@@ -24,6 +24,7 @@
   - Do not suffix app model class names or same-name model interfaces with generic terms such as `Model` or `Runtime`; name the owning concept directly.
   - In Sigma classes, add a short human-readable comment to each `#private` field explaining the runtime or bookkeeping it owns and why it stays outside reactive state.
   - Do not add private methods that only mirror a public Sigma action with the same parameters. Inline that logic into the public action.
+  - Do not suffix Sigma owner class or module names with `State`; reserve `State` for explicit state-shape types.
   - Use `useSignal()` or local component state for simple UI state such as open flags, drafts, and ephemeral form status.
   - Do not model simple UI state in `preact-sigma`.
   - For singleton UI components, prefer subscribing to shared Preact context directly instead of threading pass-through JSX props through parent components just to preserve an abstraction boundary.
@@ -66,6 +67,8 @@
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.
 - Avoid assigning JSX/TSRX elements to local `const` variables. Prefer inlining elements at the use site, including inline `<tsrx>` expression blocks when needed.
 - In UI components, prefer inline JSX callbacks for single-use handlers instead of hoisted local function declarations.
+- Prefer passing async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise with `void`.
+- Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`; introduce locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
 - Run formatting after modifying app files.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
 - Do not add module-level first-line description comments or routine component description comments unless a comment explains non-obvious behavior that the code itself does not make clear.

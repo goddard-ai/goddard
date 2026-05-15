@@ -38,8 +38,12 @@ These practices are derived from the current app plans, `spec/`, and `app/glossa
 - Keep shared presentational primitives near the surface that owns them when multiple sections reuse the same layout or control treatment.
 - Keep section files focused on semantics, labels, and state wiring, and keep generic surface layout and control styling in the owning surface.
 - Prefer plain document-flow utility surfaces over decorative headers, hero treatments, or stacked containers unless the product explicitly requires stronger framing.
-- Prefer sibling `*.style.ts` modules for non-trivial static `css(...)` classes so component files stay focused on structure and behavior.
-- Keep tiny, obvious single-use wrappers inline when extraction would not improve readability.
+- For component-local Panda classes, move non-trivial static `css(...)` calls into a sibling `*.style.ts` module that `export default`s a class map.
+- Keep tiny single-use wrappers inline when they have only a few declarations, no pseudo selectors, no complex token usage, and no clearer semantic name than the inline properties themselves.
+- In files that already use a sibling `*.style.ts`, add new non-trivial static classes there and keep only the trivial exceptions inline.
+- Keep prop- or state-derived values out of `*.style.ts`. Use render-local `style={...}` objects or other local logic for dynamic values.
+- Name extracted style entries by element role or intent, not by incidental visual details, and keep the exported object roughly ordered with the JSX structure.
+- Use `styled(...)` for reusable presentational primitives shared within a feature or surface, not for singleton page shells or one-off elements.
 
 ## Alignment
 
