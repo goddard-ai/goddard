@@ -15,6 +15,8 @@ type CliOptions = {
   model?: string
   prompt?: string
   daemonUrl?: string
+  cycleDelayMs: number
+  maxIterations?: number
 }
 
 function usage() {
@@ -27,9 +29,45 @@ Options:
       --agent <name>               Optional ACP adapter name or distribution id.
       --model <model-id>           Optional initial model id.
       --prompt <text>              Optional first prompt before reading stdin.
+      --cycle-delay <duration>     Delay between prompt iterations. Supports ms, s, m, h, d. Defaults to 0s.
+      --max-iterations <count>     Maximum prompts to send before exiting. Defaults to unlimited.
       --daemon-url <url>           Optional daemon URL override.
       --help                       Show this help text.
 `
+}
+
+function parseDurationMs(value: string) {
+  const match = value.match(/^(\d+)(ms|s|m|h|d)?$/)
+  if (!match) {
+    throw new Error(`Invalid --cycle-delay value "${value}". Use values like 500ms, 5s, or 1m.`)
+  }
+
+  const amount = Number.parseInt(match[1] ?? "0", 10)
+  const unit = match[2] ?? "ms"
+
+  switch (unit) {
+    case "ms":
+      return amount
+    case "s":
+      return amount * 1000
+    case "m":
+      return amount * 60 * 1000
+    case "h":
+      return amount * 60 * 60 * 1000
+    case "d":
+      return amount * 24 * 60 * 60 * 1000
+  }
+
+  throw new Error(`Invalid --cycle-delay unit "${unit}".`)
+}
+
+function parsePositiveInteger(name: string, value: string) {
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isInteger(parsed) || String(parsed) !== value || parsed <= 0) {
+    throw new Error(`Invalid ${name} value "${value}". Use a positive whole number.`)
+  }
+
+  return parsed
 }
 
 function readCliOptions(): CliOptions {
@@ -50,6 +88,12 @@ function readCliOptions(): CliOptions {
         type: "string",
       },
       prompt: {
+        type: "string",
+      },
+      "cycle-delay": {
+        type: "string",
+      },
+      "max-iterations": {
         type: "string",
       },
       "daemon-url": {
@@ -78,6 +122,10 @@ function readCliOptions(): CliOptions {
     model: parsed.values.model,
     prompt: parsed.values.prompt,
     daemonUrl: parsed.values["daemon-url"],
+    cycleDelayMs: parseDurationMs(parsed.values["cycle-delay"] ?? "0s"),
+    maxIterations: parsed.values["max-iterations"]
+      ? parsePositiveInteger("--max-iterations", parsed.values["max-iterations"])
+      : undefined,
   }
 }
 
@@ -125,6 +173,14 @@ async function promptOnce(session: AgentSession, prompt: string) {
   process.stdout.write(`\n[stopReason: ${result.stopReason}]\n`)
 }
 
+async function sleep(ms: number) {
+  if (ms <= 0) {
+    return
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function runPromptLoop(options: CliOptions) {
   const systemPrompt = await readFile(resolve(options.systemPromptFile), "utf8")
   const sdk = new GoddardSdk(
@@ -169,8 +225,26 @@ async function runPromptLoop(options: CliOptions) {
   try {
     process.stderr.write(`Started session ${session.sessionId} in ${options.cwd}\n`)
 
+    let iterationCount = 0
+    const runIteration = async (prompt: string) => {
+      if (options.maxIterations !== undefined && iterationCount >= options.maxIterations) {
+        return false
+      }
+
+      if (iterationCount > 0) {
+        await sleep(options.cycleDelayMs)
+      }
+
+      iterationCount += 1
+      await promptOnce(session, prompt)
+      return options.maxIterations === undefined || iterationCount < options.maxIterations
+    }
+
     if (options.prompt) {
-      await promptOnce(session, options.prompt)
+      const canContinue = await runIteration(options.prompt)
+      if (!canContinue) {
+        return
+      }
     }
 
     if (!process.stdin.isTTY && options.prompt) {
@@ -193,7 +267,10 @@ async function runPromptLoop(options: CliOptions) {
         break
       }
 
-      await promptOnce(session, prompt)
+      const canContinue = await runIteration(prompt)
+      if (!canContinue) {
+        break
+      }
     }
   } finally {
     await stop()

@@ -7,7 +7,9 @@ Run it from the repository root while the Goddard daemon is available:
 ```sh
 ./sdk-agent-loop-poc/bin/sdk-agent-loop-poc \
   --system-prompt-file ./sdk-agent-loop-poc/system-prompt.md \
-  --prompt "Say hello in one sentence."
+  --prompt "Say hello in one sentence." \
+  --cycle-delay 5s \
+  --max-iterations 3
 ```
 
 Or run the interactive loop:
@@ -24,6 +26,8 @@ Useful options:
 - `--agent`: optional ACP adapter name or distribution id. When omitted, the daemon resolves its default agent.
 - `--model`: optional initial model id.
 - `--prompt`: optional first user prompt before the interactive loop starts.
+- `--cycle-delay`: delay between submitted prompts. Supports `ms`, `s`, `m`, `h`, and `d`; defaults to `0s`.
+- `--max-iterations`: maximum number of prompts to submit before exiting. The optional `--prompt` counts as the first iteration.
 - `--daemon-url`: optional daemon URL override. When omitted, the SDK resolves the daemon using its Node defaults.
 
 The script intentionally denies permission requests so it is safe as a minimal proof of concept. Replace the `requestPermission` handler in `run-agent-loop.ts` if your external host wants to approve tool calls.
