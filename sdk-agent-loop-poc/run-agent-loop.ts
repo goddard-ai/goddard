@@ -19,7 +19,7 @@ type CliOptions = {
 
 function usage() {
   return `Usage:
-  bun run ./sdk-agent-loop-poc/run-agent-loop.ts --system-prompt-file ./prompt.md [options]
+  sdk-agent-loop-poc --system-prompt-file ./prompt.md [options]
 
 Options:
   -s, --system-prompt-file <path>  System prompt file to load.

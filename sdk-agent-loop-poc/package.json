@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "sdk-agent-loop-poc": "./bin/sdk-agent-loop-poc"
+  },
   "scripts": {
     "start": "bun run ./run-agent-loop.ts",
     "typecheck": "tsgo --noEmit"

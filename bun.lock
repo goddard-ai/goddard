@@ -255,6 +255,9 @@
     "sdk-agent-loop-poc": {
       "name": "@goddard-ai/sdk-agent-loop-poc",
       "version": "0.1.0",
+      "bin": {
+        "sdk-agent-loop-poc": "./bin/sdk-agent-loop-poc",
+      },
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/sdk": "workspace:*",

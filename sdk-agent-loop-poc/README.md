@@ -5,7 +5,7 @@ This folder shows how an external Node/Bun script can use `@goddard-ai/sdk/node`
 Run it from the repository root while the Goddard daemon is available:
 
 ```sh
-bun run ./sdk-agent-loop-poc/run-agent-loop.ts \
+./sdk-agent-loop-poc/bin/sdk-agent-loop-poc \
   --system-prompt-file ./sdk-agent-loop-poc/system-prompt.md \
   --prompt "Say hello in one sentence."
 ```
@@ -13,7 +13,7 @@ bun run ./sdk-agent-loop-poc/run-agent-loop.ts \
 Or run the interactive loop:
 
 ```sh
-bun run ./sdk-agent-loop-poc/run-agent-loop.ts \
+./sdk-agent-loop-poc/bin/sdk-agent-loop-poc \
   --system-prompt-file ./sdk-agent-loop-poc/system-prompt.md
 ```
 
