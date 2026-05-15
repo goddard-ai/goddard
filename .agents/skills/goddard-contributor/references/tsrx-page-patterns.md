@@ -25,7 +25,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 - Use a page model context for page-level UI state such as pending tasks, local action errors, selected IDs, or one-off UI bookkeeping.
 - Prefer making both contexts available to the whole page tree when practical. Prop drilling should be the fallback, not the default.
 - Consume page-wide query data and page models through feature hooks instead of pass-through props.
-- Memoize provided context value objects based on their property values so consumers do not rerender just because a fresh object literal was created.
+- Use the page model and query data context helpers instead of hand-rolled providers; they handle provider value stability automatically.
 - Let the page model provider wrap `try-pending-catch` when the model does not need query data. Put the query data provider in the successful loaded branch when it depends on loaded query results.
 
 ## Prefer Page Models For Page-Level UI State
