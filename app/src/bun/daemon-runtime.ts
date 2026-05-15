@@ -1,5 +1,5 @@
 /** Desktop host helpers that stage, install, and launch the app-managed daemon runtime. */
-import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { createDaemonIpcClient, resolveDaemonUrl } from "@goddard-ai/daemon-client/node"
@@ -155,12 +155,43 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
     }
   }
 
+  await writeAppBunHelperLaunchers(manifest, installDir)
+
   return {
     daemonRootDir: installDir,
     daemonExecutablePath: join(installDir, manifest.daemon.executablePath),
     agentBinDir: join(installDir, manifest.daemon.agentBinDir),
     runtimeHash: manifest.daemon.runtimeHash,
   } satisfies PreparedDaemonRuntime
+}
+
+/** Points lightweight packaged helper launchers at the current app-bundled Bun executable. */
+async function writeAppBunHelperLaunchers(manifest: EmbeddedRuntimeManifest, installDir: string) {
+  await Promise.all(
+    Object.values(manifest.daemon.helperPaths).map(async (relativeHelperPath) => {
+      const helperPath = join(installDir, relativeHelperPath)
+      const payloadPath = `${helperPath}.mjs`
+
+      if (!(await pathExists(payloadPath))) {
+        return
+      }
+
+      await writeFile(
+        helperPath,
+        [
+          "#!/bin/sh",
+          `exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(payloadPath)} "$@"`,
+          "",
+        ].join("\n"),
+        "utf8",
+      )
+      await chmod(helperPath, 0o755)
+    }),
+  )
+}
+
+function quoteShellLiteral(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 /** Installs or updates a user-scoped daemon service through the bundled serviceman shell launcher. */

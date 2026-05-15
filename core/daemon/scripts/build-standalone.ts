@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { dirname, join, relative, resolve } from "node:path"
+import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { basename, dirname, join, relative, resolve } from "node:path"
 
 import pkg from "../package.json" with { type: "json" }
 
 type StandaloneArtifact = {
   sourcePath: string
   outputPath: string
+  runtime?: "compiled" | "shared-bun"
 }
 
 const packageDir = resolve(import.meta.dirname, "..")
@@ -18,11 +19,13 @@ const distDir = join(packageDir, "dist")
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const target = args.get("target") ?? resolveDefaultCompileTarget()
+  const helperRuntime = resolveHelperRuntime(args.get("helper-runtime"))
   const outputDir = resolve(
     process.cwd(),
     args.get("out-dir") ?? join(packageDir, "dist", "standalone", target),
   )
   const executableExt = target.includes("windows") ? ".exe" : ""
+  const helperExt = helperRuntime === "shared-bun" ? "" : executableExt
   const artifacts: StandaloneArtifact[] = [
     {
       sourcePath: join(distDir, "main.mjs"),
@@ -30,11 +33,13 @@ async function main() {
     },
     {
       sourcePath: join(distDir, "bin", "goddard-tool.mjs"),
-      outputPath: join(outputDir, "agent-bin", `goddard${executableExt}`),
+      outputPath: join(outputDir, "agent-bin", `goddard${helperExt}`),
+      runtime: helperRuntime === "shared-bun" ? "shared-bun" : "compiled",
     },
     {
       sourcePath: join(distDir, "bin", "workforce-tool.mjs"),
-      outputPath: join(outputDir, "agent-bin", `workforce${executableExt}`),
+      outputPath: join(outputDir, "agent-bin", `workforce${helperExt}`),
+      runtime: helperRuntime === "shared-bun" ? "shared-bun" : "compiled",
     },
   ]
 
@@ -43,13 +48,21 @@ async function main() {
 
   for (const artifact of artifacts) {
     await mkdir(dirname(artifact.outputPath), { recursive: true })
-    runBun(buildCompileArgs(target, artifact.sourcePath, artifact.outputPath), packageDir)
+
+    if (artifact.runtime === "shared-bun") {
+      await writeSharedBunHelper(artifact)
+    } else {
+      runBun(buildCompileArgs(target, artifact.sourcePath, artifact.outputPath), packageDir)
+    }
   }
 
   const runtimeHash = createHash("sha256")
 
   for (const artifact of artifacts) {
     runtimeHash.update(await readFile(artifact.outputPath))
+    if (artifact.runtime === "shared-bun") {
+      runtimeHash.update(await readFile(`${artifact.outputPath}.mjs`))
+    }
   }
 
   await cleanupBunBuildScratchFiles()
@@ -74,6 +87,38 @@ async function main() {
     ) + "\n",
     "utf8",
   )
+}
+
+/** Resolves how helper commands are emitted for the standalone runtime. */
+function resolveHelperRuntime(value: string | undefined) {
+  if (!value || value === "compiled") {
+    return "compiled"
+  }
+
+  if (value === "shared-bun") {
+    return "shared-bun"
+  }
+
+  throw new Error("--helper-runtime must be either compiled or shared-bun")
+}
+
+/** Writes a small launcher plus bundled JS payload for app builds that already ship Bun. */
+async function writeSharedBunHelper(artifact: StandaloneArtifact) {
+  const payloadPath = `${artifact.outputPath}.mjs`
+  const payloadName = basename(payloadPath)
+
+  await cp(artifact.sourcePath, payloadPath)
+  await writeFile(
+    artifact.outputPath,
+    [
+      "#!/bin/sh",
+      'launcher_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+      `exec "\${GODDARD_BUN_RUNTIME:-bun}" "$launcher_dir/${payloadName}" "$@"`,
+      "",
+    ].join("\n"),
+    "utf8",
+  )
+  await chmod(artifact.outputPath, 0o755)
 }
 
 /** Parses repeated `--key value` command-line arguments into one lookup map. */
