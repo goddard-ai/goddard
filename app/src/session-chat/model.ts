@@ -87,6 +87,13 @@ type MessageId = string | number
 
 type SessionPermissionRequest = Extract<SessionChatTurnEvent, { kind: "permissionRequest" }>
 
+type QueuedSessionChatMessage = {
+  message: acp.AnyMessage
+  receivedAt: string
+}
+
+const liveChunkBatchIntervalMs = 33
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -144,6 +151,17 @@ function getSessionUpdate(message: acp.AnyMessage) {
   }
 
   return isRecord(params.update) ? params.update : null
+}
+
+function isTextAgentMessageChunk(message: acp.AnyMessage) {
+  const update = getSessionUpdate(message)
+
+  return (
+    update?.sessionUpdate === "agent_message_chunk" &&
+    isRecord(update.content) &&
+    update.content.type === "text" &&
+    typeof update.content.text === "string"
+  )
 }
 
 function buildMessageFingerprint(message: acp.AnyMessage) {
@@ -466,8 +484,7 @@ export class SessionChat extends Sigma<SessionChatState> {
   applyMessage(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
     const receivedAt = options.receivedAt ?? new Date().toISOString()
 
-    this.#mergeMessage(message, receivedAt)
-    this.#refreshTranscriptState()
+    this.#applyMessages([{ message, receivedAt }])
   }
 
   /** Applies a freshly returned session record without replacing the merged transcript. */
@@ -512,6 +529,18 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     this.#applyMessageToTurn(turn, message, receivedAt)
     this.turns.push(turn)
+  }
+
+  #applyMessages(messages: readonly QueuedSessionChatMessage[]) {
+    if (messages.length === 0) {
+      return
+    }
+
+    for (const { message, receivedAt } of messages) {
+      this.#mergeMessage(message, receivedAt)
+    }
+
+    this.#refreshTranscriptState()
   }
 
   #applyMessageToTurn(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
@@ -726,13 +755,60 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   onSetup() {
     let active = true
+    let chunkFlushTimer: ReturnType<typeof setTimeout> | null = null
+    const queuedChunks: QueuedSessionChatMessage[] = []
     let unsubscribe: (() => void) | null = null
+
+    const cancelQueuedChunkFlush = () => {
+      if (chunkFlushTimer === null) {
+        return
+      }
+
+      clearTimeout(chunkFlushTimer)
+      chunkFlushTimer = null
+    }
+
+    const takeQueuedChunks = () => {
+      cancelQueuedChunkFlush()
+      return queuedChunks.splice(0, queuedChunks.length)
+    }
+
+    const flushQueuedChunks = () => {
+      if (!active || queuedChunks.length === 0) {
+        takeQueuedChunks()
+        return
+      }
+
+      this.#applyMessages(takeQueuedChunks())
+    }
+
+    const scheduleQueuedChunkFlush = () => {
+      if (chunkFlushTimer !== null) {
+        return
+      }
+
+      chunkFlushTimer = setTimeout(flushQueuedChunks, liveChunkBatchIntervalMs)
+    }
+
+    const applySubscribedMessage = (message: acp.AnyMessage) => {
+      if (!active) {
+        return
+      }
+
+      const receivedAt = new Date().toISOString()
+
+      if (isTextAgentMessageChunk(message)) {
+        queuedChunks.push({ message, receivedAt })
+        scheduleQueuedChunkFlush()
+        return
+      }
+
+      this.#applyMessages([...takeQueuedChunks(), { message, receivedAt }])
+    }
 
     void goddardSdk.session
       .subscribe({ id: this.session.id }, (message) => {
-        if (active) {
-          this.applyMessage(message)
-        }
+        applySubscribedMessage(message)
       })
       .then(
         (nextUnsubscribe) => {
@@ -752,6 +828,8 @@ export class SessionChat extends Sigma<SessionChatState> {
     return [
       () => {
         active = false
+        cancelQueuedChunkFlush()
+        queuedChunks.length = 0
         unsubscribe?.()
         unsubscribe = null
       },
