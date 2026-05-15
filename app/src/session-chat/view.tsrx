@@ -45,6 +45,7 @@ export default component SessionChatView(props: {
           [goddardSdk.session.history, [{ id: props.sessionId }]],
           [goddardSdk.session.get, [{ id: props.sessionId }]],
         ])
+
         const chat = useSigma(
           () => new SessionChat({
             history: sessionHistory,
@@ -52,8 +53,6 @@ export default component SessionChatView(props: {
           }),
           { deps: [session.id] },
         )
-        const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
-
         useEffect(() => {
           chat.syncLoadedData({
             history: sessionHistory,
@@ -61,16 +60,13 @@ export default component SessionChatView(props: {
           })
         }, [chat, sessionHistory, session])
 
+        const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
 
         const inbox = useInbox()
-
         useEffect(() => {
           void inbox.markSessionVisited(session.id)
         }, [inbox, session.id])
-
-        const activeHeaderAction = page.headerAction.activeKey.value
-        const cancelRequestedTurnId = page.cancelRequestedTurnId.value
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
 
@@ -113,6 +109,7 @@ export default component SessionChatView(props: {
               </div>
               <div class={styles.headerActions}>
                 const workbenchTabSet = useWorkbenchTabSet()
+                const activeHeaderAction = page.headerAction.activeKey.value
 
                 function openSessionChanges() {
                   queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
@@ -223,6 +220,7 @@ export default component SessionChatView(props: {
                 }
 
                 const activeTurnId = chat.summary.activeTurnId
+                const cancelRequestedTurnId = page.cancelRequestedTurnId.value
                 const cancelAlreadyRequested =
                   activeTurnId !== null && cancelRequestedTurnId === activeTurnId
                 const canCancelTurn =
@@ -323,9 +321,9 @@ export default component SessionChatView(props: {
             if (submitError) {
               <div class={styles.composerError} role="alert">
                 <strong class={styles.composerErrorTitle}>"Prompt wasn't sent"</strong>
-                <span
-                  class={styles.composerErrorDescription}
-                >"Your draft is still here. Try again when the session is available."</span>
+                <span class={styles.composerErrorDescription}>
+                  "Your draft is still here. Try again when the session is available."
+                </span>
               </div>
             }
             <Composer
