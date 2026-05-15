@@ -34,7 +34,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 - Represent page-level UI state with signals on a page model instead of scattered `useState` calls in the page component.
 - Keep the page model focused on UI state and common UI mutations. Domain data and query results belong outside it.
 - Keep UI state owned by one component or UI primitive local to that component or primitive.
-- Use readonly model access for consumers so subcomponents can observe page signals without casually mutating them.
+- Page model context consumers receive a readonly view of signal properties, so expose mutations as named page model methods.
 - Initialize the page model with a provider, then consume it through the page's `use...PageModel()` hook.
 - Create page model contexts from the model factory and rely on inference instead of duplicating explicit page model types.
 - TSRX allows a component to provide and consume the page model in the same component scope; do not add a wrapper component solely to make context consumption possible.
