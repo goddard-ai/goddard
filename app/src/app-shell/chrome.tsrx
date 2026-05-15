@@ -106,24 +106,7 @@ export component AppShellChrome() {
     workbenchTabSet.tabList,
   )
 
-  function openMainTabSurfaceTab(kind: MainTabItemId) {
-    const nextMainTabItem = mainTab.items.find((item) => item.id === kind) ?? mainTab.selectedItem
-
-    workbenchTabSet.openOrFocusTab({
-      id: `surface:${kind}`,
-      kind,
-      title: nextMainTabItem.label,
-      payload: {},
-      dirty: false,
-    })
-  }
-
-  function selectMainTabSurface(id: MainTabItemId, options?: { openInTab?: boolean }) {
-    if (options?.openInTab) {
-      openMainTabSurfaceTab(id)
-      return
-    }
-
+  function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
     workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
   }
@@ -149,27 +132,27 @@ export component AppShellChrome() {
   })
 
   useAppCommand(AppCommand.navigation.openInbox, () => {
-    selectMainTabSurface("inbox")
+    navigateMainTab("inbox")
   })
 
   useAppCommand(AppCommand.navigation.openSessions, () => {
-    selectMainTabSurface("sessions")
+    navigateMainTab("sessions")
   })
 
   useAppCommand(AppCommand.navigation.openSearch, () => {
-    selectMainTabSurface("search")
+    navigateMainTab("search")
   })
 
   useAppCommand(AppCommand.navigation.openSpecs, () => {
-    selectMainTabSurface("specs")
+    navigateMainTab("specs")
   })
 
   useAppCommand(AppCommand.navigation.openTasks, () => {
-    selectMainTabSurface("tasks")
+    navigateMainTab("tasks")
   })
 
   useAppCommand(AppCommand.navigation.openRoadmap, () => {
-    selectMainTabSurface("roadmap")
+    navigateMainTab("roadmap")
   })
 
   useAppCommand(AppCommand.navigation.openSettings, () => {
@@ -238,13 +221,13 @@ export component AppShellChrome() {
     <nav aria-label="Primary" class={styles.nav}>
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "primary")}
-        onMainTabSelect={selectMainTabSurface}
+        onMainTabSelect={navigateMainTab}
         selectedMainTabId={mainTab.selectedKind}
       />
       <div aria-hidden="true" class={styles.navDivider} />
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "secondary")}
-        onMainTabSelect={selectMainTabSurface}
+        onMainTabSelect={navigateMainTab}
         selectedMainTabId={mainTab.selectedKind}
       />
     </nav>
@@ -324,9 +307,7 @@ component AppShellSidebarSection(props: {
   items: Array<MainTabItem & {
     icon: SvgIconName;
   }>;
-  onMainTabSelect: (id: MainTabItemId, options?: {
-    openInTab?: boolean;
-  }) => void;
+  onMainTabSelect: (id: MainTabItemId) => void;
   selectedMainTabId: MainTabItemId;
 }) {
   for (const item of props.items) {
@@ -336,8 +317,8 @@ component AppShellSidebarSection(props: {
       isSelected={item.id === props.selectedMainTabId}
       key={item.id}
       label={item.label}
-      onSelect={(options) => {
-        props.onMainTabSelect(item.id, options)
+      onSelect={() => {
+        props.onMainTabSelect(item.id)
       }}
     />
   }
@@ -365,7 +346,7 @@ component SidebarItem(props: {
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
-  onSelect: (options?: { openInTab?: boolean }) => void;
+  onSelect: () => void;
 }) {
   const hasDot = props.dot.usePredicate()
   const ariaLabel =
@@ -379,8 +360,8 @@ component SidebarItem(props: {
       color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
     }}
     type="button"
-    onClick={(event) => {
-      props.onSelect({ openInTab: event.metaKey })
+    onClick={() => {
+      props.onSelect()
     }}
   >
     <InlineSvgIcon icon={props.icon} size="22px 21px" />
