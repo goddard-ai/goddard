@@ -1,6 +1,6 @@
-import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
+import { inboxIpcSchema } from "./daemon-ipc.ts"
 import type {
   BulkUpdateInboxItemsRequest,
   InboxItemEvent,
@@ -10,7 +10,8 @@ import type {
 
 export const inboxSdkPlugin = defineSdkPlugin({
   name: "inbox",
-  create({ client }: { client: DaemonIpcClient }) {
+  ipc: inboxIpcSchema,
+  create({ client }) {
     return {
       inbox: {
         /** Lists daemon-local inbox rows using daemon ordering and filtering. */

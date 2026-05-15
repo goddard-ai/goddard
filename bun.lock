@@ -249,6 +249,9 @@
     "core/sdk-plugin": {
       "name": "@goddard-ai/sdk-plugin",
       "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/ipc": "workspace:*",
+      },
     },
     "core/sprint-branch": {
       "name": "@goddard-ai/sprint-branch",

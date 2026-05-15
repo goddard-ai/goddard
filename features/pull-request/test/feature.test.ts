@@ -9,7 +9,9 @@ describe("pull-request feature package", () => {
   test("exports selected feature entrypoints", () => {
     expect(pullRequestPlugin.name).toBe("pull-request")
     expect(Object.keys(pullRequestIpcSchema.requests)).toEqual(["pr.submit", "pr.get", "pr.reply"])
-    expect(Object.keys(pullRequestSdkPlugin.create())).toEqual(["pullRequest"])
+    expect(Object.keys(pullRequestSdkPlugin.create({ client: {} as never }))).toEqual([
+      "pullRequest",
+    ])
     expect(GetPullRequestRequest.parse({ id: "pr_1" })).toEqual({ id: "pr_1" })
   })
 })
