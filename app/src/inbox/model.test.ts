@@ -200,11 +200,11 @@ test("Inbox keeps the last list visible when refresh fails after data loaded", a
 })
 
 test("Inbox starts realtime only for focused use and cleans it up", async () => {
-  let onItem: ((event: InboxItemEvent) => void) | null = null
+  const subscription: { onItem?: (event: InboxItemEvent) => void } = {}
   const unsubscribe = vi.fn()
   const client = mockInboxClient({
     subscribe: async (nextOnItem) => {
-      onItem = nextOnItem
+      subscription.onItem = nextOnItem
       return unsubscribe
     },
   })
@@ -215,7 +215,11 @@ test("Inbox starts realtime only for focused use and cleans it up", async () => 
   const stopFocusedRealtime = inbox.startFocusedRealtime()
   await waitFor(() => client.subscribe.mock.calls.length === 1)
 
-  onItem?.({
+  if (!subscription.onItem) {
+    throw new Error("Expected inbox subscription handler to be registered")
+  }
+
+  subscription.onItem({
     mutation: "touched",
     item: createInboxItem({ entityId: "ses_live", status: "unread" }),
   })
