@@ -1,7 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["src/node", "src/tauri"],
   "compilerOptions": {
     "types": ["bun", "node"]
   }

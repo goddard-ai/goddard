@@ -28,13 +28,5 @@
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit",
     "test": "bun test --pass-with-no-tests --dots"
-  },
-  "peerDependencies": {
-    "@tauri-apps/api": "^2.10.1"
-  },
-  "peerDependenciesMeta": {
-    "@tauri-apps/api": {
-      "optional": true
-    }
   }
 }
