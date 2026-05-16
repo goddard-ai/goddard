@@ -7,7 +7,7 @@
     "sdk-agent-loop-poc": "./bin/sdk-agent-loop-poc"
   },
   "scripts": {
-    "start": "bun run ./run-agent-loop.ts",
+    "start": "bun run ./src/main.ts",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {

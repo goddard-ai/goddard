@@ -30,4 +30,4 @@ Useful options:
 - `--max-iterations`: maximum number of prompts to submit before exiting. The optional `--prompt` counts as the first iteration.
 - `--daemon-url`: optional daemon URL override. When omitted, the SDK resolves the daemon using its Node defaults.
 
-The script intentionally denies permission requests so it is safe as a minimal proof of concept. Replace the `requestPermission` handler in `run-agent-loop.ts` if your external host wants to approve tool calls.
+The script intentionally denies permission requests so it is safe as a minimal proof of concept. Replace the `requestPermission` handler in `src/loop.ts` if your external host wants to approve tool calls.
