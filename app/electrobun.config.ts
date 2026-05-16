@@ -1,8 +1,10 @@
 import type { ElectrobunConfig } from "electrobun"
 
+import rootPkg from "../package.json" with { type: "json" }
 import pkg from "./package.json" with { type: "json" }
 
 const shouldBuildEmbeddedRuntime = process.env.NODE_ENV !== "development"
+const runtimeBunVersion = rootPkg.catalog.bun
 
 /** Electrobun build config for the desktop host and Vite-produced webview assets. */
 export default {
@@ -17,6 +19,7 @@ export default {
     }),
   },
   build: {
+    bunVersion: runtimeBunVersion,
     bun: {
       entrypoint: "src/bun/index.ts",
       tsconfig: "src/bun/tsconfig.json",
