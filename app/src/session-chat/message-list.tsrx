@@ -175,6 +175,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       (item, index) => Math.max(1, Math.round(estimateRowHeight(item, index, viewport.width))),
     )
   }, [props.estimateRowHeight, props.items, viewport.width])
+
   <div ref={rootRef} style={{ minHeight: "100%" }}>
     if (viewport.width <= 0) {
       {props.loadingFallback ??

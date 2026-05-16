@@ -30,29 +30,30 @@ export type TranscriptMessage = SessionTranscriptItem
 
 /** Props accepted by the dumb session transcript component. */
 export type TranscriptProps = {
-  messages: readonly TranscriptMessage[];
-  class?: string;
-  initialScrollPosition?: "top" | "bottom";
-  onSelectPermissionOption?: (input: {
-    optionId: string;
-    requestId: SessionTranscriptPermissionRequest["requestId"];
-  }) => Promise<void> | void;
-  olderHistory?: {
-    canLoad: boolean;
-    error: string | null;
-    loading: boolean;
-    onLoad: () => Promise<void> | void;
-  };
-  scrollCacheKey?: string;
-}
+    messages: readonly TranscriptMessage[];
+    class?: string;
+    initialScrollPosition?: "top" | "bottom";
+    onSelectPermissionOption?: (input: {
+      optionId: string;
+      requestId: SessionTranscriptPermissionRequest["requestId"];
+    }) => Promise<void> | void;
+    olderHistory?: {
+      canLoad: boolean;
+      error: string | null;
+      loading: boolean;
+      onLoad: () => Promise<void> | void;
+    };
+    scrollCacheKey?: string;
+  }
 
 type CoalescedToolTranscriptRow = {
-  kind: "toolGroup";
-  id: string;
-  toolCalls: readonly SessionTranscriptToolCall[];
-}
+    kind: "toolGroup";
+    id: string;
+    toolCalls: readonly SessionTranscriptToolCall[];
+  }
 
-type RenderTranscriptItem = SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
+type RenderTranscriptItem =
+  SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
@@ -63,13 +64,11 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
       return
     }
 
-    renderItems.push(
-      {
-        kind: "toolGroup",
-        id: `${pendingToolCalls[0]!.id}:group:${pendingToolCalls[pendingToolCalls.length - 1]!.id}`,
-        toolCalls: pendingToolCalls,
-      },
-    )
+    renderItems.push({
+      kind: "toolGroup",
+      id: `${pendingToolCalls[0]!.id}:group:${pendingToolCalls[pendingToolCalls.length - 1]!.id}`,
+      toolCalls: pendingToolCalls,
+    })
     pendingToolCalls = []
   }
 
@@ -192,6 +191,7 @@ export component Transcript(props: TranscriptProps) {
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
   ])
+
   <div class={cx(styles.transcriptViewport, props.class)}>
     <MessageList
       defaultRowHeight={DEFAULT_ROW_HEIGHT}

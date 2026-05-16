@@ -80,6 +80,7 @@ export component SessionLaunchForm(props: {
     form.draftSubpackagePath.value = null
     form.launchPreview.value = null
   }, [form, props.projects])
+
   <div class={selectorStyles.section}>
     <div class={selectorStyles.grid}>
       <SessionInputSelect
@@ -168,13 +169,11 @@ export component SessionLaunchForm(props: {
           )
         }
 
-        const response = await goddardSdk.session.draftSuggestions(
-          {
-            cwd,
-            trigger: input.trigger,
-            query: input.query,
-          },
-        )
+        const response = await goddardSdk.session.draftSuggestions({
+          cwd,
+          trigger: input.trigger,
+          query: input.query,
+        })
 
         return response.suggestions
       }}
