@@ -31,15 +31,13 @@ export component ProjectsPage() {
     ? projectRegistry.projectsByPath[resolvedSelectedProjectPath] ?? null
     : null
 
-  useModalStackEntry(
-    {
-      id: "projects:add-project",
-      open: addProjectDialog.open,
-      close() {
-        addProjectDialog.setOpen(false)
-      },
+  useModalStackEntry({
+    id: "projects:add-project",
+    open: addProjectDialog.open,
+    close() {
+      addProjectDialog.setOpen(false)
     },
-  )
+  })
 
   function selectProject(projectPath: string): void {
     selectedProjectPath.value = projectPath
@@ -51,14 +49,12 @@ export component ProjectsPage() {
   }
 
   function openProjectInTab(projectPath: string): void {
-    openProjectTab(
-      {
-        projectContext,
-        projectPath,
-        projectRegistry,
-        workbenchTabSet,
-      },
-    )
+    openProjectTab({
+      projectContext,
+      projectPath,
+      projectRegistry,
+      workbenchTabSet,
+    })
   }
 
   <ProjectsPageMutations
@@ -74,9 +70,9 @@ export component ProjectsPage() {
           <header class={styles.sectionHeader}>
             <div class={styles.sectionCopy}>
               <h1 class={styles.title}>"Projects"</h1>
-              <p
-                class={styles.body}
-              >"Keep an explicit set of local roots available to the workbench."</p>
+              <p class={styles.body}>
+                "Keep an explicit set of local roots available to the workbench."
+              </p>
             </div>
             <Dialog.Trigger asChild>
               <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
@@ -89,9 +85,9 @@ export component ProjectsPage() {
             <div class={styles.empty}>
               <div class={styles.emptyCopy}>
                 <h2 class={styles.title}>"No projects yet"</h2>
-                <p
-                  class={styles.body}
-                >"Add a local directory to establish the app's explicit working set."</p>
+                <p class={styles.body}>
+                  "Add a local directory to establish the app's explicit working set."
+                </p>
                 <div>
                   <Dialog.Trigger asChild>
                     <button class={cx(styles.buttonBase, styles.primaryButton)} type="button">
@@ -280,12 +276,10 @@ component AddProjectDialog(props: {
       return
     }
 
-    projectRegistry.addProject(
-      {
-        path: draftProjectPath,
-        name: projectName,
-      },
-    )
+    projectRegistry.addProject({
+      path: draftProjectPath,
+      name: projectName,
+    })
     props.selectedProjectPath.value = draftProjectPath
     props.dialog.setOpen(false)
     resetDraft()
@@ -313,9 +307,9 @@ component AddProjectDialog(props: {
           <header class={styles.dialogHeader}>
             <div class={styles.dialogHeaderCopy}>
               <Dialog.Title class={styles.title}>"Add project"</Dialog.Title>
-              <Dialog.Description
-                class={styles.body}
-              >"Choose one local root and optionally adjust the display name."</Dialog.Description>
+              <Dialog.Description class={styles.body}>
+                "Choose one local root and optionally adjust the display name."
+              </Dialog.Description>
             </div>
             <Dialog.CloseTrigger asChild>
               <button class={styles.closeButton} type="button">
@@ -361,10 +355,9 @@ component AddProjectDialog(props: {
           </label>
           <div class={styles.dialogActions}>
             <Dialog.CloseTrigger asChild>
-              <button
-                class={cx(styles.buttonBase, styles.secondaryButton)}
-                type="button"
-              >"Cancel"</button>
+              <button class={cx(styles.buttonBase, styles.secondaryButton)} type="button">
+                "Cancel"
+              </button>
             </Dialog.CloseTrigger>
             <button
               class={cx(styles.buttonBase, styles.primaryButton)}

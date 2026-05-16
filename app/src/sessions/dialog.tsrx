@@ -45,28 +45,24 @@ component SessionLaunchDialog(props: {
       const sessionTitle = getSessionDisplayTitle(session)
 
       form.reset(projectPath)
-      workbenchTabSet.openOrFocusTab(
-        {
-          id: `session:${session.id}`,
-          kind: "sessionChat",
-          title: sessionTitle,
-          payload: {
-            projectPath,
-            sessionId: session.id,
-          },
-          dirty: false,
+      workbenchTabSet.openOrFocusTab({
+        id: `session:${session.id}`,
+        kind: "sessionChat",
+        title: sessionTitle,
+        payload: {
+          projectPath,
+          sessionId: session.id,
         },
-      )
+        dirty: false,
+      })
       // Defer the toast until the submit control finishes clearing its editor after onSubmit.
       window.setTimeout(() => {
-        appToaster.create(
-          {
-            description: sessionTitle,
-            duration: 2800,
-            title: "Session launched",
-            type: "success",
-          },
-        )
+        appToaster.create({
+          description: sessionTitle,
+          duration: 2800,
+          title: "Session launched",
+          type: "success",
+        })
       }, 0)
     } catch (error) {
       console.error("Failed to create session.", error)

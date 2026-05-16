@@ -142,12 +142,10 @@ export component InboxDebugView(props: InboxDebugViewProps) {
       return
     }
 
-    bulkUpdateDebugInboxItems(
-      {
-        entityIds,
-        ...input,
-      },
-    )
+    bulkUpdateDebugInboxItems({
+      entityIds,
+      ...input,
+    })
   }
 
   <InboxPageMutations

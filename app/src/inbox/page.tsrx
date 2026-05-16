@@ -57,12 +57,10 @@ component InboxQueryContent(props: {
   const inbox = useInbox()
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, [
-    getInboxListRequest(
-      {
-        filterId: props.filterId,
-        statuses: parsedSearch.isActive ? parsedSearch.statuses ?? allInboxStatuses : undefined,
-      },
-    ),
+    getInboxListRequest({
+      filterId: props.filterId,
+      statuses: parsedSearch.isActive ? parsedSearch.statuses ?? allInboxStatuses : undefined,
+    }),
   ])
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
@@ -154,33 +152,27 @@ component InboxPage() {
     }
 
     try {
-      const result = await bulkUpdateInboxItems(
-        {
-          entityIds,
-          ...input,
-        },
-      )
+      const result = await bulkUpdateInboxItems({
+        entityIds,
+        ...input,
+      })
       clearSelectedInboxItems()
       if (result.missingEntityIds.length > 0) {
-        appToaster.create(
-          {
-            description: `${result.missingEntityIds.length} selected rows could not be found.`,
-            duration: 3600,
-            title: "Some inbox items were missing",
-            type: "error",
-          },
-        )
+        appToaster.create({
+          description: `${result.missingEntityIds.length} selected rows could not be found.`,
+          duration: 3600,
+          title: "Some inbox items were missing",
+          type: "error",
+        })
       }
     } catch (error) {
       console.error(`Failed to run bulk inbox action: ${label}`, error)
-      appToaster.create(
-        {
-          description: "The selected inbox rows could not be updated.",
-          duration: 3200,
-          title: `Couldn't ${label.toLowerCase()}`,
-          type: "error",
-        },
-      )
+      appToaster.create({
+        description: "The selected inbox rows could not be updated.",
+        duration: 3200,
+        title: `Couldn't ${label.toLowerCase()}`,
+        type: "error",
+      })
     }
   }
 
@@ -207,24 +199,20 @@ component InboxPage() {
   async function openInboxItem(item: InboxItem) {
     try {
       if (isInboxEntityKind(item, "session")) {
-        const { session } = await goddardSdk.session.get(
-          {
-            id: item.entityId,
-          },
-        )
+        const { session } = await goddardSdk.session.get({
+          id: item.entityId,
+        })
 
-        workbenchTabSet.openOrFocusTab(
-          {
-            id: `session:${session.id}`,
-            kind: "sessionChat",
-            title: getSessionDisplayTitle(session),
-            payload: {
-              projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
-              sessionId: session.id,
-            },
-            dirty: false,
+        workbenchTabSet.openOrFocusTab({
+          id: `session:${session.id}`,
+          kind: "sessionChat",
+          title: getSessionDisplayTitle(session),
+          payload: {
+            projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+            sessionId: session.id,
           },
-        )
+          dirty: false,
+        })
         return
       }
 
@@ -232,34 +220,28 @@ component InboxPage() {
         return
       }
 
-      const { pullRequest } = await goddardSdk.pr.get(
-        {
-          id: item.entityId,
-        },
-      )
+      const { pullRequest } = await goddardSdk.pr.get({
+        id: item.entityId,
+      })
 
-      workbenchTabSet.openOrFocusTab(
-        {
-          id: `pull-request:${pullRequest.id}`,
-          kind: "pullRequest",
-          title: getPullRequestDisplayTitle(pullRequest),
-          payload: {
-            projectPath: findNearestProjectPath(projectRegistry.projectList, pullRequest.cwd),
-            pullRequestId: pullRequest.id,
-          },
-          dirty: false,
+      workbenchTabSet.openOrFocusTab({
+        id: `pull-request:${pullRequest.id}`,
+        kind: "pullRequest",
+        title: getPullRequestDisplayTitle(pullRequest),
+        payload: {
+          projectPath: findNearestProjectPath(projectRegistry.projectList, pullRequest.cwd),
+          pullRequestId: pullRequest.id,
         },
-      )
+        dirty: false,
+      })
     } catch (error) {
       console.error("Failed to open inbox item.", error)
-      appToaster.create(
-        {
-          description: "The linked daemon entity could not be loaded.",
-          duration: 3200,
-          title: "Couldn't open inbox item",
-          type: "error",
-        },
-      )
+      appToaster.create({
+        description: "The linked daemon entity could not be loaded.",
+        duration: 3200,
+        title: "Couldn't open inbox item",
+        type: "error",
+      })
     }
   }
 
@@ -320,11 +302,9 @@ component InboxPage() {
       />
       <div class={styles.listBody}>
         if (realtimeErrorMessage) {
-          <div
-            class={styles.realtimeNotice}
-            role="status"
-            title={realtimeErrorMessage}
-          >"Realtime inbox updates are unavailable. Manual refresh still works."</div>
+          <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
+            "Realtime inbox updates are unavailable. Manual refresh still works."
+          </div>
         }
         try {
           <InboxQueryContent

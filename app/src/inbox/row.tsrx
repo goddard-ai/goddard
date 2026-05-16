@@ -97,14 +97,12 @@ export component InboxRow(props: {
       await action()
     } catch (error) {
       console.error(`Failed to run inbox row action: ${label}`, error)
-      appToaster.create(
-        {
-          description: "The daemon-backed inbox row could not be updated.",
-          duration: 3200,
-          title: `Couldn't ${label.toLowerCase()}`,
-          type: "error",
-        },
-      )
+      appToaster.create({
+        description: "The daemon-backed inbox row could not be updated.",
+        duration: 3200,
+        title: `Couldn't ${label.toLowerCase()}`,
+        type: "error",
+      })
     } finally {
       setPendingAction(null)
     }
@@ -192,12 +190,10 @@ export component InboxRow(props: {
         onPress={() => {
           void performRowAction(
             readLabel,
-            () => mutations.updateInboxItem(
-              {
-                entityId: props.item.entityId,
-                status: readStatus,
-              },
-            ),
+            () => mutations.updateInboxItem({
+              entityId: props.item.entityId,
+              status: readStatus,
+            }),
           )
         }}
       />
@@ -209,12 +205,10 @@ export component InboxRow(props: {
         onPress={() => {
           void performRowAction(
             "Save",
-            () => mutations.updateInboxItem(
-              {
-                entityId: props.item.entityId,
-                status: "saved",
-              },
-            ),
+            () => mutations.updateInboxItem({
+              entityId: props.item.entityId,
+              status: "saved",
+            }),
           )
         }}
       />
@@ -226,12 +220,10 @@ export component InboxRow(props: {
         onPress={() => {
           void performRowAction(
             priorityActionLabel,
-            () => mutations.updateInboxItem(
-              {
-                entityId: props.item.entityId,
-                priority,
-              },
-            ),
+            () => mutations.updateInboxItem({
+              entityId: props.item.entityId,
+              priority,
+            }),
           )
         }}
       />
@@ -244,11 +236,9 @@ export component InboxRow(props: {
           onPress={() => {
             void performRowAction(
               "Complete",
-              () => mutations.completeSessionInboxItem(
-                {
-                  id: sessionItem.entityId,
-                },
-              ),
+              () => mutations.completeSessionInboxItem({
+                id: sessionItem.entityId,
+              }),
             )
           }}
         />
@@ -261,12 +251,10 @@ export component InboxRow(props: {
         onPress={() => {
           void performRowAction(
             "Archive",
-            () => mutations.updateInboxItem(
-              {
-                entityId: props.item.entityId,
-                status: "archived",
-              },
-            ),
+            () => mutations.updateInboxItem({
+              entityId: props.item.entityId,
+              status: "archived",
+            }),
           )
         }}
       />

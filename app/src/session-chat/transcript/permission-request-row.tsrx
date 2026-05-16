@@ -184,12 +184,10 @@ export component PermissionRequestTranscriptRow(props: {
                     setError(null)
 
                     try {
-                      await props.onSelectOption?.(
-                        {
-                          requestId: props.message.requestId,
-                          optionId: option.optionId,
-                        },
-                      )
+                      await props.onSelectOption?.({
+                        requestId: props.message.requestId,
+                        optionId: option.optionId,
+                      })
                     } catch (error) {
                       console.error("Failed to respond to permission request.", error)
                       setError(formatPermissionActionError(error))

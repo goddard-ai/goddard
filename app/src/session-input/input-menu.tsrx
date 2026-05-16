@@ -97,13 +97,11 @@ export component SessionInputMenu(props: {
         if (props.isLoadingSuggestions) {
           <div class={inputMenuEmptyClass}>
             <span
-              class={css(
-                {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                },
-              )}
+              class={css({
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
               "Loading suggestions..."

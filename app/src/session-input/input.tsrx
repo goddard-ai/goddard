@@ -222,12 +222,10 @@ export component SessionInput(props: {
   }
 
   function dismissMenuFromEditor() {
-    hideMenu(
-      {
-        dismissCurrentContext: true,
-        preserveFocus: true,
-      },
-    )
+    hideMenu({
+      dismissCurrentContext: true,
+      preserveFocus: true,
+    })
   }
 
   function submitFromEditor() {
@@ -243,12 +241,10 @@ export component SessionInput(props: {
     suggestionRequestIdRef.current = requestId
     setIsLoadingSuggestions(true)
 
-    void props.loadSuggestions(
-      {
-        trigger: menu.trigger,
-        query: menu.query,
-      },
-    ).then((response) => {
+    void props.loadSuggestions({
+      trigger: menu.trigger,
+      query: menu.query,
+    }).then((response) => {
       if (suggestionRequestIdRef.current !== requestId) {
         return
       }

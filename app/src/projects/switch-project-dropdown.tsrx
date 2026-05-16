@@ -82,13 +82,11 @@ export component SwitchProjectDropdown() {
 
   async function openFolderFromSwitcher() {
     setIsOpen(false)
-    await openProjectFromFilesystem(
-      {
-        projectContext,
-        projectRegistry,
-        workbenchTabSet,
-      },
-    )
+    await openProjectFromFilesystem({
+      projectContext,
+      projectRegistry,
+      workbenchTabSet,
+    })
   }
 
   useEffect(() => {
@@ -159,14 +157,12 @@ export component SwitchProjectDropdown() {
     }
 
     setIsOpen(false)
-    openProjectTab(
-      {
-        projectContext,
-        projectPath: item.project.path,
-        projectRegistry,
-        workbenchTabSet,
-      },
-    )
+    openProjectTab({
+      projectContext,
+      projectPath: item.project.path,
+      projectRegistry,
+      workbenchTabSet,
+    })
   }
 
   useEffect(() => {

@@ -100,9 +100,14 @@ component CommandPalette(props: { dialog: UseDialogReturn }) {
                   }}
                 >
                   if (Icon) {
-                    <Icon aria-hidden={true} size={16} strokeWidth={2} style={{
+                    <Icon
+                      aria-hidden={true}
+                      size={16}
+                      strokeWidth={2}
+                      style={{
                         color: state.active ? token.var("colors.text") : token.var("colors.muted"),
-                      }} />
+                      }}
+                    />
                   }
                   <span class={styles.itemLabel}>
                     {command.label}

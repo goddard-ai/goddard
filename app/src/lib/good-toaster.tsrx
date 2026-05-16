@@ -4,13 +4,11 @@ import { X } from "lucide-react"
 
 import styles from "./good-toaster.style.ts"
 
-export const appToaster = createToaster(
-  {
-    gap: 12,
-    max: 4,
-    placement: "bottom-end",
-  },
-)
+export const appToaster = createToaster({
+  gap: 12,
+  max: 4,
+  placement: "bottom-end",
+})
 
 export component GoodToaster() {
   <Portal>

@@ -46,7 +46,8 @@ export type ComposerSlashCommandChipData = {
 }
 
 /** One atomic chip payload stored inside the Lexical session composer. */
-export type ComposerChipData = ComposerFilesystemChipData | ComposerSkillChipData | ComposerSlashCommandChipData
+export type ComposerChipData =
+  ComposerFilesystemChipData | ComposerSkillChipData | ComposerSlashCommandChipData
 
 /** Serialized JSON shape used when Lexical copies or persists one chip node. */
 export type SerializedComposerChipNode = SerializedLexicalNode & {

@@ -9,23 +9,19 @@ import githubLightDefault from "shiki/dist/themes/github-light-default.mjs"
 import styles from "./markdown-message.style.ts"
 
 function createMessageParser() {
-  return createSerializedParse(
-    {
-      html: false,
-      plugins: [
-        highlight(
-          {
-            registerDefaultThemes: false,
-            themes: {
-              light: githubLightDefault,
-              dark: githubDarkDefault,
-            },
-            preStyles: true,
-          },
-        ),
-      ],
-    },
-  )
+  return createSerializedParse({
+    html: false,
+    plugins: [
+      highlight({
+        registerDefaultThemes: false,
+        themes: {
+          light: githubLightDefault,
+          dark: githubDarkDefault,
+        },
+        preStyles: true,
+      }),
+    ],
+  })
 }
 
 export component MarkdownMessage(props: {
@@ -61,13 +57,11 @@ export component MarkdownMessage(props: {
         return
       }
 
-      setTree(
-        {
-          frontmatter: {},
-          meta: {},
-          nodes: [props.markdown],
-        },
-      )
+      setTree({
+        frontmatter: {},
+        meta: {},
+        nodes: [props.markdown],
+      })
     })
 
     return () => {

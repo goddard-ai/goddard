@@ -48,26 +48,22 @@ component KeyboardShortcutsView(props: { class?: string }) {
   const [editingWhenRowKey, setEditingWhenRowKey] = useState<string | null>(null)
   const [captureState, setCaptureState] = useState<CaptureState | null>(null)
 
-  const captureDialog = useDialog(
-    {
-      open: captureState !== null,
-      onOpenChange: (details) => {
-        if (!details.open) {
-          setCaptureState(null)
-        }
-      },
+  const captureDialog = useDialog({
+    open: captureState !== null,
+    onOpenChange: (details) => {
+      if (!details.open) {
+        setCaptureState(null)
+      }
     },
-  )
+  })
 
-  useModalStackEntry(
-    {
-      id: "keyboard-shortcuts:capture",
-      open: captureDialog.open,
-      close() {
-        captureDialog.setOpen(false)
-      },
+  useModalStackEntry({
+    id: "keyboard-shortcuts:capture",
+    open: captureDialog.open,
+    close() {
+      captureDialog.setOpen(false)
     },
-  )
+  })
 
   function stopSearchRecording() {
     const session = searchRecordingSessionRef.current
@@ -85,16 +81,14 @@ component KeyboardShortcutsView(props: { class?: string }) {
     stopSearchRecording()
     setIsRecordingSearchEnabled(false)
     setEditingWhenRowKey(null)
-    setCaptureState(
-      {
-        commandId: row.commandId,
-        label: row.label,
-        mode: row.bindingIndex === null ? "add" : "change",
-        bindingIndex: row.bindingIndex,
-        currentExpression: row.shortcut,
-        whenClause: row.whenClause,
-      },
-    )
+    setCaptureState({
+      commandId: row.commandId,
+      label: row.label,
+      mode: row.bindingIndex === null ? "add" : "change",
+      bindingIndex: row.bindingIndex,
+      currentExpression: row.shortcut,
+      whenClause: row.whenClause,
+    })
   }
 
   useEffect(() => {
@@ -112,22 +106,20 @@ component KeyboardShortcutsView(props: { class?: string }) {
       }
 
       try {
-        const session = shortcutRegistry.runtime.record(
-          {
-            target: searchInputElement ?? document,
-            suppressHandlers: true,
-            consumeEvents: true,
-            onUpdate: (recording) => {
-              if (recording.expression === "Escape") {
-                stopSearchRecording()
-                setIsRecordingSearchEnabled(false)
-                return
-              }
+        const session = shortcutRegistry.runtime.record({
+          target: searchInputElement ?? document,
+          suppressHandlers: true,
+          consumeEvents: true,
+          onUpdate: (recording) => {
+            if (recording.expression === "Escape") {
+              stopSearchRecording()
+              setIsRecordingSearchEnabled(false)
+              return
+            }
 
-              setSearchText(formatShortcutSearch(recording.expression))
-            },
+            setSearchText(formatShortcutSearch(recording.expression))
           },
-        )
+        })
 
         searchRecordingSessionRef.current = session
 
@@ -180,28 +172,24 @@ component KeyboardShortcutsView(props: { class?: string }) {
     const bindings = shortcutRegistry.resolvedBindings[command.id]
 
     if (!bindings || bindings.length === 0) {
-      allRows.push(
-        {
-          rowKey: `${command.id}:empty`,
-          commandId: command.id,
-          label: command.label,
-          bindingIndex: null,
-          shortcut: null,
-          whenClause: command.when ?? null,
-        },
-      )
+      allRows.push({
+        rowKey: `${command.id}:empty`,
+        commandId: command.id,
+        label: command.label,
+        bindingIndex: null,
+        shortcut: null,
+        whenClause: command.when ?? null,
+      })
     } else {
       bindings.forEach((binding, bindingIndex) => {
-        allRows.push(
-          {
-            rowKey: `${command.id}:${bindingIndex}`,
-            commandId: command.id,
-            label: command.label,
-            bindingIndex,
-            shortcut: getShortcutBindingExpression(binding),
-            whenClause: getShortcutBindingWhen(binding) ?? command.when ?? null,
-          },
-        )
+        allRows.push({
+          rowKey: `${command.id}:${bindingIndex}`,
+          commandId: command.id,
+          label: command.label,
+          bindingIndex,
+          shortcut: getShortcutBindingExpression(binding),
+          whenClause: getShortcutBindingWhen(binding) ?? command.when ?? null,
+        })
       })
     }
   }
@@ -306,14 +294,18 @@ component KeyboardShortcutsView(props: { class?: string }) {
               style={{
                 width: "44%",
               }}
-            >"Command"</th>
+            >
+              "Command"
+            </th>
             <th
               class={styles.headerCell}
               scope="col"
               style={{
                 width: "23%",
               }}
-            >"Shortcut"</th>
+            >
+              "Shortcut"
+            </th>
             <th class={styles.headerCell} scope="col">"When"</th>
           </tr>
         </thead>
@@ -354,17 +346,17 @@ component KeyboardShortcutsView(props: { class?: string }) {
                             class={styles.menuItem}
                             value={`${row.rowKey}:add`}
                             onSelect={() => {
-                              openCaptureDialog(
-                                {
-                                  commandId: row.commandId,
-                                  label: row.label,
-                                  bindingIndex: null,
-                                  shortcut: null,
-                                  whenClause: row.whenClause,
-                                },
-                              )
+                              openCaptureDialog({
+                                commandId: row.commandId,
+                                label: row.label,
+                                bindingIndex: null,
+                                shortcut: null,
+                                whenClause: row.whenClause,
+                              })
                             }}
-                          >"Add shortcut"</Menu.Item>
+                          >
+                            "Add shortcut"
+                          </Menu.Item>
                           <Menu.Item
                             class={styles.menuItem}
                             disabled={row.bindingIndex === null}
@@ -376,7 +368,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
 
                               openCaptureDialog(row)
                             }}
-                          >"Change shortcut"</Menu.Item>
+                          >
+                            "Change shortcut"
+                          </Menu.Item>
                           <Menu.Item
                             class={cx(styles.menuItem, styles.menuItemDanger)}
                             disabled={row.bindingIndex === null}
@@ -392,7 +386,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                                 row.bindingIndex,
                               )
                             }}
-                          >"Remove shortcut"</Menu.Item>
+                          >
+                            "Remove shortcut"
+                          </Menu.Item>
                           <Menu.Item
                             class={styles.menuItem}
                             disabled={!row.shortcut}
@@ -407,7 +403,9 @@ component KeyboardShortcutsView(props: { class?: string }) {
                               setSearchText(formatShortcutSearch(row.shortcut))
                               searchInputRef.current?.focus()
                             }}
-                          >"Show commands with same shortcut"</Menu.Item>
+                          >
+                            "Show commands with same shortcut"
+                          </Menu.Item>
                         </Menu.Content>
                       </Menu.Positioner>
                     </MenuPortal>

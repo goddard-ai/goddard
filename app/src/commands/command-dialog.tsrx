@@ -27,32 +27,28 @@ export component CommandDialog(props: CommandDialogProps) {
   const Content = useMemo(() => lazy(props.content), [])
   const dialogId = useId()
 
-  const dialog = useDialog(
-    {
-      ...props.dialogProps,
-      onOpenChange: (details) => {
-        props.dialogProps?.onOpenChange?.(details)
+  const dialog = useDialog({
+    ...props.dialogProps,
+    onOpenChange: (details) => {
+      props.dialogProps?.onOpenChange?.(details)
 
-        if (details.open) {
-          globalEventHub.emit("commandDialogActivated", { dialogId })
-        }
-      },
-      persistentElements: concat(
-        () => document.getElementById(menuPortalId),
-        props.dialogProps?.persistentElements,
-      ),
+      if (details.open) {
+        globalEventHub.emit("commandDialogActivated", { dialogId })
+      }
     },
-  )
+    persistentElements: concat(
+      () => document.getElementById(menuPortalId),
+      props.dialogProps?.persistentElements,
+    ),
+  })
 
-  useModalStackEntry(
-    {
-      id: `command-dialog:${dialogId}`,
-      open: dialog.open,
-      close() {
-        dialog.setOpen(false)
-      },
+  useModalStackEntry({
+    id: `command-dialog:${dialogId}`,
+    open: dialog.open,
+    close() {
+      dialog.setOpen(false)
     },
-  )
+  })
 
   useListener(globalEventHub, "commandDialogActivated", ({ dialogId: activeDialogId }) => {
     if (activeDialogId !== dialogId) {

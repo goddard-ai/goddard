@@ -349,16 +349,14 @@ export component SessionInputPlugins(props: {
         return
       }
 
-      props.onMenuChange(
-        {
-          trigger: detectedMenu.trigger,
-          query: detectedMenu.query,
-          nodeKey: detectedMenu.nodeKey,
-          startOffset: detectedMenu.startOffset,
-          endOffset: detectedMenu.endOffset,
-          ...getCaretAnchorPosition(editor),
-        },
-      )
+      props.onMenuChange({
+        trigger: detectedMenu.trigger,
+        query: detectedMenu.query,
+        nodeKey: detectedMenu.nodeKey,
+        startOffset: detectedMenu.startOffset,
+        endOffset: detectedMenu.endOffset,
+        ...getCaretAnchorPosition(editor),
+      })
     })
   }, [editor, props])
 

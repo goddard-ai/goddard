@@ -10,7 +10,14 @@ import {
 import { type ModelFactory } from "@preact/signals-core"
 
 /** Read-only view of a page model where mutable Signal properties become ReadonlySignal properties. */
-type ReadonlyPageModel<TModel> = TModel extends Signal<infer Value> ? ReadonlySignal<Value> : TModel extends ReadonlySignal<unknown> ? TModel : TModel extends (...args: any[]) => any ? TModel : TModel extends object ? { [Key in keyof TModel]: ReadonlyPageModel<TModel[Key]> } : TModel
+type ReadonlyPageModel<TModel> =
+  TModel extends Signal<infer Value>
+    ? ReadonlySignal<Value>
+    : TModel extends ReadonlySignal<unknown>
+      ? TModel
+      : TModel extends (...args: any[]) => any
+        ? TModel
+        : TModel extends object ? { [Key in keyof TModel]: ReadonlyPageModel<TModel[Key]> } : TModel
 
 export function createPageModelContext<TModel, TFactoryArgs extends any[] = []>(createPageModel: ModelFactory<TModel, TFactoryArgs>) {
   const PageModel = createModel<TModel>(createPageModel)

@@ -28,18 +28,16 @@ component SessionsPage() {
       return
     }
 
-    workbenchTabSet.openOrFocusTab(
-      {
-        id: `session:${session.id}`,
-        kind: "sessionChat",
-        title: getSessionDisplayTitle(session),
-        payload: {
-          projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
-          sessionId: session.id,
-        },
-        dirty: false,
+    workbenchTabSet.openOrFocusTab({
+      id: `session:${session.id}`,
+      kind: "sessionChat",
+      title: getSessionDisplayTitle(session),
+      payload: {
+        projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+        sessionId: session.id,
       },
-    )
+      dirty: false,
+    })
   }
 
   function openSessionChanges(sessionId: DaemonSession["id"]) {
@@ -50,19 +48,17 @@ component SessionsPage() {
     }
 
     queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
-    workbenchTabSet.openOrFocusTab(
-      {
-        id: `session-changes:${session.id}`,
-        kind: "sessionChanges",
-        title: `Changes · ${getSessionDisplayTitle(session)}`,
-        payload: {
-          sessionId: session.id,
-          sessionTitle: getSessionDisplayTitle(session),
-          repositoryLabel: getSessionRepositoryLabel(session),
-        },
-        dirty: false,
+    workbenchTabSet.openOrFocusTab({
+      id: `session-changes:${session.id}`,
+      kind: "sessionChanges",
+      title: `Changes · ${getSessionDisplayTitle(session)}`,
+      payload: {
+        sessionId: session.id,
+        sessionTitle: getSessionDisplayTitle(session),
+        repositoryLabel: getSessionRepositoryLabel(session),
       },
-    )
+      dirty: false,
+    })
   }
 
   <SessionsPageMutations

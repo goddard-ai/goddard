@@ -235,11 +235,9 @@ component SelectMenuContainer(props: {
       return
     }
 
-    itemElements[highlightedItem.value]?.scrollIntoView(
-      {
-        block: "nearest",
-      },
-    )
+    itemElements[highlightedItem.value]?.scrollIntoView({
+      block: "nearest",
+    })
   }, [highlightedItem?.value, props.isMenuOpen])
 
   if (props.isMenuOpen) {
@@ -315,13 +313,11 @@ component SelectMenuContainer(props: {
         if (props.loading) {
           <div class={styles.menuEmpty}>
             <span
-              class={css(
-                {
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                },
-              )}
+              class={css({
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
               "Loading options..."

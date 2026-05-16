@@ -39,17 +39,15 @@ export component KeyboardShortcutCaptureDialog(props: {
       try {
         setIsRecording(true)
 
-        const session = shortcutRegistry.runtime.record(
-          {
-            suppressHandlers: true,
-            consumeEvents: true,
-            onUpdate: (recording) => {
-              if (!isDisposed) {
-                setDraftExpression(recording.expression)
-              }
-            },
+        const session = shortcutRegistry.runtime.record({
+          suppressHandlers: true,
+          consumeEvents: true,
+          onUpdate: (recording) => {
+            if (!isDisposed) {
+              setDraftExpression(recording.expression)
+            }
           },
-        )
+        })
 
         sessionRef.current = session
 
@@ -152,7 +150,9 @@ export component KeyboardShortcutCaptureDialog(props: {
               onClick={() => {
                 void props.onRemove?.()
               }}
-            >"Remove shortcut"</button>
+            >
+              "Remove shortcut"
+            </button>
           }
           <button
             class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
@@ -161,7 +161,9 @@ export component KeyboardShortcutCaptureDialog(props: {
             onClick={() => {
               void props.onSave(draftExpression.trim())
             }}
-          >"Save shortcut"</button>
+          >
+            "Save shortcut"
+          </button>
         </div>
       </Dialog.Content>
     </Dialog.Positioner>

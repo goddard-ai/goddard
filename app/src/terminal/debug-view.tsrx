@@ -27,12 +27,10 @@ export component TerminalDebugView(_props: TerminalDebugViewProps) {
 
   function appendChunk(data: string) {
     nextChunkId.current += 1
-    terminalChunks.current.push(
-      {
-        id: `debug-terminal:${nextChunkId.current}`,
-        data,
-      },
-    )
+    terminalChunks.current.push({
+      id: `debug-terminal:${nextChunkId.current}`,
+      data,
+    })
     terminal.syncChunks(terminalChunks.current)
   }
 
@@ -218,9 +216,11 @@ export component TerminalDebugView(_props: TerminalDebugViewProps) {
     <section class={styles.header}>
       <div class={styles.eyebrow}>"Debug Surface"</div>
       <h1 class={styles.title}>"Terminal"</h1>
-      <p
-        class={styles.body}
-      >"This view exercises the real terminal viewport and headless xterm model with a local fixture shell. It is intentionally disconnected from Bun-side PTY ownership so input echo, ANSI styling, and resize behavior can be tuned in isolation first."</p>
+      <p class={styles.body}>
+        "This view exercises the real terminal viewport and headless xterm model with a local
+        fixture shell. It is intentionally disconnected from Bun-side PTY ownership so input echo,
+        ANSI styling, and resize behavior can be tuned in isolation first."
+      </p>
       <div class={styles.metaRow}>
         <div class={styles.metaChip}>{`${terminalSize.cols} x ${terminalSize.rows}`}</div>
         <div class={styles.metaChip}>{`last command: ${lastCommand ?? "none"}`}</div>
