@@ -23,6 +23,7 @@ component SessionLaunchDialog(props: {
   const activeProjectPath = projectContext.activeProjectPath
   const isDialogOpen = props.dialog.open
   const projects = projectRegistry.projectList
+  const initialProjectPath = activeProjectPath ?? projects[0]?.path ?? null
   const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
     form.draftLocation.value === "worktree" && (form.launchPreview.value?.branches.length ?? 0) > 0
@@ -68,10 +69,10 @@ component SessionLaunchDialog(props: {
   }
 
   useEffect(() => {
-    if (isDialogOpen && form.draftProjectPath.value === null) {
-      form.reset(activeProjectPath)
+    if (isDialogOpen && form.draftProjectPath.value === null && initialProjectPath !== null) {
+      form.reset(initialProjectPath)
     }
-  }, [activeProjectPath, form, form.draftProjectPath.value, isDialogOpen])
+  }, [form, form.draftProjectPath.value, initialProjectPath, isDialogOpen])
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
