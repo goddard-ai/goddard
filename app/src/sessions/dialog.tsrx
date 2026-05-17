@@ -46,14 +46,12 @@ component SessionLaunchDialog(props: {
 
       form.reset(projectPath)
       workbenchTabSet.openOrFocusTab({
-        id: `session:${session.id}`,
         kind: "sessionChat",
-        title: sessionTitle,
         payload: {
           projectPath,
           sessionId: session.id,
+          sessionTitle,
         },
-        dirty: false,
       })
       // Defer the toast until the submit control finishes clearing its editor after onSubmit.
       window.setTimeout(() => {

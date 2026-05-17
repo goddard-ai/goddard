@@ -123,11 +123,8 @@ export component AppShellChrome() {
 
   useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
     workbenchTabSet.openOrFocusTab({
-      id: "workbench:keyboard-shortcuts",
       kind: "keyboardShortcuts",
-      title: "Keyboard Shortcuts",
       payload: {},
-      dirty: false,
     })
   })
 
@@ -157,11 +154,8 @@ export component AppShellChrome() {
 
   useAppCommand(AppCommand.navigation.openSettings, () => {
     workbenchTabSet.openOrFocusTab({
-      id: "surface:settings",
       kind: "settings",
-      title: "Settings",
       payload: {},
-      dirty: false,
     })
   })
 

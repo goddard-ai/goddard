@@ -43,6 +43,7 @@ component PullRequestLoadingState() {
 component PullRequestView(props: {
   projectPath: string | null;
   pullRequestId: DaemonPullRequestId;
+  pullRequestTitle?: string;
 }) {
   const [, setRetryVersion] = useState(0)
   useReportTabProject(props.projectPath)

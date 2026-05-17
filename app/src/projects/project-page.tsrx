@@ -3,7 +3,7 @@ import { GoodIcon } from "~/lib/good-icon.tsrx"
 import styles from "./project-page.style.ts"
 
 /** Renders one project-backed closable workbench tab. */
-export component ProjectPage(props: { projectPath: string }) {
+export component ProjectPage(props: { projectName?: string; projectPath: string }) {
   const projectRegistry = useProjectRegistry()
   const project = projectRegistry.projectsByPath[props.projectPath] ?? null
 

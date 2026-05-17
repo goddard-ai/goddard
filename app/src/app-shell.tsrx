@@ -81,29 +81,20 @@ export component AppShell() {
     switch (surface) {
       case "Inbox":
         workbenchTabSet.openOrFocusTab({
-          id: "debug:inbox",
           kind: "inboxDebug",
-          title: "Inbox Debug",
           payload: {},
-          dirty: false,
         })
         return
       case "SessionChatTranscript":
         workbenchTabSet.openOrFocusTab({
-          id: "debug:session-chat-transcript",
           kind: "sessionChatTranscriptDebug",
-          title: "Session Chat Debug",
           payload: {},
-          dirty: false,
         })
         return
       case "Terminal":
         workbenchTabSet.openOrFocusTab({
-          id: "debug:terminal",
           kind: "terminalDebug",
-          title: "Terminal Debug",
           payload: {},
-          dirty: false,
         })
         return
     }

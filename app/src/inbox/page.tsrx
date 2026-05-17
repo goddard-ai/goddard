@@ -204,14 +204,12 @@ component InboxPage() {
         })
 
         workbenchTabSet.openOrFocusTab({
-          id: `session:${session.id}`,
           kind: "sessionChat",
-          title: getSessionDisplayTitle(session),
           payload: {
             projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
             sessionId: session.id,
+            sessionTitle: getSessionDisplayTitle(session),
           },
-          dirty: false,
         })
         return
       }
@@ -225,14 +223,12 @@ component InboxPage() {
       })
 
       workbenchTabSet.openOrFocusTab({
-        id: `pull-request:${pullRequest.id}`,
         kind: "pullRequest",
-        title: getPullRequestDisplayTitle(pullRequest),
         payload: {
           projectPath: findNearestProjectPath(projectRegistry.projectList, pullRequest.cwd),
           pullRequestId: pullRequest.id,
+          pullRequestTitle: getPullRequestDisplayTitle(pullRequest),
         },
-        dirty: false,
       })
     } catch (error) {
       console.error("Failed to open inbox item.", error)

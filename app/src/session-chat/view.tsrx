@@ -35,6 +35,7 @@ import {
 export default component SessionChatView(props: {
   projectPath: string | null;
   sessionId: DaemonSession["id"];
+  sessionTitle?: string;
 }) {
   <SessionChatPageModelProvider>
     const page = useSessionChatPageModel()
@@ -111,15 +112,12 @@ export default component SessionChatView(props: {
                 function openSessionChanges() {
                   queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
                   workbenchTabSet.openOrFocusTab({
-                    id: `session-changes:${chat.session.id}`,
                     kind: "sessionChanges",
-                    title: `Changes · ${chat.title}`,
                     payload: {
                       sessionId: chat.session.id,
                       sessionTitle: chat.title,
                       repositoryLabel: chat.repositoryLabel,
                     },
-                    dirty: false,
                   })
                 }
 

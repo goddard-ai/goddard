@@ -1,9 +1,11 @@
 import { Sigma } from "preact-sigma"
 
 import {
+  createWorkbenchTab,
   type WorkbenchAnyTab,
   type WorkbenchContentKind,
   type WorkbenchMainTab,
+  type WorkbenchOpenTabInput,
   type WorkbenchTab,
   type WorkbenchTabKind,
 } from "./workbench-tab-registry.ts"
@@ -12,6 +14,7 @@ export type {
   WorkbenchAnyTab,
   WorkbenchContentKind,
   WorkbenchMainTab,
+  WorkbenchOpenTabInput,
   WorkbenchTab,
   WorkbenchTabKind,
 }
@@ -62,7 +65,9 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   }
 
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
-  openOrFocusTab(tab: WorkbenchTab) {
+  openOrFocusTab(input: WorkbenchOpenTabInput) {
+    const tab = createWorkbenchTab(input)
+
     if (this.tabs[tab.id]) {
       this.tabs[tab.id] = tab
       this.activateTab(tab.id)

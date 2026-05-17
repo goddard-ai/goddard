@@ -28,11 +28,8 @@ export function openProjectTab(props: {
 
   props.projectContext.activateProject(project.path)
   props.workbenchTabSet.openOrFocusTab({
-    id: `project:${encodeURIComponent(project.path)}`,
     kind: "project",
-    title: project.name,
-    payload: { projectPath: project.path },
-    dirty: false,
+    payload: { projectName: project.name, projectPath: project.path },
   })
   return project
 }
