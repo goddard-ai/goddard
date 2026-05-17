@@ -5,7 +5,7 @@ import { resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import { parseArgs } from "node:util"
 import { isCancel, text } from "@clack/prompts"
-import type { AgentSession } from "@goddard-ai/sdk"
+import type { AgentSession, DaemonSession } from "@goddard-ai/sdk"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
 
 import { createAgentClient, createAgentLoopInterruptController, runAgentLoop } from "./loop.ts"
@@ -159,6 +159,40 @@ function createCloseSession(session: AgentSession | null) {
   }
 }
 
+/** Returns a human-readable active model label when the agent reports model state. */
+function findCurrentModelLabel(session: Pick<DaemonSession, "models">) {
+  const currentModelId = session.models?.currentModelId
+  if (!currentModelId) {
+    return null
+  }
+
+  const currentModel = session.models?.availableModels.find(
+    (model) => model.modelId === currentModelId,
+  )
+  if (!currentModel?.name || currentModel.name === currentModelId) {
+    return currentModelId
+  }
+
+  return `${currentModel.name} (${currentModelId})`
+}
+
+/** Writes daemon-resolved defaults when the caller omitted agent or model choices. */
+function writeResolvedDefaults(input: {
+  options: Pick<CliOptions, "agent" | "model">
+  session: Pick<DaemonSession, "agentName" | "models">
+  output: NodeJS.WritableStream
+}) {
+  if (!input.options.agent) {
+    input.output.write(`Using default agent: ${input.session.agentName}\n`)
+  }
+
+  if (!input.options.model) {
+    input.output.write(
+      `Using default model: ${findCurrentModelLabel(input.session) ?? "not reported by agent"}\n`,
+    )
+  }
+}
+
 /** Creates the prompt reader used by foreground loop control. */
 function createPromptReader() {
   if (process.stdin.isTTY && process.stderr.isTTY) {
@@ -259,6 +293,13 @@ async function main() {
   })
 
   try {
+    const resolvedSession = await sdk.session.get({ id: session.sessionId })
+    writeResolvedDefaults({
+      options,
+      session: resolvedSession.session,
+      output: process.stderr,
+    })
+
     await runAgentLoop({
       session,
       cwd: options.cwd,

@@ -32,4 +32,6 @@ Useful options:
 
 The script intentionally denies permission requests so it is safe as a minimal proof of concept. Replace the `requestPermission` handler in `src/loop.ts` if your external host wants to approve tool calls.
 
+When `--agent` or `--model` is omitted, the command prints the daemon-resolved default before the loop starts.
+
 In an interactive terminal, press `Ctrl+C` to interrupt the current turn or delay. The loop asks for an optional custom prompt; press Enter with no text to resume the configured loop prompt.
