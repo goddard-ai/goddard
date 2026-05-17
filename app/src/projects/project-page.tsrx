@@ -1,10 +1,13 @@
 import { useProjectRegistry } from "~/app-state-context.tsrx"
 import { GoodIcon } from "~/lib/good-icon.tsrx"
+import { useReportTabProject } from "./use-tab-project.ts"
 import styles from "./project-page.style.ts"
 
 /** Renders one project-backed closable workbench tab. */
 export component ProjectPage(props: { projectName?: string; projectPath: string }) {
   const projectRegistry = useProjectRegistry()
+  useReportTabProject(props.projectPath)
+
   const project = projectRegistry.projectsByPath[props.projectPath] ?? null
 
   if (!project) {
