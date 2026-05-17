@@ -1,28 +1,35 @@
-import { readFile } from "node:fs/promises"
-import { resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import type * as acp from "@agentclientprotocol/sdk"
 import type { AgentSession } from "@goddard-ai/sdk"
-import { GoddardSdk } from "@goddard-ai/sdk/node"
 
+/** Runtime inputs for the foreground prompt loop after CLI and SDK setup are complete. */
 export type AgentLoopOptions = {
-  systemPromptFile: string
+  session: AgentSession
   cwd: string
-  agent?: string
-  model?: string
-  prompt?: string
-  daemonUrl?: string
+  initialPrompt?: string
   cycleDelayMs: number
   maxIterations?: number
+  input: NodeJS.ReadableStream
+  inputOutput: NodeJS.WritableStream
+  statusOutput: NodeJS.WritableStream
+  terminal: boolean
+  closeSession: () => Promise<void>
 }
 
+/** Extracts printable assistant text from ACP session update payloads. */
 function getTextChunk(params: unknown) {
   if (typeof params !== "object" || params === null || !("update" in params)) {
     return null
   }
 
   const update = params.update
-  if (typeof update !== "object" || update === null || !("content" in update)) {
+  if (
+    typeof update !== "object" ||
+    update === null ||
+    !("sessionUpdate" in update) ||
+    update.sessionUpdate !== "agent_message_chunk" ||
+    !("content" in update)
+  ) {
     return null
   }
 
@@ -41,7 +48,8 @@ function getTextChunk(params: unknown) {
   return null
 }
 
-function createAgentClient(): acp.Client {
+/** Creates the ACP client callbacks used to stream agent text and deny tool permissions. */
+export function createAgentClient(messageOutput: NodeJS.WritableStream) {
   return {
     async requestPermission() {
       return { outcome: { outcome: "cancelled" } }
@@ -49,17 +57,23 @@ function createAgentClient(): acp.Client {
     async sessionUpdate(params) {
       const text = getTextChunk(params)
       if (text) {
-        process.stdout.write(text)
+        messageOutput.write(text)
       }
     },
-  }
+  } satisfies acp.Client
 }
 
-async function promptOnce(session: AgentSession, prompt: string) {
+/** Submits one user prompt and writes the turn completion marker. */
+async function promptOnce(
+  session: AgentSession,
+  prompt: string,
+  statusOutput: NodeJS.WritableStream,
+) {
   const result = await session.prompt(prompt)
-  process.stdout.write(`\n[stopReason: ${result.stopReason}]\n`)
+  statusOutput.write(`\n[stopReason: ${result.stopReason}]\n`)
 }
 
+/** Sleeps for a requested pacing interval without imposing a minimum delay. */
 async function sleep(ms: number) {
   if (ms <= 0) {
     return
@@ -70,48 +84,8 @@ async function sleep(ms: number) {
 
 /** Runs a live SDK session as a prompt loop owned by this external script. */
 export async function runAgentLoop(options: AgentLoopOptions) {
-  const systemPrompt = await readFile(resolve(options.systemPromptFile), "utf8")
-  const sdk = new GoddardSdk(
-    options.daemonUrl
-      ? {
-          daemonUrl: options.daemonUrl,
-        }
-      : {},
-  )
-
-  const session = await sdk.session.run(
-    {
-      agent: options.agent,
-      cwd: options.cwd,
-      mcpServers: [],
-      systemPrompt,
-      initialModelId: options.model,
-    },
-    createAgentClient(),
-  )
-  if (!session) {
-    throw new Error("Interactive prompts require a live session; do not create it with oneShot.")
-  }
-
-  let stopped = false
-  const stop = async () => {
-    if (stopped) {
-      return
-    }
-
-    stopped = true
-    await session.stop()
-  }
-
-  process.on("SIGINT", () => {
-    void stop().finally(() => process.exit(130))
-  })
-  process.on("SIGTERM", () => {
-    void stop().finally(() => process.exit(143))
-  })
-
   try {
-    process.stderr.write(`Started session ${session.sessionId} in ${options.cwd}\n`)
+    options.statusOutput.write(`Started session ${options.session.sessionId} in ${options.cwd}\n`)
 
     let iterationCount = 0
     const runIteration = async (prompt: string) => {
@@ -124,25 +98,21 @@ export async function runAgentLoop(options: AgentLoopOptions) {
       }
 
       iterationCount += 1
-      await promptOnce(session, prompt)
+      await promptOnce(options.session, prompt, options.statusOutput)
       return options.maxIterations === undefined || iterationCount < options.maxIterations
     }
 
-    if (options.prompt) {
-      const canContinue = await runIteration(options.prompt)
+    if (options.initialPrompt) {
+      const canContinue = await runIteration(options.initialPrompt)
       if (!canContinue) {
         return
       }
     }
 
-    if (!process.stdin.isTTY && options.prompt) {
-      return
-    }
-
     const input = createInterface({
-      input: process.stdin,
-      output: process.stderr,
-      terminal: process.stdin.isTTY,
+      input: options.input,
+      output: options.inputOutput,
+      terminal: options.terminal,
     })
 
     for await (const line of input) {
@@ -161,6 +131,6 @@ export async function runAgentLoop(options: AgentLoopOptions) {
       }
     }
   } finally {
-    await stop()
+    await options.closeSession()
   }
 }
