@@ -10,7 +10,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { useSigma } from "preact-sigma"
+import { useSigma, useSigmaSync } from "preact-sigma"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
@@ -53,12 +53,9 @@ export default component SessionChatView(props: {
           }),
           { deps: [session.id] },
         )
-        useEffect(() => {
-          chat.syncLoadedData({
-            history: sessionHistory,
-            session,
-          })
-        }, [chat, sessionHistory, session])
+        useSigmaSync(chat, { history: sessionHistory, session }, (payload) => {
+          chat.syncLoadedData(payload)
+        })
 
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
