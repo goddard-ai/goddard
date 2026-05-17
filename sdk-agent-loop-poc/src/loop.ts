@@ -1,6 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { AgentSession } from "@goddard-ai/sdk"
-import { bold, cyan, dim, red, yellow } from "nanocolors"
+import { bold, cyan, dim, green, red, yellow } from "nanocolors"
 
 /** Interrupt signal shared between process handlers, sleeps, and active prompt cancellation. */
 export type AgentLoopInterruptController = {
@@ -98,6 +98,11 @@ function writeStatus(output: NodeJS.WritableStream, message: string) {
   output.write(`${dim("›")} ${message}\n`)
 }
 
+/** Writes the user prompt being sent for this foreground loop iteration. */
+function writeLoopPrompt(output: NodeJS.WritableStream, prompt: string) {
+  output.write(`\n${bold(green("Loop prompt"))}\n\n${green(prompt)}\n`)
+}
+
 /** Creates the ACP client callbacks used to stream agent text and deny tool permissions. */
 export function createAgentClient(messageOutput: NodeJS.WritableStream) {
   return {
@@ -119,6 +124,7 @@ async function promptOnce(
   prompt: string,
   statusOutput: NodeJS.WritableStream,
 ) {
+  writeLoopPrompt(statusOutput, prompt)
   statusOutput.write(`\n${bold(cyan("Agent response"))}\n\n`)
   const result = await session.prompt(prompt)
   statusOutput.write(`\n\n${dim(`[stopReason: ${result.stopReason}]`)}\n\n`)
