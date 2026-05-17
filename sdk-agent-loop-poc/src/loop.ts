@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import type { AgentSession } from "@goddard-ai/sdk"
+import { bold, cyan, dim, red, yellow } from "nanocolors"
 
 /** Interrupt signal shared between process handlers, sleeps, and active prompt cancellation. */
 export type AgentLoopInterruptController = {
@@ -92,6 +93,11 @@ function getTextChunk(params: unknown) {
   return null
 }
 
+/** Writes a muted foreground-loop status line to stderr-like output. */
+function writeStatus(output: NodeJS.WritableStream, message: string) {
+  output.write(`${dim("›")} ${message}\n`)
+}
+
 /** Creates the ACP client callbacks used to stream agent text and deny tool permissions. */
 export function createAgentClient(messageOutput: NodeJS.WritableStream) {
   return {
@@ -101,7 +107,7 @@ export function createAgentClient(messageOutput: NodeJS.WritableStream) {
     async sessionUpdate(params) {
       const text = getTextChunk(params)
       if (text) {
-        messageOutput.write(text)
+        messageOutput.write(cyan(text))
       }
     },
   } satisfies acp.Client
@@ -113,8 +119,9 @@ async function promptOnce(
   prompt: string,
   statusOutput: NodeJS.WritableStream,
 ) {
+  statusOutput.write(`\n${bold(cyan("Agent response"))}\n\n`)
   const result = await session.prompt(prompt)
-  statusOutput.write(`\n[stopReason: ${result.stopReason}]\n`)
+  statusOutput.write(`\n\n${dim(`[stopReason: ${result.stopReason}]`)}\n\n`)
 }
 
 /** Sleeps for a requested pacing interval without imposing a minimum delay. */
@@ -194,12 +201,14 @@ export async function runAgentLoop(options: AgentLoopOptions) {
 
     void options.session.cancel().catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error)
-      options.statusOutput.write(`\n[interrupt cancel failed: ${message}]\n`)
+      options.statusOutput.write(`\n${red(`interrupt cancel failed: ${message}`)}\n\n`)
     })
   })
 
   try {
-    options.statusOutput.write(`Started session ${options.session.sessionId} in ${options.cwd}\n`)
+    writeStatus(options.statusOutput, `${dim("started session")} ${options.session.sessionId}`)
+    writeStatus(options.statusOutput, `${dim("cwd")} ${options.cwd}`)
+    options.statusOutput.write("\n")
 
     let iterationCount = 0
     let skipDelay = false
@@ -229,7 +238,7 @@ export async function runAgentLoop(options: AgentLoopOptions) {
           throw error
         }
 
-        options.statusOutput.write("\n[interrupted]\n")
+        options.statusOutput.write(`\n${yellow("interrupted")}\n\n`)
       } finally {
         promptInProgress = false
       }

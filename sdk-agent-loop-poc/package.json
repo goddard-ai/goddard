@@ -13,7 +13,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
     "@clack/prompts": "catalog:",
-    "@goddard-ai/sdk": "workspace:*"
+    "@goddard-ai/sdk": "workspace:*",
+    "nanocolors": "^0.2.13"
   },
   "devDependencies": {
     "@types/node": "^25.6.0"

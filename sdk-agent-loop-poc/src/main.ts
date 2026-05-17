@@ -7,6 +7,7 @@ import { parseArgs } from "node:util"
 import { isCancel, text } from "@clack/prompts"
 import type { AgentSession, DaemonSession } from "@goddard-ai/sdk"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
+import { dim, green, red, yellow } from "nanocolors"
 
 import { createAgentClient, createAgentLoopInterruptController, runAgentLoop } from "./loop.ts"
 
@@ -159,6 +160,11 @@ function createCloseSession(session: AgentSession | null) {
   }
 }
 
+/** Writes a muted status line to stderr-like output. */
+function writeStatus(output: NodeJS.WritableStream, message: string) {
+  output.write(`${dim("›")} ${message}\n`)
+}
+
 /** Returns a human-readable active model label when the agent reports model state. */
 function findCurrentModelLabel(session: Pick<DaemonSession, "models">) {
   const currentModelId = session.models?.currentModelId
@@ -182,15 +188,32 @@ function writeResolvedDefaults(input: {
   session: Pick<DaemonSession, "agentName" | "models">
   output: NodeJS.WritableStream
 }) {
+  let wroteDefault = false
+
   if (!input.options.agent) {
-    input.output.write(`Using default agent: ${input.session.agentName}\n`)
+    writeStatus(input.output, `${dim("using default agent")} ${green(input.session.agentName)}`)
+    wroteDefault = true
   }
 
   if (!input.options.model) {
-    input.output.write(
-      `Using default model: ${findCurrentModelLabel(input.session) ?? "not reported by agent"}\n`,
-    )
+    const modelLabel = findCurrentModelLabel(input.session) ?? "not reported by agent"
+    writeStatus(input.output, `${dim("using default model")} ${green(modelLabel)}`)
+    wroteDefault = true
   }
+
+  if (wroteDefault) {
+    input.output.write("\n")
+  }
+}
+
+/** Writes one high-attention control message to stderr-like output. */
+function writeControl(output: NodeJS.WritableStream, message: string) {
+  output.write(`\n${yellow(message)}\n\n`)
+}
+
+/** Writes one command failure before the CLI usage text. */
+function writeError(message: string) {
+  process.stderr.write(`${red(message)}\n\n${usage()}`)
 }
 
 /** Creates the prompt reader used by foreground loop control. */
@@ -248,7 +271,7 @@ function installSignalHandlers(input: {
   interrupts: ReturnType<typeof createAgentLoopInterruptController>
 }) {
   const handleSigint = () => {
-    process.stderr.write("\n[interrupt requested]\n")
+    writeControl(process.stderr, "interrupt requested")
     input.interrupts.request()
   }
   const handleSigterm = () => {
@@ -318,6 +341,6 @@ async function main() {
 
 main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
-  process.stderr.write(`${message}\n\n${usage()}`)
+  writeError(message)
   process.exit(1)
 })
