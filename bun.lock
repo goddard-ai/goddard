@@ -282,6 +282,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@tsrx/vite-plugin-preact@0.0.34": "patches/@tsrx%2Fvite-plugin-preact@0.0.34.patch",
+  },
   "catalog": {
     "@agentclientprotocol/sdk": "^0.19.2",
     "@clack/prompts": "^1.3.0",

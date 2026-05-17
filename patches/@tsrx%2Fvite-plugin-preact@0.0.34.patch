@@ -1,0 +1,48 @@
+diff --git a/src/index.js b/src/index.js
+index c1ce301b3b833f7161335df9b5fbf1eb348508b5..b13172992465ca044f3f541946c05c786a1c186b 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -68,25 +68,34 @@ export function tsrxPreact(options = {}) {
+ 		async transform(/** @type {string} */ code, /** @type {string} */ id) {
+ 			if (!TSRX_EXTENSION_PATTERN.test(id)) return null;
+ 
+-			const { code: tsx_code, css } = compile(code, id, compile_options);
++			const { code: tsx_code, css, map } = compile(code, id, compile_options);
+ 
+ 			let source = tsx_code;
++			let input_map = /** @type {any} */ (map);
+ 			if (css) {
+ 				css_cache.set(id, css);
+ 				source = `import ${JSON.stringify(id + CSS_QUERY)};\n${tsx_code}`;
++				if (input_map && typeof input_map.mappings === 'string') {
++					input_map = { ...input_map, mappings: ';' + input_map.mappings };
++				}
+ 			} else {
+ 				css_cache.delete(id);
+ 			}
+ 
+-			const result = await transformWithOxc(source, id, {
+-				lang: 'tsx',
+-				sourcemap: true,
+-				jsx: {
+-					runtime: 'automatic',
+-					importSource: jsxImportSource,
++			const result = await transformWithOxc(
++				source,
++				id,
++				{
++					lang: 'tsx',
++					sourcemap: true,
++					jsx: {
++						runtime: 'automatic',
++						importSource: jsxImportSource,
++					},
++					target: 'esnext',
+ 				},
+-				target: 'esnext',
+-			});
++				input_map,
++			);
+ 
+ 			return { code: result.code, map: result.map };
+ 		},
