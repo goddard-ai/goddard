@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@clack/prompts": "catalog:",
     "@goddard-ai/sdk": "workspace:*"
   },
   "devDependencies": {

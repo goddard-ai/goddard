@@ -2,11 +2,13 @@
 /** Minimal external-script proof of concept for running a daemon-backed SDK agent loop. */
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { createInterface } from "node:readline/promises"
 import { parseArgs } from "node:util"
+import { isCancel, text } from "@clack/prompts"
 import type { AgentSession } from "@goddard-ai/sdk"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
 
-import { createAgentClient, runAgentLoop } from "./loop.ts"
+import { createAgentClient, createAgentLoopInterruptController, runAgentLoop } from "./loop.ts"
 
 /** Parsed command-line options before the entrypoint resolves files and SDK objects. */
 type CliOptions = {
@@ -30,7 +32,7 @@ Options:
       --cwd <path>                 Agent working directory. Defaults to process.cwd().
       --agent <name>               Optional ACP adapter name or distribution id.
       --model <model-id>           Optional initial model id.
-      --prompt <text>              Optional first prompt before reading stdin.
+      --prompt <text>              Prompt to repeat each loop iteration. When omitted, prompt interactively.
       --cycle-delay <duration>     Delay between prompt iterations. Supports ms, s, m, h, d. Defaults to 0s.
       --max-iterations <count>     Maximum prompts to send before exiting. Defaults to unlimited.
       --daemon-url <url>           Optional daemon URL override.
@@ -157,17 +159,70 @@ function createCloseSession(session: AgentSession | null) {
   }
 }
 
-/** Installs process signal handlers that shut down the foreground SDK session. */
-function installSignalHandlers(closeSession: () => Promise<void>) {
-  const handleSigint = () => {
-    void closeSession().finally(() => process.exit(130))
-  }
-  const handleSigterm = () => {
-    void closeSession().finally(() => process.exit(143))
+/** Creates the prompt reader used by foreground loop control. */
+function createPromptReader() {
+  if (process.stdin.isTTY && process.stderr.isTTY) {
+    return {
+      async readPrompt() {
+        const value = await text({
+          message: "Prompt",
+          placeholder: "Type /exit to quit",
+          input: process.stdin,
+          output: process.stderr,
+        })
+
+        return isCancel(value) ? "/exit" : value
+      },
+      async readInterruptPrompt() {
+        const value = await text({
+          message: "Interrupted",
+          placeholder: "Press Enter to resume, or type a custom prompt",
+          defaultValue: "",
+          input: process.stdin,
+          output: process.stderr,
+        })
+
+        return isCancel(value) ? "" : value
+      },
+    }
   }
 
-  process.once("SIGINT", handleSigint)
-  process.once("SIGTERM", handleSigterm)
+  const input = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+    terminal: false,
+  })
+  const iterator = input[Symbol.asyncIterator]()
+
+  return {
+    async readPrompt() {
+      const next = await iterator.next()
+      return next.done ? null : next.value
+    },
+    async readInterruptPrompt() {
+      return ""
+    },
+    close() {
+      input.close()
+    },
+  }
+}
+
+/** Installs process signal handlers that interrupt or shut down the foreground SDK session. */
+function installSignalHandlers(input: {
+  closeSession: () => Promise<void>
+  interrupts: ReturnType<typeof createAgentLoopInterruptController>
+}) {
+  const handleSigint = () => {
+    process.stderr.write("\n[interrupt requested]\n")
+    input.interrupts.request()
+  }
+  const handleSigterm = () => {
+    void input.closeSession().finally(() => process.exit(143))
+  }
+
+  process.on("SIGINT", handleSigint)
+  process.on("SIGTERM", handleSigterm)
 
   return () => {
     process.off("SIGINT", handleSigint)
@@ -197,20 +252,23 @@ async function main() {
       createAgentClient(process.stdout),
     ),
   )
-  const removeSignalHandlers = installSignalHandlers(closeSession)
+  const interrupts = createAgentLoopInterruptController()
+  const removeSignalHandlers = installSignalHandlers({
+    closeSession,
+    interrupts,
+  })
 
   try {
     await runAgentLoop({
       session,
       cwd: options.cwd,
-      initialPrompt: options.prompt,
+      loopPrompt: options.prompt,
       cycleDelayMs: options.cycleDelayMs,
       maxIterations: options.maxIterations,
-      input: process.stdin,
-      inputOutput: process.stderr,
       statusOutput: process.stderr,
-      terminal: process.stdin.isTTY,
       closeSession,
+      promptReader: createPromptReader(),
+      interrupts,
     })
   } finally {
     removeSignalHandlers()
