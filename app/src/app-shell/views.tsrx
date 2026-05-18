@@ -1,5 +1,4 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
-import { css } from "@goddard-ai/styled-system/css"
 import { useLayoutEffect, useRef } from "preact/hooks"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -9,53 +8,9 @@ import {
   shouldRestoreWorkbenchTabScroll,
 } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
+import styles from "./views.style.ts"
 
 const panelScrollCache = new Map<string, number>()
-const tabFailure = {
-  root: css({
-    display: "grid",
-    alignContent: "start",
-    gap: "12px",
-    minHeight: "100%",
-    padding: "20px",
-    color: "muted",
-  }),
-  content: css({
-    display: "grid",
-    gap: "10px",
-    maxWidth: "28rem",
-  }),
-  title: css({
-    color: "text",
-    fontSize: "1.15rem",
-    fontWeight: "720",
-    lineHeight: "1.3",
-  }),
-  body: css({
-    fontSize: "0.93rem",
-    lineHeight: "1.6",
-  }),
-  action: css({
-    justifySelf: "start",
-    height: "30px",
-    paddingInline: "12px",
-    border: "1px solid {colors.border}",
-    borderRadius: "7px",
-    backgroundColor: "panel",
-    color: "text",
-    cursor: "pointer",
-    fontSize: "0.86rem",
-    fontWeight: "640",
-    _focusVisible: {
-      outline: "2px solid",
-      outlineColor: "accentStrong",
-      outlineOffset: "2px",
-    },
-    _hover: {
-      backgroundColor: "surface",
-    },
-  }),
-}
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
 export component AppShellWorkbenchContent() {
@@ -108,22 +63,12 @@ component WorkbenchScrollPanel(props: {
 
   <div
     ref={scrollerRef}
-    class={css({
-      minHeight: "0",
-      height: "100%",
-      overflowY: "auto",
-      overscrollBehavior: "contain",
-    })}
+    class={styles.scrollPanel}
     onScroll={(event) => {
       panelScrollCache.set(props.scrollKey, event.currentTarget.scrollTop)
     }}
   >
-    <div
-      class={css({
-        height: "100%",
-        minHeight: "100%",
-      })}
-    >
+    <div class={styles.scrollPanelInner}>
       if (props.tabId) {
         <TabContextProvider id={props.tabId} scrollParentRef={scrollerRef}>
           {props.children}
@@ -180,11 +125,13 @@ component WorkbenchTabFailure(props: {
   onRetry: () => void;
   title: string;
 }) {
-  <div class={tabFailure.root}>
-    <div class={tabFailure.content}>
-      <h2 class={tabFailure.title}>{props.title}</h2>
-      <p class={tabFailure.body}>{props.description}</p>
-      <button class={tabFailure.action} type="button" onClick={props.onRetry}>"Try again"</button>
+  <div class={styles.tabFailureRoot}>
+    <div class={styles.tabFailureContent}>
+      <h2 class={styles.tabFailureTitle}>{props.title}</h2>
+      <p class={styles.tabFailureBody}>{props.description}</p>
+      <button class={styles.tabFailureAction} type="button" onClick={props.onRetry}>
+        "Try again"
+      </button>
     </div>
   </div>
 }
