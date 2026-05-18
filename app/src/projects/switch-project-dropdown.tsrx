@@ -38,6 +38,7 @@ export component SwitchProjectDropdown() {
     projectContext.activeProjectPath === null
       ? null
       : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
+
   const searchableProjects = useMemo(
     () => projects.map(
       (project) => ({
@@ -48,6 +49,7 @@ export component SwitchProjectDropdown() {
     ),
     [projects],
   )
+
   const filteredProjects = useMemo(() => {
     if (isEmptyQuery(search)) {
       return projects
@@ -63,6 +65,7 @@ export component SwitchProjectDropdown() {
       { threshold: 0 },
     ).items.map((item) => item.value.project)
   }, [projects, search, searchableProjects])
+
   const items: SwitchProjectItem[] = useMemo(() => {
     const projectItems: SwitchProjectItem[] = filteredProjects.map(
       (project) => ({
