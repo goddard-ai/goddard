@@ -18,7 +18,9 @@ import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputPromptBlocks, SessionInputSuggestion } from "./input.tsrx"
 
 function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData {
-  switch (suggestion.type) {
+  const suggestionType = suggestion.type
+
+  switch (suggestionType) {
     case "slash_command":
       return {
         kind: "slash_command",
@@ -35,15 +37,25 @@ function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData 
         detail: suggestion.detail,
         source: suggestion.source,
       }
-    default:
+    case "file":
       return {
-        kind: suggestion.type,
+        kind: "file",
+        label: suggestion.label,
+        path: suggestion.path,
+        uri: suggestion.uri,
+        detail: suggestion.detail,
+      }
+    case "folder":
+      return {
+        kind: "folder",
         label: suggestion.label,
         path: suggestion.path,
         uri: suggestion.uri,
         detail: suggestion.detail,
       }
   }
+
+  suggestionType satisfies never
 }
 
 export function clearSessionInputEditor(editor: LexicalEditor) {
