@@ -38,16 +38,9 @@ function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData 
         source: suggestion.source,
       }
     case "file":
-      return {
-        kind: "file",
-        label: suggestion.label,
-        path: suggestion.path,
-        uri: suggestion.uri,
-        detail: suggestion.detail,
-      }
     case "folder":
       return {
-        kind: "folder",
+        kind: suggestionType,
         label: suggestion.label,
         path: suggestion.path,
         uri: suggestion.uri,
