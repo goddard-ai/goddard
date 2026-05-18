@@ -9,6 +9,12 @@ minimumReleaseAgeExcludes = [
   "preact-sigma",
   "radashi",
   "turbo",
+  "@turbo/darwin-64",
+  "@turbo/darwin-arm64",
+  "@turbo/linux-64",
+  "@turbo/linux-arm64",
+  "@turbo/windows-64",
+  "@turbo/windows-arm64",
 
   # TSRX
   "@tsrx/bun-plugin-preact",
