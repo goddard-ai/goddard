@@ -13,28 +13,27 @@ import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
   setSessionInputEditorPrompt,
-  SessionInputPlugins,
-  sessionInputInitialConfig,
-  type SessionInputMenuState,
-} from "./input-lexical.tsrx"
+} from "./input-editor-content.ts"
+import type { SessionInputMenuState } from "./input-menu-detection.ts"
+import { SessionInputPlugins, sessionInputInitialConfig } from "./input-lexical.tsrx"
 import { SessionInputMenu } from "./input-menu.tsrx"
 
 export type SessionInputSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
 export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 export type SessionInputTrigger = "at" | "dollar" | "slash"
 export type SessionInputSuggestionLoader = (input: {
-  trigger: SessionInputTrigger;
-  query: string;
-}) => Promise<readonly SessionInputSuggestion[]>
+    trigger: SessionInputTrigger;
+    query: string;
+  }) => Promise<readonly SessionInputSuggestion[]>
 export type SessionInputClasses = {
-  form: string;
-  editorFrame: string;
-  contentEditable: string;
-  placeholder: string;
-  footer: string;
-  helperText: string;
-  submitButton: string;
-}
+    form: string;
+    editorFrame: string;
+    contentEditable: string;
+    placeholder: string;
+    footer: string;
+    helperText: string;
+    submitButton: string;
+  }
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 

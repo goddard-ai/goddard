@@ -2,7 +2,7 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
 
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
-import type { SessionInputMenuState } from "./input-lexical.tsrx"
+import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsrx"
 import {
   inputMenuBodyClass,

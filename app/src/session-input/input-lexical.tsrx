@@ -1,19 +1,8 @@
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin"
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
-import type { LexicalEditor, LexicalNode, NodeKey } from "lexical"
+import type { LexicalEditor } from "lexical"
 import {
-  $createLineBreakNode,
-  $createParagraphNode,
-  $createTextNode,
-  $getNodeByKey,
-  $getRoot,
-  $getSelection,
-  $insertNodes,
-  $isElementNode,
-  $isLineBreakNode,
-  $isRangeSelection,
-  $isTextNode,
   COMMAND_PRIORITY_HIGH,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
@@ -22,27 +11,14 @@ import {
 } from "lexical"
 import { useEffect } from "preact/hooks"
 
-import {
-  $createComposerChipNode,
-  ComposerChipNode,
-  type ComposerChipData,
-} from "~/session-chat/composer-chip-node.tsrx"
+import { ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
 import { serializeComposerEditorState } from "~/session-chat/composer-content.ts"
-import type {
-  SessionInputPromptBlocks,
-  SessionInputSuggestion,
-  SessionInputTrigger,
-} from "./input.tsrx"
-
-export type SessionInputMenuState = {
-  trigger: SessionInputTrigger;
-  query: string;
-  nodeKey: NodeKey;
-  startOffset: number;
-  endOffset: number;
-  anchorLeft: number;
-  anchorTop: number;
-}
+import {
+  detectSessionInputMenuState,
+  getSessionInputMenuAnchorPosition,
+  type SessionInputMenuState,
+} from "./input-menu-detection.ts"
+import type { SessionInputPromptBlocks } from "./input.tsrx"
 
 export const sessionInputInitialConfig = {
   namespace: "session-input",
@@ -50,276 +26,6 @@ export const sessionInputInitialConfig = {
   onError(error: Error) {
     throw error
   },
-}
-
-function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData {
-  if (suggestion.type === "slash_command") {
-    return {
-      kind: "slash_command",
-      label: suggestion.name,
-      description: suggestion.description,
-      inputHint: suggestion.inputHint ?? null,
-    }
-  }
-
-  if (suggestion.type === "skill") {
-    return {
-      kind: "skill",
-      label: suggestion.label,
-      path: suggestion.path,
-      uri: suggestion.uri,
-      detail: suggestion.detail,
-      source: suggestion.source,
-    }
-  }
-
-  return {
-    kind: suggestion.type,
-    label: suggestion.label,
-    path: suggestion.path,
-    uri: suggestion.uri,
-    detail: suggestion.detail,
-  }
-}
-
-function readTextBeforeCaret(nodeKey: NodeKey, offset: number) {
-  let foundCursor = false
-  let text = ""
-
-  function appendNodeText(node: LexicalNode) {
-    if (foundCursor) {
-      return
-    }
-
-    if ($isTextNode(node)) {
-      if (node.getKey() === nodeKey) {
-        text += node.getTextContent().slice(0, offset)
-        foundCursor = true
-        return
-      }
-
-      text += node.getTextContent()
-      return
-    }
-
-    if ($isLineBreakNode(node)) {
-      text += "\n"
-      return
-    }
-
-    if (!$isElementNode(node)) {
-      text += node.getTextContent()
-      return
-    }
-
-    for (const child of node.getChildren()) {
-      appendNodeText(child)
-
-      if (foundCursor) {
-        return
-      }
-    }
-  }
-
-  const topLevelChildren = $getRoot().getChildren()
-
-  for (const [index, child] of topLevelChildren.entries()) {
-    appendNodeText(child)
-
-    if (foundCursor) {
-      return text
-    }
-
-    if (index < topLevelChildren.length - 1) {
-      text += "\n"
-    }
-  }
-
-  return null
-}
-
-function detectSessionInputMenuState() {
-  const selection = $getSelection()
-
-  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
-    return null
-  }
-
-  const anchorNode = selection.anchor.getNode()
-
-  if (!$isTextNode(anchorNode)) {
-    return null
-  }
-
-  const anchorOffset = selection.anchor.offset
-
-  if (anchorOffset === 0) {
-    return null
-  }
-
-  const textBeforeCaretInNode = anchorNode.getTextContent().slice(0, anchorOffset)
-  const match = /(?:^|\s)([@$/])([^\s]*)$/.exec(textBeforeCaretInNode)
-
-  if (!match) {
-    return null
-  }
-
-  const triggerToken = `${match[1]}${match[2] ?? ""}`
-  const fullTextBeforeCaret = readTextBeforeCaret(anchorNode.getKey(), anchorOffset)
-
-  if (!fullTextBeforeCaret || !fullTextBeforeCaret.endsWith(triggerToken)) {
-    return null
-  }
-
-  if (match[1] === "/" && fullTextBeforeCaret.slice(0, -triggerToken.length).trim().length > 0) {
-    return null
-  }
-
-  const menuState: Omit<SessionInputMenuState, "anchorLeft" | "anchorTop"> = {
-    trigger: match[1] === "@"
-      ? "at"
-      : match[1] === "$"
-        ? "dollar"
-        : "slash",
-    query: match[2] ?? "",
-    nodeKey: anchorNode.getKey(),
-    startOffset: anchorOffset - triggerToken.length,
-    endOffset: anchorOffset,
-  }
-
-  return menuState
-}
-
-function getCaretAnchorPosition(editor: LexicalEditor) {
-  const selection = window.getSelection()
-  const rootElement = editor.getRootElement()
-
-  if (!selection || selection.rangeCount === 0) {
-    const fallbackRect = rootElement?.getBoundingClientRect()
-
-    if (!fallbackRect) {
-      return {
-        anchorLeft: 16,
-        anchorTop: 16,
-      }
-    }
-
-    return {
-      anchorLeft: Math.max(16, Math.min(fallbackRect.left + 16, window.innerWidth - 376)),
-      anchorTop: fallbackRect.top + 56,
-    }
-  }
-
-  const range = selection.getRangeAt(0).cloneRange()
-  range.collapse(false)
-  const rangeRect = range.getBoundingClientRect()
-  const fallbackRect = rootElement?.getBoundingClientRect()
-  const left = rangeRect.left || fallbackRect?.left || 16
-  const top = rangeRect.bottom || fallbackRect?.top || 16
-
-  return {
-    anchorLeft: Math.max(16, Math.min(left, window.innerWidth - 376)),
-    anchorTop: Math.max(16, Math.min(top + 12, window.innerHeight - 32)),
-  }
-}
-
-export function clearSessionInputEditor(editor: LexicalEditor) {
-  editor.update(() => {
-    const root = $getRoot()
-    root.clear()
-    root.append($createParagraphNode())
-  }, { discrete: true })
-}
-
-function createComposerChipFromPromptBlock(block: SessionInputPromptBlocks[number]) {
-  if (block.type !== "resource_link") {
-    return null
-  }
-
-  if (block.title?.endsWith(" skill")) {
-    const chip: ComposerChipData = {
-      kind: "skill",
-      label: block.name,
-      path: block.uri,
-      uri: block.uri,
-      detail: block.description ?? block.uri,
-      source: "local",
-    }
-
-    return chip
-  }
-
-  const chip: ComposerChipData = {
-    kind: "file",
-    label: block.name,
-    path: block.uri,
-    uri: block.uri,
-    detail: block.description ?? block.uri,
-  }
-
-  return chip
-}
-
-/** Rehydrates one saved prompt block draft so a dismissed launch dialog can show it again. */
-export function setSessionInputEditorPrompt(
-  editor: LexicalEditor,
-  blocks: SessionInputPromptBlocks,
-) {
-  editor.update(() => {
-    const root = $getRoot()
-    const paragraph = $createParagraphNode()
-
-    root.clear()
-    root.append(paragraph)
-
-    for (const block of blocks) {
-      if (block.type === "text") {
-        for (const [index, textSegment] of block.text.split("\n").entries()) {
-          if (index > 0) {
-            paragraph.append($createLineBreakNode())
-          }
-
-          if (textSegment.length > 0) {
-            paragraph.append($createTextNode(textSegment))
-          }
-        }
-
-        continue
-      }
-
-      const chip = createComposerChipFromPromptBlock(block)
-
-      if (chip) {
-        paragraph.append($createComposerChipNode(chip), $createTextNode(" "))
-      }
-    }
-  }, { discrete: true })
-}
-
-export function insertSessionInputSuggestion(
-  editor: LexicalEditor,
-  menu: SessionInputMenuState,
-  suggestion: SessionInputSuggestion,
-) {
-  const chip = suggestionToChip(suggestion)
-
-  editor.update(() => {
-    const trailingSpace = $createTextNode(" ")
-    const targetNode = $getNodeByKey(menu.nodeKey)
-
-    if ($isTextNode(targetNode)) {
-      targetNode.spliceText(menu.startOffset, menu.endOffset - menu.startOffset, "", false)
-      targetNode.select(menu.startOffset, menu.startOffset)
-      $insertNodes([$createComposerChipNode(chip), trailingSpace])
-      trailingSpace.selectEnd()
-      return
-    }
-
-    const paragraph = $createParagraphNode()
-    paragraph.append($createComposerChipNode(chip), trailingSpace)
-    $getRoot().append(paragraph)
-    trailingSpace.selectEnd()
-  }, { discrete: true })
 }
 
 export component SessionInputPlugins(props: {
@@ -338,7 +44,7 @@ export component SessionInputPlugins(props: {
 
   useEffect(() => {
     props.onEditorReady(editor)
-  }, [editor, props])
+  }, [editor])
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
@@ -355,7 +61,7 @@ export component SessionInputPlugins(props: {
         nodeKey: detectedMenu.nodeKey,
         startOffset: detectedMenu.startOffset,
         endOffset: detectedMenu.endOffset,
-        ...getCaretAnchorPosition(editor),
+        ...getSessionInputMenuAnchorPosition(editor),
       })
     })
   }, [editor, props])
