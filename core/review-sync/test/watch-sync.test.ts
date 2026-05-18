@@ -204,6 +204,7 @@ test("watch preserves a cherry-picked review commit after accepting its patch", 
     ])
     await sleep(100)
     await runGit(fixture.reviewDir, ["cherry-pick", pickedCommit])
+    const cherryPickedHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
 
     const result = await Promise.race([
       sync.promise,
@@ -218,7 +219,7 @@ test("watch preserves a cherry-picked review commit after accepting its patch", 
     expect(result.acceptedPatchPath).toBeTruthy()
     expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("picked edit\n")
     expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
-      pickedCommit,
+      cherryPickedHead,
     )
     expect((await runGit(fixture.reviewDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
       "picked review edit",
