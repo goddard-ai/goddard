@@ -18,32 +18,31 @@ import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputPromptBlocks, SessionInputSuggestion } from "./input.tsrx"
 
 function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData {
-  if (suggestion.type === "slash_command") {
-    return {
-      kind: "slash_command",
-      label: suggestion.name,
-      description: suggestion.description,
-      inputHint: suggestion.inputHint ?? null,
-    }
-  }
-
-  if (suggestion.type === "skill") {
-    return {
-      kind: "skill",
-      label: suggestion.label,
-      path: suggestion.path,
-      uri: suggestion.uri,
-      detail: suggestion.detail,
-      source: suggestion.source,
-    }
-  }
-
-  return {
-    kind: suggestion.type,
-    label: suggestion.label,
-    path: suggestion.path,
-    uri: suggestion.uri,
-    detail: suggestion.detail,
+  switch (suggestion.type) {
+    case "slash_command":
+      return {
+        kind: "slash_command",
+        label: suggestion.name,
+        description: suggestion.description,
+        inputHint: suggestion.inputHint ?? null,
+      }
+    case "skill":
+      return {
+        kind: "skill",
+        label: suggestion.label,
+        path: suggestion.path,
+        uri: suggestion.uri,
+        detail: suggestion.detail,
+        source: suggestion.source,
+      }
+    default:
+      return {
+        kind: suggestion.type,
+        label: suggestion.label,
+        path: suggestion.path,
+        uri: suggestion.uri,
+        detail: suggestion.detail,
+      }
   }
 }
 
