@@ -47,6 +47,15 @@ import type {
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
+import {
+  createAgentConnection,
+  createAgentMessageStream,
+  getAcpMessageResult,
+  isAcpRequest,
+  matchAcpRequest,
+  type AgentInputStream,
+  type AgentOutputStream,
+} from "acp-client"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 
@@ -65,15 +74,6 @@ import { prepareFreshWorktree } from "../worktrees/bootstrap.ts"
 import { createWorktree } from "../worktrees/index.ts"
 import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
 import { defaultPlugin } from "../worktrees/plugins/default.ts"
-import {
-  createAgentConnection,
-  createAgentMessageStream,
-  getAcpMessageResult,
-  isAcpRequest,
-  matchAcpRequest,
-  type AgentInputStream,
-  type AgentOutputStream,
-} from "./acp.ts"
 import {
   spawnAgentProcess,
   waitForAgentProcessExit,

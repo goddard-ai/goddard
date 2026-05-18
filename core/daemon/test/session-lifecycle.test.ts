@@ -12,11 +12,11 @@ import {
   getGlobalConfigPath,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
+import { matchAcpRequest } from "acp-client"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
-import { matchAcpRequest } from "../src/session/acp.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))

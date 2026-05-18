@@ -23,7 +23,7 @@ Replace Goddard's local ACP client transport, process launch, and registry helpe
 - Goddard has local ACP registry and agent-process support under `core/daemon/src/session/`, including registry fallback generation and agent binary/cache handling.
 - `scripts/acp-session.ts` is a debugging CLI layered on the daemon and raw adapter inspection APIs.
 - `acp-client@0.1.1` already exports:
-  - all `@agentclientprotocol/sdk` types and constants under the `acp` namespace;
+  - all `@agentclientprotocol/sdk` types under the `acp` namespace;
   - the same low-level helpers listed above;
   - `createAcpClient` for host-owned streams;
   - `createNodeAcpClient` for registry-backed stdio launch;
@@ -44,12 +44,12 @@ Replace Goddard's local ACP client transport, process launch, and registry helpe
 - Add `acp-client` to the root catalog and `core/daemon/package.json`.
 - Pin to the current published version first, then upgrade deliberately when `acp-client` publishes API changes.
 - Run `bun install` so `bun.lock` records the package and its exact dependency tree.
-- Keep `@agentclientprotocol/sdk` in the workspace catalog for packages that still import it directly, but remove the daemon's direct dependency once daemon ACP client code imports protocol types and constants through `acp-client`'s `acp` namespace.
+- Keep `@agentclientprotocol/sdk` in the workspace catalog for packages that still import it directly. Daemon code can remove its direct dependency once `acp-client` also exposes every runtime ACP constant and helper it needs.
 
 ### 2. Replace Low-Level ACP Helpers Directly
 
 - Update daemon ACP client call sites to import from `acp-client` directly:
-  - `import { acp } from "acp-client"` for protocol types and constants;
+  - `import type { acp } from "acp-client"` for protocol types that can be type-only;
   - `import { createAgentConnection, createAgentMessageStream, getAcpMessageResult, isAcpRequest, matchAcpRequest } from "acp-client"` for low-level transport helpers.
 - Delete `core/daemon/src/session/acp.ts` in the same patch instead of turning it into a re-export module.
 - Update affected tests to import helper functions from `acp-client` directly when they still need low-level helper assertions.
