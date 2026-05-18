@@ -61,6 +61,26 @@ export default {
     minWidth: "140px",
     transform: "translateX(-50%)",
   }),
+  switcherFallback: css({
+    width: "100%",
+    height: "28px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "panel",
+    color: "muted",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "560",
+    lineHeight: "1",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+    _hover: {
+      color: "text",
+    },
+  }),
   actions: css({
     display: "flex",
     alignItems: "center",

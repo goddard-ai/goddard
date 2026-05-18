@@ -11,6 +11,51 @@ import {
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
 
 const panelScrollCache = new Map<string, number>()
+const tabFailure = {
+  root: css({
+    display: "grid",
+    alignContent: "start",
+    gap: "12px",
+    minHeight: "100%",
+    padding: "20px",
+    color: "muted",
+  }),
+  content: css({
+    display: "grid",
+    gap: "10px",
+    maxWidth: "28rem",
+  }),
+  title: css({
+    color: "text",
+    fontSize: "1.15rem",
+    fontWeight: "720",
+    lineHeight: "1.3",
+  }),
+  body: css({
+    fontSize: "0.93rem",
+    lineHeight: "1.6",
+  }),
+  action: css({
+    justifySelf: "start",
+    height: "30px",
+    paddingInline: "12px",
+    border: "1px solid {colors.border}",
+    borderRadius: "7px",
+    backgroundColor: "panel",
+    color: "text",
+    cursor: "pointer",
+    fontSize: "0.86rem",
+    fontWeight: "640",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+    _hover: {
+      backgroundColor: "surface",
+    },
+  }),
+}
 
 /** Renders the shell's main content area for the current primary view or detail tab. */
 export component AppShellWorkbenchContent() {
@@ -95,7 +140,16 @@ component MainWorkbenchView() {
   const mainTab = useMainTab()
   const ActiveMainTabComponent = getWorkbenchTabComponent(mainTab.selectedKind)
 
-  <ActiveMainTabComponent />
+  try {
+    <ActiveMainTabComponent />
+  } catch (error, retry) {
+    console.error("Main workbench view render failed.", error)
+    <WorkbenchTabFailure
+      description="This primary view failed to render. The rest of the app is still available."
+      onRetry={retry}
+      title="View unavailable"
+    />
+  }
 }
 
 /** Renders the active closable workbench tab panel. */
@@ -109,5 +163,28 @@ component WorkbenchTabPanel() {
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
-  <ActiveTabComponent {...activeTab.payload} />
+  try {
+    <ActiveTabComponent {...activeTab.payload} />
+  } catch (error, retry) {
+    console.error("Workbench tab render failed.", error)
+    <WorkbenchTabFailure
+      description="This tab failed to render. You can retry it or close the tab from the tab strip."
+      onRetry={retry}
+      title="Tab unavailable"
+    />
+  }
+}
+
+component WorkbenchTabFailure(props: {
+  description: string;
+  onRetry: () => void;
+  title: string;
+}) {
+  <div class={tabFailure.root}>
+    <div class={tabFailure.content}>
+      <h2 class={tabFailure.title}>{props.title}</h2>
+      <p class={tabFailure.body}>{props.description}</p>
+      <button class={tabFailure.action} type="button" onClick={props.onRetry}>"Try again"</button>
+    </div>
+  </div>
 }

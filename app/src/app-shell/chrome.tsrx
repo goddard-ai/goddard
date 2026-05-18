@@ -179,7 +179,14 @@ export component AppShellChrome() {
             width: "100%",
           })}
         >
-          <SwitchProjectDropdown />
+          try {
+            <SwitchProjectDropdown />
+          } catch (error, retry) {
+            console.error("Project switcher render failed.", error)
+            <button class={styles.switcherFallback} type="button" onClick={retry}>
+              "Project switcher unavailable"
+            </button>
+          }
         </div>
       </div>
       <div class={cx(styles.actions, "electrobun-webkit-app-region-no-drag")}>
