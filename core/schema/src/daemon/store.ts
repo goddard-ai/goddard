@@ -4,14 +4,7 @@ import { z } from "zod"
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonPullRequestId, DaemonSessionId } from "../id.ts"
-import {
-  InboxEntityId,
-  InboxHeadline,
-  InboxPriority,
-  InboxReason,
-  InboxScope,
-  InboxStatus,
-} from "./inbox.ts"
+import { InboxHeadline, InboxScope } from "./inbox.ts"
 
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
 
@@ -229,23 +222,4 @@ export const DaemonPullRequest = z.strictObject({
 export type DaemonPullRequest = z.output<typeof DaemonPullRequest> & {
   id: DaemonPullRequestId
   updatedAt: number
-}
-
-/**
- * Persisted daemon-local inbox row keyed by one daemon-owned entity id.
- */
-export const DaemonInboxItem = z.strictObject({
-  entityId: InboxEntityId,
-  reason: InboxReason,
-  status: InboxStatus.default("unread"),
-  priority: InboxPriority.default("normal"),
-  updatedAt: z.number().int(),
-  readAt: z.number().int().nullable().optional().default(null),
-  scope: InboxScope.nullable().optional().default(null),
-  headline: InboxHeadline.nullable().optional().default(null),
-  turnId: z.string().nullable().optional().default(null),
-})
-
-export type DaemonInboxItem = z.output<typeof DaemonInboxItem> & {
-  id: `inb_${string}`
 }

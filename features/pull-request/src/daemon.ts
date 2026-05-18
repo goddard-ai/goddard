@@ -94,9 +94,13 @@ export const pullRequestPlugin = definePlugin({
           })
           return { number: pr.number, url: pr.url }
         },
-        "pr.get": async ({ id }) => ({
-          pullRequest: inbox.getPullRequest(id),
-        }),
+        "pr.get": async ({ id }) => {
+          const pullRequest = db.pullRequests.get(id) ?? null
+          if (!pullRequest) {
+            throw new IpcClientError("Pull request not found")
+          }
+          return { pullRequest }
+        },
         "pr.reply": async (payload) => {
           const sessionRecord = requireRepositorySession(await getSessionByToken(payload.token))
           setRequestSessionId(sessionRecord.sessionId)

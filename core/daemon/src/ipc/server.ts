@@ -26,7 +26,7 @@ import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager, type LoopManager } from "../loop/index.ts"
-import { db } from "../persistence/store.ts"
+import { configureDbSchema, db } from "../persistence/store.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createACPRegistryService } from "../session/registry.ts"
@@ -40,6 +40,7 @@ import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
 const daemonPlugins = composePlugins([adapterPlugin, sessionPlugin, inboxPlugin, pullRequestPlugin])
+configureDbSchema(daemonPlugins.db)
 
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
 type DaemonStreamName = keyof typeof daemonIpcSchema.streams & string
@@ -536,6 +537,7 @@ async function setupDaemonPlugins(
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
+        db: createPluginDbContext(plugin),
         publish: (name: string, payload: unknown) => {
           publish(plugin, name, payload)
         },
@@ -558,6 +560,27 @@ async function setupDaemonPlugins(
     extensions,
     requestHandlers,
   }
+}
+
+function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {
+  const schema: Record<string, unknown> = {}
+  for (const consumedPlugin of plugin.consumes ?? []) {
+    Object.assign(schema, consumedPlugin.db)
+  }
+  Object.assign(schema, plugin.db)
+
+  const contextSchema: Record<string, unknown> = {}
+  const context: Record<string, unknown> = {
+    schema: contextSchema,
+    batch: db.batch.bind(db),
+  }
+
+  for (const key of Object.keys(schema)) {
+    context[key] = db[key]
+    contextSchema[key] = db.schema[key]
+  }
+
+  return context
 }
 
 function readBoundTcpPort(server: Server) {

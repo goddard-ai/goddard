@@ -1,8 +1,7 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindInput } from "kindstore"
 
-import { db } from "../../../../core/daemon/src/persistence/store.ts"
 import type {
   BulkUpdateInboxItemsRequest,
   InboxEntityId,
@@ -16,6 +15,7 @@ import type {
   ListInboxRequest,
   UpdateInboxItemRequest,
 } from "../schema.ts"
+import type { InboxStore } from "./store.ts"
 
 const DEFAULT_INBOX_PAGE_SIZE = 50
 const MAX_INBOX_PAGE_SIZE = 100
@@ -27,7 +27,7 @@ const userWorkflowStatuses = new Set<InboxStatus>([
   "archived",
 ])
 
-type InboxItemInput = KindInput<typeof db.schema.inboxItems>
+type InboxItemInput = KindInput<InboxStore["schema"]["inboxItems"]>
 
 type TouchInboxItemInput = {
   entityId: InboxEntityId
@@ -44,6 +44,7 @@ type InboxItemEventPublisher = (payload: {
 }) => void
 
 type InboxManagerOptions = {
+  db: InboxStore
   publishEvent: InboxItemEventPublisher
 }
 
@@ -104,6 +105,8 @@ function toInboxItem(item: InboxItem): InboxItem {
 
 /** Creates the daemon-owned inbox manager that centralizes all inbox writes. */
 export function createInboxManager(options: InboxManagerOptions) {
+  const { db } = options
+
   function publishItem(item: InboxItem, mutation: InboxItemEventMutation) {
     options.publishEvent({ item, mutation })
     return item
@@ -279,15 +282,6 @@ export function createInboxManager(options: InboxManagerOptions) {
     )
   }
 
-  function getPullRequest(id: DaemonPullRequestId) {
-    const pullRequest = db.pullRequests.get(id) ?? null
-    if (!pullRequest) {
-      throw new IpcClientError("Pull request not found")
-    }
-
-    return pullRequest
-  }
-
   return {
     listInboxItems,
     touchInboxItem,
@@ -295,7 +289,6 @@ export function createInboxManager(options: InboxManagerOptions) {
     bulkUpdateInboxItems,
     markSessionReplied,
     completeSession,
-    getPullRequest,
   }
 }
 

@@ -3,6 +3,7 @@ import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { inboxIpcSchema } from "./daemon-ipc.ts"
 import { createInboxManager, type InboxManager } from "./daemon/manager.ts"
+import { inboxDbSchema } from "./daemon/store.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
@@ -12,7 +13,6 @@ type InboxExtension = Pick<
   | "touchInboxItem"
   | "markSessionReplied"
   | "completeSession"
-  | "getPullRequest"
   | "listInboxItems"
   | "updateInboxItem"
   | "bulkUpdateInboxItems"
@@ -21,9 +21,11 @@ type InboxExtension = Pick<
 export const inboxPlugin = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin],
+  db: inboxDbSchema,
   ipc: inboxIpcSchema,
-  setup({ publish, session }) {
+  setup({ db, publish, session }) {
     const inbox = createInboxManager({
+      db,
       publishEvent: (payload) => {
         publish("inbox.item", payload)
       },

@@ -6,6 +6,7 @@ import {
   type IpcSchema,
   type ValidStreamName,
 } from "@goddard-ai/ipc"
+import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
 
 /** Named feature extensions exposed by one daemon plugin to plugins that consume it. */
@@ -28,6 +29,17 @@ export type ConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig>
     readonly user?: TRawConfig | undefined
     readonly project?: TRawConfig | undefined
   }) => TResolvedConfig | Promise<TResolvedConfig>
+}
+
+/** Feature-owned kindstore schema fragment merged by the daemon composition root. */
+export type DbSchemaDefinition = KindRegistry
+
+/** Scoped kindstore surface available to one daemon plugin during setup. */
+export type DbContext<TDb extends DbSchemaDefinition> = {
+  readonly schema: TDb
+  readonly batch: Kindstore<TDb, {}>["batch"]
+} & {
+  readonly [K in keyof TDb]: Kindstore<TDb, {}>[K]
 }
 
 type SetupResult<TPlugin> = TPlugin extends {
@@ -62,6 +74,12 @@ export type InferConfig<TPlugin> = TPlugin extends {
   ? { readonly [TKey in TName]: InferConfigValue<TPlugin> }
   : {}
 
+type InferDb<TPlugin> = TPlugin extends {
+  readonly db: infer TDb extends DbSchemaDefinition
+}
+  ? TDb
+  : {}
+
 type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
 
 type RuntimeSetupContributions = {
@@ -70,6 +88,10 @@ type RuntimeSetupContributions = {
 }
 
 type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }
+
+type SetupDbContext<TDb> = keyof TDb extends never
+  ? {}
+  : { readonly db: DbContext<Extract<TDb, DbSchemaDefinition>> }
 
 type PublishContext<TPlugin> = TPlugin extends { readonly ipc: infer TIpc extends IpcSchema }
   ? keyof TIpc["streams"] extends never
@@ -129,13 +151,15 @@ export type SetupContext<
 > = DaemonSetupSubstrate &
   PublishContext<TSelf> &
   UnionToIntersection<InferProvides<TConsumes[number]>> &
-  SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>>
+  SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>> &
+  SetupDbContext<UnionToIntersection<InferDb<TSelf | TConsumes[number]>>>
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
 export type Plugin = {
   readonly name: string
   readonly consumes?: readonly Plugin[]
   readonly config?: ConfigDefinition
+  readonly db?: DbSchemaDefinition
   readonly ipc?: IpcSchema
   readonly lifecycle?: unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
@@ -150,6 +174,7 @@ export type Composition = {
   readonly plugins: readonly Plugin[]
   readonly ipc: IpcSchema
   readonly config: Record<string, ConfigDefinition>
+  readonly db: DbSchemaDefinition
 }
 
 type RegisterFunction = (...args: never[]) => void | Promise<void>
@@ -165,11 +190,13 @@ type PluginShape<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
+  TDb extends DbSchemaDefinition | undefined,
   TIpc extends IpcSchema | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
   OptionalPluginField<"config", TConfig> &
+  OptionalPluginField<"db", TDb> &
   OptionalPluginField<"ipc", TIpc> &
   OptionalPluginField<"lifecycle", TLifecycle> &
   OptionalPluginField<"register", TRegister>
@@ -178,6 +205,7 @@ type PluginOptions<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
+  TDb extends DbSchemaDefinition | undefined,
   TIpc extends IpcSchema | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
@@ -186,6 +214,7 @@ type PluginOptions<
   readonly consumes?: TConsumes
   readonly provides?: never
   readonly config?: TConfig
+  readonly db?: TDb
   readonly ipc?: TIpc
   readonly lifecycle?: TLifecycle
   readonly register?: TRegister
@@ -238,24 +267,25 @@ type DefinePlugin = {
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
+    const TDb extends DbSchemaDefinition | undefined,
     const TIpc extends IpcSchema,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
+    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister> & {
       readonly ipc: TIpc
       readonly setup: RequiredPluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
+        PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister>,
         TIpc,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister> & {
     readonly setup: RequiredPluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TIpc, TLifecycle, TRegister>,
+      PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister>,
       TIpc,
       TProvides
     >
@@ -264,23 +294,24 @@ type DefinePlugin = {
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
+    const TDb extends DbSchemaDefinition | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister> & {
+    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister> & {
       readonly ipc?: undefined
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister>,
+        PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister>,
         undefined,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, undefined, TLifecycle, TRegister>,
+      PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister>,
       undefined,
       TProvides
     >
@@ -297,6 +328,7 @@ export function composePlugins(plugins: readonly Plugin[]) {
   const orderedPlugins = sortPluginsByDependency(plugins)
 
   const config: Record<string, ConfigDefinition> = {}
+  const db: DbSchemaDefinition = {}
   const ipcSchemas: IpcSchema[] = []
 
   for (const plugin of orderedPlugins) {
@@ -306,12 +338,19 @@ export function composePlugins(plugins: readonly Plugin[]) {
     if (plugin.ipc) {
       ipcSchemas.push(plugin.ipc)
     }
+    for (const [key, kind] of Object.entries(plugin.db ?? {})) {
+      if (db[key]) {
+        throw new Error(`Duplicate daemon plugin DB collection: ${key}`)
+      }
+      db[key] = kind
+    }
   }
 
   return {
     plugins: orderedPlugins,
     ipc: composeIpcSchemas(ipcSchemas),
     config,
+    db,
   } satisfies Composition
 }
 
