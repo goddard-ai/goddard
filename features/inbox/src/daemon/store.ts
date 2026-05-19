@@ -3,11 +3,9 @@ import { kind } from "kindstore"
 
 import { InboxItem } from "../schema.ts"
 
-const InboxItemPayload = InboxItem.omit({ id: true })
-
 /** Kindstore schema fragment owned by the inbox daemon feature. */
 export const inboxDbSchema = {
-  inboxItems: kind("inb", InboxItemPayload)
+  inboxItems: kind("inb", InboxItem.omit({ id: true }))
     .index("entityId", { type: "text", unique: true })
     .index("status")
     .multi("updatedAt_id", {
