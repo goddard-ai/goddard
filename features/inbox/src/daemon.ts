@@ -16,19 +16,15 @@ export const inboxPlugin = definePlugin({
   db: inboxDbSchema,
   ipc: inboxIpcSchema,
   setup({ db, publish, session }) {
-    const manager = createInboxManager({
+    const inbox = createInboxManager({
       db,
       publishEvent: (payload) => {
         publish("inbox.item", payload)
       },
     })
 
-    const inbox = {
-      touchInboxItem: manager.touchInboxItem,
-    } satisfies InboxExtension
-
     session.events.on("lifecycle.blocked", (event) => {
-      manager.touchInboxItem({
+      inbox.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.blocked",
         scope: event.scope,
@@ -37,7 +33,7 @@ export const inboxPlugin = definePlugin({
       })
     })
     session.events.on("lifecycle.turnEnded", (event) => {
-      manager.touchInboxItem({
+      inbox.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.turn_ended",
         scope: event.scope,
@@ -46,20 +42,22 @@ export const inboxPlugin = definePlugin({
       })
     })
     session.events.on("lifecycle.replied", (event) => {
-      manager.markSessionReplied(event.sessionId)
+      inbox.markSessionReplied(event.sessionId)
     })
     session.events.on("lifecycle.completed", (event) => {
-      return manager.completeSession(event.sessionId)
+      return inbox.completeSession(event.sessionId)
     })
 
     return {
       provides: {
-        inbox,
+        inbox: {
+          touchInboxItem: inbox.touchInboxItem,
+        } satisfies InboxExtension,
       },
       requestHandlers: {
-        "inbox.list": async (payload) => manager.listInboxItems(payload),
-        "inbox.update": async (payload) => manager.updateInboxItem(payload),
-        "inbox.bulkUpdate": async (payload) => manager.bulkUpdateInboxItems(payload),
+        "inbox.list": async (payload) => inbox.listInboxItems(payload),
+        "inbox.update": async (payload) => inbox.updateInboxItem(payload),
+        "inbox.bulkUpdate": async (payload) => inbox.bulkUpdateInboxItems(payload),
       },
     }
   },
