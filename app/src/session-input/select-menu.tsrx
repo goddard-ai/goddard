@@ -102,90 +102,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         </button>
       </span>
     </GoodTooltip>
-    const [query, setQuery] = useState("")
-    const [selectedIndex, setSelectedIndex] = useState(0)
-    const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
-
-    const searchableItems = useMemo(
-      () => props.items.map(
-        (item) => ({
-          item,
-          preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
-          preparedLabel: fuzzysort.prepare(item.label),
-          preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
-        }),
-      ),
-      [props.items],
-    )
-    const filteredItems = useMemo(() => {
-      if (!props.filterable || isEmptyQuery(query)) {
-        return props.items
-      }
-
-      return fuzzysort.searchFields(
-        query,
-        searchableItems,
-        [
-          { key: "label", extract: (entry) => entry.preparedLabel },
-          { key: "detail", extract: (entry) => entry.preparedDetail },
-          { key: "searchText", extract: (entry) => entry.preparedSearchText },
-        ],
-        { threshold: 0 },
-      ).items.map((entry) => entry.value.item)
-    }, [props.filterable, props.items, query, searchableItems])
-    const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
-    const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
-
-    function moveHighlightedIndex(step: 1 | -1) {
-      if (filteredItems.length === 0) {
-        setSelectedIndex(0)
-        return
-      }
-
-      setSelectedIndex((currentIndex) => {
-        const nextIndex = currentIndex + step
-
-        if (nextIndex < 0) {
-          return filteredItems.length - 1
-        }
-
-        if (nextIndex >= filteredItems.length) {
-          return 0
-        }
-
-        return nextIndex
-      })
-    }
-
-    function commitSelection(item: SessionInputSelectItem | null) {
-      if (!item || item.disabled) {
-        return
-      }
-
-      props.onValueChange(item.value)
-      props.open.value = false
-    }
-
-    useEffect(() => {
-      if (!props.open.value) {
-        setQuery("")
-        setSelectedIndex(0)
-        return
-      }
-
-      const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-    }, [filteredItemSignature, props.open.value, props.value])
-
-    useEffect(() => {
-      if (!props.open.value || !highlightedItem) {
-        return
-      }
-
-      itemElements[highlightedItem.value]?.scrollIntoView({
-        block: "nearest",
-      })
-    }, [highlightedItem?.value, props.open.value])
 
     <Popover
       anchor={() => triggerElementRef.current}
@@ -200,6 +116,91 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       sameWidth={true}
       strategy="fixed"
     >
+      const [query, setQuery] = useState("")
+      const [selectedIndex, setSelectedIndex] = useState(0)
+      const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
+
+      const searchableItems = useMemo(
+        () => props.items.map(
+          (item) => ({
+            item,
+            preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
+            preparedLabel: fuzzysort.prepare(item.label),
+            preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
+          }),
+        ),
+        [props.items],
+      )
+      const filteredItems = useMemo(() => {
+        if (!props.filterable || isEmptyQuery(query)) {
+          return props.items
+        }
+
+        return fuzzysort.searchFields(
+          query,
+          searchableItems,
+          [
+            { key: "label", extract: (entry) => entry.preparedLabel },
+            { key: "detail", extract: (entry) => entry.preparedDetail },
+            { key: "searchText", extract: (entry) => entry.preparedSearchText },
+          ],
+          { threshold: 0 },
+        ).items.map((entry) => entry.value.item)
+      }, [props.filterable, props.items, query, searchableItems])
+      const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
+      const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
+
+      function moveHighlightedIndex(step: 1 | -1) {
+        if (filteredItems.length === 0) {
+          setSelectedIndex(0)
+          return
+        }
+
+        setSelectedIndex((currentIndex) => {
+          const nextIndex = currentIndex + step
+
+          if (nextIndex < 0) {
+            return filteredItems.length - 1
+          }
+
+          if (nextIndex >= filteredItems.length) {
+            return 0
+          }
+
+          return nextIndex
+        })
+      }
+
+      function commitSelection(item: SessionInputSelectItem | null) {
+        if (!item || item.disabled) {
+          return
+        }
+
+        props.onValueChange(item.value)
+        props.open.value = false
+      }
+
+      useEffect(() => {
+        if (!props.open.value) {
+          setQuery("")
+          setSelectedIndex(0)
+          return
+        }
+
+        const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
+        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
+      }, [filteredItemSignature, props.open.value, props.value])
+
+      useEffect(() => {
+        if (!props.open.value || !highlightedItem) {
+          return
+        }
+
+        itemElements[highlightedItem.value]?.scrollIntoView({
+          block: "nearest",
+        })
+      }, [highlightedItem?.value, props.open.value])
+
       if (props.open.value) {
         <div
           class={styles.menuBody}
