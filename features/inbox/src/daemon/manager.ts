@@ -48,10 +48,6 @@ type InboxManagerOptions = {
   publishEvent: InboxItemEventPublisher
 }
 
-function now() {
-  return Date.now()
-}
-
 function normalizeInboxPageSize(limit?: number) {
   if (!Number.isFinite(limit)) {
     return DEFAULT_INBOX_PAGE_SIZE
@@ -99,10 +95,6 @@ function withWorkflowStatus(
   } satisfies Partial<InboxItemInput>
 }
 
-function toInboxItem(item: InboxItem): InboxItem {
-  return item
-}
-
 /** Creates the daemon-owned inbox manager that centralizes all inbox writes. */
 export function createInboxManager(options: InboxManagerOptions) {
   const { db } = options
@@ -110,14 +102,6 @@ export function createInboxManager(options: InboxManagerOptions) {
   function publishItem(item: InboxItem, mutation: InboxItemEventMutation) {
     options.publishEvent({ item, mutation })
     return item
-  }
-
-  function publishNullableItem(item: InboxItem | null, mutation: InboxItemEventMutation) {
-    if (!item) {
-      return item
-    }
-
-    return publishItem(item, mutation)
   }
 
   function listInboxItems(params: ListInboxRequest) {
@@ -145,14 +129,14 @@ export function createInboxManager(options: InboxManagerOptions) {
     }
 
     return {
-      items: page.items.map(toInboxItem),
+      items: page.items,
       nextCursor: page.next ?? null,
       hasMore: page.next != null,
     }
   }
 
   function touchInboxItem(input: TouchInboxItemInput) {
-    const timestamp = now()
+    const timestamp = Date.now()
     const existing =
       db.inboxItems.first({
         where: { entityId: input.entityId },
@@ -169,16 +153,13 @@ export function createInboxManager(options: InboxManagerOptions) {
       turnId: input.turnId ?? existing?.turnId ?? null,
     }
 
-    return publishItem(
-      toInboxItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem)),
-      "touched",
-    )
+    return publishItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem), "touched")
   }
 
   function updateInboxItem(input: UpdateInboxItemRequest) {
     assertMutableFields(input)
     assertUserWorkflowStatus(input.entityId, input.status)
-    const timestamp = now()
+    const timestamp = Date.now()
     const existing =
       db.inboxItems.first({
         where: { entityId: input.entityId },
@@ -196,7 +177,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       throw new IpcClientError("Inbox item not found")
     }
 
-    return { item: publishItem(toInboxItem(item), "updated") }
+    return { item: publishItem(item, "updated") }
   }
 
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
@@ -210,7 +191,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       assertUserWorkflowStatus(entityId, input.status)
     }
 
-    const timestamp = now()
+    const timestamp = Date.now()
     const items: InboxItem[] = []
     const missingEntityIds: InboxEntityId[] = []
 
@@ -231,7 +212,7 @@ export function createInboxManager(options: InboxManagerOptions) {
           updatedAt: timestamp,
         })
         if (item) {
-          items.push(publishItem(toInboxItem(item), "bulk_updated"))
+          items.push(publishItem(item, "bulk_updated"))
         }
       }
     })
@@ -251,15 +232,15 @@ export function createInboxManager(options: InboxManagerOptions) {
       return null
     }
 
-    return publishNullableItem(
-      toInboxItem(
-        db.inboxItems.update(existing.id, {
-          status: "replied",
-          updatedAt: now(),
-        })!,
-      ),
-      "replied",
-    )
+    const item = db.inboxItems.update(existing.id, {
+      status: "replied",
+      updatedAt: Date.now(),
+    })
+    if (!item) {
+      throw new IpcClientError("Inbox item not found")
+    }
+
+    return publishItem(item, "replied")
   }
 
   function completeSession(sessionId: DaemonSessionId) {
@@ -271,15 +252,15 @@ export function createInboxManager(options: InboxManagerOptions) {
       return null
     }
 
-    return publishNullableItem(
-      toInboxItem(
-        db.inboxItems.update(existing.id, {
-          status: "completed",
-          updatedAt: now(),
-        })!,
-      ),
-      "completed",
-    )
+    const item = db.inboxItems.update(existing.id, {
+      status: "completed",
+      updatedAt: Date.now(),
+    })
+    if (!item) {
+      throw new IpcClientError("Inbox item not found")
+    }
+
+    return publishItem(item, "completed")
   }
 
   return {
