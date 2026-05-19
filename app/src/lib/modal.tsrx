@@ -2,10 +2,10 @@ import { type Signal } from "@preact/signals"
 import { useId, useLayoutEffect, useRef } from "preact/hooks"
 
 import { registerModalStackEntry } from "./modal-stack.ts"
-import { startOverlayDismissal } from "./overlay-dismissal.ts"
-import { focusFirstElement, keepFocusInside, restoreFocus } from "./overlay-focus.ts"
-import { OverlayPortal } from "./overlay-portal.tsrx"
-import { overlayStack } from "./overlay-stack.ts"
+import { startOverlayDismissal } from "./overlay/dismissal.ts"
+import { focusFirstElement, keepFocusInside, restoreFocus } from "./overlay/focus.ts"
+import { OverlayPortal } from "./overlay/portal.tsrx"
+import { overlayStack } from "./overlay/stack.ts"
 
 export type ModalCloseReason = "escape" | "explicit" | "outside"
 
