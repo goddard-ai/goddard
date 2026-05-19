@@ -2028,6 +2028,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   const repoDir = await createRepoFixture({ includeSrc: true })
   const requestedCwd = join(repoDir, "src")
   const resolvedRequestedCwd = await realpath(requestedCwd)
+  const targetBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
 
   const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -2046,6 +2047,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   expect(worktree?.requestedCwd).toBe(resolvedRequestedCwd)
   expect(worktree?.effectiveCwd).toBe(join(worktree!.worktreeDir, "src"))
   expect(worktree?.worktreeDir).not.toBe(repoDir)
+  expect(worktree?.mergeTargetBranch).toBe(targetBranch)
   expect(existsSync(worktree!.worktreeDir)).toBe(true)
   expect(existsSync(worktree!.effectiveCwd)).toBe(true)
   await client.session.shutdown({ id: created.session.id })
@@ -2207,6 +2209,86 @@ test("session worktree launch branches from the selected base branch", async () 
   )
 
   await client.session.shutdown({ id: created.session.id })
+})
+
+test("session worktree stores a null merge target when the source checkout HEAD is detached", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const targetBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
+  const detachedHeadOid = await readGitOutput(repoDir, ["rev-parse", "HEAD"])
+
+  await runGit(repoDir, ["checkout", "--detach", detachedHeadOid])
+
+  const created = await client.session.create({
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Say hello in one sentence.",
+    oneShot: true,
+  })
+
+  const fetchedWorktree = await client.session.worktree.get({ id: created.session.id })
+  const readinessBefore = await client.session.worktree.mergeReadiness({
+    id: created.session.id,
+  })
+  const updated = await client.session.worktree.mergeTargetBranch.set({
+    id: created.session.id,
+    mergeTargetBranch: targetBranch,
+  })
+
+  expect(fetchedWorktree.worktree?.mergeTargetBranch).toBeNull()
+  expect(readinessBefore.readiness.status).toBe("merge_target_branch_required")
+  expect(updated.mergeTargetBranch).toBe(targetBranch)
+  expect(updated.readiness.status).toBe("not_ahead")
+})
+
+test("session worktree merge fast-forwards the target branch and auto-unmounts sync", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const targetBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
+
+  const created = await client.session.create({
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Say hello in one sentence.",
+    oneShot: true,
+  })
+
+  const fetchedWorktree = await client.session.worktree.get({ id: created.session.id })
+  expect(fetchedWorktree.worktree?.mergeTargetBranch).toBe(targetBranch)
+
+  await writeFile(join(fetchedWorktree.worktree!.worktreeDir, "feature.txt"), "feature\n", "utf-8")
+  await runGit(fetchedWorktree.worktree!.worktreeDir, ["add", "feature.txt"])
+  await runGit(fetchedWorktree.worktree!.worktreeDir, ["commit", "-m", "feature"])
+
+  await client.reviewSession.mount({ id: created.session.id })
+
+  const readiness = await client.session.worktree.mergeReadiness({
+    id: created.session.id,
+  })
+  expect(readiness.readiness.status).toBe("ready")
+  expect(readiness.readiness.syncMounted).toBe(true)
+  expect(readiness.readiness.willAutoUnmountSync).toBe(true)
+
+  const merged = await client.session.worktree.merge({ id: created.session.id })
+  const reviewSession = await client.reviewSession.get({ id: created.session.id })
+
+  expect(merged.merged).toBe(true)
+  if (merged.merged) {
+    expect(merged.targetBranch).toBe(targetBranch)
+    expect(merged.syncUnmounted).toBe(true)
+    expect(merged.previousTargetHeadOid).not.toBe(merged.nextTargetHeadOid)
+    expect(await readGitOutput(repoDir, ["rev-parse", "HEAD"])).toBe(merged.nextTargetHeadOid)
+    expect(await readFile(join(repoDir, "feature.txt"), "utf-8")).toBe("feature\n")
+  }
+  expect(reviewSession.reviewSession).toBeNull()
 })
 
 test("session.create promotes a compatible prepared launch worktree", async () => {

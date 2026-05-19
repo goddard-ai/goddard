@@ -1105,6 +1105,9 @@ importers:
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../../core/paths
+      '@goddard-ai/review-sync':
+        specifier: workspace:*
+        version: link:../../core/review-sync
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../../core/schema

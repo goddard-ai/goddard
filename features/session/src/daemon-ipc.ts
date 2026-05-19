@@ -7,8 +7,10 @@ import {
   DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
+  GetSessionWorktreeMergeReadinessRequest,
   GetSessionWorktreeRequest,
   ListSessionsRequest,
+  MergeSessionWorktreeRequest,
   PrepareSessionLaunchWorktreeRequest,
   ReleaseSessionLaunchLeaseRequest,
   ReleaseSessionLaunchWorktreeRequest,
@@ -23,6 +25,7 @@ import {
   SessionSubpackagesRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
   SteerSessionRequest,
   type CancelSessionResponse,
   type CompleteSessionResponse,
@@ -31,8 +34,10 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
+  type GetSessionWorktreeMergeReadinessResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
+  type MergeSessionWorktreeResponse,
   type PopQueuedSessionPromptResponse,
   type PrepareSessionLaunchWorktreeResponse,
   type ReleaseSessionLaunchLeaseResponse,
@@ -43,6 +48,7 @@ import {
   type SessionSubpackagesResponse,
   type SetSessionConfigOptionResponse,
   type SetSessionModelResponse,
+  type SetSessionWorktreeMergeTargetBranchResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
 } from "./schema.ts"
@@ -187,6 +193,35 @@ export const sessionIpcRoutes = defineIpcRoutes({
         }),
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
+      }),
+      /** Reads merge readiness for one session worktree. */
+      mergeReadiness: http.post("merge-readiness", {
+        ...metadata({
+          description: "Reads merge readiness for one session worktree.",
+        }),
+        body: GetSessionWorktreeMergeReadinessRequest,
+        response: $type<GetSessionWorktreeMergeReadinessResponse>(),
+      }),
+      mergeTargetBranch: http.resource("merge-target-branch", {
+        ...metadata({
+          description: "Session worktree merge-target control.",
+        }),
+        /** Updates the persisted merge target branch for one session worktree. */
+        set: http.post("set", {
+          ...metadata({
+            description: "Updates the persisted merge target branch for one session worktree.",
+          }),
+          body: SetSessionWorktreeMergeTargetBranchRequest,
+          response: $type<SetSessionWorktreeMergeTargetBranchResponse>(),
+        }),
+      }),
+      /** Merges one session worktree into its persisted target branch. */
+      merge: http.post("merge", {
+        ...metadata({
+          description: "Merges one session worktree into its persisted target branch.",
+        }),
+        body: MergeSessionWorktreeRequest,
+        response: $type<MergeSessionWorktreeResponse>(),
       }),
     }),
     /** Shuts down one session and reports whether shutdown succeeded. */

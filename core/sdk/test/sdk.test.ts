@@ -447,6 +447,67 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session worktree merge helpers forward the expected daemon requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      readiness: {
+        status: "ready",
+        mergeTargetBranch: "main",
+        worktreeHeadOid: "abc123",
+        worktreeHeadBranch: "goddard-ses_1",
+        targetBranchHeadOid: "def456",
+        aheadCount: 2,
+        syncMounted: false,
+        willAutoUnmountSync: false,
+      },
+    })
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      mergeTargetBranch: "release/1.x",
+      readiness: {
+        status: "ready",
+        mergeTargetBranch: "release/1.x",
+        worktreeHeadOid: "abc123",
+        worktreeHeadBranch: "goddard-ses_1",
+        targetBranchHeadOid: "def456",
+        aheadCount: 2,
+        syncMounted: false,
+        willAutoUnmountSync: false,
+      },
+    })
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      merged: true,
+      targetBranch: "release/1.x",
+      sourceHeadOid: "abc123",
+      previousTargetHeadOid: "def456",
+      nextTargetHeadOid: "abc123",
+      syncUnmounted: false,
+      warnings: [],
+    })
+
+    await sdk.session.worktree.mergeReadiness({ id: "ses_1" })
+    await sdk.session.worktree.mergeTargetBranch.set({
+      id: "ses_1",
+      mergeTargetBranch: "release/1.x",
+    })
+    await sdk.session.worktree.merge({ id: "ses_1" })
+
+    expect(send).toHaveBeenNthCalledWith(1, "session.worktree.mergeReadiness", {
+      id: "ses_1",
+    })
+    expect(send).toHaveBeenNthCalledWith(2, "session.worktree.mergeTargetBranch.set", {
+      id: "ses_1",
+      mergeTargetBranch: "release/1.x",
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "session.worktree.merge", { id: "ses_1" })
+  })
+
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
     const { sdk, send } = createSdkWithClient()
 

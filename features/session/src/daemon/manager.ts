@@ -12,6 +12,7 @@ import type {
   DaemonSessionContextService,
   EventBus,
 } from "@goddard-ai/daemon-plugin"
+import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
@@ -41,10 +42,12 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryRequest,
   type GetSessionHistoryResponse,
+  type GetSessionWorktreeMergeReadinessResponse,
   type GetSessionWorktreeResponse,
   type InitialPromptOption,
   type ListSessionsRequest,
   type ListSessionsResponse,
+  type MergeSessionWorktreeResponse,
   type PopQueuedSessionPromptResponse,
   type PrepareSessionLaunchWorktreeRequest,
   type PrepareSessionLaunchWorktreeResponse,
@@ -62,8 +65,10 @@ import {
   type SessionSubpackagesRequest,
   type SessionSubpackagesResponse,
   type SessionTitlesConfig,
+  type SessionWorktreeMergeReadiness,
   type SetSessionConfigOptionRequest,
   type SetSessionModelRequest,
+  type SetSessionWorktreeMergeTargetBranchResponse,
   type SteerSessionResponse,
   type SubpackagesConfig,
   type WorktreesConfig,
@@ -125,6 +130,7 @@ import {
   resolvePullRequestWorktreeBranchName,
 } from "./worktree-branch.ts"
 import {
+  resolveGitHeadRef,
   resolveGitWorktreeSource,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
@@ -133,6 +139,12 @@ import {
 } from "./worktree.ts"
 import { prepareFreshWorktree } from "./worktrees/bootstrap.ts"
 import { createWorktree } from "./worktrees/index.ts"
+import {
+  getSessionWorktreeMergeReadiness,
+  mergeSessionWorktreeIntoTarget,
+  normalizeAndValidateMergeTargetBranch,
+  unmountMountedWorktreeSync,
+} from "./worktrees/merge.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
@@ -587,10 +599,13 @@ async function resolveLaunchWorktree(params: {
     return null
   }
 
+  const mergeTargetBranch = await resolveLaunchMergeTargetBranch(source.path)
+
   return toPreparedSessionWorktree(
     await createWorktree({
       cwd: source.path,
       requestedCwd: params.request.cwd,
+      mergeTargetBranch,
       branchName:
         typeof params.request.prNumber === "number"
           ? resolvePullRequestWorktreeBranchName({
@@ -606,6 +621,11 @@ async function resolveLaunchWorktree(params: {
       defaultPluginDirName: params.defaultWorktreesFolder,
     }),
   )
+}
+
+/** Resolves the merge target branch that should be persisted on one fresh session worktree. */
+async function resolveLaunchMergeTargetBranch(repoRoot: string) {
+  return await resolveGitHeadRef(repoRoot).catch(() => null)
 }
 
 /** Builds the structured logging context shared across session lifecycle events. */
@@ -1920,6 +1940,162 @@ export function createSessionManager({
     return sessionWorktrees.getWorktree(id)
   }
 
+  function createMissingWorktreeMergeReadiness(): SessionWorktreeMergeReadiness {
+    return {
+      status: "missing_worktree",
+      mergeTargetBranch: null,
+      worktreeHeadOid: null,
+      worktreeHeadBranch: null,
+      targetBranchHeadOid: null,
+      aheadCount: 0,
+      syncMounted: false,
+      willAutoUnmountSync: false,
+    }
+  }
+
+  async function getWorktreeMergeReadiness(
+    id: SessionId,
+  ): Promise<GetSessionWorktreeMergeReadinessResponse> {
+    await ready
+    const session = await getSession(id)
+    const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
+
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      readiness: worktreeRecord
+        ? await getSessionWorktreeMergeReadiness({
+            primaryDir: worktreeRecord.repoRoot,
+            worktreeDir: worktreeRecord.worktreeDir,
+            mergeTargetBranch: worktreeRecord.mergeTargetBranch,
+            sessionActive: session.activeDaemonSession,
+            sessionPrNumber: session.prNumber,
+          })
+        : createMissingWorktreeMergeReadiness(),
+    }
+  }
+
+  async function setWorktreeMergeTargetBranch(
+    id: SessionId,
+    mergeTargetBranch: string | null,
+  ): Promise<SetSessionWorktreeMergeTargetBranchResponse> {
+    await ready
+    const session = await getSession(id)
+    const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
+    if (!worktreeRecord) {
+      throw createSessionIpcError(SessionErrorCodes.NoWorktree, { sessionId: id })
+    }
+
+    let nextMergeTargetBranch: string | null
+    try {
+      nextMergeTargetBranch = await normalizeAndValidateMergeTargetBranch({
+        primaryDir: worktreeRecord.repoRoot,
+        mergeTargetBranch,
+      })
+    } catch (error) {
+      throw new IpcClientError(getErrorMessage(error))
+    }
+
+    db.worktrees.update(worktreeRecord.id, {
+      mergeTargetBranch: nextMergeTargetBranch,
+    })
+
+    await emitDiagnostic(id, "worktree.merge_target_branch_updated", {
+      mergeTargetBranch: nextMergeTargetBranch,
+    })
+
+    const readiness = await getWorktreeMergeReadiness(id)
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      mergeTargetBranch: nextMergeTargetBranch,
+      readiness: readiness.readiness,
+    }
+  }
+
+  async function mergeWorktree(id: SessionId): Promise<MergeSessionWorktreeResponse> {
+    await ready
+    const session = await getSession(id)
+    const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
+    const warnings: string[] = []
+    let syncUnmounted = false
+
+    await emitDiagnostic(id, "worktree.merge_requested", {
+      mergeTargetBranch: worktreeRecord?.mergeTargetBranch ?? null,
+    })
+
+    if (!worktreeRecord) {
+      return {
+        id: session.id,
+        acpSessionId: session.acpSessionId,
+        merged: false,
+        readiness: createMissingWorktreeMergeReadiness(),
+        syncUnmounted: false,
+        warnings,
+      }
+    }
+
+    if (!session.activeDaemonSession) {
+      syncUnmounted = await unmountMountedWorktreeSync(worktreeRecord.worktreeDir)
+      if (syncUnmounted) {
+        await emitDiagnostic(id, "worktree.sync_unmounted", {
+          reason: "merge_preflight",
+        })
+      }
+    }
+
+    const readinessResponse = await getWorktreeMergeReadiness(id)
+    if (
+      readinessResponse.readiness.status !== "ready" ||
+      readinessResponse.readiness.mergeTargetBranch === null
+    ) {
+      return {
+        id: session.id,
+        acpSessionId: session.acpSessionId,
+        merged: false,
+        readiness: readinessResponse.readiness,
+        syncUnmounted,
+        warnings,
+      }
+    }
+
+    try {
+      const result = await mergeSessionWorktreeIntoTarget({
+        primaryDir: worktreeRecord.repoRoot,
+        worktreeDir: worktreeRecord.worktreeDir,
+        mergeTargetBranch: readinessResponse.readiness.mergeTargetBranch,
+      })
+
+      await emitDiagnostic(id, "worktree.merge_completed", {
+        mergeTargetBranch: result.targetBranch,
+        sourceHeadOid: result.sourceHeadOid,
+        previousTargetHeadOid: result.previousTargetHeadOid,
+        nextTargetHeadOid: result.nextTargetHeadOid,
+        syncUnmounted,
+      })
+
+      return {
+        id: session.id,
+        acpSessionId: session.acpSessionId,
+        merged: true,
+        targetBranch: result.targetBranch,
+        sourceHeadOid: result.sourceHeadOid,
+        previousTargetHeadOid: result.previousTargetHeadOid,
+        nextTargetHeadOid: result.nextTargetHeadOid,
+        syncUnmounted,
+        warnings,
+      }
+    } catch (error) {
+      await emitDiagnostic(id, "worktree.merge_failed", {
+        mergeTargetBranch: readinessResponse.readiness.mergeTargetBranch,
+        sourceHeadOid: readinessResponse.readiness.worktreeHeadOid,
+        syncUnmounted,
+        errorMessage: getErrorMessage(error),
+      })
+      throw new IpcClientError(getErrorMessage(error))
+    }
+  }
+
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
     await ready
     return sessionWorktrees.requireWorktree(id)
@@ -2166,6 +2342,9 @@ export function createSessionManager({
     getSubpackages,
     getDiagnostics,
     getWorktree,
+    getWorktreeMergeReadiness,
+    setWorktreeMergeTargetBranch,
+    mergeWorktree,
     requireWorktree,
     listWorktrees,
     findWorktreeByDir,

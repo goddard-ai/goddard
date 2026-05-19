@@ -402,6 +402,7 @@ export const DaemonWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable().default(null),
   poweredBy: z.string(),
 })
 
@@ -419,6 +420,7 @@ export const DaemonLaunchWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable().default(null),
   poweredBy: z.string(),
   releaseAfter: z.string().nullable(),
 })
@@ -1209,6 +1211,7 @@ export const SessionWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable(),
   poweredBy: z.string(),
 })
 
@@ -1229,3 +1232,88 @@ export type GetSessionWorktreeResponse = SessionWorktreeIdentity & {
 export const GetSessionWorktreeRequest = SessionIdParams
 
 export type GetSessionWorktreeRequest = z.infer<typeof GetSessionWorktreeRequest>
+
+/** Status values returned when evaluating whether one session worktree can merge now. */
+export const SessionWorktreeMergeReadinessStatus = z.enum([
+  "ready",
+  "missing_worktree",
+  "merge_target_branch_required",
+  "merge_target_branch_missing",
+  "pr_scoped_session",
+  "session_active",
+  "worktree_dirty",
+  "primary_dirty",
+  "not_ahead",
+  "not_fast_forward",
+  "worktree_missing",
+])
+
+export type SessionWorktreeMergeReadinessStatus = z.infer<
+  typeof SessionWorktreeMergeReadinessStatus
+>
+
+/** Structured readiness facts returned for one session worktree merge evaluation. */
+export const SessionWorktreeMergeReadiness = z.strictObject({
+  status: SessionWorktreeMergeReadinessStatus,
+  mergeTargetBranch: z.string().nullable(),
+  worktreeHeadOid: z.string().nullable(),
+  worktreeHeadBranch: z.string().nullable(),
+  targetBranchHeadOid: z.string().nullable(),
+  aheadCount: z.number().int().nonnegative(),
+  syncMounted: z.boolean(),
+  willAutoUnmountSync: z.boolean(),
+})
+
+export type SessionWorktreeMergeReadiness = z.infer<typeof SessionWorktreeMergeReadiness>
+
+/** Request payload used to read merge readiness for one daemon-managed session worktree. */
+export const GetSessionWorktreeMergeReadinessRequest = SessionIdParams
+
+export type GetSessionWorktreeMergeReadinessRequest = z.infer<
+  typeof GetSessionWorktreeMergeReadinessRequest
+>
+
+/** Response payload returned after reading merge readiness for one session worktree. */
+export type GetSessionWorktreeMergeReadinessResponse = SessionWorktreeIdentity & {
+  readiness: SessionWorktreeMergeReadiness
+}
+
+/** Request payload used to update one persisted session worktree merge target branch. */
+export const SetSessionWorktreeMergeTargetBranchRequest = SessionIdParams.extend({
+  mergeTargetBranch: z.string().nullable(),
+})
+
+export type SetSessionWorktreeMergeTargetBranchRequest = z.infer<
+  typeof SetSessionWorktreeMergeTargetBranchRequest
+>
+
+/** Response payload returned after updating one session worktree merge target branch. */
+export type SetSessionWorktreeMergeTargetBranchResponse = SessionWorktreeIdentity & {
+  mergeTargetBranch: string | null
+  readiness: SessionWorktreeMergeReadiness
+}
+
+/** Request payload used to merge one session worktree into its persisted target branch. */
+export const MergeSessionWorktreeRequest = SessionIdParams
+
+export type MergeSessionWorktreeRequest = z.infer<typeof MergeSessionWorktreeRequest>
+
+/** Response payload returned after one session worktree merge attempt. */
+export type MergeSessionWorktreeResponse = SessionWorktreeIdentity &
+  (
+    | {
+        merged: true
+        targetBranch: string
+        sourceHeadOid: string
+        previousTargetHeadOid: string
+        nextTargetHeadOid: string
+        syncUnmounted: boolean
+        warnings: string[]
+      }
+    | {
+        merged: false
+        readiness: SessionWorktreeMergeReadiness
+        syncUnmounted: boolean
+        warnings: string[]
+      }
+  )

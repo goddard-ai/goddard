@@ -1,5 +1,9 @@
 import { t } from "@lingui/core/macro"
-import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
+import {
+  deriveSessionLaunchModelConfig,
+  type DaemonSession,
+  type GetSessionWorktreeMergeReadinessResponse,
+} from "@goddard-ai/sdk"
 import { cx } from "@goddard-ai/styled-system/css"
 import { signal, useSignal } from "@preact/signals"
 import {
@@ -7,7 +11,9 @@ import {
   ChevronDown,
   ChevronUp,
   FileDiff,
+  GitBranch,
   GitFork,
+  GitMerge,
   Laptop,
   XCircle,
 } from "lucide-react"
@@ -48,9 +54,11 @@ import {
 import {
   cancelSessionTurn,
   completeSession,
+  mergeSessionWorktree,
   popQueuedSessionPrompt,
   reconnectSession,
   respondSessionPermission,
+  setSessionWorktreeMergeTargetBranch,
   setSessionConfigOption,
   submitSessionPrompt,
   steerSessionPrompt,
@@ -81,7 +89,7 @@ function SessionChatViewContent(props: {
 
   <main class={styles.root}>
     @try {
-      const [sessionHistory, { session }, sessionWorktree] = useQueries(
+      const [sessionHistory, { session }, sessionWorktree, mergeReadiness] = useQueries(
         (query) => [
           query(goddardSdk.session.history, {
             params: [{ id: props.sessionId }],
@@ -91,6 +99,9 @@ function SessionChatViewContent(props: {
             params: [{ id: props.sessionId }],
           }),
           query(goddardSdk.session.worktree.get, {
+            params: [{ id: props.sessionId }],
+          }),
+          query(goddardSdk.session.worktree.mergeReadiness, {
             params: [{ id: props.sessionId }],
           }),
         ],
@@ -167,8 +178,18 @@ function SessionChatViewContent(props: {
           </div>
           <div class={styles.headerControls}>
             <div class={styles.headerActions}>
-              <SessionChatHeaderActions {canNavigatePrompts} {chat} {page} />
+              <SessionChatHeaderActions
+                {canNavigatePrompts}
+                {chat}
+                mergeReadiness={mergeReadiness.readiness}
+                {page}
+              />
             </div>
+            {getMergeStatusText(mergeReadiness.readiness)
+              ? <span class={styles.headerStatusText}>{getMergeStatusText(
+                  mergeReadiness.readiness,
+                )}</span>
+              : null}
           </div>
         </header>
 
@@ -249,10 +270,14 @@ function SessionChatViewContent(props: {
 function SessionChatHeaderActions(props: {
   canNavigatePrompts: boolean;
   chat: SessionChat;
+  mergeReadiness: GetSessionWorktreeMergeReadinessResponse["readiness"];
   page: ReturnType<typeof useSessionChatPageModel>;
 }) @{
   const workbenchTabSet = useWorkbenchTabSet()
   const activeHeaderAction = props.page.headerAction.activeKey.value
+  const shouldRenderMergeControls =
+    props.mergeReadiness.status !== "missing_worktree" &&
+      props.mergeReadiness.status !== "worktree_missing"
 
   function openSessionChanges() {
     invalidateSessionChanges(props.chat.session.id)
@@ -342,6 +367,68 @@ function SessionChatHeaderActions(props: {
     }).catch(() => {})
   }
 
+  const setMergeTargetBranch = async () => {
+    if (!shouldRenderMergeControls) {
+      return
+    }
+
+    const nextMergeTargetBranch = globalThis.prompt(
+      t`Merge target branch (leave empty to clear)`,
+      props.mergeReadiness.mergeTargetBranch ?? "",
+    )
+    if (nextMergeTargetBranch === null) {
+      return
+    }
+
+    await props.page.headerAction.run("setMergeTargetBranch", async () => {
+      try {
+        await setSessionWorktreeMergeTargetBranch({
+          id: props.chat.session.id,
+          mergeTargetBranch: nextMergeTargetBranch.trim().length > 0
+            ? nextMergeTargetBranch.trim()
+            : null,
+        })
+      } catch (error) {
+        console.error("Failed to update merge target branch.", error)
+        throw {
+          title: t`Target branch update failed`,
+          description: formatSessionRequestError(error),
+        }
+      }
+    }).catch(() => {})
+  }
+
+  const mergeCurrentWorktree = async () => {
+    if (props.mergeReadiness.status !== "ready") {
+      return
+    }
+
+    await props.page.headerAction.run("merge", async () => {
+      try {
+        const result = await mergeSessionWorktree({
+          id: props.chat.session.id,
+        })
+
+        if (!result.merged) {
+          throw {
+            title: t`Merge skipped`,
+            description: getMergeStatusText(result.readiness) ?? t`The daemon rejected the merge.`,
+          }
+        }
+      } catch (error) {
+        if (isSessionChatHeaderActionError(error)) {
+          throw error
+        }
+
+        console.error("Failed to merge session worktree.", error)
+        throw {
+          title: t`Merge failed`,
+          description: formatSessionRequestError(error),
+        }
+      }
+    }).catch(() => {})
+  }
+
   <>
     <AppCommandTooltip
       command={AppCommand.sessionChat.skipToPreviousPrompt}
@@ -415,6 +502,43 @@ function SessionChatHeaderActions(props: {
             <XCircle size={15} strokeWidth={2.1} />
           </button>
         </GoodTooltip>
+      : null}
+
+    {shouldRenderMergeControls
+      ? <>
+          <GoodTooltip
+            ariaLabel={props.mergeReadiness.mergeTargetBranch
+              ? t`Merge target branch: ${props.mergeReadiness.mergeTargetBranch}`
+              : t`Set merge target branch`}
+            content={props.mergeReadiness.mergeTargetBranch
+              ? t`Target branch: ${props.mergeReadiness.mergeTargetBranch}`
+              : t`Set merge target branch`}
+          >
+            <button
+              aria-label={props.mergeReadiness.mergeTargetBranch
+                ? t`Merge target branch: ${props.mergeReadiness.mergeTargetBranch}`
+                : t`Set merge target branch`}
+              class={styles.headerActionButton}
+              disabled={activeHeaderAction !== null}
+              type="button"
+              onClick={setMergeTargetBranch}
+            >
+              <GitBranch size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
+
+          <GoodTooltip ariaLabel={t`Merge worktree`} content={t`Merge worktree`}>
+            <button
+              aria-label={t`Merge worktree`}
+              class={styles.headerActionButton}
+              disabled={activeHeaderAction !== null || props.mergeReadiness.status !== "ready"}
+              type="button"
+              onClick={mergeCurrentWorktree}
+            >
+              <GitMerge size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
+        </>
       : null}
   </>
 }
@@ -747,6 +871,56 @@ function SessionChatStateMessage(props: {
         >{props.actionLabel}</button>
       : null}
   </div>
+}
+
+function getMergeStatusText(readiness: GetSessionWorktreeMergeReadinessResponse["readiness"]) {
+  if (readiness.status === "ready") {
+    if (readiness.willAutoUnmountSync) {
+      return t`Review sync will unmount automatically before merge.`
+    }
+
+    return readiness.mergeTargetBranch
+      ? t`Ready to merge into ${readiness.mergeTargetBranch}.`
+      : t`Ready to merge.`
+  }
+
+  if (readiness.status === "worktree_missing") {
+    return t`Session worktree is missing on disk.`
+  }
+
+  if (readiness.status === "merge_target_branch_required") {
+    return t`Select a target branch before merging.`
+  }
+
+  if (readiness.status === "merge_target_branch_missing") {
+    return t`The saved target branch no longer exists locally.`
+  }
+
+  if (readiness.status === "pr_scoped_session") {
+    return t`PR-scoped sessions cannot merge back into the primary checkout.`
+  }
+
+  if (readiness.status === "session_active") {
+    return t`Stop the session before merging.`
+  }
+
+  if (readiness.status === "worktree_dirty") {
+    return t`Commit or discard worktree changes before merging.`
+  }
+
+  if (readiness.status === "primary_dirty") {
+    return t`Clean the primary checkout before merging.`
+  }
+
+  if (readiness.status === "not_ahead") {
+    return t`The session worktree has no commits ahead of the target branch.`
+  }
+
+  if (readiness.status === "not_fast_forward") {
+    return t`The target branch has diverged. Fast-forward merge is unavailable.`
+  }
+
+  return null
 }
 
 function isSessionChatHeaderActionError(error: unknown) {

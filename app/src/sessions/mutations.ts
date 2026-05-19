@@ -1,10 +1,12 @@
 import type {
   CreateSessionRequest,
   DaemonSession,
+  MergeSessionWorktreeRequest,
   SessionPermissionResponseRequest,
   SessionPromptRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
   SteerSessionRequest,
 } from "@goddard-ai/sdk"
 
@@ -120,6 +122,26 @@ export async function reconnectSession(sessionId: DaemonSession["id"]) {
 export async function cancelSessionTurn(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.session.cancel({ id: sessionId })
   invalidateSessionViews(sessionId)
+  return result
+}
+
+/**
+ * Updates one persisted worktree merge target branch and refreshes the affected session views.
+ */
+export async function setSessionWorktreeMergeTargetBranch(
+  input: SetSessionWorktreeMergeTargetBranchRequest,
+) {
+  const result = await goddardSdk.session.worktree.mergeTargetBranch.set(input)
+  invalidateSessionViews(input.id)
+  return result
+}
+
+/**
+ * Merges one session worktree into its persisted target branch and refreshes the affected views.
+ */
+export async function mergeSessionWorktree(input: MergeSessionWorktreeRequest) {
+  const result = await goddardSdk.session.worktree.merge(input)
+  invalidateSessionViews(input.id)
   return result
 }
 
