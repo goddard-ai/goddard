@@ -8,15 +8,7 @@ import { inboxDbSchema } from "./daemon/store.ts"
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
 /** First-class inbox methods exposed to daemon plugins that create attention items. */
-type InboxExtension = Pick<
-  InboxManager,
-  | "touchInboxItem"
-  | "markSessionReplied"
-  | "completeSession"
-  | "listInboxItems"
-  | "updateInboxItem"
-  | "bulkUpdateInboxItems"
->
+type InboxExtension = Pick<InboxManager, "touchInboxItem">
 
 export const inboxPlugin = definePlugin({
   name: "inbox",
@@ -24,15 +16,19 @@ export const inboxPlugin = definePlugin({
   db: inboxDbSchema,
   ipc: inboxIpcSchema,
   setup({ db, publish, session }) {
-    const inbox = createInboxManager({
+    const manager = createInboxManager({
       db,
       publishEvent: (payload) => {
         publish("inbox.item", payload)
       },
-    }) satisfies InboxExtension
+    })
+
+    const inbox = {
+      touchInboxItem: manager.touchInboxItem,
+    } satisfies InboxExtension
 
     session.events.on("lifecycle.blocked", (event) => {
-      inbox.touchInboxItem({
+      manager.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.blocked",
         scope: event.scope,
@@ -41,7 +37,7 @@ export const inboxPlugin = definePlugin({
       })
     })
     session.events.on("lifecycle.turnEnded", (event) => {
-      inbox.touchInboxItem({
+      manager.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.turn_ended",
         scope: event.scope,
@@ -50,10 +46,10 @@ export const inboxPlugin = definePlugin({
       })
     })
     session.events.on("lifecycle.replied", (event) => {
-      inbox.markSessionReplied(event.sessionId)
+      manager.markSessionReplied(event.sessionId)
     })
     session.events.on("lifecycle.completed", (event) => {
-      return inbox.completeSession(event.sessionId)
+      return manager.completeSession(event.sessionId)
     })
 
     return {
@@ -61,9 +57,9 @@ export const inboxPlugin = definePlugin({
         inbox,
       },
       requestHandlers: {
-        "inbox.list": async (payload) => inbox.listInboxItems(payload),
-        "inbox.update": async (payload) => inbox.updateInboxItem(payload),
-        "inbox.bulkUpdate": async (payload) => inbox.bulkUpdateInboxItems(payload),
+        "inbox.list": async (payload) => manager.listInboxItems(payload),
+        "inbox.update": async (payload) => manager.updateInboxItem(payload),
+        "inbox.bulkUpdate": async (payload) => manager.bulkUpdateInboxItems(payload),
       },
     }
   },
