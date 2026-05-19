@@ -39,18 +39,11 @@ export type SessionInputSelectProps = {
 export component SessionInputSelect(props: SessionInputSelectProps) {
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
-  const popoverOpen = useSignal(props.open)
 
-  const isMenuOpen = props.open
-  const isFilterable = props.filterable ?? false
   const selectedItem = props.items.find((item) => item.value === props.value) ?? null
   const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
-
-  useEffect(() => {
-    popoverOpen.value = props.open
-  }, [props.open])
 
   <div class={styles.field}>
     <GoodTooltip
@@ -69,14 +62,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       <span class={styles.tooltipTrigger}>
         <button
           {ref triggerElementRef}
-          aria-expanded={isMenuOpen}
+          aria-expanded={props.open}
           aria-haspopup="menu"
           aria-label={ariaLabel}
           class={styles.trigger}
           disabled={props.disabled}
           type="button"
           onClick={() => {
-            props.onOpenChange(!isMenuOpen)
+            props.onOpenChange(!props.open)
           }}
           onKeyDown={(event) => {
             if (props.disabled) {
@@ -89,7 +82,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               return
             }
 
-            if (event.key === "Escape" && isMenuOpen) {
+            if (event.key === "Escape" && props.open) {
               event.preventDefault()
               props.onOpenChange(false)
             }
@@ -103,20 +96,23 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             size={16}
             strokeWidth={2.2}
             style={{
-              color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
-              transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+              color: props.open ? token.var("colors.text") : token.var("colors.muted"),
+              transform: props.open ? "rotate(180deg)" : "rotate(0deg)",
             }}
           />
         </button>
       </span>
     </GoodTooltip>
+    const popoverOpen = useSignal(props.open)
+    popoverOpen.value = props.open
+
     <Popover
       anchor={() => triggerElementRef.current}
       class={styles.menu}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
-      initialFocus={() => isFilterable ? filterInputRef.current : null}
-      modalFocus={isFilterable}
+      initialFocus={() => props.filterable ? filterInputRef.current : null}
+      modalFocus={props.filterable ?? false}
       offset={8}
       open={popoverOpen}
       placement="bottom-start"
@@ -126,8 +122,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
     >
       <SelectMenuContainer
         items={props.items}
-        {isFilterable}
-        {isMenuOpen}
+        isFilterable={props.filterable ?? false}
+        isMenuOpen={props.open}
         {filterInputRef}
         onOpenChange={props.onOpenChange}
         onValueChange={props.onValueChange}

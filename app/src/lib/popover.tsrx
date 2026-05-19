@@ -27,7 +27,6 @@ export type PopoverProps = FloatingPositionOptions & {
 export component Popover(props: PopoverProps) {
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
-  const isOpen = props.open.value
 
   function requestClose(reason: PopoverCloseReason) {
     props.open.value = false
@@ -35,7 +34,7 @@ export component Popover(props: PopoverProps) {
   }
 
   useLayoutEffect(() => {
-    if (!isOpen) {
+    if (!props.open.value) {
       return
     }
 
@@ -93,9 +92,9 @@ export component Popover(props: PopoverProps) {
         restoreFocus(previouslyFocusedElement)
       }
     }
-  }, [isOpen, popoverId])
+  }, [props.open.value, popoverId])
 
-  if (!isOpen) {
+  if (!props.open.value) {
     return
   }
 
