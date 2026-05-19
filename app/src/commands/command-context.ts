@@ -10,12 +10,11 @@ const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchContentKind>("inbox")
 const hasClosableActiveTab = signal(false)
 const selectedKind = signal<MainTabItemId>("inbox")
-const hasCloseTarget = computed(() => hasClosableActiveTab.value)
 
 const whenContext = computed(() => {
   return {
     "workbench.activeTabKind": activeTabKind.value,
-    "workbench.hasCloseTarget": hasCloseTarget.value,
+    "workbench.hasCloseTarget": hasClosableActiveTab.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
     "mainTab.selectedKind": selectedKind.value,
   }
@@ -24,7 +23,6 @@ const whenContext = computed(() => {
 export const commandContext = {
   activeScopes,
   activeTabKind,
-  hasCloseTarget,
   hasClosableActiveTab,
   selectedKind,
   whenContext,
