@@ -1,5 +1,4 @@
 /** Shared custom dropdown used by the launch-session selectors. */
-import { Popover } from "@ark-ui/react/popover"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import * as fuzzysort from "fuzzysort2"
@@ -7,39 +6,38 @@ import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { MenuPortal } from "~/lib/menu-portal.tsrx"
+import { Popover } from "~/lib/popover.tsrx"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import styles from "./select-menu.style.ts"
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
-  value: string;
-  label: string;
-  detail?: string | null;
-  searchText?: string | null;
-  disabled?: boolean;
-}
+    value: string;
+    label: string;
+    detail?: string | null;
+    searchText?: string | null;
+    disabled?: boolean;
+  }
 
 /** Props for one shared launch-session selector menu. */
 export type SessionInputSelectProps = {
-  label: string;
-  placeholder: string;
-  shortcut?: string | null;
-  value: string | null;
-  items: readonly SessionInputSelectItem[];
-  open: boolean;
-  disabled?: boolean;
-  filterable?: boolean;
-  loading?: boolean;
-  onOpenChange: (open: boolean) => void;
-  onValueChange: (value: string) => void;
-}
+    label: string;
+    placeholder: string;
+    shortcut?: string | null;
+    value: string | null;
+    items: readonly SessionInputSelectItem[];
+    open: boolean;
+    disabled?: boolean;
+    filterable?: boolean;
+    loading?: boolean;
+    onOpenChange: (open: boolean) => void;
+    onValueChange: (value: string) => void;
+  }
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
 export component SessionInputSelect(props: SessionInputSelectProps) {
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
-  const menuContainerRef = useRef<HTMLDivElement>(null)
 
   const isMenuOpen = props.open
   const isFilterable = props.filterable ?? false
@@ -48,100 +46,92 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
 
-  <Popover.Root
-    autoFocus={true}
-    closeOnInteractOutside={true}
-    finalFocusEl={() => triggerElementRef.current}
-    immediate={true}
-    initialFocusEl={() => isFilterable ? filterInputRef.current : menuContainerRef.current}
-    lazyMount={true}
-    modal={isFilterable}
-    open={isMenuOpen}
-    positioning={{
-      fitViewport: true,
-      getAnchorElement: () => triggerElementRef.current,
-      gutter: 8,
-      placement: "bottom-start",
-      sameWidth: true,
-      strategy: "fixed",
-    }}
-    unmountOnExit={true}
-    onOpenChange={(details) => {
-      props.onOpenChange(details.open)
-    }}
-  >
-    <div class={styles.field}>
-      <GoodTooltip
-        ariaLabel={props.label}
-        content={<tsrx>
-          <span class={styles.tooltipContent}>
-            <span>
-              {props.label}
-            </span>
-            <span class={styles.tooltipShortcut}>
-              {shortcutLabel}
-            </span>
+  <div class={styles.field}>
+    <GoodTooltip
+      ariaLabel={props.label}
+      content={<tsrx>
+        <span class={styles.tooltipContent}>
+          <span>
+            {props.label}
           </span>
-        </tsrx>}
-      >
-        <span class={styles.tooltipTrigger}>
-          <Popover.Trigger asChild>
-            <button
-              {ref triggerElementRef}
-              aria-expanded={isMenuOpen}
-              aria-haspopup="menu"
-              aria-label={ariaLabel}
-              class={styles.trigger}
-              disabled={props.disabled}
-              type="button"
-              onKeyDown={(event) => {
-                if (props.disabled) {
-                  return
-                }
-
-                if (event.key === "ArrowDown") {
-                  event.preventDefault()
-                  props.onOpenChange(true)
-                  return
-                }
-
-                if (event.key === "Escape" && isMenuOpen) {
-                  event.preventDefault()
-                  props.onOpenChange(false)
-                }
-              }}
-            >
-              <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
-                {triggerLabel}
-              </span>
-              <ChevronDown
-                class={styles.chevron}
-                size={16}
-                strokeWidth={2.2}
-                style={{
-                  color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
-                  transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
-                }}
-              />
-            </button>
-          </Popover.Trigger>
+          <span class={styles.tooltipShortcut}>
+            {shortcutLabel}
+          </span>
         </span>
-      </GoodTooltip>
-      <MenuPortal>
-        <SelectMenuContainer
-          items={props.items}
-          {isFilterable}
-          {isMenuOpen}
-          {filterInputRef}
-          {menuContainerRef}
-          onOpenChange={props.onOpenChange}
-          onValueChange={props.onValueChange}
-          value={props.value}
-          loading={props.loading}
-        />
-      </MenuPortal>
-    </div>
-  </Popover.Root>
+      </tsrx>}
+    >
+      <span class={styles.tooltipTrigger}>
+        <button
+          {ref triggerElementRef}
+          aria-expanded={isMenuOpen}
+          aria-haspopup="menu"
+          aria-label={ariaLabel}
+          class={styles.trigger}
+          disabled={props.disabled}
+          type="button"
+          onClick={() => {
+            props.onOpenChange(!isMenuOpen)
+          }}
+          onKeyDown={(event) => {
+            if (props.disabled) {
+              return
+            }
+
+            if (event.key === "ArrowDown") {
+              event.preventDefault()
+              props.onOpenChange(true)
+              return
+            }
+
+            if (event.key === "Escape" && isMenuOpen) {
+              event.preventDefault()
+              props.onOpenChange(false)
+            }
+          }}
+        >
+          <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
+            {triggerLabel}
+          </span>
+          <ChevronDown
+            class={styles.chevron}
+            size={16}
+            strokeWidth={2.2}
+            style={{
+              color: isMenuOpen ? token.var("colors.text") : token.var("colors.muted"),
+              transform: isMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          />
+        </button>
+      </span>
+    </GoodTooltip>
+    <Popover
+      anchor={() => triggerElementRef.current}
+      class={styles.menu}
+      closeOnEscape={true}
+      closeOnOutsidePointer={true}
+      initialFocus={() => isFilterable ? filterInputRef.current : null}
+      modalFocus={isFilterable}
+      offset={8}
+      open={isMenuOpen}
+      placement="bottom-start"
+      sameWidth={true}
+      strategy="fixed"
+      onOpenChange={(open) => {
+        props.onOpenChange(open)
+      }}
+    >
+      <SelectMenuContainer
+        items={props.items}
+        {isFilterable}
+        {isMenuOpen}
+        {filterInputRef}
+        onOpenChange={props.onOpenChange}
+        onValueChange={props.onValueChange}
+        value={props.value}
+        loading={props.loading}
+      />
+    </Popover>
+  </div>
 }
 
 component SelectMenuContainer(props: {
@@ -149,7 +139,6 @@ component SelectMenuContainer(props: {
   isFilterable: boolean;
   isMenuOpen: boolean;
   filterInputRef: preact.Ref<HTMLInputElement>;
-  menuContainerRef: preact.Ref<HTMLDivElement>;
   onOpenChange: (open: boolean) => void;
   onValueChange: (value: string) => void;
   value: string | null;
@@ -241,115 +230,111 @@ component SelectMenuContainer(props: {
   }, [highlightedItem?.value, props.isMenuOpen])
 
   if (props.isMenuOpen) {
-    <Popover.Positioner>
-      <Popover.Content
-        {ref props.menuContainerRef}
-        class={styles.menu}
-        tabIndex={props.isFilterable ? undefined : -1}
-        onKeyDown={(event) => {
-          if (props.isFilterable) {
-            return
-          }
-
-          if (event.key === "ArrowDown") {
-            event.preventDefault()
-            moveHighlightedIndex(1)
-            return
-          }
-
-          if (event.key === "ArrowUp") {
-            event.preventDefault()
-            moveHighlightedIndex(-1)
-            return
-          }
-
-          if (event.key === "Enter") {
-            event.preventDefault()
-            commitSelection(highlightedItem)
-            return
-          }
-
-          if (event.key === "Escape") {
-            event.preventDefault()
-            props.onOpenChange(false)
-          }
-        }}
-      >
+    <div
+      class={styles.menuBody}
+      onKeyDown={(event) => {
         if (props.isFilterable) {
-          <input
-            {ref props.filterInputRef}
-            class={styles.menuFilter}
-            placeholder="Type to filter"
-            value={query}
-            onInput={(event) => {
-              setQuery(event.currentTarget.value)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault()
-                moveHighlightedIndex(1)
-                return
-              }
-
-              if (event.key === "ArrowUp") {
-                event.preventDefault()
-                moveHighlightedIndex(-1)
-                return
-              }
-
-              if (event.key === "Enter") {
-                event.preventDefault()
-                commitSelection(highlightedItem)
-                return
-              }
-
-              if (event.key === "Escape") {
-                event.preventDefault()
-                props.onOpenChange(false)
-              }
-            }}
-          />
+          return
         }
-        if (props.loading) {
-          <div class={styles.menuEmpty}>
-            <span
-              class={css({
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-              })}
-            >
-              <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              "Loading options..."
-            </span>
-          </div>
-        } else if (filteredItems.length === 0) {
-          <div class={styles.menuEmpty}>"No matching options."</div>
-        } else {
-          <ul class={styles.menuList}>
-            for (const item of filteredItems; index index) {
-              <li key={item.value}>
-                <button
-                  {ref (element) => {
-                    itemElements[item.value] = element
-                  }}
-                  class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
-                  disabled={item.disabled}
-                  type="button"
-                  onMouseEnter={() => {
-                    setSelectedIndex(index)
-                  }}
-                  onClick={() => {
-                    commitSelection(item)
-                  }}
-                >
-                  {item.label}
-                </button>
-              </li>
+
+        if (event.key === "ArrowDown") {
+          event.preventDefault()
+          moveHighlightedIndex(1)
+          return
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault()
+          moveHighlightedIndex(-1)
+          return
+        }
+
+        if (event.key === "Enter") {
+          event.preventDefault()
+          commitSelection(highlightedItem)
+          return
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault()
+          props.onOpenChange(false)
+        }
+      }}
+    >
+      if (props.isFilterable) {
+        <input
+          {ref props.filterInputRef}
+          class={styles.menuFilter}
+          placeholder="Type to filter"
+          value={query}
+          onInput={(event) => {
+            setQuery(event.currentTarget.value)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault()
+              moveHighlightedIndex(1)
+              return
             }
-          </ul>
-        }
-      </Popover.Content>
-    </Popover.Positioner>
+
+            if (event.key === "ArrowUp") {
+              event.preventDefault()
+              moveHighlightedIndex(-1)
+              return
+            }
+
+            if (event.key === "Enter") {
+              event.preventDefault()
+              commitSelection(highlightedItem)
+              return
+            }
+
+            if (event.key === "Escape") {
+              event.preventDefault()
+              props.onOpenChange(false)
+            }
+          }}
+        />
+      }
+      if (props.loading) {
+        <div class={styles.menuEmpty}>
+          <span
+            class={css({
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+            })}
+          >
+            <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+            "Loading options..."
+          </span>
+        </div>
+      } else if (filteredItems.length === 0) {
+        <div class={styles.menuEmpty}>"No matching options."</div>
+      } else {
+        <ul class={styles.menuList}>
+          for (const item of filteredItems; index index) {
+            <li key={item.value}>
+              <button
+                {ref (element) => {
+                  itemElements[item.value] = element
+                }}
+                class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
+                disabled={item.disabled}
+                type="button"
+                onMouseEnter={() => {
+                  setSelectedIndex(index)
+                }}
+                onClick={() => {
+                  commitSelection(item)
+                }}
+              >
+                {item.label}
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </div>
   }
 }

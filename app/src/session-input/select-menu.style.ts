@@ -77,6 +77,9 @@ export default {
     boxShadow: "0 12px 28px rgba(98, 112, 128, 0.16)",
     outline: "none",
   }),
+  menuBody: css({
+    display: "contents",
+  }),
   menuFilter: css({
     width: "100%",
     padding: "10px 0 8px",
