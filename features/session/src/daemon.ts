@@ -94,7 +94,14 @@ const sessionDb = {
     type: "text",
   }),
 
-  worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
+  worktrees: kind("wt", DaemonWorktree)
+    .index("sessionId", { type: "text" })
+    .migrate(2, {
+      1: (value) => ({
+        ...value,
+        mergeTargetBranch: value.mergeTargetBranch ?? null,
+      }),
+    }),
 }
 
 export const sessionPlugin = definePlugin({
@@ -244,6 +251,9 @@ export const sessionPlugin = definePlugin({
           completeSession: sessionManager.completeSession,
           getSession: sessionManager.getSession,
           getWorktree: sessionManager.getWorktree,
+          getWorktreeMergeReadiness: sessionManager.getWorktreeMergeReadiness,
+          setWorktreeMergeTargetBranch: sessionManager.setWorktreeMergeTargetBranch,
+          mergeWorktree: sessionManager.mergeWorktree,
           requireWorktree: sessionManager.requireWorktree,
           listWorktrees: sessionManager.listWorktrees,
           findWorktreeByDir: sessionManager.findWorktreeByDir,
@@ -280,6 +290,13 @@ export const sessionPlugin = definePlugin({
           diagnostics: async ({ body: { id } }) => sessionManager.getDiagnostics(id),
           worktree: {
             get: async ({ body: { id } }) => sessionManager.getWorktree(id),
+            mergeReadiness: async ({ body: { id } }) =>
+              sessionManager.getWorktreeMergeReadiness(id),
+            mergeTargetBranch: {
+              set: async ({ body: { id, mergeTargetBranch } }) =>
+                sessionManager.setWorktreeMergeTargetBranch(id, mergeTargetBranch),
+            },
+            merge: async ({ body: { id } }) => sessionManager.mergeWorktree(id),
           },
           shutdown: async ({ body: { id } }) => ({
             id,

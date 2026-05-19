@@ -46,6 +46,11 @@ export interface CreateWorktreeOptions extends WorktreeOptions {
   baseBranchName?: string
 
   /**
+   * The source-checkout branch this worktree should merge back into when known.
+   */
+  mergeTargetBranch?: string | null
+
+  /**
    * The requested working directory that should be mapped inside the created worktree.
    */
   requestedCwd?: string
@@ -113,6 +118,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
           requestedCwd,
           worktreeDir,
           branchName: options.branchName,
+          mergeTargetBranch: options.mergeTargetBranch,
           poweredBy: plugin.name,
         })
       }
@@ -140,6 +146,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
     requestedCwd,
     worktreeDir,
     branchName: options.branchName,
+    mergeTargetBranch: options.mergeTargetBranch,
     poweredBy: defaultPlugin.name,
   })
 }
@@ -211,6 +218,7 @@ async function createWorktreeMetadata(params: {
   requestedCwd: string
   worktreeDir: string
   branchName: string
+  mergeTargetBranch?: string | null
   poweredBy: string
 }) {
   const normalizedRepoRoot = normalizeExistingPath(params.repoRoot)
@@ -232,6 +240,7 @@ async function createWorktreeMetadata(params: {
         : path.join(normalizedWorktreeDir, relativeCwd),
     worktreeDir: normalizedWorktreeDir,
     branchName: params.branchName,
+    mergeTargetBranch: params.mergeTargetBranch ?? null,
     poweredBy: params.poweredBy,
   } satisfies CreatedWorktree
 }

@@ -7,8 +7,10 @@ import {
   DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
+  GetSessionWorktreeMergeReadinessRequest,
   GetSessionWorktreeRequest,
   ListSessionsRequest,
+  MergeSessionWorktreeRequest,
   ReleaseSessionLaunchLeaseRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
@@ -23,6 +25,7 @@ import {
   SessionSubpackagesRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
   SteerSessionRequest,
   type CancelSessionResponse,
   type CompleteSessionResponse,
@@ -31,8 +34,10 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
+  type GetSessionWorktreeMergeReadinessResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
+  type MergeSessionWorktreeResponse,
   type ReleaseSessionLaunchLeaseResponse,
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
@@ -40,6 +45,7 @@ import {
   type SessionSubpackagesResponse,
   type SetSessionConfigOptionResponse,
   type SetSessionModelResponse,
+  type SetSessionWorktreeMergeTargetBranchResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
 } from "./schema.ts"
@@ -113,6 +119,23 @@ export const sessionIpcRoutes = defineIpcRoutes({
       get: http.post("get", {
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
+      }),
+      /** Reads merge readiness for one daemon-managed session worktree. */
+      mergeReadiness: http.post("merge-readiness", {
+        body: GetSessionWorktreeMergeReadinessRequest,
+        response: $type<GetSessionWorktreeMergeReadinessResponse>(),
+      }),
+      mergeTargetBranch: http.resource("merge-target-branch", {
+        /** Updates the persisted merge target branch for one daemon-managed session worktree. */
+        set: http.post("set", {
+          body: SetSessionWorktreeMergeTargetBranchRequest,
+          response: $type<SetSessionWorktreeMergeTargetBranchResponse>(),
+        }),
+      }),
+      /** Merges one daemon-managed session worktree into its persisted target branch. */
+      merge: http.post("merge", {
+        body: MergeSessionWorktreeRequest,
+        response: $type<MergeSessionWorktreeResponse>(),
       }),
     }),
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
