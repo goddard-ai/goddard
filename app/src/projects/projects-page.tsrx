@@ -293,7 +293,6 @@ component AddProjectDialog(props: {
   }, [props.open.value])
 
   <Modal
-    id="projects:add-project"
     open={props.open}
     {titleId}
     {descriptionId}

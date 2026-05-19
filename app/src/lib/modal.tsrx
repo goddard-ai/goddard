@@ -14,7 +14,6 @@ export type ModalProps = {
     open: Signal<boolean>;
     titleId: string;
     descriptionId?: string;
-    id?: string;
     backdropClass?: string;
     positionerClass?: string;
     contentClass?: string;
@@ -27,8 +26,7 @@ export type ModalProps = {
 
 /** Renders one modal dialog with owned focus, dismissal, portal, and modal-stack behavior. */
 export component Modal(props: ModalProps) {
-  const generatedId = useId()
-  const modalId = props.id ?? generatedId
+  const modalId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
 
   function requestClose(reason: ModalCloseReason) {
