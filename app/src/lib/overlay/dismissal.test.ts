@@ -18,7 +18,8 @@ test("outside pointer dismissal ignores pointer events inside nested overlay con
   })
   const stop = startOverlayDismissal({
     id: "dialog",
-    close() {
+    close(reason) {
+      expect(reason).toBe("outside")
       closeCount++
     },
   })

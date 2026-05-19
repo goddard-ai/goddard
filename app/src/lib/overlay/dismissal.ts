@@ -3,16 +3,16 @@ import { overlayStack } from "./stack.ts"
 /** Dismissal behavior owned by one overlay while it is mounted. */
 export type OverlayDismissalOptions = {
   id: string
-  close: () => void
+  close: (reason: "escape" | "outside") => void
   dismissOnEscape?: boolean
   dismissOnOutsidePointer?: boolean
 }
 
 /** Registers document-level dismissal listeners for the topmost overlay only. */
 export function startOverlayDismissal(options: OverlayDismissalOptions) {
-  function closeIfTopmost() {
+  function closeIfTopmost(reason: "escape" | "outside") {
     if (overlayStack.isTopmost(options.id)) {
-      options.close()
+      options.close(reason)
     }
   }
 
@@ -22,7 +22,7 @@ export function startOverlayDismissal(options: OverlayDismissalOptions) {
     }
 
     event.preventDefault()
-    closeIfTopmost()
+    closeIfTopmost("escape")
   }
 
   function handlePointerDown(event: PointerEvent) {
@@ -30,7 +30,7 @@ export function startOverlayDismissal(options: OverlayDismissalOptions) {
       return
     }
 
-    closeIfTopmost()
+    closeIfTopmost("outside")
   }
 
   document.addEventListener("keydown", handleKeyDown)
