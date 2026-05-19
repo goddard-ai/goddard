@@ -5,9 +5,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 ## Keep The Page Shape Visible
 
 - Prefer one exported page component that shows the whole page skeleton when the boundary is only used once.
-- Inline single-use local components unless extraction gives the JSX a meaningful reusable concept.
 - For workbench tab components, keep `export default` on the `component` declaration when the module exports one primary tab surface.
-- Avoid relay components whose main job is to rename loaded data or forward props into a single child.
 
 ## Use TSRX Control Flow Directly
 
@@ -61,31 +59,8 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 - Keeping them in the same module is fine while they stay private and the file remains readable.
 - Move them into focused sibling modules once subcomponents consume them or the page module starts mixing too many concerns.
 
-## Place Logic Near Use
-
-- Put hooks, derived values, and event handlers near the JSX that uses them. TSRX supports hooks anywhere in component scope, including inside JSX expression blocks and conditional branches.
-- Do not hoist hooks, variables, or helper declarations to the top of a component solely to satisfy React-style hook ordering habits. Keep them in the smallest readable scope that still preserves the state lifetime and dependencies they need.
-- Move purely presentational derived values into the JSX subtree that renders them.
-- Avoid a large top-of-component variable block when the values are only meaningful in one local region.
-- Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`.
-- Keep locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
-
-## Keep Handlers Local And Direct
-
-- Prefer inline JSX callbacks for tiny single-use handlers.
-- For larger single-use handlers, declare them in the nearest JSX or control-flow block that uses them.
-- Use arrow function bindings for handlers declared inside `if` blocks so their scope matches the block.
-- Pass async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise.
-- Keep explicit guards only when they express real domain or UX rules. Do not duplicate generic task concurrency checks at every call site.
-
 ## Keep Loading And Error UI Generic
 
 - Prefer generic page-level loading and error messages unless the missing context is common enough to justify a specific branch.
 - Keep state-specific UI in the shared page layout so loading, error, and success states feel structurally consistent.
 - Use the page model for recoverable action errors inside the loaded page, and TSRX catch blocks for query/render failure states.
-
-## Inline Low-Complexity Helpers
-
-- Inline helpers that are single-use and low complexity, especially when their extraction hides nearby context.
-- Keep top-level helpers for reusable presentation logic, validation, type guards, or formatting that is used in multiple places or would distract from the JSX.
-- Do not create explicit helper types when the model or factory type can be inferred without duplication.

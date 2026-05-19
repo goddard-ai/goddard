@@ -38,12 +38,31 @@ These practices are derived from the current app plans, `spec/`, and `app/glossa
 - Keep shared presentational primitives near the surface that owns them when multiple sections reuse the same layout or control treatment.
 - Keep section files focused on semantics, labels, and state wiring, and keep generic surface layout and control styling in the owning surface.
 - Prefer plain document-flow utility surfaces over decorative headers, hero treatments, or stacked containers unless the product explicitly requires stronger framing.
+- Inline single-use local components unless extraction gives the JSX a meaningful reusable concept.
+- Avoid relay components whose main job is to rename loaded data or forward props into a single child.
 - For component-local Panda classes, move non-trivial static `css(...)` calls into a sibling `*.style.ts` module that `export default`s a class map.
 - Keep tiny single-use wrappers inline when they have only a few declarations, no pseudo selectors, no complex token usage, and no clearer semantic name than the inline properties themselves.
 - In files that already use a sibling `*.style.ts`, add new non-trivial static classes there and keep only the trivial exceptions inline.
 - Keep prop- or state-derived values out of `*.style.ts`. Use render-local `style={...}` objects or other local logic for dynamic values.
 - Name extracted style entries by element role or intent, not by incidental visual details, and keep the exported object roughly ordered with the JSX structure.
 - Use `styled(...)` for reusable presentational primitives shared within a feature or surface, not for singleton page shells or one-off elements.
+
+## TSRX Component Organization
+
+- Put hooks, derived values, and event handlers near the JSX that uses them. TSRX supports hooks anywhere in component scope, including inside JSX expression blocks and conditional branches.
+- Do not hoist hooks, variables, or helper declarations to the top of a component solely to satisfy React-style hook ordering habits. Keep them in the smallest readable scope that still preserves the state lifetime and dependencies they need.
+- Move purely presentational derived values into the JSX subtree that renders them.
+- Avoid a large top-of-component variable block when the values are only meaningful in one local region.
+- Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`.
+- Keep locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
+- Prefer inline JSX callbacks for tiny single-use handlers.
+- For larger single-use handlers, declare them in the nearest JSX or control-flow block that uses them.
+- Use arrow function bindings for handlers declared inside `if` blocks so their scope matches the block.
+- Pass async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise.
+- Keep explicit guards only when they express real domain or UX rules. Do not duplicate generic task concurrency checks at every call site.
+- Inline helpers that are single-use and low complexity, especially when their extraction hides nearby context.
+- Keep top-level helpers for reusable presentation logic, validation, type guards, or formatting that is used in multiple places or would distract from the JSX.
+- Do not create explicit helper types when the model or factory type can be inferred without duplication.
 
 ## Alignment
 
