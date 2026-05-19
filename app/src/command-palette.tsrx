@@ -1,10 +1,9 @@
 /** Renders the app-wide command palette. */
 import { token } from "@goddard-ai/styled-system/tokens"
-import { type Signal } from "@preact/signals"
-import { Command } from "ark-cmdk"
+import { type Signal, useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
-import { useEffect, useId, useState } from "preact/hooks"
+import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks"
 
 import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
@@ -25,13 +24,17 @@ component CommandPalette(props: { open: Signal<boolean> }) {
   const isOpen = props.open.value
   const shortcutRegistry = useShortcutRegistry()
   const titleId = useId()
+  const inputId = useId()
+  const listboxId = useId()
+  const search = useSignal("")
+  const activeIndex = useSignal(0)
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
-  const [search, setSearch] = useState("")
   useEffect(() => {
-    if (!isOpen && search.length > 0) {
-      setSearch("")
+    if (!isOpen && search.value.length > 0) {
+      search.value = ""
     }
-  }, [isOpen, search])
+  }, [isOpen, search.value])
 
   const visibleCommands = (() => {
     const availableCommands = preparedAppCommands.filter(
@@ -39,12 +42,12 @@ component CommandPalette(props: { open: Signal<boolean> }) {
         isCommandAvailable(shortcutRegistry.runtime, entry.command),
     )
 
-    if (isEmptyQuery(search)) {
+    if (isEmptyQuery(search.value)) {
       return availableCommands.map((entry) => entry.command)
     }
 
     return fuzzysort.searchFields(
-      search,
+      search.value,
       availableCommands,
       [
         { key: "label", extract: (entry) => entry.preparedLabel },
@@ -53,6 +56,65 @@ component CommandPalette(props: { open: Signal<boolean> }) {
       { threshold: 0 },
     ).items.map((entry) => entry.value.command)
   })()
+  const activeCommand = visibleCommands[activeIndex.value] ?? visibleCommands[0] ?? null
+  const visibleCommandIds = visibleCommands.map((command) => command.id).join("\n")
+
+  useEffect(() => {
+    activeIndex.value = 0
+  }, [isOpen, visibleCommandIds])
+
+  useLayoutEffect(() => {
+    if (!activeCommand) {
+      return
+    }
+
+    itemRefs.current[activeCommand.id]?.scrollIntoView({ block: "nearest" })
+  }, [activeCommand?.id])
+
+  function selectCommand(command: AppCommand) {
+    props.open.value = false
+    command()
+  }
+
+  function moveActiveIndex(delta: number) {
+    if (visibleCommands.length === 0) {
+      return
+    }
+
+    activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
+    visibleCommands.length
+  }
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault()
+      moveActiveIndex(1)
+      return
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault()
+      moveActiveIndex(-1)
+      return
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault()
+      activeIndex.value = 0
+      return
+    }
+
+    if (event.key === "End") {
+      event.preventDefault()
+      activeIndex.value = Math.max(visibleCommands.length - 1, 0)
+      return
+    }
+
+    if (event.key === "Enter" && activeCommand) {
+      event.preventDefault()
+      selectCommand(activeCommand)
+    }
+  }
 
   <Modal
     open={props.open}
@@ -62,45 +124,70 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     contentClass={styles.content}
   >
     <h2 id={titleId} class={styles.title}>"Command menu"</h2>
-    <Command.Root
+    <div
       class={styles.root}
-      filter={() => 1}
-      itemToKeywords={(command) => command.keywords}
-      itemToString={(command) => command.label}
-      itemToValue={(command) => command.id}
-      items={visibleCommands}
-      label="Command menu"
-      onSearchChange={setSearch}
-      onSelect={(command) => {
-        props.open.value = false
-        command()
-      }}
-      {search}
+      role="combobox"
+      aria-controls={listboxId}
+      aria-expanded={isOpen}
+      aria-haspopup="listbox"
+      aria-labelledby={titleId}
+      aria-owns={listboxId}
+      onKeyDown={handleKeyDown}
     >
       <div class={styles.searchRow}>
         <Search aria-hidden={true} class={styles.searchIcon} size={16} />
-        <Command.Input autoFocus={true} class={styles.input} placeholder="Type a command" />
+        <input
+          id={inputId}
+          autoFocus={true}
+          class={styles.input}
+          placeholder="Type a command"
+          role="searchbox"
+          type="text"
+          value={search.value}
+          aria-activedescendant={activeCommand ? `${listboxId}-${activeCommand.id}` : undefined}
+          aria-autocomplete="list"
+          aria-controls={listboxId}
+          onInput={(event) => {
+            search.value = event.currentTarget.value
+            activeIndex.value = 0
+          }}
+        />
       </div>
-      <Command.List
-        class={styles.list}
-        empty={<tsrx>
+      <div id={listboxId} class={styles.list} role="listbox" aria-label="Command menu">
+        if (visibleCommands.length === 0) {
           <div class={styles.empty}>"No matching commands."</div>
-        </tsrx>}
-        children={(item, state) => {
-          const command = item as AppCommand
-          const Icon = command.icon
-          const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
-          const shortcut =
-            typeof shortcutBinding === "string"
-              ? shortcutBinding
-              : shortcutBinding?.combo ?? shortcutBinding?.sequence
+        } else {
+          for (const command of visibleCommands) {
+            const isActive = activeCommand?.id === command.id
+            const itemId = `${listboxId}-${command.id}`
+            const Icon = command.icon
+            const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
+            const shortcut =
+              typeof shortcutBinding === "string"
+                ? shortcutBinding
+                : shortcutBinding?.combo ?? shortcutBinding?.sequence
 
-          return <tsrx>
             <div
+              id={itemId}
+              key={command.id}
+              ref={(element) => {
+                itemRefs.current[command.id] = element
+              }}
               class={styles.item}
-              data-active={state.active ? "true" : "false"}
+              role="option"
+              aria-selected={isActive}
+              data-active={isActive ? "true" : "false"}
               style={{
                 gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault()
+              }}
+              onMouseEnter={() => {
+                activeIndex.value = visibleCommands.indexOf(command)
+              }}
+              onClick={() => {
+                selectCommand(command)
               }}
             >
               if (Icon) {
@@ -109,7 +196,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
                   size={16}
                   strokeWidth={2}
                   style={{
-                    color: state.active ? token.var("colors.text") : token.var("colors.muted"),
+                    color: isActive ? token.var("colors.text") : token.var("colors.muted"),
                   }}
                 />
               }
@@ -122,10 +209,10 @@ component CommandPalette(props: { open: Signal<boolean> }) {
                 </span>
               }
             </div>
-          </tsrx>
-        }}
-      />
-    </Command.Root>
+          }
+        }
+      </div>
+    </div>
   </Modal>
 }
 
