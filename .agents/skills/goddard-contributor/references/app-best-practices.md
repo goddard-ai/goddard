@@ -53,7 +53,7 @@ These practices are derived from the current app plans, `spec/`, and `app/glossa
 - Do not hoist hooks, variables, or helper declarations to the top of a component solely to satisfy React-style hook ordering habits. Keep them in the smallest readable scope that still preserves the state lifetime and dependencies they need.
 - Move purely presentational derived values into the JSX subtree that renders them.
 - Avoid a large top-of-component variable block when the values are only meaningful in one local region.
-- Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`.
+- Avoid local aliases that only hide useful ownership or reactivity context such as `props.*`, `page.*`, or `*.value`.
 - Keep locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
 - Prefer inline JSX callbacks for tiny single-use handlers.
 - For larger single-use handlers, declare them in the nearest JSX or control-flow block that uses them.
