@@ -198,9 +198,11 @@ component CommandPalette(props: { open: Signal<boolean> }) {
                   }}
                 />
               }
+
               <span class={styles.itemLabel}>
                 {command.label}
               </span>
+
               if (shortcut) {
                 <span class={styles.shortcut}>
                   {shortcut}

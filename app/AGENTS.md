@@ -67,7 +67,7 @@
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.
 - Never destructure component props. Define component prop types inline instead of creating `Props` aliases or interfaces.
 - Avoid assigning JSX/TSRX elements to local `const` variables. Prefer inlining elements at the use site, including inline `<tsrx>` expression blocks when needed.
-- Keep a blank line between JSX tags and non-JSX statements for readability. Consecutive JSX tags do not need a blank line between them.
+- Keep a blank line between sibling JSX tags and non-JSX statements for readability, including sibling `if` blocks after JSX. Consecutive JSX tags do not need a blank line between them, and parent opening tags do not need a blank line before their first child statement.
 - Keep single-use event handlers at the use site. Prefer inline JSX callbacks for tiny handlers; for larger handlers, declare a block-scoped arrow function in the nearest JSX or control-flow block that uses it.
 - Prefer passing async event handlers directly, such as `onClick={saveChanges}`, instead of wrapping them only to discard the returned promise with `void`.
 - Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`; introduce locals when they name domain meaning, avoid duplicated non-trivial logic, or are reused enough to improve clarity.
