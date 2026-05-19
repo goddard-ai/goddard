@@ -88,13 +88,10 @@ export component SessionLaunchForm(props: {
         filterable={true}
         items={projectItems}
         label="Project"
-        open={form.openPicker.value === "project"}
+        open={form.getPickerOpen("project")}
         placeholder="Select a project"
         shortcut={projectShortcut}
         value={form.draftProjectPath.value}
-        onOpenChange={(open) => {
-          form.setOpenPicker(open ? "project" : null)
-        }}
         onValueChange={(value) => {
           form.draftProjectPath.value = value
           form.draftSubpackagePath.value = null

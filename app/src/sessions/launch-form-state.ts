@@ -9,11 +9,12 @@ import {
 import { computed, createModel, signal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 
+import { lens } from "~/lib/lens.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
-type LaunchPickerId =
+type SessionLaunchPickerId =
   | "project"
   | "subpackage"
   | "adapter"
@@ -21,7 +22,7 @@ type LaunchPickerId =
   | "branch"
   | "model"
   | "thinking"
-  | null
+type LaunchPickerId = SessionLaunchPickerId | null
 /** One slash-command suggestion shown in the session launch composer. */
 type SlashCommandSuggestion = SessionLaunchPreviewResponse["slashCommands"][number]
 /** One prepared slash-command suggestion cached by source array identity. */
@@ -331,6 +332,14 @@ export const SessionLaunchFormState = createModel(function () {
     },
     selectedAdapter,
     sessionInput,
+    getPickerOpen(picker: SessionLaunchPickerId) {
+      return lens(
+        () => openPicker.value === picker,
+        (open) => {
+          openPicker.value = open ? picker : openPicker.value === picker ? null : openPicker.value
+        },
+      )
+    },
     setOpenPicker(nextPicker: LaunchPickerId) {
       openPicker.value = nextPicker
     },

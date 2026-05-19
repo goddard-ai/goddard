@@ -1,7 +1,7 @@
 /** Shared custom dropdown used by the launch-session selectors. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { useSignal } from "@preact/signals"
+import { type Signal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
@@ -27,11 +27,10 @@ export type SessionInputSelectProps = {
     shortcut?: string | null;
     value: string | null;
     items: readonly SessionInputSelectItem[];
-    open: boolean;
+    open: Signal<boolean>;
     disabled?: boolean;
     filterable?: boolean;
     loading?: boolean;
-    onOpenChange: (open: boolean) => void;
     onValueChange: (value: string) => void;
   }
 
@@ -62,14 +61,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       <span class={styles.tooltipTrigger}>
         <button
           {ref triggerElementRef}
-          aria-expanded={props.open}
+          aria-expanded={props.open.value}
           aria-haspopup="menu"
           aria-label={ariaLabel}
           class={styles.trigger}
           disabled={props.disabled}
           type="button"
           onClick={() => {
-            props.onOpenChange(!props.open)
+            props.open.value = !props.open.value
           }}
           onKeyDown={(event) => {
             if (props.disabled) {
@@ -78,13 +77,13 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
 
             if (event.key === "ArrowDown") {
               event.preventDefault()
-              props.onOpenChange(true)
+              props.open.value = true
               return
             }
 
-            if (event.key === "Escape" && props.open) {
+            if (event.key === "Escape" && props.open.value) {
               event.preventDefault()
-              props.onOpenChange(false)
+              props.open.value = false
             }
           }}
         >
@@ -96,15 +95,13 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             size={16}
             strokeWidth={2.2}
             style={{
-              color: props.open ? token.var("colors.text") : token.var("colors.muted"),
-              transform: props.open ? "rotate(180deg)" : "rotate(0deg)",
+              color: props.open.value ? token.var("colors.text") : token.var("colors.muted"),
+              transform: props.open.value ? "rotate(180deg)" : "rotate(0deg)",
             }}
           />
         </button>
       </span>
     </GoodTooltip>
-    const popoverOpen = useSignal(props.open)
-    popoverOpen.value = props.open
 
     <Popover
       anchor={() => triggerElementRef.current}
@@ -114,18 +111,16 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       initialFocus={() => props.filterable ? filterInputRef.current : null}
       modalFocus={props.filterable ?? false}
       offset={8}
-      open={popoverOpen}
+      open={props.open}
       placement="bottom-start"
       sameWidth={true}
       strategy="fixed"
-      onOpenChange={props.onOpenChange}
     >
       <SelectMenuContainer
         items={props.items}
         isFilterable={props.filterable ?? false}
-        isMenuOpen={props.open}
+        open={props.open}
         {filterInputRef}
-        onOpenChange={props.onOpenChange}
         onValueChange={props.onValueChange}
         value={props.value}
         loading={props.loading}
@@ -137,9 +132,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
 component SelectMenuContainer(props: {
   items: readonly SessionInputSelectItem[];
   isFilterable: boolean;
-  isMenuOpen: boolean;
+  open: Signal<boolean>;
   filterInputRef: preact.Ref<HTMLInputElement>;
-  onOpenChange: (open: boolean) => void;
   onValueChange: (value: string) => void;
   value: string | null;
   loading?: boolean;
@@ -205,11 +199,11 @@ component SelectMenuContainer(props: {
     }
 
     props.onValueChange(item.value)
-    props.onOpenChange(false)
+    props.open.value = false
   }
 
   useEffect(() => {
-    if (!props.isMenuOpen) {
+    if (!props.open.value) {
       setQuery("")
       setSelectedIndex(0)
       return
@@ -217,19 +211,19 @@ component SelectMenuContainer(props: {
 
     const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
     setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-  }, [filteredItemSignature, props.isMenuOpen, props.value])
+  }, [filteredItemSignature, props.open.value, props.value])
 
   useEffect(() => {
-    if (!props.isMenuOpen || !highlightedItem) {
+    if (!props.open.value || !highlightedItem) {
       return
     }
 
     itemElements[highlightedItem.value]?.scrollIntoView({
       block: "nearest",
     })
-  }, [highlightedItem?.value, props.isMenuOpen])
+  }, [highlightedItem?.value, props.open.value])
 
-  if (props.isMenuOpen) {
+  if (props.open.value) {
     <div
       class={styles.menuBody}
       onKeyDown={(event) => {
@@ -257,7 +251,7 @@ component SelectMenuContainer(props: {
 
         if (event.key === "Escape") {
           event.preventDefault()
-          props.onOpenChange(false)
+          props.open.value = false
         }
       }}
     >
@@ -291,7 +285,7 @@ component SelectMenuContainer(props: {
 
             if (event.key === "Escape") {
               event.preventDefault()
-              props.onOpenChange(false)
+              props.open.value = false
             }
           }}
         />

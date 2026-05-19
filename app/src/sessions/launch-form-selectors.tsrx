@@ -1,4 +1,5 @@
 import type { SessionSubpackage } from "@goddard-ai/sdk"
+import { useSignal } from "@preact/signals"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
@@ -28,16 +29,17 @@ function getShortcutLabel(binding: unknown) {
 }
 
 export component SessionLaunchLoadingSelect(props: { label: string }) {
+  const open = useSignal(false)
+
   <SessionInputSelect
     disabled={true}
     filterable={false}
     items={[]}
     label={props.label}
     loading={true}
-    open={false}
+    {open}
     placeholder="Loading options..."
     value={null}
-    onOpenChange={() => {}}
     onValueChange={() => {}}
   />
 }
@@ -69,13 +71,10 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
     filterable={true}
     {items}
     label="Adapter"
-    open={form.openPicker.value === "adapter"}
+    open={form.getPickerOpen("adapter")}
     placeholder="Select an adapter"
     shortcut={adapterShortcut}
     value={form.draftAdapterId.value}
-    onOpenChange={(open) => {
-      form.setOpenPicker(open ? "adapter" : null)
-    }}
     onValueChange={(value) => {
       form.draftAdapterId.value = value
       form.launchPreview.value = null
@@ -136,12 +135,9 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
     filterable={true}
     {items}
     label="Working directory"
-    open={form.openPicker.value === "subpackage"}
+    open={form.getPickerOpen("subpackage")}
     placeholder="Project root"
     value={selectedValue}
-    onOpenChange={(open) => {
-      form.setOpenPicker(open ? "subpackage" : null)
-    }}
     onValueChange={(value) => {
       form.draftSubpackagePath.value = value === projectPath ? null : value
       form.launchPreview.value = null
@@ -245,13 +241,10 @@ export component SessionLaunchPreviewSelectors(props: {
       filterable={false}
       items={locationItems}
       label="Launch location"
-      open={form.openPicker.value === "location"}
+      open={form.getPickerOpen("location")}
       placeholder="Choose where to launch"
       shortcut={locationShortcut}
       value={form.draftLocation.value}
-      onOpenChange={(open) => {
-        form.setOpenPicker(open ? "location" : null)
-      }}
       onValueChange={(value) => {
         form.draftLocation.value = value as "local" | "worktree"
       }}
@@ -261,13 +254,10 @@ export component SessionLaunchPreviewSelectors(props: {
       filterable={true}
       items={branchItems}
       label="Git branch"
-      open={form.openPicker.value === "branch"}
+      open={form.getPickerOpen("branch")}
       placeholder="Choose a branch"
       shortcut={branchShortcut}
       value={form.draftBaseBranchName.value}
-      onOpenChange={(open) => {
-        form.setOpenPicker(open ? "branch" : null)
-      }}
       onValueChange={(value) => {
         form.draftBaseBranchName.value = value
       }}
@@ -279,13 +269,10 @@ export component SessionLaunchPreviewSelectors(props: {
       filterable={true}
       items={modelItems}
       label="Model"
-      open={form.openPicker.value === "model"}
+      open={form.getPickerOpen("model")}
       placeholder="Use the adapter default model"
       shortcut={modelShortcut}
       value={form.draftModelId.value}
-      onOpenChange={(open) => {
-        form.setOpenPicker(open ? "model" : null)
-      }}
       onValueChange={(value) => {
         form.draftModelId.value = value
       }}
@@ -295,15 +282,12 @@ export component SessionLaunchPreviewSelectors(props: {
       filterable={false}
       items={thinkingItems}
       label="Thinking level"
-      open={form.openPicker.value === "thinking"}
+      open={form.getPickerOpen("thinking")}
       placeholder="Use the adapter default"
       shortcut={thinkingShortcut}
       value={typeof form.draftThinkingValue.value === "boolean"
         ? String(form.draftThinkingValue.value)
         : form.draftThinkingValue.value ?? null}
-      onOpenChange={(open) => {
-        form.setOpenPicker(open ? "thinking" : null)
-      }}
       onValueChange={(value) => {
         form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
           ? value === "true"
