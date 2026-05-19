@@ -53,7 +53,10 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
       const id = `${namespaceKey as string}.${commandKey as string}`
       return Object.assign(
         function (match?: ShortcutMatch) {
-          if (!hasActiveAppCommandHandler(id as AppCommandId)) {
+          if (
+            (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[id as AppCommandId] ??
+              0) === 0
+          ) {
             return
           }
 
@@ -152,16 +155,6 @@ export const appCommandList = Object.values(AppCommand).flatMap(
   (commands) => Object.values(commands) as AppCommand[],
 )
 
-function hasActiveAppCommandHandler(commandId: AppCommandId) {
-  return (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[commandId] ?? 0) > 0
-}
-
-function hasAnyAppCommandHandler(commandId: AppCommandId) {
-  return Object.values(appCommandHandlerCounts.value).some(
-    (layerCounts) => (layerCounts[commandId] ?? 0) > 0,
-  )
-}
-
 function registerAppCommandHandler(layerId: string, commandId: AppCommandId) {
   const currentCounts = appCommandHandlerCounts.value
   const currentLayerCounts = currentCounts[layerId] ?? {}
@@ -196,11 +189,13 @@ function registerAppCommandHandler(layerId: string, commandId: AppCommandId) {
 }
 
 export function isAppCommandHandled(commandId: AppCommandId) {
-  return hasActiveAppCommandHandler(commandId)
+  return (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[commandId] ?? 0) > 0
 }
 
 export function isAppCommandHandledAnywhere(commandId: AppCommandId) {
-  return hasAnyAppCommandHandler(commandId)
+  return Object.values(appCommandHandlerCounts.value).some(
+    (layerCounts) => (layerCounts[commandId] ?? 0) > 0,
+  )
 }
 
 export function useAppCommand(
