@@ -8,7 +8,7 @@ import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks"
 import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
-import { isCommandAvailable } from "./commands/command-context.ts"
+import { isCommandPaletteVisible } from "./commands/command-context.ts"
 import { Modal } from "./lib/modal.tsrx"
 import { isEmptyQuery } from "./lib/search-query.ts"
 
@@ -39,7 +39,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
   const visibleCommands = (() => {
     const availableCommands = preparedAppCommands.filter(
       (entry) => entry.command.id !== "navigation.openCommandPalette" &&
-        isCommandAvailable(shortcutRegistry.runtime, entry.command),
+        isCommandPaletteVisible(shortcutRegistry.runtime, entry.command),
     )
 
     if (isEmptyQuery(search.value)) {
@@ -73,7 +73,9 @@ component CommandPalette(props: { open: Signal<boolean> }) {
 
   function selectCommand(command: AppCommand) {
     props.open.value = false
-    command()
+    window.setTimeout(() => {
+      command()
+    }, 0)
   }
 
   function moveActiveIndex(delta: number) {

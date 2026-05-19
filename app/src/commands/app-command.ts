@@ -156,6 +156,12 @@ function hasActiveAppCommandHandler(commandId: AppCommandId) {
   return (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[commandId] ?? 0) > 0
 }
 
+function hasAnyAppCommandHandler(commandId: AppCommandId) {
+  return Object.values(appCommandHandlerCounts.value).some(
+    (layerCounts) => (layerCounts[commandId] ?? 0) > 0,
+  )
+}
+
 function registerAppCommandHandler(layerId: string, commandId: AppCommandId) {
   const currentCounts = appCommandHandlerCounts.value
   const currentLayerCounts = currentCounts[layerId] ?? {}
@@ -191,6 +197,10 @@ function registerAppCommandHandler(layerId: string, commandId: AppCommandId) {
 
 export function isAppCommandHandled(commandId: AppCommandId) {
   return hasActiveAppCommandHandler(commandId)
+}
+
+export function isAppCommandHandledAnywhere(commandId: AppCommandId) {
+  return hasAnyAppCommandHandler(commandId)
 }
 
 export function useAppCommand(

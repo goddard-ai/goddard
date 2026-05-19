@@ -1,7 +1,7 @@
 import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
-import { isAppCommandHandled } from "~/commands/app-command.ts"
+import { isAppCommandHandled, isAppCommandHandledAnywhere } from "~/commands/app-command.ts"
 import type { MainTabItemId } from "~/main-tab-items.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import type { WorkbenchContentKind } from "~/workbench-tab-set.ts"
@@ -40,6 +40,20 @@ export function isCommandAvailable(runtime: ShortcutRuntime, input: RunnableInpu
   const commandId = "id" in input ? (input.id as AppCommandId) : null
 
   if (commandId && !isAppCommandHandled(commandId)) {
+    return false
+  }
+
+  return runtime.isAvailable(input)
+}
+
+/** Checks whether a command can be shown from the command palette across command layers. */
+export function isCommandPaletteVisible(runtime: ShortcutRuntime, input: RunnableInput) {
+  const snapshot = commandAvailabilitySnapshot.value
+  runtime.batchContext(snapshot.whenContext)
+
+  const commandId = "id" in input ? (input.id as AppCommandId) : null
+
+  if (commandId && !isAppCommandHandledAnywhere(commandId)) {
     return false
   }
 

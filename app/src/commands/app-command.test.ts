@@ -3,7 +3,7 @@ import { Fragment, h, render } from "preact"
 
 import { ShortcutRegistry } from "~/shortcuts/shortcut-registry.ts"
 import { AppCommand, useAppCommand } from "./app-command.ts"
-import { commandContext, isCommandAvailable } from "./command-context.ts"
+import { commandContext, isCommandAvailable, isCommandPaletteVisible } from "./command-context.ts"
 import { CommandLayerProvider } from "./command-layer.tsrx"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
@@ -428,6 +428,38 @@ test("session input commands require a handler in the active command layer", asy
     expect(isCommandAvailable(registry.runtime, AppCommand.sessionInput.openProjectSelector)).toBe(
       true,
     )
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("command palette visibility can include handlers outside the active command layer", async () => {
+  const { registry, cleanup } = createTestRegistry()
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  try {
+    render(
+      h(
+        Fragment,
+        {},
+        h(TestCommandHandler, {
+          command: AppCommand.navigation.openNewSessionDialog,
+          onMatch() {},
+        }),
+        h(CommandLayerProvider, { active: true }, null),
+      ),
+      container,
+    )
+    await flushRenderEffects()
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.navigation.openNewSessionDialog)).toBe(
+      false,
+    )
+    expect(
+      isCommandPaletteVisible(registry.runtime, AppCommand.navigation.openNewSessionDialog),
+    ).toBe(true)
   } finally {
     render(null, container)
     cleanup()
