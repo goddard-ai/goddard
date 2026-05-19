@@ -6,7 +6,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 
 - Prefer one exported page component that shows the whole page skeleton when the boundary is only used once.
 - Inline single-use local components unless extraction gives the JSX a meaningful reusable concept.
-- Keep `export default` on the `component` declaration when the module exports one primary page component.
+- For workbench tab components, keep `export default` on the `component` declaration when the module exports one primary tab surface.
 - Avoid relay components whose main job is to rename loaded data or forward props into a single child.
 
 ## Use TSRX Control Flow Directly

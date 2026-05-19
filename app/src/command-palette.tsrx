@@ -1,4 +1,3 @@
-/** Renders the app-wide command palette. */
 import { token } from "@goddard-ai/styled-system/tokens"
 import { type Signal, useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
