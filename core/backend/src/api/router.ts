@@ -1,3 +1,4 @@
+import * as authRoutes from "@goddard-ai/auth/backend"
 import type { RepoEvent } from "@goddard-ai/schema/backend"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
@@ -21,123 +22,126 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
   const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
 
-  return createRouter<Env>({ debug: false }).use(routes, {
-    authDeviceStartRoute: {
-      POST: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.startDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+  return createRouter<Env>({ debug: false }).use(
+    { ...authRoutes, ...routes },
+    {
+      authDeviceStartRoute: {
+        POST: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            return await controlPlane.startDeviceFlow(ctx.body)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    authDeviceCompleteRoute: {
-      POST: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.completeDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      authDeviceCompleteRoute: {
+        POST: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            return await controlPlane.completeDeviceFlow(ctx.body)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    authSessionRoute: {
-      GET: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          return await controlPlane.getSession(token)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      authSessionRoute: {
+        GET: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            const token = readBearerToken(ctx.headers.authorization)
+            return await controlPlane.getSession(token)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    prCreateRoute: {
-      POST: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const pr = await controlPlane.createPr(token, ctx.body, env)
+      prCreateRoute: {
+        POST: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastEvent(env, {
-            type: "pr.created",
-            owner: pr.owner,
-            repo: pr.repo,
-            prNumber: pr.number,
-            title: pr.title,
-            author: pr.createdBy,
-            createdAt: pr.createdAt,
-          })
+            await broadcastEvent(env, {
+              type: "pr.created",
+              owner: pr.owner,
+              repo: pr.repo,
+              prNumber: pr.number,
+              title: pr.title,
+              author: pr.createdBy,
+              createdAt: pr.createdAt,
+            })
 
-          return pr
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+            return pr
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    prManagedRoute: {
-      GET: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
-          const { owner, repo, prNumber } = ctx.query
-          assertRepo(owner, repo)
-          const managed = await controlPlane.isManagedPr(
-            owner,
-            repo,
-            prNumber,
-            session.githubUsername,
-          )
-          return { managed }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      prManagedRoute: {
+        GET: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            const token = readBearerToken(ctx.headers.authorization)
+            const session = await controlPlane.getSession(token)
+            const { owner, repo, prNumber } = ctx.query
+            assertRepo(owner, repo)
+            const managed = await controlPlane.isManagedPr(
+              owner,
+              repo,
+              prNumber,
+              session.githubUsername,
+            )
+            return { managed }
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    prReplyRoute: {
-      POST: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          await controlPlane.replyToPr(token, ctx.body, env)
-          return { success: true }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      prReplyRoute: {
+        POST: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            await controlPlane.replyToPr(token, ctx.body, env)
+            return { success: true }
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    githubWebhookRoute: {
-      POST: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const event = await controlPlane.handleGitHubWebhook(ctx.body)
-          await broadcastEvent(env, event)
-          return event
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      githubWebhookRoute: {
+        POST: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const event = await controlPlane.handleGitHubWebhook(ctx.body)
+            await broadcastEvent(env, event)
+            return event
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-    },
-    repoStreamRoute: {
-      GET: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
+      repoStreamRoute: {
+        GET: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            const session = await controlPlane.getSession(token)
 
-          return await handleUserStream(env, session.githubUsername, ctx.request)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+            return await handleUserStream(env, session.githubUsername, ctx.request)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
     },
-  })
+  )
 }
 
 /** Builds the default Turso-backed control-plane implementation for one request environment. */

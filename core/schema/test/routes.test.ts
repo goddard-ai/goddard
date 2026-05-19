@@ -1,9 +1,11 @@
-import { expect, test } from "bun:test"
-
 import {
   authDeviceCompleteRoute,
   authDeviceStartRoute,
   authSessionRoute,
+} from "@goddard-ai/auth/backend"
+import { expect, test } from "bun:test"
+
+import {
   githubWebhookRoute,
   prCreateRoute,
   prManagedRoute,

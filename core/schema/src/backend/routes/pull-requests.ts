@@ -1,6 +1,6 @@
+import { BearerHeaders } from "@goddard-ai/auth/schema"
 import { $type, route } from "rouzer"
 
-import { BearerHeaders } from "../../auth.ts"
 import {
   CreatePrInput,
   ManagedPrQuery,

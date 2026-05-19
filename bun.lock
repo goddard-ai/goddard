@@ -106,6 +106,7 @@
         "goddard-backend": "./dist/server.mjs",
       },
       "dependencies": {
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@hattip/adapter-cloudflare-workers": "^0.0.49",
         "@hattip/adapter-node": "^0.0.49",
@@ -138,6 +139,7 @@
         "@agentclientprotocol/sdk": "catalog:",
         "@b9g/async-context": "^0.2.1",
         "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/config": "workspace:^",
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/daemon-plugin": "workspace:*",
@@ -221,6 +223,7 @@
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/pull-request": "workspace:*",
@@ -236,6 +239,7 @@
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
@@ -283,6 +287,17 @@
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
+    "features/auth": {
+      "name": "@goddard-ai/auth",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "rouzer": "catalog:",
         "zod": "catalog:",
       },
     },
@@ -676,6 +691,8 @@
     "@goddard-ai/app": ["@goddard-ai/app@workspace:app"],
 
     "@goddard-ai/app-plugin": ["@goddard-ai/app-plugin@workspace:core/app-plugin"],
+
+    "@goddard-ai/auth": ["@goddard-ai/auth@workspace:features/auth"],
 
     "@goddard-ai/backend": ["@goddard-ai/backend@workspace:core/backend"],
 

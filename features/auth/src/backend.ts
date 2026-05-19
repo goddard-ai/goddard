@@ -1,12 +1,12 @@
 import { $type, route } from "rouzer"
 
-import { BearerHeaders } from "../../auth.ts"
 import {
+  AuthSession,
+  BearerHeaders,
   DeviceFlowComplete,
   DeviceFlowStart,
-  type AuthSession,
   type DeviceFlowSession,
-} from "../auth.ts"
+} from "./schema.ts"
 
 /** Starts the GitHub device flow for a pending user session. */
 export const authDeviceStartRoute = route("auth/device/start", {

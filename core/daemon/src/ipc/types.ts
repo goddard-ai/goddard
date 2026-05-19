@@ -3,7 +3,7 @@ import type {
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
-} from "@goddard-ai/schema/backend"
+} from "@goddard-ai/auth/schema"
 
 export type PrCreateInput = {
   owner: string

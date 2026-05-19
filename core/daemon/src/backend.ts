@@ -1,9 +1,12 @@
+import * as authRoutes from "@goddard-ai/auth/backend"
 import type {
   AuthSession,
-  CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+} from "@goddard-ai/auth/schema"
+import type {
+  CreatePrInput,
   PullRequestRecord,
   RepoRef,
   StreamMessage,
@@ -117,7 +120,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   const rouzerClient = createClient({
     baseURL: options.baseUrl,
     fetch: options.fetchImpl ?? fetch,
-    routes,
+    routes: { ...authRoutes, ...routes },
   })
 
   return {

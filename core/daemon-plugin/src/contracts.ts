@@ -108,6 +108,31 @@ export type DaemonSetupSubstrate = {
     prNumber: number,
   ) => void | Promise<void>
   readonly backendClient: {
+    readonly auth: {
+      readonly startDeviceFlow: (input?: {
+        readonly githubUsername?: string | undefined
+      }) => Promise<{
+        readonly deviceCode: string
+        readonly userCode: string
+        readonly verificationUri: string
+        readonly expiresIn: number
+        readonly interval: number
+      }>
+      readonly completeDeviceFlow: (input: {
+        readonly deviceCode: string
+        readonly githubUsername: string
+      }) => Promise<{
+        readonly token: string
+        readonly githubUsername: string
+        readonly githubUserId: number
+      }>
+      readonly whoami: () => Promise<{
+        readonly token: string
+        readonly githubUsername: string
+        readonly githubUserId: number
+      }>
+      readonly logout: () => Promise<void>
+    }
     readonly pr: {
       readonly create: (input: {
         readonly owner: string
@@ -124,6 +149,10 @@ export type DaemonSetupSubstrate = {
         readonly body: string
       }) => Promise<{ readonly success: boolean }>
     }
+  }
+  readonly authTokenStore: {
+    readonly set: (token: string) => void | Promise<void>
+    readonly delete: () => void | Promise<void>
   }
   readonly configManager: {
     readonly getRootConfig: (cwd: string) => Promise<any>

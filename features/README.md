@@ -44,6 +44,11 @@ feature becomes part of a supported product surface.
 
 ## Current Feature Boundaries
 
+`features/auth` owns auth schemas, backend auth route contracts, daemon auth IPC
+handlers, and SDK auth namespace construction. Backend storage, GitHub device
+flow persistence, daemon token persistence, and HTTP/router substrate remain in
+core packages.
+
 `features/inbox` owns inbox IPC, SDK namespace construction, app metadata, inbox
 manager logic, inbox metadata resolution, and inbox item state transitions.
 Daemon persistence remains core substrate.

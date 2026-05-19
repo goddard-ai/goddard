@@ -1,8 +1,8 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
+import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
-import type { DeviceFlowComplete, DeviceFlowStart } from "@goddard-ai/schema/backend"
 import type {
   CancelSessionRequest,
   CancelWorkforceRequest,
@@ -54,9 +54,10 @@ import {
   type SessionPromptRequest,
 } from "./session.ts"
 
-const sdkPlugins = composeSdkPlugins([adapterSdkPlugin, inboxSdkPlugin])
+const sdkPlugins = composeSdkPlugins([adapterSdkPlugin, authSdkPlugin, inboxSdkPlugin])
 
 type FeatureSdkNamespaces = ReturnType<typeof adapterSdkPlugin.create> &
+  ReturnType<typeof authSdkPlugin.create> &
   ReturnType<typeof inboxSdkPlugin.create>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
@@ -76,24 +77,6 @@ function createDaemonNamespace(client: DaemonIpcClient) {
   return {
     /** Probes daemon liveness without adding SDK-specific behavior. */
     health: async () => client.send("daemon.health"),
-  }
-}
-
-/** Builds the auth namespace with one thin method per daemon auth IPC action. */
-function createAuthNamespace(client: DaemonIpcClient) {
-  return {
-    /** Starts one GitHub device flow through the daemon auth contract. */
-    startDeviceFlow: async (input: DeviceFlowStart) => client.send("auth.device.start", input),
-
-    /** Completes one pending GitHub device flow through the daemon auth contract. */
-    completeDeviceFlow: async (input: DeviceFlowComplete) =>
-      client.send("auth.device.complete", input),
-
-    /** Reads the current daemon-owned auth session as-is. */
-    whoami: async () => client.send("auth.whoami"),
-
-    /** Clears the current daemon-owned auth session as-is. */
-    logout: async () => client.send("auth.logout"),
   }
 }
 
@@ -312,7 +295,7 @@ export class GoddardSdk {
   }
 
   get auth() {
-    return defineCachedNamespace(this, "auth", createAuthNamespace(this.#client))
+    return defineCachedNamespace(this, "auth", this.#features.auth)
   }
 
   get adapter() {

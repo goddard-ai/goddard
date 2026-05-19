@@ -31,6 +31,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/adapter": "workspace:*",
+    "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",

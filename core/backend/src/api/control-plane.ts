@@ -1,9 +1,11 @@
 import type {
   AuthSession,
-  CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+} from "@goddard-ai/auth/schema"
+import type {
+  CreatePrInput,
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,

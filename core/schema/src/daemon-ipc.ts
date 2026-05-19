@@ -1,10 +1,10 @@
 import { adapterIpcSchema } from "@goddard-ai/adapter/daemon-ipc"
+import { authIpcSchema } from "@goddard-ai/auth/daemon-ipc"
 import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
 import { sessionIpcSchema } from "@goddard-ai/session/daemon-ipc"
 import { z } from "zod"
 
-import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./backend.ts"
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
   GetLoopRequest,
@@ -51,20 +51,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
   requests: {
     "daemon.health": {
       response: $type<{ ok: boolean }>(),
-    },
-    "auth.device.start": {
-      payload: DeviceFlowStart,
-      response: $type<DeviceFlowSession>(),
-    },
-    "auth.device.complete": {
-      payload: DeviceFlowComplete,
-      response: $type<AuthSession>(),
-    },
-    "auth.whoami": {
-      response: $type<AuthSession>(),
-    },
-    "auth.logout": {
-      response: $type<{ success: true }>(),
     },
     "pr.submit": {
       payload: SubmitPrRequest.extend({
@@ -161,6 +147,7 @@ const coreDaemonIpcSchema = defineIpcSchema({
 export const daemonIpcSchema = composeIpcSchemas([
   coreDaemonIpcSchema,
   adapterIpcSchema,
+  authIpcSchema,
   inboxIpcSchema,
   sessionIpcSchema,
 ]) satisfies IpcSchema

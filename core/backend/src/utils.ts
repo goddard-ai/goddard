@@ -1,4 +1,4 @@
-import type { AuthSession } from "@goddard-ai/schema/backend"
+import type { AuthSession } from "@goddard-ai/auth/schema"
 
 import type { SessionRecord, StreamSink } from "./api/in-memory-control-plane.ts"
 

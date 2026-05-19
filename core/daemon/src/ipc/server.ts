@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
+import { authPlugin } from "@goddard-ai/auth/daemon"
 import {
   composePlugins,
   type DaemonSetupSubstrate,
@@ -39,7 +40,13 @@ import { createWorkforceManager, type WorkforceManager } from "../workforce/inde
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { BackendPrClient, DaemonServer } from "./types.ts"
 
-const daemonPlugins = composePlugins([adapterPlugin, sessionPlugin, inboxPlugin, pullRequestPlugin])
+const daemonPlugins = composePlugins([
+  adapterPlugin,
+  authPlugin,
+  sessionPlugin,
+  inboxPlugin,
+  pullRequestPlugin,
+])
 configureDbSchema(daemonPlugins.db)
 
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
@@ -181,6 +188,14 @@ export async function startDaemonServer(
 
   const daemonSubstrate = {
     addAllowedPrToSession,
+    authTokenStore: {
+      set: (token) => {
+        db.metadata.set("authToken", token)
+      },
+      delete: () => {
+        db.metadata.delete("authToken")
+      },
+    },
     backendClient: client,
     configManager,
     getSessionByToken,
@@ -209,18 +224,6 @@ export async function startDaemonServer(
 
   const requestHandlers = {
     "daemon.health": async () => ({ ok: true }),
-    "auth.device.start": async (payload) => client.auth.startDeviceFlow(payload),
-    "auth.device.complete": async (payload) => {
-      const session = await client.auth.completeDeviceFlow(payload)
-      db.metadata.set("authToken", session.token)
-      return session
-    },
-    "auth.whoami": async () => client.auth.whoami(),
-    "auth.logout": async () => {
-      await client.auth.logout()
-      db.metadata.delete("authToken")
-      return { success: true as const }
-    },
     ...pluginSetup.requestHandlers,
     "action.run": async (payload) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)

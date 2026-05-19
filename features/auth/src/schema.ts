@@ -1,5 +1,12 @@
 import { z } from "zod"
 
+/** Standard authenticated HTTP headers shared by auth-owned backend routes. */
+export const BearerHeaders = z.object({
+  authorization: z.string(),
+})
+
+export type BearerHeaders = z.infer<typeof BearerHeaders>
+
 /** Request payload that starts one GitHub device authorization flow. */
 export const DeviceFlowStart = z.object({
   githubUsername: z.string().optional(),
