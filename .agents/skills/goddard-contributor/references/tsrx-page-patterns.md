@@ -64,6 +64,7 @@ Use these patterns when refining page-like TSRX components. In app guidance, a p
 ## Place Logic Near Use
 
 - Put hooks, derived values, and event handlers near the JSX that uses them. TSRX supports hooks anywhere in component scope, including inside JSX expression blocks and conditional branches.
+- Do not hoist hooks, variables, or helper declarations to the top of a component solely to satisfy React-style hook ordering habits. Keep them in the smallest readable scope that still preserves the state lifetime and dependencies they need.
 - Move purely presentational derived values into the JSX subtree that renders them.
 - Avoid a large top-of-component variable block when the values are only meaningful in one local region.
 - Avoid local aliases that only hide useful ownership or reactivity context such as `page.*` or `*.value`.

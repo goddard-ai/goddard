@@ -20,20 +20,18 @@ const preparedAppCommands = appCommandList.map(
 )
 
 component CommandPalette(props: { open: Signal<boolean> }) {
-  const isOpen = props.open.value
   const shortcutRegistry = useShortcutRegistry()
   const titleId = useId()
-  const inputId = useId()
   const listboxId = useId()
   const search = useSignal("")
   const activeIndex = useSignal(0)
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
-    if (!isOpen && search.value.length > 0) {
+    if (!props.open.value && search.value.length > 0) {
       search.value = ""
     }
-  }, [isOpen, search.value])
+  }, [props.open.value, search.value])
 
   const visibleCommands = (() => {
     const availableCommands = preparedAppCommands.filter(
@@ -60,7 +58,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
 
   useEffect(() => {
     activeIndex.value = 0
-  }, [isOpen, visibleCommandIds])
+  }, [props.open.value, visibleCommandIds])
 
   useLayoutEffect(() => {
     if (!activeCommand) {
@@ -124,13 +122,15 @@ component CommandPalette(props: { open: Signal<boolean> }) {
       class={styles.root}
       role="combobox"
       aria-controls={listboxId}
-      aria-expanded={isOpen}
+      aria-expanded={props.open.value}
       aria-haspopup="listbox"
       aria-labelledby={titleId}
       aria-owns={listboxId}
       onKeyDown={handleKeyDown}
     >
       <div class={styles.searchRow}>
+        const inputId = useId()
+
         <Search aria-hidden={true} class={styles.searchIcon} size={16} />
         <input
           id={inputId}
