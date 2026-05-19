@@ -88,33 +88,28 @@ component CommandPalette(props: { open: Signal<boolean> }) {
   }
 
   function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault()
-      moveActiveIndex(1)
-      return
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault()
-      moveActiveIndex(-1)
-      return
-    }
-
-    if (event.key === "Home") {
-      event.preventDefault()
-      activeIndex.value = 0
-      return
-    }
-
-    if (event.key === "End") {
-      event.preventDefault()
-      activeIndex.value = Math.max(visibleCommands.length - 1, 0)
-      return
-    }
-
-    if (event.key === "Enter" && activeCommand) {
-      event.preventDefault()
-      selectCommand(activeCommand)
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault()
+        moveActiveIndex(1)
+        return
+      case "ArrowUp":
+        event.preventDefault()
+        moveActiveIndex(-1)
+        return
+      case "Home":
+        event.preventDefault()
+        activeIndex.value = 0
+        return
+      case "End":
+        event.preventDefault()
+        activeIndex.value = Math.max(visibleCommands.length - 1, 0)
+        return
+      case "Enter":
+        if (activeCommand) {
+          event.preventDefault()
+          selectCommand(activeCommand)
+        }
     }
   }
 
