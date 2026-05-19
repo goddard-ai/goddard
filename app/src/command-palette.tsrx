@@ -53,8 +53,9 @@ component CommandPalette(props: { open: Signal<boolean> }) {
       { threshold: 0 },
     ).items.map((entry) => entry.value.command)
   })()
-  const activeCommand = visibleCommands[activeIndex.value] ?? visibleCommands[0] ?? null
+
   const visibleCommandIds = visibleCommands.map((command) => command.id).join("\n")
+  const activeCommand = visibleCommands[activeIndex.value] ?? visibleCommands[0] ?? null
 
   useEffect(() => {
     activeIndex.value = 0
@@ -68,48 +69,6 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     itemRefs.current[activeCommand.id]?.scrollIntoView({ block: "nearest" })
   }, [activeCommand?.id])
 
-  function selectCommand(command: AppCommand) {
-    props.open.value = false
-    window.setTimeout(() => {
-      command()
-    }, 0)
-  }
-
-  function moveActiveIndex(delta: number) {
-    if (visibleCommands.length === 0) {
-      return
-    }
-
-    activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
-    visibleCommands.length
-  }
-
-  function handleKeyDown(event: KeyboardEvent) {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault()
-        moveActiveIndex(1)
-        return
-      case "ArrowUp":
-        event.preventDefault()
-        moveActiveIndex(-1)
-        return
-      case "Home":
-        event.preventDefault()
-        activeIndex.value = 0
-        return
-      case "End":
-        event.preventDefault()
-        activeIndex.value = Math.max(visibleCommands.length - 1, 0)
-        return
-      case "Enter":
-        if (activeCommand) {
-          event.preventDefault()
-          selectCommand(activeCommand)
-        }
-    }
-  }
-
   <Modal
     open={props.open}
     {titleId}
@@ -118,6 +77,48 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     contentClass={styles.content}
   >
     <h2 id={titleId} class={styles.title}>"Command menu"</h2>
+    const selectCommand = (command: AppCommand) => {
+      props.open.value = false
+      window.setTimeout(() => {
+        command()
+      }, 0)
+    }
+
+    const moveActiveIndex = (delta: number) => {
+      if (visibleCommands.length === 0) {
+        return
+      }
+
+      activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
+      visibleCommands.length
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      switch (event.key) {
+        case "ArrowDown":
+          event.preventDefault()
+          moveActiveIndex(1)
+          return
+        case "ArrowUp":
+          event.preventDefault()
+          moveActiveIndex(-1)
+          return
+        case "Home":
+          event.preventDefault()
+          activeIndex.value = 0
+          return
+        case "End":
+          event.preventDefault()
+          activeIndex.value = Math.max(visibleCommands.length - 1, 0)
+          return
+        case "Enter":
+          if (activeCommand) {
+            event.preventDefault()
+            selectCommand(activeCommand)
+          }
+      }
+    }
+
     <div
       class={styles.root}
       role="combobox"
