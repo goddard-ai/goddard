@@ -2,8 +2,8 @@ import { adapterIpcSchema } from "@goddard-ai/adapter/daemon-ipc"
 import { authIpcSchema } from "@goddard-ai/auth/daemon-ipc"
 import { inboxIpcSchema } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcSchemas, defineIpcSchema, IpcSchema } from "@goddard-ai/ipc"
+import { pullRequestIpcSchema } from "@goddard-ai/pull-request/daemon-ipc"
 import { sessionIpcSchema } from "@goddard-ai/session/daemon-ipc"
-import { z } from "zod"
 
 import { RunNamedActionRequest } from "./daemon/actions.ts"
 import {
@@ -15,14 +15,6 @@ import {
   type ShutdownLoopResponse,
   type StartLoopResponse,
 } from "./daemon/loops.ts"
-import {
-  GetPullRequestRequest,
-  ReplyPrRequest,
-  SubmitPrRequest,
-  type GetPullRequestResponse,
-  type ReplyPrResponse,
-  type SubmitPrResponse,
-} from "./daemon/pull-requests.ts"
 import { type CreateSessionResponse } from "./daemon/sessions.ts"
 import {
   CancelWorkforceRequest,
@@ -51,22 +43,6 @@ const coreDaemonIpcSchema = defineIpcSchema({
   requests: {
     "daemon.health": {
       response: $type<{ ok: boolean }>(),
-    },
-    "pr.submit": {
-      payload: SubmitPrRequest.extend({
-        token: z.string(),
-      }),
-      response: $type<SubmitPrResponse>(),
-    },
-    "pr.get": {
-      payload: GetPullRequestRequest,
-      response: $type<GetPullRequestResponse>(),
-    },
-    "pr.reply": {
-      payload: ReplyPrRequest.extend({
-        token: z.string(),
-      }),
-      response: $type<ReplyPrResponse>(),
     },
     "action.run": {
       payload: RunNamedActionRequest,
@@ -149,5 +125,6 @@ export const daemonIpcSchema = composeIpcSchemas([
   adapterIpcSchema,
   authIpcSchema,
   inboxIpcSchema,
+  pullRequestIpcSchema,
   sessionIpcSchema,
 ]) satisfies IpcSchema

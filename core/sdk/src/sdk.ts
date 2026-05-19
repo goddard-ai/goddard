@@ -3,6 +3,7 @@ import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
+import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import type {
   CancelSessionRequest,
   CancelWorkforceRequest,
@@ -11,13 +12,11 @@ import type {
   DeclareSessionInitiativeRequest,
   DiscoverWorkforceCandidatesRequest,
   GetLoopRequest,
-  GetPullRequestRequest,
   GetSessionChangesRequest,
   GetSessionHistoryRequest,
   GetWorkforceRequest,
   InitializeWorkforceRequest,
   ListSessionsRequest,
-  ReplyPrRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
@@ -33,7 +32,6 @@ import type {
   StartLoopRequest,
   StartWorkforceRequest,
   SteerSessionRequest,
-  SubmitPrRequest,
   SubscribeWorkforceEventsRequest,
   SuspendWorkforceRequest,
   TruncateWorkforceRequest,
@@ -54,11 +52,17 @@ import {
   type SessionPromptRequest,
 } from "./session.ts"
 
-const sdkPlugins = composeSdkPlugins([adapterSdkPlugin, authSdkPlugin, inboxSdkPlugin])
+const sdkPlugins = composeSdkPlugins([
+  adapterSdkPlugin,
+  authSdkPlugin,
+  inboxSdkPlugin,
+  pullRequestSdkPlugin,
+])
 
 type FeatureSdkNamespaces = ReturnType<typeof adapterSdkPlugin.create> &
   ReturnType<typeof authSdkPlugin.create> &
-  ReturnType<typeof inboxSdkPlugin.create>
+  ReturnType<typeof inboxSdkPlugin.create> &
+  ReturnType<typeof pullRequestSdkPlugin.create>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -77,20 +81,6 @@ function createDaemonNamespace(client: DaemonIpcClient) {
   return {
     /** Probes daemon liveness without adding SDK-specific behavior. */
     health: async () => client.send("daemon.health"),
-  }
-}
-
-/** Builds the pull request namespace with one thin method per daemon PR IPC action. */
-function createPrNamespace(client: DaemonIpcClient) {
-  return {
-    /** Submits one pull request through the daemon PR contract. */
-    submit: async (input: SubmitPrRequest & { token: string }) => client.send("pr.submit", input),
-
-    /** Fetches one daemon-managed pull request by tagged id. */
-    get: async (input: GetPullRequestRequest) => client.send("pr.get", input),
-
-    /** Posts one pull request reply through the daemon PR contract. */
-    reply: async (input: ReplyPrRequest & { token: string }) => client.send("pr.reply", input),
   }
 }
 
@@ -303,7 +293,7 @@ export class GoddardSdk {
   }
 
   get pr() {
-    return defineCachedNamespace(this, "pr", createPrNamespace(this.#client))
+    return defineCachedNamespace(this, "pr", this.#features.pr)
   }
 
   get inbox() {

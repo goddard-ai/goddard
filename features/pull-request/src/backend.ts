@@ -3,10 +3,12 @@ import { $type, route } from "rouzer"
 
 import {
   CreatePrInput,
+  GitHubWebhookInput,
   ManagedPrQuery,
   ReplyPrInput,
   type PullRequestRecord,
-} from "../pull-requests.ts"
+  type RepoEvent,
+} from "./schema.ts"
 
 /** Creates a managed pull request through the backend. */
 export const prCreateRoute = route("pr/create", {
@@ -32,5 +34,13 @@ export const prManagedRoute = route("pr/managed", {
     headers: BearerHeaders,
     query: ManagedPrQuery,
     response: $type<{ managed: boolean }>(),
+  },
+})
+
+/** Receives normalized GitHub webhook payloads for managed PR feedback. */
+export const githubWebhookRoute = route("webhooks/github", {
+  POST: {
+    body: GitHubWebhookInput,
+    response: $type<RepoEvent>(),
   },
 })

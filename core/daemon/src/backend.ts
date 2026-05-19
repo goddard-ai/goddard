@@ -5,13 +5,14 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
+import * as pullRequestRoutes from "@goddard-ai/pull-request/backend"
 import type {
   CreatePrInput,
   PullRequestRecord,
-  RepoRef,
   StreamMessage,
-} from "@goddard-ai/schema/backend"
+} from "@goddard-ai/pull-request/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
+import type { RepoRef } from "@goddard-ai/schema/repository"
 import { getErrorMessage } from "radashi"
 import { createClient } from "rouzer"
 
@@ -120,7 +121,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
   const rouzerClient = createClient({
     baseURL: options.baseUrl,
     fetch: options.fetchImpl ?? fetch,
-    routes: { ...authRoutes, ...routes },
+    routes: { ...authRoutes, ...pullRequestRoutes, ...routes },
   })
 
   return {

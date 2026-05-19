@@ -9,7 +9,7 @@ import type {
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
-} from "@goddard-ai/schema/backend"
+} from "@goddard-ai/pull-request/schema"
 import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"

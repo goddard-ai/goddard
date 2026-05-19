@@ -107,6 +107,7 @@
       },
       "dependencies": {
         "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@hattip/adapter-cloudflare-workers": "^0.0.49",
         "@hattip/adapter-node": "^0.0.49",
@@ -243,6 +244,7 @@
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
@@ -321,6 +323,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
@@ -329,6 +332,7 @@
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
         "kindstore": "^0.4.4",
+        "rouzer": "catalog:",
         "zod": "catalog:",
       },
     },

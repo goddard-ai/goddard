@@ -53,6 +53,11 @@ core packages.
 manager logic, inbox metadata resolution, and inbox item state transitions.
 Daemon persistence remains core substrate.
 
+`features/pull-request` owns pull-request schemas, backend PR route and webhook
+contracts, daemon PR IPC handlers, SDK PR namespace construction, git-backed PR
+request resolution, and PR inbox attention behavior. Backend transport, daemon
+IPC server mechanics, and daemon persistence substrate remain in core packages.
+
 `features/session` owns session feature schemas, session-owned daemon IPC
 routes, session lifecycle implementation modules, SDK session method fragments,
 app session metadata, and the first-class daemon `context.session` extension

@@ -10,12 +10,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
-import {
-  createDaemonUrl,
-  readDaemonTcpAddressFromDaemonUrl,
-  resolveReplyRequestFromGit,
-  resolveSubmitRequestFromGit,
-} from "../src/ipc.ts"
+import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
@@ -423,55 +418,6 @@ test("daemon runtime resolves the global daemon port override", async () => {
   })
 
   expect(resolveRuntimeConfig().port).toBe(41236)
-})
-
-test("daemon resolves PR context from git metadata", async () => {
-  const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-git-"))
-  cleanup.push(async () => {
-    await rm(repoDir, { recursive: true, force: true })
-  })
-
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.name", "Goddard"])
-  runGit(repoDir, ["config", "user.email", "goddard@example.com"])
-  await writeFile(join(repoDir, "README.md"), "# test\n", "utf-8")
-  runGit(repoDir, ["add", "README.md"])
-  runGit(repoDir, ["commit", "-m", "init"])
-  runGit(repoDir, ["checkout", "-b", "feature/ipc"])
-  runGit(repoDir, ["remote", "add", "origin", "git@github.com:acme/widgets.git"])
-  await mkdir(join(repoDir, ".git", "refs", "remotes", "origin"), {
-    recursive: true,
-  })
-  await writeFile(
-    join(repoDir, ".git", "refs", "remotes", "origin", "HEAD"),
-    "ref: refs/remotes/origin/main\n",
-  )
-
-  const submit = await resolveSubmitRequestFromGit({
-    cwd: repoDir,
-    title: "Implement IPC routing",
-    body: "Done.",
-  })
-  expect(submit).toEqual({
-    owner: "acme",
-    repo: "widgets",
-    title: "Implement IPC routing",
-    body: "Done.",
-    head: "feature/ipc",
-    base: "main",
-  })
-
-  runGit(repoDir, ["checkout", "-B", "pr-12"])
-  const reply = await resolveReplyRequestFromGit({
-    cwd: repoDir,
-    message: "Updated per review",
-  })
-  expect(reply).toEqual({
-    owner: "acme",
-    repo: "widgets",
-    prNumber: 12,
-    body: "Updated per review",
-  })
 })
 
 function runGit(cwd: string, args: string[]): void {

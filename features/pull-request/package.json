@@ -5,6 +5,14 @@
   "license": "MIT",
   "type": "module",
   "exports": {
+    "./backend": {
+      "types": {
+        "source": "./src/backend.ts",
+        "default": "./dist/backend.d.mts"
+      },
+      "bun": "./src/backend.ts",
+      "import": "./dist/backend.mjs"
+    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -47,6 +55,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
@@ -55,6 +64,7 @@
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "kindstore": "^0.4.4",
+    "rouzer": "catalog:",
     "zod": "catalog:"
   }
 }

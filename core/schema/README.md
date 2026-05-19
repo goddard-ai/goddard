@@ -8,12 +8,9 @@ This package contains schemas for Goddard's core daemon, backend, and shared sub
 
 ## Usage
 
-```typescript
-import { CreatePrInput } from "@goddard-ai/schema/backend"
-
-// Validate payload
-const input = CreatePrInput.parse(payload)
-```
+Core packages import core schemas from this package. Feature-owned schemas should
+be imported from their owning feature package, such as
+`@goddard-ai/pull-request/schema`.
 
 ## License
 

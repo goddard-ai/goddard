@@ -3,14 +3,10 @@ import {
   authDeviceStartRoute,
   authSessionRoute,
 } from "@goddard-ai/auth/backend"
+import { githubWebhookRoute, prCreateRoute, prManagedRoute } from "@goddard-ai/pull-request/backend"
 import { expect, test } from "bun:test"
 
-import {
-  githubWebhookRoute,
-  prCreateRoute,
-  prManagedRoute,
-  repoStreamRoute,
-} from "../src/backend/routes.ts"
+import { repoStreamRoute } from "../src/backend/routes.ts"
 
 test("backend routes keep their stable public paths", () => {
   expect(authDeviceStartRoute.path.source).toBe("auth/device/start")

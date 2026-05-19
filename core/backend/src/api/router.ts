@@ -1,5 +1,6 @@
 import * as authRoutes from "@goddard-ai/auth/backend"
-import type { RepoEvent } from "@goddard-ai/schema/backend"
+import * as pullRequestRoutes from "@goddard-ai/pull-request/backend"
+import type { RepoEvent } from "@goddard-ai/pull-request/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
@@ -23,7 +24,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
 
   return createRouter<Env>({ debug: false }).use(
-    { ...authRoutes, ...routes },
+    { ...authRoutes, ...pullRequestRoutes, ...routes },
     {
       authDeviceStartRoute: {
         POST: async (ctx) => {
