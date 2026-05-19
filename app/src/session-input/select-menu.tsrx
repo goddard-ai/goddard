@@ -1,6 +1,7 @@
 /** Shared custom dropdown used by the launch-session selectors. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
@@ -38,6 +39,7 @@ export type SessionInputSelectProps = {
 export component SessionInputSelect(props: SessionInputSelectProps) {
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
+  const popoverOpen = useSignal(props.open)
 
   const isMenuOpen = props.open
   const isFilterable = props.filterable ?? false
@@ -45,6 +47,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
+
+  useEffect(() => {
+    popoverOpen.value = props.open
+  }, [props.open])
 
   <div class={styles.field}>
     <GoodTooltip
@@ -112,13 +118,11 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       initialFocus={() => isFilterable ? filterInputRef.current : null}
       modalFocus={isFilterable}
       offset={8}
-      open={isMenuOpen}
+      open={popoverOpen}
       placement="bottom-start"
       sameWidth={true}
       strategy="fixed"
-      onOpenChange={(open) => {
-        props.onOpenChange(open)
-      }}
+      onOpenChange={props.onOpenChange}
     >
       <SelectMenuContainer
         items={props.items}

@@ -10,7 +10,7 @@ import { overlayStack } from "./overlay/stack.ts"
 export type PopoverCloseReason = "anchor-lost" | "escape" | "outside"
 
 export type PopoverProps = FloatingPositionOptions & {
-    open: boolean | Signal<boolean>;
+    open: Signal<boolean>;
     anchor: () => HTMLElement | null;
     class?: string;
     closeOnEscape?: boolean;
@@ -23,24 +23,14 @@ export type PopoverProps = FloatingPositionOptions & {
     children?: preact.ComponentChildren;
   }
 
-function readOpen(open: boolean | Signal<boolean>) {
-  return typeof open === "boolean" ? open : open.value
-}
-
-function writeOpen(open: boolean | Signal<boolean>, nextOpen: boolean) {
-  if (typeof open !== "boolean") {
-    open.value = nextOpen
-  }
-}
-
 /** Renders unstyled anchored overlay content for feature-owned popovers. */
 export component Popover(props: PopoverProps) {
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
-  const isOpen = readOpen(props.open)
+  const isOpen = props.open.value
 
   function requestClose(reason: PopoverCloseReason) {
-    writeOpen(props.open, false)
+    props.open.value = false
     props.onOpenChange?.(false, reason)
   }
 
