@@ -1,7 +1,6 @@
 import { type Signal } from "@preact/signals"
 import { useId, useLayoutEffect, useRef } from "preact/hooks"
 
-import { registerModalStackEntry } from "./modal-stack.ts"
 import { startOverlayDismissal } from "./overlay/dismissal.ts"
 import { focusFirstElement, keepFocusInside, restoreFocus } from "./overlay/focus.ts"
 import { OverlayPortal } from "./overlay/portal.tsrx"
@@ -24,7 +23,7 @@ export type ModalProps = {
     children?: preact.ComponentChildren;
   }
 
-/** Renders one modal dialog with owned focus, dismissal, portal, and modal-stack behavior. */
+/** Renders one modal dialog with owned focus, dismissal, and portal behavior. */
 export component Modal(props: ModalProps) {
   const modalId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
@@ -53,12 +52,6 @@ export component Modal(props: ModalProps) {
       id: modalId,
       elements: [contentElement],
     })
-    const unregisterModal = registerModalStackEntry({
-      id: modalId,
-      close() {
-        requestClose("explicit")
-      },
-    })
     const stopDismissal = startOverlayDismissal({
       id: modalId,
       dismissOnEscape: props.closeOnEscape ?? true,
@@ -77,7 +70,6 @@ export component Modal(props: ModalProps) {
 
     return () => {
       stopDismissal()
-      unregisterModal()
       unregisterOverlay()
       restoreFocus(previouslyFocusedElement)
     }

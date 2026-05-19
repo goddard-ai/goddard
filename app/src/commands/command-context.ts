@@ -2,7 +2,6 @@ import { computed, signal } from "@preact/signals"
 import type { RunnableInput, ShortcutRuntime } from "powerkeys"
 
 import { isAppCommandHandled } from "~/commands/app-command.ts"
-import { hasOpenModalDialog } from "~/lib/modal-stack.ts"
 import type { MainTabItemId } from "~/main-tab-items.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import type { WorkbenchContentKind } from "~/workbench-tab-set.ts"
@@ -11,16 +10,13 @@ const activeScopes = signal<readonly string[]>([])
 const activeTabKind = signal<WorkbenchContentKind>("inbox")
 const hasClosableActiveTab = signal(false)
 const selectedKind = signal<MainTabItemId>("inbox")
-const hasCloseTarget = computed(() => {
-  return hasClosableActiveTab.value || hasOpenModalDialog.value
-})
+const hasCloseTarget = computed(() => hasClosableActiveTab.value)
 
 const whenContext = computed(() => {
   return {
     "workbench.activeTabKind": activeTabKind.value,
     "workbench.hasCloseTarget": hasCloseTarget.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
-    "workbench.hasOpenModal": hasOpenModalDialog.value,
     "mainTab.selectedKind": selectedKind.value,
   }
 })
@@ -30,7 +26,6 @@ export const commandContext = {
   activeTabKind,
   hasCloseTarget,
   hasClosableActiveTab,
-  hasOpenModalDialog,
   selectedKind,
   whenContext,
 } as const

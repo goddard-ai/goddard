@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test"
 import { Fragment, h, render } from "preact"
 
-import { registerModalStackEntry } from "~/lib/modal-stack.ts"
 import { ShortcutRegistry } from "~/shortcuts/shortcut-registry.ts"
 import { AppCommand, useAppCommand } from "./app-command.ts"
 import { commandContext, isCommandAvailable } from "./command-context.ts"
@@ -272,7 +271,7 @@ test("command-owned when clauses gate both dispatch and palette availability", a
   }
 })
 
-test("modal or closable tab drives runtime availability for closeActiveTab", async () => {
+test("closable tab drives runtime availability for closeActiveTab", async () => {
   const { registry, cleanup } = createTestRegistry()
   const container = document.createElement("div")
   document.body.append(container)
@@ -287,19 +286,6 @@ test("modal or closable tab drives runtime availability for closeActiveTab", asy
 
   try {
     await flushRenderEffects()
-    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
-
-    const unregisterModal = registerModalStackEntry({
-      id: "app-command-test:modal",
-      close() {},
-    })
-
-    try {
-      expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
-    } finally {
-      unregisterModal()
-    }
-
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
     commandContext.hasClosableActiveTab.value = true
