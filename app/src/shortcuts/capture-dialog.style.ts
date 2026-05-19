@@ -27,9 +27,7 @@ export default {
     outline: "none",
   }),
   title: css({
-    display: "grid",
-    gap: "4px",
-    paddingRight: "40px",
+    srOnly: true,
   }),
   titleLabel: css({
     color: "muted",

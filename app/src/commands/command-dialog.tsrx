@@ -38,9 +38,7 @@ export component CommandDialog(props: CommandDialogProps) {
     }
   })
 
-  useAppCommand(props.command, () => {
-    openDialog()
-  })
+  useAppCommand(props.command, openDialog)
 
   <CommandLayerProvider active={open.value}>
     if (open.value) {

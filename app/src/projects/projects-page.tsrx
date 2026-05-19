@@ -310,7 +310,7 @@ component AddProjectDialog(props: {
     >
       <header class={styles.dialogHeader}>
         <div class={styles.dialogHeaderCopy}>
-          <h2 id={titleId} class={styles.title}>"Add project"</h2>
+          <h2 id={titleId} class={styles.dialogTitle}>"Add project"</h2>
           <p id={descriptionId} class={styles.body}>
             "Choose one local root and optionally adjust the display name."
           </p>

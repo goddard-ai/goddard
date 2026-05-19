@@ -14,7 +14,6 @@ const selectedKind = signal<MainTabItemId>("inbox")
 const whenContext = computed(() => {
   return {
     "workbench.activeTabKind": activeTabKind.value,
-    "workbench.hasCloseTarget": hasClosableActiveTab.value,
     "workbench.hasClosableActiveTab": hasClosableActiveTab.value,
     "mainTab.selectedKind": selectedKind.value,
   }

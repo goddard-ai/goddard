@@ -70,7 +70,7 @@ export const AppCommand = defineAppCommands({
   workbench: {
     closeActiveTab: {
       label: "Close Active Tab",
-      when: "workbench.hasCloseTarget",
+      when: "workbench.hasClosableActiveTab",
     },
   },
   navigation: {

@@ -29,9 +29,7 @@ export default {
     gap: "7px",
   }),
   failureTitle: css({
-    fontSize: "1rem",
-    fontWeight: "720",
-    lineHeight: "1.35",
+    srOnly: true,
   }),
   failureDescription: css({
     color: "muted",

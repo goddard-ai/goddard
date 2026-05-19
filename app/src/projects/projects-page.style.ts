@@ -16,6 +16,9 @@ export default {
     fontWeight: "700",
     lineHeight: "1.25",
   }),
+  dialogTitle: css({
+    srOnly: true,
+  }),
   body: css({
     color: "muted",
     fontSize: "0.9rem",
