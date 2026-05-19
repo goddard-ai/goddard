@@ -77,6 +77,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     contentClass={styles.content}
   >
     <h2 id={titleId} class={styles.title}>"Command menu"</h2>
+
     const selectCommand = (command: AppCommand) => {
       props.open.value = false
       window.setTimeout(() => {
