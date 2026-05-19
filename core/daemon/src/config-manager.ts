@@ -9,7 +9,7 @@ import {
 import { getErrorMessage } from "radashi"
 
 import { createLogger } from "./logging.ts"
-import { readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
+import { readGlobalRootConfig, readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
 
 const WATCH_RELOAD_SETTLE_MS = 50
 const WATCH_RELOAD_RETRY_MS = 50
@@ -30,6 +30,10 @@ export type RootConfigSnapshot = {
 export interface ConfigManager {
   getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot>
   getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot | null
+  getGlobalRootConfig: () => Promise<{
+    globalRoot: string
+    config: RootConfig
+  }>
   ensureWatching: (cwd: string) => Promise<void>
   close: () => Promise<void>
 }
@@ -378,6 +382,10 @@ export function createConfigManager() {
 
     getLastKnownRootConfig(cwd: string = process.cwd()) {
       return entries.get(resolve(getLocalConfigPath(resolve(cwd))))?.snapshot ?? null
+    },
+
+    async getGlobalRootConfig() {
+      return readGlobalRootConfig()
     },
 
     async ensureWatching(cwd: string) {

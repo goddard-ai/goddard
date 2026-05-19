@@ -9,6 +9,15 @@ import {
   type GoddardClient,
 } from "../src/index.ts"
 
+const sampleTranscriptionRequest = {
+  audio: {
+    type: "base64" as const,
+    data: "ZmFrZS1hdWRpby1ieXRlcw==",
+    mediaType: "audio/mpeg",
+    filename: "sample.mp3",
+  },
+}
+
 function createSdkWithClient() {
   const send = vi.fn()
   const subscribe = vi.fn()
@@ -114,11 +123,24 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "adapter")).toBe(true)
     expect(Object.hasOwn(sdk, "pr")).toBe(true)
     expect(Object.hasOwn(sdk, "inbox")).toBe(true)
+    expect(Object.hasOwn(sdk, "transcription")).toBe(true)
     expect(Object.hasOwn(sdk, "session")).toBe(true)
     expect(Object.hasOwn(sdk, "reviewSession")).toBe(true)
     expect(Object.hasOwn(sdk, "action")).toBe(true)
     expect(Object.hasOwn(sdk, "loop")).toBe(true)
     expect(Object.hasOwn(sdk, "workforce")).toBe(true)
+  })
+
+  test("transcription.transcribe forwards to transcription.transcribe", async () => {
+    const { sdk, send } = createSdkWithClient()
+    send.mockResolvedValueOnce({
+      text: "transcribed text",
+    })
+
+    await expect(sdk.transcription.transcribe(sampleTranscriptionRequest)).resolves.toEqual({
+      text: "transcribed text",
+    })
+    expect(send).toHaveBeenCalledWith("transcription.transcribe", sampleTranscriptionRequest)
   })
 
   test("inbox.streamItems streams daemon inbox item updates", async () => {

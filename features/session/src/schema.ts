@@ -3,7 +3,11 @@ import { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import { StaticSessionParams as StaticSessionParamsSchema } from "@goddard-ai/schema/config"
 import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
-import { textModelConfigSchema, type ModelConfig } from "ai-sdk-json-schema"
+import {
+  textModelConfigSchema,
+  transcriptionModelConfigSchema,
+  type ModelConfig,
+} from "ai-sdk-json-schema"
 import { z } from "zod"
 
 export { StaticSessionParamsSchema as StaticSessionParams }
@@ -720,6 +724,49 @@ export type SteerSessionResponse = {
   response: acp.PromptResponse
 }
 
+/** Audio bytes encoded as base64 for one daemon transcription request. */
+export const TranscriptionAudioBase64Input = z
+  .strictObject({
+    type: z.literal("base64"),
+    data: z.string().min(1).describe("Base64-encoded audio bytes."),
+    mediaType: z.string().min(1).describe("IANA media type for the audio payload."),
+    filename: z.string().min(1).optional().describe("Optional original filename for the audio."),
+  })
+  .describe("Base64-encoded audio accepted by the daemon transcription API.")
+
+export type TranscriptionAudioBase64Input = z.infer<typeof TranscriptionAudioBase64Input>
+
+/** Remote audio URL accepted by one daemon transcription request. */
+export const TranscriptionAudioUrlInput = z
+  .strictObject({
+    type: z.literal("url"),
+    url: z.url().describe("Remote audio URL to transcribe."),
+    mediaType: z.string().min(1).describe("IANA media type for the referenced audio."),
+    filename: z.string().min(1).optional().describe("Optional original filename for the audio."),
+  })
+  .describe("Remote audio URL accepted by the daemon transcription API.")
+
+export type TranscriptionAudioUrlInput = z.infer<typeof TranscriptionAudioUrlInput>
+
+/** Audio input accepted by the daemon transcription API regardless of runtime strategy. */
+export const TranscriptionAudioInput = z
+  .discriminatedUnion("type", [TranscriptionAudioBase64Input, TranscriptionAudioUrlInput])
+  .describe("Audio input accepted by the daemon transcription API.")
+
+export type TranscriptionAudioInput = z.infer<typeof TranscriptionAudioInput>
+
+/** Request payload used to transcribe one audio input through the daemon. */
+export const TranscribeAudioRequest = z.strictObject({
+  audio: TranscriptionAudioInput,
+})
+
+export type TranscribeAudioRequest = z.infer<typeof TranscribeAudioRequest>
+
+/** Response payload returned after the daemon transcribes one audio input. */
+export type TranscribeAudioResponse = {
+  text: string
+}
+
 /** Schema for one custom worktree plugin loaded from a filesystem path. */
 export const WorktreePluginPathReference = z
   .strictObject({
@@ -841,6 +888,20 @@ export const SessionTitlesConfig: z.ZodType<SessionTitlesConfig> = z
       .describe("Text model selection used for background session title generation."),
   })
   .describe("Persisted session title-generation defaults loaded from JSON.")
+
+/** Persisted transcription defaults loaded from JSON. */
+export type TranscriptionConfig = {
+  model?: ModelConfig
+}
+
+/** Schema for persisted transcription defaults loaded from JSON. */
+export const TranscriptionConfig: z.ZodType<TranscriptionConfig> = z
+  .strictObject({
+    model: transcriptionModelConfigSchema
+      .optional()
+      .describe("Transcription model selection used for daemon speech-to-text requests."),
+  })
+  .describe("Persisted transcription defaults loaded from JSON.")
 
 const SESSION_IDLE_SHUTDOWN_DURATION_PATTERN = /^([1-9]\d*)\s*(ms|s|m|h)$/
 const SESSION_IDLE_SHUTDOWN_DURATION_UNITS = {

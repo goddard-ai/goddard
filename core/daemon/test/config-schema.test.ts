@@ -19,6 +19,22 @@ test("daemon root config schema accepts session title generator model config", (
   })
 })
 
+test("daemon root config schema accepts transcription model config", () => {
+  const config = buildRootConfigSchema().parse({
+    transcription: {
+      model: {
+        provider: "openai",
+        model: "whisper-1",
+      },
+    },
+  }) as { transcription?: { model?: unknown } }
+
+  expect(config.transcription?.model).toEqual({
+    provider: "openai",
+    model: "whisper-1",
+  })
+})
+
 test("daemon root config schema accepts worktree branch prefix config", () => {
   const config = buildRootConfigSchema().parse({
     worktrees: {
@@ -70,8 +86,13 @@ test("generated goddard schema embeds the model schema once under local defs", (
   const defs = goddardSchema.$defs as Record<string, Record<string, unknown>>
   expect(defs.ModelConfig).toBeTruthy()
   expect(defs.ModelConfig?.$schema).toBeUndefined()
+  expect(defs.TranscriptionModelConfig).toBeTruthy()
+  expect(defs.TranscriptionModelConfig?.$schema).toBeUndefined()
   expect((defs.SessionTitlesConfig?.properties as Record<string, unknown>)?.generator).toEqual({
     $ref: "#/$defs/ModelConfig",
+  })
+  expect((defs.TranscriptionConfig?.properties as Record<string, unknown>)?.model).toEqual({
+    $ref: "#/$defs/TranscriptionModelConfig",
   })
 })
 

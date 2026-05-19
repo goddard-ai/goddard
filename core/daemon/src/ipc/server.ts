@@ -59,6 +59,11 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
   const store = options.store ?? openComposedDaemonStore()
   const ownsStore = options.store == null
+  const daemonConfigProvider = {
+    getRootConfig: configManager.getRootConfig,
+    getLastKnownRootConfig: configManager.getLastKnownRootConfig,
+    getGlobalRootConfig: configManager.getGlobalRootConfig,
+  } satisfies DaemonConfigProvider
 
   const registryService = createAcpRegistryService()
   const managedAgentUsageStore: ManagedAgentUsageStore = {
@@ -72,10 +77,7 @@ export async function startDaemonServer(
     usageStore: managedAgentUsageStore,
   })
   const agentUpdateScheduler = createManagedAgentUpdateScheduler({
-    configProvider: {
-      getRootConfig: configManager.getRootConfig,
-      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
-    },
+    configProvider: daemonConfigProvider,
     agentInstallService,
     updateCheckStore: {
       get: () => store.metadata.get("managedAgentUpdateChecks") ?? {},
@@ -137,15 +139,7 @@ export async function startDaemonServer(
     },
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(
-    daemonSubstrate,
-    {
-      getRootConfig: configManager.getRootConfig,
-      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
-    },
-    client,
-    store,
-  )
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, daemonConfigProvider, client, store)
   const ipcHandlers = {
     daemon: {
       health: async () => ({ ok: true }),
@@ -337,6 +331,19 @@ function createPluginConfigProvider(
         config: selectConfigKeys(snapshot.config, keys),
       }
     },
+    getGlobalRootConfig: source.getGlobalRootConfig
+      ? async () => {
+          const snapshot = await source.getGlobalRootConfig?.()
+          if (!snapshot) {
+            throw new Error("Global root config snapshot is unavailable")
+          }
+
+          return {
+            ...snapshot,
+            config: selectConfigKeys(snapshot.config, keys),
+          }
+        }
+      : undefined,
   }
 }
 

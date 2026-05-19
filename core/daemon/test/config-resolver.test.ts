@@ -44,6 +44,24 @@ test("rejects worktree plugin references in repository-local config", async () =
   )
 })
 
+test("rejects transcription model selection in repository-local config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeLocalRootConfig(repoDir, {
+    transcription: {
+      model: {
+        provider: "openai",
+        model: "whisper-1",
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
+    "`transcription` is only supported in the global Goddard config",
+  )
+})
+
 test("allows repository-local worktree bootstrap config and replaces inherited arrays", async () => {
   await useTempHome()
   const repoDir = await createRepoFixture()

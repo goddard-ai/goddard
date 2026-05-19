@@ -1,12 +1,12 @@
-/** Daemon-owned text-model loading that prefers bundled provider packages and can install others on demand. */
+/** Daemon-owned AI-model loading that prefers bundled provider packages and can install others on demand. */
 import { mkdir, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { getGoddardCacheDir } from "@goddard-ai/paths/node"
-import type { LanguageModel } from "ai"
+import type { LanguageModel, TranscriptionModel } from "ai"
 import {
+  MissingProviderPackageError as AiSdkMissingProviderPackageError,
   buildModelLoadPlan,
   executeModelLoadPlan,
-  MissingProviderPackageError,
   resolveModel,
   resolveModelModules,
   type BuildModelLoadPlanOptions,
@@ -22,11 +22,12 @@ import { runCommand } from "./worktrees/process.ts"
 export {
   AdapterConfigurationError,
   InvalidProviderModuleError,
-  MissingProviderPackageError,
   MissingTemplateVariableError,
   UnknownModelError,
   UnknownProviderError,
 } from "ai-sdk-json-schema"
+
+export const MissingProviderPackageError = AiSdkMissingProviderPackageError
 
 /**
  * One daemon-managed dynamic import function for one supported provider package.
@@ -56,6 +57,8 @@ export type DaemonTextModelPackageInstaller = (
  * Runtime-only options used while resolving provider packages for daemon AI features.
  */
 export interface DaemonTextModelResolveOptions extends BuildModelLoadPlanOptions {
+  env?: Record<string, string | undefined>
+  packageOptions?: unknown
   installMissingPackage?: DaemonTextModelPackageInstaller | false
   moduleLoaders?: Partial<Record<string, DaemonTextModelModuleLoader>>
   installationRoot?: string
@@ -73,6 +76,16 @@ export type LoadedDaemonTextModel = {
   descriptor: ModelDescriptor
   model: LanguageModel
 }
+
+/**
+ * One ready-to-use transcription model resolved from shared JSON config.
+ */
+export type LoadedDaemonTranscriptionModel = {
+  descriptor: ModelDescriptor
+  model: TranscriptionModel
+}
+
+type DaemonModelMode = "text" | "transcription"
 
 const daemonProviderInstallationRoot = resolve(getGoddardCacheDir(), "text-model-providers")
 const daemonProviderRootManifest = {
@@ -114,7 +127,7 @@ function isBundledProviderPackage(packageName: string) {
 /** Returns true when one thrown value matches the missing-provider-package error contract. */
 function isMissingProviderPackageResolutionError(
   error: unknown,
-): error is MissingProviderPackageError {
+): error is InstanceType<typeof MissingProviderPackageError> {
   if (error instanceof MissingProviderPackageError) {
     return true
   }
@@ -181,7 +194,7 @@ export async function installDaemonTextModelPackage(request: DaemonTextModelPack
 }
 
 /** Resolves one external-provider load plan and installs one missing package when daemon policy allows it. */
-async function resolveDaemonTextModelModules(
+async function resolveDaemonModelModules(
   config: ModelConfig,
   descriptor: ModelDescriptor,
   plan: UnresolvedModelLoadPlan,
@@ -220,14 +233,15 @@ async function resolveDaemonTextModelModules(
   }
 }
 
-/** Loads a runtime AI SDK language model from one persisted text-model config. */
-export async function loadDaemonTextModel(
+/** Loads one runtime AI SDK model from one persisted config and selected mode. */
+async function loadDaemonModel<TModel>(
+  mode: DaemonModelMode,
   config: unknown,
   options: DaemonTextModelResolveOptions = {},
 ) {
-  const descriptor = resolveModel("text", config)
+  const descriptor = resolveModel(mode, config)
   const plan = buildModelLoadPlan(
-    "text",
+    mode,
     {
       provider: descriptor.provider,
       model: descriptor.model,
@@ -255,7 +269,7 @@ export async function loadDaemonTextModel(
           `No daemon-owned loader is configured for bundled provider package "${module.packageName}".`,
         )
       },
-    })) as LanguageModel
+    })) as TModel
 
     return {
       descriptor,
@@ -264,7 +278,7 @@ export async function loadDaemonTextModel(
   }
 
   const model = (await executeModelLoadPlan(
-    await resolveDaemonTextModelModules(
+    await resolveDaemonModelModules(
       {
         provider: descriptor.provider,
         model: descriptor.model,
@@ -273,10 +287,26 @@ export async function loadDaemonTextModel(
       plan,
       options,
     ),
-  )) as LanguageModel
+  )) as TModel
 
   return {
     descriptor,
     model,
   }
+}
+
+/** Loads a runtime AI SDK language model from one persisted text-model config. */
+export async function loadDaemonTextModel(
+  config: unknown,
+  options: DaemonTextModelResolveOptions = {},
+) {
+  return loadDaemonModel<LanguageModel>("text", config, options)
+}
+
+/** Loads a runtime AI SDK transcription model from one persisted transcription config. */
+export async function loadDaemonTranscriptionModel(
+  config: unknown,
+  options: DaemonTextModelResolveOptions = {},
+) {
+  return loadDaemonModel<TranscriptionModel>("transcription", config, options)
 }

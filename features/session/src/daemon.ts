@@ -14,6 +14,7 @@ import {
   type SessionStoppingEvent,
   type SessionWorktreePreparedEvent,
 } from "./daemon/manager.ts"
+import { transcribeAudioWithDaemonModel } from "./daemon/transcription.ts"
 import {
   DaemonSession,
   DaemonSessionDiagnostics,
@@ -24,6 +25,7 @@ import {
   SessionTitlesConfig,
   StaticSessionParams,
   SubpackagesConfig,
+  TranscriptionConfig,
   WorktreesConfig,
   type SessionId,
   type SessionLifecycleEvent,
@@ -116,6 +118,11 @@ export const sessionPlugin = definePlugin({
     sessionTitles: {
       schema: SessionTitlesConfig,
       scopes: ["user", "project"],
+    },
+    transcription: {
+      schema: TranscriptionConfig,
+      scopes: ["user"],
+      resolve: ({ user }) => user,
     },
     subpackages: {
       schema: SubpackagesConfig,
@@ -253,6 +260,24 @@ export const sessionPlugin = definePlugin({
       },
       close: sessionManager.close,
       ipcHandlers: {
+        transcription: {
+          transcribe: async ({ body: { audio } }) => {
+            const snapshot = context.configProvider.getGlobalRootConfig
+              ? await context.configProvider.getGlobalRootConfig()
+              : await context.configProvider.getRootConfig()
+            const configuredModel = snapshot.config.transcription?.model
+            if (!configuredModel) {
+              throw new Error(
+                'Global transcription model is not configured in "~/.goddard/config.json".',
+              )
+            }
+
+            return transcribeAudioWithDaemonModel({
+              config: configuredModel,
+              audio,
+            })
+          },
+        },
         session: {
           create: async ({ body }) => {
             const response = {

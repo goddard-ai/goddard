@@ -24,6 +24,9 @@
 - `Title Generator Config`
   - The persisted shared configuration that selects one reusable text model config for session title generation.
   - Why: so title generation can be configured independently from the session agent's own model settings while still reusing shared provider setup.
+- `Transcription Model Config`
+  - The persisted `{ provider, model }` JSON shape validated by `ai-sdk-json-schema` for speech-to-text requests.
+  - Why: so daemon transcription can reuse shared provider selection without inventing a second config model.
 - `Session Metadata`
   - Structured context attached to a daemon session.
   - Why: so auxiliary work context such as workforce ownership can travel with the session without being embedded in prompt text.

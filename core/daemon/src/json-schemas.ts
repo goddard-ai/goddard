@@ -1,4 +1,4 @@
-import { textModelConfigJsonSchema } from "ai-sdk-json-schema"
+import { textModelConfigJsonSchema, transcriptionModelConfigJsonSchema } from "ai-sdk-json-schema"
 import { isObject } from "radashi"
 import { toJSONSchema, z } from "zod"
 import type { ToJSONSchemaParams } from "zod/v4/core"
@@ -39,40 +39,57 @@ export function buildGeneratedSchemaArtifacts() {
   return schemas.map(({ name, schema }) => {
     const jsonSchema = toJSONSchema(schema, schemaParams) as Record<string, unknown>
     if (name === "goddard.json") {
-      replaceSessionTitleModelConfig(jsonSchema)
+      replaceModelConfigRefs(jsonSchema)
     }
     return { name, jsonSchema }
   })
 }
 
-function replaceSessionTitleModelConfig(jsonSchema: Record<string, unknown>) {
+function replaceModelConfigRefs(jsonSchema: Record<string, unknown>) {
   const defs = isObject(jsonSchema.$defs)
     ? (jsonSchema.$defs as Record<string, unknown>)
     : ((jsonSchema.$defs = {}) as Record<string, unknown>)
-  const embeddedModelConfig = JSON.parse(JSON.stringify(textModelConfigJsonSchema)) as Record<
-    string,
-    unknown
-  >
-  delete embeddedModelConfig.$schema
-  defs.ModelConfig = embeddedModelConfig
+  defs.ModelConfig = cloneEmbeddedModelSchema(textModelConfigJsonSchema)
+  defs.TranscriptionModelConfig = cloneEmbeddedModelSchema(transcriptionModelConfigJsonSchema)
 
-  const sessionTitlesDefinition = isObject(defs.SessionTitlesConfig)
-    ? (defs.SessionTitlesConfig as Record<string, unknown>)
+  replacePropertyWithLocalRef(defs, "SessionTitlesConfig", "generator", "#/$defs/ModelConfig")
+  replacePropertyWithLocalRef(
+    defs,
+    "TranscriptionConfig",
+    "model",
+    "#/$defs/TranscriptionModelConfig",
+  )
+}
+
+function cloneEmbeddedModelSchema(schema: Record<string, unknown>) {
+  const cloned = JSON.parse(JSON.stringify(schema)) as Record<string, unknown>
+  delete cloned.$schema
+  return cloned
+}
+
+function replacePropertyWithLocalRef(
+  defs: Record<string, unknown>,
+  definitionName: string,
+  propertyName: string,
+  ref: string,
+) {
+  const definition = isObject(defs[definitionName])
+    ? (defs[definitionName] as Record<string, unknown>)
     : null
-  const sessionTitlesProperties = isObject(sessionTitlesDefinition?.properties)
-    ? (sessionTitlesDefinition.properties as Record<string, unknown>)
+  const properties = isObject(definition?.properties)
+    ? (definition.properties as Record<string, unknown>)
     : null
-  const generatorProperty = isObject(sessionTitlesProperties?.generator)
-    ? (sessionTitlesProperties.generator as Record<string, unknown>)
+  const property = isObject(properties?.[propertyName])
+    ? (properties[propertyName] as Record<string, unknown>)
     : null
 
-  if (!generatorProperty) {
-    throw new Error("Generated RootConfig schema is missing sessionTitles.generator.")
+  if (!property) {
+    throw new Error(`Generated RootConfig schema is missing ${definitionName}.${propertyName}.`)
   }
 
-  for (const key of Object.keys(generatorProperty)) {
-    delete generatorProperty[key]
+  for (const key of Object.keys(property)) {
+    delete property[key]
   }
 
-  generatorProperty.$ref = "#/$defs/ModelConfig"
+  property.$ref = ref
 }
