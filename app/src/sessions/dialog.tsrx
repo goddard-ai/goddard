@@ -1,12 +1,12 @@
-import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
+import { type Signal } from "@preact/signals"
 import { useModel } from "@preact/signals"
 import { X } from "lucide-react"
-import { useEffect } from "preact/hooks"
+import { useEffect, useId } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { DialogPortal } from "~/lib/dialog-portal.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
+import { Modal } from "~/lib/modal.tsrx"
 import { createSession } from "./mutations.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
@@ -14,14 +14,15 @@ import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./display.ts"
 
 component SessionLaunchDialog(props: {
-  dialog: UseDialogReturn;
+  open: Signal<boolean>;
 }) {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
   const activeProjectPath = projectContext.activeProjectPath
-  const isDialogOpen = props.dialog.open
+  const isDialogOpen = props.open.value
+  const titleId = useId()
   const projects = projectRegistry.projectList
   const initialProjectPath = activeProjectPath ?? projects[0]?.path ?? null
   const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
@@ -96,27 +97,32 @@ component SessionLaunchDialog(props: {
     void launchSession()
   }, { active: canSubmit })
 
-  <DialogPortal>
-    <Dialog.Backdrop class={styles.backdrop} />
-    <Dialog.Positioner class={styles.positioner}>
-      <Dialog.Content class={styles.content}>
-        <Dialog.Title class={styles.title}>"Launch session"</Dialog.Title>
-        <Dialog.CloseTrigger asChild>
-          <button class={styles.closeButton} type="button">
-            <X size={16} strokeWidth={2.2} />
-          </button>
-        </Dialog.CloseTrigger>
-        <SessionLaunchForm
-          {form}
-          onEscape={() => {
-            props.dialog.setOpen(false)
-          }}
-          onSubmit={launchSession}
-          {projects}
-        />
-      </Dialog.Content>
-    </Dialog.Positioner>
-  </DialogPortal>
+  <Modal
+    open={props.open}
+    {titleId}
+    backdropClass={styles.backdrop}
+    positionerClass={styles.positioner}
+    contentClass={styles.content}
+  >
+    <h2 id={titleId} class={styles.title}>"Launch session"</h2>
+    <button
+      class={styles.closeButton}
+      type="button"
+      onClick={() => {
+        props.open.value = false
+      }}
+    >
+      <X size={16} strokeWidth={2.2} />
+    </button>
+    <SessionLaunchForm
+      {form}
+      onEscape={() => {
+        props.open.value = false
+      }}
+      onSubmit={launchSession}
+      {projects}
+    />
+  </Modal>
 }
 
 export default SessionLaunchDialog

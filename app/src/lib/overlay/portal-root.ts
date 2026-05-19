@@ -1,7 +1,8 @@
-import { dialogPortalId } from "../dialog-portal.tsrx"
 import { menuPortalId } from "../menu-portal.tsrx"
 
 export type OverlayPortalRoot = "dialog" | "menu"
+
+const dialogPortalId = "dialog-portal"
 
 const portalRootIds: Record<OverlayPortalRoot, string> = {
   dialog: dialogPortalId,

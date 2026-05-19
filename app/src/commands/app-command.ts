@@ -69,7 +69,7 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
 export const AppCommand = defineAppCommands({
   workbench: {
     closeActiveTab: {
-      label: "Close Modal or Active Tab",
+      label: "Close Active Tab",
       when: "workbench.hasCloseTarget",
     },
   },

@@ -1,14 +1,14 @@
-import { Dialog, type UseDialogReturn } from "@ark-ui/react/dialog"
+import { type Signal } from "@preact/signals"
 import { X } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useId, useRef, useState } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
-import { DialogPortal } from "~/lib/dialog-portal.tsrx"
+import { Modal } from "~/lib/modal.tsrx"
 import styles from "./capture-dialog.style.ts"
 
 export component KeyboardShortcutCaptureDialog(props: {
-  dialog: UseDialogReturn;
+  open: Signal<boolean>;
   label: string;
   mode: "add" | "change";
   currentExpression: string | null;
@@ -18,11 +18,12 @@ export component KeyboardShortcutCaptureDialog(props: {
 }) {
   const shortcutRegistry = useShortcutRegistry()
   const sessionRef = useRef<RecordingSession | null>(null)
+  const titleId = useId()
   const [draftExpression, setDraftExpression] = useState(props.currentExpression ?? "")
   const [isRecording, setIsRecording] = useState(false)
 
   useEffect(() => {
-    if (!props.dialog.open) {
+    if (!props.open.value) {
       setDraftExpression(props.currentExpression ?? "")
       setIsRecording(false)
       return
@@ -87,87 +88,98 @@ export component KeyboardShortcutCaptureDialog(props: {
       sessionRef.current = null
       session?.cancel()
     }
-  }, [props.currentExpression, props.dialog.open, shortcutRegistry.runtime])
+  }, [props.currentExpression, props.open.value, shortcutRegistry.runtime])
 
-  <DialogPortal>
-    <Dialog.Backdrop class={styles.backdrop} />
-    <Dialog.Positioner class={styles.positioner}>
-      <Dialog.Content class={styles.content}>
-        <Dialog.Title class={styles.title}>
-          <span class={styles.titleLabel}>
-            {props.mode === "add" ? "Add shortcut" : "Change shortcut"}
-          </span>
-          <span class={styles.titleText}>
-            {props.label}
-          </span>
-        </Dialog.Title>
-        <Dialog.CloseTrigger asChild>
-          <button class={styles.closeButton} type="button">
-            <X size={16} strokeWidth={2.2} />
-          </button>
-        </Dialog.CloseTrigger>
-        <dl class={styles.metaList}>
-          if (props.currentExpression) {
-            <div class={styles.metaRow}>
-              <dt class={styles.metaTerm}>"Current shortcut"</dt>
-              <dd class={styles.metaDetail}>
-                {props.currentExpression}
-              </dd>
-            </div>
-          }
-          if (props.whenClause) {
-            <div class={styles.metaRow}>
-              <dt class={styles.metaTerm}>"When"</dt>
-              <dd class={styles.metaDetail}>
-                {props.whenClause}
-              </dd>
-            </div>
-          }
-        </dl>
-        <section class={styles.captureSection}>
-          <div class={styles.captureHeading}>
-            <span class={styles.captureLabel}>"Press the shortcut you want to use"</span>
-            if (isRecording) {
-              <span class={styles.captureStatus}>"Listening…"</span>
-            }
-          </div>
-          <div class={styles.captureValue}>
-            if (draftExpression) {
-              {draftExpression}
-            } else {
-              <span class={styles.capturePlaceholder}>"Type a key combination or sequence"</span>
-            }
-          </div>
-        </section>
-        <div class={styles.actionRow}>
-          <Dialog.CloseTrigger asChild>
-            <button class={styles.actionButton} type="button">"Cancel"</button>
-          </Dialog.CloseTrigger>
-          if (props.onRemove) {
-            <button
-              class={`${styles.actionButton} ${styles.actionButtonDanger}`}
-              type="button"
-              onClick={() => {
-                void props.onRemove?.()
-              }}
-            >
-              "Remove shortcut"
-            </button>
-          }
-          <button
-            class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
-            disabled={draftExpression.trim().length === 0}
-            type="button"
-            onClick={() => {
-              void props.onSave(draftExpression.trim())
-            }}
-          >
-            "Save shortcut"
-          </button>
+  <Modal
+    open={props.open}
+    {titleId}
+    backdropClass={styles.backdrop}
+    positionerClass={styles.positioner}
+    contentClass={styles.content}
+  >
+    <h2 id={titleId} class={styles.title}>
+      <span class={styles.titleLabel}>
+        {props.mode === "add" ? "Add shortcut" : "Change shortcut"}
+      </span>
+      <span class={styles.titleText}>
+        {props.label}
+      </span>
+    </h2>
+    <button
+      class={styles.closeButton}
+      type="button"
+      onClick={() => {
+        props.open.value = false
+      }}
+    >
+      <X size={16} strokeWidth={2.2} />
+    </button>
+    <dl class={styles.metaList}>
+      if (props.currentExpression) {
+        <div class={styles.metaRow}>
+          <dt class={styles.metaTerm}>"Current shortcut"</dt>
+          <dd class={styles.metaDetail}>
+            {props.currentExpression}
+          </dd>
         </div>
-      </Dialog.Content>
-    </Dialog.Positioner>
-  </DialogPortal>
+      }
+      if (props.whenClause) {
+        <div class={styles.metaRow}>
+          <dt class={styles.metaTerm}>"When"</dt>
+          <dd class={styles.metaDetail}>
+            {props.whenClause}
+          </dd>
+        </div>
+      }
+    </dl>
+    <section class={styles.captureSection}>
+      <div class={styles.captureHeading}>
+        <span class={styles.captureLabel}>"Press the shortcut you want to use"</span>
+        if (isRecording) {
+          <span class={styles.captureStatus}>"Listening…"</span>
+        }
+      </div>
+      <div class={styles.captureValue}>
+        if (draftExpression) {
+          {draftExpression}
+        } else {
+          <span class={styles.capturePlaceholder}>"Type a key combination or sequence"</span>
+        }
+      </div>
+    </section>
+    <div class={styles.actionRow}>
+      <button
+        class={styles.actionButton}
+        type="button"
+        onClick={() => {
+          props.open.value = false
+        }}
+      >
+        "Cancel"
+      </button>
+      if (props.onRemove) {
+        <button
+          class={`${styles.actionButton} ${styles.actionButtonDanger}`}
+          type="button"
+          onClick={() => {
+            void props.onRemove?.()
+          }}
+        >
+          "Remove shortcut"
+        </button>
+      }
+      <button
+        class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+        disabled={draftExpression.trim().length === 0}
+        type="button"
+        onClick={() => {
+          void props.onSave(draftExpression.trim())
+        }}
+      >
+        "Save shortcut"
+      </button>
+    </div>
+  </Modal>
 }
 
 export default KeyboardShortcutCaptureDialog

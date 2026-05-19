@@ -1,6 +1,6 @@
-import { Dialog, useDialog } from "@ark-ui/react/dialog"
 import { Menu } from "@ark-ui/react/menu"
 import { cx } from "@goddard-ai/styled-system/css"
+import { useSignal } from "@preact/signals"
 import { Command, Search } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
 import { useEffect, useRef, useState } from "preact/hooks"
@@ -8,7 +8,6 @@ import { useEffect, useRef, useState } from "preact/hooks"
 import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
-import { useModalStackEntry } from "~/lib/modal-stack.ts"
 import { MenuPortal } from "~/lib/menu-portal.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
@@ -30,13 +29,13 @@ function getExactShortcutSearch(searchText: string) {
 }
 
 type CaptureState = {
-  commandId: AppCommandId;
-  label: string;
-  mode: "add" | "change";
-  bindingIndex: number | null;
-  currentExpression: string | null;
-  whenClause: string | null;
-}
+    commandId: AppCommandId;
+    label: string;
+    mode: "add" | "change";
+    bindingIndex: number | null;
+    currentExpression: string | null;
+    whenClause: string | null;
+  }
 
 component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
@@ -47,23 +46,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
   const [isRecordingSearchEnabled, setIsRecordingSearchEnabled] = useState(false)
   const [editingWhenRowKey, setEditingWhenRowKey] = useState<string | null>(null)
   const [captureState, setCaptureState] = useState<CaptureState | null>(null)
-
-  const captureDialog = useDialog({
-    open: captureState !== null,
-    onOpenChange: (details) => {
-      if (!details.open) {
-        setCaptureState(null)
-      }
-    },
-  })
-
-  useModalStackEntry({
-    id: "keyboard-shortcuts:capture",
-    open: captureDialog.open,
-    close() {
-      captureDialog.setOpen(false)
-    },
-  })
+  const isCaptureOpen = useSignal(false)
 
   function stopSearchRecording() {
     const session = searchRecordingSessionRef.current
@@ -89,7 +72,19 @@ component KeyboardShortcutsView(props: { class?: string }) {
       currentExpression: row.shortcut,
       whenClause: row.whenClause,
     })
+    isCaptureOpen.value = true
   }
+
+  function closeCaptureDialog() {
+    isCaptureOpen.value = false
+    setCaptureState(null)
+  }
+
+  useEffect(() => {
+    if (!isCaptureOpen.value && captureState !== null) {
+      setCaptureState(null)
+    }
+  }, [captureState, isCaptureOpen.value])
 
   useEffect(() => {
     if (!isRecordingSearchEnabled || captureState !== null) {
@@ -473,62 +468,60 @@ component KeyboardShortcutsView(props: { class?: string }) {
         </tbody>
       </table>
     </div>
-    <Dialog.RootProvider value={captureDialog} lazyMount unmountOnExit>
-      if (captureState) {
-        <KeyboardShortcutCaptureDialog
-          currentExpression={captureState.currentExpression}
-          dialog={captureDialog}
-          label={captureState.label}
-          mode={captureState.mode}
-          whenClause={captureState.whenClause}
-          onRemove={captureState.bindingIndex === null
-            ? undefined
-            : async () => {
-                if (captureState.bindingIndex === null) {
-                  return
-                }
-
-                if (
-                  await shortcutRegistry.removeCommandBinding(
-                    captureState.commandId,
-                    captureState.bindingIndex,
-                  )
-                ) {
-                  setCaptureState(null)
-                }
-              }}
-          onSave={async (expression) => {
-            if (captureState.mode === "add") {
-              if (
-                await shortcutRegistry.addCommandBinding(
-                  captureState.commandId,
-                  expression,
-                  captureState.whenClause,
-                )
-              ) {
-                setCaptureState(null)
+    if (captureState) {
+      <KeyboardShortcutCaptureDialog
+        currentExpression={captureState.currentExpression}
+        open={isCaptureOpen}
+        label={captureState.label}
+        mode={captureState.mode}
+        whenClause={captureState.whenClause}
+        onRemove={captureState.bindingIndex === null
+          ? undefined
+          : async () => {
+              if (captureState.bindingIndex === null) {
+                return
               }
 
-              return
-            }
-
-            if (captureState.bindingIndex === null) {
-              return
-            }
-
+              if (
+                await shortcutRegistry.removeCommandBinding(
+                  captureState.commandId,
+                  captureState.bindingIndex,
+                )
+              ) {
+                closeCaptureDialog()
+              }
+            }}
+        onSave={async (expression) => {
+          if (captureState.mode === "add") {
             if (
-              await shortcutRegistry.replaceCommandBinding(
+              await shortcutRegistry.addCommandBinding(
                 captureState.commandId,
-                captureState.bindingIndex,
                 expression,
+                captureState.whenClause,
               )
             ) {
-              setCaptureState(null)
+              closeCaptureDialog()
             }
-          }}
-        />
-      }
-    </Dialog.RootProvider>
+
+            return
+          }
+
+          if (captureState.bindingIndex === null) {
+            return
+          }
+
+          if (
+            await shortcutRegistry.replaceCommandBinding(
+              captureState.commandId,
+              captureState.bindingIndex,
+              expression,
+            )
+          ) {
+            closeCaptureDialog()
+          }
+        }}
+      />
+    }
   </section>
 }
 
