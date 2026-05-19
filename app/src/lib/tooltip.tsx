@@ -1,11 +1,11 @@
-import { type Signal } from "@preact/signals"
+import { signal, type Signal } from "@preact/signals"
 import { cloneElement, Fragment, h, toChildArray, type VNode } from "preact"
 import { useId, useRef } from "preact/hooks"
 
 import { Popover } from "./popover.tsrx"
 
 export type TooltipProps = {
-  open: Signal<boolean>
+  open?: Signal<boolean>
   ariaLabel?: string
   children: preact.ComponentChildren
   class?: string
@@ -35,6 +35,8 @@ export function Tooltip(props: TooltipProps) {
   const triggerRef = useRef<HTMLElement | null>(null)
   const openDelayRef = useRef<number | null>(null)
   const closeDelayRef = useRef<number | null>(null)
+  const openSignal = useRef<Signal<boolean> | null>(null)
+  const open = props.open ?? (openSignal.current ??= signal(false))
   const children = toChildArray(props.children)
   const trigger = children[0]
 
@@ -48,7 +50,7 @@ export function Tooltip(props: TooltipProps) {
     clearDelay(closeDelayRef)
     clearDelay(openDelayRef)
     openDelayRef.current = window.setTimeout(() => {
-      props.open.value = true
+      open.value = true
       openDelayRef.current = null
     }, props.openDelay ?? 450)
   }
@@ -57,13 +59,13 @@ export function Tooltip(props: TooltipProps) {
     clearDelay(openDelayRef)
     clearDelay(closeDelayRef)
     closeDelayRef.current = window.setTimeout(() => {
-      props.open.value = false
+      open.value = false
       closeDelayRef.current = null
     }, props.closeDelay ?? 80)
   }
 
   const triggerElement = cloneElement(trigger as VNode, {
-    "aria-describedby": props.open.value ? tooltipId : triggerProps["aria-describedby"],
+    "aria-describedby": open.value ? tooltipId : triggerProps["aria-describedby"],
     ref(element: HTMLElement | null) {
       triggerRef.current = element
 
@@ -77,11 +79,11 @@ export function Tooltip(props: TooltipProps) {
     onFocus: chainHandlers(triggerProps.onFocus, openTooltip),
     onKeyDown: chainHandlers(triggerProps.onKeyDown, (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        props.open.value = false
+        open.value = false
       }
     }),
     onPointerDown: chainHandlers(triggerProps.onPointerDown, () => {
-      props.open.value = false
+      open.value = false
     }),
     onPointerEnter: chainHandlers(triggerProps.onPointerEnter, openTooltip),
     onPointerLeave: chainHandlers(triggerProps.onPointerLeave, closeTooltip),
@@ -100,7 +102,7 @@ export function Tooltip(props: TooltipProps) {
         closeOnEscape: true,
         closeOnOutsidePointer: false,
         offset: props.sideOffset ?? 8,
-        open: props.open,
+        open,
         placement: props.side ?? "top",
         restoreFocus: false,
         role: "tooltip",
