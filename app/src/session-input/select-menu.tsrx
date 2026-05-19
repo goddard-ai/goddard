@@ -131,6 +131,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         ),
         [props.items],
       )
+
       const filteredItems = useMemo(() => {
         if (!props.filterable || isEmptyQuery(query)) {
           return props.items
@@ -147,6 +148,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           { threshold: 0 },
         ).items.map((entry) => entry.value.item)
       }, [props.filterable, props.items, query, searchableItems])
+
       const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
       const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
 
@@ -201,117 +203,102 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         })
       }, [highlightedItem?.value, props.open.value])
 
-      if (props.open.value) {
-        <div
-          class={styles.menuBody}
-          onKeyDown={(event) => {
-            if (props.filterable) {
-              return
-            }
+      <div
+        class={styles.menuBody}
+        onKeyDown={(event) => {
+          if (props.filterable) {
+            return
+          }
 
-            if (event.key === "ArrowDown") {
+          switch (event.key) {
+            case "ArrowDown":
               event.preventDefault()
               moveHighlightedIndex(1)
               return
-            }
-
-            if (event.key === "ArrowUp") {
+            case "ArrowUp":
               event.preventDefault()
               moveHighlightedIndex(-1)
               return
-            }
-
-            if (event.key === "Enter") {
+            case "Enter":
               event.preventDefault()
               commitSelection(highlightedItem)
               return
-            }
-
-            if (event.key === "Escape") {
+            case "Escape":
               event.preventDefault()
               props.open.value = false
-            }
-          }}
-        >
-          if (props.filterable) {
-            <input
-              {ref filterInputRef}
-              class={styles.menuFilter}
-              placeholder="Type to filter"
-              value={query}
-              onInput={(event) => {
-                setQuery(event.currentTarget.value)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
+          }
+        }}
+      >
+        if (props.filterable) {
+          <input
+            {ref filterInputRef}
+            class={styles.menuFilter}
+            placeholder="Type to filter"
+            value={query}
+            onInput={(event) => {
+              setQuery(event.currentTarget.value)
+            }}
+            onKeyDown={(event) => {
+              switch (event.key) {
+                case "ArrowDown":
                   event.preventDefault()
                   moveHighlightedIndex(1)
                   return
-                }
-
-                if (event.key === "ArrowUp") {
+                case "ArrowUp":
                   event.preventDefault()
                   moveHighlightedIndex(-1)
                   return
-                }
-
-                if (event.key === "Enter") {
+                case "Enter":
                   event.preventDefault()
                   commitSelection(highlightedItem)
                   return
-                }
-
-                if (event.key === "Escape") {
+                case "Escape":
                   event.preventDefault()
                   props.open.value = false
-                }
-              }}
-            />
-          }
-          if (props.loading) {
-            <div class={styles.menuEmpty}>
-              <span
-                class={css({
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                })}
-              >
-                <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-                "Loading options..."
-              </span>
-            </div>
-          } else if (filteredItems.length === 0) {
-            <div class={styles.menuEmpty}>"No matching options."</div>
-          } else {
-            <ul class={styles.menuList}>
-              for (const item of filteredItems; index index) {
-                <li key={item.value}>
-                  <button
-                    {ref (element) => {
-                      itemElements[item.value] = element
-                    }}
-                    class={cx(
-                      styles.menuButton,
-                      index === selectedIndex && styles.menuButtonActive,
-                    )}
-                    disabled={item.disabled}
-                    type="button"
-                    onMouseEnter={() => {
-                      setSelectedIndex(index)
-                    }}
-                    onClick={() => {
-                      commitSelection(item)
-                    }}
-                  >
-                    {item.label}
-                  </button>
-                </li>
               }
-            </ul>
-          }
-        </div>
-      }
+            }}
+          />
+        }
+        if (props.loading) {
+          <div class={styles.menuEmpty}>
+            <span
+              class={css({
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+              })}
+            >
+              <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+              "Loading options..."
+            </span>
+          </div>
+        } else if (filteredItems.length === 0) {
+          <div class={styles.menuEmpty}>"No matching options."</div>
+        } else {
+          <ul class={styles.menuList}>
+            for (const item of filteredItems; index index) {
+              <li key={item.value}>
+                <button
+                  {ref (element) => {
+                    itemElements[item.value] = element
+                  }}
+                  class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
+                  disabled={item.disabled}
+                  type="button"
+                  onMouseEnter={() => {
+                    setSelectedIndex(index)
+                  }}
+                  onClick={() => {
+                    commitSelection(item)
+                  }}
+                >
+                  {item.label}
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
     </Popover>
   </div>
 }
