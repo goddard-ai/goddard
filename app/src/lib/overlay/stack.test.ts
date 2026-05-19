@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { createOverlayStack } from "./overlay-stack.ts"
+import { createOverlayStack } from "./stack.ts"
 
 test("contains treats nested portal content as inside active overlays", () => {
   const stack = createOverlayStack()

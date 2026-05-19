@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { keepFocusInside, restoreFocus } from "./overlay-focus.ts"
+import { keepFocusInside, restoreFocus } from "./focus.ts"
 
 test("restoreFocus focuses an attached element", () => {
   const button = document.createElement("button")

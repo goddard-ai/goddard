@@ -1,4 +1,4 @@
-import { overlayStack } from "./overlay-stack.ts"
+import { overlayStack } from "./stack.ts"
 
 /** Dismissal behavior owned by one overlay while it is mounted. */
 export type OverlayDismissalOptions = {
