@@ -4,6 +4,7 @@ import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { getMainWindow, setMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
+import { startBackgroundUpdateCheck } from "./updater.ts"
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
@@ -50,3 +51,4 @@ await ensureDaemonRuntime()
 const mainWindowUrl = await getMainWindowUrl()
 const mainWindow = createMainWindow(mainWindowUrl)
 setMainWindow(mainWindow)
+startBackgroundUpdateCheck()

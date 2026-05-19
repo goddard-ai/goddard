@@ -1,9 +1,9 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
-import { concat } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { DebugMenuSurfaces, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
+import { applyReadyUpdate, checkAndDownloadUpdate } from "./updater.ts"
 
 const fileMenu = {
   label: "File",
@@ -37,9 +37,23 @@ const viewMenu = {
   },
 } as const
 
+const appUpdateMenu = {
+  label: "Goddard",
+  checkForUpdates: {
+    label: "Check for Updates...",
+    action: "app:check-for-updates",
+  },
+  restartToUpdate: {
+    label: "Restart to Update",
+    action: "app:restart-to-update",
+  },
+} as const
+
 /** Installs the native application menu so platform accelerators work inside the desktop shell. */
 export function installApplicationMenu(getMainWindow: () => BrowserWindow | null): void {
-  const actions: Record<string, (window: BrowserWindow, params: any) => void> = {
+  const actions: Record<string, (window: BrowserWindow, params: any) => Promise<void> | void> = {
+    [appUpdateMenu.checkForUpdates.action]: checkForUpdates,
+    [appUpdateMenu.restartToUpdate.action]: restartToUpdate,
     [fileMenu.closeTab.action]: dispatchAppMenuAction("workbench.closeActiveTab"),
     [fileMenu.closeWindow.action]: closeWindow,
     [viewMenu.commandPalette.action]: dispatchAppMenuAction("navigation.openCommandPalette"),
@@ -58,12 +72,18 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
 
   const menu: ApplicationMenuItemConfig[] = [
     {
+      label: appUpdateMenu.label,
+      submenu: [
+        appUpdateMenu.checkForUpdates,
+        appUpdateMenu.restartToUpdate,
+        ...(process.platform === "darwin"
+          ? [{ type: "separator" as const }, { role: "quit" }]
+          : []),
+      ],
+    },
+    {
       label: fileMenu.label,
-      submenu: concat(
-        fileMenu.closeTab,
-        fileMenu.closeWindow,
-        process.platform === "darwin" ? [{ type: "separator" as const }, { role: "quit" }] : null,
-      ),
+      submenu: [fileMenu.closeTab, fileMenu.closeWindow],
     },
     {
       label: "Edit",
@@ -108,9 +128,26 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
     }
     const mainWindow = getMainWindow()
     if (mainWindow) {
-      actions[action]?.(mainWindow, JSON.parse(params))
+      void Promise.resolve(actions[action]?.(mainWindow, JSON.parse(params))).catch((error) => {
+        console.error(`Application menu action failed: ${action}.`, error)
+      })
     }
   })
+}
+
+/** Checks for a packaged app update from the native application menu. */
+async function checkForUpdates(_window: BrowserWindow) {
+  const result = await checkAndDownloadUpdate()
+  console.log(`Update check finished: ${result}.`)
+}
+
+/** Applies a downloaded app update from the native application menu when one is ready. */
+async function restartToUpdate(_window: BrowserWindow) {
+  const result = await applyReadyUpdate()
+
+  if (result !== "ready") {
+    console.log(`No ready update to apply: ${result}.`)
+  }
 }
 
 function reloadWindow(window: BrowserWindow): void {

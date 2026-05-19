@@ -42,8 +42,11 @@ Unless stated otherwise, commands below are run from `./app`.
 ## Releases
 
 - Pushing a `v*` git tag triggers `.github/workflows/release-app.yml`.
+- The tag must match `app/package.json`, such as tag `v0.1.1` for app version `0.1.1`.
 - The workflow runs native Electrobun `stable` builds on macOS, Windows, and Linux, then uploads `app/artifacts/*` into the matching GitHub Release.
 - Before publishing a new stable release, the workflow also copies forward older `.patch` assets from the previous latest release so Electrobun `bsdiff` updates remain available across versions.
+- Packaged stable builds check for updates from GitHub Releases in the background. When an update is downloaded, use `Goddard > Restart to Update` to apply it.
+- Electrobun generates `bsdiff` patches during non-dev builds. If a patch path is unavailable for an installed version, Electrobun falls back to the full update archive.
 
 ## Host Model
 
