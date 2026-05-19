@@ -102,6 +102,90 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         </button>
       </span>
     </GoodTooltip>
+    const [query, setQuery] = useState("")
+    const [selectedIndex, setSelectedIndex] = useState(0)
+    const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
+
+    const searchableItems = useMemo(
+      () => props.items.map(
+        (item) => ({
+          item,
+          preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
+          preparedLabel: fuzzysort.prepare(item.label),
+          preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
+        }),
+      ),
+      [props.items],
+    )
+    const filteredItems = useMemo(() => {
+      if (!props.filterable || isEmptyQuery(query)) {
+        return props.items
+      }
+
+      return fuzzysort.searchFields(
+        query,
+        searchableItems,
+        [
+          { key: "label", extract: (entry) => entry.preparedLabel },
+          { key: "detail", extract: (entry) => entry.preparedDetail },
+          { key: "searchText", extract: (entry) => entry.preparedSearchText },
+        ],
+        { threshold: 0 },
+      ).items.map((entry) => entry.value.item)
+    }, [props.filterable, props.items, query, searchableItems])
+    const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
+    const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
+
+    function moveHighlightedIndex(step: 1 | -1) {
+      if (filteredItems.length === 0) {
+        setSelectedIndex(0)
+        return
+      }
+
+      setSelectedIndex((currentIndex) => {
+        const nextIndex = currentIndex + step
+
+        if (nextIndex < 0) {
+          return filteredItems.length - 1
+        }
+
+        if (nextIndex >= filteredItems.length) {
+          return 0
+        }
+
+        return nextIndex
+      })
+    }
+
+    function commitSelection(item: SessionInputSelectItem | null) {
+      if (!item || item.disabled) {
+        return
+      }
+
+      props.onValueChange(item.value)
+      props.open.value = false
+    }
+
+    useEffect(() => {
+      if (!props.open.value) {
+        setQuery("")
+        setSelectedIndex(0)
+        return
+      }
+
+      const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
+      setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
+    }, [filteredItemSignature, props.open.value, props.value])
+
+    useEffect(() => {
+      if (!props.open.value || !highlightedItem) {
+        return
+      }
+
+      itemElements[highlightedItem.value]?.scrollIntoView({
+        block: "nearest",
+      })
+    }, [highlightedItem?.value, props.open.value])
 
     <Popover
       anchor={() => triggerElementRef.current}
@@ -116,155 +200,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       sameWidth={true}
       strategy="fixed"
     >
-      <SelectMenuContainer
-        items={props.items}
-        isFilterable={props.filterable ?? false}
-        open={props.open}
-        {filterInputRef}
-        onValueChange={props.onValueChange}
-        value={props.value}
-        loading={props.loading}
-      />
-    </Popover>
-  </div>
-}
-
-component SelectMenuContainer(props: {
-  items: readonly SessionInputSelectItem[];
-  isFilterable: boolean;
-  open: Signal<boolean>;
-  filterInputRef: preact.Ref<HTMLInputElement>;
-  onValueChange: (value: string) => void;
-  value: string | null;
-  loading?: boolean;
-}) {
-  const [query, setQuery] = useState("")
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
-
-  const searchableItems = useMemo(
-    () => props.items.map(
-      (item) => ({
-        item,
-        preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
-        preparedLabel: fuzzysort.prepare(item.label),
-        preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
-      }),
-    ),
-    [props.items],
-  )
-  const filteredItems = useMemo(() => {
-    if (!props.isFilterable || isEmptyQuery(query)) {
-      return props.items
-    }
-
-    return fuzzysort.searchFields(
-      query,
-      searchableItems,
-      [
-        { key: "label", extract: (entry) => entry.preparedLabel },
-        { key: "detail", extract: (entry) => entry.preparedDetail },
-        { key: "searchText", extract: (entry) => entry.preparedSearchText },
-      ],
-      { threshold: 0 },
-    ).items.map((entry) => entry.value.item)
-  }, [props.isFilterable, props.items, query, searchableItems])
-  const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
-  const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
-
-  function moveHighlightedIndex(step: 1 | -1) {
-    if (filteredItems.length === 0) {
-      setSelectedIndex(0)
-      return
-    }
-
-    setSelectedIndex((currentIndex) => {
-      const nextIndex = currentIndex + step
-
-      if (nextIndex < 0) {
-        return filteredItems.length - 1
-      }
-
-      if (nextIndex >= filteredItems.length) {
-        return 0
-      }
-
-      return nextIndex
-    })
-  }
-
-  function commitSelection(item: SessionInputSelectItem | null) {
-    if (!item || item.disabled) {
-      return
-    }
-
-    props.onValueChange(item.value)
-    props.open.value = false
-  }
-
-  useEffect(() => {
-    if (!props.open.value) {
-      setQuery("")
-      setSelectedIndex(0)
-      return
-    }
-
-    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-    setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-  }, [filteredItemSignature, props.open.value, props.value])
-
-  useEffect(() => {
-    if (!props.open.value || !highlightedItem) {
-      return
-    }
-
-    itemElements[highlightedItem.value]?.scrollIntoView({
-      block: "nearest",
-    })
-  }, [highlightedItem?.value, props.open.value])
-
-  if (props.open.value) {
-    <div
-      class={styles.menuBody}
-      onKeyDown={(event) => {
-        if (props.isFilterable) {
-          return
-        }
-
-        if (event.key === "ArrowDown") {
-          event.preventDefault()
-          moveHighlightedIndex(1)
-          return
-        }
-
-        if (event.key === "ArrowUp") {
-          event.preventDefault()
-          moveHighlightedIndex(-1)
-          return
-        }
-
-        if (event.key === "Enter") {
-          event.preventDefault()
-          commitSelection(highlightedItem)
-          return
-        }
-
-        if (event.key === "Escape") {
-          event.preventDefault()
-          props.open.value = false
-        }
-      }}
-    >
-      if (props.isFilterable) {
-        <input
-          {ref props.filterInputRef}
-          class={styles.menuFilter}
-          placeholder="Type to filter"
-          value={query}
-          onInput={(event) => {
-            setQuery(event.currentTarget.value)
-          }}
+      if (props.open.value) {
+        <div
+          class={styles.menuBody}
           onKeyDown={(event) => {
+            if (props.filterable) {
+              return
+            }
+
             if (event.key === "ArrowDown") {
               event.preventDefault()
               moveHighlightedIndex(1)
@@ -288,47 +231,86 @@ component SelectMenuContainer(props: {
               props.open.value = false
             }
           }}
-        />
-      }
-      if (props.loading) {
-        <div class={styles.menuEmpty}>
-          <span
-            class={css({
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-            })}
-          >
-            <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-            "Loading options..."
-          </span>
-        </div>
-      } else if (filteredItems.length === 0) {
-        <div class={styles.menuEmpty}>"No matching options."</div>
-      } else {
-        <ul class={styles.menuList}>
-          for (const item of filteredItems; index index) {
-            <li key={item.value}>
-              <button
-                {ref (element) => {
-                  itemElements[item.value] = element
-                }}
-                class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
-                disabled={item.disabled}
-                type="button"
-                onMouseEnter={() => {
-                  setSelectedIndex(index)
-                }}
-                onClick={() => {
-                  commitSelection(item)
-                }}
-              >
-                {item.label}
-              </button>
-            </li>
+        >
+          if (props.filterable) {
+            <input
+              {ref filterInputRef}
+              class={styles.menuFilter}
+              placeholder="Type to filter"
+              value={query}
+              onInput={(event) => {
+                setQuery(event.currentTarget.value)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault()
+                  moveHighlightedIndex(1)
+                  return
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault()
+                  moveHighlightedIndex(-1)
+                  return
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  commitSelection(highlightedItem)
+                  return
+                }
+
+                if (event.key === "Escape") {
+                  event.preventDefault()
+                  props.open.value = false
+                }
+              }}
+            />
           }
-        </ul>
+          if (props.loading) {
+            <div class={styles.menuEmpty}>
+              <span
+                class={css({
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                })}
+              >
+                <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
+                "Loading options..."
+              </span>
+            </div>
+          } else if (filteredItems.length === 0) {
+            <div class={styles.menuEmpty}>"No matching options."</div>
+          } else {
+            <ul class={styles.menuList}>
+              for (const item of filteredItems; index index) {
+                <li key={item.value}>
+                  <button
+                    {ref (element) => {
+                      itemElements[item.value] = element
+                    }}
+                    class={cx(
+                      styles.menuButton,
+                      index === selectedIndex && styles.menuButtonActive,
+                    )}
+                    disabled={item.disabled}
+                    type="button"
+                    onMouseEnter={() => {
+                      setSelectedIndex(index)
+                    }}
+                    onClick={() => {
+                      commitSelection(item)
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </div>
       }
-    </div>
-  }
+    </Popover>
+  </div>
 }
