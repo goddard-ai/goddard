@@ -1,8 +1,8 @@
 /** Shared, pre-styled tooltip primitives for app UI chrome. */
-import { Portal } from "@ark-ui/react/portal"
-import { Tooltip } from "@ark-ui/react/tooltip"
+import { useSignal } from "@preact/signals"
 
 import styles from "./good-tooltip.style.ts"
+import { Tooltip } from "./tooltip.tsx"
 
 /** Attaches the shared app tooltip treatment to one trigger element. */
 export component GoodTooltip(props: {
@@ -12,24 +12,18 @@ export component GoodTooltip(props: {
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
 }) {
-  <Tooltip.Root
+  const open = useSignal(false)
+
+  <Tooltip
+    {open}
+    ariaLabel={props.ariaLabel}
+    class={styles.content}
     closeDelay={80}
-    closeOnPointerDown={false}
+    content={props.content}
     openDelay={450}
-    positioning={{
-      gutter: props.sideOffset ?? 8,
-      placement: props.side ?? "top",
-    }}
+    side={props.side}
+    sideOffset={props.sideOffset}
   >
-    <Tooltip.Trigger asChild>
-      {props.children}
-    </Tooltip.Trigger>
-    <Portal>
-      <Tooltip.Positioner>
-        <Tooltip.Content aria-label={props.ariaLabel} class={styles.content}>
-          {props.content}
-        </Tooltip.Content>
-      </Tooltip.Positioner>
-    </Portal>
-  </Tooltip.Root>
+    {props.children}
+  </Tooltip>
 }

@@ -181,6 +181,10 @@ export default {
     _hover: {
       backgroundColor: "surface",
     },
+    _focus: {
+      backgroundColor: "surface",
+      outline: "none",
+    },
     "&[data-highlighted]": {
       backgroundColor: "surface",
     },

@@ -1,4 +1,3 @@
-import { Menu } from "@ark-ui/react/menu"
 import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
 import { Command, Search } from "lucide-react"
@@ -8,7 +7,7 @@ import { useEffect, useRef, useState } from "preact/hooks"
 import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
-import { MenuPortal } from "~/lib/menu-portal.tsrx"
+import { Menu, MenuItem } from "~/lib/menu.tsx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
 import { KeyboardShortcutCaptureDialog } from "./capture-dialog.tsrx"
@@ -307,104 +306,117 @@ component KeyboardShortcutsView(props: { class?: string }) {
         <tbody>
           if (visibleRows.length > 0) {
             for (const row of visibleRows) {
+              const menuOpen = useSignal(false)
+              const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
+              const menuContextPoint = useSignal<{ x: number; y: number } | null>(null)
+
               <tr class={styles.row} key={row.rowKey}>
                 <td class={`${styles.cell} ${styles.commandCell}`}>
                   {row.label}
                 </td>
                 <td class={styles.cell}>
-                  <Menu.Root
-                    aria-label={`${row.label} shortcut actions`}
-                    lazyMount={true}
-                    positioning={{
-                      fitViewport: true,
-                      placement: "bottom-start",
+                  <button
+                    ref={menuTriggerRef}
+                    class={cx(
+                      styles.cellButton,
+                      styles.shortcutButton,
+                      !row.shortcut && styles.cellButtonMuted,
+                    )}
+                    type="button"
+                    onClick={() => {
+                      openCaptureDialog(row)
                     }}
-                    unmountOnExit={true}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      menuContextPoint.value = {
+                        x: event.clientX,
+                        y: event.clientY,
+                      }
+                      menuOpen.value = true
+                    }}
                   >
-                    <Menu.ContextTrigger
-                      class={cx(
-                        styles.cellButton,
-                        styles.shortcutButton,
-                        !row.shortcut && styles.cellButtonMuted,
-                      )}
-                      type="button"
-                      onClick={() => {
+                    {row.shortcut ?? "Add shortcut"}
+                  </button>
+
+                  <Menu
+                    anchor={() => {
+                      const point = menuContextPoint.value
+
+                      if (point) {
+                        return {
+                          getBoundingClientRect() {
+                            return new DOMRect(point.x, point.y, 0, 0)
+                          },
+                        }
+                      }
+
+                      return menuTriggerRef.current
+                    }}
+                    ariaLabel={`${row.label} shortcut actions`}
+                    class={styles.menuContent}
+                    open={menuOpen}
+                  >
+                    <MenuItem
+                      class={styles.menuItem}
+                      onSelect={() => {
+                        openCaptureDialog({
+                          commandId: row.commandId,
+                          label: row.label,
+                          bindingIndex: null,
+                          shortcut: null,
+                          whenClause: row.whenClause,
+                        })
+                      }}
+                    >
+                      "Add shortcut"
+                    </MenuItem>
+
+                    <MenuItem
+                      class={styles.menuItem}
+                      disabled={row.bindingIndex === null}
+                      onSelect={() => {
+                        if (row.bindingIndex === null) {
+                          return
+                        }
+
                         openCaptureDialog(row)
                       }}
                     >
-                      {row.shortcut ?? "Add shortcut"}
-                    </Menu.ContextTrigger>
-                    <MenuPortal>
-                      <Menu.Positioner>
-                        <Menu.Content class={styles.menuContent}>
-                          <Menu.Item
-                            class={styles.menuItem}
-                            value={`${row.rowKey}:add`}
-                            onSelect={() => {
-                              openCaptureDialog({
-                                commandId: row.commandId,
-                                label: row.label,
-                                bindingIndex: null,
-                                shortcut: null,
-                                whenClause: row.whenClause,
-                              })
-                            }}
-                          >
-                            "Add shortcut"
-                          </Menu.Item>
-                          <Menu.Item
-                            class={styles.menuItem}
-                            disabled={row.bindingIndex === null}
-                            value={`${row.rowKey}:change`}
-                            onSelect={() => {
-                              if (row.bindingIndex === null) {
-                                return
-                              }
+                      "Change shortcut"
+                    </MenuItem>
 
-                              openCaptureDialog(row)
-                            }}
-                          >
-                            "Change shortcut"
-                          </Menu.Item>
-                          <Menu.Item
-                            class={cx(styles.menuItem, styles.menuItemDanger)}
-                            disabled={row.bindingIndex === null}
-                            value={`${row.rowKey}:remove`}
-                            onSelect={() => {
-                              if (row.bindingIndex === null) {
-                                return
-                              }
+                    <MenuItem
+                      class={cx(styles.menuItem, styles.menuItemDanger)}
+                      disabled={row.bindingIndex === null}
+                      onSelect={() => {
+                        if (row.bindingIndex === null) {
+                          return
+                        }
 
-                              setEditingWhenRowKey(null)
-                              void shortcutRegistry.removeCommandBinding(
-                                row.commandId,
-                                row.bindingIndex,
-                              )
-                            }}
-                          >
-                            "Remove shortcut"
-                          </Menu.Item>
-                          <Menu.Item
-                            class={styles.menuItem}
-                            disabled={!row.shortcut}
-                            value={`${row.rowKey}:show-matches`}
-                            onSelect={() => {
-                              if (!row.shortcut) {
-                                return
-                              }
+                        setEditingWhenRowKey(null)
+                        void shortcutRegistry.removeCommandBinding(row.commandId, row.bindingIndex)
+                      }}
+                    >
+                      "Remove shortcut"
+                    </MenuItem>
 
-                              stopSearchRecording()
-                              setIsRecordingSearchEnabled(false)
-                              setSearchText(formatShortcutSearch(row.shortcut))
-                              searchInputRef.current?.focus()
-                            }}
-                          >
-                            "Show commands with same shortcut"
-                          </Menu.Item>
-                        </Menu.Content>
-                      </Menu.Positioner>
-                    </MenuPortal>
-                  </Menu.Root>
+                    <MenuItem
+                      class={styles.menuItem}
+                      disabled={!row.shortcut}
+                      onSelect={() => {
+                        if (!row.shortcut) {
+                          return
+                        }
+
+                        stopSearchRecording()
+                        setIsRecordingSearchEnabled(false)
+                        setSearchText(formatShortcutSearch(row.shortcut))
+                        searchInputRef.current?.focus()
+                      }}
+                    >
+                      "Show commands with same shortcut"
+                    </MenuItem>
+                  </Menu>
                 </td>
                 <td class={styles.cell}>
                   if (editingWhenRowKey === row.rowKey && row.bindingIndex !== null) {

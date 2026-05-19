@@ -4,15 +4,21 @@ import { useId, useLayoutEffect, useRef } from "preact/hooks"
 import { startOverlayDismissal } from "./overlay/dismissal.ts"
 import { focusFirstElement, keepFocusInside, restoreFocus } from "./overlay/focus.ts"
 import { OverlayPortal } from "./overlay/portal.tsrx"
-import { startFloatingPosition, type FloatingPositionOptions } from "./overlay/position.ts"
+import {
+  startFloatingPosition,
+  type FloatingPositionOptions,
+  type FloatingReference,
+} from "./overlay/position.ts"
 import { overlayStack } from "./overlay/stack.ts"
 
 export type PopoverCloseReason = "anchor-lost" | "escape" | "outside"
 
 export type PopoverProps = FloatingPositionOptions & {
     open: Signal<boolean>;
-    anchor: () => HTMLElement | null;
+    anchor: () => FloatingReference | null;
     class?: string;
+    role?: any;
+    ariaLabel?: string;
     closeOnEscape?: boolean;
     closeOnOutsidePointer?: boolean;
     modalFocus?: boolean;
@@ -49,7 +55,9 @@ export component Popover(props: PopoverProps) {
     const previouslyFocusedElement = document.activeElement
     const unregisterOverlay = overlayStack.register({
       id: popoverId,
-      elements: [anchorElement, contentElement],
+      elements: anchorElement instanceof HTMLElement
+        ? [anchorElement, contentElement]
+        : [contentElement],
     })
     const stopDismissal = startOverlayDismissal({
       id: popoverId,
@@ -65,13 +73,16 @@ export component Popover(props: PopoverProps) {
       sameWidth: props.sameWidth,
       strategy: props.strategy,
     })
-    const anchorObserver = new MutationObserver(() => {
-      if (!document.contains(anchorElement)) {
-        requestClose("anchor-lost")
-      }
-    })
+    const anchorObserver =
+      anchorElement instanceof Element
+        ? new MutationObserver(() => {
+            if (!document.contains(anchorElement)) {
+              requestClose("anchor-lost")
+            }
+          })
+        : null
 
-    anchorObserver.observe(document, { childList: true, subtree: true })
+    anchorObserver?.observe(document, { childList: true, subtree: true })
 
     const initialFocusElement = props.initialFocus?.()
     if (initialFocusElement) {
@@ -81,12 +92,12 @@ export component Popover(props: PopoverProps) {
     }
 
     return () => {
-      anchorObserver.disconnect()
+      anchorObserver?.disconnect()
       stopPositioning()
       stopDismissal()
       unregisterOverlay()
 
-      if (props.restoreFocus ?? true) {
+      if ((props.restoreFocus ?? true) && anchorElement instanceof Element) {
         restoreFocus(anchorElement)
       } else {
         restoreFocus(previouslyFocusedElement)
@@ -101,7 +112,9 @@ export component Popover(props: PopoverProps) {
   <OverlayPortal root="menu">
     <div
       ref={contentRef}
+      aria-label={props.ariaLabel}
       class={props.class}
+      role={props.role}
       tabIndex={-1}
       onKeyDown={(event) => {
         if (props.modalFocus) {

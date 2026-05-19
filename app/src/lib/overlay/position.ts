@@ -9,6 +9,12 @@ import {
   type Strategy,
 } from "@floating-ui/dom"
 
+export type FloatingReference =
+  | Element
+  | {
+      getBoundingClientRect: () => DOMRect
+    }
+
 /** Placement settings shared by anchored overlay primitives. */
 export type FloatingPositionOptions = {
   placement?: Placement
@@ -19,14 +25,14 @@ export type FloatingPositionOptions = {
 
 /** Keeps a floating overlay positioned against its anchor until either element unmounts. */
 export function startFloatingPosition(
-  referenceElement: HTMLElement,
+  referenceElement: FloatingReference,
   floatingElement: HTMLElement,
   options: FloatingPositionOptions = {},
 ) {
   let disposed = false
 
   async function updatePosition() {
-    const { x, y } = await computePosition(referenceElement, floatingElement, {
+    const { x, y } = await computePosition(referenceElement as Element, floatingElement, {
       placement: options.placement ?? "bottom-start",
       strategy: options.strategy ?? "absolute",
       middleware: [
@@ -58,7 +64,18 @@ export function startFloatingPosition(
     })
   }
 
-  const stopAutoUpdate = autoUpdate(referenceElement, floatingElement, updatePosition)
+  const stopAutoUpdate =
+    referenceElement instanceof Element
+      ? autoUpdate(referenceElement, floatingElement, updatePosition)
+      : (() => {
+          window.addEventListener("resize", updatePosition)
+          window.addEventListener("scroll", updatePosition, true)
+
+          return () => {
+            window.removeEventListener("resize", updatePosition)
+            window.removeEventListener("scroll", updatePosition, true)
+          }
+        })()
   void updatePosition()
 
   return () => {
