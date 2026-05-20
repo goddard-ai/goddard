@@ -803,6 +803,12 @@ export type SessionManager = {
     id: SessionId,
     metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string },
   ) => Promise<{ scope: InboxScope; headline: InboxHeadline; turnId: string | null }>
+  resolveTokenScope: (token: string) => Promise<{
+    readonly sessionId: SessionId
+    readonly owner: string | null
+    readonly repo: string | null
+    readonly allowedPrNumbers: readonly number[]
+  } | null>
   allowPullRequest: (id: SessionId, prNumber: number) => Promise<void>
   completeSession: (id: SessionId) => Promise<InboxItem | null>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
@@ -4158,6 +4164,24 @@ export function createSessionManager(input: {
     }
   }
 
+  async function resolveTokenScope(token: string) {
+    await ready
+    const session =
+      db.sessions.first({
+        where: { token },
+      }) ?? null
+    if (!session?.permissions) {
+      return null
+    }
+
+    return {
+      sessionId: session.id,
+      owner: session.permissions.owner,
+      repo: session.permissions.repo,
+      allowedPrNumbers: session.permissions.allowedPrNumbers,
+    }
+  }
+
   async function allowPullRequest(id: SessionId, prNumber: number) {
     await ready
     const session = requireSessionDocument(id)
@@ -4465,6 +4489,7 @@ export function createSessionManager(input: {
     reportBlocker,
     reportTurnEnded,
     recordTurnAttentionActivity,
+    resolveTokenScope,
     allowPullRequest,
     completeSession,
     sendMessage,

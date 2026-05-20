@@ -153,12 +153,6 @@ export type DaemonSetupSubstrate = {
   readonly configManager: {
     readonly getRootConfig: (cwd: string) => Promise<any>
   }
-  readonly getSessionByToken: (token: string) => Promise<{
-    readonly sessionId: `ses_${string}`
-    readonly owner: string | null
-    readonly repo: string | null
-    readonly allowedPrNumbers: readonly number[]
-  } | null>
   readonly registryService: {
     readonly listAdapters: () => Promise<any>
   }

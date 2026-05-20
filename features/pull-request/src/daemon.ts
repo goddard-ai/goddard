@@ -46,11 +46,13 @@ export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin, inboxPlugin],
   ipc: pullRequestIpcSchema,
-  setup({ backendClient, getSessionByToken, inbox, session, setRequestSessionId }) {
+  setup({ backendClient, inbox, session, setRequestSessionId }) {
     return {
       requestHandlers: {
         "pr.submit": async (payload) => {
-          const sessionRecord = requireRepositorySession(await getSessionByToken(payload.token))
+          const sessionRecord = requireRepositorySession(
+            await session.resolveTokenScope(payload.token),
+          )
           setRequestSessionId(sessionRecord.sessionId)
 
           const resolvedInput = await resolveSubmitRequestFromGit(payload)
@@ -95,7 +97,9 @@ export const pullRequestPlugin = definePlugin({
           return { pullRequest }
         },
         "pr.reply": async (payload) => {
-          const sessionRecord = requireRepositorySession(await getSessionByToken(payload.token))
+          const sessionRecord = requireRepositorySession(
+            await session.resolveTokenScope(payload.token),
+          )
           setRequestSessionId(sessionRecord.sessionId)
 
           const resolvedInput = await resolveReplyRequestFromGit(payload)

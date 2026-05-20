@@ -78,23 +78,6 @@ export async function startDaemonServer(
   let loopManager!: LoopManager
   let workforceManager!: WorkforceManager
 
-  async function getSessionByToken(token: string) {
-    const sessionRecord =
-      db.sessions.first({
-        where: { token },
-      }) ?? null
-    if (!sessionRecord?.permissions) {
-      return null
-    }
-
-    return {
-      sessionId: sessionRecord.id,
-      owner: sessionRecord.permissions.owner,
-      repo: sessionRecord.permissions.repo,
-      allowedPrNumbers: sessionRecord.permissions.allowedPrNumbers,
-    }
-  }
-
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
     if (!context) {
@@ -117,7 +100,7 @@ export async function startDaemonServer(
       }
     }
 
-    const session = await getSessionByToken(token)
+    const session = await sessionFeature.resolveTokenScope(token)
     if (!session) {
       throw new IpcClientError("Invalid session token")
     }
@@ -176,7 +159,6 @@ export async function startDaemonServer(
     },
     backendClient: client,
     configManager,
-    getSessionByToken,
     registryService,
     get sessionManager() {
       if (!sessionManager) {
