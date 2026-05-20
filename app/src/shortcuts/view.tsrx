@@ -28,13 +28,13 @@ function getExactShortcutSearch(searchText: string) {
 }
 
 type CaptureState = {
-    commandId: AppCommandId;
-    label: string;
-    mode: "add" | "change";
-    bindingIndex: number | null;
-    currentExpression: string | null;
-    whenClause: string | null;
-  }
+  commandId: AppCommandId;
+  label: string;
+  mode: "add" | "change";
+  bindingIndex: number | null;
+  currentExpression: string | null;
+  whenClause: string | null;
+}
 
 component KeyboardShortcutsView(props: { class?: string }) {
   const shortcutRegistry = useShortcutRegistry()
@@ -343,11 +343,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
                       const point = menuContextPoint.value
 
                       if (point) {
-                        return {
-                          getBoundingClientRect() {
-                            return new DOMRect(point.x, point.y, 0, 0)
-                          },
-                        }
+                        return point
                       }
 
                       return menuTriggerRef.current
