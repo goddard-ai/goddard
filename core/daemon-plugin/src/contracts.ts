@@ -103,10 +103,6 @@ type PublishContext<TPlugin> = TPlugin extends { readonly ipc: infer TIpc extend
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
-  readonly addAllowedPrToSession: (
-    sessionId: `ses_${string}`,
-    prNumber: number,
-  ) => void | Promise<void>
   readonly backendClient: {
     readonly auth: {
       readonly startDeviceFlow: (input?: {

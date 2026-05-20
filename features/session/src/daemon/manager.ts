@@ -803,6 +803,7 @@ export type SessionManager = {
     id: SessionId,
     metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string },
   ) => Promise<{ scope: InboxScope; headline: InboxHeadline; turnId: string | null }>
+  allowPullRequest: (id: SessionId, prNumber: number) => Promise<void>
   completeSession: (id: SessionId) => Promise<InboxItem | null>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
   cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
@@ -4157,6 +4158,21 @@ export function createSessionManager(input: {
     }
   }
 
+  async function allowPullRequest(id: SessionId, prNumber: number) {
+    await ready
+    const session = requireSessionDocument(id)
+    if (!session.permissions || session.permissions.allowedPrNumbers.includes(prNumber)) {
+      return
+    }
+
+    updateSession(id, {
+      permissions: {
+        ...session.permissions,
+        allowedPrNumbers: [...session.permissions.allowedPrNumbers, prNumber],
+      },
+    })
+  }
+
   async function completeSession(id: SessionId) {
     await ready
     requireSessionDocument(id)
@@ -4449,6 +4465,7 @@ export function createSessionManager(input: {
     reportBlocker,
     reportTurnEnded,
     recordTurnAttentionActivity,
+    allowPullRequest,
     completeSession,
     sendMessage,
     cancelSessionTurn,

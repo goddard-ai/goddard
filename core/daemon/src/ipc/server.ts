@@ -95,27 +95,6 @@ export async function startDaemonServer(
     }
   }
 
-  async function addAllowedPrToSession(sessionId: DaemonSession["id"], prNumber: number) {
-    const sessionRecord = db.sessions.get(sessionId)
-    if (!sessionRecord?.permissions) {
-      return
-    }
-
-    db.sessions.update(sessionId, (record) => {
-      if (!record.permissions || record.permissions.allowedPrNumbers.includes(prNumber)) {
-        return record
-      }
-
-      return {
-        ...record,
-        permissions: {
-          ...record.permissions,
-          allowedPrNumbers: [...record.permissions.allowedPrNumbers, prNumber],
-        },
-      }
-    })
-  }
-
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
     if (!context) {
@@ -187,7 +166,6 @@ export async function startDaemonServer(
   }
 
   const daemonSubstrate = {
-    addAllowedPrToSession,
     authTokenStore: {
       set: (token) => {
         db.metadata.set("authToken", token)

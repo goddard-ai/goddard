@@ -43,6 +43,7 @@ type SessionExtension = {
   reportBlocker: SessionManager["reportBlocker"]
   reportTurnEnded: SessionManager["reportTurnEnded"]
   recordTurnAttentionActivity: SessionManager["recordTurnAttentionActivity"]
+  allowPullRequest: SessionManager["allowPullRequest"]
   subscriberConnected: SessionManager["sessionSubscriberConnected"]
   subscriberDisconnected: SessionManager["sessionSubscriberDisconnected"]
   resolveToken: SessionManager["resolveSessionIdByToken"]
@@ -82,6 +83,7 @@ export const sessionPlugin = definePlugin({
       reportTurnEnded: (id, metadata) => context.sessionManager.reportTurnEnded(id, metadata),
       recordTurnAttentionActivity: (id, metadata) =>
         context.sessionManager.recordTurnAttentionActivity(id, metadata),
+      allowPullRequest: (id, prNumber) => context.sessionManager.allowPullRequest(id, prNumber),
       subscriberConnected: (id) => context.sessionManager.sessionSubscriberConnected(id),
       subscriberDisconnected: (id) => context.sessionManager.sessionSubscriberDisconnected(id),
       resolveToken: (token) => context.sessionManager.resolveSessionIdByToken(token),

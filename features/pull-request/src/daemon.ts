@@ -46,14 +46,7 @@ export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin, inboxPlugin],
   ipc: pullRequestIpcSchema,
-  setup({
-    addAllowedPrToSession,
-    backendClient,
-    getSessionByToken,
-    inbox,
-    session,
-    setRequestSessionId,
-  }) {
+  setup({ backendClient, getSessionByToken, inbox, session, setRequestSessionId }) {
     return {
       requestHandlers: {
         "pr.submit": async (payload) => {
@@ -66,7 +59,7 @@ export const pullRequestPlugin = definePlugin({
             owner: sessionRecord.owner,
             repo: sessionRecord.repo,
           })
-          await addAllowedPrToSession(sessionRecord.sessionId, pr.number)
+          await session.allowPullRequest(sessionRecord.sessionId, pr.number)
           const pullRequest = await recordPullRequest({
             host: "github",
             owner: sessionRecord.owner,
