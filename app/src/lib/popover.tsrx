@@ -32,6 +32,10 @@ export type PopoverProps = FloatingPositionOptions & {
 
 /** Renders unstyled anchored overlay content for feature-owned popovers. */
 export component Popover(props: PopoverProps) {
+  if (!props.open.value) {
+    return
+  }
+
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
 
@@ -40,11 +44,9 @@ export component Popover(props: PopoverProps) {
     props.onOpenChange?.(false, reason)
   }
 
-  useLayoutEffect(() => {
-    if (!props.open.value) {
-      return
-    }
+  const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
 
+  useLayoutEffect(() => {
     const anchorElement = props.anchor()
     const contentElement = contentRef.current
 
@@ -95,13 +97,7 @@ export component Popover(props: PopoverProps) {
         restoreFocus(previouslyFocusedElement)
       }
     }
-  }, [props.open.value, popoverId])
-
-  if (!props.open.value) {
-    return
-  }
-
-  const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
+  }, [popoverId])
 
   <OverlayPortal root="menu">
     if (shouldBlockOutsidePointer) {
