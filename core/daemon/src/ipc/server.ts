@@ -157,7 +157,8 @@ export async function startDaemonServer(
         db.metadata.delete("authToken")
       },
     },
-    backendClient: client,
+    authBackendClient: client.auth,
+    pullRequestBackendClient: client.pr,
     configManager,
     registryService,
     get sessionManager() {

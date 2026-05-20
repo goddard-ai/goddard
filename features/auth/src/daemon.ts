@@ -5,18 +5,18 @@ import { authIpcSchema } from "./daemon-ipc.ts"
 export const authPlugin = definePlugin({
   name: "auth",
   ipc: authIpcSchema,
-  setup({ authTokenStore, backendClient }) {
+  setup({ authBackendClient, authTokenStore }) {
     return {
       requestHandlers: {
-        "auth.device.start": async (payload) => backendClient.auth.startDeviceFlow(payload),
+        "auth.device.start": async (payload) => authBackendClient.startDeviceFlow(payload),
         "auth.device.complete": async (payload) => {
-          const session = await backendClient.auth.completeDeviceFlow(payload)
+          const session = await authBackendClient.completeDeviceFlow(payload)
           await authTokenStore.set(session.token)
           return session
         },
-        "auth.whoami": async () => backendClient.auth.whoami(),
+        "auth.whoami": async () => authBackendClient.whoami(),
         "auth.logout": async () => {
-          await backendClient.auth.logout()
+          await authBackendClient.logout()
           await authTokenStore.delete()
           return { success: true as const }
         },

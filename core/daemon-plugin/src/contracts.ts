@@ -103,48 +103,46 @@ type PublishContext<TPlugin> = TPlugin extends { readonly ipc: infer TIpc extend
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
-  readonly backendClient: {
-    readonly auth: {
-      readonly startDeviceFlow: (input?: {
-        readonly githubUsername?: string | undefined
-      }) => Promise<{
-        readonly deviceCode: string
-        readonly userCode: string
-        readonly verificationUri: string
-        readonly expiresIn: number
-        readonly interval: number
-      }>
-      readonly completeDeviceFlow: (input: {
-        readonly deviceCode: string
-        readonly githubUsername: string
-      }) => Promise<{
-        readonly token: string
-        readonly githubUsername: string
-        readonly githubUserId: number
-      }>
-      readonly whoami: () => Promise<{
-        readonly token: string
-        readonly githubUsername: string
-        readonly githubUserId: number
-      }>
-      readonly logout: () => Promise<void>
-    }
-    readonly pr: {
-      readonly create: (input: {
-        readonly owner: string
-        readonly repo: string
-        readonly title: string
-        readonly body?: string | undefined
-        readonly head: string
-        readonly base: string
-      }) => Promise<{ readonly number: number; readonly url: string }>
-      readonly reply: (input: {
-        readonly owner: string
-        readonly repo: string
-        readonly prNumber: number
-        readonly body: string
-      }) => Promise<{ readonly success: boolean }>
-    }
+  readonly authBackendClient: {
+    readonly startDeviceFlow: (input?: {
+      readonly githubUsername?: string | undefined
+    }) => Promise<{
+      readonly deviceCode: string
+      readonly userCode: string
+      readonly verificationUri: string
+      readonly expiresIn: number
+      readonly interval: number
+    }>
+    readonly completeDeviceFlow: (input: {
+      readonly deviceCode: string
+      readonly githubUsername: string
+    }) => Promise<{
+      readonly token: string
+      readonly githubUsername: string
+      readonly githubUserId: number
+    }>
+    readonly whoami: () => Promise<{
+      readonly token: string
+      readonly githubUsername: string
+      readonly githubUserId: number
+    }>
+    readonly logout: () => Promise<void>
+  }
+  readonly pullRequestBackendClient: {
+    readonly create: (input: {
+      readonly owner: string
+      readonly repo: string
+      readonly title: string
+      readonly body?: string | undefined
+      readonly head: string
+      readonly base: string
+    }) => Promise<{ readonly number: number; readonly url: string }>
+    readonly reply: (input: {
+      readonly owner: string
+      readonly repo: string
+      readonly prNumber: number
+      readonly body: string
+    }) => Promise<{ readonly success: boolean }>
   }
   readonly authTokenStore: {
     readonly set: (token: string) => void | Promise<void>
