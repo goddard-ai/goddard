@@ -38,10 +38,10 @@ export component Popover(props: PopoverProps) {
 
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
-
-  const open = props.open
-  const onOpenChange = props.onOpenChange
-  const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
+  const close = (reason: PopoverCloseReason) => {
+    props.open.value = false
+    props.onOpenChange?.(false, reason)
+  }
 
   useLayoutEffect(() => {
     const anchorElement = props.anchor()
@@ -66,10 +66,7 @@ export component Popover(props: PopoverProps) {
       id: popoverId,
       dismissOnEscape: props.closeOnEscape ?? true,
       dismissOnOutsidePointer: props.closeOnOutsidePointer ?? true,
-      close(reason) {
-        open.value = false
-        onOpenChange?.(false, reason)
-      },
+      close,
     })
     const stopPositioning = startFloatingPosition(anchorElement, contentElement, {
       offset: props.offset,
@@ -98,6 +95,9 @@ export component Popover(props: PopoverProps) {
   }, [popoverId])
 
   <OverlayPortal root="menu">
+    const shouldBlockOutsidePointer =
+      props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
+
     if (shouldBlockOutsidePointer) {
       <div
         aria-hidden="true"
