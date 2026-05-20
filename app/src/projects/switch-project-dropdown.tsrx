@@ -1,7 +1,7 @@
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
-import { useSignal } from "@preact/signals"
-import { useEffect, useMemo, useRef } from "preact/hooks"
+import { useComputed, useSignal } from "@preact/signals"
+import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -32,44 +32,45 @@ export component SwitchProjectDropdown() {
   const search = useSignal("")
   const highlightedIndex = useSignal(0)
 
-  const projects = orderProjectsByRecentActivity(
-    projectRegistry.projectList,
-    projectContext.recentProjectPaths,
+  const projects = useComputed(
+    () => orderProjectsByRecentActivity(
+      projectRegistry.projectList,
+      projectContext.recentProjectPaths,
+    ),
   )
   const activeProject =
     projectContext.activeProjectPath === null
       ? null
       : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
 
-  const searchableProjects = useMemo(
-    () => projects.map(
+  const searchableProjects = useComputed(
+    () => projects.value.map(
       (project) => ({
         preparedName: fuzzysort.prepare(project.name),
         preparedPath: fuzzysort.prepare(project.path),
         project,
       }),
     ),
-    [projects],
   )
 
-  const filteredProjects = useMemo(() => {
+  const filteredProjects = useComputed(() => {
     if (isEmptyQuery(search.value)) {
-      return projects
+      return projects.value
     }
 
     return fuzzysort.searchFields(
       search.value,
-      searchableProjects,
+      searchableProjects.value,
       [
         { key: "name", extract: (item) => item.preparedName },
         { key: "path", extract: (item) => item.preparedPath },
       ],
       { threshold: 0 },
     ).items.map((item) => item.value.project)
-  }, [projects, search.value, searchableProjects])
+  })
 
-  const items: SwitchProjectItem[] = useMemo(() => {
-    const projectItems: SwitchProjectItem[] = filteredProjects.map(
+  const items = useComputed<SwitchProjectItem[]>(() => {
+    const projectItems: SwitchProjectItem[] = filteredProjects.value.map(
       (project) => ({
         id: project.path,
         kind: "project",
@@ -83,7 +84,7 @@ export component SwitchProjectDropdown() {
 
     const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
     return [openFolderItem, ...projectItems]
-  }, [filteredProjects, search.value])
+  })
 
   async function openFolderFromSwitcher() {
     isOpen.value = false
@@ -145,19 +146,19 @@ export component SwitchProjectDropdown() {
     strategy="fixed"
   >
     const highlightedItemIndex =
-      items.length === 0 ? 0 : Math.min(highlightedIndex.value, items.length - 1)
-    const highlightedItem = items[highlightedItemIndex]
+      items.value.length === 0 ? 0 : Math.min(highlightedIndex.value, items.value.length - 1)
+    const highlightedItem = items.value[highlightedItemIndex]
 
     const moveHighlightedIndex = (delta: -1 | 1) => {
-      if (items.length === 0) {
+      if (items.value.length === 0) {
         highlightedIndex.value = 0
         return
       }
 
-      const currentHighlightedIndex = Math.min(highlightedIndex.value, items.length - 1)
+      const currentHighlightedIndex = Math.min(highlightedIndex.value, items.value.length - 1)
 
       highlightedIndex.value = delta > 0
-        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
+        ? Math.min(currentHighlightedIndex + 1, items.value.length - 1)
         : Math.max(currentHighlightedIndex - 1, 0)
     }
 
@@ -210,9 +211,9 @@ export component SwitchProjectDropdown() {
       />
     </label>
 
-    if (items.length > 0) {
+    if (items.value.length > 0) {
       <ul class={styles.list}>
-        for (const item of items; index index) {
+        for (const item of items.value; index index) {
           <li key={item.id}>
             <button
               class={styles.item}
