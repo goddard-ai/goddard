@@ -124,30 +124,29 @@ component TranscriptRow(props: {
   row: MessageListRow<RenderTranscriptItem>;
   onSelectPermissionOption?: TranscriptProps["onSelectPermissionOption"];
 }) {
-  if (props.row.item.kind === "toolGroup") {
-    <ToolTranscriptRow groupId={props.row.item.id} toolCalls={props.row.item.toolCalls} />
-    return
+  const item = props.row.item
+  switch (item.kind) {
+    case "toolGroup":
+      <ToolTranscriptRow groupId={item.id} toolCalls={item.toolCalls} />
+      return
+    case "permissionRequest":
+      <PermissionRequestTranscriptRow
+        message={item}
+        onSelectOption={props.onSelectPermissionOption}
+      />
+      return
+    case "planUpdate":
+      <PlanUpdateTranscriptRow message={item} />
+      return
+    case "turnStop":
+      <TurnStopTranscriptRow row={props.row as MessageListRow<SessionTranscriptTurnStop>} />
+      return
+    case "message":
+      <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
+      return
+    default:
+      item satisfies never
   }
-
-  if (props.row.item.kind === "permissionRequest") {
-    <PermissionRequestTranscriptRow
-      message={props.row.item}
-      onSelectOption={props.onSelectPermissionOption}
-    />
-    return
-  }
-
-  if (props.row.item.kind === "planUpdate") {
-    <PlanUpdateTranscriptRow message={props.row.item} />
-    return
-  }
-
-  if (props.row.item.kind === "turnStop") {
-    <TurnStopTranscriptRow row={props.row as MessageListRow<SessionTranscriptTurnStop>} />
-    return
-  }
-
-  <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
 }
 
 component OlderHistoryPager(props: {
@@ -201,11 +200,11 @@ export component Transcript(props: TranscriptProps) {
           ? TURN_STOP_ROW_HEIGHT
           : estimateTranscriptRowHeight(message, viewportWidth)}
       getItemKey={(message) => message.id}
-      header={props.olderHistory
-        ? <tsrx>
-            <OlderHistoryPager olderHistory={props.olderHistory} />
-          </tsrx>
-        : undefined}
+      header={<tsrx>
+        if (props.olderHistory) {
+          <OlderHistoryPager olderHistory={props.olderHistory} />
+        }
+      </tsrx>}
       initialScrollPosition={effectiveInitialScroll}
       items={renderItems}
       loadingFallback={<tsrx>

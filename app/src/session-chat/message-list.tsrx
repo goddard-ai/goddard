@@ -77,9 +77,7 @@ function resolvePrependedItemCount(previousKeys: readonly string[], nextKeys: re
 }
 
 component MessageListHeader(props: { context: MessageListContext }) {
-  <tsrx>
-    {props.context.header}
-  </tsrx>
+  {props.context.header}
 }
 
 const messageListComponents = {
