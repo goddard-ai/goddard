@@ -1,6 +1,6 @@
-import * as acp from "@agentclientprotocol/sdk"
 import type { InitialPromptOption } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionTitleState } from "@goddard-ai/schema/daemon/store"
+import * as acp from "acp-client/protocol"
 import { generateText, type LanguageModel } from "ai"
 import type { ModelConfig } from "ai-sdk-json-schema"
 

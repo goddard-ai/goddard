@@ -1,4 +1,3 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type {
@@ -8,6 +7,7 @@ import type {
   SessionConnection,
   SessionHistoryTurn,
 } from "@goddard-ai/schema/daemon"
+import type * as acp from "acp-client/protocol"
 import type { KindInput, KindOutput } from "kindstore"
 
 import type { SessionConnectionMode } from "../persistence/session-state.ts"

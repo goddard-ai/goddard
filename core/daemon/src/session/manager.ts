@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import * as acp from "@agentclientprotocol/sdk"
+import { ClientSideConnection } from "@agentclientprotocol/sdk"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
@@ -56,6 +56,7 @@ import {
   type AgentInputStream,
   type AgentOutputStream,
 } from "acp-client"
+import * as acp from "acp-client/protocol"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 
@@ -203,7 +204,7 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
 
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
-  agent: acp.ClientSideConnection
+  agent: ClientSideConnection
   sessionId: string
   models: acp.SessionModelState | null | undefined
   configOptions: acp.SessionConfigOption[] | null | undefined
@@ -479,7 +480,7 @@ async function initializeSession(params: {
   const stream = createAgentMessageStream(params.input, params.output)
 
   try {
-    const agent = new acp.ClientSideConnection(
+    const agent = new ClientSideConnection(
       () => ({
         async requestPermission() {
           return { outcome: { outcome: "cancelled" } }
@@ -2940,14 +2941,14 @@ export function createSessionManager(input: {
     const stream = createAgentMessageStream(agentProcess.stdin, agentProcess.stdout)
     let availableCommands: acp.AvailableCommand[] = []
     let previewSessionId: string | null = null
-    let agent: acp.ClientSideConnection | null = null
+    let agent: ClientSideConnection | null = null
     let resolveAvailableCommands: (() => void) | null = null
     const availableCommandsReady = new Promise<void>((resolve) => {
       resolveAvailableCommands = resolve
     })
 
     try {
-      agent = new acp.ClientSideConnection(
+      agent = new ClientSideConnection(
         () => ({
           async requestPermission() {
             return { outcome: { outcome: "cancelled" } }
@@ -2998,7 +2999,7 @@ export function createSessionManager(input: {
     } finally {
       if (previewSessionId && agent) {
         try {
-          await agent.unstable_closeSession({
+          await agent.closeSession({
             sessionId: previewSessionId,
           })
         } catch {

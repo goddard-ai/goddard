@@ -87,7 +87,7 @@ class LaunchPreviewFixtureAgent {
     }
   }
 
-  async unstable_closeSession(params) {
+  async closeSession(params) {
     this.sessions.delete(params.sessionId)
     return {}
   }

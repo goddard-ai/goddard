@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url"
-import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
+import * as acp from "acp-client/protocol"
 import { getErrorMessage, proportionalJitter } from "radashi"
 
 import { LoopContext } from "../context.ts"

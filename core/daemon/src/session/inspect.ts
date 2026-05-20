@@ -1,7 +1,7 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
-import * as acp from "@agentclientprotocol/sdk"
 import { createAcpClient } from "acp-client"
+import * as acp from "acp-client/protocol"
 
 import { spawnAgentProcess } from "./agent-process.ts"
 import { createACPRegistryService } from "./registry.ts"

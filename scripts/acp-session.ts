@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /** ACP debugging CLI for daemon-backed sessions and raw adapters. */
 import { resolve } from "node:path"
-import type * as acp from "@agentclientprotocol/sdk"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
+import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
 import { inspectAdapterSession, listAdapterSessions } from "../core/daemon/src/session/inspect.ts"

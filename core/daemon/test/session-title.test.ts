@@ -1,4 +1,4 @@
-import * as acp from "@agentclientprotocol/sdk"
+import * as acp from "acp-client/protocol"
 import { expect, test } from "bun:test"
 
 import {

@@ -3,6 +3,7 @@ minimumReleaseAge = 1209600 # 14 days
 minimumReleaseAgeExcludes = [
   "@clack/core",
   "@clack/prompts",
+  "@agentclientprotocol/sdk",
   "acp-client",
   "ai-sdk-json-schema",
   "electrobun",
