@@ -6,6 +6,7 @@ import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
@@ -348,21 +349,23 @@ component SidebarItem(props: {
   const ariaLabel =
     hasDot ? props.dot.getAriaLabel(props.label) : props.label
 
-  <button
-    aria-current={props.isSelected ? "page" : undefined}
-    aria-label={ariaLabel}
-    class={styles.sidebarItem}
-    style={{
-      color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
-    }}
-    type="button"
-    onClick={props.onSelect}
-  >
-    <InlineSvgIcon icon={props.icon} size="22px 21px" />
-    if (hasDot) {
-      <span aria-hidden="true" class={styles.sidebarUnreadDot} />
-    }
-  </button>
+  <GoodTooltip content={props.label} side="right" sideOffset={10}>
+    <button
+      aria-current={props.isSelected ? "page" : undefined}
+      aria-label={ariaLabel}
+      class={styles.sidebarItem}
+      style={{
+        color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
+      }}
+      type="button"
+      onClick={props.onSelect}
+    >
+      <InlineSvgIcon icon={props.icon} size="22px 21px" />
+      if (hasDot) {
+        <span aria-hidden="true" class={styles.sidebarUnreadDot} />
+      }
+    </button>
+  </GoodTooltip>
 }
 
 component TabButton(props: {
