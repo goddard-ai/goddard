@@ -101,7 +101,7 @@ export const sessionPlugin = definePlugin({
           const response = {
             session: await session.create(payload),
           }
-          context.setRequestSessionId(response.session.id)
+          context.getIpcRequestContext().setSessionId(response.session.id)
           return response
         },
         "session.list": async (payload) => session.list(payload),
@@ -147,7 +147,7 @@ export const sessionPlugin = definePlugin({
         }),
         "session.resolveToken": async ({ token }) => {
           const id = await session.resolveToken(token)
-          context.setRequestSessionId(id)
+          context.getIpcRequestContext().setSessionId(id)
           return {
             id,
           }

@@ -157,7 +157,9 @@ export type DaemonSetupSubstrate = {
     readonly listAdapters: () => Promise<any>
   }
   readonly sessionManager: any
-  readonly setRequestSessionId: (id: `ses_${string}`) => void
+  readonly getIpcRequestContext: () => {
+    readonly setSessionId: (id: `ses_${string}`) => void
+  }
 }
 
 /** Infers setup context fields from a plugin's own definition and consumed plugins. */

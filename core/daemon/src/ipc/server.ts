@@ -166,9 +166,7 @@ export async function startDaemonServer(
       }
       return sessionManager
     },
-    setRequestSessionId: (id) => {
-      requireIpcRequestContext().setSessionId(id)
-    },
+    getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
   const pluginSetup = await setupDaemonPlugins(daemonSubstrate, (plugin, name, payload) => {
