@@ -25,82 +25,13 @@ type SwitchProjectItem = {
 export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
-  const workbenchTabSet = useWorkbenchTabSet()
   const triggerElementRef = useRef<HTMLButtonElement>(null)
 
   const isOpen = useSignal(false)
-  const search = useSignal("")
-  const highlightedIndex = useSignal(0)
-
-  const projects = useComputed(
-    () => orderProjectsByRecentActivity(
-      projectRegistry.projectList,
-      projectContext.recentProjectPaths,
-    ),
-  )
   const activeProject =
     projectContext.activeProjectPath === null
       ? null
       : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
-
-  const searchableProjects = useComputed(
-    () => projects.value.map(
-      (project) => ({
-        preparedName: fuzzysort.prepare(project.name),
-        preparedPath: fuzzysort.prepare(project.path),
-        project,
-      }),
-    ),
-  )
-
-  const filteredProjects = useComputed(() => {
-    if (isEmptyQuery(search.value)) {
-      return projects.value
-    }
-
-    return fuzzysort.searchFields(
-      search.value,
-      searchableProjects.value,
-      [
-        { key: "name", extract: (item) => item.preparedName },
-        { key: "path", extract: (item) => item.preparedPath },
-      ],
-      { threshold: 0 },
-    ).items.map((item) => item.value.project)
-  })
-
-  const items = useComputed<SwitchProjectItem[]>(() => {
-    const projectItems: SwitchProjectItem[] = filteredProjects.value.map(
-      (project) => ({
-        id: project.path,
-        kind: "project",
-        project,
-      }),
-    )
-
-    if (!isEmptyQuery(search.value)) {
-      return projectItems
-    }
-
-    const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
-    return [openFolderItem, ...projectItems]
-  })
-
-  async function openFolderFromSwitcher() {
-    isOpen.value = false
-    await openProjectFromFilesystem({
-      projectContext,
-      projectRegistry,
-      workbenchTabSet,
-    })
-  }
-
-  useEffect(() => {
-    if (!isOpen.value) {
-      search.value = ""
-      highlightedIndex.value = 0
-    }
-  }, [isOpen.value])
 
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
     isOpen.value = true
@@ -129,6 +60,15 @@ export component SwitchProjectDropdown() {
   </button>
 
   const inputElementRef = useRef<HTMLInputElement>(null)
+  const search = useSignal("")
+  const highlightedIndex = useSignal(0)
+
+  useEffect(() => {
+    if (!isOpen.value) {
+      search.value = ""
+      highlightedIndex.value = 0
+    }
+  }, [isOpen.value])
 
   <Popover
     anchor={() => triggerElementRef.current}
@@ -145,6 +85,63 @@ export component SwitchProjectDropdown() {
     sameWidth={true}
     strategy="fixed"
   >
+    const workbenchTabSet = useWorkbenchTabSet()
+    const projects = useComputed(
+      () => orderProjectsByRecentActivity(
+        projectRegistry.projectList,
+        projectContext.recentProjectPaths,
+      ),
+    )
+    const searchableProjects = useComputed(
+      () => projects.value.map(
+        (project) => ({
+          preparedName: fuzzysort.prepare(project.name),
+          preparedPath: fuzzysort.prepare(project.path),
+          project,
+        }),
+      ),
+    )
+    const filteredProjects = useComputed(() => {
+      if (isEmptyQuery(search.value)) {
+        return projects.value
+      }
+
+      return fuzzysort.searchFields(
+        search.value,
+        searchableProjects.value,
+        [
+          { key: "name", extract: (item) => item.preparedName },
+          { key: "path", extract: (item) => item.preparedPath },
+        ],
+        { threshold: 0 },
+      ).items.map((item) => item.value.project)
+    })
+    const items = useComputed<SwitchProjectItem[]>(() => {
+      const projectItems: SwitchProjectItem[] = filteredProjects.value.map(
+        (project) => ({
+          id: project.path,
+          kind: "project",
+          project,
+        }),
+      )
+
+      if (!isEmptyQuery(search.value)) {
+        return projectItems
+      }
+
+      const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
+      return [openFolderItem, ...projectItems]
+    })
+
+    const openFolderFromSwitcher = async () => {
+      isOpen.value = false
+      await openProjectFromFilesystem({
+        projectContext,
+        projectRegistry,
+        workbenchTabSet,
+      })
+    }
+
     const highlightedItemIndex =
       items.value.length === 0 ? 0 : Math.min(highlightedIndex.value, items.value.length - 1)
     const highlightedItem = items.value[highlightedItemIndex]
