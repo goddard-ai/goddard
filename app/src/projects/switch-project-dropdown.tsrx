@@ -245,5 +245,3 @@ export component SwitchProjectDropdown() {
     }
   </Popover>
 }
-
-export default SwitchProjectDropdown
