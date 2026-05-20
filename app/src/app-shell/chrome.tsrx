@@ -2,7 +2,7 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
-import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -16,6 +16,7 @@ import {
   appShellDefaultSidebarDot,
   appShellSidebarDots,
   type AppShellSidebarDot,
+  type AppShellSidebarState,
 } from "./config.ts"
 import { AppShellWorkbenchContent } from "./views.tsrx"
 
@@ -90,8 +91,10 @@ function useAppShellTabStrip(
 
 /** Renders the merged shell chrome and owns its local interaction wiring. */
 export component AppShellChrome() {
+  const inbox = useInbox()
   const mainTab = useMainTab()
   const workbenchTabSet = useWorkbenchTabSet()
+  const sidebarState: AppShellSidebarState = { inbox }
   const mainTabItems = mainTab.items.map(
     (item) => ({
       ...item,
@@ -219,12 +222,14 @@ export component AppShellChrome() {
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "primary")}
         onMainTabSelect={navigateMainTab}
+        {sidebarState}
         selectedMainTabId={mainTab.selectedKind}
       />
       <div aria-hidden="true" class={styles.navDivider} />
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "secondary")}
         onMainTabSelect={navigateMainTab}
+        {sidebarState}
         selectedMainTabId={mainTab.selectedKind}
       />
     </nav>
@@ -305,6 +310,7 @@ component AppShellSidebarSection(props: {
     icon: SvgIconName;
   }>;
   onMainTabSelect: (id: MainTabItemId) => void;
+  sidebarState: AppShellSidebarState;
   selectedMainTabId: MainTabItemId;
 }) {
   for (const item of props.items) {
@@ -314,6 +320,7 @@ component AppShellSidebarSection(props: {
       isSelected={item.id === props.selectedMainTabId}
       key={item.id}
       label={item.label}
+      sidebarState={props.sidebarState}
       onSelect={() => {
         props.onMainTabSelect(item.id)
       }}
@@ -343,9 +350,10 @@ component SidebarItem(props: {
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
+  sidebarState: AppShellSidebarState;
   onSelect: () => void;
 }) {
-  const hasDot = props.dot.usePredicate()
+  const hasDot = props.dot.isVisible(props.sidebarState)
   const ariaLabel =
     hasDot ? props.dot.getAriaLabel(props.label) : props.label
 
