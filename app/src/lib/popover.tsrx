@@ -19,6 +19,7 @@ export type PopoverProps = FloatingPositionOptions & {
     class?: string;
     role?: any;
     ariaLabel?: string;
+    blockOutsidePointer?: boolean;
     closeOnEscape?: boolean;
     closeOnOutsidePointer?: boolean;
     modalFocus?: boolean;
@@ -109,7 +110,21 @@ export component Popover(props: PopoverProps) {
     return
   }
 
+  const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
+
   <OverlayPortal root="menu">
+    if (shouldBlockOutsidePointer) {
+      <div
+        aria-hidden="true"
+        data-overlay-pointer-blocker="true"
+        style={{
+          position: "fixed",
+          inset: "0",
+          background: "transparent",
+          pointerEvents: "auto",
+        }}
+      />
+    }
     <div
       ref={contentRef}
       aria-label={props.ariaLabel}
