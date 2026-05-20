@@ -91,23 +91,8 @@ function useAppShellTabStrip(
 
 /** Renders the merged shell chrome and owns its local interaction wiring. */
 export component AppShellChrome() {
-  const inbox = useInbox()
   const mainTab = useMainTab()
   const workbenchTabSet = useWorkbenchTabSet()
-  const sidebarState: AppShellSidebarState = { inbox }
-  const mainTabItems = mainTab.items.map(
-    (item) => ({
-      ...item,
-      icon: getWorkbenchTabIcon(item.id),
-    }),
-  )
-  const selectedMainTab =
-    mainTabItems.find((item) => item.id === mainTab.selectedKind) ?? mainTabItems[0]
-  const tabStrip = useAppShellTabStrip(
-    workbenchTabSet.activeTabId,
-    mainTab.selectedKind,
-    workbenchTabSet.tabList,
-  )
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
@@ -219,6 +204,15 @@ export component AppShellChrome() {
       </div>
     </header>
     <nav aria-label="Primary" class={styles.nav}>
+      const inbox = useInbox()
+      const sidebarState: AppShellSidebarState = { inbox }
+      const mainTabItems = mainTab.items.map(
+        (item) => ({
+          ...item,
+          icon: getWorkbenchTabIcon(item.id),
+        }),
+      )
+
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "primary")}
         onMainTabSelect={navigateMainTab}
@@ -233,6 +227,14 @@ export component AppShellChrome() {
         selectedMainTabId={mainTab.selectedKind}
       />
     </nav>
+
+    const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
+    const tabStrip = useAppShellTabStrip(
+      workbenchTabSet.activeTabId,
+      mainTab.selectedKind,
+      workbenchTabSet.tabList,
+    )
+
     <div class={styles.main}>
       <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
         <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
