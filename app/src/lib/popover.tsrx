@@ -11,7 +11,7 @@ import {
 } from "./overlay/position.ts"
 import { overlayStack } from "./overlay/stack.ts"
 
-export type PopoverCloseReason = "anchor-lost" | "escape" | "outside"
+export type PopoverCloseReason = "escape" | "outside"
 
 export type PopoverProps = FloatingPositionOptions & {
     open: Signal<boolean>;
@@ -49,7 +49,10 @@ export component Popover(props: PopoverProps) {
     const contentElement = contentRef.current
 
     if (!anchorElement || !contentElement) {
-      requestClose("anchor-lost")
+      console.error("Popover opened without a mounted anchor or content element.", {
+        hasAnchor: Boolean(anchorElement),
+        hasContent: Boolean(contentElement),
+      })
       return
     }
 
@@ -74,17 +77,6 @@ export component Popover(props: PopoverProps) {
       sameWidth: props.sameWidth,
       strategy: props.strategy,
     })
-    const anchorObserver =
-      anchorElement instanceof Element
-        ? new MutationObserver(() => {
-            if (!document.contains(anchorElement)) {
-              requestClose("anchor-lost")
-            }
-          })
-        : null
-
-    anchorObserver?.observe(document, { childList: true, subtree: true })
-
     const initialFocusElement = props.initialFocus?.()
     if (initialFocusElement) {
       initialFocusElement.focus()
@@ -93,7 +85,6 @@ export component Popover(props: PopoverProps) {
     }
 
     return () => {
-      anchorObserver?.disconnect()
       stopPositioning()
       stopDismissal()
       unregisterOverlay()
