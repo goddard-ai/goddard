@@ -39,11 +39,8 @@ export component Popover(props: PopoverProps) {
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
 
-  function requestClose(reason: PopoverCloseReason) {
-    props.open.value = false
-    props.onOpenChange?.(false, reason)
-  }
-
+  const open = props.open
+  const onOpenChange = props.onOpenChange
   const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
 
   useLayoutEffect(() => {
@@ -70,7 +67,8 @@ export component Popover(props: PopoverProps) {
       dismissOnEscape: props.closeOnEscape ?? true,
       dismissOnOutsidePointer: props.closeOnOutsidePointer ?? true,
       close(reason) {
-        requestClose(reason)
+        open.value = false
+        onOpenChange?.(false, reason)
       },
     })
     const stopPositioning = startFloatingPosition(anchorElement, contentElement, {
