@@ -31,9 +31,7 @@ export component AppShellWorkbenchContent() {
         <WorkbenchTabPanel />
       </WorkbenchScrollPanel>
     }
-  } pending {
-    <></>
-  }
+  } pending {}
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
