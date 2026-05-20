@@ -136,11 +136,6 @@ export component MenuItem(props: MenuItemProps) {
       props.onSelect?.()
       menu?.close()
     }}
-    onMouseEnter={(event) => {
-      if (!props.disabled) {
-        event.currentTarget.focus()
-      }
-    }}
   >
     {props.children}
   </button>
