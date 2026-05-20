@@ -86,21 +86,24 @@ export component SwitchProjectDropdown() {
     strategy="fixed"
   >
     const workbenchTabSet = useWorkbenchTabSet()
-    const projects = useComputed(
-      () => orderProjectsByRecentActivity(
+
+    const projects = useComputed(() => {
+      return orderProjectsByRecentActivity(
         projectRegistry.projectList,
         projectContext.recentProjectPaths,
-      ),
-    )
-    const searchableProjects = useComputed(
-      () => projects.value.map(
+      )
+    })
+
+    const searchableProjects = useComputed(() => {
+      return projects.value.map(
         (project) => ({
           preparedName: fuzzysort.prepare(project.name),
           preparedPath: fuzzysort.prepare(project.path),
           project,
         }),
-      ),
-    )
+      )
+    })
+
     const filteredProjects = useComputed(() => {
       if (isEmptyQuery(search.value)) {
         return projects.value
@@ -116,6 +119,7 @@ export component SwitchProjectDropdown() {
         { threshold: 0 },
       ).items.map((item) => item.value.project)
     })
+
     const items = useComputed<SwitchProjectItem[]>(() => {
       const projectItems: SwitchProjectItem[] = filteredProjects.value.map(
         (project) => ({
