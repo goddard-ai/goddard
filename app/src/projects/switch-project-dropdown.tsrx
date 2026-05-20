@@ -1,9 +1,11 @@
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "preact/hooks"
+import { useSignal } from "@preact/signals"
+import { useEffect, useMemo, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { Popover } from "~/lib/popover.tsrx"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
@@ -11,24 +13,24 @@ import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./switch-project-dropdown.style.ts"
 
 type SwitchProjectItem = {
-  id: "open-folder";
-  kind: "open-folder";
-} | {
-  id: string;
-  kind: "project";
-  project: ProjectRecord;
-}
+    id: "open-folder";
+    kind: "open-folder";
+  } | {
+    id: string;
+    kind: "project";
+    project: ProjectRecord;
+  }
 
 /** Renders the header-anchored searchable project switcher dropdown. */
 export component SwitchProjectDropdown() {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
+  const triggerElementRef = useRef<HTMLButtonElement>(null)
 
-  const [isOpen, setIsOpen] = useState(false)
-  const [search, setSearch] = useState("")
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
-  const [itemElements] = useState<Record<string, HTMLButtonElement | null>>({})
+  const isOpen = useSignal(false)
+  const search = useSignal("")
+  const highlightedIndex = useSignal(0)
 
   const projects = orderProjectsByRecentActivity(
     projectRegistry.projectList,
@@ -51,12 +53,12 @@ export component SwitchProjectDropdown() {
   )
 
   const filteredProjects = useMemo(() => {
-    if (isEmptyQuery(search)) {
+    if (isEmptyQuery(search.value)) {
       return projects
     }
 
     return fuzzysort.searchFields(
-      search,
+      search.value,
       searchableProjects,
       [
         { key: "name", extract: (item) => item.preparedName },
@@ -64,7 +66,7 @@ export component SwitchProjectDropdown() {
       ],
       { threshold: 0 },
     ).items.map((item) => item.value.project)
-  }, [projects, search, searchableProjects])
+  }, [projects, search.value, searchableProjects])
 
   const items: SwitchProjectItem[] = useMemo(() => {
     const projectItems: SwitchProjectItem[] = filteredProjects.map(
@@ -75,16 +77,16 @@ export component SwitchProjectDropdown() {
       }),
     )
 
-    if (!isEmptyQuery(search)) {
+    if (!isEmptyQuery(search.value)) {
       return projectItems
     }
 
     const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
     return [openFolderItem, ...projectItems]
-  }, [filteredProjects, search])
+  }, [filteredProjects, search.value])
 
   async function openFolderFromSwitcher() {
-    setIsOpen(false)
+    isOpen.value = false
     await openProjectFromFilesystem({
       projectContext,
       projectRegistry,
@@ -93,29 +95,30 @@ export component SwitchProjectDropdown() {
   }
 
   useEffect(() => {
-    if (!isOpen) {
-      setSearch("")
-      setHighlightedIndex(0)
+    if (!isOpen.value) {
+      search.value = ""
+      highlightedIndex.value = 0
     }
-  }, [isOpen])
+  }, [isOpen.value])
 
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
-    setIsOpen(true)
+    isOpen.value = true
   })
 
   <button
-    aria-expanded={isOpen ? "true" : "false"}
+    {ref triggerElementRef}
+    aria-expanded={isOpen.value ? "true" : "false"}
     aria-haspopup="dialog"
     aria-label="Switch project"
     class={styles.trigger}
     type="button"
     onClick={() => {
-      setIsOpen(!isOpen)
+      isOpen.value = !isOpen.value
     }}
     onKeyDown={(event) => {
-      if (event.key === "ArrowDown" && !isOpen) {
+      if (event.key === "ArrowDown" && !isOpen.value) {
         event.preventDefault()
-        setIsOpen(true)
+        isOpen.value = true
       }
     }}
   >
@@ -124,65 +127,59 @@ export component SwitchProjectDropdown() {
     </span>
   </button>
 
-  if (!isOpen) {
-    return
-  }
-
   const inputElementRef = useRef<HTMLInputElement>(null)
 
-  const highlightedItemIndex =
-    items.length === 0 ? 0 : Math.min(highlightedIndex, items.length - 1)
-  const highlightedItem = items[highlightedItemIndex]
-  const highlightedItemId = highlightedItem?.id ?? null
+  <Popover
+    anchor={() => triggerElementRef.current}
+    ariaLabel="Switch project"
+    class={styles.content}
+    closeOnEscape={true}
+    closeOnOutsidePointer={true}
+    initialFocus={() => inputElementRef.current}
+    modalFocus={true}
+    offset={10}
+    open={isOpen}
+    placement="bottom-start"
+    role="dialog"
+    sameWidth={true}
+    strategy="fixed"
+  >
+    const highlightedItemIndex =
+      items.length === 0 ? 0 : Math.min(highlightedIndex.value, items.length - 1)
+    const highlightedItem = items[highlightedItemIndex]
 
-  function moveHighlightedIndex(delta: -1 | 1) {
-    setHighlightedIndex((currentIndex) => {
+    const moveHighlightedIndex = (delta: -1 | 1) => {
       if (items.length === 0) {
-        return 0
-      }
-
-      const currentHighlightedIndex = Math.min(currentIndex, items.length - 1)
-
-      return delta > 0
-        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
-        : Math.max(currentHighlightedIndex - 1, 0)
-    })
-  }
-
-  function activateItem(item: SwitchProjectItem | undefined) {
-    if (!item) {
-      return
-    }
-
-    if (item.kind === "open-folder") {
-      void openFolderFromSwitcher()
-      return
-    }
-
-    setIsOpen(false)
-    openProjectTab({
-      projectContext,
-      projectPath: item.project.path,
-      projectRegistry,
-      workbenchTabSet,
-    })
-  }
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      const inputElement = inputElementRef.current
-
-      if (!inputElement) {
+        highlightedIndex.value = 0
         return
       }
 
-      const length = inputElement.value.length
-      inputElement.focus()
-      inputElement.setSelectionRange(length, length)
-    })
-  }, [])
+      const currentHighlightedIndex = Math.min(highlightedIndex.value, items.length - 1)
 
-  <div class={styles.content}>
+      highlightedIndex.value = delta > 0
+        ? Math.min(currentHighlightedIndex + 1, items.length - 1)
+        : Math.max(currentHighlightedIndex - 1, 0)
+    }
+
+    const activateItem = (item: SwitchProjectItem | undefined) => {
+      if (!item) {
+        return
+      }
+
+      if (item.kind === "open-folder") {
+        void openFolderFromSwitcher()
+        return
+      }
+
+      isOpen.value = false
+      openProjectTab({
+        projectContext,
+        projectPath: item.project.path,
+        projectRegistry,
+        workbenchTabSet,
+      })
+    }
+
     <label class={styles.searchField}>
       <span class={styles.srOnly}>"Search projects"</span>
       <Search aria-hidden={true} size={16} strokeWidth={2.1} />
@@ -190,27 +187,24 @@ export component SwitchProjectDropdown() {
         {ref inputElementRef}
         class={styles.searchInput}
         placeholder="Search projects"
-        value={search}
+        value={search.value}
         onInput={(event) => {
-          setSearch(event.currentTarget.value)
-          setHighlightedIndex(0)
+          search.value = event.currentTarget.value
+          highlightedIndex.value = 0
         }}
         onKeyDown={(event) => {
-          if (event.key === "ArrowDown") {
-            event.preventDefault()
-            moveHighlightedIndex(1)
-            return
-          }
-
-          if (event.key === "ArrowUp") {
-            event.preventDefault()
-            moveHighlightedIndex(-1)
-            return
-          }
-
-          if (event.key === "Enter") {
-            event.preventDefault()
-            activateItem(highlightedItem)
+          switch (event.key) {
+            case "ArrowDown":
+              event.preventDefault()
+              moveHighlightedIndex(1)
+              return
+            case "ArrowUp":
+              event.preventDefault()
+              moveHighlightedIndex(-1)
+              return
+            case "Enter":
+              event.preventDefault()
+              activateItem(highlightedItem)
           }
         }}
       />
@@ -221,14 +215,11 @@ export component SwitchProjectDropdown() {
         for (const item of items; index index) {
           <li key={item.id}>
             <button
-              {ref (element) => {
-                itemElements[item.id] = element
-              }}
               class={styles.item}
               data-highlighted={highlightedItemIndex === index ? "true" : "false"}
               type="button"
               onMouseEnter={() => {
-                setHighlightedIndex(index)
+                highlightedIndex.value = index
               }}
               onClick={() => {
                 activateItem(item)
@@ -257,7 +248,7 @@ export component SwitchProjectDropdown() {
     } else {
       <p class={styles.empty}>"No matching projects."</p>
     }
-  </div>
+  </Popover>
 }
 
 export default SwitchProjectDropdown
