@@ -5,31 +5,31 @@ import { useContext, useMemo, useRef } from "preact/hooks"
 import { type FloatingReference } from "./overlay/position.ts"
 import { Popover } from "./popover.tsrx"
 
-type MenuContextValue = {
-    close: () => void;
-  }
+type MenuControls = {
+  close: () => void;
+}
 
 export type MenuProps = {
-    anchor: () => FloatingReference | null;
-    ariaLabel: string;
-    class?: string;
-    children?: preact.ComponentChildren;
-    open: Signal<boolean>;
-  }
+  anchor: () => FloatingReference | null;
+  ariaLabel: string;
+  class?: string;
+  children?: preact.ComponentChildren;
+  open: Signal<boolean>;
+}
 
 export type MenuItemProps = {
-    children?: preact.ComponentChildren;
-    class?: string;
-    disabled?: boolean;
-    onSelect?: () => void;
-  }
+  children?: preact.ComponentChildren;
+  class?: string;
+  disabled?: boolean;
+  onSelect?: () => void;
+}
 
-const menuContext = createContext<MenuContextValue | null>(null)
+const menuContext = createContext<MenuControls | null>(null)
 
 export component Menu(props: MenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
 
-  const menuContextValue = useMemo<MenuContextValue>(
+  const menuControls = useMemo<MenuControls>(
     () => ({
       close() {
         props.open.value = false
@@ -38,17 +38,17 @@ export component Menu(props: MenuProps) {
     [props.open],
   )
 
-  <menuContext.Provider value={menuContextValue}>
+  <menuContext.Provider value={menuControls}>
     <Popover
       anchor={props.anchor}
       ariaLabel={props.ariaLabel}
       class={props.class}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
-      initialFocus={() => menuRef.current?.querySelector<HTMLElement>(
-        "[role=\"menuitem\"]:not([aria-disabled=\"true\"])",
-      ) ??
-        null}
+      initialFocus={() =>
+        menuRef.current?.querySelector<HTMLElement>(
+          "[role=\"menuitem\"]:not([aria-disabled=\"true\"])",
+        ) ?? null}
       offset={4}
       open={props.open}
       placement="bottom-start"
