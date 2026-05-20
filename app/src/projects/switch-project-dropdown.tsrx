@@ -1,7 +1,7 @@
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
 import { useComputed, useSignal } from "@preact/signals"
-import { useEffect, useRef } from "preact/hooks"
+import { useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -60,15 +60,6 @@ export component SwitchProjectDropdown() {
   </button>
 
   const inputElementRef = useRef<HTMLInputElement>(null)
-  const search = useSignal("")
-  const highlightedIndex = useSignal(0)
-
-  useEffect(() => {
-    if (!isOpen.value) {
-      search.value = ""
-      highlightedIndex.value = 0
-    }
-  }, [isOpen.value])
 
   <Popover
     anchor={() => triggerElementRef.current}
@@ -86,6 +77,8 @@ export component SwitchProjectDropdown() {
     strategy="fixed"
   >
     const workbenchTabSet = useWorkbenchTabSet()
+    const search = useSignal("")
+    const highlightedIndex = useSignal(0)
 
     const projects = useComputed(() => {
       return orderProjectsByRecentActivity(
