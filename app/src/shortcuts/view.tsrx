@@ -309,6 +309,10 @@ component KeyboardShortcutsView(props: { class?: string }) {
               const menuOpen = useSignal(false)
               const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
               const menuContextPoint = useSignal<{ x: number; y: number } | null>(null)
+              const openShortcutMenu = (point: { x: number; y: number } | null) => {
+                menuContextPoint.value = point
+                menuOpen.value = true
+              }
 
               <tr class={styles.row} key={row.rowKey}>
                 <td class={`${styles.cell} ${styles.commandCell}`}>
@@ -328,11 +332,16 @@ component KeyboardShortcutsView(props: { class?: string }) {
                     }}
                     onContextMenu={(event) => {
                       event.preventDefault()
-                      menuContextPoint.value = {
+                      openShortcutMenu({
                         x: event.clientX,
                         y: event.clientY,
+                      })
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "ContextMenu" || event.key === "F10" && event.shiftKey) {
+                        event.preventDefault()
+                        openShortcutMenu(null)
                       }
-                      menuOpen.value = true
                     }}
                   >
                     {row.shortcut ?? "Add shortcut"}
