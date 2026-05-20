@@ -1,6 +1,6 @@
 import { type Signal } from "@preact/signals"
 import { createContext } from "preact"
-import { useContext, useRef } from "preact/hooks"
+import { useContext, useMemo, useRef } from "preact/hooks"
 
 import { type FloatingReference } from "./overlay/position.ts"
 import { Popover } from "./popover.tsrx"
@@ -29,11 +29,16 @@ const menuContext = createContext<MenuContextValue | null>(null)
 export component Menu(props: MenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null)
 
-  const close = () => {
-    props.open.value = false
-  }
+  const menuContextValue = useMemo<MenuContextValue>(
+    () => ({
+      close() {
+        props.open.value = false
+      },
+    }),
+    [props.open],
+  )
 
-  <menuContext.Provider value={{ close }}>
+  <menuContext.Provider value={menuContextValue}>
     <Popover
       anchor={props.anchor}
       ariaLabel={props.ariaLabel}
