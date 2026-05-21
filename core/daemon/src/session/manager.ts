@@ -89,6 +89,7 @@ import {
   MAX_COMPOSER_SUGGESTION_LIMIT,
   normalizeComposerSuggestionLimit,
 } from "./composer-suggestions.ts"
+import { createLaunchLeaseKey, createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
 import type { ACPRegistryService } from "./registry.ts"
 import {
   agentNameFromInput,
@@ -144,10 +145,8 @@ function getPackageVersion(): string {
 const logger = createLogger()
 
 type SessionId = DaemonSession["id"]
-type AcpClient = Awaited<ReturnType<typeof createAcpClient>>
 
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
-const LAUNCH_LEASE_RELEASE_TIMEOUT_MS = 10 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
 type SessionDoc = KindOutput<typeof db.schema.sessions>
@@ -312,28 +311,6 @@ type ActiveSession = {
   idleShutdownTimer: ReturnType<typeof setTimeout> | null
 }
 
-/** Prepared ACP session kept alive while the launch dialog gathers final user choices. */
-type LaunchLease = {
-  id: string
-  key: string
-  agent: NonNullable<SessionLaunchPreviewRequest["agent"]>
-  cwd: string
-  token: string
-  acpSessionId: string
-  agentProcess: AgentProcessHandle
-  client: AcpClient
-  session: AcpSession
-  initializeResult: acp.InitializeResponse
-  history: acp.AnyMessage[]
-  availableCommands: acp.AvailableCommand[]
-  models: acp.SessionModelState | null
-  configOptions: acp.SessionConfigOption[]
-  repoRoot: string | null
-  branches: SessionLaunchBranch[]
-  releaseTimer: ReturnType<typeof setTimeout> | null
-  closing: Promise<void> | null
-}
-
 type ReviewSessionRuntime = {
   abortController: AbortController
   running: Promise<void>
@@ -469,45 +446,6 @@ function isErrorSignal(signal: string | null): boolean {
 /** Detects one-shot sessions that should exit immediately after the initial prompt completes. */
 function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
   return params.request.oneShot === true && params.request.initialPrompt !== undefined
-}
-
-/** Builds the reuse key for the ACP session prepared behind one launch-dialog option set. */
-function createLaunchLeaseKey(params: {
-  agent: NonNullable<SessionLaunchPreviewRequest["agent"]>
-  cwd: string
-}) {
-  return JSON.stringify([params.cwd, params.agent])
-}
-
-/** Compares launch agents structurally because config-resolved distributions may be object values. */
-function isSameLaunchAgent(
-  left: NonNullable<SessionLaunchPreviewRequest["agent"]>,
-  right: NonNullable<CreateSessionRequest["agent"]>,
-) {
-  return JSON.stringify(left) === JSON.stringify(right)
-}
-
-/** Returns true when a launch lease was created with the same ACP-facing session inputs. */
-function canPromoteLaunchLease(params: {
-  lease: LaunchLease
-  request: ResolvedCreateSessionRequest
-  cwd: string
-  existingSession: SessionDoc | null
-  worktree: PreparedSessionWorktree | null
-}) {
-  return (
-    params.existingSession === null &&
-    params.worktree === null &&
-    params.request.worktree?.enabled !== true &&
-    params.request.mcpServers.length === 0 &&
-    params.request.env === undefined &&
-    params.request.metadata === undefined &&
-    params.request.repository === undefined &&
-    params.request.prNumber === undefined &&
-    params.request.workforce === undefined &&
-    params.lease.cwd === params.cwd &&
-    isSameLaunchAgent(params.lease.agent, params.request.agent)
-  )
 }
 
 /** Returns true when the ACP adapter can reopen this session later via `session/load`. */
@@ -949,8 +887,7 @@ export function createSessionManager(input: {
   idleSessionShutdownTimeoutMs?: number
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
-  const launchLeases = new Map<string, LaunchLease>()
-  const launchLeaseIdsByKey = new Map<string, string>()
+  const launchLeaseStore = createLaunchLeaseStore({ logger })
   const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
   const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
@@ -1001,101 +938,6 @@ export function createSessionManager(input: {
     }
 
     return record
-  }
-
-  function removeLaunchLease(lease: LaunchLease) {
-    launchLeases.delete(lease.id)
-    if (launchLeaseIdsByKey.get(lease.key) === lease.id) {
-      launchLeaseIdsByKey.delete(lease.key)
-    }
-  }
-
-  function cancelLaunchLeaseReleaseTimer(lease: LaunchLease) {
-    if (!lease.releaseTimer) {
-      return
-    }
-
-    clearTimeout(lease.releaseTimer)
-    lease.releaseTimer = null
-  }
-
-  async function closeLaunchLease(lease: LaunchLease, reason: string) {
-    if (lease.closing) {
-      return lease.closing
-    }
-
-    cancelLaunchLeaseReleaseTimer(lease)
-    removeLaunchLease(lease)
-    lease.closing = (async () => {
-      logger.log("launch_lease_closing", {
-        launchLeaseId: lease.id,
-        acpSessionId: lease.acpSessionId,
-        reason,
-      })
-      await lease.client
-        .closeSession({
-          sessionId: lease.acpSessionId,
-        })
-        .catch(() => {})
-      await lease.client.close().catch(() => {})
-      await treeKill(lease.agentProcess).catch(() => {})
-      await waitForAgentProcessExit(lease.agentProcess).catch(() => {})
-    })()
-
-    return lease.closing
-  }
-
-  function scheduleLaunchLeaseRelease(lease: LaunchLease, reason: string) {
-    if (lease.closing || lease.releaseTimer) {
-      return
-    }
-
-    logger.log("launch_lease_release_scheduled", {
-      launchLeaseId: lease.id,
-      acpSessionId: lease.acpSessionId,
-      reason,
-      timeoutMs: LAUNCH_LEASE_RELEASE_TIMEOUT_MS,
-    })
-    lease.releaseTimer = setTimeout(() => {
-      void closeLaunchLease(lease, reason).catch((error) => {
-        logger.log("launch_lease_close_failed", {
-          launchLeaseId: lease.id,
-          reason,
-          errorMessage: getErrorMessage(error),
-        })
-      })
-    }, LAUNCH_LEASE_RELEASE_TIMEOUT_MS)
-  }
-
-  function findLaunchLeaseByKey(key: string) {
-    const id = launchLeaseIdsByKey.get(key)
-    return id ? (launchLeases.get(id) ?? null) : null
-  }
-
-  function takeCompatibleLaunchLease(params: {
-    launchLeaseId: string | undefined
-    request: ResolvedCreateSessionRequest
-    cwd: string
-    existingSession: SessionDoc | null
-    worktree: PreparedSessionWorktree | null
-  }) {
-    if (!params.launchLeaseId) {
-      return null
-    }
-
-    const lease = launchLeases.get(params.launchLeaseId) ?? null
-    if (!lease) {
-      return null
-    }
-
-    if (!canPromoteLaunchLease({ ...params, lease })) {
-      scheduleLaunchLeaseRelease(lease, "incompatible_launch")
-      return null
-    }
-
-    cancelLaunchLeaseReleaseTimer(lease)
-    removeLaunchLease(lease)
-    return lease
   }
 
   function resolveCurrentTurnId(id: SessionId) {
@@ -2762,7 +2604,7 @@ export function createSessionManager(input: {
           message: createPayloadPreview(message),
         })
       }
-      const launchLease = takeCompatibleLaunchLease({
+      const launchLease = launchLeaseStore.takeCompatible({
         launchLeaseId: resolvedRequest.launchLeaseId,
         request: resolvedRequest,
         cwd,
@@ -3178,9 +3020,9 @@ export function createSessionManager(input: {
       resolveGitRepoRoot(params.cwd),
       listLaunchBranches(params.cwd),
     ])
-    const existingLease = findLaunchLeaseByKey(key)
+    const existingLease = launchLeaseStore.findByKey(key)
     if (existingLease) {
-      cancelLaunchLeaseReleaseTimer(existingLease)
+      launchLeaseStore.reactivate(existingLease)
       existingLease.repoRoot = repoRoot
       existingLease.branches = branches
       return {
@@ -3214,7 +3056,7 @@ export function createSessionManager(input: {
     })
     let availableCommands: acp.AvailableCommand[] = []
     let acpSessionId: string | null = null
-    let client: AcpClient | null = null
+    let client: Awaited<ReturnType<typeof createAcpClient>> | null = null
     let resolveAvailableCommands: (() => void) | null = null
     const history: acp.AnyMessage[] = []
     const availableCommandsReady = new Promise<void>((resolve) => {
@@ -3280,14 +3122,7 @@ export function createSessionManager(input: {
         releaseTimer: null,
         closing: null,
       }
-      launchLeases.set(lease.id, lease)
-      launchLeaseIdsByKey.set(key, lease.id)
-      agentProcess.onceExit(() => {
-        if (launchLeases.get(lease.id) === lease) {
-          cancelLaunchLeaseReleaseTimer(lease)
-          removeLaunchLease(lease)
-        }
-      })
+      launchLeaseStore.register(lease)
 
       return {
         launchLeaseId: lease.id,
@@ -3323,18 +3158,9 @@ export function createSessionManager(input: {
     params: ReleaseSessionLaunchLeaseRequest,
   ): Promise<ReleaseSessionLaunchLeaseResponse> {
     await ready
-    const lease = launchLeases.get(params.launchLeaseId) ?? null
-    if (!lease) {
-      return {
-        launchLeaseId: params.launchLeaseId,
-        released: false,
-      }
-    }
-
-    scheduleLaunchLeaseRelease(lease, "client_release")
     return {
-      launchLeaseId: lease.id,
-      released: true,
+      launchLeaseId: params.launchLeaseId,
+      released: launchLeaseStore.scheduleReleaseById(params.launchLeaseId, "client_release"),
     }
   }
 
@@ -3814,16 +3640,7 @@ export function createSessionManager(input: {
 
   async function close(): Promise<void> {
     await ready
-    while (launchLeases.size > 0) {
-      const lease = launchLeases.values().next().value
-      if (!lease) {
-        break
-      }
-
-      await closeLaunchLease(lease, "daemon_shutdown").catch(() => {})
-    }
-    launchLeases.clear()
-    launchLeaseIdsByKey.clear()
+    await launchLeaseStore.closeAll("daemon_shutdown")
 
     for (const session of activeSessions.values()) {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
