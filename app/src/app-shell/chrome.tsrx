@@ -9,7 +9,7 @@ import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
-import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
+import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
 import styles from "./chrome.style.ts"
 import {
@@ -18,7 +18,7 @@ import {
   type AppShellSidebarDot,
   type AppShellSidebarState,
 } from "./config.ts"
-import { AppShellWorkbenchContent } from "./views.tsrx"
+import { MainWorkbenchView, WorkbenchScrollPanel, WorkbenchTabPanel } from "./views.tsrx"
 
 const accentStrongColor = token.var("colors.accentStrong")
 const textColor = token.var("colors.text")
@@ -300,7 +300,23 @@ export component AppShellChrome() {
           overflow: "hidden",
         })}
       >
-        <AppShellWorkbenchContent />
+        try {
+          if (workbenchTabSet.activeTabId === WORKBENCH_MAIN_TAB.id) {
+            <WorkbenchScrollPanel scrollKey={`main:${mainTab.selectedKind}`}>
+              <MainWorkbenchView />
+            </WorkbenchScrollPanel>
+          } else if (workbenchTabSet.activeClosableTab) {
+            <WorkbenchScrollPanel
+              restoreScroll={shouldRestoreWorkbenchTabScroll(
+                workbenchTabSet.activeClosableTab.kind,
+              )}
+              scrollKey={`detail:${workbenchTabSet.activeClosableTab.id}`}
+              tabId={workbenchTabSet.activeClosableTab.id}
+            >
+              <WorkbenchTabPanel />
+            </WorkbenchScrollPanel>
+          }
+        } pending {}
       </div>
     </div>
   </div>

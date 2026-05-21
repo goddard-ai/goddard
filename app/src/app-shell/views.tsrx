@@ -12,30 +12,8 @@ import styles from "./views.style.ts"
 
 const panelScrollCache = new Map<string, number>()
 
-/** Renders the shell's main content area for the current primary view or detail tab. */
-export component AppShellWorkbenchContent() {
-  const mainTab = useMainTab()
-  const workbenchTabSet = useWorkbenchTabSet()
-
-  try {
-    if (workbenchTabSet.activeTabId === WORKBENCH_MAIN_TAB.id) {
-      <WorkbenchScrollPanel scrollKey={`main:${mainTab.selectedKind}`}>
-        <MainWorkbenchView />
-      </WorkbenchScrollPanel>
-    } else if (workbenchTabSet.activeClosableTab) {
-      <WorkbenchScrollPanel
-        restoreScroll={shouldRestoreWorkbenchTabScroll(workbenchTabSet.activeClosableTab.kind)}
-        scrollKey={`detail:${workbenchTabSet.activeClosableTab.id}`}
-        tabId={workbenchTabSet.activeClosableTab.id}
-      >
-        <WorkbenchTabPanel />
-      </WorkbenchScrollPanel>
-    }
-  } pending {}
-}
-
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
-component WorkbenchScrollPanel(props: {
+export component WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
   restoreScroll?: boolean;
@@ -79,7 +57,7 @@ component WorkbenchScrollPanel(props: {
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-component MainWorkbenchView() {
+export component MainWorkbenchView() {
   const mainTab = useMainTab()
   const ActiveMainTabComponent = getWorkbenchTabComponent(mainTab.selectedKind)
 
@@ -96,7 +74,7 @@ component MainWorkbenchView() {
 }
 
 /** Renders the active closable workbench tab panel. */
-component WorkbenchTabPanel() {
+export component WorkbenchTabPanel() {
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeClosableTab
 
