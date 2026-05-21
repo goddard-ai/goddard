@@ -167,7 +167,7 @@ function usageUpdate(size: number, used: number) {
   } satisfies acp.AnyMessage
 }
 
-test("SessionChat normalizes history turns into deterministic order and statuses", () => {
+test("SessionChat preserves history turn order and normalizes statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
     history: createHistory([
@@ -177,8 +177,8 @@ test("SessionChat normalizes history turns into deterministic order and statuses
   })
 
   expect(chat.turns.map((turn) => [turn.turnId, turn.status])).toEqual([
-    ["turn-1", "completed"],
     ["turn-2", "running"],
+    ["turn-1", "completed"],
   ])
   expect(chat.summary).toMatchObject({
     activeTurnId: "turn-2",
@@ -383,6 +383,51 @@ test("SessionChat receiveMessage batches chunks and flushes before boundary mess
   })
   expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
     content: [{ type: "text", text: "Still working." }],
+  })
+})
+
+test("SessionChat does not repeat streamed text after history refreshes with coalesced chunks", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(agentChunk("Still "), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  chat.applyMessageNow(agentChunk("working"), {
+    receivedAt: "2026-04-14T00:00:03.000Z",
+  })
+  chat.applyMessageNow(agentChunk(" now"), {
+    receivedAt: "2026-04-14T00:00:04.000Z",
+  })
+
+  const refreshedHistory = createHistory([
+    createTurn({
+      completedAt: null,
+      completionKind: null,
+      messages: [promptMessage(), agentChunk("Still working")],
+    }),
+  ])
+
+  chat.syncLoadedData({
+    session: createSession(),
+    history: refreshedHistory,
+  })
+  chat.syncLoadedData({
+    session: createSession(),
+    history: refreshedHistory,
+  })
+
+  expect(chat.turns).toHaveLength(1)
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
+    content: [{ type: "text", text: "Still working now" }],
   })
 })
 

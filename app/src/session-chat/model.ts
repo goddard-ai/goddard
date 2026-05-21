@@ -171,6 +171,31 @@ function isTextAgentMessageChunk(message: acp.AnyMessage) {
   )
 }
 
+function getTextAgentMessageChunkText(message: acp.AnyMessage) {
+  const update = getSessionUpdate(message)
+
+  return update?.sessionUpdate === "agent_message_chunk" &&
+    isRecord(update.content) &&
+    update.content.type === "text" &&
+    typeof update.content.text === "string"
+    ? update.content.text
+    : null
+}
+
+function createAgentMessageChunk(sessionId: string, text: string) {
+  return {
+    jsonrpc: "2.0",
+    method: acp.CLIENT_METHODS.session_update,
+    params: {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text },
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
 function buildMessageFingerprint(message: acp.AnyMessage) {
   return hashSum(message)
 }
@@ -254,18 +279,6 @@ function getPermissionRequest(message: acp.AnyMessage) {
   return params as acp.RequestPermissionRequest
 }
 
-function compareTurns(left: SessionChatTurn, right: SessionChatTurn) {
-  if (left.sequence !== right.sequence) {
-    return left.sequence - right.sequence
-  }
-
-  if (left.startedAt !== right.startedAt) {
-    return left.startedAt.localeCompare(right.startedAt)
-  }
-
-  return left.turnId.localeCompare(right.turnId)
-}
-
 function resolveNextLiveSequence(turns: readonly SessionChatTurn[]) {
   return turns.reduce((sequence, turn) => Math.max(sequence, turn.sequence), -1) + 1
 }
@@ -296,6 +309,10 @@ function findNewestRunningTurn(turns: readonly SessionChatTurn[]) {
   }
 
   return null
+}
+
+function getTurnAgentText(turn: Pick<SessionHistoryTurn, "messages">) {
+  return turn.messages.map((message) => getTextAgentMessageChunkText(message) ?? "").join("")
 }
 
 function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
@@ -445,7 +462,10 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   /** Applies refreshed query data while preserving loaded older pages and local live messages. */
   syncLoadedData(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
-    const preservedLoadedTurns = this.turns.filter((turn) => turn.source !== "live")
+    const refreshedTurnsById = new Map(input.history.turns.map((turn) => [turn.turnId, turn]))
+    const preservedLoadedTurns = this.turns.filter(
+      (turn) => turn.source !== "live" && !refreshedTurnsById.has(turn.turnId),
+    )
     const refreshedTurnIds = new Set(input.history.turns.map((turn) => turn.turnId))
     const hasPreservedOlderTurns = preservedLoadedTurns.some(
       (turn) => !refreshedTurnIds.has(turn.turnId),
@@ -455,16 +475,37 @@ export class SessionChat extends Sigma<SessionChatState> {
     const localMessages: { message: acp.AnyMessage; receivedAt: string }[] = []
 
     for (const turn of this.turns) {
-      if (turn.source !== "live") {
+      if (turn.source === "live") {
+        for (const message of turn.messages) {
+          localMessages.push({
+            message,
+            receivedAt: turn.completedAt ?? turn.startedAt,
+          })
+        }
         continue
       }
 
-      for (const message of turn.messages) {
-        localMessages.push({
-          message,
-          receivedAt: turn.completedAt ?? turn.startedAt,
-        })
+      const refreshedTurn = refreshedTurnsById.get(turn.turnId)
+      if (!refreshedTurn || turn.source !== "merged") {
+        continue
       }
+
+      const existingAgentText = getTurnAgentText(turn)
+      const refreshedAgentText = getTurnAgentText(refreshedTurn)
+      if (
+        !existingAgentText.startsWith(refreshedAgentText) ||
+        existingAgentText.length === refreshedAgentText.length
+      ) {
+        continue
+      }
+
+      localMessages.push({
+        message: createAgentMessageChunk(
+          this.session.acpSessionId,
+          existingAgentText.slice(refreshedAgentText.length),
+        ),
+        receivedAt: turn.completedAt ?? turn.startedAt,
+      })
     }
 
     this.connection = input.history.connection
@@ -473,11 +514,11 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.session = input.session
     this.turns.length = 0
 
-    for (const turn of input.history.turns) {
+    for (const turn of preservedLoadedTurns) {
       this.#mergeHistoryTurn(turn)
     }
 
-    for (const turn of preservedLoadedTurns) {
+    for (const turn of input.history.turns) {
       this.#mergeHistoryTurn(turn)
     }
 
@@ -504,17 +545,26 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   /** Merges one older history page ahead of the currently loaded transcript. */
   prependOlderHistory(history: GetSessionHistoryResponse) {
+    const currentTurns = [...this.turns]
+    const olderTurnIds = new Set(history.turns.map((turn) => turn.turnId))
+
     this.connection = history.connection
     this.hasMore = history.hasMore
     this.nextCursor = history.nextCursor
+    this.turns.length = 0
 
     for (const turn of history.turns) {
       this.#mergeHistoryTurn(turn)
     }
 
+    for (const turn of currentTurns) {
+      if (!olderTurnIds.has(turn.turnId)) {
+        this.#mergeHistoryTurn(turn)
+      }
+    }
+
     this.#refreshTranscriptState()
   }
-
   /** Applies one daemon-published ACP message through the live chunk batching queue. */
   receiveMessage(message: acp.AnyMessage) {
     const receivedAt = new Date().toISOString()
@@ -839,7 +889,6 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #refreshTranscriptState() {
-    this.turns.sort(compareTurns)
     this.#syncSummary()
   }
 
