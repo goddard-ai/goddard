@@ -34,11 +34,6 @@ function normalizeStreamTarget<S extends IpcSchema>(
       filter: undefined,
     }
   }
-
-  if (!Object.hasOwn(target, "filter")) {
-    throw new Error(`Stream target object for ${target.name} must include a filter`)
-  }
-
   return {
     name: target.name,
     filter: target.filter,
