@@ -42,10 +42,17 @@ export default component SessionChatView(props: {
 
     <main class={styles.root}>
       try {
-        const [sessionHistory, { session }] = useQueries([
-          [goddardSdk.session.history, [{ id: props.sessionId }]],
-          [goddardSdk.session.get, [{ id: props.sessionId }]],
-        ])
+        const [sessionHistory, { session }] = useQueries(
+          (query) => [
+            query(goddardSdk.session.history, {
+              params: [{ id: props.sessionId }],
+              refetchOnWindowReactivate: false,
+            }),
+            query(goddardSdk.session.get, {
+              params: [{ id: props.sessionId }],
+            }),
+          ],
+        )
 
         const chat = useSigma(
           () => new SessionChat({

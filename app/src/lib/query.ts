@@ -9,6 +9,13 @@ type AnyQueryFunction = QueryFunction<any, any>
 type EmptyQueryResult = Record<string, never>
 type DisabledQuery = null | EmptyQueryResult
 type QueryInput = AnyQueryFunction | DisabledQuery
+type QueryOptions = {
+  refetchOnWindowReactivate?: boolean
+}
+
+type QueryRequest<TQueryFn extends QueryInput = QueryInput> = QueryOptions & {
+  params: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null
+}
 
 type QueryEntry = {
   args: QueryArgs
@@ -17,22 +24,39 @@ type QueryEntry = {
   hasData: boolean
   promise: Promise<unknown> | null
   queryFn: AnyQueryFunction
+  refetchOnWindowReactivate: boolean
   stale: boolean
   subscribers: Set<() => void>
 }
 
-type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = readonly [
-  TQueryFn,
-  TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null,
-]
+type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = {
+  options: Required<QueryOptions>
+  params: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null
+  queryFn: TQueryFn
+}
 
 type QueryResult<TQueryFn extends QueryInput> = TQueryFn extends AnyQueryFunction
   ? Awaited<ReturnType<TQueryFn>>
   : never
 
 type QueryResults<TQueries extends readonly QueryDescriptor[]> = {
-  [TKey in keyof TQueries]: QueryResult<TQueries[TKey][0]>
+  [TKey in keyof TQueries]: QueryResult<TQueries[TKey]["queryFn"]>
 }
+
+type QueryBuilder = {
+  <TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    request: QueryRequest<TQueryFn>,
+  ): QueryDescriptor<TQueryFn>
+  <TQueryFn extends DisabledQuery>(
+    queryFn: TQueryFn,
+    request: QueryRequest<TQueryFn>,
+  ): QueryDescriptor<TQueryFn>
+}
+
+const defaultQueryOptions = {
+  refetchOnWindowReactivate: true,
+} satisfies Required<QueryOptions>
 
 /**
  * Detects the explicit disabled-query sentinels supported by the query hooks.
@@ -51,6 +75,21 @@ function isEmptyQueryObject(value: QueryInput): value is EmptyQueryResult {
     Object.getPrototypeOf(value) === Object.prototype &&
     Object.keys(value).length === 0
   )
+}
+
+function createQueryDescriptor<TQueryFn extends QueryInput>(
+  queryFn: TQueryFn,
+  request: QueryRequest<TQueryFn>,
+) {
+  return {
+    options: {
+      ...defaultQueryOptions,
+      refetchOnWindowReactivate:
+        request.refetchOnWindowReactivate ?? defaultQueryOptions.refetchOnWindowReactivate,
+    },
+    params: request.params,
+    queryFn,
+  } satisfies QueryDescriptor<TQueryFn>
 }
 
 /**
@@ -77,8 +116,10 @@ export class QueryClient {
     queryKey: string,
     queryFn: TQueryFn,
     args: Parameters<TQueryFn>,
+    options: Required<QueryOptions> = defaultQueryOptions,
   ) {
-    const entry = this.ensureEntry(queryKey, queryFn, args)
+    const entry = this.ensureEntry(queryKey, queryFn, args, options)
+    entry.refetchOnWindowReactivate = options.refetchOnWindowReactivate
 
     if (entry.stale || (!entry.hasData && !entry.promise && entry.error === null)) {
       void this.fetchEntry(entry, entry.hasData)
@@ -100,8 +141,9 @@ export class QueryClient {
     queryKey: string,
     queryFn: TQueryFn,
     args: Parameters<TQueryFn>,
+    options: Required<QueryOptions> = defaultQueryOptions,
   ) {
-    const snapshot = this.getSnapshot(queryKey, queryFn, args)
+    const snapshot = this.getSnapshot(queryKey, queryFn, args, options)
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error
@@ -160,7 +202,7 @@ export class QueryClient {
    */
   refetchActiveQueries() {
     for (const entry of this.entries.values()) {
-      if (entry.subscribers.size > 0 && !entry.promise) {
+      if (entry.refetchOnWindowReactivate && entry.subscribers.size > 0 && !entry.promise) {
         void this.fetchEntry(entry, entry.hasData)
       }
     }
@@ -228,6 +270,7 @@ export class QueryClient {
     queryKey: string,
     queryFn: TQueryFn,
     args: Parameters<TQueryFn>,
+    options: Required<QueryOptions>,
   ) {
     const existingEntry = this.entries.get(queryKey)
 
@@ -242,6 +285,7 @@ export class QueryClient {
       hasData: false,
       promise: null,
       queryFn,
+      refetchOnWindowReactivate: options.refetchOnWindowReactivate,
       stale: true,
       subscribers: new Set(),
     }
@@ -356,12 +400,16 @@ import.meta.hot.dispose(() => {
  */
 export function useQuery<TQueryFn extends QueryInput>(
   queryFn: TQueryFn,
-  args: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null,
+  request: QueryRequest<TQueryFn>,
 ): QueryResult<TQueryFn> {
   const [, setVersion] = useState(0)
+  const descriptor = createQueryDescriptor(queryFn, request)
 
-  const queryKey = isEnabledQuery(queryFn)
-    ? queryClient.getQueryKey(queryFn, args as Parameters<typeof queryFn>)
+  const queryKey = isEnabledQuery(descriptor.queryFn)
+    ? queryClient.getQueryKey(
+        descriptor.queryFn,
+        descriptor.params as Parameters<typeof descriptor.queryFn>,
+      )
     : null
 
   useEffect(() => {
@@ -371,22 +419,33 @@ export function useQuery<TQueryFn extends QueryInput>(
       })
   }, [queryKey])
 
-  if (isEnabledQuery(queryFn)) {
-    return queryClient.read(queryKey!, queryFn, args as Parameters<typeof queryFn>)
+  if (isEnabledQuery(descriptor.queryFn)) {
+    return queryClient.read(
+      queryKey!,
+      descriptor.queryFn,
+      descriptor.params as Parameters<typeof descriptor.queryFn>,
+      descriptor.options,
+    )
   }
 
-  return queryFn as QueryResult<TQueryFn>
+  return descriptor.queryFn as QueryResult<TQueryFn>
 }
 
 /**
  * Reads multiple cached queries from an ordered descriptor list and returns the resolved data in
  * the same order, preserving disabled-query sentinels in their original positions.
  */
-export function useQueries<const TQueries extends readonly QueryDescriptor[]>(queries: TQueries) {
+export function useQueries<const TQueries extends readonly QueryDescriptor[]>(
+  createQueries: (query: QueryBuilder) => TQueries,
+) {
   const [, setVersion] = useState(0)
-  const queryKeys = queries.map(([queryFn, args]) =>
-    isEnabledQuery(queryFn)
-      ? queryClient.getQueryKey(queryFn, args as Parameters<typeof queryFn>)
+  const queries = createQueries(createQueryDescriptor as QueryBuilder)
+  const queryKeys = queries.map((descriptor) =>
+    isEnabledQuery(descriptor.queryFn)
+      ? queryClient.getQueryKey(
+          descriptor.queryFn,
+          descriptor.params as Parameters<typeof descriptor.queryFn>,
+        )
       : null,
   )
 
@@ -410,9 +469,9 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
   const data: any[] = []
   const pendingPromises: Promise<unknown>[] = []
 
-  for (const [index, [queryFn, args]] of queries.entries()) {
-    if (!isEnabledQuery(queryFn)) {
-      data[index] = queryFn
+  for (const [index, descriptor] of queries.entries()) {
+    if (!isEnabledQuery(descriptor.queryFn)) {
+      data[index] = descriptor.queryFn
       continue
     }
 
@@ -421,7 +480,12 @@ export function useQueries<const TQueries extends readonly QueryDescriptor[]>(qu
       throw new Error("Missing query key for enabled query.")
     }
 
-    const snapshot = queryClient.getSnapshot(queryKey, queryFn, args!)
+    const snapshot = queryClient.getSnapshot(
+      queryKey,
+      descriptor.queryFn,
+      descriptor.params as Parameters<typeof descriptor.queryFn>,
+      descriptor.options,
+    )
 
     if (snapshot.error !== null && !snapshot.hasData) {
       throw snapshot.error

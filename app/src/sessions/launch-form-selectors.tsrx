@@ -48,9 +48,9 @@ export component SessionLaunchLoadingSelect(props: { label: string }) {
 export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, [
-    { cwd: form.draftProjectPath.value ?? undefined },
-  ])
+  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+    params: [{ cwd: form.draftProjectPath.value ?? undefined }],
+  })
   const items: SessionInputSelectItem[] = adapterCatalog.adapters.map(
     (adapter) => ({
       value: adapter.id,
@@ -107,14 +107,9 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
 export component SessionSubpackageSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
   const projectPath = form.draftProjectPath.value
-  const response = useQuery(
-    projectPath ? goddardSdk.session.subpackages : null,
-    projectPath
-      ? [
-          { cwd: projectPath },
-        ]
-      : null,
-  )
+  const response = useQuery(projectPath ? goddardSdk.session.subpackages : null, {
+    params: projectPath ? [{ cwd: projectPath }] : null,
+  })
   const subpackages = projectPath ? response.subpackages : []
   const items =
     projectPath ? buildSubpackageItems(projectPath, subpackages) : []
@@ -154,14 +149,16 @@ export component SessionLaunchPreviewSelectors(props: {
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
     form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
-    form.effectiveCwd.value && form.draftAdapterId.value
-      ? [
-          {
-            agent: form.draftAdapterId.value,
-            cwd: form.effectiveCwd.value,
-          },
-        ]
-      : null,
+    {
+      params: form.effectiveCwd.value && form.draftAdapterId.value
+        ? [
+            {
+              agent: form.draftAdapterId.value,
+              cwd: form.effectiveCwd.value,
+            },
+          ]
+        : null,
+    },
   )
 
   useEffect(() => {

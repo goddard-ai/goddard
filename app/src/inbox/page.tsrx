@@ -56,12 +56,14 @@ component InboxQueryContent(props: {
 }) {
   const inbox = useInbox()
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
-  const { items } = useQuery(goddardSdk.inbox.list, [
-    getInboxListRequest({
-      filterId: props.filterId,
-      statuses: parsedSearch.isActive ? parsedSearch.statuses ?? allInboxStatuses : undefined,
-    }),
-  ])
+  const { items } = useQuery(goddardSdk.inbox.list, {
+    params: [
+      getInboxListRequest({
+        filterId: props.filterId,
+        statuses: parsedSearch.isActive ? parsedSearch.statuses ?? allInboxStatuses : undefined,
+      }),
+    ],
+  })
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
 

@@ -17,9 +17,9 @@ component SessionsPage() {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
 
-  const { sessions } = useQuery(goddardSdk.session.list, [
-    { limit: SESSION_LIST_LIMIT },
-  ])
+  const { sessions } = useQuery(goddardSdk.session.list, {
+    params: [{ limit: SESSION_LIST_LIMIT }],
+  })
 
   function openSession(sessionId: DaemonSession["id"]) {
     const session = sessions.find((candidate) => candidate.id === sessionId)

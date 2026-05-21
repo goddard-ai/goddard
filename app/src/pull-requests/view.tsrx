@@ -49,7 +49,7 @@ component PullRequestView(props: {
   useReportTabProject(props.projectPath)
 
   try {
-    const { pullRequest } = useQuery(goddardSdk.pr.get, [{ id: props.pullRequestId }])
+    const { pullRequest } = useQuery(goddardSdk.pr.get, { params: [{ id: props.pullRequestId }] })
     const title = getPullRequestDisplayTitle(pullRequest)
     const url = getPullRequestUrl(pullRequest)
 

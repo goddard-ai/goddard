@@ -9,9 +9,7 @@ component SessionChangesView(props: {
   sessionId: DaemonSession["id"];
   sessionTitle: string;
 }) {
-  const changes = useQuery(goddardSdk.session.changes, [
-    { id: props.sessionId },
-  ])
+  const changes = useQuery(goddardSdk.session.changes, { params: [{ id: props.sessionId }] })
 
   <section class={styles.root}>
     <header class={styles.header}>

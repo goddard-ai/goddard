@@ -167,3 +167,62 @@ test("QueryClient.refetchActiveQueries refreshes only subscribed queries", async
   expect(queryClient.read(activeQueryKey, loadActiveSession, ["ses_active"])).toBe("active:second")
   expect(activeQueryNotifications).toEqual(["update", "update"])
 })
+
+test("QueryClient.refetchActiveQueries skips queries that opt out of window reactivation", async () => {
+  let activeDeferred = createDeferred<string>()
+  let skippedDeferred = createDeferred<string>()
+  const activeQueryNotifications: string[] = []
+  const activeRefetchSettled = createDeferred<void>()
+  let isWaitingForActiveRefetch = false
+  const queryClient = new QueryClient()
+  const loadActiveSession = vi.fn((_sessionId: string) => activeDeferred.promise)
+  const loadSkippedSession = vi.fn((_sessionId: string) => skippedDeferred.promise)
+  const activeQueryKey = queryClient.getQueryKey(loadActiveSession, ["ses_active"])
+  const skippedQueryKey = queryClient.getQueryKey(loadSkippedSession, ["ses_skipped"])
+
+  const firstActiveLoad = waitForSuspendedRead(() =>
+    queryClient.read(activeQueryKey, loadActiveSession, ["ses_active"]),
+  )
+  const firstSkippedLoad = waitForSuspendedRead(() =>
+    queryClient.read(skippedQueryKey, loadSkippedSession, ["ses_skipped"], {
+      refetchOnWindowReactivate: false,
+    }),
+  )
+
+  queryClient.subscribe(activeQueryKey, () => {
+    activeQueryNotifications.push("update")
+
+    if (isWaitingForActiveRefetch && activeQueryNotifications.length === 2) {
+      activeRefetchSettled.resolve()
+    }
+  })
+  queryClient.subscribe(skippedQueryKey, () => {})
+
+  await Promise.resolve()
+  activeDeferred.resolve("active:first")
+  skippedDeferred.resolve("skipped:first")
+  await firstActiveLoad
+  await firstSkippedLoad
+
+  activeDeferred = createDeferred<string>()
+  skippedDeferred = createDeferred<string>()
+  loadActiveSession.mockReturnValueOnce(activeDeferred.promise)
+  loadSkippedSession.mockReturnValueOnce(skippedDeferred.promise)
+  isWaitingForActiveRefetch = true
+
+  queryClient.refetchActiveQueries()
+  await Promise.resolve()
+
+  expect(loadActiveSession).toHaveBeenCalledTimes(2)
+  expect(loadSkippedSession).toHaveBeenCalledTimes(1)
+
+  activeDeferred.resolve("active:second")
+  await activeRefetchSettled.promise
+
+  expect(queryClient.read(activeQueryKey, loadActiveSession, ["ses_active"])).toBe("active:second")
+  expect(
+    queryClient.read(skippedQueryKey, loadSkippedSession, ["ses_skipped"], {
+      refetchOnWindowReactivate: false,
+    }),
+  ).toBe("skipped:first")
+})
