@@ -191,12 +191,6 @@
     "core/paths": {
       "name": "@goddard-ai/paths",
       "version": "0.1.0",
-      "peerDependencies": {
-        "@tauri-apps/api": "^2.10.1",
-      },
-      "optionalPeers": [
-        "@tauri-apps/api",
-      ],
     },
     "core/review-sync": {
       "name": "@goddard-ai/review-sync",
