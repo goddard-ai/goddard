@@ -22,6 +22,7 @@ export function TooltipTrigger(props: {
   const openDelayRef = useRef<number | null>(null)
   const closeDelayRef = useRef<number | null>(null)
   const groupCloseCallbackRef = useRef<(() => void) | null>(null)
+  const suppressFocusOpenRef = useRef(false)
   const getGroupState = () => {
     if (!props.group) {
       return null
@@ -85,6 +86,25 @@ export function TooltipTrigger(props: {
       closeTooltipImmediately()
     }, props.closeDelay ?? 80)
   }
+  const openTooltipOnFocus = () => {
+    if (suppressFocusOpenRef.current) {
+      return
+    }
+
+    openTooltip()
+  }
+  const closeTooltipOnBlur = () => {
+    suppressFocusOpenRef.current = false
+    closeTooltip()
+  }
+  const closeTooltipOnPointerDown = () => {
+    suppressFocusOpenRef.current = true
+    closeTooltipImmediately()
+  }
+  const closeTooltipOnPointerLeave = () => {
+    suppressFocusOpenRef.current = false
+    closeTooltip()
+  }
 
   useEffect(() => closeTooltipImmediately, [])
 
@@ -99,16 +119,16 @@ export function TooltipTrigger(props: {
         triggerProps.ref.current = element
       }
     },
-    onBlur: chainHandlers(triggerProps.onBlur, closeTooltip),
-    onFocus: chainHandlers(triggerProps.onFocus, openTooltip),
+    onBlur: chainHandlers(triggerProps.onBlur, closeTooltipOnBlur),
+    onFocus: chainHandlers(triggerProps.onFocus, openTooltipOnFocus),
     onKeyDown: chainHandlers(triggerProps.onKeyDown, (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         props.open.value = false
       }
     }),
-    onPointerDown: chainHandlers(triggerProps.onPointerDown, closeTooltipImmediately),
+    onPointerDown: chainHandlers(triggerProps.onPointerDown, closeTooltipOnPointerDown),
     onPointerEnter: chainHandlers(triggerProps.onPointerEnter, openTooltip),
-    onPointerLeave: chainHandlers(triggerProps.onPointerLeave, closeTooltip),
+    onPointerLeave: chainHandlers(triggerProps.onPointerLeave, closeTooltipOnPointerLeave),
   })
 }
 
