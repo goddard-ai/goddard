@@ -109,6 +109,7 @@ export type InitialSessionConfigOption = z.infer<typeof InitialSessionConfigOpti
 export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]).optional(),
   cwd: z.string(),
+  launchLeaseId: z.string().optional(),
   worktree: SessionWorktreeParams.optional(),
   workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
@@ -254,6 +255,19 @@ export const SessionLaunchPreviewRequest = z.strictObject({
 
 export type SessionLaunchPreviewRequest = z.infer<typeof SessionLaunchPreviewRequest>
 
+/** Request payload used to release a prepared launch lease after launch-dialog abandonment. */
+export const ReleaseSessionLaunchLeaseRequest = z.strictObject({
+  launchLeaseId: z.string(),
+})
+
+export type ReleaseSessionLaunchLeaseRequest = z.infer<typeof ReleaseSessionLaunchLeaseRequest>
+
+/** Response payload returned after a launch lease release has been scheduled. */
+export type ReleaseSessionLaunchLeaseResponse = {
+  launchLeaseId: string
+  released: boolean
+}
+
 /** Request payload used to discover launchable subpackage directories under one project cwd. */
 export const SessionSubpackagesRequest = z.strictObject({
   cwd: z.string(),
@@ -276,6 +290,7 @@ export type SessionSubpackagesResponse = {
 
 /** Response payload returned after loading launch-time adapter and repository capabilities. */
 export type SessionLaunchPreviewResponse = {
+  launchLeaseId: string
   repoRoot: string | null
   branches: SessionLaunchBranch[]
   models: acp.SessionModelState | null

@@ -33,6 +33,8 @@ import type {
   ListSessionsRequest,
   ListSessionsResponse,
   MutateSessionReviewSessionResponse,
+  ReleaseSessionLaunchLeaseRequest,
+  ReleaseSessionLaunchLeaseResponse,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
@@ -142,8 +144,10 @@ function getPackageVersion(): string {
 const logger = createLogger()
 
 type SessionId = DaemonSession["id"]
+type AcpClient = Awaited<ReturnType<typeof createAcpClient>>
 
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
+const LAUNCH_LEASE_RELEASE_TIMEOUT_MS = 10 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
 type SessionDoc = KindOutput<typeof db.schema.sessions>
@@ -308,6 +312,28 @@ type ActiveSession = {
   idleShutdownTimer: ReturnType<typeof setTimeout> | null
 }
 
+/** Prepared ACP session kept alive while the launch dialog gathers final user choices. */
+type LaunchLease = {
+  id: string
+  key: string
+  agent: NonNullable<SessionLaunchPreviewRequest["agent"]>
+  cwd: string
+  token: string
+  acpSessionId: string
+  agentProcess: AgentProcessHandle
+  client: AcpClient
+  session: AcpSession
+  initializeResult: acp.InitializeResponse
+  history: acp.AnyMessage[]
+  availableCommands: acp.AvailableCommand[]
+  models: acp.SessionModelState | null
+  configOptions: acp.SessionConfigOption[]
+  repoRoot: string | null
+  branches: SessionLaunchBranch[]
+  releaseTimer: ReturnType<typeof setTimeout> | null
+  closing: Promise<void> | null
+}
+
 type ReviewSessionRuntime = {
   abortController: AbortController
   running: Promise<void>
@@ -345,6 +371,9 @@ export type SessionManager = {
     params: SessionDraftSuggestionsRequest,
   ) => Promise<SessionComposerSuggestionsResponse>
   getLaunchPreview: (params: SessionLaunchPreviewRequest) => Promise<SessionLaunchPreviewResponse>
+  releaseLaunchLease: (
+    params: ReleaseSessionLaunchLeaseRequest,
+  ) => Promise<ReleaseSessionLaunchLeaseResponse>
   getSubpackages: (params: SessionSubpackagesRequest) => Promise<SessionSubpackagesResponse>
   getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
   getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
@@ -442,9 +471,130 @@ function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
   return params.request.oneShot === true && params.request.initialPrompt !== undefined
 }
 
+/** Builds the reuse key for the ACP session prepared behind one launch-dialog option set. */
+function createLaunchLeaseKey(params: {
+  agent: NonNullable<SessionLaunchPreviewRequest["agent"]>
+  cwd: string
+}) {
+  return JSON.stringify([params.cwd, params.agent])
+}
+
+/** Compares launch agents structurally because config-resolved distributions may be object values. */
+function isSameLaunchAgent(
+  left: NonNullable<SessionLaunchPreviewRequest["agent"]>,
+  right: NonNullable<CreateSessionRequest["agent"]>,
+) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+/** Returns true when a launch lease was created with the same ACP-facing session inputs. */
+function canPromoteLaunchLease(params: {
+  lease: LaunchLease
+  request: ResolvedCreateSessionRequest
+  cwd: string
+  existingSession: SessionDoc | null
+  worktree: PreparedSessionWorktree | null
+}) {
+  return (
+    params.existingSession === null &&
+    params.worktree === null &&
+    params.request.worktree?.enabled !== true &&
+    params.request.mcpServers.length === 0 &&
+    params.request.env === undefined &&
+    params.request.metadata === undefined &&
+    params.request.repository === undefined &&
+    params.request.prNumber === undefined &&
+    params.request.workforce === undefined &&
+    params.lease.cwd === params.cwd &&
+    isSameLaunchAgent(params.lease.agent, params.request.agent)
+  )
+}
+
 /** Returns true when the ACP adapter can reopen this session later via `session/load`. */
 function supportsSessionLoad(initialized: Pick<InitializedSession, "agentCapabilities">): boolean {
   return initialized.agentCapabilities?.loadSession === true
+}
+
+type InitializedSession = acp.InitializeResponse & {
+  status: DaemonSessionStatus
+  isFirstPrompt: boolean
+  history: acp.AnyMessage[]
+  initialPromptRequestId: SessionTurnPromptRequestId | null
+  initialPromptStartedAt: string | null
+  initialPromptCompletedAt: string | null
+  acpSessionId: string
+  models?: acp.SessionModelState | null
+  configOptions?: acp.SessionConfigOption[] | null
+  stopReason: acp.PromptResponse["stopReason"] | null
+}
+
+/** Runs an optional launch-time prompt and captures the synthetic turn history around it. */
+async function runLaunchInitialPrompt(params: {
+  session: AcpSession
+  acpSessionId: string
+  request: CreateSessionRequest
+  isFirstPrompt: boolean
+  history: acp.AnyMessage[]
+  onMessageWrite?: (message: acp.AnyMessage) => void
+}) {
+  let status: DaemonSessionStatus = "active"
+  let isFirstPrompt = params.isFirstPrompt
+  let initialPromptRequestId: SessionTurnPromptRequestId | null = null
+  let initialPromptStartedAt: string | null = null
+  let initialPromptCompletedAt: string | null = null
+  let stopReason: acp.PromptResponse["stopReason"] | null = null
+
+  if (params.request.initialPrompt !== undefined) {
+    initialPromptRequestId = randomUUID()
+    initialPromptStartedAt = new Date().toISOString()
+    const initialMessage = {
+      jsonrpc: "2.0",
+      id: initialPromptRequestId,
+      method: acp.AGENT_METHODS.session_prompt,
+      params: createInitialPromptRequest({
+        sessionId: params.acpSessionId,
+        prompt: params.request.initialPrompt,
+        isFirstPrompt,
+        systemPrompt: params.request.systemPrompt,
+      }),
+    } satisfies acp.AnyMessage
+
+    params.history.push(initialMessage)
+    params.onMessageWrite?.(initialMessage)
+
+    const response = await params.session.prompt(initialMessage.params.prompt)
+    initialPromptCompletedAt = new Date().toISOString()
+    params.history.push({
+      jsonrpc: "2.0",
+      id: initialPromptRequestId,
+      result: response,
+    } satisfies acp.AnyMessage)
+    stopReason = response.stopReason
+
+    switch (response.stopReason) {
+      case "cancelled":
+        status = "cancelled"
+        break
+      case "end_turn":
+      case "max_tokens":
+      case "max_turn_requests":
+      case "refusal":
+        status = "done"
+        break
+      default:
+        response.stopReason satisfies never
+    }
+    isFirstPrompt = false
+  }
+
+  return {
+    status,
+    isFirstPrompt,
+    initialPromptRequestId,
+    initialPromptStartedAt,
+    initialPromptCompletedAt,
+    stopReason,
+  }
 }
 
 /** Performs the ACP handshake and optional initial prompt before live streaming begins. */
@@ -454,20 +604,7 @@ async function initializeSession(params: {
   request: CreateSessionRequest
   resumeAcpId?: string
   onMessageWrite?: (message: acp.AnyMessage) => void
-}): Promise<
-  acp.InitializeResponse & {
-    status: DaemonSessionStatus
-    isFirstPrompt: boolean
-    history: acp.AnyMessage[]
-    initialPromptRequestId: SessionTurnPromptRequestId | null
-    initialPromptStartedAt: string | null
-    initialPromptCompletedAt: string | null
-    acpSessionId: string
-    models?: acp.SessionModelState | null
-    configOptions?: acp.SessionConfigOption[] | null
-    stopReason: acp.PromptResponse["stopReason"] | null
-  }
-> {
+}): Promise<InitializedSession> {
   const history: acp.AnyMessage[] = []
   const client = await createAcpClient({
     stdin: params.input,
@@ -493,16 +630,11 @@ async function initializeSession(params: {
   try {
     const initializeResult = client.initialize
 
-    let status: DaemonSessionStatus = "active"
     let isFirstPrompt = true
     let acpSessionId: string
     let session: AcpSession
     let models: acp.SessionModelState | null | undefined
-    let initialPromptRequestId: SessionTurnPromptRequestId | null = null
-    let initialPromptStartedAt: string | null = null
-    let initialPromptCompletedAt: string | null = null
     let configOptions: acp.SessionConfigOption[] | null | undefined
-    let stopReason: acp.PromptResponse["stopReason"] | null = null
 
     if (params.resumeAcpId !== undefined) {
       if (initializeResult.agentCapabilities?.loadSession !== true) {
@@ -540,67 +672,74 @@ async function initializeSession(params: {
       }
     }
 
-    if (params.request.initialPrompt !== undefined) {
-      initialPromptRequestId = randomUUID()
-      initialPromptStartedAt = new Date().toISOString()
-      const initialMessage = {
-        jsonrpc: "2.0",
-        id: initialPromptRequestId,
-        method: acp.AGENT_METHODS.session_prompt,
-        params: createInitialPromptRequest({
-          sessionId: acpSessionId,
-          prompt: params.request.initialPrompt,
-          isFirstPrompt,
-          systemPrompt: params.request.systemPrompt,
-        }),
-      } satisfies acp.AnyMessage
-
-      history.push(initialMessage)
-      params.onMessageWrite?.(initialMessage)
-
-      const response = await session.prompt(initialMessage.params.prompt)
-      initialPromptCompletedAt = new Date().toISOString()
-      history.push({
-        jsonrpc: "2.0",
-        id: initialPromptRequestId,
-        result: response,
-      } satisfies acp.AnyMessage)
-      stopReason = response.stopReason
-      switch (response.stopReason) {
-        case "cancelled":
-          status = "cancelled"
-          break
-        case "end_turn":
-        case "max_tokens":
-        case "max_turn_requests":
-        case "refusal":
-          status = "done"
-          break
-        default:
-          response.stopReason satisfies never
-      }
-      isFirstPrompt = false
-    }
+    const initialPromptResult = await runLaunchInitialPrompt({
+      session,
+      acpSessionId,
+      request: params.request,
+      isFirstPrompt,
+      history,
+      onMessageWrite: params.onMessageWrite,
+    })
 
     return {
       ...initializeResult,
-      status,
-      isFirstPrompt,
+      ...initialPromptResult,
       history,
-      initialPromptRequestId,
-      initialPromptStartedAt,
-      initialPromptCompletedAt,
       acpSessionId,
       models,
       configOptions,
-      stopReason,
     }
   } finally {
     await client.close()
   }
 }
 
-type InitializedSession = Awaited<ReturnType<typeof initializeSession>>
+/** Promotes one prepared launch lease by applying final launch options and optional initial prompt. */
+async function initializeSessionFromLaunchLease(params: {
+  lease: LaunchLease
+  request: CreateSessionRequest
+  onMessageWrite?: (message: acp.AnyMessage) => void
+}) {
+  try {
+    let models: acp.SessionModelState | null | undefined = params.lease.models
+    let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
+
+    if (
+      params.request.initialModelId !== undefined ||
+      (params.request.initialConfigOptions?.length ?? 0) > 0
+    ) {
+      const configuredSession = await applyInitialSessionConfiguration({
+        session: params.lease.session,
+        models,
+        configOptions,
+        request: params.request,
+      })
+
+      models = configuredSession.models
+      configOptions = configuredSession.configOptions
+    }
+
+    const initialPromptResult = await runLaunchInitialPrompt({
+      session: params.lease.session,
+      acpSessionId: params.lease.acpSessionId,
+      request: params.request,
+      isFirstPrompt: true,
+      history: params.lease.history,
+      onMessageWrite: params.onMessageWrite,
+    })
+
+    return {
+      ...params.lease.initializeResult,
+      ...initialPromptResult,
+      history: params.lease.history,
+      acpSessionId: params.lease.acpSessionId,
+      models,
+      configOptions,
+    } satisfies InitializedSession
+  } finally {
+    await params.lease.client.close().catch(() => {})
+  }
+}
 
 /**
  * Returns true when one launch path needs configured worktree plugins for reuse or creation.
@@ -810,6 +949,8 @@ export function createSessionManager(input: {
   idleSessionShutdownTimeoutMs?: number
 }): SessionManager {
   const activeSessions = new Map<SessionId, ActiveSession>()
+  const launchLeases = new Map<string, LaunchLease>()
+  const launchLeaseIdsByKey = new Map<string, string>()
   const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
   const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
@@ -860,6 +1001,101 @@ export function createSessionManager(input: {
     }
 
     return record
+  }
+
+  function removeLaunchLease(lease: LaunchLease) {
+    launchLeases.delete(lease.id)
+    if (launchLeaseIdsByKey.get(lease.key) === lease.id) {
+      launchLeaseIdsByKey.delete(lease.key)
+    }
+  }
+
+  function cancelLaunchLeaseReleaseTimer(lease: LaunchLease) {
+    if (!lease.releaseTimer) {
+      return
+    }
+
+    clearTimeout(lease.releaseTimer)
+    lease.releaseTimer = null
+  }
+
+  async function closeLaunchLease(lease: LaunchLease, reason: string) {
+    if (lease.closing) {
+      return lease.closing
+    }
+
+    cancelLaunchLeaseReleaseTimer(lease)
+    removeLaunchLease(lease)
+    lease.closing = (async () => {
+      logger.log("launch_lease_closing", {
+        launchLeaseId: lease.id,
+        acpSessionId: lease.acpSessionId,
+        reason,
+      })
+      await lease.client
+        .closeSession({
+          sessionId: lease.acpSessionId,
+        })
+        .catch(() => {})
+      await lease.client.close().catch(() => {})
+      await treeKill(lease.agentProcess).catch(() => {})
+      await waitForAgentProcessExit(lease.agentProcess).catch(() => {})
+    })()
+
+    return lease.closing
+  }
+
+  function scheduleLaunchLeaseRelease(lease: LaunchLease, reason: string) {
+    if (lease.closing || lease.releaseTimer) {
+      return
+    }
+
+    logger.log("launch_lease_release_scheduled", {
+      launchLeaseId: lease.id,
+      acpSessionId: lease.acpSessionId,
+      reason,
+      timeoutMs: LAUNCH_LEASE_RELEASE_TIMEOUT_MS,
+    })
+    lease.releaseTimer = setTimeout(() => {
+      void closeLaunchLease(lease, reason).catch((error) => {
+        logger.log("launch_lease_close_failed", {
+          launchLeaseId: lease.id,
+          reason,
+          errorMessage: getErrorMessage(error),
+        })
+      })
+    }, LAUNCH_LEASE_RELEASE_TIMEOUT_MS)
+  }
+
+  function findLaunchLeaseByKey(key: string) {
+    const id = launchLeaseIdsByKey.get(key)
+    return id ? (launchLeases.get(id) ?? null) : null
+  }
+
+  function takeCompatibleLaunchLease(params: {
+    launchLeaseId: string | undefined
+    request: ResolvedCreateSessionRequest
+    cwd: string
+    existingSession: SessionDoc | null
+    worktree: PreparedSessionWorktree | null
+  }) {
+    if (!params.launchLeaseId) {
+      return null
+    }
+
+    const lease = launchLeases.get(params.launchLeaseId) ?? null
+    if (!lease) {
+      return null
+    }
+
+    if (!canPromoteLaunchLease({ ...params, lease })) {
+      scheduleLaunchLeaseRelease(lease, "incompatible_launch")
+      return null
+    }
+
+    cancelLaunchLeaseReleaseTimer(lease)
+    removeLaunchLease(lease)
+    return lease
   }
 
   function resolveCurrentTurnId(id: SessionId) {
@@ -2391,7 +2627,7 @@ export function createSessionManager(input: {
   ): Promise<DaemonSession> {
     await ready
     const id = existingSession?.id ?? db.sessions.newId()
-    const token = params.token ?? randomBytes(32).toString("hex")
+    let token = params.token ?? randomBytes(32).toString("hex")
     const exitAfterInitialPrompt = shouldExitAfterInitialPrompt(params)
     const existingArtifacts = resolveExistingSessionArtifacts(id, existingSession)
     const resolvedConfig =
@@ -2518,36 +2754,64 @@ export function createSessionManager(input: {
         )
       }
 
-      const agentProcess = await spawnAgentProcess({
-        daemonUrl: input.daemonUrl,
-        token,
-        agent: resolvedRequest.agent,
+      const onMessageWrite = (message: acp.AnyMessage) => {
+        sessionLogger.log("agent.message_write", {
+          direction: "write",
+          hasId: "id" in message && message.id != null,
+          method: "method" in message ? message.method : undefined,
+          message: createPayloadPreview(message),
+        })
+      }
+      const launchLease = takeCompatibleLaunchLease({
+        launchLeaseId: resolvedRequest.launchLeaseId,
+        request: resolvedRequest,
         cwd,
-        agentBinDir: input.agentBinDir,
-        env: resolvedRequest.env,
-        registryService: input.registryService,
-        registry: resolvedRegistry,
+        existingSession,
+        worktree,
       })
-      spawnedAgentProcess = agentProcess
+      let agentProcess: AgentProcessHandle
+      let initialized: InitializedSession
 
-      const initialized = await initializeSession({
-        input: agentProcess.stdin,
-        output: agentProcess.stdout,
-        request: {
-          ...resolvedRequest,
+      if (launchLease) {
+        token = launchLease.token
+        agentProcess = launchLease.agentProcess
+        spawnedAgentProcess = agentProcess
+        initialized = await initializeSessionFromLaunchLease({
+          lease: launchLease,
+          request: {
+            ...resolvedRequest,
+            cwd,
+            launchLeaseId: undefined,
+            metadata: sessionMetadata,
+          },
+          onMessageWrite,
+        })
+      } else {
+        agentProcess = await spawnAgentProcess({
+          daemonUrl: input.daemonUrl,
+          token,
+          agent: resolvedRequest.agent,
           cwd,
-          metadata: sessionMetadata,
-        },
-        resumeAcpId: existingSession?.acpSessionId,
-        onMessageWrite: (message) => {
-          sessionLogger.log("agent.message_write", {
-            direction: "write",
-            hasId: "id" in message && message.id != null,
-            method: "method" in message ? message.method : undefined,
-            message: createPayloadPreview(message),
-          })
-        },
-      })
+          agentBinDir: input.agentBinDir,
+          env: resolvedRequest.env,
+          registryService: input.registryService,
+          registry: resolvedRegistry,
+        })
+        spawnedAgentProcess = agentProcess
+
+        initialized = await initializeSession({
+          input: agentProcess.stdin,
+          output: agentProcess.stdout,
+          request: {
+            ...resolvedRequest,
+            cwd,
+            launchLeaseId: undefined,
+            metadata: sessionMetadata,
+          },
+          resumeAcpId: existingSession?.acpSessionId,
+          onMessageWrite,
+        })
+      }
       sessionContext.acpSessionId = initialized.acpSessionId
 
       const latestAvailableCommands = getLatestAvailableCommands(initialized.history)
@@ -2909,17 +3173,39 @@ export function createSessionManager(input: {
   ): Promise<SessionLaunchPreviewResponse> {
     await ready
 
-    const resolvedConfig = await input.configManager
-      .getRootConfig(params.cwd)
-      .then((root) => root.config)
-    const resolvedRegistry = resolvedConfig?.registry
+    const key = createLaunchLeaseKey(params)
     const [repoRoot, branches] = await Promise.all([
       resolveGitRepoRoot(params.cwd),
       listLaunchBranches(params.cwd),
     ])
+    const existingLease = findLaunchLeaseByKey(key)
+    if (existingLease) {
+      cancelLaunchLeaseReleaseTimer(existingLease)
+      existingLease.repoRoot = repoRoot
+      existingLease.branches = branches
+      return {
+        launchLeaseId: existingLease.id,
+        repoRoot,
+        branches,
+        models: existingLease.models,
+        configOptions: existingLease.configOptions,
+        slashCommands: getSlashComposerSuggestions(
+          existingLease.availableCommands,
+          "",
+          MAX_COMPOSER_SUGGESTION_LIMIT,
+        ),
+      }
+    }
+
+    const resolvedConfig = await input.configManager
+      .getRootConfig(params.cwd)
+      .then((root) => root.config)
+    const resolvedRegistry = resolvedConfig?.registry
+    const launchLeaseId = randomUUID()
+    const token = randomBytes(32).toString("hex")
     const agentProcess = await spawnAgentProcess({
       daemonUrl: input.daemonUrl,
-      token: randomBytes(32).toString("hex"),
+      token,
       agent: params.agent,
       cwd: params.cwd,
       agentBinDir: input.agentBinDir,
@@ -2927,9 +3213,10 @@ export function createSessionManager(input: {
       registry: resolvedRegistry,
     })
     let availableCommands: acp.AvailableCommand[] = []
-    let previewSessionId: string | null = null
-    let client: Awaited<ReturnType<typeof createAcpClient>> | null = null
+    let acpSessionId: string | null = null
+    let client: AcpClient | null = null
     let resolveAvailableCommands: (() => void) | null = null
+    const history: acp.AnyMessage[] = []
     const availableCommandsReady = new Promise<void>((resolve) => {
       resolveAvailableCommands = resolve
     })
@@ -2947,6 +3234,11 @@ export function createSessionManager(input: {
             return { outcome: { outcome: "cancelled" } }
           },
           async sessionUpdate(params) {
+            history.push({
+              jsonrpc: "2.0",
+              method: acp.CLIENT_METHODS.session_update,
+              params,
+            })
             if (params.update.sessionUpdate === "available_commands_update") {
               availableCommands = params.update.availableCommands
               resolveAvailableCommands?.()
@@ -2955,11 +3247,11 @@ export function createSessionManager(input: {
           },
         },
       })
-      const previewSession = await client.newSession({
+      const session = await client.newSession({
         cwd: params.cwd,
         mcpServers: [],
       })
-      previewSessionId = previewSession.sessionId
+      acpSessionId = session.sessionId
 
       await Promise.race([
         availableCommandsReady,
@@ -2968,30 +3260,81 @@ export function createSessionManager(input: {
         }),
       ])
 
-      return {
+      const lease: LaunchLease = {
+        id: launchLeaseId,
+        key,
+        agent: params.agent,
+        cwd: params.cwd,
+        token,
+        acpSessionId,
+        agentProcess,
+        client,
+        session,
+        initializeResult: client.initialize,
+        history,
+        availableCommands,
+        models: session.models ?? null,
+        configOptions: session.configOptions ?? [],
         repoRoot,
         branches,
-        models: previewSession.models ?? null,
-        configOptions: previewSession.configOptions ?? [],
+        releaseTimer: null,
+        closing: null,
+      }
+      launchLeases.set(lease.id, lease)
+      launchLeaseIdsByKey.set(key, lease.id)
+      agentProcess.onceExit(() => {
+        if (launchLeases.get(lease.id) === lease) {
+          cancelLaunchLeaseReleaseTimer(lease)
+          removeLaunchLease(lease)
+        }
+      })
+
+      return {
+        launchLeaseId: lease.id,
+        repoRoot: lease.repoRoot,
+        branches: lease.branches,
+        models: lease.models,
+        configOptions: lease.configOptions,
         slashCommands: getSlashComposerSuggestions(
-          availableCommands,
+          lease.availableCommands,
           "",
           MAX_COMPOSER_SUGGESTION_LIMIT,
         ),
       }
-    } finally {
-      if (previewSessionId && client) {
+    } catch (error) {
+      if (acpSessionId && client) {
         try {
           await client.closeSession({
-            sessionId: previewSessionId,
+            sessionId: acpSessionId,
           })
         } catch {
-          // The preview process is short-lived anyway.
+          // The launch lease failed before it could be returned to a caller.
         }
       }
 
       await client?.close().catch(() => {})
-      agentProcess.kill()
+      await treeKill(agentProcess).catch(() => {})
+      await waitForAgentProcessExit(agentProcess).catch(() => {})
+      throw error
+    }
+  }
+
+  async function releaseLaunchLease(
+    params: ReleaseSessionLaunchLeaseRequest,
+  ): Promise<ReleaseSessionLaunchLeaseResponse> {
+    await ready
+    const lease = launchLeases.get(params.launchLeaseId) ?? null
+    if (!lease) {
+      return {
+        launchLeaseId: params.launchLeaseId,
+        released: false,
+      }
+    }
+
+    scheduleLaunchLeaseRelease(lease, "client_release")
+    return {
+      launchLeaseId: lease.id,
+      released: true,
     }
   }
 
@@ -3471,6 +3814,17 @@ export function createSessionManager(input: {
 
   async function close(): Promise<void> {
     await ready
+    while (launchLeases.size > 0) {
+      const lease = launchLeases.values().next().value
+      if (!lease) {
+        break
+      }
+
+      await closeLaunchLease(lease, "daemon_shutdown").catch(() => {})
+    }
+    launchLeases.clear()
+    launchLeaseIdsByKey.clear()
+
     for (const session of activeSessions.values()) {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
       await stopReviewSessionRuntime(session.id)
@@ -3507,6 +3861,7 @@ export function createSessionManager(input: {
     getComposerSuggestions,
     getDraftSuggestions,
     getLaunchPreview,
+    releaseLaunchLease,
     getSubpackages,
     getDiagnostics,
     getWorktree,

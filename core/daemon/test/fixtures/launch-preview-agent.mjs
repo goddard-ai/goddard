@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto"
+import { appendFileSync } from "node:fs"
 import { Readable, Writable } from "node:stream"
 import * as acp from "@agentclientprotocol/sdk"
+
+function recordEvent(event) {
+  if (!process.env.LAUNCH_PREVIEW_AGENT_LOG) {
+    return
+  }
+
+  appendFileSync(process.env.LAUNCH_PREVIEW_AGENT_LOG, `${JSON.stringify(event)}\n`)
+}
 
 class LaunchPreviewFixtureAgent {
   constructor(connection) {
@@ -25,6 +34,7 @@ class LaunchPreviewFixtureAgent {
       thinkingLevel: "medium",
     }
     this.sessions.set(sessionId, session)
+    recordEvent({ type: "newSession", sessionId })
 
     await this.connection.sessionUpdate({
       sessionId,
@@ -88,6 +98,7 @@ class LaunchPreviewFixtureAgent {
   }
 
   async closeSession(params) {
+    recordEvent({ type: "closeSession", sessionId: params.sessionId })
     this.sessions.delete(params.sessionId)
     return {}
   }
@@ -99,6 +110,7 @@ class LaunchPreviewFixtureAgent {
     }
 
     session.currentModelId = params.modelId
+    recordEvent({ type: "setModel", sessionId: params.sessionId, modelId: params.modelId })
     return {}
   }
 
@@ -113,6 +125,12 @@ class LaunchPreviewFixtureAgent {
     }
 
     session.thinkingLevel = params.value
+    recordEvent({
+      type: "setConfigOption",
+      sessionId: params.sessionId,
+      configId: params.configId,
+      value: params.value,
+    })
 
     return {
       configOptions: [
@@ -146,6 +164,12 @@ class LaunchPreviewFixtureAgent {
     if (!session) {
       throw new Error(`Session ${params.sessionId} not found`)
     }
+    recordEvent({
+      type: "prompt",
+      sessionId: params.sessionId,
+      modelId: session.currentModelId,
+      thinkingLevel: session.thinkingLevel,
+    })
 
     await this.connection.sessionUpdate({
       sessionId: params.sessionId,

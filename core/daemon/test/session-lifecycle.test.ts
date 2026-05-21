@@ -1830,6 +1830,7 @@ test("session.launchPreview loads adapter capabilities and repository branches f
     cwd: repoDir,
   })
 
+  expect(typeof preview.launchLeaseId).toBe("string")
   expect(preview.repoRoot).toBe(await realpath(repoDir))
   expect(preview.branches).toContainEqual({
     name: currentBranch,
@@ -1853,6 +1854,119 @@ test("session.launchPreview loads adapter capabilities and repository branches f
     description: "Create or revise the plan",
     inputHint: "What should change?",
   })
+})
+
+test("session.create promotes compatible launch leases instead of creating a second ACP session", async () => {
+  const logPath = await createLaunchPreviewAgentLog()
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const agent = createWrappedNodeAgent(launchPreviewAgentPath)
+
+  const preview = await client.send("session.launchPreview", {
+    agent,
+    cwd: repoDir,
+  })
+
+  await client.send("session.create", {
+    agent,
+    cwd: repoDir,
+    launchLeaseId: preview.launchLeaseId,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialModelId: "gpt-5.4-mini",
+    initialConfigOptions: [
+      {
+        configId: "thinking",
+        value: "high",
+      },
+    ],
+    initialPrompt: "Start the session.",
+    oneShot: true,
+  })
+
+  const events = await readLaunchPreviewAgentEvents(logPath)
+  const newSessionEvents = events.filter((event) => event.type === "newSession")
+  const promptEvents = events.filter((event) => event.type === "prompt")
+
+  expect(newSessionEvents).toHaveLength(1)
+  expect(promptEvents).toHaveLength(1)
+  expect(promptEvents[0]?.sessionId).toBe(newSessionEvents[0]?.sessionId)
+  expect(promptEvents[0]).toMatchObject({
+    modelId: "gpt-5.4-mini",
+    thinkingLevel: "high",
+  })
+})
+
+test("session.create falls back to a fresh session for worktree launches", async () => {
+  const logPath = await createLaunchPreviewAgentLog()
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const agent = createWrappedNodeAgent(launchPreviewAgentPath)
+
+  const preview = await client.send("session.launchPreview", {
+    agent,
+    cwd: repoDir,
+  })
+
+  await client.send("session.create", {
+    agent,
+    cwd: repoDir,
+    launchLeaseId: preview.launchLeaseId,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Start the worktree session.",
+    oneShot: true,
+  })
+
+  const events = await readLaunchPreviewAgentEvents(logPath)
+  const newSessionEvents = events.filter((event) => event.type === "newSession")
+  const promptEvents = events.filter((event) => event.type === "prompt")
+
+  expect(newSessionEvents).toHaveLength(2)
+  expect(promptEvents).toHaveLength(1)
+  expect(promptEvents[0]?.sessionId).toBe(newSessionEvents[1]?.sessionId)
+})
+
+test("released launch leases remain promotable until delayed cleanup expires", async () => {
+  const logPath = await createLaunchPreviewAgentLog()
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const agent = createWrappedNodeAgent(launchPreviewAgentPath)
+
+  const preview = await client.send("session.launchPreview", {
+    agent,
+    cwd: repoDir,
+  })
+
+  await expect(
+    client.send("session.launchLease.release", {
+      launchLeaseId: preview.launchLeaseId,
+    }),
+  ).resolves.toEqual({
+    launchLeaseId: preview.launchLeaseId,
+    released: true,
+  })
+
+  await client.send("session.create", {
+    agent,
+    cwd: repoDir,
+    launchLeaseId: preview.launchLeaseId,
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Start the released lease.",
+    oneShot: true,
+  })
+
+  const events = await readLaunchPreviewAgentEvents(logPath)
+  const newSessionEvents = events.filter((event) => event.type === "newSession")
+  const promptEvents = events.filter((event) => event.type === "prompt")
+
+  expect(newSessionEvents).toHaveLength(1)
+  expect(promptEvents[0]?.sessionId).toBe(newSessionEvents[0]?.sessionId)
 })
 
 test("session.subpackages discovers package manifests breadth-first while skipping ignored directories", async () => {
@@ -2254,4 +2368,37 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000) {
   }
 
   throw new Error("Timed out waiting for condition")
+}
+
+async function createLaunchPreviewAgentLog() {
+  const logDir = await mkdtemp(join(tmpdir(), "goddard-launch-preview-agent-"))
+  const logPath = join(logDir, "events.jsonl")
+  const previousLogPath = process.env.LAUNCH_PREVIEW_AGENT_LOG
+
+  process.env.LAUNCH_PREVIEW_AGENT_LOG = logPath
+  cleanup.push(async () => {
+    await rm(logDir, { recursive: true, force: true })
+  })
+  cleanup.push(async () => {
+    if (previousLogPath === undefined) {
+      delete process.env.LAUNCH_PREVIEW_AGENT_LOG
+      return
+    }
+
+    process.env.LAUNCH_PREVIEW_AGENT_LOG = previousLogPath
+  })
+
+  return logPath
+}
+
+async function readLaunchPreviewAgentEvents(logPath: string) {
+  if (!existsSync(logPath)) {
+    return []
+  }
+
+  return (await readFile(logPath, "utf-8"))
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
 }

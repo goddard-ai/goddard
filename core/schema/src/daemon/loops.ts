@@ -6,6 +6,7 @@ import { CreateSessionRequest } from "./sessions.ts"
 /** Runtime loop overrides accepted from a daemon client before local package resolution. */
 const LoopSessionOverrides = CreateSessionRequest.omit({
   initialPrompt: true,
+  launchLeaseId: true,
   oneShot: true,
 }).partial()
 
@@ -45,7 +46,7 @@ export type DaemonLoopRuntimeState = "running"
 /** Resolved session and pacing config owned by one daemon-managed loop runtime. */
 export type DaemonLoopConfig = {
   promptModulePath: string
-  session: Omit<CreateSessionRequest, "initialPrompt" | "oneShot">
+  session: Omit<CreateSessionRequest, "initialPrompt" | "launchLeaseId" | "oneShot">
   rateLimits: {
     cycleDelay: string
     maxOpsPerMinute: number

@@ -11,6 +11,12 @@ export const daemonIpcTestHandlers = new Proxy(
   {},
   {
     // The schema-typed proxy keeps app test stubs aligned as daemon IPC methods change.
-    get: (_target, key) => createUnsupportedHandler(String(key)),
+    get: (_target, key) => {
+      if (key === "session.launchLease.release") {
+        return createUnsupportedHandler("session.launchLease.release")
+      }
+
+      return createUnsupportedHandler(String(key))
+    },
   },
 ) as Handlers<typeof daemonIpcSchema>

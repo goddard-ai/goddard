@@ -26,6 +26,17 @@ export async function createSession(input: CreateSessionRequest) {
 }
 
 /**
+ * Schedules one launch lease for delayed cleanup after the launch dialog stops using it.
+ */
+export async function releaseSessionLaunchLease(launchLeaseId: string | null | undefined) {
+  if (!launchLeaseId) {
+    return
+  }
+
+  await goddardSdk.session.releaseLaunchLease({ launchLeaseId })
+}
+
+/**
  * Submits one prompt into an existing session and refreshes the affected session views.
  */
 export async function submitSessionPrompt(props: SessionPromptRequest) {

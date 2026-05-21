@@ -7,7 +7,7 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "~/lib/modal.tsrx"
-import { createSession } from "./mutations.ts"
+import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
@@ -46,6 +46,9 @@ component SessionLaunchDialog(props: {
       const { session } = await createSession(sessionInput)
       const sessionTitle = getSessionDisplayTitle(session)
 
+      void releaseSessionLaunchLease(form.launchPreview.value?.launchLeaseId).catch((error) => {
+        console.error("Failed to release launch lease.", error)
+      })
       form.reset(projectPath)
       workbenchTabSet.openOrFocusTab({
         kind: "sessionChat",

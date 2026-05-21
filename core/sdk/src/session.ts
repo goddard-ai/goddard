@@ -15,6 +15,8 @@ import type {
   InitialSessionConfigOption,
   ListSessionsRequest,
   ListSessionsResponse,
+  ReleaseSessionLaunchLeaseRequest,
+  ReleaseSessionLaunchLeaseResponse,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
@@ -53,6 +55,8 @@ export type {
   SessionWorktreeParams,
   ListSessionsRequest,
   ListSessionsResponse,
+  ReleaseSessionLaunchLeaseRequest,
+  ReleaseSessionLaunchLeaseResponse,
   ShutdownSessionResponse,
 }
 
@@ -99,6 +103,7 @@ export function createSessionPermissionResponseMessage(input: SessionPermissionR
 interface BaseSessionParams {
   agent?: ACPAdapterName | AgentDistribution
   cwd: string
+  launchLeaseId?: string
   worktree?: SessionWorktreeParams
   workforce?: SessionWorkforceParams
   mcpServers: acp.McpServer[]

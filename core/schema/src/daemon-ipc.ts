@@ -40,6 +40,7 @@ import {
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   ListSessionsRequest,
   MountSessionReviewSessionRequest as MountSessionReviewSessionRequestSchema,
+  ReleaseSessionLaunchLeaseRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
@@ -63,6 +64,7 @@ import {
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
   type MutateSessionReviewSessionResponse,
+  type ReleaseSessionLaunchLeaseResponse,
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
@@ -168,6 +170,10 @@ export const daemonIpcSchema = {
     "session.launchPreview": {
       payload: SessionLaunchPreviewRequest,
       response: $type<SessionLaunchPreviewResponse>(),
+    },
+    "session.launchLease.release": {
+      payload: ReleaseSessionLaunchLeaseRequest,
+      response: $type<ReleaseSessionLaunchLeaseResponse>(),
     },
     "session.subpackages": {
       payload: SessionSubpackagesRequest,

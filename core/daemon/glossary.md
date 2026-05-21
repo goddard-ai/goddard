@@ -15,6 +15,9 @@
 - `Session Manager`
   - The daemon subsystem that owns session lifecycle operations.
   - Why: so creation, connection, message forwarding, shutdown, and session reconciliation are coordinated in one place.
+- `Launch Lease`
+  - The daemon-owned live ACP session prepared for a launch dialog before it becomes a durable daemon session.
+  - Why: so launch-time capability discovery can be reused for the actual local-checkout session while still being abandoned safely after dialog changes.
 - `Inbox Manager`
   - The daemon subsystem that owns local inbox row listing, workflow updates, and attention refreshes.
   - Why: so every inbox status transition follows one set of daemon-owned write rules.

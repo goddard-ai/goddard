@@ -9,6 +9,7 @@ import { goddardSdk } from "~/sdk.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import styles from "./launch-form-selectors.style.ts"
 import { flattenConfigOptionValues, type SessionLaunchFormState } from "./launch-form-state.ts"
+import { releaseSessionLaunchLease } from "./mutations.ts"
 
 function getShortcutLabel(binding: unknown) {
   if (typeof binding === "string") {
@@ -165,6 +166,24 @@ export component SessionLaunchPreviewSelectors(props: {
 
   useEffect(() => {
     form.launchPreview.value = preview
+
+    return () => {
+      const launchLeaseId = preview?.launchLeaseId
+
+      if (form.launchPreview.value?.launchLeaseId === launchLeaseId) {
+        form.launchPreview.value = null
+      }
+
+      queueMicrotask(() => {
+        if (!launchLeaseId || form.launchPreview.value?.launchLeaseId === launchLeaseId) {
+          return
+        }
+
+        void releaseSessionLaunchLease(launchLeaseId).catch((error) => {
+          console.error("Failed to release launch lease.", error)
+        })
+      })
+    }
   }, [form, preview])
 
   const locationItems: SessionInputSelectItem[] = [

@@ -365,6 +365,9 @@ export async function startDaemonServer(
     "session.launchPreview": async (payload) => {
       return sessionManager.getLaunchPreview(payload)
     },
+    "session.launchLease.release": async (payload) => {
+      return sessionManager.releaseLaunchLease(payload)
+    },
     "session.subpackages": async (payload) => {
       return sessionManager.getSubpackages(payload)
     },

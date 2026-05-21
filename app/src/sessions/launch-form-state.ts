@@ -188,6 +188,8 @@ export const SessionLaunchFormState = createModel(function () {
     return {
       agent,
       cwd,
+      launchLeaseId:
+        draftLocation.value === "local" ? launchPreview.value?.launchLeaseId : undefined,
       worktree:
         draftLocation.value === "worktree"
           ? {

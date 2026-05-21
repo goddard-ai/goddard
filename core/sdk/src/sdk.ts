@@ -236,6 +236,9 @@ export class GoddardSdk {
       /** Loads launch-time adapter and repository capabilities before a session is created. */
       launchPreview: defineRequest(this.#client, "session.launchPreview"),
 
+      /** Schedules one abandoned launch lease for delayed release. */
+      releaseLaunchLease: defineRequest(this.#client, "session.launchLease.release"),
+
       /** Discovers launchable subpackage working directories under one project cwd. */
       subpackages: defineRequest(this.#client, "session.subpackages"),
 

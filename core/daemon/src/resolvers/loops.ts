@@ -13,7 +13,7 @@ export type ResolvedLoopStartRequest = {
   rootDir: string
   loopName: string
   promptModulePath: string
-  session: Omit<CreateSessionRequest, "initialPrompt" | "oneShot">
+  session: Omit<CreateSessionRequest, "initialPrompt" | "launchLeaseId" | "oneShot">
   rateLimits: RequiredObject<StartLoopRequest["rateLimits"]>
   retries: RequiredObject<StartLoopRequest["retries"]>
 }

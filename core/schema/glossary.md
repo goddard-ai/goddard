@@ -12,6 +12,9 @@
 - `Daemon Session`
   - The durable identity for one daemon-managed agent interaction.
   - Why: so creation, connection, history, diagnostics, and access control all refer to the same unit of work.
+- `Launch Lease`
+  - An opaque handle for a daemon-prepared agent session that may be promoted into a durable daemon session.
+  - Why: so clients can gather launch-time model and command options without forcing the daemon to start a second agent process when the user launches from the same local checkout.
 - `Session Title`
   - The short human-readable label attached to one daemon session.
   - Why: so hosts can identify sessions in lists, tabs, and headers without exposing raw ids or long prompt text.

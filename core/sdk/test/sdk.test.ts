@@ -419,6 +419,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
+      launchLeaseId: "lease_1",
       repoRoot: "/repo",
       branches: [
         { name: "main", current: true },
@@ -451,6 +452,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         cwd: "/repo",
       }),
     ).resolves.toEqual({
+      launchLeaseId: "lease_1",
       repoRoot: "/repo",
       branches: [
         { name: "main", current: true },
@@ -480,6 +482,28 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenCalledWith("session.launchPreview", {
       agent: "pi-acp",
       cwd: "/repo",
+    })
+  })
+
+  test("session.releaseLaunchLease forwards launch lease release requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      launchLeaseId: "lease_1",
+      released: true,
+    })
+
+    await expect(
+      sdk.session.releaseLaunchLease({
+        launchLeaseId: "lease_1",
+      }),
+    ).resolves.toEqual({
+      launchLeaseId: "lease_1",
+      released: true,
+    })
+
+    expect(send).toHaveBeenCalledWith("session.launchLease.release", {
+      launchLeaseId: "lease_1",
     })
   })
 
