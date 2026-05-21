@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260425.1",
-    "alchemy": "^0.90.1",
-    "wrangler": "^4.71.0"
+    "alchemy": "^0.92.2",
+    "wrangler": "^4.84.1"
   }
 }
