@@ -8,6 +8,7 @@ import {
   useMode,
   wcagContrast,
 } from "culori/fn"
+import { clamp } from "radashi"
 
 useMode(modeRgb)
 useMode(modeOklch)
@@ -64,10 +65,6 @@ const builtInThemeSeeds = {
     danger: { mode: "oklch", l: 0.7, c: 0.16, h: 25 },
   },
 } satisfies Record<BuiltInThemeName, ThemeSeeds>
-
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(maximum, Math.max(minimum, value))
-}
 
 function mixColors(first: OklchColor, second: OklchColor, amount: number) {
   const mix = interpolate([first, second], "oklch")

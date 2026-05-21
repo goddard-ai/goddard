@@ -162,52 +162,20 @@ function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>
   }
 }
 
-/** Observes committed app Sigma changes and writes the latest combined snapshot. */
-export function observeAppStateSnapshot(
-  appState: AppState,
-  writeSnapshot: SnapshotWriter<AppStateSnapshot>,
-  options: ObserveSnapshotOptions = {},
-) {
-  return observeSnapshot({
-    captureSnapshot: () => ({
-      appearance: sigma.captureState(appState.appearance),
-      mainTab: sigma.captureState(appState.mainTab),
-      projectContext: sigma.captureState(appState.projectContext),
-      projectRegistry: sigma.captureState(appState.projectRegistry),
-      workbenchTabSet: sigma.captureState(appState.workbenchTabSet),
-    }),
-    writeSnapshot,
-    subscribeSnapshots: (queueSnapshotWrite) => [
-      sigma.subscribe(appState.appearance, queueSnapshotWrite),
-      sigma.subscribe(appState.mainTab, queueSnapshotWrite),
-      sigma.subscribe(appState.projectContext, queueSnapshotWrite),
-      sigma.subscribe(appState.projectRegistry, queueSnapshotWrite),
-      sigma.subscribe(appState.workbenchTabSet, queueSnapshotWrite),
-    ],
-    options,
-  })
-}
-
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
 export function useAppState() {
-  const [appState] = useState(() => {
-    const appearance = new Appearance({
+  const [appState] = useState(() => ({
+    appearance: new Appearance({
       mode: "system",
       highContrast: false,
-    })
-
-    appearance.applyDocumentAppearance()
-
-    return {
-      appearance,
-      inbox: new Inbox(),
-      mainTab: new MainTab(),
-      projectContext: new ProjectContext(),
-      projectRegistry: new ProjectRegistry(),
-      shortcutRegistry: new ShortcutRegistry(),
-      workbenchTabSet: new WorkbenchTabSet(),
-    }
-  })
+    }),
+    inbox: new Inbox(),
+    mainTab: new MainTab(),
+    projectContext: new ProjectContext(),
+    projectRegistry: new ProjectRegistry(),
+    shortcutRegistry: new ShortcutRegistry(),
+    workbenchTabSet: new WorkbenchTabSet(),
+  }))
 
   useEffect(() => {
     let isDisposed = false
@@ -224,17 +192,30 @@ export function useAppState() {
         return
       }
 
-      appStateObserver = observeAppStateSnapshot(
-        appState,
-        (snapshot) => {
+      appStateObserver = observeSnapshot({
+        captureSnapshot: () => ({
+          appearance: sigma.captureState(appState.appearance),
+          mainTab: sigma.captureState(appState.mainTab),
+          projectContext: sigma.captureState(appState.projectContext),
+          projectRegistry: sigma.captureState(appState.projectRegistry),
+          workbenchTabSet: sigma.captureState(appState.workbenchTabSet),
+        }),
+        writeSnapshot: (snapshot) => {
           return desktopHost.writeAppStateSnapshot(snapshot)
         },
-        {
+        subscribeSnapshots: (queueSnapshotWrite) => [
+          sigma.subscribe(appState.appearance, queueSnapshotWrite),
+          sigma.subscribe(appState.mainTab, queueSnapshotWrite),
+          sigma.subscribe(appState.projectContext, queueSnapshotWrite),
+          sigma.subscribe(appState.projectRegistry, queueSnapshotWrite),
+          sigma.subscribe(appState.workbenchTabSet, queueSnapshotWrite),
+        ],
+        options: {
           onWriteError(error) {
             console.error("Failed to save app state.", error)
           },
         },
-      )
+      })
     }
 
     void desktopHost.loadAppStateSnapshot<AppStateSnapshot>().then(
@@ -249,8 +230,6 @@ export function useAppState() {
           sigma.replaceState(appState.projectContext, snapshot.projectContext)
           sigma.replaceState(appState.projectRegistry, snapshot.projectRegistry)
           sigma.replaceState(appState.workbenchTabSet, snapshot.workbenchTabSet)
-
-          appState.appearance.applyDocumentAppearance()
         }
 
         startAppStateObserver()

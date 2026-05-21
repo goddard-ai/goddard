@@ -1,4 +1,4 @@
-import { signal } from "@preact/signals"
+import { effect, signal } from "@preact/signals"
 import { listen, Sigma } from "preact-sigma"
 
 import {
@@ -6,17 +6,6 @@ import {
   type AppearanceMode,
   type BuiltInThemeName,
 } from "./theme.ts"
-
-const SYSTEM_COLOR_SCHEME_MEDIA_QUERY = "(prefers-color-scheme: dark)"
-
-/** Reads the observed system theme from the app webview runtime. */
-function readSystemThemeName(mediaQuery?: MediaQueryList): BuiltInThemeName {
-  if (mediaQuery) {
-    return mediaQuery.matches ? "dark" : "light"
-  }
-
-  return window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY).matches ? "dark" : "light"
-}
 
 /** Public state for the app shell's appearance model. */
 export type AppearanceState = {
@@ -26,14 +15,7 @@ export type AppearanceState = {
 
 export class Appearance extends Sigma<AppearanceState> {
   /** Tracks the browser's color-scheme outside persisted state because it is runtime-derived. */
-  #systemTheme = signal(readSystemThemeName())
-
-  constructor(initialState: AppearanceState) {
-    super({
-      mode: initialState.mode,
-      highContrast: initialState.highContrast,
-    })
-  }
+  #systemTheme = signal<BuiltInThemeName>("dark")
 
   get effectiveTheme() {
     return this.mode === "system" ? this.#systemTheme.value : this.mode
@@ -41,55 +23,41 @@ export class Appearance extends Sigma<AppearanceState> {
 
   setMode(mode: AppearanceMode) {
     this.mode = mode
-    this.applyDocumentAppearance()
   }
 
   setHighContrast(highContrast: boolean) {
     this.highContrast = highContrast
-    this.applyDocumentAppearance()
-  }
-
-  /** Applies the current appearance preferences to the document without changing persisted state. */
-  applyDocumentAppearance() {
-    const root = document.documentElement
-    const documentState = buildAppearanceDocumentState({
-      mode: this.mode,
-      highContrast: this.highContrast,
-      systemTheme: this.#systemTheme.value,
-    })
-
-    for (const [name, value] of Object.entries(documentState.attributes)) {
-      root.setAttribute(name, value)
-    }
-
-    root.style.colorScheme = documentState.themeName
-
-    for (const [name, value] of Object.entries(documentState.variables)) {
-      root.style.setProperty(name, value)
-    }
   }
 
   onSetup() {
-    this.applyDocumentAppearance()
-
-    const mediaQuery = window.matchMedia(SYSTEM_COLOR_SCHEME_MEDIA_QUERY)
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
     const syncSystemTheme = () => {
-      const systemTheme = readSystemThemeName(mediaQuery)
-
-      if (this.#systemTheme.value === systemTheme) {
-        return
-      }
-
-      this.#systemTheme.value = systemTheme
-
-      if (this.mode === "system") {
-        this.applyDocumentAppearance()
-      }
+      this.#systemTheme.value = mediaQuery.matches ? "dark" : "light"
     }
 
     syncSystemTheme()
 
-    return [listen(mediaQuery, "change", syncSystemTheme)]
+    return [
+      listen(mediaQuery, "change", syncSystemTheme),
+      effect(() => {
+        const root = document.documentElement
+        const documentState = buildAppearanceDocumentState({
+          mode: this.mode,
+          highContrast: this.highContrast,
+          systemTheme: this.#systemTheme.value,
+        })
+
+        for (const [name, value] of Object.entries(documentState.attributes)) {
+          root.setAttribute(name, value)
+        }
+
+        root.style.colorScheme = documentState.themeName
+
+        for (const [name, value] of Object.entries(documentState.variables)) {
+          root.style.setProperty(name, value)
+        }
+      }),
+    ]
   }
 }
 
