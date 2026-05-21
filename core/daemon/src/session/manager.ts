@@ -1,7 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import { ClientSideConnection } from "@agentclientprotocol/sdk"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
@@ -48,8 +47,8 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
+  createAcpClient,
   createAgentConnection,
-  createAgentMessageStream,
   getAcpMessageResult,
   isAcpRequest,
   matchAcpRequest,
@@ -204,7 +203,7 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
 
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
-  agent: ClientSideConnection
+  agent: RawAcpClientConnection
   sessionId: string
   models: acp.SessionModelState | null | undefined
   configOptions: acp.SessionConfigOption[] | null | undefined
@@ -262,6 +261,23 @@ type PromptRequestMessage = acp.AnyMessage & {
 /** Narrows one agent notification to a structured session update payload. */
 type SessionUpdateMessage = acp.AnyMessage & {
   params: acp.SessionNotification
+}
+
+type RawAcpClientConnection = {
+  newSession: (request: acp.NewSessionRequest) => Promise<acp.NewSessionResponse>
+  loadSession: (request: acp.LoadSessionRequest) => Promise<acp.LoadSessionResponse>
+  prompt: (request: acp.PromptRequest) => Promise<acp.PromptResponse>
+  setSessionConfigOption: (
+    request: acp.SetSessionConfigOptionRequest,
+  ) => Promise<acp.SetSessionConfigOptionResponse>
+  unstable_setSessionModel: (
+    request: acp.SetSessionModelRequest,
+  ) => Promise<acp.SetSessionModelResponse>
+  closeSession: (request: acp.CloseSessionRequest) => Promise<acp.CloseSessionResponse>
+}
+
+function getRawAcpClientConnection(client: unknown) {
+  return (client as { connection: RawAcpClientConnection }).connection
 }
 
 /** Queue-backed prompt request owned by the daemon until it is sent or aborted. */
@@ -477,32 +493,30 @@ async function initializeSession(params: {
   }
 > {
   const history: acp.AnyMessage[] = []
-  const stream = createAgentMessageStream(params.input, params.output)
+  const client = await createAcpClient({
+    stdin: params.input,
+    stdout: params.output,
+    clientInfo: {
+      name: "npm:@goddard-ai/daemon",
+      version: getPackageVersion(),
+    },
+    handler: {
+      async requestPermission() {
+        return { outcome: { outcome: "cancelled" } }
+      },
+      async sessionUpdate(params) {
+        history.push({
+          jsonrpc: "2.0",
+          method: acp.CLIENT_METHODS.session_update,
+          params,
+        })
+      },
+    },
+  })
 
   try {
-    const agent = new ClientSideConnection(
-      () => ({
-        async requestPermission() {
-          return { outcome: { outcome: "cancelled" } }
-        },
-        async sessionUpdate(params) {
-          history.push({
-            jsonrpc: "2.0",
-            method: acp.CLIENT_METHODS.session_update,
-            params,
-          })
-        },
-      }),
-      stream,
-    )
-
-    const initializeResult = await agent.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientInfo: {
-        name: "npm:@goddard-ai/daemon",
-        version: getPackageVersion(),
-      },
-    })
+    const initializeResult = client.initialize
+    const agent = getRawAcpClientConnection(client)
 
     let status: DaemonSessionStatus = "active"
     let isFirstPrompt = true
@@ -607,8 +621,7 @@ async function initializeSession(params: {
       stopReason,
     }
   } finally {
-    await stream.readable.cancel().catch(() => {})
-    await stream.writable.close().catch(() => {})
+    await client.close()
   }
 }
 
@@ -2938,18 +2951,23 @@ export function createSessionManager(input: {
       registryService: input.registryService,
       registry: resolvedRegistry,
     })
-    const stream = createAgentMessageStream(agentProcess.stdin, agentProcess.stdout)
     let availableCommands: acp.AvailableCommand[] = []
     let previewSessionId: string | null = null
-    let agent: ClientSideConnection | null = null
+    let client: Awaited<ReturnType<typeof createAcpClient>> | null = null
     let resolveAvailableCommands: (() => void) | null = null
     const availableCommandsReady = new Promise<void>((resolve) => {
       resolveAvailableCommands = resolve
     })
 
     try {
-      agent = new ClientSideConnection(
-        () => ({
+      client = await createAcpClient({
+        stdin: agentProcess.stdin,
+        stdout: agentProcess.stdout,
+        clientInfo: {
+          name: "npm:@goddard-ai/daemon",
+          version: getPackageVersion(),
+        },
+        handler: {
           async requestPermission() {
             return { outcome: { outcome: "cancelled" } }
           },
@@ -2960,17 +2978,9 @@ export function createSessionManager(input: {
               resolveAvailableCommands = null
             }
           },
-        }),
-        stream,
-      )
-
-      await agent.initialize({
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientInfo: {
-          name: "npm:@goddard-ai/daemon",
-          version: getPackageVersion(),
         },
       })
+      const agent = getRawAcpClientConnection(client)
 
       const previewSession = await agent.newSession({
         cwd: params.cwd,
@@ -2997,9 +3007,9 @@ export function createSessionManager(input: {
         ),
       }
     } finally {
-      if (previewSessionId && agent) {
+      if (previewSessionId && client) {
         try {
-          await agent.closeSession({
+          await getRawAcpClientConnection(client).closeSession({
             sessionId: previewSessionId,
           })
         } catch {
@@ -3007,8 +3017,7 @@ export function createSessionManager(input: {
         }
       }
 
-      await stream.readable.cancel().catch(() => {})
-      await stream.writable.close().catch(() => {})
+      await client?.close().catch(() => {})
       agentProcess.kill()
     }
   }

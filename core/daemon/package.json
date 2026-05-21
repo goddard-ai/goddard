@@ -36,7 +36,6 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "catalog:",
     "acp-client": "catalog:",
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.62",
@@ -67,6 +66,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/backend": "workspace:^",
     "@types/hash-sum": "^1.0.2",
     "@types/tar-fs": "^2.0.4",
