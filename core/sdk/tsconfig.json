@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["raw.d.ts", "src"],
-  "exclude": ["test"]
+  "exclude": ["src/node", "test"]
 }
