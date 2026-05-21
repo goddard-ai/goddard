@@ -52,6 +52,7 @@ import {
   getAcpMessageResult,
   isAcpRequest,
   matchAcpRequest,
+  type AcpSession,
   type AgentInputStream,
   type AgentOutputStream,
 } from "acp-client"
@@ -203,8 +204,7 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
 
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
-  agent: RawAcpClientConnection
-  sessionId: string
+  session: AcpSession
   models: acp.SessionModelState | null | undefined
   configOptions: acp.SessionConfigOption[] | null | undefined
   request: CreateSessionRequest
@@ -213,10 +213,7 @@ async function applyInitialSessionConfiguration(params: {
   let configOptions = params.configOptions ?? []
 
   if (params.request.initialModelId) {
-    await params.agent.unstable_setSessionModel({
-      sessionId: params.sessionId,
-      modelId: params.request.initialModelId,
-    })
+    await params.session.setModel(params.request.initialModelId)
 
     if (models) {
       models = {
@@ -229,11 +226,7 @@ async function applyInitialSessionConfiguration(params: {
   for (const option of params.request.initialConfigOptions ?? []) {
     // ACP config option values are always string ids, even when the launch form captured
     // a boolean choice locally.
-    const response = await params.agent.setSessionConfigOption({
-      sessionId: params.sessionId,
-      configId: option.configId,
-      value: String(option.value),
-    })
+    const response = await params.session.setConfigOption(option.configId, String(option.value))
 
     configOptions = response.configOptions
   }
@@ -261,23 +254,6 @@ type PromptRequestMessage = acp.AnyMessage & {
 /** Narrows one agent notification to a structured session update payload. */
 type SessionUpdateMessage = acp.AnyMessage & {
   params: acp.SessionNotification
-}
-
-type RawAcpClientConnection = {
-  newSession: (request: acp.NewSessionRequest) => Promise<acp.NewSessionResponse>
-  loadSession: (request: acp.LoadSessionRequest) => Promise<acp.LoadSessionResponse>
-  prompt: (request: acp.PromptRequest) => Promise<acp.PromptResponse>
-  setSessionConfigOption: (
-    request: acp.SetSessionConfigOptionRequest,
-  ) => Promise<acp.SetSessionConfigOptionResponse>
-  unstable_setSessionModel: (
-    request: acp.SetSessionModelRequest,
-  ) => Promise<acp.SetSessionModelResponse>
-  closeSession: (request: acp.CloseSessionRequest) => Promise<acp.CloseSessionResponse>
-}
-
-function getRawAcpClientConnection(client: unknown) {
-  return (client as { connection: RawAcpClientConnection }).connection
 }
 
 /** Queue-backed prompt request owned by the daemon until it is sent or aborted. */
@@ -516,11 +492,11 @@ async function initializeSession(params: {
 
   try {
     const initializeResult = client.initialize
-    const agent = getRawAcpClientConnection(client)
 
     let status: DaemonSessionStatus = "active"
     let isFirstPrompt = true
     let acpSessionId: string
+    let session: AcpSession
     let models: acp.SessionModelState | null | undefined
     let initialPromptRequestId: SessionTurnPromptRequestId | null = null
     let initialPromptStartedAt: string | null = null
@@ -535,7 +511,7 @@ async function initializeSession(params: {
         )
       }
 
-      await agent.loadSession({
+      session = await client.loadSession({
         sessionId: params.resumeAcpId,
         cwd: params.request.cwd,
         mcpServers: params.request.mcpServers,
@@ -543,18 +519,17 @@ async function initializeSession(params: {
       acpSessionId = params.resumeAcpId
       isFirstPrompt = false
     } else {
-      const newSession = await agent.newSession(params.request)
-      acpSessionId = newSession.sessionId
-      models = newSession.models
-      configOptions = newSession.configOptions
+      session = await client.newSession(params.request)
+      acpSessionId = session.sessionId
+      models = session.models
+      configOptions = session.configOptions
 
       if (
         params.request.initialModelId !== undefined ||
         (params.request.initialConfigOptions?.length ?? 0) > 0
       ) {
         const configuredSession = await applyInitialSessionConfiguration({
-          agent,
-          sessionId: acpSessionId,
+          session,
           models,
           configOptions,
           request: params.request,
@@ -583,7 +558,7 @@ async function initializeSession(params: {
       history.push(initialMessage)
       params.onMessageWrite?.(initialMessage)
 
-      const response = await agent.prompt(initialMessage.params)
+      const response = await session.prompt(initialMessage.params.prompt)
       initialPromptCompletedAt = new Date().toISOString()
       history.push({
         jsonrpc: "2.0",
@@ -2980,9 +2955,7 @@ export function createSessionManager(input: {
           },
         },
       })
-      const agent = getRawAcpClientConnection(client)
-
-      const previewSession = await agent.newSession({
+      const previewSession = await client.newSession({
         cwd: params.cwd,
         mcpServers: [],
       })
@@ -3009,7 +2982,7 @@ export function createSessionManager(input: {
     } finally {
       if (previewSessionId && client) {
         try {
-          await getRawAcpClientConnection(client).closeSession({
+          await client.closeSession({
             sessionId: previewSessionId,
           })
         } catch {
