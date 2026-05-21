@@ -359,7 +359,7 @@ component SidebarItem(props: {
   const ariaLabel =
     hasDot ? props.dot.getAriaLabel(props.label) : props.label
 
-  <GoodTooltip content={props.label} side="right" sideOffset={10}>
+  <GoodTooltip content={props.label} group="app-shell-sidebar" side="right" sideOffset={10}>
     <button
       aria-current={props.isSelected ? "page" : undefined}
       aria-label={ariaLabel}

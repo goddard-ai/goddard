@@ -7,6 +7,7 @@ export component GoodTooltip(props: {
   ariaLabel?: string;
   children: preact.ComponentChildren;
   content: preact.ComponentChildren;
+  group?: string;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
 }) {
@@ -15,6 +16,7 @@ export component GoodTooltip(props: {
     class={styles.content}
     closeDelay={80}
     content={props.content}
+    group={props.group}
     openDelay={450}
     side={props.side}
     sideOffset={props.sideOffset}

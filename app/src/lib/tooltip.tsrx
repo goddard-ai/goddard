@@ -13,6 +13,7 @@ export component Tooltip(props: {
   class?: string;
   closeDelay?: number;
   content: preact.ComponentChildren;
+  group?: string;
   openDelay?: number;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
@@ -30,6 +31,7 @@ export component Tooltip(props: {
 
   <TooltipTrigger
     closeDelay={props.closeDelay}
+    group={props.group}
     {open}
     openDelay={props.openDelay}
     {tooltipId}

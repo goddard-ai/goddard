@@ -1,10 +1,17 @@
 import { type Signal } from "@preact/signals"
 import { cloneElement, type VNode } from "preact"
-import { useRef } from "preact/hooks"
+import { useEffect, useRef } from "preact/hooks"
+
+type TooltipGroupState = {
+  pendingCloseCallbacks: Set<() => void>
+}
+
+const tooltipGroups = new Map<string, TooltipGroupState>()
 
 /** Wires tooltip accessibility and pointer/focus behavior onto the caller-provided trigger vnode. */
 export function TooltipTrigger(props: {
   closeDelay?: number
+  group?: string
   open: Signal<boolean>
   openDelay?: number
   tooltipId: string
@@ -14,9 +21,54 @@ export function TooltipTrigger(props: {
   const triggerProps = props.trigger.props as Record<string, any>
   const openDelayRef = useRef<number | null>(null)
   const closeDelayRef = useRef<number | null>(null)
-  const openTooltip = () => {
+  const groupCloseCallbackRef = useRef<(() => void) | null>(null)
+  const getGroupState = () => {
+    if (!props.group) {
+      return null
+    }
+
+    let groupState = tooltipGroups.get(props.group)
+    if (!groupState) {
+      groupState = {
+        pendingCloseCallbacks: new Set(),
+      }
+      tooltipGroups.set(props.group, groupState)
+    }
+
+    return groupState
+  }
+  const removePendingGroupClose = () => {
+    if (props.group && groupCloseCallbackRef.current) {
+      tooltipGroups.get(props.group)?.pendingCloseCallbacks.delete(groupCloseCallbackRef.current)
+      groupCloseCallbackRef.current = null
+    }
+  }
+  const closeTooltipImmediately = () => {
+    clearDelay(openDelayRef)
+    clearDelay(closeDelayRef)
+    removePendingGroupClose()
+    props.open.value = false
+  }
+  const openTooltipImmediately = () => {
     clearDelay(closeDelayRef)
     clearDelay(openDelayRef)
+    removePendingGroupClose()
+    props.open.value = true
+  }
+  const openTooltip = () => {
+    const groupState = getGroupState()
+    if (groupState && groupState.pendingCloseCallbacks.size > 0) {
+      for (const closePendingTooltip of [...groupState.pendingCloseCallbacks]) {
+        closePendingTooltip()
+      }
+
+      openTooltipImmediately()
+      return
+    }
+
+    clearDelay(closeDelayRef)
+    clearDelay(openDelayRef)
+    removePendingGroupClose()
     openDelayRef.current = window.setTimeout(() => {
       props.open.value = true
       openDelayRef.current = null
@@ -25,11 +77,16 @@ export function TooltipTrigger(props: {
   const closeTooltip = () => {
     clearDelay(openDelayRef)
     clearDelay(closeDelayRef)
+    removePendingGroupClose()
+
+    groupCloseCallbackRef.current = closeTooltipImmediately
+    getGroupState()?.pendingCloseCallbacks.add(closeTooltipImmediately)
     closeDelayRef.current = window.setTimeout(() => {
-      props.open.value = false
-      closeDelayRef.current = null
+      closeTooltipImmediately()
     }, props.closeDelay ?? 80)
   }
+
+  useEffect(() => closeTooltipImmediately, [])
 
   return cloneElement(props.trigger, {
     "aria-describedby": props.open.value ? props.tooltipId : triggerProps["aria-describedby"],
