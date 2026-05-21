@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
-    "@ark-ui/react": "^5.36.2",
     "@chenglou/pretext": "^0.0.4",
     "@floating-ui/dom": "^1.7.6",
     "@goddard-ai/daemon-client": "workspace:^",
@@ -33,7 +32,6 @@
     "@preact/signals-core": "^1.14.1",
     "@tsrx/preact": "^0.1.12",
     "@xterm/headless": "^6.0.0",
-    "ark-cmdk": "^0.1.1",
     "bun-pty": "^0.4.8",
     "comark": "0.2.1",
     "culori": "^4.0.2",

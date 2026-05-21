@@ -59,7 +59,7 @@ export function TooltipTrigger(props: {
   const openTooltip = () => {
     const groupState = getGroupState()
     if (groupState && groupState.pendingCloseCallbacks.size > 0) {
-      for (const closePendingTooltip of [...groupState.pendingCloseCallbacks]) {
+      for (const closePendingTooltip of groupState.pendingCloseCallbacks) {
         closePendingTooltip()
       }
 

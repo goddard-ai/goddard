@@ -10,7 +10,13 @@ const surfaceColor = token.var("colors.surface")
 
 export default {
   group: css({
+    position: "fixed",
+    right: "12px",
+    bottom: "12px",
+    display: "grid",
+    gap: "12px",
     width: "min(360px, calc(100vw - 24px))",
+    pointerEvents: "none",
     zIndex: "70",
     "@media (max-width: 640px)": {
       width: "calc(100vw - 24px)",
@@ -24,6 +30,7 @@ export default {
     gap: "12px",
     width: "min(360px, calc(100vw - 24px))",
     padding: "14px",
+    pointerEvents: "auto",
     borderRadius: "18px",
     border: "1px solid {colors.border}",
     background: `linear-gradient(180deg, ${surfaceColor} 0%, ${panelColor} 100%)`,

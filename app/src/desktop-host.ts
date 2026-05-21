@@ -146,9 +146,9 @@ export async function browseForProject(): Promise<string | null> {
 }
 
 /** Reads the app-state snapshot through the Bun host bridge. */
-export async function loadAppStateSnapshot() {
+export async function loadAppStateSnapshot<T extends AppStateSnapshot>() {
   const response = await rpc.request.loadAppStateSnapshot({})
-  return response.snapshot
+  return response.snapshot as T | null
 }
 
 /** Writes the app-state snapshot through the Bun host bridge. */
