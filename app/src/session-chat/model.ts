@@ -301,14 +301,10 @@ function resolvePromptRequestId(message: acp.AnyMessage) {
   return null
 }
 
-function findNewestRunningTurn(turns: readonly SessionChatTurn[]) {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    if (turns[index].completedAt === null) {
-      return turns[index]
-    }
-  }
+function getActiveTurn(turns: readonly SessionChatTurn[]) {
+  const turn = turns.at(-1)
 
-  return null
+  return turn?.completedAt === null ? turn : null
 }
 
 function getTurnAgentText(turn: Pick<SessionHistoryTurn, "messages">) {
@@ -634,7 +630,7 @@ export class SessionChat extends Sigma<SessionChatState> {
     const existingTurn =
       permissionTurn ??
       (promptRequestId === null
-        ? findNewestRunningTurn(this.turns)
+        ? getActiveTurn(this.turns)
         : (this.turns.find((turn) => turn.promptRequestId === promptRequestId) ?? null))
 
     if (existingTurn) {
@@ -893,7 +889,7 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #syncSummary() {
-    const activeTurn = findNewestRunningTurn(this.turns)
+    const activeTurn = getActiveTurn(this.turns)
     const permissionRequest = findPendingPermissionRequest(this.turns)
 
     this.summary = {

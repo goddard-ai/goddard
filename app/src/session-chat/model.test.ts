@@ -171,14 +171,14 @@ test("SessionChat preserves history turn order and normalizes statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
     history: createHistory([
-      createTurn({ turnId: "turn-2", sequence: 2, completedAt: null, completionKind: null }),
       createTurn({ turnId: "turn-1", sequence: 1 }),
+      createTurn({ turnId: "turn-2", sequence: 2, completedAt: null, completionKind: null }),
     ]),
   })
 
   expect(chat.turns.map((turn) => [turn.turnId, turn.status])).toEqual([
-    ["turn-2", "running"],
     ["turn-1", "completed"],
+    ["turn-2", "running"],
   ])
   expect(chat.summary).toMatchObject({
     activeTurnId: "turn-2",
