@@ -106,9 +106,7 @@ export function TooltipTrigger(props: {
         props.open.value = false
       }
     }),
-    onPointerDown: chainHandlers(triggerProps.onPointerDown, () => {
-      props.open.value = false
-    }),
+    onPointerDown: chainHandlers(triggerProps.onPointerDown, closeTooltipImmediately),
     onPointerEnter: chainHandlers(triggerProps.onPointerEnter, openTooltip),
     onPointerLeave: chainHandlers(triggerProps.onPointerLeave, closeTooltip),
   })
