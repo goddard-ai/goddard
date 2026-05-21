@@ -45,6 +45,7 @@ export component Tooltip(props: {
     class={props.class}
     closeOnEscape={true}
     closeOnOutsidePointer={false}
+    focusOnOpen={false}
     offset={props.sideOffset ?? 8}
     {open}
     placement={props.side ?? "top"}

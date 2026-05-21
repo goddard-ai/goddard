@@ -22,6 +22,7 @@ export type PopoverProps = FloatingPositionOptions & {
     blockOutsidePointer?: boolean;
     closeOnEscape?: boolean;
     closeOnOutsidePointer?: boolean;
+    focusOnOpen?: boolean;
     modalFocus?: boolean;
     initialFocus?: () => HTMLElement | null;
     restoreFocus?: boolean;
@@ -74,11 +75,13 @@ export component Popover(props: PopoverProps) {
       sameWidth: props.sameWidth,
       strategy: props.strategy,
     })
-    const initialFocusElement = props.initialFocus?.()
-    if (initialFocusElement) {
-      initialFocusElement.focus()
-    } else if (!focusFirstElement(contentElement)) {
-      contentElement.focus()
+    if (props.focusOnOpen ?? true) {
+      const initialFocusElement = props.initialFocus?.()
+      if (initialFocusElement) {
+        initialFocusElement.focus()
+      } else if (!focusFirstElement(contentElement)) {
+        contentElement.focus()
+      }
     }
 
     return () => {
@@ -115,7 +118,7 @@ export component Popover(props: PopoverProps) {
       aria-label={props.ariaLabel}
       class={props.class}
       role={props.role}
-      tabIndex={-1}
+      tabIndex={props.focusOnOpen ?? true ? -1 : undefined}
       onKeyDown={(event) => {
         if (props.modalFocus) {
           keepFocusInside(event.currentTarget, event)
