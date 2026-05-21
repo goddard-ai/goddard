@@ -50,7 +50,7 @@ export interface DesktopHostBridge {
   browseForProject(): Promise<string | null>
 
   /** Reads the app-state snapshot through the Bun host bridge. */
-  loadAppStateSnapshot(): Promise<AppStateSnapshot | null>
+  loadAppStateSnapshot<T extends AppStateSnapshot>(): Promise<T | null>
 
   /** Writes the app-state snapshot through the Bun host bridge. */
   writeAppStateSnapshot(snapshot: AppStateSnapshot): Promise<void>

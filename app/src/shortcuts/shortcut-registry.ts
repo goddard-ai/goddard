@@ -288,6 +288,3 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 }
 
 export interface ShortcutRegistry extends ShortcutRegistryState {}
-
-/** Module-scoped shortcut registry singleton shared across the app shell. */
-export const shortcutRegistry = new ShortcutRegistry()

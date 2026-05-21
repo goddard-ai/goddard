@@ -1,6 +1,6 @@
 import { signal } from "@preact/signals"
-import { castProtected, sigma, type Immutable, type Protected } from "preact-sigma"
-import { useEffect, useRef } from "preact/hooks"
+import { castProtected, sigma, useSetup, type Immutable } from "preact-sigma"
+import { useEffect, useState } from "preact/hooks"
 import { getErrorMessage } from "radashi"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
@@ -9,22 +9,14 @@ import { Inbox } from "./inbox/model.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
-import { SHORTCUT_KEYMAP_FILE_VERSION, type ShortcutKeymapFile } from "./shared/shortcut-keymap.ts"
-import { shortcutRegistry, type ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
+import { SHORTCUT_KEYMAP_FILE_VERSION } from "./shared/shortcut-keymap.ts"
+import { ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
 /** Context-ready app model bundle produced by the app lifecycle hook. */
-export type AppState = {
-  appearance: Protected<Appearance>
-  inbox: Protected<Inbox>
-  mainTab: Protected<MainTab>
-  projectContext: Protected<ProjectContext>
-  projectRegistry: Protected<ProjectRegistry>
-  shortcutRegistry: ShortcutRegistry
-  workbenchTabSet: Protected<WorkbenchTabSet>
-}
+export type AppState = ReturnType<typeof useAppState>
 
 /** Persisted Sigma state captured and restored through the Bun-host app state file. */
 export type AppStateSnapshot = {
@@ -50,22 +42,19 @@ type ObserveSnapshotOptions = {
   onWriteError?: (error: unknown) => void
 }
 
+/** Readable dependency bundle for one debounced snapshot observer. */
+type ObserveSnapshotProps<TSnapshot> = {
+  captureSnapshot: () => TSnapshot
+  writeSnapshot: SnapshotWriter<TSnapshot>
+  subscribeSnapshots: (queueSnapshotWrite: () => void) => Array<() => void>
+  options?: ObserveSnapshotOptions
+}
+
 /** Non-Sigma persistence status surfaced in settings UI. */
 export const shortcutPersistenceErrors = signal({
   loadError: null as string | null,
   writeError: null as string | null,
 })
-
-/** Captures the current committed app Sigma state as one app-owned persisted snapshot. */
-export function captureAppStateSnapshot(appState: AppState) {
-  return {
-    appearance: sigma.captureState(appState.appearance as unknown as Appearance),
-    mainTab: sigma.captureState(appState.mainTab as unknown as MainTab),
-    projectContext: sigma.captureState(appState.projectContext as unknown as ProjectContext),
-    projectRegistry: sigma.captureState(appState.projectRegistry as unknown as ProjectRegistry),
-    workbenchTabSet: sigma.captureState(appState.workbenchTabSet as unknown as WorkbenchTabSet),
-  }
-}
 
 function cancelTimer(timer: ReturnType<typeof setTimeout> | null) {
   if (timer !== null) {
@@ -76,12 +65,8 @@ function cancelTimer(timer: ReturnType<typeof setTimeout> | null) {
 /**
  * Observes one or more Sigma sources and writes the latest captured snapshot after changes settle.
  */
-function observeSnapshot<TSnapshot>(
-  captureSnapshot: () => TSnapshot,
-  writeSnapshot: SnapshotWriter<TSnapshot>,
-  subscribeSnapshots: (queueSnapshotWrite: () => void) => Array<() => void>,
-  options: ObserveSnapshotOptions = {},
-) {
+function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>) {
+  const options = props.options ?? {}
   const debounceMs = options.debounceMs ?? APP_STATE_WRITE_DEBOUNCE_MS
   let isStopped = false
   let pendingSnapshot: TSnapshot | null = null
@@ -103,7 +88,7 @@ function observeSnapshot<TSnapshot>(
       while (pendingSnapshot && !isStopped) {
         const snapshot = pendingSnapshot
         pendingSnapshot = null
-        await writeSnapshot(snapshot)
+        await props.writeSnapshot(snapshot)
       }
     })()
 
@@ -141,11 +126,11 @@ function observeSnapshot<TSnapshot>(
       return
     }
 
-    pendingSnapshot = captureSnapshot()
+    pendingSnapshot = props.captureSnapshot()
     scheduleWrite()
   }
 
-  const unsubscribe = subscribeSnapshots(queueSnapshotWrite)
+  const unsubscribe = props.subscribeSnapshots(queueSnapshotWrite)
 
   return {
     async flush() {
@@ -183,56 +168,53 @@ export function observeAppStateSnapshot(
   writeSnapshot: SnapshotWriter<AppStateSnapshot>,
   options: ObserveSnapshotOptions = {},
 ) {
-  return observeSnapshot(
-    () => captureAppStateSnapshot(appState),
+  return observeSnapshot({
+    captureSnapshot: () => ({
+      appearance: sigma.captureState(appState.appearance),
+      mainTab: sigma.captureState(appState.mainTab),
+      projectContext: sigma.captureState(appState.projectContext),
+      projectRegistry: sigma.captureState(appState.projectRegistry),
+      workbenchTabSet: sigma.captureState(appState.workbenchTabSet),
+    }),
     writeSnapshot,
-    (queueSnapshotWrite) => [
-      sigma.subscribe(appState.appearance as unknown as Appearance, queueSnapshotWrite),
-      sigma.subscribe(appState.mainTab as unknown as MainTab, queueSnapshotWrite),
-      sigma.subscribe(appState.projectContext as unknown as ProjectContext, queueSnapshotWrite),
-      sigma.subscribe(appState.projectRegistry as unknown as ProjectRegistry, queueSnapshotWrite),
-      sigma.subscribe(appState.workbenchTabSet as unknown as WorkbenchTabSet, queueSnapshotWrite),
+    subscribeSnapshots: (queueSnapshotWrite) => [
+      sigma.subscribe(appState.appearance, queueSnapshotWrite),
+      sigma.subscribe(appState.mainTab, queueSnapshotWrite),
+      sigma.subscribe(appState.projectContext, queueSnapshotWrite),
+      sigma.subscribe(appState.projectRegistry, queueSnapshotWrite),
+      sigma.subscribe(appState.workbenchTabSet, queueSnapshotWrite),
     ],
     options,
-  )
-}
-
-/** Creates the app's singleton Sigma models before async daemon state restoration. */
-export function createAppState() {
-  const appearance = castProtected(
-    new Appearance({
-      mode: "system",
-      highContrast: false,
-    }),
-  )
-
-  appearance.applyDocumentAppearance()
-
-  return {
-    appearance,
-    inbox: castProtected(new Inbox()),
-    mainTab: castProtected(new MainTab()),
-    projectContext: castProtected(new ProjectContext()),
-    projectRegistry: castProtected(new ProjectRegistry()),
-    shortcutRegistry,
-    workbenchTabSet: castProtected(new WorkbenchTabSet()),
-  } satisfies AppState
+  })
 }
 
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
 export function useAppState() {
-  const appStateRef = useRef<AppState | null>(null)
-  if (!appStateRef.current) {
-    appStateRef.current = createAppState()
-  }
-  const appState = appStateRef.current
+  const [appState] = useState(() => {
+    const appearance = new Appearance({
+      mode: "system",
+      highContrast: false,
+    })
+
+    appearance.applyDocumentAppearance()
+
+    return {
+      appearance,
+      inbox: new Inbox(),
+      mainTab: new MainTab(),
+      projectContext: new ProjectContext(),
+      projectRegistry: new ProjectRegistry(),
+      shortcutRegistry: new ShortcutRegistry(),
+      workbenchTabSet: new WorkbenchTabSet(),
+    }
+  })
 
   useEffect(() => {
     let isDisposed = false
     let appStateObserver: SnapshotObserver | null = null
 
     function syncProjectContext() {
-      ;(appState.projectContext as unknown as ProjectContext).syncProjects(
+      appState.projectContext.syncProjects(
         appState.projectRegistry.projectList.map((project) => project.path),
       )
     }
@@ -255,32 +237,20 @@ export function useAppState() {
       )
     }
 
-    void desktopHost.loadAppStateSnapshot().then(
+    void desktopHost.loadAppStateSnapshot<AppStateSnapshot>().then(
       (snapshot) => {
         if (isDisposed) {
           return
         }
 
         if (snapshot) {
-          const persistedSnapshot = snapshot as AppStateSnapshot
-          sigma.replaceState(
-            appState.appearance as unknown as Appearance,
-            persistedSnapshot.appearance,
-          )
-          sigma.replaceState(appState.mainTab as unknown as MainTab, persistedSnapshot.mainTab)
-          sigma.replaceState(
-            appState.projectContext as unknown as ProjectContext,
-            persistedSnapshot.projectContext,
-          )
-          sigma.replaceState(
-            appState.projectRegistry as unknown as ProjectRegistry,
-            persistedSnapshot.projectRegistry,
-          )
-          sigma.replaceState(
-            appState.workbenchTabSet as unknown as WorkbenchTabSet,
-            persistedSnapshot.workbenchTabSet,
-          )
-          ;(appState.appearance as unknown as Appearance).applyDocumentAppearance()
+          sigma.replaceState(appState.appearance, snapshot.appearance)
+          sigma.replaceState(appState.mainTab, snapshot.mainTab)
+          sigma.replaceState(appState.projectContext, snapshot.projectContext)
+          sigma.replaceState(appState.projectRegistry, snapshot.projectRegistry)
+          sigma.replaceState(appState.workbenchTabSet, snapshot.workbenchTabSet)
+
+          appState.appearance.applyDocumentAppearance()
         }
 
         startAppStateObserver()
@@ -303,27 +273,26 @@ export function useAppState() {
     }
   }, [appState])
 
-  useEffect(() => {
-    return (appState.appearance as unknown as Appearance).setup()
+  useSetup(() => {
+    return [appState.appearance.setup(), appState.shortcutRegistry.setup()]
   }, [appState])
 
   useEffect(() => {
     let isDisposed = false
     let shortcutKeymapObserver: SnapshotObserver | null = null
-    const cleanupShortcutRegistry = shortcutRegistry.setup()
 
     function startShortcutKeymapObserver() {
       if (isDisposed || shortcutKeymapObserver) {
         return
       }
 
-      shortcutKeymapObserver = observeSnapshot(
-        () => ({
-          version: SHORTCUT_KEYMAP_FILE_VERSION as ShortcutKeymapFile["version"],
-          selectedProfileId: shortcutRegistry.selectedProfileId,
-          overrides: shortcutRegistry.overrides,
+      shortcutKeymapObserver = observeSnapshot({
+        captureSnapshot: () => ({
+          version: SHORTCUT_KEYMAP_FILE_VERSION,
+          selectedProfileId: appState.shortcutRegistry.selectedProfileId,
+          overrides: appState.shortcutRegistry.overrides,
         }),
-        async (snapshot) => {
+        writeSnapshot: async (snapshot) => {
           await desktopHost.writeShortcutKeymap(snapshot)
           shortcutPersistenceErrors.value = {
             ...shortcutPersistenceErrors.value,
@@ -331,8 +300,10 @@ export function useAppState() {
             writeError: null,
           }
         },
-        (queueSnapshotWrite) => [sigma.subscribe(shortcutRegistry, queueSnapshotWrite)],
-        {
+        subscribeSnapshots: (queueSnapshotWrite) => [
+          sigma.subscribe(appState.shortcutRegistry, queueSnapshotWrite),
+        ],
+        options: {
           onWriteError(error) {
             shortcutPersistenceErrors.value = {
               ...shortcutPersistenceErrors.value,
@@ -340,7 +311,7 @@ export function useAppState() {
             }
           },
         },
-      )
+      })
     }
 
     void desktopHost.loadShortcutKeymap().then(
@@ -350,9 +321,12 @@ export function useAppState() {
         }
 
         if (snapshot) {
-          shortcutRegistry.applyKeymapSnapshot(snapshot.selectedProfileId, snapshot.overrides)
+          appState.shortcutRegistry.applyKeymapSnapshot(
+            snapshot.selectedProfileId,
+            snapshot.overrides,
+          )
         } else {
-          shortcutRegistry.rebindRuntime()
+          appState.shortcutRegistry.rebindRuntime()
         }
 
         startShortcutKeymapObserver()
@@ -366,8 +340,9 @@ export function useAppState() {
           return
         }
 
-        shortcutRegistry.rebindRuntime()
+        appState.shortcutRegistry.rebindRuntime()
         startShortcutKeymapObserver()
+
         shortcutPersistenceErrors.value = {
           ...shortcutPersistenceErrors.value,
           loadError: `Failed to load shortcut keymap: ${getErrorMessage(error)}`,
@@ -378,17 +353,16 @@ export function useAppState() {
     return () => {
       isDisposed = true
       void shortcutKeymapObserver?.stop()
-      cleanupShortcutRegistry()
     }
   }, [])
 
   return {
-    appearance: appState.appearance,
-    inbox: appState.inbox,
-    mainTab: appState.mainTab,
-    projectContext: appState.projectContext,
-    projectRegistry: appState.projectRegistry,
-    shortcutRegistry,
-    workbenchTabSet: appState.workbenchTabSet,
-  } satisfies AppState
+    appearance: castProtected(appState.appearance),
+    inbox: castProtected(appState.inbox),
+    mainTab: castProtected(appState.mainTab),
+    projectContext: castProtected(appState.projectContext),
+    projectRegistry: castProtected(appState.projectRegistry),
+    shortcutRegistry: castProtected(appState.shortcutRegistry),
+    workbenchTabSet: castProtected(appState.workbenchTabSet),
+  }
 }
