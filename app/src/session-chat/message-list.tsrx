@@ -1,17 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
-import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuoso"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { useTabContext } from "~/tab-context.tsrx"
 import styles from "./message-list.style.ts"
 
-const messageListStateCache = new Map<
-  string,
-  {
-    itemKeys: readonly string[];
-    state: StateSnapshot;
-  }
->()
-const prependAnchorFirstItemIndex = 1000000
+const initializedBottomScrollKeys = new Set<string>()
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
@@ -20,7 +13,7 @@ export type MessageListRow<Item> = {
   viewportWidth: number;
 }
 
-/** Props accepted by the session-chat-owned Virtuoso wrapper. */
+/** Props accepted by the session-chat-owned virtual message list wrapper. */
 export type MessageListProps<Item> = {
   items: readonly Item[];
   overscanPx?: number;
@@ -35,32 +28,10 @@ export type MessageListProps<Item> = {
   renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
 }
 
-type MessageListContext = {
-  header: preact.ComponentChild;
-}
-
 type MessageListViewport = {
+  scrollMarginMeasured: boolean;
+  scrollMargin: number;
   width: number;
-}
-
-/** Returns the first mount position for a list that should open from the top or bottom. */
-function getInitialTopMostItemIndex<Item>(
-  items: readonly Item[],
-  initialScrollPosition: "top" | "bottom",
-  restoreState: StateSnapshot | undefined,
-) {
-  if (restoreState || items.length === 0) {
-    return undefined
-  }
-
-  if (initialScrollPosition === "bottom") {
-    return {
-      index: "LAST" as const,
-      align: "end" as const,
-    }
-  }
-
-  return 0
 }
 
 function buildItemKeys<Item>(
@@ -82,26 +53,27 @@ function resolvePrependedItemCount(previousKeys: readonly string[], nextKeys: re
   return 0
 }
 
-function haveSameItemKeys(left: readonly string[], right: readonly string[]) {
-  return left.length === right.length && left.every((key, index) => key === right[index])
+function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HTMLDivElement) {
+  if (!spacerElement) {
+    return 0
+  }
+
+  return Math.round(
+    spacerElement.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top +
+      scrollElement.scrollTop,
+  )
 }
 
-component MessageListHeader(props: { context: MessageListContext }) {
-  {props.context.header}
-}
-
-const messageListComponents = {
-  Header: MessageListHeader,
-}
-
-/** Renders the transcript's Virtuoso message list inside the nearest scrollable panel. */
+/** Renders the transcript's virtualized message list inside the nearest scrollable panel. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const virtuosoHandleRef = useRef<VirtuosoHandle | null>(null)
-  const firstItemIndexRef = useRef(prependAnchorFirstItemIndex)
+  const spacerRef = useRef<HTMLDivElement | null>(null)
+  const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>({
+    scrollMarginMeasured: false,
+    scrollMargin: 0,
     width: 0,
   })
 
@@ -112,42 +84,20 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     props.getItemKey,
     props.items,
   ])
-  const cachedState =
-    scrollCacheKey ? messageListStateCache.get(scrollCacheKey) : undefined
-  const restoreState =
-    cachedState && haveSameItemKeys(cachedState.itemKeys, itemKeys) ? cachedState.state : undefined
-  const initialTopMostItemIndex = getInitialTopMostItemIndex(
-    props.items,
-    effectiveInitialScroll,
-    restoreState,
-  )
-  const headerContext = useMemo(
-    () => ({
-      header: props.header,
-    }),
-    [props.header],
-  )
-
-  if (props.preserveScrollOnPrepend) {
-    const prependedItemCount = resolvePrependedItemCount(previousItemKeysRef.current, itemKeys)
-
-    firstItemIndexRef.current = Math.max(1, firstItemIndexRef.current - prependedItemCount)
-    previousItemKeysRef.current = itemKeys
-  } else {
-    firstItemIndexRef.current = prependAnchorFirstItemIndex
-    previousItemKeysRef.current = itemKeys
-  }
-  const effectiveFirstItemIndex = props.preserveScrollOnPrepend ? firstItemIndexRef.current : 0
-
   useLayoutEffect(() => {
     const rootElement = rootRef.current
+    const scrollElement = tabContext.scrollParentRef.current
 
-    if (!rootElement) {
+    if (!rootElement || !scrollElement) {
       return
     }
 
     const updateViewport = () => {
+      const spacerElement = spacerRef.current
+
       setViewport({
+        scrollMargin: getScrollMargin(spacerElement, scrollElement),
+        scrollMarginMeasured: Boolean(spacerElement),
         width: rootElement.clientWidth,
       })
     }
@@ -160,34 +110,100 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     return () => {
       resizeObserver.disconnect()
     }
-  }, [])
+  }, [tabContext.scrollParentRef])
 
-  useEffect(() => {
-    return () => {
-      if (!scrollCacheKey) {
-        return
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement || viewport.width <= 0) {
+      return
+    }
+
+    const scrollMargin = getScrollMargin(spacerRef.current, scrollElement)
+
+    if (scrollMargin !== viewport.scrollMargin || !viewport.scrollMarginMeasured) {
+      setViewport(
+        (currentViewport) => ({
+          ...currentViewport,
+          scrollMargin,
+          scrollMarginMeasured: true,
+        }),
+      )
+    }
+  })
+
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: props.items.length,
+    estimateSize: (index) => {
+      const item = props.items[index]
+
+      if (!item) {
+        return props.defaultRowHeight ?? 1
       }
 
-      virtuosoHandleRef.current?.getState((state) => {
-        messageListStateCache.set(scrollCacheKey, {
-          itemKeys,
-          state,
-        })
+      if (props.estimateRowHeight && viewport.width > 0) {
+        return Math.max(1, Math.round(props.estimateRowHeight(item, index, viewport.width)))
+      }
+
+      return props.defaultRowHeight ?? 1
+    },
+    getItemKey: (index) => itemKeys[index] ?? index,
+    getScrollElement: () => tabContext.scrollParentRef.current,
+    overscan: Math.max(1, Math.ceil(overscanPx / Math.max(1, props.defaultRowHeight ?? 1))),
+    scrollMargin: viewport.scrollMargin,
+    useFlushSync: false,
+  })
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement) {
+      return
+    }
+
+    if (props.preserveScrollOnPrepend) {
+      const prependedItemCount = resolvePrependedItemCount(previousItemKeysRef.current, itemKeys)
+
+      if (prependedItemCount > 0) {
+        scrollElement.scrollTop += Math.max(
+          0,
+          scrollElement.scrollHeight - previousScrollHeightRef.current,
+        )
+      }
+    }
+
+    previousItemKeysRef.current = itemKeys
+    previousScrollHeightRef.current = scrollElement.scrollHeight
+  }, [itemKeys, props.preserveScrollOnPrepend, tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    if (
+      effectiveInitialScroll !== "bottom" || props.items.length === 0 || viewport.width <= 0 ||
+        !viewport.scrollMarginMeasured
+    ) {
+      return
+    }
+
+    const initializationKey = scrollCacheKey ?? "__default__"
+
+    if (initializedBottomScrollKeys.has(initializationKey)) {
+      return
+    }
+
+    initializedBottomScrollKeys.add(initializationKey)
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(props.items.length - 1, {
+        align: "end",
       })
-    }
-  }, [itemKeys, scrollCacheKey])
-
-  const heightEstimates = useMemo(() => {
-    const estimateRowHeight = props.estimateRowHeight
-
-    if (!estimateRowHeight || viewport.width <= 0) {
-      return undefined
-    }
-
-    return props.items.map(
-      (item, index) => Math.max(1, Math.round(estimateRowHeight(item, index, viewport.width))),
-    )
-  }, [props.estimateRowHeight, props.items, viewport.width])
+    })
+  }, [
+    effectiveInitialScroll,
+    props.items.length,
+    scrollCacheKey,
+    viewport.scrollMarginMeasured,
+    viewport.width,
+    virtualizer,
+  ])
 
   <div ref={rootRef} style={{ minHeight: "100%" }}>
     if (viewport.width <= 0) {
@@ -196,36 +212,40 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
           <div class={styles.loading}>"Preparing message list..."</div>
         </tsrx>}
     } else {
-      <Virtuoso
-        {ref virtuosoHandleRef}
-        alignToBottom={effectiveInitialScroll === "bottom"}
-        components={props.header ? messageListComponents : undefined}
-        computeItemKey={(index, item) => props.getItemKey?.(
-          item,
-          index - effectiveFirstItemIndex,
-        ) ??
-          index}
-        context={headerContext}
-        customScrollParent={tabContext.scrollParentRef.current ?? undefined}
-        data={props.items}
-        defaultItemHeight={props.defaultRowHeight}
-        firstItemIndex={props.preserveScrollOnPrepend ? effectiveFirstItemIndex : undefined}
-        {heightEstimates}
-        {initialTopMostItemIndex}
-        itemContent={(index, item) => props.renderRow({
-          item,
-          index: index - effectiveFirstItemIndex,
-          viewportWidth: viewport.width,
-        })}
-        overscan={{
-          main: overscanPx,
-          reverse: overscanPx,
-        }}
-        restoreStateFrom={restoreState}
+      if (props.header) {
+        {props.header}
+      }
+      <div
+        ref={spacerRef}
+        class={styles.spacer}
         style={{
-          minHeight: "100%",
+          height: `${virtualizer.getTotalSize()}px`,
         }}
-      />
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const item = props.items[virtualItem.index]
+
+          if (!item) {
+            return
+          }
+
+          <div
+            key={virtualItem.key}
+            data-index={virtualItem.index}
+            ref={virtualizer.measureElement}
+            class={styles.row}
+            style={{
+              transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+            }}
+          >
+            {props.renderRow({
+              item,
+              index: virtualItem.index,
+              viewportWidth: viewport.width,
+            })}
+          </div>
+        })}
+      </div>
     }
   </div>
 }

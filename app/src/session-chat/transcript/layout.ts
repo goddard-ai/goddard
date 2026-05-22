@@ -173,7 +173,7 @@ function estimatePlanUpdateRowHeight(message: SessionTranscriptPlanUpdate, maxWi
   return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 32
 }
 
-/** Rough row estimate used by Virtuoso before the real transcript row is measured. */
+/** Rough row estimate used before the real transcript row is measured. */
 export function estimateTranscriptRowHeight(message: SessionTranscriptItem, viewportWidth: number) {
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
 

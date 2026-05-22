@@ -7,9 +7,6 @@ export default {
     paddingInline: "20px",
     paddingTop: "24px",
     paddingBottom: "32px",
-    "& [data-testid='virtuoso-item-list']": {
-      visibility: "visible !important",
-    },
   }),
 
   loadingState: css({
