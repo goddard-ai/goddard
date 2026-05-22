@@ -34,25 +34,6 @@ type MessageListViewport = {
   width: number;
 }
 
-function buildItemKeys<Item>(
-  items: readonly Item[],
-  getItemKey: MessageListProps<Item>["getItemKey"],
-) {
-  return items.map((item, index) => String(getItemKey?.(item, index) ?? index))
-}
-
-function resolvePrependedItemCount(previousKeys: readonly string[], nextKeys: readonly string[]) {
-  for (const [previousIndex, previousKey] of previousKeys.entries()) {
-    const nextIndex = nextKeys.indexOf(previousKey)
-
-    if (nextIndex >= 0) {
-      return Math.max(0, nextIndex - previousIndex)
-    }
-  }
-
-  return 0
-}
-
 function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HTMLDivElement) {
   if (!spacerElement) {
     return 0
@@ -64,7 +45,6 @@ function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HT
   )
 }
 
-/** Renders the transcript's virtualized message list inside the nearest scrollable panel. */
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const spacerRef = useRef<HTMLDivElement | null>(null)
@@ -80,10 +60,11 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
-  const itemKeys = useMemo(() => buildItemKeys(props.items, props.getItemKey), [
-    props.getItemKey,
-    props.items,
-  ])
+  const itemKeys = useMemo(
+    () => props.items.map((item, index) => String(props.getItemKey?.(item, index) ?? index)),
+    [props.getItemKey, props.items],
+  )
+
   useLayoutEffect(() => {
     const rootElement = rootRef.current
     const scrollElement = tabContext.scrollParentRef.current
@@ -163,7 +144,16 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     }
 
     if (props.preserveScrollOnPrepend) {
-      const prependedItemCount = resolvePrependedItemCount(previousItemKeysRef.current, itemKeys)
+      let prependedItemCount = 0
+
+      for (const [previousIndex, previousKey] of previousItemKeysRef.current.entries()) {
+        const nextIndex = itemKeys.indexOf(previousKey)
+
+        if (nextIndex >= 0) {
+          prependedItemCount = Math.max(0, nextIndex - previousIndex)
+          break
+        }
+      }
 
       if (prependedItemCount > 0) {
         scrollElement.scrollTop += Math.max(
@@ -185,7 +175,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       return
     }
 
-    const initializationKey = scrollCacheKey ?? "__default__"
+    const initializationKey = scrollCacheKey ?? tabContext.id
 
     if (initializedBottomScrollKeys.has(initializationKey)) {
       return
@@ -201,6 +191,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     effectiveInitialScroll,
     props.items.length,
     scrollCacheKey,
+    tabContext.id,
     viewport.scrollMarginMeasured,
     viewport.width,
     virtualizer,
