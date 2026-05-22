@@ -155,6 +155,7 @@ Typical flow:
 Notes:
 
 - `terminal/create` returns immediately with a `terminalId`.
+- `outputByteLimit` truncates from the beginning when exceeded and clients must preserve character boundaries.
 - `terminal/output` may also return `exitStatus`.
 - `terminal/release` invalidates the terminal ID and kills the process if it is still running.
 - A released terminal can still remain visible in the client when it was already attached to a tool call.
@@ -166,8 +167,8 @@ Clients may provide MCP server configs in `session/new` or `session/load`.
 Supported MCP server transport shapes:
 
 - Stdio is required for agents.
-- HTTP is optional and gated by `mcpCapabilities.http`.
-- SSE is optional and gated by `mcpCapabilities.sse`.
+- HTTP is optional and gated by `mcpCapabilities.http`; new agents should support HTTP for modern MCP compatibility.
+- SSE is optional, gated by `mcpCapabilities.sse`, and deprecated by the MCP spec.
 
 Stdio MCP config includes:
 

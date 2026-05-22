@@ -10,6 +10,7 @@ Implement ACP as a strict JSON-RPC 2.0 protocol between an agent and a client. P
 ## Start
 
 - Determine whether the task is agent-side, client-side, or both.
+- If the project uses the npm package `@agentclientprotocol/sdk`, check the TypeScript SDK changelog at <https://raw.githubusercontent.com/agentclientprotocol/typescript-sdk/refs/heads/main/CHANGELOG.md> for SDK-specific changes before changing or validating SDK usage.
 - Read [references/protocol-overview.md](references/protocol-overview.md) first for the lifecycle and required invariants.
 - Read [references/content-tools-and-io.md](references/content-tools-and-io.md) when the task involves prompt content, tool calls, permissions, filesystem access, terminals, or MCP server wiring.
 - Read [references/session-features-and-extensions.md](references/session-features-and-extensions.md) when the task involves session listing/loading, plans, modes, config options, slash commands, `_meta`, custom methods, or schema lookups.
@@ -23,9 +24,9 @@ Implement ACP as a strict JSON-RPC 2.0 protocol between an agent and a client. P
 3. Preserve baseline guarantees.
    Support `session/new`, `session/prompt`, `session/cancel`, and `session/update` on every agent implementation. Support text and `resource_link` prompt content as the prompt baseline.
 4. Implement the full lifecycle, not only the happy path.
-   Handle initialization, prompt execution, streaming updates, cancellation, final response, and any required cleanup such as terminal release.
+   Handle initialization, authentication if required, prompt execution, streaming updates, cancellation, final response, and any required cleanup such as terminal release.
 5. Treat optional features as additive.
-   Add `session/load`, `session/list`, HTTP/SSE MCP transports, image/audio/resource prompt blocks, modes, or config options only when the implementation advertises them.
+   Add `authenticate`, `logout`, `session/load`, `session/resume`, `session/close`, `session/list`, HTTP/SSE MCP transports, image/audio/resource prompt blocks, modes, or config options only when the implementation advertises them.
 6. Preserve extensibility correctly.
    Put custom data in `_meta`, keep custom method names prefixed with `_`, and avoid inventing new top-level ACP fields.
 7. Validate cross-side behavior.
@@ -44,7 +45,7 @@ Implement ACP as a strict JSON-RPC 2.0 protocol between an agent and a client. P
 
 ## Feature Map
 
-- Use [references/protocol-overview.md](references/protocol-overview.md) for `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/load`, `session/list`, stop reasons, and transport rules.
+- Use [references/protocol-overview.md](references/protocol-overview.md) for `initialize`, authentication, `session/new`, `session/prompt`, `session/cancel`, `session/load`, `session/resume`, `session/close`, `session/list`, stop reasons, and transport rules.
 - Use [references/content-tools-and-io.md](references/content-tools-and-io.md) for `ContentBlock` variants, tool call creation and updates, permission requests, `fs/*`, `terminal/*`, and MCP server transport config.
 - Use [references/session-features-and-extensions.md](references/session-features-and-extensions.md) for plans, modes, config options, slash commands, `_meta`, custom methods, and schema-level method/type names.
 

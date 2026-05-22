@@ -54,9 +54,20 @@ Capability highlights:
 
 - Client filesystem: `fs.readTextFile`, `fs.writeTextFile`
 - Client terminals: `terminal`
+- Agent authentication: `authMethods`, `agentCapabilities.auth.logout`
 - Agent prompt content: `promptCapabilities.image`, `audio`, `embeddedContext`
 - Agent MCP transports: `mcpCapabilities.http`, `sse`
-- Agent session features: `loadSession`, `sessionCapabilities.list`
+- Agent session features: `loadSession`, `sessionCapabilities.list`, `sessionCapabilities.resume`, `sessionCapabilities.close`
+
+## Authentication
+
+If the agent advertises `authMethods`, clients choose one and call `authenticate` with its `methodId` before authentication-gated session operations.
+
+- Default `AuthMethod` type is `agent` when `type` is omitted.
+- `methodId` must match an advertised auth method ID.
+- On successful `authenticate`, expect an empty result object.
+- Call `logout` only when `agentCapabilities.auth.logout` is present.
+- After `logout`, active session behavior is not guaranteed; clients should handle auth-related failures and prompt for re-authentication.
 
 ## Session Lifecycle
 
@@ -73,11 +84,24 @@ Load a session with `session/load` only if `loadSession` is advertised.
 - Expect the agent to replay prior conversation entries through `session/update`.
 - Expect the method response only after replay completes.
 
+Resume a session with `session/resume` only if `sessionCapabilities.resume` is present.
+
+- Send `sessionId`, absolute `cwd`, and any `mcpServers`.
+- Do not replay conversation history before responding.
+- The response may include initial mode, model, or config state when supported.
+
+Close an active session with `session/close` only if `sessionCapabilities.close` is present.
+
+- Send `sessionId`.
+- The agent must cancel ongoing work as if `session/cancel` was sent, then free session resources.
+- Expect an empty result object on success.
+
 List sessions with `session/list` only if `sessionCapabilities.list` is present.
 
 - Optional inputs: `cwd`, `cursor`
 - Expect `sessions` plus optional `nextCursor`
 - Treat cursors as opaque
+- Session metadata updates use `session_info_update`; omitted fields are unchanged and `title`, `updatedAt`, or `_meta` may be updated.
 
 ## Prompt Turn
 

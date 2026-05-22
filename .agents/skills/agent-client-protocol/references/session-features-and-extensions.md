@@ -101,9 +101,12 @@ Rules:
 Agent-side core methods:
 
 - `authenticate`
+- `logout`
 - `initialize`
 - `session/new`
 - `session/load`
+- `session/resume`
+- `session/close`
 - `session/list`
 - `session/prompt`
 - `session/set_mode`
@@ -148,6 +151,8 @@ Important enums and unions to keep consistent:
 - Confirm every optional method is capability-gated.
 - Confirm every prompt/update payload uses ACP field names and discriminators exactly.
 - Confirm all file paths are absolute and all line numbers are treated as 1-based.
+- Confirm authentication-gated methods handle `authMethods`, `authenticate`, `auth_required`, and optional `logout` correctly.
 - Confirm cancellation resolves the original prompt request with `cancelled`.
+- Confirm `session/resume` does not replay history and `session/close` frees active-session resources when advertised.
 - Confirm terminals are eventually released.
 - Confirm `_meta` is preserved and custom fields are not leaking into ACP roots.
