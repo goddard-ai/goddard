@@ -126,13 +126,11 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
 
   return {
     auth: {
-      startDeviceFlow: async (input = {}) =>
-        rouzerClient.authDeviceStartRoute.POST({ body: input }),
-      completeDeviceFlow: async (input) =>
-        rouzerClient.authDeviceCompleteRoute.POST({ body: input }),
+      startDeviceFlow: async (input = {}) => rouzerClient.authDeviceStart({ body: input }),
+      completeDeviceFlow: async (input) => rouzerClient.authDeviceComplete({ body: input }),
       whoami: async () => {
         const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.authSessionRoute.GET({
+        return rouzerClient.authSession({
           headers: { authorization },
         })
       },
@@ -143,14 +141,14 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     pr: {
       create: async (input) => {
         const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.prCreateRoute.POST({
+        return rouzerClient.prCreate({
           headers: { authorization },
           body: input,
         })
       },
       isManaged: async ({ owner, repo, prNumber }) => {
         const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        const result = await rouzerClient.prManagedRoute.GET({
+        const result = await rouzerClient.prManaged({
           headers: { authorization },
           query: { owner, repo, prNumber },
         })
@@ -158,7 +156,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       },
       reply: async (input) => {
         const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.prReplyRoute.POST({
+        return rouzerClient.prReply({
           headers: { authorization },
           body: input,
         })
@@ -168,7 +166,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
       subscribe: async () => {
         const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         const abortController = new AbortController()
-        const response = await rouzerClient.repoStreamRoute.GET({
+        const response = await rouzerClient.repoStream({
           headers: { authorization },
           signal: abortController.signal,
         })

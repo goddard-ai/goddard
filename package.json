@@ -18,7 +18,7 @@
     "ai-sdk-json-schema": "^0.3.1",
     "cmd-ts": "^0.15.0",
     "radashi": "^12.8.0",
-    "rouzer": "^2.0.0",
+    "rouzer": "3.0.2",
     "zod": "^4.3.6"
   },
   "type": "module",
