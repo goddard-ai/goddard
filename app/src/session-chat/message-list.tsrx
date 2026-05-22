@@ -5,6 +5,7 @@ import { useTabContext } from "~/tab-context.tsrx"
 import styles from "./message-list.style.ts"
 
 const initializedBottomScrollKeys = new Set<string>()
+const messageListScrollCache = new Map<string, number>()
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
@@ -50,6 +51,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const spacerRef = useRef<HTMLDivElement | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
+  const restoredScrollKeyRef = useRef<string | null>(null)
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>({
     scrollMarginMeasured: false,
@@ -58,6 +60,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   })
 
   const scrollCacheKey = props.scrollCacheKey
+  const effectiveScrollCacheKey = scrollCacheKey ?? tabContext.id
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
   const itemKeys = useMemo(
@@ -168,6 +171,65 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   }, [itemKeys, props.preserveScrollOnPrepend, tabContext.scrollParentRef])
 
   useLayoutEffect(() => {
+    return () => {
+      const scrollElement = tabContext.scrollParentRef.current
+
+      if (scrollElement) {
+        messageListScrollCache.set(effectiveScrollCacheKey, scrollElement.scrollTop)
+      }
+    }
+  }, [effectiveScrollCacheKey, tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    const restoredScrollTop = messageListScrollCache.get(effectiveScrollCacheKey)
+
+    if (
+      restoredScrollTop === undefined || restoredScrollKeyRef.current === effectiveScrollCacheKey ||
+        viewport.width <= 0 ||
+        !viewport.scrollMarginMeasured
+    ) {
+      return
+    }
+
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement) {
+      return
+    }
+
+    restoredScrollKeyRef.current = effectiveScrollCacheKey
+    let attemptCount = 0
+    let animationFrame: number | null = null
+
+    const restoreScrollTop = () => {
+      animationFrame = null
+
+      const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
+      scrollElement.scrollTop = Math.min(restoredScrollTop, maxScrollTop)
+
+      if (restoredScrollTop <= maxScrollTop || attemptCount >= 120) {
+        return
+      }
+
+      attemptCount += 1
+      animationFrame = requestAnimationFrame(restoreScrollTop)
+    }
+
+    restoreScrollTop()
+
+    return () => {
+      if (animationFrame !== null) {
+        cancelAnimationFrame(animationFrame)
+      }
+    }
+  }, [
+    effectiveScrollCacheKey,
+    tabContext.scrollParentRef,
+    viewport.scrollMarginMeasured,
+    viewport.width,
+  ])
+
+  useLayoutEffect(() => {
     if (
       effectiveInitialScroll !== "bottom" || props.items.length === 0 || viewport.width <= 0 ||
         !viewport.scrollMarginMeasured
@@ -175,13 +237,14 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       return
     }
 
-    const initializationKey = scrollCacheKey ?? tabContext.id
-
-    if (initializedBottomScrollKeys.has(initializationKey)) {
+    if (
+      initializedBottomScrollKeys.has(effectiveScrollCacheKey) ||
+        messageListScrollCache.has(effectiveScrollCacheKey)
+    ) {
       return
     }
 
-    initializedBottomScrollKeys.add(initializationKey)
+    initializedBottomScrollKeys.add(effectiveScrollCacheKey)
     requestAnimationFrame(() => {
       virtualizer.scrollToIndex(props.items.length - 1, {
         align: "end",
@@ -189,9 +252,8 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     })
   }, [
     effectiveInitialScroll,
+    effectiveScrollCacheKey,
     props.items.length,
-    scrollCacheKey,
-    tabContext.id,
     viewport.scrollMarginMeasured,
     viewport.width,
     virtualizer,
