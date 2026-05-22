@@ -4,38 +4,44 @@ import { Virtuoso, type StateSnapshot, type VirtuosoHandle } from "react-virtuos
 import { useTabContext } from "~/tab-context.tsrx"
 import styles from "./message-list.style.ts"
 
-const messageListStateCache = new Map<string, StateSnapshot>()
+const messageListStateCache = new Map<
+  string,
+  {
+    itemKeys: readonly string[];
+    state: StateSnapshot;
+  }
+>()
 const prependAnchorFirstItemIndex = 1000000
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
-    item: Item;
-    index: number;
-    viewportWidth: number;
-  }
+  item: Item;
+  index: number;
+  viewportWidth: number;
+}
 
 /** Props accepted by the session-chat-owned Virtuoso wrapper. */
 export type MessageListProps<Item> = {
-    items: readonly Item[];
-    overscanPx?: number;
-    initialScrollPosition?: "top" | "bottom";
-    header?: preact.ComponentChild;
-    scrollCacheKey?: string;
-    preserveScrollOnPrepend?: boolean;
-    loadingFallback?: preact.ComponentChild;
-    defaultRowHeight?: number;
-    getItemKey?: (item: Item, index: number) => string;
-    estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number;
-    renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
-  }
+  items: readonly Item[];
+  overscanPx?: number;
+  initialScrollPosition?: "top" | "bottom";
+  header?: preact.ComponentChild;
+  scrollCacheKey?: string;
+  preserveScrollOnPrepend?: boolean;
+  loadingFallback?: preact.ComponentChild;
+  defaultRowHeight?: number;
+  getItemKey?: (item: Item, index: number) => string;
+  estimateRowHeight?: (item: Item, index: number, viewportWidth: number) => number;
+  renderRow: (row: MessageListRow<Item>) => preact.ComponentChild;
+}
 
 type MessageListContext = {
-    header: preact.ComponentChild;
-  }
+  header: preact.ComponentChild;
+}
 
 type MessageListViewport = {
-    width: number;
-  }
+  width: number;
+}
 
 /** Returns the first mount position for a list that should open from the top or bottom. */
 function getInitialTopMostItemIndex<Item>(
@@ -89,6 +95,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const virtuosoHandleRef = useRef<VirtuosoHandle | null>(null)
   const firstItemIndexRef = useRef(prependAnchorFirstItemIndex)
+  const loggedRestoreRef = useRef(false)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>({
@@ -98,17 +105,18 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const scrollCacheKey = props.scrollCacheKey
   const effectiveInitialScroll = props.initialScrollPosition ?? "top"
   const overscanPx = props.overscanPx ?? 320
-  const restoreState =
-    scrollCacheKey ? messageListStateCache.get(scrollCacheKey) : undefined
   const initialTopMostItemIndex = getInitialTopMostItemIndex(
     props.items,
     effectiveInitialScroll,
-    restoreState,
+    scrollCacheKey ? messageListStateCache.get(scrollCacheKey)?.state : undefined,
   )
   const itemKeys = useMemo(() => buildItemKeys(props.items, props.getItemKey), [
     props.getItemKey,
     props.items,
   ])
+  const cachedState =
+    scrollCacheKey ? messageListStateCache.get(scrollCacheKey) : undefined
+  const restoreState = cachedState?.state
   const headerContext = useMemo(
     () => ({
       header: props.header,
@@ -157,10 +165,19 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       }
 
       virtuosoHandleRef.current?.getState((state) => {
-        messageListStateCache.set(scrollCacheKey, state)
+        console.info("[session-chat] saving transcript list state", {
+          itemCount: itemKeys.length,
+          firstItemKey: itemKeys[0] ?? null,
+          lastItemKey: itemKeys.at(-1) ?? null,
+          scrollCacheKey,
+        })
+        messageListStateCache.set(scrollCacheKey, {
+          itemKeys,
+          state,
+        })
       })
     }
-  }, [scrollCacheKey])
+  }, [itemKeys, scrollCacheKey])
 
   const heightEstimates = useMemo(() => {
     const estimateRowHeight = props.estimateRowHeight
@@ -173,6 +190,24 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       (item, index) => Math.max(1, Math.round(estimateRowHeight(item, index, viewport.width))),
     )
   }, [props.estimateRowHeight, props.items, viewport.width])
+
+  useEffect(() => {
+    if (viewport.width <= 0 || loggedRestoreRef.current) {
+      return
+    }
+
+    loggedRestoreRef.current = true
+    console.info("[session-chat] mounting transcript list", {
+      cachedItemCount: cachedState?.itemKeys.length ?? 0,
+      cachedFirstItemKey: cachedState?.itemKeys[0] ?? null,
+      cachedLastItemKey: cachedState?.itemKeys.at(-1) ?? null,
+      currentItemCount: itemKeys.length,
+      currentFirstItemKey: itemKeys[0] ?? null,
+      currentLastItemKey: itemKeys.at(-1) ?? null,
+      restoringState: Boolean(restoreState),
+      scrollCacheKey,
+    })
+  }, [cachedState, itemKeys, restoreState, scrollCacheKey, viewport.width])
 
   <div ref={rootRef} style={{ minHeight: "100%" }}>
     if (viewport.width <= 0) {

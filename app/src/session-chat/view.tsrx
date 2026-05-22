@@ -64,6 +64,23 @@ export default component SessionChatView(props: {
         useSigmaSync(chat, { history: sessionHistory, session }, (payload) => {
           chat.syncLoadedData(payload)
         })
+        const transcriptMessages = chat.transcriptMessages
+
+        useEffect(() => {
+          console.info("[session-chat] transcript state", {
+            firstTranscriptItemId: transcriptMessages[0]?.id ?? null,
+            hasEmptyTranscript: chat.hasEmptyTranscript,
+            lastTranscriptItemId: transcriptMessages.at(-1)?.id ?? null,
+            sessionId: chat.session.id,
+            transcriptItemCount: transcriptMessages.length,
+            turnCount: chat.turns.length,
+          })
+        }, [
+          chat.hasEmptyTranscript,
+          chat.session.id,
+          chat.turns.length,
+          transcriptMessages.length,
+        ])
 
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
@@ -295,7 +312,7 @@ export default component SessionChatView(props: {
             <Transcript
               class={styles.transcript}
               initialScrollPosition="bottom"
-              messages={chat.transcriptMessages}
+              messages={transcriptMessages}
               olderHistory={{
                 canLoad: canLoadOlderHistory,
                 error: page.olderHistory.error.value
