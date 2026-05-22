@@ -26,104 +26,118 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   return createRouter<Env>({ debug: false }).use(
     { ...authRoutes, ...pullRequestRoutes, ...routes },
     {
-      authDeviceStart: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.startDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      auth: {
+        device: {
+          start: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              return await controlPlane.startDeviceFlow(ctx.body)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+          complete: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              return await controlPlane.completeDeviceFlow(ctx.body)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+        },
+        session: {
+          current: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              const token = readBearerToken(ctx.headers.authorization)
+              return await controlPlane.getSession(token)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+        },
       },
-      authDeviceComplete: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.completeDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-      authSession: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          return await controlPlane.getSession(token)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-      prCreate: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const pr = await controlPlane.createPr(token, ctx.body, env)
+      pullRequests: {
+        create: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastEvent(env, {
-            type: "pr.created",
-            owner: pr.owner,
-            repo: pr.repo,
-            prNumber: pr.number,
-            title: pr.title,
-            author: pr.createdBy,
-            createdAt: pr.createdAt,
-          })
+            await broadcastEvent(env, {
+              type: "pr.created",
+              owner: pr.owner,
+              repo: pr.repo,
+              prNumber: pr.number,
+              title: pr.title,
+              author: pr.createdBy,
+              createdAt: pr.createdAt,
+            })
 
-          return pr
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+            return pr
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+        managed: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            const token = readBearerToken(ctx.headers.authorization)
+            const session = await controlPlane.getSession(token)
+            const { owner, repo, prNumber } = ctx.query
+            assertRepo(owner, repo)
+            const managed = await controlPlane.isManagedPr(
+              owner,
+              repo,
+              prNumber,
+              session.githubUsername,
+            )
+            return { managed }
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+        comments: {
+          create: async (ctx) => {
+            try {
+              const env = readEnv(ctx)
+              const controlPlane = createControlPlane(env)
+              const token = readBearerToken(ctx.headers.authorization)
+              await controlPlane.replyToPr(token, ctx.body, env)
+              return { success: true }
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+        },
       },
-      prManaged: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
-          const { owner, repo, prNumber } = ctx.query
-          assertRepo(owner, repo)
-          const managed = await controlPlane.isManagedPr(
-            owner,
-            repo,
-            prNumber,
-            session.githubUsername,
-          )
-          return { managed }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      webhooks: {
+        github: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const event = await controlPlane.handleGitHubWebhook(ctx.body)
+            await broadcastEvent(env, event)
+            return event
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-      prReply: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          await controlPlane.replyToPr(token, ctx.body, env)
-          return { success: true }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-      githubWebhook: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const event = await controlPlane.handleGitHubWebhook(ctx.body)
-          await broadcastEvent(env, event)
-          return event
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-      repoStream: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
+      repositories: {
+        stream: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            const session = await controlPlane.getSession(token)
 
-          return await handleUserStream(env, session.githubUsername, ctx.request)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+            return await handleUserStream(env, session.githubUsername, ctx.request)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
     },
   )

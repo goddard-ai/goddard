@@ -529,7 +529,7 @@ async function startBackendHarness(
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`)
 
-    if (url.pathname === "/stream") {
+    if (url.pathname === "/repositories/stream") {
       if (options.rejectStreamUnauthorized || !request.headers.authorization) {
         response.writeHead(401, { "content-type": "text/plain" })
         response.end("unauthorized")
@@ -550,7 +550,7 @@ async function startBackendHarness(
       return
     }
 
-    if (url.pathname === "/pr/managed") {
+    if (url.pathname === "/pull-requests/managed") {
       if (!request.headers.authorization) {
         response.writeHead(401, { "content-type": "text/plain" })
         response.end("unauthorized")

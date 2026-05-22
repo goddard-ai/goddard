@@ -11,29 +11,31 @@ import {
   type RepoEvent,
 } from "./schema.ts"
 
-/** Creates a managed pull request through the backend. */
-export const prCreate = http.post("pr/create", {
-  headers: BearerHeaders,
-  body: CreatePrInput,
-  response: $type<PullRequestRecord>(),
+/** Pull-request-owned backend routes grouped by PR domain action. */
+export const pullRequests = http.resource("pull-requests", {
+  create: http.post("create", {
+    headers: BearerHeaders,
+    body: CreatePrInput,
+    response: $type<PullRequestRecord>(),
+  }),
+  managed: http.get("managed", {
+    headers: BearerHeaders,
+    query: ManagedPrQuery,
+    response: $type<{ managed: boolean }>(),
+  }),
+  comments: http.resource("comments", {
+    create: http.post("create", {
+      headers: BearerHeaders,
+      body: ReplyPrInput,
+      response: $type<{ success: boolean }>(),
+    }),
+  }),
 })
 
-/** Posts a managed pull-request reply through the backend. */
-export const prReply = http.post("pr/reply", {
-  headers: BearerHeaders,
-  body: ReplyPrInput,
-  response: $type<{ success: boolean }>(),
-})
-
-/** Reports whether a pull request is managed by the authenticated user. */
-export const prManaged = http.get("pr/managed", {
-  headers: BearerHeaders,
-  query: ManagedPrQuery,
-  response: $type<{ managed: boolean }>(),
-})
-
-/** Receives normalized GitHub webhook payloads for managed PR feedback. */
-export const githubWebhook = http.post("webhooks/github", {
-  body: GitHubWebhookInput,
-  response: $type<RepoEvent>(),
+/** External webhook ingress routes grouped by provider. */
+export const webhooks = http.resource("webhooks", {
+  github: http.post("github", {
+    body: GitHubWebhookInput,
+    response: $type<RepoEvent>(),
+  }),
 })

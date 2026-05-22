@@ -9,20 +9,22 @@ import {
   type DeviceFlowSession,
 } from "./schema.ts"
 
-/** Starts the GitHub device flow for a pending user session. */
-export const authDeviceStart = http.post("auth/device/start", {
-  body: DeviceFlowStart,
-  response: $type<DeviceFlowSession>(),
-})
-
-/** Completes the GitHub device flow and returns an authenticated backend session. */
-export const authDeviceComplete = http.post("auth/device/complete", {
-  body: DeviceFlowComplete,
-  response: $type<AuthSession>(),
-})
-
-/** Reads the current authenticated backend session. */
-export const authSession = http.get("auth/session", {
-  headers: BearerHeaders,
-  response: $type<AuthSession>(),
+/** Auth-owned backend routes grouped by the authenticated session workflow. */
+export const auth = http.resource("auth", {
+  device: http.resource("device", {
+    start: http.post("start", {
+      body: DeviceFlowStart,
+      response: $type<DeviceFlowSession>(),
+    }),
+    complete: http.post("complete", {
+      body: DeviceFlowComplete,
+      response: $type<AuthSession>(),
+    }),
+  }),
+  session: http.resource("session", {
+    current: http.get("current", {
+      headers: BearerHeaders,
+      response: $type<AuthSession>(),
+    }),
+  }),
 })
