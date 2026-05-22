@@ -66,22 +66,6 @@ export default component SessionChatView(props: {
         })
         const transcriptMessages = chat.transcriptMessages
 
-        useEffect(() => {
-          console.info("[session-chat] transcript state", {
-            firstTranscriptItemId: transcriptMessages[0]?.id ?? null,
-            hasEmptyTranscript: chat.hasEmptyTranscript,
-            lastTranscriptItemId: transcriptMessages.at(-1)?.id ?? null,
-            sessionId: chat.session.id,
-            transcriptItemCount: transcriptMessages.length,
-            turnCount: chat.turns.length,
-          })
-        }, [
-          chat.hasEmptyTranscript,
-          chat.session.id,
-          chat.turns.length,
-          transcriptMessages.length,
-        ])
-
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
 
