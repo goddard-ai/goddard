@@ -1,11 +1,18 @@
-import { useVirtualizer } from "@tanstack/react-virtual"
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { useTabContext } from "~/tab-context.tsrx"
 import styles from "./message-list.style.ts"
 
 const initializedBottomScrollKeys = new Set<string>()
-const messageListScrollCache = new Map<string, number>()
+const messageListScrollCache = new Map<
+  string,
+  {
+    itemKeys: readonly string[];
+    measurements: readonly VirtualItem[];
+    scrollTop: number;
+  }
+>()
 
 /** One visible message row handed to the row renderer. */
 export type MessageListRow<Item> = {
@@ -51,7 +58,6 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const spacerRef = useRef<HTMLDivElement | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
-  const restoredScrollKeyRef = useRef<string | null>(null)
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>({
     scrollMarginMeasured: false,
@@ -67,6 +73,12 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     () => props.items.map((item, index) => String(props.getItemKey?.(item, index) ?? index)),
     [props.getItemKey, props.items],
   )
+  const cachedScrollSnapshot = messageListScrollCache.get(effectiveScrollCacheKey)
+  const restoredScrollSnapshot =
+    cachedScrollSnapshot &&
+    cachedScrollSnapshot.itemKeys.every((itemKey, index) => itemKeys[index] === itemKey)
+      ? cachedScrollSnapshot
+      : undefined
 
   useLayoutEffect(() => {
     const rootElement = rootRef.current
@@ -134,6 +146,10 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     },
     getItemKey: (index) => itemKeys[index] ?? index,
     getScrollElement: () => tabContext.scrollParentRef.current,
+    initialMeasurementsCache: restoredScrollSnapshot
+      ? [...restoredScrollSnapshot.measurements]
+      : undefined,
+    initialOffset: restoredScrollSnapshot?.scrollTop,
     overscan: Math.max(1, Math.ceil(overscanPx / Math.max(1, props.defaultRowHeight ?? 1))),
     scrollMargin: viewport.scrollMargin,
     useFlushSync: false,
@@ -175,59 +191,18 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       const scrollElement = tabContext.scrollParentRef.current
 
       if (scrollElement) {
-        messageListScrollCache.set(effectiveScrollCacheKey, scrollElement.scrollTop)
+        messageListScrollCache.set(effectiveScrollCacheKey, {
+          itemKeys,
+          measurements: virtualizer.measurementsCache.map(
+            (measurement) => ({
+              ...measurement,
+            }),
+          ),
+          scrollTop: scrollElement.scrollTop,
+        })
       }
     }
-  }, [effectiveScrollCacheKey, tabContext.scrollParentRef])
-
-  useLayoutEffect(() => {
-    const restoredScrollTop = messageListScrollCache.get(effectiveScrollCacheKey)
-
-    if (
-      restoredScrollTop === undefined || restoredScrollKeyRef.current === effectiveScrollCacheKey ||
-        viewport.width <= 0 ||
-        !viewport.scrollMarginMeasured
-    ) {
-      return
-    }
-
-    const scrollElement = tabContext.scrollParentRef.current
-
-    if (!scrollElement) {
-      return
-    }
-
-    restoredScrollKeyRef.current = effectiveScrollCacheKey
-    let attemptCount = 0
-    let animationFrame: number | null = null
-
-    const restoreScrollTop = () => {
-      animationFrame = null
-
-      const maxScrollTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight)
-      scrollElement.scrollTop = Math.min(restoredScrollTop, maxScrollTop)
-
-      if (restoredScrollTop <= maxScrollTop || attemptCount >= 120) {
-        return
-      }
-
-      attemptCount += 1
-      animationFrame = requestAnimationFrame(restoreScrollTop)
-    }
-
-    restoreScrollTop()
-
-    return () => {
-      if (animationFrame !== null) {
-        cancelAnimationFrame(animationFrame)
-      }
-    }
-  }, [
-    effectiveScrollCacheKey,
-    tabContext.scrollParentRef,
-    viewport.scrollMarginMeasured,
-    viewport.width,
-  ])
+  }, [effectiveScrollCacheKey, itemKeys, tabContext.scrollParentRef, virtualizer])
 
   useLayoutEffect(() => {
     if (
