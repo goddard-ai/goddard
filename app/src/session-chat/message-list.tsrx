@@ -134,6 +134,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
 
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: props.items.length,
+    enabled: viewport.width > 0,
     estimateSize: (index) => {
       const item = props.items[index]
 
@@ -229,21 +230,23 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
             return
           }
 
-          <div
-            key={virtualItem.key}
-            data-index={virtualItem.index}
-            ref={virtualizer.measureElement}
-            class={styles.row}
-            style={{
-              transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
-            }}
-          >
-            {props.renderRow({
-              item,
-              index: virtualItem.index,
-              viewportWidth: viewport.width,
-            })}
-          </div>
+          return <tsrx>
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+              class={styles.row}
+              style={{
+                transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+              }}
+            >
+              {props.renderRow({
+                item,
+                index: virtualItem.index,
+                viewportWidth: viewport.width,
+              })}
+            </div>
+          </tsrx>
         })}
       </div>
     }
