@@ -612,6 +612,18 @@ test("buildSessionChatTranscript ignores routed session/update payloads without 
         },
       },
     },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          size: 258400,
+          used: 35839,
+          sessionUpdate: "usage_update",
+        },
+      },
+    },
   ])
 
   expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toEqual([

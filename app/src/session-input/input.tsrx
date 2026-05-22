@@ -26,14 +26,19 @@ export type SessionInputSuggestionLoader = (input: {
     query: string;
   }) => Promise<readonly SessionInputSuggestion[]>
 export type SessionInputClasses = {
-    form: string;
-    editorFrame: string;
-    contentEditable: string;
-    placeholder: string;
-    footer: string;
-    helperText: string;
-    submitButton: string;
-  }
+  form: string;
+  editorFrame: string;
+  contentEditable: string;
+  placeholder: string;
+  footer: string;
+  helperText: string;
+  contextUsage?: string;
+  submitButton: string;
+}
+export type SessionInputContextUsage = {
+  size: number;
+  used: number;
+}
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
@@ -47,6 +52,7 @@ export component SessionInput(props: {
   placeholder?: string;
   helperText?: string;
   initialPrompt?: SessionInputPromptBlocks;
+  contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) {
   const formElementRef = useRef<HTMLFormElement>(null)
@@ -68,6 +74,15 @@ export component SessionInput(props: {
     props.helperText ??
       "Enter sends, Shift+Enter inserts a newline, and @, $, or / open suggestions."
   const submitLabel = props.submitLabel ?? "Send"
+  const contextUsage =
+    props.contextUsage && props.contextUsage.size > 0
+      ? {
+          size: props.contextUsage.size,
+          used: Math.max(0, props.contextUsage.used),
+        }
+      : null
+  const contextUsagePercent =
+    contextUsage ? Math.min(100, Math.round((contextUsage.used / contextUsage.size) * 100)) : null
 
   const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
@@ -365,6 +380,25 @@ export component SessionInput(props: {
       <p class={classes.helperText}>
         {helperText}
       </p>
+      if (contextUsage) {
+        <div
+          aria-label={`Context usage ${contextUsagePercent}%`}
+          class={classes.contextUsage}
+          title={`${contextUsage.used.toLocaleString()} of ${contextUsage.size.toLocaleString()} context tokens used`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="15.5" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15.5"
+              pathLength="100"
+              strokeDasharray={`${contextUsagePercent} 100`}
+            />
+          </svg>
+          <span>{`${contextUsagePercent}%`}</span>
+        </div>
+      }
       <button class={classes.submitButton} disabled={!canSubmit} type="submit">
         {submitLabel}
         <SendHorizontal size={15} strokeWidth={2.2} />

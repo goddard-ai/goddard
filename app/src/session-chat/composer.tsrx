@@ -1,6 +1,7 @@
 import {
   SessionInput,
   type SessionInputClasses,
+  type SessionInputContextUsage,
   type SessionInputPromptBlocks,
   type SessionInputSuggestionLoader,
 } from "~/session-input/input.tsrx"
@@ -13,6 +14,7 @@ const composerClasses: SessionInputClasses = {
   placeholder: styles.placeholder,
   footer: styles.footer,
   helperText: styles.helperText,
+  contextUsage: styles.contextUsage,
   submitButton: styles.submitButton,
 }
 
@@ -22,10 +24,12 @@ export component Composer(props: {
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: string;
+  contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) {
   <SessionInput
     classes={composerClasses}
+    contextUsage={props.contextUsage}
     helperText={props.helperText}
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}

@@ -65,8 +65,15 @@ export type SessionChatTurn = SessionHistoryTurn & {
 /** Derived state facts consumed by the session chat view and later transcript rows. */
 export type SessionChatSummary = {
   activeTurnId: string | null
+  contextUsage: SessionChatContextUsage | null
   pendingPermissionRequest: Extract<SessionChatTurnEvent, { kind: "permissionRequest" }> | null
   status: SessionChatStatus
+}
+
+/** Latest model context window usage reported by the agent. */
+export type SessionChatContextUsage = {
+  size: number
+  used: number
 }
 
 /** Reactive session chat state initialized from history and updated by daemon stream messages. */
@@ -211,6 +218,25 @@ function parsePlanEvent(update: Record<string, unknown>) {
   return update.sessionUpdate === "plan" && Array.isArray(update.entries)
     ? (update as acp.Plan)
     : null
+}
+
+function parseContextUsage(update: Record<string, unknown>): SessionChatContextUsage | null {
+  if (
+    update.sessionUpdate !== "usage_update" ||
+    typeof update.size !== "number" ||
+    typeof update.used !== "number" ||
+    !Number.isFinite(update.size) ||
+    !Number.isFinite(update.used) ||
+    update.size <= 0 ||
+    update.used < 0
+  ) {
+    return null
+  }
+
+  return {
+    size: update.size,
+    used: update.used,
+  }
 }
 
 function getPermissionRequest(message: acp.AnyMessage) {
@@ -383,6 +409,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       session: input.session,
       summary: {
         activeTurnId: null,
+        contextUsage: null,
         pendingPermissionRequest: null,
         status: "idle",
       },
@@ -803,9 +830,27 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     this.summary = {
       activeTurnId: activeTurn?.turnId ?? null,
+      contextUsage: this.#findLatestContextUsage(),
       pendingPermissionRequest: permissionRequest,
       status: resolveSessionChatStatus(this.session, this.turns, permissionRequest),
     }
+  }
+
+  #findLatestContextUsage() {
+    for (let turnIndex = this.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+      const turn = this.turns[turnIndex]
+
+      for (let messageIndex = turn.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+        const update = getSessionUpdate(turn.messages[messageIndex])
+        const contextUsage = update ? parseContextUsage(update) : null
+
+        if (contextUsage) {
+          return contextUsage
+        }
+      }
+    }
+
+    return null
   }
 
   onSetup() {

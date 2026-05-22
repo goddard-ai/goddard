@@ -119,6 +119,7 @@ const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
   "config_option_update",
   "current_mode_update",
   "session_info_update",
+  "usage_update",
 ])
 
 const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set([

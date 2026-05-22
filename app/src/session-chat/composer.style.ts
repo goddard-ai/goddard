@@ -43,13 +43,48 @@ export default {
   footer: css({
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     gap: "12px",
   }),
   helperText: css({
+    flex: "1 1 auto",
     color: "muted",
     fontSize: "0.83rem",
     lineHeight: "1.6",
+  }),
+  contextUsage: css({
+    position: "relative",
+    display: "inline-grid",
+    placeItems: "center",
+    width: "40px",
+    height: "40px",
+    flex: "0 0 auto",
+    color: "muted",
+    fontSize: "0.64rem",
+    fontWeight: "700",
+    lineHeight: "1",
+    "& svg": {
+      position: "absolute",
+      inset: "0",
+      width: "100%",
+      height: "100%",
+      transform: "rotate(-90deg)",
+    },
+    "& circle": {
+      fill: "none",
+      strokeWidth: "3.25",
+    },
+    "& circle:first-of-type": {
+      stroke: "border",
+    },
+    "& circle:last-of-type": {
+      stroke: "accentStrong",
+      strokeLinecap: "round",
+      transition: "stroke-dasharray 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    },
+    "& span": {
+      position: "relative",
+    },
   }),
   submitButton: css({
     display: "inline-flex",

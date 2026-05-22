@@ -151,6 +151,21 @@ function permissionResponseMessage() {
   } satisfies acp.AnyMessage
 }
 
+function usageUpdate(size: number, used: number) {
+  return {
+    jsonrpc: "2.0",
+    method: acp.CLIENT_METHODS.session_update,
+    params: {
+      sessionId: "acp-session-1",
+      update: {
+        size,
+        used,
+        sessionUpdate: "usage_update",
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
 test("SessionChat normalizes history turns into deterministic order and statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
@@ -404,6 +419,30 @@ test("SessionChat treats an active session without a running turn as ready", () 
   const chat = createChat({})
 
   expect(chat.summary.status).toBe("idle")
+})
+
+test("SessionChat exposes the latest usage update", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        messages: [usageUpdate(258_400, 35_839), usageUpdate(258_400, 64_000)],
+      }),
+    ]),
+  })
+
+  expect(chat.summary.contextUsage).toEqual({
+    size: 258_400,
+    used: 64_000,
+  })
+
+  chat.applyMessageNow(usageUpdate(258_400, 96_000), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+
+  expect(chat.summary.contextUsage).toEqual({
+    size: 258_400,
+    used: 96_000,
+  })
 })
 
 test("SessionChat exposes pending permission and plan events", () => {

@@ -322,6 +322,7 @@ export default component SessionChatView(props: {
               </div>
             }
             <Composer
+              contextUsage={chat.summary.contextUsage}
               loadSuggestions={async (input) => {
                 const response = await goddardSdk.session.composerSuggestions({
                   id: chat.session.id,
