@@ -73,6 +73,17 @@ export const DaemonSessionAvailableCommands = z.custom<acp.AvailableCommand[]>()
 
 export type DaemonSessionAvailableCommands = z.output<typeof DaemonSessionAvailableCommands>
 
+/** Latest context window usage reported by the agent for one daemon session. */
+export const DaemonSessionContextUsage = z
+  .strictObject({
+    size: z.number().finite().positive(),
+    used: z.number().finite().nonnegative(),
+  })
+  .nullable()
+  .default(null)
+
+export type DaemonSessionContextUsage = z.output<typeof DaemonSessionContextUsage>
+
 /**
  * Persisted daemon-managed session record stored in kindstore.
  */
@@ -105,6 +116,7 @@ export const DaemonSession = z.strictObject({
   metadata: DaemonSessionMetadata.nullable().default(null),
   models: z.custom<acp.SessionModelState>().nullable().default(null),
   availableCommands: DaemonSessionAvailableCommands.default([]),
+  contextUsage: DaemonSessionContextUsage,
 })
 
 export type DaemonSession = z.output<typeof DaemonSession> & {

@@ -33,6 +33,7 @@ function createSession(lastAgentMessage: string | null) {
     lastAgentMessage,
     models: null,
     availableCommands: [],
+    contextUsage: null,
   } satisfies DaemonSession
 }
 

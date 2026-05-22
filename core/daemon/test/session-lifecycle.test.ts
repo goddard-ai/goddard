@@ -21,6 +21,7 @@ import { createWrappedNodeAgent } from "./acp-fixture.ts"
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
 const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
+const usageAgentPath = createRequire(import.meta.url).resolve("./fixtures/usage-agent.mjs")
 const launchPreviewAgentPath = fileURLToPath(
   new URL("./fixtures/launch-preview-agent.mjs", import.meta.url),
 )
@@ -464,6 +465,65 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
   expect(turnRecord?.messages).toEqual(history.turns[0]?.messages)
 })
 
+test("daemon stores usage updates on the session instead of durable turn history", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(usageAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const liveUsageUpdates: unknown[] = []
+  const unsubscribe = await client.subscribe(
+    { name: "session.message", filter: { id: created.session.id } },
+    (payload) => {
+      const update = matchAcpRequest<{
+        update?: {
+          sessionUpdate?: string
+        }
+      }>(payload.message, "session/update")?.update
+
+      if (update?.sessionUpdate === "usage_update") {
+        liveUsageUpdates.push(update)
+      }
+    },
+  )
+
+  await client.send("session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
+  })
+
+  await waitFor(async () => {
+    return db.sessions.get(created.session.id)?.stopReason === "end_turn"
+  })
+
+  await Promise.resolve(unsubscribe()).catch(() => {})
+
+  expect(liveUsageUpdates).toHaveLength(1)
+  expect(db.sessions.get(created.session.id)?.contextUsage).toEqual({
+    size: 258400,
+    used: 35839,
+  })
+
+  const history = await client.send("session.history", {
+    id: created.session.id,
+  })
+  expect(
+    history.turns.some((turn) =>
+      turn.messages.some((message) => {
+        return (
+          matchAcpRequest<{ update?: { sessionUpdate?: string } }>(message, "session/update")
+            ?.update?.sessionUpdate === "usage_update"
+        )
+      }),
+    ),
+  ).toBe(false)
+})
+
 test("daemon creates placeholder session titles before any user prompt is sent", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -663,6 +723,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     metadata: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(sessionId, sessionRecord)
   db.sessionTurns.create({
@@ -748,6 +809,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     metadata: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
   })
   db.sessionTurnDrafts.create({
     sessionId,
@@ -1752,6 +1814,7 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
         description: "Summarize the current progress",
       },
     ],
+    contextUsage: null,
   })
 
   const daemon = await startServer({ useExistingHome: true })

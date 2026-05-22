@@ -135,6 +135,10 @@ function getAgentMessageChunkParts(message: acp.AnyMessage) {
 
 /** Appends one ACP history entry while folding adjacent streamed agent text chunks together. */
 export function appendSessionHistoryMessage(history: acp.AnyMessage[], message: acp.AnyMessage) {
+  if (isContextUsageUpdateMessage(message)) {
+    return
+  }
+
   const previousChunk = history.length > 0 ? getAgentMessageChunkParts(history.at(-1)!) : null
   const nextChunk = getAgentMessageChunkParts(message)
 
@@ -156,6 +160,61 @@ export function appendSessionHistoryMessage(history: acp.AnyMessage[], message: 
   }
 
   history.push(message)
+}
+
+/** Returns true when one ACP message is a context usage update, including malformed payloads. */
+export function isContextUsageUpdateMessage(message: acp.AnyMessage) {
+  if (
+    !isRecord(message) ||
+    "method" in message === false ||
+    message.method !== acp.CLIENT_METHODS.session_update ||
+    !isRecord(message.params)
+  ) {
+    return false
+  }
+
+  const params = "params" in message && isRecord(message.params) ? message.params : null
+  const update = params && isRecord(params.update) ? params.update : null
+  return update?.sessionUpdate === "usage_update"
+}
+
+/** Extracts model context window usage when an ACP update reports it. */
+export function getContextUsageFromMessage(message: acp.AnyMessage) {
+  const params = "params" in message && isRecord(message.params) ? message.params : null
+  if (!isContextUsageUpdateMessage(message) || !params) {
+    return null
+  }
+
+  const update = isRecord(params.update) ? params.update : null
+  if (
+    !update ||
+    typeof update.size !== "number" ||
+    typeof update.used !== "number" ||
+    !Number.isFinite(update.size) ||
+    !Number.isFinite(update.used) ||
+    update.size <= 0 ||
+    update.used < 0
+  ) {
+    return null
+  }
+
+  return {
+    size: update.size,
+    used: update.used,
+  }
+}
+
+/** Extracts the latest model context usage update recorded in one message sequence. */
+export function getLatestContextUsage(messages: readonly acp.AnyMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const contextUsage = getContextUsageFromMessage(messages[index])
+
+    if (contextUsage !== null) {
+      return contextUsage
+    }
+  }
+
+  return null
 }
 
 /** Rebuilds one history stream using the daemon's chunk-coalescing persistence rules. */

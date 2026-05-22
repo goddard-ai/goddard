@@ -205,6 +205,7 @@ export function createSessionRecordUpdate(params: {
   title: string
   titleState: DaemonSession["titleState"]
   availableCommands: acp.AvailableCommand[]
+  contextUsage: DaemonSession["contextUsage"]
 }) {
   const connectionMode: SessionConnectionMode =
     params.exitAfterInitialPrompt && !params.supportsLoadSession ? "history" : "live"
@@ -230,6 +231,7 @@ export function createSessionRecordUpdate(params: {
     metadata: params.sessionMetadata ?? null,
     models: params.initialized.models ?? params.existingSession?.models ?? null,
     availableCommands: params.availableCommands,
+    contextUsage: params.contextUsage ?? params.existingSession?.contextUsage ?? null,
     errorMessage: null,
     blockedReason: null,
     initiative: params.existingSession?.initiative ?? null,

@@ -569,6 +569,7 @@ async function seedWorkforceSession(input: {
     metadata: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
   db.sessions.put(input.sessionId, sessionRecord)
   db.workforces.create({
@@ -616,6 +617,7 @@ function seedAuthorizedSession(input: {
     metadata: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
   })
 }
 

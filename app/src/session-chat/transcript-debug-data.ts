@@ -64,6 +64,7 @@ function createDebugSession(overrides: Partial<DaemonSession> = {}) {
     lastAgentMessage: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
     ...overrides,
   } satisfies DaemonSession
 }

@@ -239,6 +239,11 @@ function parseContextUsage(update: Record<string, unknown>): SessionChatContextU
   }
 }
 
+function getMessageContextUsage(message: acp.AnyMessage) {
+  const update = getSessionUpdate(message)
+  return update ? parseContextUsage(update) : null
+}
+
 function getPermissionRequest(message: acp.AnyMessage) {
   const params = getMessageField(message, "params")
 
@@ -513,6 +518,13 @@ export class SessionChat extends Sigma<SessionChatState> {
   /** Applies one daemon-published ACP message through the live chunk batching queue. */
   receiveMessage(message: acp.AnyMessage) {
     const receivedAt = new Date().toISOString()
+    const contextUsage = getMessageContextUsage(message)
+
+    if (contextUsage) {
+      this.session.contextUsage = contextUsage
+      this.#refreshTranscriptState()
+      return
+    }
 
     if (isTextAgentMessageChunk(message)) {
       this.#queuedChunks.push({ message, receivedAt })
@@ -526,6 +538,13 @@ export class SessionChat extends Sigma<SessionChatState> {
   /** Applies one ACP message immediately, bypassing live chunk batching. */
   applyMessageNow(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
     const receivedAt = options.receivedAt ?? new Date().toISOString()
+    const contextUsage = getMessageContextUsage(message)
+
+    if (contextUsage) {
+      this.session.contextUsage = contextUsage
+      this.#refreshTranscriptState()
+      return
+    }
 
     this.#applyMessages([{ message, receivedAt }])
   }
@@ -830,27 +849,10 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     this.summary = {
       activeTurnId: activeTurn?.turnId ?? null,
-      contextUsage: this.#findLatestContextUsage(),
+      contextUsage: this.session.contextUsage,
       pendingPermissionRequest: permissionRequest,
       status: resolveSessionChatStatus(this.session, this.turns, permissionRequest),
     }
-  }
-
-  #findLatestContextUsage() {
-    for (let turnIndex = this.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
-      const turn = this.turns[turnIndex]
-
-      for (let messageIndex = turn.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-        const update = getSessionUpdate(turn.messages[messageIndex])
-        const contextUsage = update ? parseContextUsage(update) : null
-
-        if (contextUsage) {
-          return contextUsage
-        }
-      }
-    }
-
-    return null
   }
 
   onSetup() {

@@ -34,6 +34,7 @@ function createSession(overrides: Partial<DaemonSession> = {}) {
     lastAgentMessage: null,
     models: null,
     availableCommands: [],
+    contextUsage: null,
     ...overrides,
   } satisfies DaemonSession
 }
@@ -423,11 +424,12 @@ test("SessionChat treats an active session without a running turn as ready", () 
 
 test("SessionChat exposes the latest usage update", () => {
   const chat = createChat({
-    history: createHistory([
-      createTurn({
-        messages: [usageUpdate(258_400, 35_839), usageUpdate(258_400, 64_000)],
-      }),
-    ]),
+    session: createSession({
+      contextUsage: {
+        size: 258_400,
+        used: 64_000,
+      },
+    }),
   })
 
   expect(chat.summary.contextUsage).toEqual({
@@ -439,6 +441,7 @@ test("SessionChat exposes the latest usage update", () => {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
 
+  expect(chat.turns).toHaveLength(0)
   expect(chat.summary.contextUsage).toEqual({
     size: 258_400,
     used: 96_000,

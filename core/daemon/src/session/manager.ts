@@ -110,7 +110,9 @@ import {
   appendSessionHistoryMessage,
   createInitializedHistoryTurn,
   getAvailableCommandsFromMessage,
+  getContextUsageFromMessage,
   getLatestAvailableCommands,
+  getLatestContextUsage,
   isTurnTerminalMessage,
   shouldFlushTurnDraftImmediately,
   toCompletedTurnInput,
@@ -1026,6 +1028,18 @@ export function createSessionManager(input: {
     })
   }
 
+  function updateSessionContextUsage(sessionId: SessionId, message: acp.AnyMessage) {
+    const contextUsage = getContextUsageFromMessage(message)
+    if (!contextUsage || !db.sessions.get(sessionId)) {
+      return false
+    }
+
+    db.sessions.update(sessionId, {
+      contextUsage,
+    })
+    return true
+  }
+
   function flushActiveTurnDraft(active: ActiveSession, reason: string) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
@@ -1117,6 +1131,10 @@ export function createSessionManager(input: {
     const availableCommands = getAvailableCommandsFromMessage(message)
     if (availableCommands) {
       updateSessionAvailableCommands(active.id, availableCommands)
+    }
+
+    if (updateSessionContextUsage(active.id, message)) {
+      return
     }
 
     const activeTurn = active.activeTurn
@@ -2657,6 +2675,7 @@ export function createSessionManager(input: {
       sessionContext.acpSessionId = initialized.acpSessionId
 
       const latestAvailableCommands = getLatestAvailableCommands(initialized.history)
+      const latestContextUsage = getLatestContextUsage(initialized.history)
       const availableCommands = latestAvailableCommands ?? existingSession?.availableCommands ?? []
       const sessionSupportsLoad = supportsSessionLoad(initialized)
       const initialTurn = createInitializedHistoryTurn({
@@ -2680,6 +2699,7 @@ export function createSessionManager(input: {
         title: preparedTitle.title,
         titleState: preparedTitle.titleState,
         availableCommands,
+        contextUsage: latestContextUsage,
       })
 
       persistLaunchedSession({
