@@ -2,12 +2,20 @@ import { expect, test } from "bun:test"
 
 import { GoddardSdk } from "../src/index.ts"
 
-test("session.prompt forwards a structured ACP prompt message through session.send", async () => {
+test("session.prompt reconnects before forwarding a structured ACP prompt message", async () => {
   const calls: Array<{ name: string; payload: unknown }> = []
   const sdk = new GoddardSdk({
     client: {
       send: async (name: string, payload: unknown) => {
         calls.push({ name, payload })
+        if (name === "session.connect") {
+          return {
+            session: {
+              acpSessionId: "acp-session-reconnected",
+            },
+          }
+        }
+
         return { accepted: true }
       },
       subscribe: async () => {
@@ -26,15 +34,21 @@ test("session.prompt forwards a structured ACP prompt message through session.se
     accepted: true,
   })
 
-  expect(calls).toHaveLength(1)
-  expect(calls[0]?.name).toBe("session.send")
-  expect(calls[0]?.payload).toMatchObject({
+  expect(calls).toHaveLength(2)
+  expect(calls[0]).toEqual({
+    name: "session.connect",
+    payload: {
+      id: "ses_daemon-session-1",
+    },
+  })
+  expect(calls[1]?.name).toBe("session.send")
+  expect(calls[1]?.payload).toMatchObject({
     id: "ses_daemon-session-1",
     message: {
       jsonrpc: "2.0",
       method: "session/prompt",
       params: {
-        sessionId: "acp-session-1",
+        sessionId: "acp-session-reconnected",
         prompt: [{ type: "text", text: "Review the current diff." }],
       },
     },

@@ -291,12 +291,18 @@ export class GoddardSdk {
           message: createSessionPermissionResponseMessage(input),
         }),
 
-      /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
-      prompt: async (input: SessionPromptRequest) =>
-        this.#client.send("session.send", {
+      /** Reconnects if needed, then sends one prompt without exposing raw ACP message construction. */
+      prompt: async (input: SessionPromptRequest) => {
+        const { session } = await this.#client.send("session.connect", { id: input.id })
+
+        return this.#client.send("session.send", {
           id: input.id,
-          message: createSessionPromptMessage(input),
-        }),
+          message: createSessionPromptMessage({
+            ...input,
+            acpId: session.acpSessionId,
+          }),
+        })
+      },
 
       /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
       subscribe: defineUnwrappedSubscription<DaemonIpcSchema, "session.message", acp.AnyMessage>(
