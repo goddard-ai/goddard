@@ -1,6 +1,12 @@
 import { defineGlobalStyles } from "@pandacss/dev"
 
 export const globalCss = defineGlobalStyles({
+  "@keyframes thinking-gradient": {
+    to: {
+      backgroundPosition: "200% center",
+    },
+  },
+
   ":where(main)": {
     minInlineSize: "0",
     padding: "0.75rem",

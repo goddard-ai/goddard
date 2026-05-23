@@ -322,6 +322,7 @@ export default component SessionChatView(props: {
                 })
               }}
               scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
+              showThinkingLabel={chat.summary.showThinkingLabel}
             />
           }
           <footer class={styles.composerDock}>

@@ -167,6 +167,40 @@ function usageUpdate(size: number, used: number) {
   } satisfies acp.AnyMessage
 }
 
+function toolCallMessage(
+  status: "pending" | "in_progress" | "completed" | "failed" = "in_progress",
+) {
+  return {
+    jsonrpc: "2.0",
+    method: acp.CLIENT_METHODS.session_update,
+    params: {
+      sessionId: "acp-session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-1",
+        title: "Read file",
+        kind: "read",
+        status,
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
+function toolCallUpdateMessage(status: "pending" | "in_progress" | "completed" | "failed") {
+  return {
+    jsonrpc: "2.0",
+    method: acp.CLIENT_METHODS.session_update,
+    params: {
+      sessionId: "acp-session-1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-1",
+        status,
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
 test("SessionChat preserves history turn order and normalizes statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
@@ -540,6 +574,49 @@ test("SessionChat exposes pending permission and plan events", () => {
     "permissionRequest",
     "planUpdate",
   ])
+})
+
+test("SessionChat shows thinking while a turn is running outside tool calls", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  expect(chat.summary.showThinkingLabel).toBe(true)
+
+  chat.applyMessageNow(toolCallMessage("in_progress"))
+
+  expect(chat.summary.showThinkingLabel).toBe(false)
+
+  chat.applyMessageNow(toolCallUpdateMessage("completed"))
+
+  expect(chat.summary.showThinkingLabel).toBe(true)
+
+  chat.applyMessageNow(promptResult())
+
+  expect(chat.summary.showThinkingLabel).toBe(false)
+})
+
+test("SessionChat hides thinking while blocked on permission", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(permissionRequestMessage())
+
+  expect(chat.summary.status).toBe("blocked")
+  expect(chat.summary.showThinkingLabel).toBe(false)
 })
 
 test("SessionChat clears pending permission after the matching response", () => {

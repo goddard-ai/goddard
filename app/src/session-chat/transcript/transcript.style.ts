@@ -72,6 +72,26 @@ export default {
     lineHeight: "1.4",
   }),
 
+  thinkingLabelRow: css({
+    display: "flex",
+    justifyContent: "flex-start",
+    paddingBlock: "2px 12px",
+    pointerEvents: "none",
+  }),
+
+  thinkingLabel: css({
+    display: "inline-flex",
+    background: "linear-gradient(90deg, #ff00cc, #3333ff, #ff00cc)",
+    backgroundClip: "text",
+    backgroundSize: "200% auto",
+    animation: "thinking-gradient 3s cubic-bezier(0.45, 0, 0.2, 1) infinite",
+    color: "transparent",
+    filter: "drop-shadow(0 0 7px rgb(255 0 204 / 0.36))",
+    fontSize: "0.88rem",
+    fontWeight: "680",
+    lineHeight: "1.45",
+  }),
+
   row: css({
     paddingBottom: "16px",
   }),

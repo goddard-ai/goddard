@@ -30,27 +30,28 @@ export type TranscriptMessage = SessionTranscriptItem
 
 /** Props accepted by the dumb session transcript component. */
 export type TranscriptProps = {
-    messages: readonly TranscriptMessage[];
-    class?: string;
-    initialScrollPosition?: "top" | "bottom";
-    onSelectPermissionOption?: (input: {
-      optionId: string;
-      requestId: SessionTranscriptPermissionRequest["requestId"];
-    }) => Promise<void> | void;
-    olderHistory?: {
-      canLoad: boolean;
-      error: string | null;
-      loading: boolean;
-      onLoad: () => Promise<void> | void;
-    };
-    scrollCacheKey?: string;
-  }
+  messages: readonly TranscriptMessage[];
+  class?: string;
+  initialScrollPosition?: "top" | "bottom";
+  onSelectPermissionOption?: (input: {
+    optionId: string;
+    requestId: SessionTranscriptPermissionRequest["requestId"];
+  }) => Promise<void> | void;
+  olderHistory?: {
+    canLoad: boolean;
+    error: string | null;
+    loading: boolean;
+    onLoad: () => Promise<void> | void;
+  };
+  scrollCacheKey?: string;
+  showThinkingLabel?: boolean;
+}
 
 type CoalescedToolTranscriptRow = {
-    kind: "toolGroup";
-    id: string;
-    toolCalls: readonly SessionTranscriptToolCall[];
-  }
+  kind: "toolGroup";
+  id: string;
+  toolCalls: readonly SessionTranscriptToolCall[];
+}
 
 type RenderTranscriptItem =
   SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
@@ -145,7 +146,7 @@ component TranscriptRow(props: {
       <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
       return
     default:
-      item satisfies never
+      throw new Error("Unsupported transcript row.")
   }
 }
 
@@ -184,6 +185,12 @@ component OlderHistoryPager(props: {
   </div>
 }
 
+component ThinkingLabel() {
+  <div class={styles.thinkingLabelRow} aria-live="polite">
+    <span class={styles.thinkingLabel}>"Thinking..."</span>
+  </div>
+}
+
 /** Renders one chat transcript inside the shared message-list virtualizer. */
 export component Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
@@ -219,5 +226,8 @@ export component Transcript(props: TranscriptProps) {
       )}
       scrollCacheKey={props.scrollCacheKey}
     />
+    if (props.showThinkingLabel) {
+      <ThinkingLabel />
+    }
   </div>
 }

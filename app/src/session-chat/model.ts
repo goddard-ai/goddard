@@ -67,6 +67,7 @@ export type SessionChatSummary = {
   activeTurnId: string | null
   contextUsage: SessionChatContextUsage | null
   pendingPermissionRequest: Extract<SessionChatTurnEvent, { kind: "permissionRequest" }> | null
+  showThinkingLabel: boolean
   status: SessionChatStatus
 }
 
@@ -264,6 +265,58 @@ function parseContextUsage(update: Record<string, unknown>): SessionChatContextU
   }
 }
 
+function getToolCallUpdateStatus(message: acp.AnyMessage) {
+  const update = getSessionUpdate(message)
+
+  if (
+    !update ||
+    (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") ||
+    typeof update.toolCallId !== "string"
+  ) {
+    return null
+  }
+
+  return {
+    status: typeof update.status === "string" ? update.status : null,
+    toolCallId: update.toolCallId,
+    updateKind: update.sessionUpdate,
+  }
+}
+
+function hasActiveToolCall(turn: SessionChatTurn) {
+  const toolStatuses = new Map<string, string>()
+
+  for (const message of turn.messages) {
+    const update = getToolCallUpdateStatus(message)
+
+    if (!update) {
+      continue
+    }
+
+    toolStatuses.set(
+      update.toolCallId,
+      update.status ?? (update.updateKind === "tool_call" ? "in_progress" : "pending"),
+    )
+  }
+
+  return [...toolStatuses.values()].some(
+    (status) => status === "pending" || status === "in_progress",
+  )
+}
+
+function shouldShowThinkingLabel(input: {
+  activeTurn: SessionChatTurn | null
+  permissionRequest: SessionPermissionRequest | null
+  status: SessionChatStatus
+}) {
+  return (
+    input.status === "running" &&
+    input.activeTurn !== null &&
+    input.permissionRequest === null &&
+    !hasActiveToolCall(input.activeTurn)
+  )
+}
+
 function getMessageContextUsage(message: acp.AnyMessage) {
   const update = getSessionUpdate(message)
   return update ? parseContextUsage(update) : null
@@ -429,6 +482,7 @@ export class SessionChat extends Sigma<SessionChatState> {
         activeTurnId: null,
         contextUsage: null,
         pendingPermissionRequest: null,
+        showThinkingLabel: false,
         status: "idle",
       },
       turns: [],
@@ -891,12 +945,14 @@ export class SessionChat extends Sigma<SessionChatState> {
   #syncSummary() {
     const activeTurn = getActiveTurn(this.turns)
     const permissionRequest = findPendingPermissionRequest(this.turns)
+    const status = resolveSessionChatStatus(this.session, this.turns, permissionRequest)
 
     this.summary = {
       activeTurnId: activeTurn?.turnId ?? null,
       contextUsage: this.session.contextUsage,
       pendingPermissionRequest: permissionRequest,
-      status: resolveSessionChatStatus(this.session, this.turns, permissionRequest),
+      showThinkingLabel: shouldShowThinkingLabel({ activeTurn, permissionRequest, status }),
+      status,
     }
   }
 
