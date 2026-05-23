@@ -1,10 +1,11 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 
-import { authIpcSchema } from "./daemon-ipc.ts"
+import { authIpcRoutes, authIpcSchema } from "./daemon-ipc.ts"
 
 export const authPlugin = definePlugin({
   name: "auth",
   ipc: authIpcSchema,
+  ipcRoutes: authIpcRoutes,
   setup({ authBackendClient, authTokenStore }) {
     return {
       requestHandlers: {
