@@ -1,21 +1,26 @@
-import { defineRequest, defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
-import { pullRequestIpcSchema } from "./daemon-ipc.ts"
+import {
+  pullRequestIpcRoutes,
+  type ReplyPrRouteRequest,
+  type SubmitPrRouteRequest,
+} from "./daemon-ipc.ts"
+import type { GetPullRequestRequest } from "./schema.ts"
 
 export const pullRequestSdkPlugin = defineSdkPlugin({
   name: "pull-request",
-  ipc: pullRequestIpcSchema,
+  ipcRoutes: pullRequestIpcRoutes,
   create({ client }) {
     return {
       pr: {
         /** Submits one pull request through the daemon PR contract. */
-        submit: defineRequest(client, "pr.submit"),
+        submit: (input: SubmitPrRouteRequest) => client.send("pr.submit", input),
 
         /** Fetches one daemon-managed pull request by tagged id. */
-        get: defineRequest(client, "pr.get"),
+        get: (input: GetPullRequestRequest) => client.send("pr.get", input),
 
         /** Posts one pull request reply through the daemon PR contract. */
-        reply: defineRequest(client, "pr.reply"),
+        reply: (input: ReplyPrRouteRequest) => client.send("pr.reply", input),
       },
     }
   },

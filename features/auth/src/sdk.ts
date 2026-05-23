@@ -1,24 +1,26 @@
-import { defineRequest, defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
-import { authIpcSchema } from "./daemon-ipc.ts"
+import { authIpcRoutes } from "./daemon-ipc.ts"
+import type { DeviceFlowComplete, DeviceFlowStart } from "./schema.ts"
 
 export const authSdkPlugin = defineSdkPlugin({
   name: "auth",
-  ipc: authIpcSchema,
+  ipcRoutes: authIpcRoutes,
   create({ client }) {
     return {
       auth: {
         /** Starts one GitHub device flow through the daemon auth contract. */
-        startDeviceFlow: defineRequest(client, "auth.device.start"),
+        startDeviceFlow: (input?: DeviceFlowStart) => client.send("auth.device.start", input),
 
         /** Completes one pending GitHub device flow through the daemon auth contract. */
-        completeDeviceFlow: defineRequest(client, "auth.device.complete"),
+        completeDeviceFlow: (input: DeviceFlowComplete) =>
+          client.send("auth.device.complete", input),
 
         /** Reads the current daemon-owned auth session as-is. */
-        whoami: defineRequest(client, "auth.whoami"),
+        whoami: () => client.send("auth.whoami"),
 
         /** Clears the current daemon-owned auth session as-is. */
-        logout: defineRequest(client, "auth.logout"),
+        logout: () => client.send("auth.logout"),
       },
     }
   },

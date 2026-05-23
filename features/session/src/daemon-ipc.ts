@@ -1,4 +1,4 @@
-import { $type, defineIpcSchema } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, defineIpcSchema, http } from "@goddard-ai/ipc"
 import {
   CancelSessionRequest,
   CompleteSessionRequest,
@@ -153,4 +153,29 @@ export const sessionIpcSchema = defineIpcSchema({
       filter: DaemonSessionIdParams,
     },
   },
+})
+
+export const sessionIpcRoutes = defineIpcRoutes({
+  session: http.resource("session", {
+    worktree: http.resource("worktree", {
+      get: http.post("get", {
+        body: GetSessionWorktreeRequest,
+        response: $type<GetSessionWorktreeResponse>(),
+      }),
+    }),
+    reviewSession: http.resource("review-session", {
+      mount: http.post("mount", {
+        body: MountSessionReviewSessionRequest,
+        response: $type<MutateSessionReviewSessionResponse>(),
+      }),
+      run: http.post("run", {
+        body: RunSessionReviewSessionRequest,
+        response: $type<MutateSessionReviewSessionResponse>(),
+      }),
+      unmount: http.post("unmount", {
+        body: UnmountSessionReviewSessionRequest,
+        response: $type<MutateSessionReviewSessionResponse>(),
+      }),
+    }),
+  }),
 })

@@ -1,4 +1,4 @@
-import { $type, defineIpcSchema } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, defineIpcSchema, http, ndjson } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
@@ -30,4 +30,24 @@ export const inboxIpcSchema = defineIpcSchema({
       payload: $type<InboxItemEvent>(),
     },
   },
+})
+
+export const inboxIpcRoutes = defineIpcRoutes({
+  inbox: http.resource("inbox", {
+    list: http.post("list", {
+      body: ListInboxRequest,
+      response: $type<ListInboxResponse>(),
+    }),
+    update: http.post("update", {
+      body: UpdateInboxItemRequest,
+      response: $type<UpdateInboxItemResponse>(),
+    }),
+    bulkUpdate: http.post("bulk-update", {
+      body: BulkUpdateInboxItemsRequest,
+      response: $type<BulkUpdateInboxItemsResponse>(),
+    }),
+    itemEvents: http.get("item-events", {
+      response: ndjson.$type<InboxItemEvent>(),
+    }),
+  }),
 })

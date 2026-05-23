@@ -1,15 +1,16 @@
-import { defineRequest, defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
-import { adapterIpcSchema } from "./daemon-ipc.ts"
+import { adapterIpcRoutes } from "./daemon-ipc.ts"
+import type { ListAdaptersRequestType } from "./schema.ts"
 
 export const adapterSdkPlugin = defineSdkPlugin({
   name: "adapter",
-  ipc: adapterIpcSchema,
+  ipcRoutes: adapterIpcRoutes,
   create({ client }) {
     return {
       adapter: {
         /** Lists adapters available for one project or global launch flow. */
-        list: defineRequest(client, "adapter.list"),
+        list: (input: ListAdaptersRequestType) => client.send("adapter.list", input),
       },
     }
   },
