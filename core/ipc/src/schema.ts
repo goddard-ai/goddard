@@ -1,9 +1,6 @@
 import { z } from "zod"
 
-/** Marks a compile-time type without producing any runtime schema. */
-export function $type<T>() {
-  return {} as { __unchecked__: T }
-}
+export { $type } from "rouzer"
 
 /** Carries a type through schema declarations without runtime validation logic. */
 type TypeMarker<T = unknown> = {

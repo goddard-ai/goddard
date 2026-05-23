@@ -29,6 +29,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
+    "rouzer": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

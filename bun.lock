@@ -190,6 +190,7 @@
       "name": "@goddard-ai/ipc",
       "version": "0.1.0",
       "dependencies": {
+        "rouzer": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -396,7 +397,7 @@
     "ai-sdk-json-schema": "^0.3.1",
     "cmd-ts": "^0.15.0",
     "radashi": "^12.8.0",
-    "rouzer": "3.0.2",
+    "rouzer": "3.1.0",
     "zod": "^4.3.6",
   },
   "packages": {
@@ -2484,7 +2485,7 @@
 
     "router": ["router@2.2.0", "", { "dependencies": { "debug": "^4.4.0", "depd": "^2.0.0", "is-promise": "^4.0.0", "parseurl": "^1.3.3", "path-to-regexp": "^8.0.0" } }, "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ=="],
 
-    "rouzer": ["rouzer@3.0.2", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.21.1", "alien-middleware": "^0.11.6" }, "peerDependencies": { "zod": ">=4" } }, "sha512-wTr7HItqQ7S0aDQjN5FVenTZiViuj6s26qbyicrgZensv8mjbM8JM2kZa220Ru9d8EpQX2OhKR291XYzPvx5bw=="],
+    "rouzer": ["rouzer@3.1.0", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.21.1", "alien-middleware": "^0.11.6" }, "peerDependencies": { "zod": ">=4" } }, "sha512-3MkHcfmyUjbIoY902OWZz6uxD9udI+dF19BkvNjPhC5Jdk+jjoOpXwTG7fPTT48dmHUqBUtvvNpNizUMaTDRpw=="],
 
     "run-applescript": ["run-applescript@7.1.0", "", {}, "sha512-DPe5pVFaAsinSaV6QjQ6gdiedWDcRCbUuiQfQa2wmWV7+xC9bGulGI8+TdRmoFkAPaBXk8CrAbnlY2ISniJ47Q=="],
 

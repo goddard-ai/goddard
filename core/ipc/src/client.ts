@@ -13,7 +13,7 @@ import { toValidationClientError } from "./validation.ts"
 /** Normalizes shorthand and object stream definitions into optional filter schemas. */
 function getStreamSchemas<S extends IpcSchema, K extends ValidStreamName<S>>(schema: S, name: K) {
   const definition = schema.streams[name]
-  if (!("payload" in definition)) {
+  if (typeof definition !== "object" || definition === null || !("payload" in definition)) {
     return {
       filter: undefined,
     }

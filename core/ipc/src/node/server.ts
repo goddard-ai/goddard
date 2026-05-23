@@ -44,7 +44,7 @@ function getStreamSchemas<TSchema extends IpcSchema, K extends ValidStreamName<T
   name: K,
 ) {
   const definition = schema.streams[name]
-  if (!("payload" in definition)) {
+  if (typeof definition !== "object" || definition === null || !("payload" in definition)) {
     return {
       filter: undefined,
     }
