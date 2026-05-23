@@ -14,4 +14,4 @@ Please direct bug reports and feature requests to the [Issue Tracker](https://gi
 
 ## License
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPLv3)](./LICENSE-AGPLv3).
+This project is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](./LICENSE).

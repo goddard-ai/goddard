@@ -17,4 +17,4 @@ const input = CreatePrInput.parse(payload)
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE-MIT).
+This project is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](./LICENSE).

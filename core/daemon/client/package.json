@@ -1,7 +1,7 @@
 {
   "name": "@goddard-ai/daemon-client",
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "exports": {
     ".": {

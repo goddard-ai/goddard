@@ -2,7 +2,7 @@
   "name": "@goddard-ai/sprint-branch",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "bin": {
     "sprint-branch": "./bin/sprint-branch"
   },

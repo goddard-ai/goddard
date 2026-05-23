@@ -131,4 +131,4 @@ console.log(listed.workforces.length)
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE-MIT).
+This project is licensed under the [Apache License 2.0](./LICENSE).

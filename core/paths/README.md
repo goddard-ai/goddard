@@ -17,4 +17,4 @@ It does not read files, write files, persist tokens, or open SQLite databases.
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE-MIT).
+This project is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](./LICENSE).

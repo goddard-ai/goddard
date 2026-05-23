@@ -2,7 +2,7 @@
   "name": "@goddard-ai/daemon",
   "version": "0.1.0",
   "private": true,
-  "license": "AGPL-3.0",
+  "license": "FSL-1.1-ALv2",
   "bin": {
     "goddard-daemon": "./dist/main.mjs"
   },
