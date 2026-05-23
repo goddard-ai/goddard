@@ -20,26 +20,31 @@ export component WorkbenchScrollPanel(props: {
   tabId?: string;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const lastFocusedScrollKeyRef = useRef(props.scrollKey)
   const shouldRestoreScroll = props.restoreScroll ?? true
 
   useLayoutEffect(() => {
-    if (!shouldRestoreScroll) {
-      return
-    }
-
     const scrollerElement = scrollerRef.current
 
     if (!scrollerElement) {
       return
     }
 
-    const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
-    scrollerElement.scrollTop = restoredScrollTop
+    if (shouldRestoreScroll) {
+      const restoredScrollTop = panelScrollCache.get(props.scrollKey) ?? 0
+      scrollerElement.scrollTop = restoredScrollTop
+    }
+
+    if (lastFocusedScrollKeyRef.current !== props.scrollKey) {
+      lastFocusedScrollKeyRef.current = props.scrollKey
+      scrollerElement.focus({ preventScroll: true })
+    }
   }, [props.scrollKey, shouldRestoreScroll])
 
   <div
     ref={scrollerRef}
     class={styles.scrollPanel}
+    tabIndex={-1}
     onScroll={(event) => {
       panelScrollCache.set(props.scrollKey, event.currentTarget.scrollTop)
     }}
