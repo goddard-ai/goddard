@@ -10,7 +10,7 @@ import type { GetPullRequestRequest } from "./schema.ts"
 export const pullRequestSdkPlugin = defineSdkPlugin({
   name: "pull-request",
   ipcRoutes: pullRequestIpcRoutes,
-  create({ client }) {
+  extend({ client }) {
     return {
       pr: {
         /** Submits one pull request through the daemon PR contract. */

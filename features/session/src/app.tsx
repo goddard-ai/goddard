@@ -4,7 +4,7 @@ import { sessionSdkPlugin } from "./sdk.ts"
 
 /** SDK surface the app composition root must provide to session app contributions. */
 export type SessionAppSdkRequirements = {
-  readonly session: ReturnType<typeof sessionSdkPlugin.create>["session"]
+  readonly session: ReturnType<NonNullable<typeof sessionSdkPlugin.extend>>["session"]
 }
 
 export const sessionAppPlugin = defineAppPlugin({

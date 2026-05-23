@@ -10,7 +10,7 @@ type LegacyDaemonClient = {
 type RuntimeSdkPlugin = {
   readonly name: string
   readonly ipcRoutes: HttpRouteTree
-  readonly create: (input: { readonly client: any }) => SdkNamespaces
+  readonly extend?: (input: { readonly client: any }) => SdkNamespaces
 }
 
 /** SDK plugin shape used to constrain feature plugin values without widening them. */
@@ -20,7 +20,7 @@ export type SdkPluginDefinition<
 > = {
   readonly name: string
   readonly ipcRoutes: TRoutes
-  readonly create: (input: {
+  readonly extend?: (input: {
     readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
   }) => TNamespaces
 }
@@ -33,13 +33,13 @@ export function defineSdkPlugin<
 >(plugin: {
   readonly name: TName
   readonly ipcRoutes: TRoutes
-  readonly create: (input: {
+  readonly extend?: (input: {
     readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
   }) => TNamespaces
 }): {
   readonly name: TName
   readonly ipcRoutes: TRoutes
-  readonly create: (input: { readonly client: any }) => TNamespaces
+  readonly extend?: (input: { readonly client: any }) => TNamespaces
 } {
   return plugin as any
 }
@@ -47,11 +47,14 @@ export function defineSdkPlugin<
 /** Composes SDK feature plugins by merging namespace objects and rejecting method collisions. */
 export function composeSdkPlugins(plugins: readonly RuntimeSdkPlugin[]) {
   return {
-    create(input: Parameters<RuntimeSdkPlugin["create"]>[0]) {
+    extend(input: { readonly client: any }) {
       const namespaces: SdkNamespaces = {}
 
       for (const plugin of plugins) {
-        const pluginNamespaces = plugin.create(input)
+        const pluginNamespaces = plugin.extend?.(input)
+        if (!pluginNamespaces) {
+          continue
+        }
 
         for (const [namespaceName, namespace] of Object.entries(pluginNamespaces)) {
           const existingNamespace = namespaces[namespaceName]

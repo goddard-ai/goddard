@@ -16,7 +16,7 @@ describe("SDK plugin composition", () => {
     const first = defineSdkPlugin({
       name: "first",
       ipcRoutes: testIpcRoutes,
-      create() {
+      extend() {
         return {
           inbox: {
             list: () => "list",
@@ -27,7 +27,7 @@ describe("SDK plugin composition", () => {
     const second = defineSdkPlugin({
       name: "second",
       ipcRoutes: testIpcRoutes,
-      create() {
+      extend() {
         return {
           inbox: {
             update: () => "update",
@@ -36,7 +36,7 @@ describe("SDK plugin composition", () => {
       },
     })
 
-    const namespaces = composeSdkPlugins([first, second]).create({ client: {} })
+    const namespaces = composeSdkPlugins([first, second]).extend({ client: {} })
 
     expect(Object.keys(namespaces.inbox)).toEqual(["list", "update"])
   })
@@ -45,7 +45,7 @@ describe("SDK plugin composition", () => {
     const first = defineSdkPlugin({
       name: "first",
       ipcRoutes: testIpcRoutes,
-      create() {
+      extend() {
         return {
           inbox: {
             list: () => "first",
@@ -56,7 +56,7 @@ describe("SDK plugin composition", () => {
     const second = defineSdkPlugin({
       name: "second",
       ipcRoutes: testIpcRoutes,
-      create() {
+      extend() {
         return {
           inbox: {
             list: () => "second",
@@ -65,8 +65,17 @@ describe("SDK plugin composition", () => {
       },
     })
 
-    expect(() => composeSdkPlugins([first, second]).create({ client: {} })).toThrow(
+    expect(() => composeSdkPlugins([first, second]).extend({ client: {} })).toThrow(
       "Duplicate SDK namespace method: inbox.list",
     )
+  })
+
+  test("allows route-only plugins without custom extensions", () => {
+    const plugin = defineSdkPlugin({
+      name: "route-only",
+      ipcRoutes: testIpcRoutes,
+    })
+
+    expect(composeSdkPlugins([plugin]).extend({ client: {} })).toEqual({})
   })
 })

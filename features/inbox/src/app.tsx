@@ -3,7 +3,7 @@ import { defineAppPlugin } from "@goddard-ai/app-plugin"
 import { inboxSdkPlugin } from "./sdk.ts"
 
 export type InboxAppSdkRequirements = {
-  readonly inbox: ReturnType<typeof inboxSdkPlugin.create>["inbox"]
+  readonly inbox: ReturnType<NonNullable<typeof inboxSdkPlugin.extend>>["inbox"]
 }
 
 export const inboxAppPlugin = defineAppPlugin({
