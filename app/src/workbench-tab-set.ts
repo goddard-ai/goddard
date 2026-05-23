@@ -38,13 +38,18 @@ export const WORKBENCH_TAB_LIMIT = 20
 
 /** Sigma state for the shell's closable workbench tab strip. */
 export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
-  constructor() {
+  // Close listeners keep non-persisted tab resources in sync with persisted tab records.
+  #onCloseTab: (tabId: string) => void
+
+  constructor(input: { onCloseTab?: (tabId: string) => void } = {}) {
     super({
       tabs: {},
       orderedTabIds: [],
       activeTabId: WORKBENCH_MAIN_TAB.id,
       recency: [],
     })
+
+    this.#onCloseTab = input.onCloseTab ?? (() => {})
   }
 
   /** Returns the closable tabs in their rendered order. */
@@ -104,6 +109,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     delete this.tabs[tabId]
     this.orderedTabIds = this.orderedTabIds.filter((id) => id !== tabId)
     this.recency = this.recency.filter((id) => id !== tabId)
+    this.#onCloseTab(tabId)
 
     if (this.activeTabId === tabId) {
       this.activeTabId = this.orderedTabIds[this.orderedTabIds.length - 1] ?? WORKBENCH_MAIN_TAB.id

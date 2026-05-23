@@ -11,6 +11,7 @@ import { ProjectContext, type ProjectContextState } from "./projects/project-con
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION } from "./shared/shortcut-keymap.ts"
 import { ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
+import { WorkbenchTabCache } from "./workbench-tab-cache.ts"
 import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
 
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
@@ -164,18 +165,27 @@ function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>
 
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
 export function useAppState() {
-  const [appState] = useState(() => ({
-    appearance: new Appearance({
-      mode: "system",
-      highContrast: false,
-    }),
-    inbox: new Inbox(),
-    mainTab: new MainTab(),
-    projectContext: new ProjectContext(),
-    projectRegistry: new ProjectRegistry(),
-    shortcutRegistry: new ShortcutRegistry(),
-    workbenchTabSet: new WorkbenchTabSet(),
-  }))
+  const [appState] = useState(() => {
+    const workbenchTabCache = new WorkbenchTabCache()
+
+    return {
+      appearance: new Appearance({
+        mode: "system",
+        highContrast: false,
+      }),
+      inbox: new Inbox(),
+      mainTab: new MainTab(),
+      projectContext: new ProjectContext(),
+      projectRegistry: new ProjectRegistry(),
+      shortcutRegistry: new ShortcutRegistry(),
+      workbenchTabCache,
+      workbenchTabSet: new WorkbenchTabSet({
+        onCloseTab: (tabId) => {
+          workbenchTabCache.disposeTab(tabId)
+        },
+      }),
+    }
+  })
 
   useEffect(() => {
     let isDisposed = false
@@ -253,7 +263,13 @@ export function useAppState() {
   }, [appState])
 
   useSetup(() => {
-    return [appState.appearance.setup(), appState.shortcutRegistry.setup()]
+    return [
+      appState.appearance.setup(),
+      appState.shortcutRegistry.setup(),
+      () => {
+        appState.workbenchTabCache.disposeAll()
+      },
+    ]
   }, [appState])
 
   useEffect(() => {
@@ -342,6 +358,7 @@ export function useAppState() {
     projectContext: castProtected(appState.projectContext),
     projectRegistry: castProtected(appState.projectRegistry),
     shortcutRegistry: castProtected(appState.shortcutRegistry),
+    workbenchTabCache: appState.workbenchTabCache,
     workbenchTabSet: castProtected(appState.workbenchTabSet),
   }
 }

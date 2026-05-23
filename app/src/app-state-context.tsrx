@@ -22,6 +22,7 @@ type AppStateContextStore = {
   ProjectContext?: RequiredContext<AppState["projectContext"]>;
   ProjectRegistry?: RequiredContext<AppState["projectRegistry"]>;
   ShortcutRegistry?: RequiredContext<AppState["shortcutRegistry"]>;
+  WorkbenchTabCache?: RequiredContext<AppState["workbenchTabCache"]>;
   WorkbenchTabSet?: RequiredContext<AppState["workbenchTabSet"]>;
 }
 
@@ -57,6 +58,9 @@ const context = {
   ShortcutRegistry: appStateContextStore.ShortcutRegistry ??= createRequiredContext<
     AppState["shortcutRegistry"]
   >("shortcutRegistryContext"),
+  WorkbenchTabCache: appStateContextStore.WorkbenchTabCache ??= createRequiredContext<
+    AppState["workbenchTabCache"]
+  >("workbenchTabCacheContext"),
   WorkbenchTabSet: appStateContextStore.WorkbenchTabSet ??= createRequiredContext<
     AppState["workbenchTabSet"]
   >("workbenchTabSetContext"),
@@ -73,9 +77,11 @@ export component AppStateProvider(props: {
         <context.ProjectContext value={appState.projectContext}>
           <context.ProjectRegistry value={appState.projectRegistry}>
             <context.ShortcutRegistry value={appState.shortcutRegistry}>
-              <context.WorkbenchTabSet value={appState.workbenchTabSet}>
-                {props.children}
-              </context.WorkbenchTabSet>
+              <context.WorkbenchTabCache value={appState.workbenchTabCache}>
+                <context.WorkbenchTabSet value={appState.workbenchTabSet}>
+                  {props.children}
+                </context.WorkbenchTabSet>
+              </context.WorkbenchTabCache>
             </context.ShortcutRegistry>
           </context.ProjectRegistry>
         </context.ProjectContext>
@@ -90,4 +96,5 @@ export const useMainTab = context.MainTab.use
 export const useProjectContext = context.ProjectContext.use
 export const useProjectRegistry = context.ProjectRegistry.use
 export const useShortcutRegistry = context.ShortcutRegistry.use
+export const useWorkbenchTabCache = context.WorkbenchTabCache.use
 export const useWorkbenchTabSet = context.WorkbenchTabSet.use

@@ -10,7 +10,7 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect } from "preact/hooks"
-import { useSigma, useSigmaSync } from "preact-sigma"
+import { castProtected, useSigmaSync } from "preact-sigma"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
@@ -31,6 +31,7 @@ import {
   respondSessionPermission,
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
+import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
 export default component SessionChatView(props: {
   projectPath: string | null;
@@ -54,16 +55,21 @@ export default component SessionChatView(props: {
           ],
         )
 
-        const chat = useSigma(
-          () => new SessionChat({
+        const chat = useWorkbenchCachedValue("sessionChat", () => {
+          const chat = new SessionChat({
             history: sessionHistory,
             session,
-          }),
-          { deps: [session.id] },
-        )
+          })
+
+          return {
+            setup: () => chat.setup(),
+            value: chat,
+          }
+        })
         useSigmaSync(chat, { history: sessionHistory, session }, (payload) => {
           chat.syncLoadedData(payload)
         })
+        const protectedChat = castProtected(chat)
         const transcriptMessages = chat.transcriptMessages
 
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
@@ -88,7 +94,7 @@ export default component SessionChatView(props: {
           }
         }
 
-        <SessionChatQueryDataProvider value={{ chat, session, sessionHistory }}>
+        <SessionChatQueryDataProvider value={{ chat: protectedChat, session, sessionHistory }}>
           <header class={styles.header}>
             <div class={styles.headerIdentity}>
               <p class={styles.headerRepository}>
