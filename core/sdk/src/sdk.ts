@@ -59,10 +59,10 @@ const sdkPlugins = composeSdkPlugins([
   pullRequestSdkPlugin,
 ])
 
-type FeatureSdkNamespaces = ReturnType<NonNullable<typeof adapterSdkPlugin.extend>> &
-  ReturnType<NonNullable<typeof authSdkPlugin.extend>> &
-  ReturnType<NonNullable<typeof inboxSdkPlugin.extend>> &
-  ReturnType<NonNullable<typeof pullRequestSdkPlugin.extend>>
+type FeatureSdkNamespaces = ReturnType<NonNullable<typeof adapterSdkPlugin.wrap>> &
+  ReturnType<NonNullable<typeof authSdkPlugin.wrap>> &
+  ReturnType<NonNullable<typeof inboxSdkPlugin.wrap>> &
+  ReturnType<NonNullable<typeof pullRequestSdkPlugin.wrap>>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -86,7 +86,7 @@ function createDaemonNamespace(client: DaemonIpcClient) {
 
 /** Builds the session namespace with one thin method per daemon session IPC action. */
 function createSessionNamespace(client: DaemonIpcClient) {
-  const sessionFeature = sessionSdkPlugin.extend!({ client }).session
+  const sessionFeature = sessionSdkPlugin.wrap!({ client }).session
 
   return {
     /** Starts or reconnects one live daemon-backed session and returns an object-backed wrapper. */
@@ -274,7 +274,7 @@ export class GoddardSdk {
   }
 
   get #features() {
-    this.#featureNamespaces ??= sdkPlugins.extend({
+    this.#featureNamespaces ??= sdkPlugins.wrap({
       client: this.#client,
     }) as FeatureSdkNamespaces
     return this.#featureNamespaces

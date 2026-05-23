@@ -6,7 +6,7 @@ import type { DeviceFlowComplete, DeviceFlowStart } from "./schema.ts"
 export const authSdkPlugin = defineSdkPlugin({
   name: "auth",
   ipcRoutes: authIpcRoutes,
-  extend({ client }) {
+  wrap({ client }) {
     return {
       auth: {
         /** Starts one GitHub device flow through the daemon auth contract. */

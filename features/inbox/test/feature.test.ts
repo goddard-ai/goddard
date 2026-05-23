@@ -16,7 +16,7 @@ describe("inbox feature package", () => {
       "inbox.update",
       "inbox.bulkUpdate",
     ])
-    expect(Object.keys(inboxSdkPlugin.extend!({ client: {} as never }))).toEqual(["inbox"])
+    expect(Object.keys(inboxSdkPlugin.wrap!({ client: {} as never }))).toEqual(["inbox"])
     expect(InboxItemId.parse("inb_test")).toBe("inb_test")
   })
 })

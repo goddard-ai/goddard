@@ -12,7 +12,7 @@ Feature packages export SDK plugins from `features/<name>/src/sdk.ts` and public
 export const inboxSdkPlugin = defineSdkPlugin({
   name: "inbox",
   ipcRoutes: inboxIpcRoutes,
-  extend({ client }) {
+  wrap({ client }) {
     return {
       inbox: {
         list: (input = {}) => client.inbox.list({ body: input }),
@@ -22,6 +22,8 @@ export const inboxSdkPlugin = defineSdkPlugin({
 })
 ```
 
-Feature SDK plugins should not import `@goddard-ai/sdk`. They declare the IPC route tree they wrap and receive a route-scoped client from the public SDK composition root. The optional `extend()` hook is for product-shaped wrappers around generated route methods; route-only plugins can omit it.
+Feature SDK plugins should not import `@goddard-ai/sdk`. They declare the IPC route tree they wrap and receive a route-scoped client from the public SDK composition root. The optional `wrap()` hook is for product-shaped wrappers around generated route methods; route-only plugins can omit it.
+
+The public SDK composition root owns the client runtime. It composes feature `ipcRoutes`, builds one generated route client, and passes that client to each feature wrapper. Wrappers may expose friendlier SDK method signatures, combine multiple route calls, normalize subscription lifecycles, or preserve a product-shaped namespace when the raw route shape is too transport-oriented. Duplicate wrapper methods in the same namespace are rejected during composition.
 
 `features/inbox/src/sdk.ts` is the reference SDK feature entrypoint.

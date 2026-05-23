@@ -11,7 +11,7 @@ import type {
 export const sessionSdkPlugin = defineSdkPlugin({
   name: "session",
   ipcRoutes: sessionIpcRoutes,
-  extend({ client }) {
+  wrap({ client }) {
     return {
       session: {
         /** Reads persisted worktree metadata attached to one daemon-managed session. */

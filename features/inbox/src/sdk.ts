@@ -11,7 +11,7 @@ import type {
 export const inboxSdkPlugin = defineSdkPlugin({
   name: "inbox",
   ipcRoutes: inboxIpcRoutes,
-  extend({ client }) {
+  wrap({ client }) {
     return {
       inbox: {
         /** Lists daemon-local inbox rows using daemon ordering and filtering. */

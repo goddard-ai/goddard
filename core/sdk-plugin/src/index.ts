@@ -1,5 +1,5 @@
 /** Internal SDK plugin support contracts for statically composed feature packages. */
-import type { HttpRouteTree, RouzerClient } from "@goddard-ai/ipc"
+import { composeIpcRoutes, type HttpRouteTree, type RouzerClient } from "@goddard-ai/ipc"
 
 type SdkNamespaces = Record<string, Record<string, unknown>>
 type LegacyDaemonClient = {
@@ -10,7 +10,7 @@ type LegacyDaemonClient = {
 type RuntimeSdkPlugin = {
   readonly name: string
   readonly ipcRoutes: HttpRouteTree
-  readonly extend?: (input: { readonly client: any }) => SdkNamespaces
+  readonly wrap?: (input: { readonly client: any }) => SdkNamespaces
 }
 
 /** SDK plugin shape used to constrain feature plugin values without widening them. */
@@ -20,7 +20,7 @@ export type SdkPluginDefinition<
 > = {
   readonly name: string
   readonly ipcRoutes: TRoutes
-  readonly extend?: (input: {
+  readonly wrap?: (input: {
     readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
   }) => TNamespaces
 }
@@ -33,25 +33,27 @@ export function defineSdkPlugin<
 >(plugin: {
   readonly name: TName
   readonly ipcRoutes: TRoutes
-  readonly extend?: (input: {
+  readonly wrap?: (input: {
     readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
   }) => TNamespaces
 }): {
   readonly name: TName
   readonly ipcRoutes: TRoutes
-  readonly extend?: (input: { readonly client: any }) => TNamespaces
+  readonly wrap?: (input: { readonly client: any }) => TNamespaces
 } {
   return plugin as any
 }
 
-/** Composes SDK feature plugins by merging namespace objects and rejecting method collisions. */
+/** Composes SDK feature plugins by merging route trees and wrapper namespaces. */
 export function composeSdkPlugins(plugins: readonly RuntimeSdkPlugin[]) {
   return {
-    extend(input: { readonly client: any }) {
+    ipcRoutes: composeIpcRoutes(plugins.map((plugin) => plugin.ipcRoutes)),
+
+    wrap(input: { readonly client: any }) {
       const namespaces: SdkNamespaces = {}
 
       for (const plugin of plugins) {
-        const pluginNamespaces = plugin.extend?.(input)
+        const pluginNamespaces = plugin.wrap?.(input)
         if (!pluginNamespaces) {
           continue
         }
