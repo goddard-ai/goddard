@@ -1,3 +1,4 @@
+import { $type, http, ndjson } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
@@ -44,6 +45,33 @@ describe("daemon plugin composition", () => {
     expect(composition.plugins.map((plugin) => plugin.name)).toEqual(["session", "inbox"])
     expect(Object.keys(composition.ipc.requests)).toEqual(["session.create"])
     expect(composition.config.session.scopes).toEqual(["user", "project"])
+  })
+
+  test("composes IPC route tree fragments", () => {
+    const session = definePlugin({
+      name: "session",
+      ipcRoutes: {
+        session: http.resource("session", {
+          create: http.post("create", {
+            response: $type<{ id: string }>(),
+          }),
+        }),
+      },
+    })
+    const inbox = definePlugin({
+      name: "inbox",
+      ipcRoutes: {
+        session: http.resource("session", {
+          events: http.get("events", {
+            response: ndjson.$type<{ id: string }>(),
+          }),
+        }),
+      },
+    })
+
+    const composition = composePlugins([inbox, session])
+
+    expect(Object.keys(composition.ipcRoutes.session.children).sort()).toEqual(["create", "events"])
   })
 
   test("rejects duplicate plugin names", () => {

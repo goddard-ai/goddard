@@ -1,4 +1,4 @@
-import type { IpcSchema } from "@goddard-ai/ipc"
+import type { HttpRouteTree, IpcSchema } from "@goddard-ai/ipc"
 
 import type {
   ConfigDefinition,
@@ -24,12 +24,14 @@ type PluginShape<
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TIpc extends IpcSchema | undefined,
+  TIpcRoutes extends HttpRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
   OptionalPluginField<"config", TConfig> &
   OptionalPluginField<"db", TDb> &
   OptionalPluginField<"ipc", TIpc> &
+  OptionalPluginField<"ipcRoutes", TIpcRoutes> &
   OptionalPluginField<"lifecycle", TLifecycle> &
   OptionalPluginField<"register", TRegister>
 
@@ -39,6 +41,7 @@ type PluginOptions<
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TIpc extends IpcSchema | undefined,
+  TIpcRoutes extends HttpRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = {
@@ -48,6 +51,7 @@ type PluginOptions<
   readonly config?: TConfig
   readonly db?: TDb
   readonly ipc?: TIpc
+  readonly ipcRoutes?: TIpcRoutes
   readonly lifecycle?: TLifecycle
   readonly register?: TRegister
 }
@@ -101,23 +105,33 @@ type DefinePlugin = {
     const TConfig extends ConfigDefinition | undefined,
     const TDb extends DbSchemaDefinition | undefined,
     const TIpc extends IpcSchema,
+    const TIpcRoutes extends HttpRouteTree | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister> & {
+    plugin: PluginOptions<
+      TName,
+      TConsumes,
+      TConfig,
+      TDb,
+      TIpc,
+      TIpcRoutes,
+      TLifecycle,
+      TRegister
+    > & {
       readonly ipc: TIpc
       readonly setup: RequiredPluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister>,
+        PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister>,
         TIpc,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister> & {
     readonly setup: RequiredPluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TLifecycle, TRegister>,
+      PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister>,
       TIpc,
       TProvides
     >
@@ -127,23 +141,33 @@ type DefinePlugin = {
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
     const TDb extends DbSchemaDefinition | undefined,
+    const TIpcRoutes extends HttpRouteTree | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister> & {
+    plugin: PluginOptions<
+      TName,
+      TConsumes,
+      TConfig,
+      TDb,
+      undefined,
+      TIpcRoutes,
+      TLifecycle,
+      TRegister
+    > & {
       readonly ipc?: undefined
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister>,
+        PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister>,
         undefined,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, undefined, TLifecycle, TRegister>,
+      PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister>,
       undefined,
       TProvides
     >

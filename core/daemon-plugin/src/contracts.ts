@@ -1,6 +1,7 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
 import {
   type Handlers,
+  type HttpRouteTree,
   type InferStreamPayload,
   type IpcSchema,
   type ValidStreamName,
@@ -177,6 +178,7 @@ export type Plugin = {
   readonly config?: ConfigDefinition
   readonly db?: DbSchemaDefinition
   readonly ipc?: IpcSchema
+  readonly ipcRoutes?: HttpRouteTree
   readonly lifecycle?: unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
   readonly setup?: (
@@ -189,6 +191,7 @@ export type Plugin = {
 export type Composition = {
   readonly plugins: readonly Plugin[]
   readonly ipc: IpcSchema
+  readonly ipcRoutes: HttpRouteTree
   readonly config: Record<string, ConfigDefinition>
   readonly db: DbSchemaDefinition
 }
