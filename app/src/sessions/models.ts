@@ -72,6 +72,7 @@ export type SessionTranscriptToolCall = {
   title: string
   toolKind: SessionTranscriptToolKind
   status: SessionTranscriptToolStatus
+  rawInput: unknown | null
   content: readonly SessionTranscriptToolContent[]
   locations: readonly SessionTranscriptToolLocation[]
 }

@@ -28,6 +28,7 @@ type ParsedToolCallUpdate = {
   title?: string
   toolKind?: SessionTranscriptToolKind
   status?: SessionTranscriptToolStatus
+  rawInput?: unknown
   content?: SessionTranscriptToolContent[]
   locations?: SessionTranscriptToolLocation[]
 }
@@ -517,6 +518,10 @@ function extractToolCallUpdate(update: Record<string, unknown> | null) {
     toolCallUpdate.content = extractToolCallContent(update.content)
   }
 
+  if ("rawInput" in update) {
+    toolCallUpdate.rawInput = update.rawInput ?? null
+  }
+
   if ("locations" in update) {
     toolCallUpdate.locations = extractToolCallLocations(update.locations)
   }
@@ -915,6 +920,7 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
         status:
           toolCallUpdate.status ??
           (toolCallUpdate.updateKind === "tool_call" ? "in_progress" : "pending"),
+        rawInput: toolCallUpdate.rawInput ?? null,
         content: toolCallUpdate.content ?? [],
         locations: toolCallUpdate.locations ?? [],
       }
@@ -933,6 +939,7 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
       title: toolCallUpdate.title ?? existingRow.title,
       toolKind: toolCallUpdate.toolKind ?? existingRow.toolKind,
       status: toolCallUpdate.status ?? existingRow.status,
+      rawInput: toolCallUpdate.rawInput ?? existingRow.rawInput,
       content: toolCallUpdate.content ?? existingRow.content,
       locations: toolCallUpdate.locations ?? existingRow.locations,
     }

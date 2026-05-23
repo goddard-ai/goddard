@@ -1,70 +1,213 @@
-import type {
-  SessionTranscriptToolCall,
-  SessionTranscriptToolContent,
-  SessionTranscriptToolStatus,
-} from "~/sessions/models.ts"
+import type { SessionTranscriptToolCall, SessionTranscriptToolContent } from "~/sessions/models.ts"
 import { buildToolDiffPreview } from "./layout.ts"
 import styles from "./transcript.style.ts"
 
-function formatToolKindLabel(toolKind: SessionTranscriptToolCall["toolKind"]) {
-  return toolKind === "switch_mode"
-    ? "Switch mode"
-    : `${toolKind.slice(0, 1).toUpperCase()}${toolKind.slice(1)}`
+const TOOL_KIND_SUMMARIES: Record<SessionTranscriptToolCall["toolKind"], readonly [verb: string, noun: string]> = {
+  read: ["Read", "file"],
+  edit: ["Edited", "file"],
+  delete: ["Deleted", "file"],
+  move: ["Moved", "file"],
+  search: ["Searched", "time"],
+  execute: ["Ran", "command"],
+  think: ["Thought", "time"],
+  fetch: ["Fetched", "resource"],
+  switch_mode: ["Switched", "mode"],
+  other: ["Used", "tool"],
 }
 
-function formatToolStatusLabel(status: SessionTranscriptToolStatus) {
-  return status === "in_progress"
-    ? "Running"
-    : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
+function formatCount(noun: string, count: number) {
+  return `${count} ${count === 1 ? noun : `${noun}s`}`
 }
 
-function buildToolGroupSummaryParts(toolCalls: readonly SessionTranscriptToolCall[]) {
-  const visibleTitles = toolCalls.slice(0, 3).map((toolCall) => toolCall.title)
-  const moreCount = Math.max(0, toolCalls.length - visibleTitles.length)
-
-  return [
-    toolCalls.length === 1 ? "Tool call" : `${toolCalls.length} tool calls`,
-    visibleTitles.join(", "),
-    moreCount > 0 ? `+${moreCount} more` : null,
-  ].filter(Boolean) as string[]
-}
-
-function buildToolStatusSummary(toolCalls: readonly SessionTranscriptToolCall[]) {
-  const counts: Record<SessionTranscriptToolStatus, number> = {
-    pending: 0,
-    in_progress: 0,
-    completed: 0,
-    failed: 0,
+function findToolCallPath(toolCall: SessionTranscriptToolCall) {
+  const locationPath = toolCall.locations[0]?.path
+  if (locationPath) {
+    return locationPath
   }
+
+  for (const content of toolCall.content) {
+    if (content.type === "diff" && content.path) {
+      return content.path
+    }
+  }
+
+  return findRawString(toolCall.rawInput, ["path", "file", "filePath"])
+}
+
+function getPathBasename(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
+
+function isRecord(value: unknown) {
+  return typeof value === "object" && value !== null
+}
+
+function findRawString(value: unknown, keys: readonly string[]) {
+  if (typeof value === "string") {
+    const text = value.trim()
+    return text.length > 0 ? text : null
+  }
+
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+
+  for (const key of keys) {
+    const rawValue = record[key]
+    if (typeof rawValue === "string" && rawValue.trim().length > 0) {
+      return rawValue.trim()
+    }
+  }
+
+  return null
+}
+
+function findRawCommand(value: unknown) {
+  if (typeof value === "string") {
+    const command = value.trim()
+    return command.length > 0 ? command : null
+  }
+
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const command =
+    typeof record.command === "string" ? record.command.trim() : ""
+  if (command.length === 0) {
+    return findRawString(record, ["cmd", "script"])
+  }
+
+  const args =
+    Array.isArray(record.args)
+      ? record.args.flatMap((arg) => (typeof arg === "string" ? [arg] : []))
+      : []
+
+  return [command, ...args].join(" ")
+}
+
+function removeTitlePrefix(title: string, prefixes: readonly string[]) {
+  const trimmedTitle = title.trim()
+
+  for (const prefix of prefixes) {
+    if (trimmedTitle.toLowerCase().startsWith(prefix.toLowerCase())) {
+      return trimmedTitle.slice(prefix.length).trim() || trimmedTitle
+    }
+  }
+
+  return trimmedTitle
+}
+
+function countToolCallTargets(toolCall: SessionTranscriptToolCall) {
+  const paths = new Set<string>()
+
+  for (const location of toolCall.locations) {
+    paths.add(location.path)
+  }
+
+  for (const content of toolCall.content) {
+    if (content.type === "diff" && content.path) {
+      paths.add(content.path)
+    }
+  }
+
+  return paths.size || 1
+}
+
+function buildToolCallDescription(toolCall: SessionTranscriptToolCall) {
+  const [verb, noun] = TOOL_KIND_SUMMARIES[toolCall.toolKind]
+
+  return `${verb} ${formatCount(noun, countToolCallTargets(toolCall))}`
+}
+
+function buildToolCallDetailDescription(toolCall: SessionTranscriptToolCall) {
+  const path = findToolCallPath(toolCall)
+
+  if (path && ["read", "edit", "delete", "move"].includes(toolCall.toolKind)) {
+    const [verb] = TOOL_KIND_SUMMARIES[toolCall.toolKind]
+
+    return {
+      text: `${verb} ${getPathBasename(path)}`,
+      tooltip: path,
+    }
+  }
+
+  if (toolCall.toolKind === "execute") {
+    const command = findRawCommand(toolCall.rawInput)
+
+    return {
+      text: `Ran ${
+        command ?? removeTitlePrefix(toolCall.title, ["Run ", "Ran ", "Execute ", "Executed "])
+      }`,
+      tooltip: null,
+    }
+  }
+
+  if (toolCall.toolKind === "search") {
+    const searchTarget =
+      findRawString(toolCall.rawInput, ["query", "pattern", "search"]) ??
+        removeTitlePrefix(toolCall.title, ["Search ", "Searched ", "Queue ", "Queued "])
+
+    return {
+      text: `Searched ${searchTarget}`,
+      tooltip: null,
+    }
+  }
+
+  if (toolCall.toolKind === "fetch") {
+    const resource = findRawString(toolCall.rawInput, ["url", "uri", "href", "resource"])
+
+    return {
+      text: `Fetched ${resource ?? removeTitlePrefix(toolCall.title, ["Fetch ", "Fetched "])}`,
+      tooltip: null,
+    }
+  }
+
+  if (toolCall.toolKind === "switch_mode") {
+    const mode = findRawString(toolCall.rawInput, ["mode", "name"])
+
+    return {
+      text: `Switched ${mode ?? removeTitlePrefix(toolCall.title, ["Switch ", "Switched "])}`,
+      tooltip: null,
+    }
+  }
+
+  return {
+    text: toolCall.toolKind === "other" ? toolCall.title : buildToolCallDescription(toolCall),
+    tooltip: null,
+  }
+}
+
+function buildToolGroupDescription(toolCalls: readonly SessionTranscriptToolCall[]) {
+  const counts = new Map<SessionTranscriptToolCall["toolKind"], number>()
 
   for (const toolCall of toolCalls) {
-    counts[toolCall.status] += 1
+    counts.set(
+      toolCall.toolKind,
+      (counts.get(toolCall.toolKind) ?? 0) + countToolCallTargets(toolCall),
+    )
   }
 
-  return Object.entries(counts).filter(([, count]) => count > 0).map(
-    ([status, count]) => `${count} ${formatToolStatusLabel(
-      status as SessionTranscriptToolStatus,
-    ).toLowerCase()}`,
-  ).join(", ")
+  return Array.from(counts.entries()).map(([toolKind, count]) => {
+    const [verb, noun] = TOOL_KIND_SUMMARIES[toolKind]
+
+    return `${verb} ${formatCount(noun, count).toLowerCase()}`
+  }).map((part, index) => {
+    return index === 0 ? part : `${part.slice(0, 1).toLowerCase()}${part.slice(1)}`
+  }).join(", ")
 }
 
-component ToolMetaParts(props: {
-  parts: readonly string[];
-  keyPrefix: string;
+component ToolDetailHeading(props: {
+  toolCall: SessionTranscriptToolCall;
 }) {
-  for (const part of props.parts; index index) {
-    if (index > 0) {
-      <span
-        key={`${props.keyPrefix}:separator:${index}`}
-        aria-hidden="true"
-        class={styles.toolInlineSeparator}
-      />
-    }
+  const description = buildToolCallDetailDescription(props.toolCall)
 
-    <span key={`${props.keyPrefix}:part:${index}`}>
-      {part}
-    </span>
-  }
+  <div class={styles.toolDetailHeading} title={description.tooltip ?? undefined}>
+    {description.text}
+  </div>
 }
 
 component ToolContentDetail(props: {
@@ -94,73 +237,28 @@ component ToolContentDetail(props: {
   }
 }
 
-component ToolLocationsList(props: {
-  locations: SessionTranscriptToolCall["locations"];
-}) {
-  if (props.locations.length === 0) {
-    return
-  }
-
-  <div class={styles.toolDetailList}>
-    for (const location of props.locations; index index) {
-      <div
-        class={styles.toolDetailMono}
-        key={`${location.path}:${location.line ?? "none"}:${index}`}
-      >
-        {location.path}
-        {location.line != null ? `:${location.line}` : ""}
-      </div>
-    }
-  </div>
-}
-
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
 export component ToolTranscriptRow(props: {
   groupId: string;
   toolCalls: readonly SessionTranscriptToolCall[];
 }) {
-  const summaryParts = buildToolGroupSummaryParts(props.toolCalls)
-  const statusSummary = buildToolStatusSummary(props.toolCalls)
-  const summaryMetaParts = statusSummary ? [...summaryParts, statusSummary] : summaryParts
-
   <article class={styles.row}>
     <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
       <div class={styles.rowColumn} style={{ width: "100%" }}>
         <details class={styles.toolDisclosure}>
           <summary class={styles.toolSummary}>
             <span class={styles.toolSummaryText}>
-              <span class={styles.toolInlineMeta}>
-                <ToolMetaParts parts={summaryMetaParts} keyPrefix={`${props.groupId}:summary`} />
-              </span>
+              {buildToolGroupDescription(props.toolCalls)}
             </span>
-            <span class={styles.toolToggleHint}>"Details"</span>
           </summary>
           <ol class={styles.toolDetailList}>
             for (const toolCall of props.toolCalls) {
               <li class={styles.toolDetailItem} key={`${props.groupId}:${toolCall.id}`}>
                 <article>
-                  <div class={styles.toolDetailHeading}>
-                    <span class={styles.toolInlineMeta}>
-                      <ToolMetaParts
-                        parts={[
-                          toolCall.title,
-                          formatToolKindLabel(toolCall.toolKind),
-                          formatToolStatusLabel(toolCall.status),
-                        ]}
-                        keyPrefix={`${props.groupId}:${toolCall.id}:heading`}
-                      />
-                    </span>
-                  </div>
+                  <ToolDetailHeading {toolCall} />
 
                   for (const content of toolCall.content; index index) {
                     <ToolContentDetail key={`${toolCall.id}:content:${index}`} {content} />
-                  }
-
-                  <ToolLocationsList locations={toolCall.locations} />
-                  if (toolCall.content.length === 0 && toolCall.locations.length === 0) {
-                    <div class={styles.toolDetailText}>
-                      "No tool output was attached to this call."
-                    </div>
                   }
                 </article>
               </li>

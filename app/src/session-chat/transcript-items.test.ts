@@ -272,6 +272,7 @@ test("buildSessionChatTranscript merges tool_call updates into one stable tool r
           title: "Read transcript.tsrx",
           kind: "read",
           status: "in_progress",
+          rawInput: { path: "/repo-a/app/src/session-chat/transcript.tsrx" },
           locations: [{ path: "/repo-a/app/src/session-chat/transcript.tsrx", line: 12 }],
         },
       },
@@ -327,6 +328,7 @@ test("buildSessionChatTranscript merges tool_call updates into one stable tool r
       title: "Read transcript.tsrx",
       toolKind: "read",
       status: "completed",
+      rawInput: { path: "/repo-a/app/src/session-chat/transcript.tsrx" },
       content: [
         {
           type: "content",

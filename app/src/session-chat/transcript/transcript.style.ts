@@ -168,7 +168,7 @@ export default {
 
   toolDisclosure: css({
     display: "grid",
-    gap: "10px",
+    gap: "8px",
     width: "100%",
   }),
 
@@ -192,32 +192,9 @@ export default {
   }),
 
   toolSummaryText: css({
-    color: "fg.default",
-    fontSize: "0.9rem",
-    fontWeight: "580",
-    lineHeight: "1.5",
-  }),
-
-  toolInlineMeta: css({
-    display: "inline-flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: "6px",
-  }),
-
-  toolInlineSeparator: css({
-    display: "inline-flex",
-    width: "4px",
-    height: "4px",
-    flexShrink: 0,
-    borderRadius: "999px",
-    backgroundColor: "currentColor",
-    opacity: "0.55",
-  }),
-
-  toolToggleHint: css({
     color: "fg.muted",
-    fontSize: "0.82rem",
+    fontSize: "0.84rem",
+    fontWeight: "450",
     lineHeight: "1.5",
     textDecoration: "underline",
     textUnderlineOffset: "0.18em",
@@ -234,14 +211,13 @@ export default {
   toolDetailItem: css({
     display: "grid",
     gap: "6px",
-    paddingInlineStart: "12px",
     listStyle: "none",
   }),
 
   toolDetailHeading: css({
-    color: "fg.default",
-    fontSize: "0.86rem",
-    fontWeight: "620",
+    color: "fg.muted",
+    fontSize: "0.84rem",
+    fontWeight: "450",
     lineHeight: "1.5",
   }),
 
