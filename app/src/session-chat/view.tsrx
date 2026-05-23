@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleDot,
+  Folder,
   GitBranch,
   LoaderCircle,
   PauseCircle,
@@ -99,11 +100,9 @@ export default component SessionChatView(props: {
           <header class={styles.header}>
             <div class={styles.headerIdentity}>
               <p class={styles.headerRepository}>
+                <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
                 {chat.repositoryLabel}
               </p>
-              <h1 class={styles.headerTitle}>
-                {chat.title}
-              </h1>
             </div>
             <div class={styles.headerControls}>
               const status = getSessionChatStatusPresentation(chat.summary.status)
