@@ -26,6 +26,7 @@
   "[ripple]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
+  "prettier.documentSelectors": ["**/*.tsrx"],
   "files.readonlyInclude": {
     "core/schema/src/acp-adapters.ts": true
   },
