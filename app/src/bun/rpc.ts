@@ -14,6 +14,7 @@ import { getMainWindow } from "./main-window.ts"
 import { getProjectGitStatus } from "./project-git-status.ts"
 import { browseForProject } from "./projects.ts"
 import { loadShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"
+import { listWorktreeOpeners, openWorktree } from "./worktree-openers.ts"
 
 type AppRpc = ReturnType<typeof BrowserView.defineRPC<AppDesktopRpc>>
 
@@ -34,6 +35,8 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
         await writeShortcutKeymap(keymap)
         return {}
       },
+      listWorktreeOpeners: async (input) => await listWorktreeOpeners(input),
+      openWorktree: async (input) => await openWorktree(input),
       daemonSend: async (input) => await daemonSend(input),
       daemonSubscribe: async (input) => await daemonSubscribe(input),
       daemonUnsubscribe: async (input) => await daemonUnsubscribe(input),
