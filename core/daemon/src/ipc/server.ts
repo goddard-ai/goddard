@@ -177,7 +177,7 @@ export async function startDaemonServer(
     if (!publishPluginEvent) {
       throw new Error(`Daemon plugin ${plugin.name} published IPC route ${name} before startup`)
     }
-    publishPluginEvent(toLegacyStreamName(name), payload)
+    publishPluginEvent(name, payload)
   })
   const sessionFeature = pluginSetup.extensions.session as SessionExtension
 
@@ -565,13 +565,6 @@ function hasRouteHandlerName(routes: Record<string, unknown>, path: readonly str
   }
 
   return typeof current === "object" && current != null && "kind" in current
-}
-
-function toLegacyStreamName(name: string) {
-  if (name === "inbox.itemEvents") {
-    return "inbox.item"
-  }
-  return name
 }
 
 function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {

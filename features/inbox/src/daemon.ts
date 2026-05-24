@@ -19,7 +19,7 @@ export const inboxPlugin = definePlugin({
     const inbox = createInboxManager({
       db,
       publishEvent: (payload) => {
-        publish("inbox.itemEvents", payload)
+        publish("inbox.item", payload)
       },
     })
 
@@ -59,7 +59,7 @@ export const inboxPlugin = definePlugin({
           list: async ({ body }) => inbox.listInboxItems(body),
           update: async ({ body }) => inbox.updateInboxItem(body),
           bulkUpdate: async ({ body }) => inbox.bulkUpdateInboxItems(body),
-          itemEvents: async function* () {},
+          item: async function* () {},
         },
       },
     }

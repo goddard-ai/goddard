@@ -27,7 +27,7 @@ export const inboxSdkPlugin = defineSdkPlugin({
         /** Subscribes to daemon-published inbox item updates. */
         subscribe: async (onMessage: (payload: InboxItemEvent) => void) => {
           const controller = new AbortController()
-          const events = await client.inbox.itemEvents({ signal: controller.signal })
+          const events = await client.inbox.item({ signal: controller.signal })
 
           void (async () => {
             try {

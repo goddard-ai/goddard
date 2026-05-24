@@ -46,7 +46,7 @@ export const inboxIpcRoutes = defineIpcRoutes({
       body: BulkUpdateInboxItemsRequest,
       response: $type<BulkUpdateInboxItemsResponse>(),
     }),
-    itemEvents: http.get("item-events", {
+    item: http.get("item-events", {
       response: ndjson.$type<InboxItemEvent>(),
     }),
   }),
