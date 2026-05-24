@@ -22,7 +22,7 @@ export const inboxPlugin = definePlugin({
   ipcRoutes: inboxIpcRoutes,
   setup({ inbox }) {
     return {
-      routeHandlers: {
+      ipcHandlers: {
         inbox: {
           list: ({ body }) => inbox.list(body),
         },

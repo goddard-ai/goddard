@@ -15,7 +15,7 @@ export const actionPlugin = definePlugin({
   ipcRoutes: actionIpcRoutes,
   setup({ configManager, getIpcRequestContext, session }) {
     return {
-      routeHandlers: {
+      ipcHandlers: {
         action: {
           run: async ({ body: payload }) => {
             const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)

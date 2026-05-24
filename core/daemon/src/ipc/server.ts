@@ -169,7 +169,7 @@ export async function startDaemonServer(
   } satisfies DaemonSetupSubstrate
 
   const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, (plugin, name, payload) => {
-    if (!plugin.ipcRoutes || !hasRouteHandlerName(plugin.ipcRoutes, name.split("."))) {
+    if (!plugin.ipcRoutes || !hasIpcRouteName(plugin.ipcRoutes, name.split("."))) {
       throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC route ${name}`)
     }
     if (!publishPluginEvent) {
@@ -466,8 +466,8 @@ async function setupDaemonPlugins(
     )
     const setup = await plugin.setup?.(context)
 
-    if (setup?.routeHandlers) {
-      Object.assign(requestHandlers, flattenRouteHandlers(setup.routeHandlers))
+    if (setup?.ipcHandlers) {
+      Object.assign(requestHandlers, flattenIpcHandlers(setup.ipcHandlers))
     }
 
     if (setup?.close) {
@@ -491,7 +491,7 @@ async function setupDaemonPlugins(
   }
 }
 
-function flattenRouteHandlers(routeHandlers: Record<string, unknown>) {
+function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
   const requestHandlers: Record<string, unknown> = {}
 
   function visit(node: unknown, path: string[]) {
@@ -510,11 +510,11 @@ function flattenRouteHandlers(routeHandlers: Record<string, unknown>) {
     }
   }
 
-  visit(routeHandlers, [])
+  visit(ipcHandlers, [])
   return requestHandlers
 }
 
-function hasRouteHandlerName(routes: Record<string, unknown>, path: readonly string[]) {
+function hasIpcRouteName(routes: Record<string, unknown>, path: readonly string[]) {
   let current: unknown = routes
 
   for (const segment of path) {

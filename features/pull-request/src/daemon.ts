@@ -50,7 +50,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, getIpcRequestContext, inbox, session }) {
     return {
-      routeHandlers: {
+      ipcHandlers: {
         pr: {
           submit: async ({ body: payload }) => {
             const sessionRecord = requireRepositorySession(

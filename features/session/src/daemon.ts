@@ -97,7 +97,7 @@ export const sessionPlugin = definePlugin({
       provides: {
         session,
       },
-      routeHandlers: {
+      ipcHandlers: {
         session: {
           create: async ({ body }) => {
             const response = {

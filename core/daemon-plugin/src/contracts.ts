@@ -77,14 +77,14 @@ type InferBackendRoutes<TPlugin> = TPlugin extends {
   ? TBackendRoutes
   : {}
 
-/** Route handler map inferred from a plugin Rouzer IPC route tree. */
-export type RouteHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
+/** IPC handler map inferred from a plugin Rouzer IPC route tree. */
+export type IpcHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
   ? RouteRequestHandlerMap<TIpcRoutes>
   : never
 
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
-  readonly routeHandlers?: Record<string, unknown>
+  readonly ipcHandlers?: Record<string, unknown>
   readonly provides?: FeatureExtensions
   readonly close?: () => void | Promise<void>
 }

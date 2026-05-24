@@ -5,8 +5,8 @@ import type {
   ConfigDefinition,
   DbSchemaDefinition,
   FeatureExtensions,
+  IpcHandlers,
   Plugin,
-  RouteHandlers,
   SetupContext,
 } from "./contracts.ts"
 
@@ -78,12 +78,12 @@ type RequiredPluginSetup<
   context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
 ) => SetupContributions<TIpcRoutes, TProvides> | Promise<SetupContributions<TIpcRoutes, TProvides>>
 
-type RouteHandlerContributions<TIpcRoutes> = TIpcRoutes extends IpcRouteTree
+type IpcHandlerContributions<TIpcRoutes> = TIpcRoutes extends IpcRouteTree
   ? {
-      readonly routeHandlers: RouteHandlers<TIpcRoutes>
+      readonly ipcHandlers: IpcHandlers<TIpcRoutes>
     }
   : {
-      readonly routeHandlers?: never
+      readonly ipcHandlers?: never
     }
 
 type ProvidesContribution<TProvides> = TProvides extends FeatureExtensions
@@ -97,7 +97,7 @@ type ProvidesContribution<TProvides> = TProvides extends FeatureExtensions
 type SetupContributions<
   TIpcRoutes,
   TProvides extends FeatureExtensions | undefined,
-> = RouteHandlerContributions<TIpcRoutes> &
+> = IpcHandlerContributions<TIpcRoutes> &
   ProvidesContribution<TProvides> & {
     readonly close?: () => void | Promise<void>
   }

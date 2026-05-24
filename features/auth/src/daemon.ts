@@ -9,7 +9,7 @@ export const authPlugin = definePlugin({
   ipcRoutes: authIpcRoutes,
   setup({ authTokenStore, backend }) {
     return {
-      routeHandlers: {
+      ipcHandlers: {
         auth: {
           device: {
             start: async ({ body }) => backend.auth.device.start({ body }),

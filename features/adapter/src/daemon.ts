@@ -8,7 +8,7 @@ export const adapterPlugin = definePlugin({
   ipcRoutes: adapterIpcRoutes,
   setup(context) {
     return {
-      routeHandlers: {
+      ipcHandlers: {
         adapter: {
           list: async ({ body }) => listAdapters(context, body),
         },

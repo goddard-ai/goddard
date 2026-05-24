@@ -22,7 +22,7 @@ export const loopPlugin = definePlugin({
 
     return {
       close: () => loop.close(),
-      routeHandlers: {
+      ipcHandlers: {
         loop: {
           start: async ({ body }) => ({
             loop: await loop.startLoop(body),

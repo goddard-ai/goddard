@@ -29,7 +29,7 @@ describe("daemon plugin composition", () => {
               start: () => "started",
             },
           },
-          routeHandlers: {
+          ipcHandlers: {
             session: {
               create: () => ({ id: "session-1" }),
             },

@@ -54,7 +54,7 @@ export const inboxPlugin = definePlugin({
           touchInboxItem: inbox.touchInboxItem,
         } satisfies InboxExtension,
       },
-      routeHandlers: {
+      ipcHandlers: {
         inbox: {
           list: async ({ body }) => inbox.listInboxItems(body),
           update: async ({ body }) => inbox.updateInboxItem(body),
