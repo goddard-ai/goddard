@@ -1,5 +1,4 @@
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
-import { useListener } from "preact-sigma"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { useTabContext } from "~/tab-context.tsrx"
@@ -186,45 +185,61 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     scrollElement.scrollTop = scrollElement.scrollHeight
   }
 
-  useListener(tabContext.scrollParentRef.current, "wheel", () => {
-    userScrollIntentRef.current = true
-  })
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
 
-  useListener(tabContext.scrollParentRef.current, "touchstart", () => {
-    userScrollIntentRef.current = true
-  })
-
-  useListener(tabContext.scrollParentRef.current, "pointerdown", (event) => {
-    if (event.target !== event.currentTarget) {
+    if (!scrollElement) {
       return
     }
 
-    userScrollIntentRef.current = true
-  })
-
-  useListener(tabContext.scrollParentRef.current, "keydown", (event) => {
-    if (event.target !== event.currentTarget) {
-      return
-    }
-
-    if (
-      event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home" || event.key === " "
-    ) {
+    const markUserScrollIntent = () => {
       userScrollIntentRef.current = true
     }
-  })
+    const markScrollbarPointerIntent = (event: PointerEvent) => {
+      if (event.target !== event.currentTarget) {
+        return
+      }
 
-  useListener(tabContext.scrollParentRef.current, "scroll", (event) => {
-    if (!isStickingToBottom || !userScrollIntentRef.current) {
-      return
+      userScrollIntentRef.current = true
+    }
+    const markKeyboardScrollIntent = (event: KeyboardEvent) => {
+      if (event.target !== event.currentTarget) {
+        return
+      }
+
+      if (
+        event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home" ||
+          event.key === " "
+      ) {
+        userScrollIntentRef.current = true
+      }
+    }
+    const stopStickingAfterUserScroll = () => {
+      if (!isStickingToBottom || !userScrollIntentRef.current) {
+        return
+      }
+
+      if (isScrolledNearBottom(scrollElement)) {
+        return
+      }
+
+      setIsStickingToBottom(false)
     }
 
-    if (isScrolledNearBottom(event.currentTarget)) {
-      return
-    }
+    scrollElement.addEventListener("wheel", markUserScrollIntent)
+    scrollElement.addEventListener("touchstart", markUserScrollIntent)
+    scrollElement.addEventListener("pointerdown", markScrollbarPointerIntent)
+    scrollElement.addEventListener("keydown", markKeyboardScrollIntent)
+    scrollElement.addEventListener("scroll", stopStickingAfterUserScroll)
 
-    setIsStickingToBottom(false)
-  })
+    return () => {
+      scrollElement.removeEventListener("wheel", markUserScrollIntent)
+      scrollElement.removeEventListener("touchstart", markUserScrollIntent)
+      scrollElement.removeEventListener("pointerdown", markScrollbarPointerIntent)
+      scrollElement.removeEventListener("keydown", markKeyboardScrollIntent)
+      scrollElement.removeEventListener("scroll", stopStickingAfterUserScroll)
+    }
+  }, [isStickingToBottom, tabContext.scrollParentRef])
 
   useLayoutEffect(() => {
     const scrollElement = tabContext.scrollParentRef.current
