@@ -9,7 +9,7 @@ import {
   RefreshCcw,
   XCircle,
 } from "lucide-react"
-import { useEffect } from "preact/hooks"
+import { useEffect, useState } from "preact/hooks"
 import { castProtected, useSigmaSync } from "preact-sigma"
 
 import { Composer } from "./composer.tsrx"
@@ -40,6 +40,7 @@ export default component SessionChatView(props: {
 }) {
   <SessionChatPageModelProvider>
     const page = useSessionChatPageModel()
+    const [submittedPromptScrollKey, setSubmittedPromptScrollKey] = useState<number | null>(null)
 
     <main class={styles.root}>
       try {
@@ -323,6 +324,7 @@ export default component SessionChatView(props: {
               }}
               scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
               showThinkingLabel={chat.summary.showThinkingLabel}
+              stickToBottomKey={submittedPromptScrollKey ?? undefined}
             />
           }
           <footer class={styles.composerDock}>
@@ -353,6 +355,7 @@ export default component SessionChatView(props: {
                 }
               }}
               onSubmit={async (prompt) => {
+                setSubmittedPromptScrollKey((currentKey) => (currentKey ?? 0) + 1)
                 await page.submitPrompt.run(async () => {
                   await submitSessionPrompt({
                     id: chat.session.id,

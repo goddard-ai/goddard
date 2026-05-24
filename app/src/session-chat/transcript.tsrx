@@ -45,6 +45,7 @@ export type TranscriptProps = {
   };
   scrollCacheKey?: string;
   showThinkingLabel?: boolean;
+  stickToBottomKey?: number | string;
 }
 
 type CoalescedToolTranscriptRow = {
@@ -225,6 +226,7 @@ export component Transcript(props: TranscriptProps) {
         </tsrx>
       )}
       scrollCacheKey={props.scrollCacheKey}
+      stickToBottomKey={props.stickToBottomKey}
     />
     if (props.showThinkingLabel) {
       <ThinkingLabel />

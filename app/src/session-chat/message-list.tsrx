@@ -1,4 +1,5 @@
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
+import { useListener } from "preact-sigma"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { useTabContext } from "~/tab-context.tsrx"
@@ -28,6 +29,7 @@ export type MessageListProps<Item> = {
   initialScrollPosition?: "top" | "bottom";
   header?: preact.ComponentChild;
   scrollCacheKey?: string;
+  stickToBottomKey?: number | string;
   preserveScrollOnPrepend?: boolean;
   loadingFallback?: preact.ComponentChild;
   defaultRowHeight?: number;
@@ -40,6 +42,10 @@ type MessageListViewport = {
   scrollMarginMeasured: boolean;
   scrollMargin: number;
   width: number;
+}
+
+function isScrolledNearBottom(scrollElement: HTMLDivElement) {
+  return scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight <= 8
 }
 
 function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HTMLDivElement) {
@@ -58,6 +64,8 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
   const spacerRef = useRef<HTMLDivElement | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
+  const userScrollIntentRef = useRef(false)
+  const [isStickingToBottom, setIsStickingToBottom] = useState(false)
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<MessageListViewport>({
     scrollMarginMeasured: false,
@@ -79,6 +87,15 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     cachedScrollSnapshot.itemKeys.every((itemKey, index) => itemKeys[index] === itemKey)
       ? cachedScrollSnapshot
       : undefined
+
+  useLayoutEffect(() => {
+    if (props.stickToBottomKey === undefined) {
+      return
+    }
+
+    userScrollIntentRef.current = false
+    setIsStickingToBottom(true)
+  }, [props.stickToBottomKey])
 
   useLayoutEffect(() => {
     const rootElement = rootRef.current
@@ -154,6 +171,60 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     scrollMargin: viewport.scrollMargin,
     useFlushSync: false,
   })
+  const totalSize = virtualizer.getTotalSize()
+
+  const scrollToBottom = () => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement || props.items.length === 0) {
+      return
+    }
+
+    virtualizer.scrollToIndex(props.items.length - 1, {
+      align: "end",
+    })
+    scrollElement.scrollTop = scrollElement.scrollHeight
+  }
+
+  useListener(tabContext.scrollParentRef.current, "wheel", () => {
+    userScrollIntentRef.current = true
+  })
+
+  useListener(tabContext.scrollParentRef.current, "touchstart", () => {
+    userScrollIntentRef.current = true
+  })
+
+  useListener(tabContext.scrollParentRef.current, "pointerdown", (event) => {
+    if (event.target !== event.currentTarget) {
+      return
+    }
+
+    userScrollIntentRef.current = true
+  })
+
+  useListener(tabContext.scrollParentRef.current, "keydown", (event) => {
+    if (event.target !== event.currentTarget) {
+      return
+    }
+
+    if (
+      event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home" || event.key === " "
+    ) {
+      userScrollIntentRef.current = true
+    }
+  })
+
+  useListener(tabContext.scrollParentRef.current, "scroll", (event) => {
+    if (!isStickingToBottom || !userScrollIntentRef.current) {
+      return
+    }
+
+    if (isScrolledNearBottom(event.currentTarget)) {
+      return
+    }
+
+    setIsStickingToBottom(false)
+  })
 
   useLayoutEffect(() => {
     const scrollElement = tabContext.scrollParentRef.current
@@ -203,6 +274,24 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       }
     }
   }, [effectiveScrollCacheKey, itemKeys, tabContext.scrollParentRef, virtualizer])
+
+  useLayoutEffect(() => {
+    if (
+      !isStickingToBottom || props.items.length === 0 || viewport.width <= 0 ||
+        !viewport.scrollMarginMeasured
+    ) {
+      return
+    }
+
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
+  }, [
+    isStickingToBottom,
+    props.items.length,
+    totalSize,
+    viewport.scrollMarginMeasured,
+    viewport.width,
+  ])
 
   useLayoutEffect(() => {
     if (
