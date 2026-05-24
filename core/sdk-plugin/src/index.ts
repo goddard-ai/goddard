@@ -9,6 +9,25 @@ type RuntimeSdkPlugin = {
   readonly wrap?: (input: { readonly client: any }) => SdkNamespaces
 }
 
+type InferPluginNamespaces<TPlugin> = TPlugin extends {
+  readonly wrap?: (...args: any[]) => infer TNamespaces
+}
+  ? TNamespaces
+  : {}
+
+type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) extends (
+  value: infer TResult,
+) => void
+  ? TResult
+  : never
+
+/** Infers the merged namespace surface returned by an SDK plugin composition. */
+export type InferSdkNamespaces<TComposition> = TComposition extends {
+  readonly plugins: readonly RuntimeSdkPlugin[]
+}
+  ? UnionToIntersection<InferPluginNamespaces<TComposition["plugins"][number]>>
+  : {}
+
 /** SDK plugin shape used to constrain feature plugin values without widening them. */
 export type SdkPluginDefinition<
   TRoutes extends HttpRouteTree = HttpRouteTree,
@@ -37,8 +56,11 @@ export function defineSdkPlugin<
 }
 
 /** Composes SDK feature plugins by merging route trees and wrapper namespaces. */
-export function composeSdkPlugins(plugins: readonly RuntimeSdkPlugin[]) {
+export function composeSdkPlugins<const TPlugins extends readonly RuntimeSdkPlugin[]>(
+  plugins: TPlugins,
+) {
   return {
+    plugins,
     ipcRoutes: composeIpcRoutes(plugins.map((plugin) => plugin.ipcRoutes)),
 
     wrap(input: { readonly client: any }) {

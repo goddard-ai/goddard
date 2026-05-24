@@ -49,6 +49,28 @@ describe("SDK plugin composition", () => {
     expect(Object.keys(namespaces.inbox)).toEqual(["list", "update"])
   })
 
+  test("preserves the raw plugin tuple for composition-time inference", () => {
+    const first = defineSdkPlugin({
+      name: "first",
+      ipcRoutes: testIpcRoutes,
+      wrap() {
+        return {
+          inbox: {
+            list: () => "list",
+          },
+        }
+      },
+    })
+    const second = defineSdkPlugin({
+      name: "second",
+      ipcRoutes: moreTestIpcRoutes,
+    })
+
+    const composition = composeSdkPlugins([first, second])
+
+    expect(composition.plugins).toEqual([first, second])
+  })
+
   test("rejects duplicate methods in the same namespace", () => {
     const first = defineSdkPlugin({
       name: "first",

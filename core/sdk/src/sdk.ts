@@ -39,7 +39,7 @@ import type {
   WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
-import { composeSdkPlugins } from "@goddard-ai/sdk-plugin"
+import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
@@ -59,10 +59,7 @@ const sdkPlugins = composeSdkPlugins([
   pullRequestSdkPlugin,
 ])
 
-type FeatureSdkNamespaces = ReturnType<NonNullable<typeof adapterSdkPlugin.wrap>> &
-  ReturnType<NonNullable<typeof authSdkPlugin.wrap>> &
-  ReturnType<NonNullable<typeof inboxSdkPlugin.wrap>> &
-  ReturnType<NonNullable<typeof pullRequestSdkPlugin.wrap>>
+type FeatureSdkNamespaces = InferSdkNamespaces<typeof sdkPlugins>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
