@@ -1,4 +1,5 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
+import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
@@ -70,6 +71,12 @@ type InferDb<TPlugin> = TPlugin extends {
   ? TDb
   : {}
 
+type InferBackendRoutes<TPlugin> = TPlugin extends {
+  readonly backendRoutes: infer TBackendRoutes extends BackendRouteTree
+}
+  ? TBackendRoutes
+  : {}
+
 /** Route handler map inferred from a plugin Rouzer IPC route tree. */
 export type RouteHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
   ? RouteRequestHandlerMap<TIpcRoutes>
@@ -87,6 +94,10 @@ type SetupDbContext<TDb> = keyof TDb extends never
   ? {}
   : { readonly db: DbContext<Extract<TDb, DbSchemaDefinition>> }
 
+type SetupBackendContext<TBackendRoutes> = keyof TBackendRoutes extends never
+  ? {}
+  : { readonly backend: RouzerClient<Extract<TBackendRoutes, BackendRouteTree>> }
+
 type PublishContext<TPlugin> = TPlugin extends { readonly ipcRoutes: HttpRouteTree }
   ? {
       readonly publish: (name: string, payload: unknown) => void
@@ -95,47 +106,6 @@ type PublishContext<TPlugin> = TPlugin extends { readonly ipcRoutes: HttpRouteTr
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
-  readonly authBackendClient: {
-    readonly startDeviceFlow: (input?: {
-      readonly githubUsername?: string | undefined
-    }) => Promise<{
-      readonly deviceCode: string
-      readonly userCode: string
-      readonly verificationUri: string
-      readonly expiresIn: number
-      readonly interval: number
-    }>
-    readonly completeDeviceFlow: (input: {
-      readonly deviceCode: string
-      readonly githubUsername: string
-    }) => Promise<{
-      readonly token: string
-      readonly githubUsername: string
-      readonly githubUserId: number
-    }>
-    readonly whoami: () => Promise<{
-      readonly token: string
-      readonly githubUsername: string
-      readonly githubUserId: number
-    }>
-    readonly logout: () => Promise<void>
-  }
-  readonly pullRequestBackendClient: {
-    readonly create: (input: {
-      readonly owner: string
-      readonly repo: string
-      readonly title: string
-      readonly body?: string | undefined
-      readonly head: string
-      readonly base: string
-    }) => Promise<{ readonly number: number; readonly url: string }>
-    readonly reply: (input: {
-      readonly owner: string
-      readonly repo: string
-      readonly prNumber: number
-      readonly body: string
-    }) => Promise<{ readonly success: boolean }>
-  }
   readonly authTokenStore: {
     readonly set: (token: string) => void | Promise<void>
     readonly delete: () => void | Promise<void>
@@ -160,7 +130,8 @@ export type SetupContext<
   PublishContext<TSelf> &
   UnionToIntersection<InferProvides<TConsumes[number]>> &
   SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>> &
-  SetupDbContext<UnionToIntersection<InferDb<TSelf | TConsumes[number]>>>
+  SetupDbContext<UnionToIntersection<InferDb<TSelf | TConsumes[number]>>> &
+  SetupBackendContext<UnionToIntersection<InferBackendRoutes<TSelf | TConsumes[number]>>>
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
 export type Plugin = {
@@ -168,6 +139,7 @@ export type Plugin = {
   readonly consumes?: readonly Plugin[]
   readonly config?: ConfigDefinition
   readonly db?: DbSchemaDefinition
+  readonly backendRoutes?: BackendRouteTree
   readonly ipcRoutes?: HttpRouteTree
   readonly lifecycle?: unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
@@ -181,6 +153,7 @@ export type Plugin = {
 export type Composition = {
   readonly plugins: readonly Plugin[]
   readonly ipcRoutes: HttpRouteTree
+  readonly backendRoutes: BackendRouteTree
   readonly config: Record<string, ConfigDefinition>
   readonly db: DbSchemaDefinition
 }

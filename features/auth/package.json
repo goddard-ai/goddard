@@ -54,10 +54,10 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
+    "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
-    "rouzer": "catalog:",
     "zod": "catalog:"
   }
 }

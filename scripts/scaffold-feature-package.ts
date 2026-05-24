@@ -178,6 +178,7 @@ function createPackageJson(options: FeatureScaffoldOptions, packageName: string)
   }
 
   if (hasLayer(options.layers, "backend")) {
+    dependencies["@goddard-ai/backend-plugin"] = "workspace:*"
     exports["./backend"] = createExportTarget("backend.ts")
   }
 
@@ -353,13 +354,17 @@ function createAppStyle(name: string) {
   `}\n`
 }
 
-function createBackendEntrypoint(name: string) {
+function createBackendEntrypoint() {
+  return `export * from "./backend/routes.ts"\n`
+}
+
+function createBackendRoutesEntrypoint(name: string) {
   const identifier = toIdentifier(name)
 
   return `${dedent`
-    export const ${identifier}BackendEntrypoint = {
-      name: "${name}",
-    }
+    import { defineBackendRoutes } from "@goddard-ai/backend-plugin"
+
+    export const ${identifier}BackendRoutes = defineBackendRoutes({})
   `}\n`
 }
 
@@ -383,7 +388,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
       ? `import { ${identifier}AppPlugin } from "../src/app.tsx"`
       : undefined,
     hasLayer(options.layers, "backend")
-      ? `import { ${identifier}BackendEntrypoint } from "../src/backend.ts"`
+      ? `import { ${identifier}BackendRoutes } from "../src/backend.ts"`
       : undefined,
     hasLayer(options.layers, "daemon")
       ? `import { ${identifier}Plugin } from "../src/daemon.ts"`
@@ -404,7 +409,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
       ? `    expect(${identifier}AppPlugin.name).toBe("${name}")`
       : undefined,
     hasLayer(options.layers, "backend")
-      ? `    expect(${identifier}BackendEntrypoint.name).toBe("${name}")`
+      ? `    expect(${identifier}BackendRoutes).toEqual({})`
       : undefined,
     hasLayer(options.layers, "daemon")
       ? `    expect(${identifier}Plugin.name).toBe("${name}")`
@@ -470,7 +475,8 @@ export function createFeatureScaffoldPlan(options: FeatureScaffoldOptions) {
   }
 
   if (hasLayer(options.layers, "backend")) {
-    addFile(files, featureDir, "src/backend.ts", createBackendEntrypoint(name))
+    addFile(files, featureDir, "src/backend.ts", createBackendEntrypoint())
+    addFile(files, featureDir, "src/backend/routes.ts", createBackendRoutesEntrypoint(name))
   }
 
   if (hasLayer(options.layers, "daemon")) {

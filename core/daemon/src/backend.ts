@@ -1,28 +1,28 @@
-import * as authRoutes from "@goddard-ai/auth/backend"
-import type {
-  AuthSession,
-  DeviceFlowComplete,
-  DeviceFlowSession,
-  DeviceFlowStart,
-} from "@goddard-ai/auth/schema"
-import * as pullRequestRoutes from "@goddard-ai/pull-request/backend"
-import type {
-  CreatePrInput,
-  PullRequestRecord,
-  StreamMessage,
-} from "@goddard-ai/pull-request/schema"
+import { authBackendRoutes } from "@goddard-ai/auth/backend"
+import {
+  composeBackendRoutes,
+  createBackendClient as createRouteClient,
+  type RouzerClient,
+} from "@goddard-ai/backend-plugin"
+import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
+import type { StreamMessage } from "@goddard-ai/pull-request/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
-import type { RepoRef } from "@goddard-ai/schema/repository"
 import { getErrorMessage } from "radashi"
-import { createClient } from "rouzer"
 
 /** Fetch implementation consumed by the daemon's backend client. */
-type FetchLike = typeof fetch
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 /** Listener signature used by daemon-owned backend stream subscriptions. */
 type StreamHandler = (event?: unknown) => void
 
 const notAuthenticatedMessage = "Not authenticated. Run login first."
+
+/** Backend routes available to daemon-owned backend clients. */
+export const backendRoutes = composeBackendRoutes([
+  authBackendRoutes,
+  pullRequestBackendRoutes,
+  routes,
+])
 
 /** Error thrown when a daemon backend call requires a login session that is not available. */
 export class BackendUnauthenticatedError extends Error {
@@ -45,7 +45,6 @@ export type BackendClientOptions = {
   baseUrl: string
   fetchImpl?: FetchLike
   getAuthorizationHeader?: () => Promise<string | null> | string | null
-  clearAuthorization?: () => Promise<void> | void
 }
 
 /** Disposable SSE subscription returned by the daemon's backend client. */
@@ -58,18 +57,7 @@ export type StreamSubscription = {
 }
 
 /** Direct backend client surface owned privately by the daemon. */
-export type BackendClient = {
-  auth: {
-    startDeviceFlow: (input?: DeviceFlowStart) => Promise<DeviceFlowSession>
-    completeDeviceFlow: (input: DeviceFlowComplete) => Promise<AuthSession>
-    whoami: () => Promise<AuthSession>
-    logout: () => Promise<void>
-  }
-  pr: {
-    create: (input: CreatePrInput) => Promise<PullRequestRecord>
-    isManaged: (input: RepoRef & { prNumber: number }) => Promise<boolean>
-    reply: (input: RepoRef & { prNumber: number; body: string }) => Promise<{ success: boolean }>
-  }
+export type BackendClient = RouzerClient<typeof backendRoutes> & {
   stream: {
     subscribe: () => Promise<StreamSubscription>
   }
@@ -118,56 +106,18 @@ class BackendStreamSubscription implements StreamSubscription {
 
 /** Creates the daemon's direct rouzer-backed client for backend auth, PR, and stream routes. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
-  const rouzerClient = createClient({
+  const routeClient = createRouteClient({
     baseURL: options.baseUrl,
-    fetch: options.fetchImpl ?? fetch,
-    routes: { ...authRoutes, ...pullRequestRoutes, ...routes },
+    fetch: createAuthorizedFetch(options) as typeof fetch,
+    routes: backendRoutes,
   })
+  const authorizedClient = createAuthorizedRouteClient(backendRoutes, routeClient, options)
 
-  return {
-    auth: {
-      startDeviceFlow: async (input = {}) => rouzerClient.auth.device.start({ body: input }),
-      completeDeviceFlow: async (input) => rouzerClient.auth.device.complete({ body: input }),
-      whoami: async () => {
-        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.auth.session.current({
-          headers: { authorization },
-        })
-      },
-      logout: async () => {
-        await options.clearAuthorization?.()
-      },
-    },
-    pr: {
-      create: async (input) => {
-        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.pullRequests.create({
-          headers: { authorization },
-          body: input,
-        })
-      },
-      isManaged: async ({ owner, repo, prNumber }) => {
-        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        const result = await rouzerClient.pullRequests.managed({
-          headers: { authorization },
-          query: { owner, repo, prNumber },
-        })
-        return result.managed
-      },
-      reply: async (input) => {
-        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
-        return rouzerClient.pullRequests.comments.create({
-          headers: { authorization },
-          body: input,
-        })
-      },
-    },
+  return Object.assign(authorizedClient, {
     stream: {
       subscribe: async () => {
-        const authorization = await requireAuthorizationHeader(options.getAuthorizationHeader)
         const abortController = new AbortController()
-        const response = await rouzerClient.repositories.stream({
-          headers: { authorization },
+        const response = await authorizedClient.repositories.stream({
           signal: abortController.signal,
         })
 
@@ -199,19 +149,65 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         return subscription
       },
     },
+  })
+}
+
+function createAuthorizedRouteClient(
+  routes: Record<string, any>,
+  source: Record<string, any>,
+  options: BackendClientOptions,
+) {
+  const context: Record<string, unknown> = {}
+
+  for (const [key, route] of Object.entries(routes)) {
+    if (!route || typeof route !== "object") {
+      continue
+    }
+    if (route.kind === "resource") {
+      context[key] = createAuthorizedRouteClient(route.children, source[key], options)
+      continue
+    }
+    context[key] = async (args?: Record<string, any>) => {
+      return source[key](await addAuthorizationHeader(args, options))
+    }
+  }
+
+  return context as RouzerClient<typeof backendRoutes>
+}
+
+async function addAuthorizationHeader(
+  args: Record<string, any> | undefined,
+  options: BackendClientOptions,
+) {
+  const authorization = await options.getAuthorizationHeader?.()
+  if (!authorization) {
+    return args
+  }
+
+  return {
+    ...args,
+    headers: {
+      ...args?.headers,
+      authorization,
+    },
   }
 }
 
-/** Resolves the injected auth header or fails when the daemon is unauthenticated. */
-async function requireAuthorizationHeader(
-  getAuthorizationHeader: BackendClientOptions["getAuthorizationHeader"],
-): Promise<string> {
-  const authorization = await getAuthorizationHeader?.()
-  if (!authorization) {
-    throw new BackendUnauthenticatedError()
-  }
+function createAuthorizedFetch(options: BackendClientOptions): FetchLike {
+  const fetchImpl = options.fetchImpl ?? fetch
 
-  return authorization
+  return async (input, init) => {
+    const response = await fetchImpl(input, {
+      ...init,
+    })
+    if (response.status !== 401) {
+      return response
+    }
+
+    throw new BackendUnauthenticatedError(
+      `Backend request failed (${response.status}): ${await response.text()}`,
+    )
+  }
 }
 
 /** Reads the backend SSE response stream until the subscription closes or the stream ends. */

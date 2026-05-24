@@ -1,3 +1,4 @@
+import { $type as $backendType, http as backendHttp } from "@goddard-ai/backend-plugin"
 import { $type, http, ndjson } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
@@ -73,6 +74,35 @@ describe("daemon plugin composition", () => {
     const composition = composePlugins([inbox, session])
 
     expect(Object.keys(composition.ipcRoutes.session.children).sort()).toEqual(["create", "events"])
+  })
+
+  test("composes backend route tree fragments", () => {
+    const auth = definePlugin({
+      name: "auth",
+      backendRoutes: {
+        auth: backendHttp.resource("auth", {
+          session: backendHttp.resource("session", {
+            current: backendHttp.get("current", {
+              response: $backendType<{ token: string }>(),
+            }),
+          }),
+        }),
+      },
+    })
+    const pullRequest = definePlugin({
+      name: "pull-request",
+      backendRoutes: {
+        pullRequests: backendHttp.resource("pull-requests", {
+          create: backendHttp.post("create", {
+            response: $backendType<{ number: number }>(),
+          }),
+        }),
+      },
+    })
+
+    const composition = composePlugins([pullRequest, auth])
+
+    expect(Object.keys(composition.backendRoutes).sort()).toEqual(["auth", "pullRequests"])
   })
 
   test("rejects duplicate plugin names", () => {

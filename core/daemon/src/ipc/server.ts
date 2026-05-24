@@ -3,6 +3,7 @@ import { once } from "node:events"
 import type { Server } from "node:http"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
+import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
   composePlugins,
   type DaemonSetupSubstrate,
@@ -21,6 +22,7 @@ import {
 } from "@goddard-ai/session/daemon"
 import { getErrorMessage } from "radashi"
 
+import type { BackendClient } from "../backend.ts"
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
@@ -37,7 +39,7 @@ import {
 } from "../workforce/config.ts"
 import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
 import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
-import type { BackendPrClient, DaemonServer } from "./types.ts"
+import type { DaemonServer } from "./types.ts"
 
 const daemonPlugins = composePlugins([
   adapterPlugin,
@@ -51,7 +53,7 @@ configureDbSchema(daemonPlugins.db)
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
 
 export async function startDaemonServer(
-  client: BackendPrClient,
+  client: BackendClient,
   options: {
     port?: number
     agentBinDir?: string
@@ -155,8 +157,6 @@ export async function startDaemonServer(
         db.metadata.delete("authToken")
       },
     },
-    authBackendClient: client.auth,
-    pullRequestBackendClient: client.pr,
     configManager,
     registryService,
     get sessionManager() {
@@ -168,7 +168,7 @@ export async function startDaemonServer(
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, (plugin, name, payload) => {
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, (plugin, name, payload) => {
     if (!plugin.ipcRoutes || !hasRouteHandlerName(plugin.ipcRoutes, name.split("."))) {
       throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC route ${name}`)
     }
@@ -488,6 +488,7 @@ export async function startDaemonServer(
 
 async function setupDaemonPlugins(
   substrate: DaemonSetupSubstrate,
+  backendClient: BackendClient,
   publish: (plugin: (typeof daemonPlugins.plugins)[number], name: string, payload: unknown) => void,
 ) {
   const extensions: Record<string, unknown> = {}
@@ -502,6 +503,7 @@ async function setupDaemonPlugins(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
         db: createPluginDbContext(plugin),
+        backend: createPluginBackendContext(plugin, backendClient),
         publish: (name: string, payload: unknown) => {
           publish(plugin, name, payload)
         },
@@ -567,6 +569,35 @@ function hasRouteHandlerName(routes: Record<string, unknown>, path: readonly str
   }
 
   return typeof current === "object" && current != null && "kind" in current
+}
+
+function createPluginBackendContext(
+  plugin: (typeof daemonPlugins.plugins)[number],
+  client: BackendClient,
+) {
+  const routes = composeBackendRoutes([
+    ...(plugin.consumes ?? []).map((consumedPlugin) => consumedPlugin.backendRoutes ?? {}),
+    plugin.backendRoutes ?? {},
+  ])
+
+  return selectBackendClientRoutes(routes, client)
+}
+
+function selectBackendClientRoutes(routes: Record<string, any>, source: Record<string, any>) {
+  const context: Record<string, unknown> = {}
+
+  for (const [key, route] of Object.entries(routes)) {
+    if (!route || typeof route !== "object") {
+      continue
+    }
+    if (route.kind === "resource") {
+      context[key] = selectBackendClientRoutes(route.children, source[key])
+      continue
+    }
+    context[key] = source[key]
+  }
+
+  return context
 }
 
 function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {

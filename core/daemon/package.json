@@ -40,6 +40,7 @@
     "@goddard-ai/adapter": "workspace:*",
     "@goddard-ai/auth": "workspace:*",
     "@b9g/async-context": "^0.2.1",
+    "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/config": "workspace:^",
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/daemon-plugin": "workspace:*",

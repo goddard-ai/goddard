@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@goddard-ai/auth": "workspace:*",
+    "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
     "@hattip/adapter-cloudflare-workers": "^0.0.49",

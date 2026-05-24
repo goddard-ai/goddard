@@ -1,4 +1,5 @@
-import type { HttpRouteTree } from "@goddard-ai/ipc"
+import type { HttpRouteTree as BackendRouteTree } from "@goddard-ai/backend-plugin"
+import type { HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 
 import type {
   ConfigDefinition,
@@ -23,12 +24,14 @@ type PluginShape<
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
-  TIpcRoutes extends HttpRouteTree | undefined,
+  TBackendRoutes extends BackendRouteTree | undefined,
+  TIpcRoutes extends IpcRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
   OptionalPluginField<"config", TConfig> &
   OptionalPluginField<"db", TDb> &
+  OptionalPluginField<"backendRoutes", TBackendRoutes> &
   OptionalPluginField<"ipcRoutes", TIpcRoutes> &
   OptionalPluginField<"lifecycle", TLifecycle> &
   OptionalPluginField<"register", TRegister>
@@ -38,7 +41,8 @@ type PluginOptions<
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
-  TIpcRoutes extends HttpRouteTree | undefined,
+  TBackendRoutes extends BackendRouteTree | undefined,
+  TIpcRoutes extends IpcRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = {
@@ -47,6 +51,7 @@ type PluginOptions<
   readonly provides?: never
   readonly config?: TConfig
   readonly db?: TDb
+  readonly backendRoutes?: TBackendRoutes
   readonly ipcRoutes?: TIpcRoutes
   readonly lifecycle?: TLifecycle
   readonly register?: TRegister
@@ -73,7 +78,7 @@ type RequiredPluginSetup<
   context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
 ) => SetupContributions<TIpcRoutes, TProvides> | Promise<SetupContributions<TIpcRoutes, TProvides>>
 
-type RouteHandlerContributions<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
+type RouteHandlerContributions<TIpcRoutes> = TIpcRoutes extends IpcRouteTree
   ? {
       readonly routeHandlers: RouteHandlers<TIpcRoutes>
     }
@@ -100,24 +105,61 @@ type DefinePlugin = {
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
     const TDb extends DbSchemaDefinition | undefined,
-    const TIpcRoutes extends HttpRouteTree,
+    const TBackendRoutes extends BackendRouteTree | undefined,
+    const TIpcRoutes extends IpcRouteTree,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
+    plugin: PluginOptions<
+      TName,
+      TConsumes,
+      TConfig,
+      TDb,
+      TBackendRoutes,
+      TIpcRoutes,
+      TLifecycle,
+      TRegister
+    > & {
       readonly ipcRoutes: TIpcRoutes
       readonly setup: RequiredPluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+        PluginShape<
+          TName,
+          TConsumes,
+          TConfig,
+          TDb,
+          TBackendRoutes,
+          TIpcRoutes,
+          TLifecycle,
+          TRegister
+        >,
         TIpcRoutes,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
+  ): PluginShape<
+    TName,
+    TConsumes,
+    TConfig,
+    TDb,
+    TBackendRoutes,
+    TIpcRoutes,
+    TLifecycle,
+    TRegister
+  > & {
     readonly setup: RequiredPluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+      PluginShape<
+        TName,
+        TConsumes,
+        TConfig,
+        TDb,
+        TBackendRoutes,
+        TIpcRoutes,
+        TLifecycle,
+        TRegister
+      >,
       TIpcRoutes,
       TProvides
     >
@@ -127,23 +169,60 @@ type DefinePlugin = {
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
     const TDb extends DbSchemaDefinition | undefined,
-    const TIpcRoutes extends HttpRouteTree | undefined,
+    const TBackendRoutes extends BackendRouteTree | undefined,
+    const TIpcRoutes extends IpcRouteTree | undefined,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
+    plugin: PluginOptions<
+      TName,
+      TConsumes,
+      TConfig,
+      TDb,
+      TBackendRoutes,
+      TIpcRoutes,
+      TLifecycle,
+      TRegister
+    > & {
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+        PluginShape<
+          TName,
+          TConsumes,
+          TConfig,
+          TDb,
+          TBackendRoutes,
+          TIpcRoutes,
+          TLifecycle,
+          TRegister
+        >,
         undefined,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
+  ): PluginShape<
+    TName,
+    TConsumes,
+    TConfig,
+    TDb,
+    TBackendRoutes,
+    TIpcRoutes,
+    TLifecycle,
+    TRegister
+  > & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+      PluginShape<
+        TName,
+        TConsumes,
+        TConfig,
+        TDb,
+        TBackendRoutes,
+        TIpcRoutes,
+        TLifecycle,
+        TRegister
+      >,
       undefined,
       TProvides
     >

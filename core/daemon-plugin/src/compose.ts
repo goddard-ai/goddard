@@ -1,4 +1,8 @@
-import { composeIpcRoutes, type HttpRouteTree } from "@goddard-ai/ipc"
+import {
+  composeBackendRoutes,
+  type HttpRouteTree as BackendRouteTree,
+} from "@goddard-ai/backend-plugin"
+import { composeIpcRoutes, type HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 
 import type { Composition, ConfigDefinition, DbSchemaDefinition, Plugin } from "./contracts.ts"
 
@@ -10,7 +14,8 @@ export function composePlugins(plugins: readonly Plugin[]) {
 
   const config: Record<string, ConfigDefinition> = {}
   const db: DbSchemaDefinition = {}
-  const ipcRouteTrees: HttpRouteTree[] = []
+  const backendRouteTrees: BackendRouteTree[] = []
+  const ipcRouteTrees: IpcRouteTree[] = []
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
@@ -18,6 +23,9 @@ export function composePlugins(plugins: readonly Plugin[]) {
     }
     if (plugin.ipcRoutes) {
       ipcRouteTrees.push(plugin.ipcRoutes)
+    }
+    if (plugin.backendRoutes) {
+      backendRouteTrees.push(plugin.backendRoutes)
     }
     for (const [key, kind] of Object.entries(plugin.db ?? {})) {
       if (db[key]) {
@@ -30,6 +38,7 @@ export function composePlugins(plugins: readonly Plugin[]) {
   return {
     plugins: orderedPlugins,
     ipcRoutes: composeIpcRoutes(ipcRouteTrees),
+    backendRoutes: composeBackendRoutes(backendRouteTrees),
     config,
     db,
   } satisfies Composition

@@ -6,6 +6,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 
+import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
 import { createWorkforceManager } from "../src/workforce/manager.ts"
@@ -39,37 +40,9 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   )
   expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
 
-  const daemon = await startDaemonServer(
-    {
-      auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        whoami: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        logout: async () => {},
-      },
-      pr: {
-        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
-        reply: async () => ({ success: true }),
-      },
-    },
-    {
-      port: 0,
-    },
-  )
+  const daemon = await startDaemonServer(createTestBackendClient(), {
+    port: 0,
+  })
   cleanup.push(async () => {
     await daemon.close()
   })
@@ -81,14 +54,14 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   const normalizedRootDir = await normalizeWorkforceRootDir(repoDir)
 
   expect(discovered.rootDir).toBe(normalizedRootDir)
-  expect(discovered.candidates.map((candidate) => candidate.relativeDir)).toEqual([
+  expect(discovered.candidates.map((candidate: any) => candidate.relativeDir)).toEqual([
     ".",
     "packages/ui",
   ])
 
   const initialized = await client.send("workforce.initialize", {
     rootDir: packageDir,
-    packageDirs: discovered.candidates.map((candidate) => candidate.rootDir),
+    packageDirs: discovered.candidates.map((candidate: any) => candidate.rootDir),
   })
 
   const config = JSON.parse(await readFile(initialized.initialized.configPath, "utf-8")) as {
@@ -106,37 +79,9 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
   cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
 
-  const daemon = await startDaemonServer(
-    {
-      auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        whoami: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        logout: async () => {},
-      },
-      pr: {
-        create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
-        reply: async () => ({ success: true }),
-      },
-    },
-    {
-      port: 0,
-    },
-  )
+  const daemon = await startDaemonServer(createTestBackendClient(), {
+    port: 0,
+  })
   cleanup.push(async () => {
     await daemon.close()
   })
@@ -148,6 +93,52 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
     client.subscribe({ name: "workforce.event", filter: { rootDir } }, () => {}),
   ).rejects.toThrow(`No workforce is running for ${normalizedRootDir}`)
 })
+
+function createTestBackendClient(): BackendClient {
+  return {
+    auth: {
+      device: {
+        start: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        complete: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+      session: {
+        current: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+    },
+    pullRequests: {
+      create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+      managed: async () => ({ managed: true }),
+      comments: {
+        create: async () => ({ success: true }),
+      },
+    },
+    webhooks: {
+      github: async () => ({ type: "noop" }),
+    },
+    repositories: {
+      stream: async () => new Response(),
+    },
+    stream: {
+      subscribe: async () => {
+        throw new Error("not used")
+      },
+    },
+  } as unknown as BackendClient
+}
 
 test("workforce manager reuses one runtime per normalized repository root", async () => {
   const created: string[] = []

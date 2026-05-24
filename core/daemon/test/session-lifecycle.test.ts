@@ -15,6 +15,7 @@ import {
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
+import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -276,7 +277,7 @@ test("session completion hides from the default list but stays interactive", asy
   })
   await waitFor(async () => {
     const history = await client.send("session.history", { id: created.session.id })
-    return history.turns.some((turn) => turn.completedAt === null)
+    return history.turns.some((turn: any) => turn.completedAt === null)
   })
   await expect(client.send("session.complete", { id: created.session.id })).rejects.toThrow(
     /active turn/i,
@@ -424,8 +425,8 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     id: created.session.id,
   })
   const chunkMessages = history.turns
-    .flatMap((turn) => turn.messages)
-    .filter((message) => {
+    .flatMap((turn: any) => turn.messages)
+    .filter((message: any) => {
       return (
         typeof message === "object" &&
         message !== null &&
@@ -705,7 +706,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     id: sessionId,
   })
   expect(
-    diagnostics.events.some((event) => event.type === "session_reconciled_after_restart"),
+    diagnostics.events.some((event: any) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
   await expect(client.send("session.connect", { id: sessionId })).rejects.toThrow(/archived/i)
   await expect(client.send("session.resolveToken", { token: "tok-restart-1" })).rejects.toThrow(
@@ -1641,7 +1642,7 @@ test("session.composerSuggestions scopes `@` lookups to the session cwd and skip
     query: "match",
   })
 
-  const emptyQueryLabels = emptyQuery.suggestions.flatMap((suggestion) =>
+  const emptyQueryLabels = emptyQuery.suggestions.flatMap((suggestion: any) =>
     "label" in suggestion ? [suggestion.label] : [],
   )
 
@@ -1973,8 +1974,8 @@ test("session.create applies initial model and thinking configuration before the
     id: created.session.id,
   })
   expect(
-    history.turns.some((turn) =>
-      turn.messages.some((message) => {
+    history.turns.some((turn: any) =>
+      turn.messages.some((message: any) => {
         const update = matchAcpRequest<{
           update?: {
             sessionUpdate?: string
@@ -2077,47 +2078,65 @@ async function startServer(
     await useTempHome()
   }
 
-  const daemon = await startDaemonServer(
-    {
-      auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        whoami: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-        logout: async () => {},
-      },
-      pr: {
-        create: async () => ({
-          number: 1,
-          url: "https://github.com/example/repo/pull/1",
-        }),
-        reply: async () => ({ success: true }),
-      },
-    },
-    {
-      port: 0,
-      idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
-    },
-  )
+  const daemon = await startDaemonServer(createTestBackendClient(), {
+    port: 0,
+    idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+  })
 
   cleanup.push(async () => {
     await daemon.close().catch(() => {})
   })
 
   return daemon
+}
+
+function createTestBackendClient(): BackendClient {
+  return {
+    auth: {
+      device: {
+        start: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        complete: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+      session: {
+        current: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+    },
+    pullRequests: {
+      create: async () => ({
+        number: 1,
+        url: "https://github.com/example/repo/pull/1",
+      }),
+      managed: async () => ({ managed: true }),
+      comments: {
+        create: async () => ({ success: true }),
+      },
+    },
+    webhooks: {
+      github: async () => ({ type: "noop" }),
+    },
+    repositories: {
+      stream: async () => new Response(),
+    },
+    stream: {
+      subscribe: async () => {
+        throw new Error("not used")
+      },
+    },
+  } as unknown as BackendClient
 }
 
 async function useTempHome(): Promise<void> {
@@ -2233,7 +2252,7 @@ function buildPromptMessage(sessionId: string, id: string, text: string) {
 
 async function listSessionIds(client: DaemonIpcClient) {
   const { sessions } = await client.send("session.list", { limit: 50 })
-  return sessions.map((session) => session.id)
+  return sessions.map((session: any) => session.id)
 }
 
 function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {

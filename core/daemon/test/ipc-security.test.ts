@@ -6,8 +6,8 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
+import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import type { BackendPrClient } from "../src/ipc/types.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 
@@ -142,7 +142,6 @@ test("daemon submit request enforces trusted repo context and records created PR
           githubUsername: "alec",
           githubUserId: 42,
         }),
-        logout: async () => {},
       },
       pr: {
         create: async (input) => {
@@ -468,8 +467,15 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 type StartServerOptions = {
   useExistingHome?: boolean
   sdk?: {
-    auth?: Partial<BackendPrClient["auth"]>
-    pr?: Partial<BackendPrClient["pr"]>
+    auth?: {
+      startDeviceFlow?: (input?: any) => Promise<any>
+      completeDeviceFlow?: (input: any) => Promise<any>
+      whoami?: () => Promise<any>
+    }
+    pr?: {
+      create?: (input: any) => Promise<any>
+      reply?: (input: any) => Promise<any>
+    }
   }
 }
 
@@ -479,43 +485,42 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
   }
 
   const daemon = await startDaemonServer(
-    {
+    createTestBackendClient({
       auth: {
-        startDeviceFlow:
+        start:
           options.sdk?.auth?.startDeviceFlow ??
-          (async () => ({
+          (async (_input?: any) => ({
             deviceCode: "dev_1",
             userCode: "ABCD-1234",
             verificationUri: "https://github.com/login/device",
             expiresIn: 900,
             interval: 5,
           })),
-        completeDeviceFlow:
+        complete:
           options.sdk?.auth?.completeDeviceFlow ??
-          (async () => ({
+          (async (_input: any) => ({
             token: "tok_1",
             githubUsername: "alec",
             githubUserId: 42,
           })),
-        whoami:
+        current:
           options.sdk?.auth?.whoami ??
           (async () => ({
             token: "tok_1",
             githubUsername: "alec",
             githubUserId: 42,
           })),
-        logout: options.sdk?.auth?.logout ?? (async () => {}),
       },
-      pr: {
+      pullRequests: {
         create:
           options.sdk?.pr?.create ??
-          (async () => ({
+          (async (_input: any) => ({
             number: 12,
             url: "https://github.com/trusted/widgets/pull/12",
           })),
-        reply: options.sdk?.pr?.reply ?? (async () => ({ success: true })),
+        reply: options.sdk?.pr?.reply ?? (async (_input: any) => ({ success: true })),
       },
-    },
+    }),
     { port: 0 },
   )
 
@@ -524,6 +529,50 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
   })
 
   return daemon
+}
+
+function createTestBackendClient(
+  input: {
+    auth?: {
+      start?: (input?: any) => Promise<any>
+      complete?: (input: any) => Promise<any>
+      current?: () => Promise<any>
+    }
+    pullRequests?: {
+      create?: (input: any) => Promise<any>
+      reply?: (input: any) => Promise<any>
+    }
+  } = {},
+): BackendClient {
+  return {
+    auth: {
+      device: {
+        start: ({ body }: any = {}) => input.auth?.start?.(body),
+        complete: ({ body }: any) => input.auth?.complete?.(body),
+      },
+      session: {
+        current: () => input.auth?.current?.(),
+      },
+    },
+    pullRequests: {
+      create: ({ body }: any) => input.pullRequests?.create?.(body),
+      managed: async () => ({ managed: true }),
+      comments: {
+        create: ({ body }: any) => input.pullRequests?.reply?.(body),
+      },
+    },
+    webhooks: {
+      github: async () => ({ type: "noop" }),
+    },
+    repositories: {
+      stream: async () => new Response(),
+    },
+    stream: {
+      subscribe: async () => {
+        throw new Error("not used")
+      },
+    },
+  } as unknown as BackendClient
 }
 
 async function useTempHome(): Promise<void> {

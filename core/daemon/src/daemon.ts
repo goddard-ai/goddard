@@ -126,10 +126,12 @@ export async function runDaemon(input: RunInput): Promise<number> {
           runningPrs.add(requestKey)
 
           try {
-            const managed = await client.pr.isManaged({
-              owner: event.owner,
-              repo: event.repo,
-              prNumber: event.prNumber,
+            const { managed } = await client.pullRequests.managed({
+              query: {
+                owner: event.owner,
+                repo: event.repo,
+                prNumber: event.prNumber,
+              },
             })
             if (!managed) {
               logger.log("repo.feedback_ignored", {
@@ -203,9 +205,6 @@ async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClien
     getAuthorizationHeader: async () => {
       const token = db.metadata.get("authToken") ?? null
       return token ? `Bearer ${token}` : null
-    },
-    clearAuthorization: async () => {
-      db.metadata.delete("authToken")
     },
   })
 }

@@ -5,6 +5,7 @@ import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { db } from "../../../core/daemon/src/persistence/store.ts"
+import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 
@@ -45,8 +46,9 @@ async function recordPullRequest(record: Parameters<typeof db.pullRequests.creat
 export const pullRequestPlugin: Plugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin, inboxPlugin],
+  backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ getIpcRequestContext, inbox, pullRequestBackendClient, session }) {
+  setup({ backend, getIpcRequestContext, inbox, session }) {
     return {
       routeHandlers: {
         pr: {
@@ -57,10 +59,12 @@ export const pullRequestPlugin: Plugin = definePlugin({
             getIpcRequestContext().setSessionId(sessionRecord.sessionId)
 
             const resolvedInput = await resolveSubmitRequestFromGit(payload)
-            const pr = await pullRequestBackendClient.create({
-              ...resolvedInput,
-              owner: sessionRecord.owner,
-              repo: sessionRecord.repo,
+            const pr = await backend.pullRequests.create({
+              body: {
+                ...resolvedInput,
+                owner: sessionRecord.owner,
+                repo: sessionRecord.repo,
+              },
             })
             await session.allowPullRequest(sessionRecord.sessionId, pr.number)
             const pullRequest = await recordPullRequest({
@@ -111,10 +115,12 @@ export const pullRequestPlugin: Plugin = definePlugin({
               )
             }
 
-            const response = await pullRequestBackendClient.reply({
-              ...resolvedInput,
-              owner: sessionRecord.owner,
-              repo: sessionRecord.repo,
+            const response = await backend.pullRequests.comments.create({
+              body: {
+                ...resolvedInput,
+                owner: sessionRecord.owner,
+                repo: sessionRecord.repo,
+              },
             })
             const pullRequest = await recordPullRequest({
               host: "github",

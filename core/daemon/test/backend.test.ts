@@ -21,23 +21,27 @@ test("daemon backend client creates PRs and checks managed status through rouzer
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const pr = await client.pr.create({
-      owner: "goddard-ai",
-      repo: "sdk",
-      title: "Add daemon backend route client",
-      body: "Ship it",
-      head: "feat/daemon-backend-routes",
-      base: "main",
+    const pr = await client.pullRequests.create({
+      body: {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Add daemon backend route client",
+        body: "Ship it",
+        head: "feat/daemon-backend-routes",
+        base: "main",
+      },
     })
 
     expect(pr.number).toBe(1)
     await expect(
-      client.pr.isManaged({
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: pr.number,
+      client.pullRequests.managed({
+        query: {
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: pr.number,
+        },
       }),
-    ).resolves.toBe(true)
+    ).resolves.toEqual({ managed: true })
   } finally {
     await server.close()
   }
@@ -53,21 +57,17 @@ test("daemon backend client uses injected auth state for authenticated requests"
     const client = createBackendClient({
       baseUrl,
       getAuthorizationHeader: () => authorization,
-      clearAuthorization: () => {
-        authorization = null
-      },
     })
-    const start = await client.auth.startDeviceFlow({ githubUsername: "alec" })
-    const session = await client.auth.completeDeviceFlow({
-      deviceCode: start.deviceCode,
-      githubUsername: "alec",
+    const start = await client.auth.device.start({ body: { githubUsername: "alec" } })
+    const session = await client.auth.device.complete({
+      body: {
+        deviceCode: start.deviceCode,
+        githubUsername: "alec",
+      },
     })
 
     authorization = `Bearer ${session.token}`
-    await expect(client.auth.whoami()).resolves.toEqual(session)
-
-    await client.auth.logout()
-    expect(authorization).toBeNull()
+    await expect(client.auth.session.current()).resolves.toEqual(session)
   } finally {
     await server.close()
   }
@@ -100,13 +100,15 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       subscription!.on("event", resolve)
     })
 
-    const pr = await client.pr.create({
-      owner: "goddard-ai",
-      repo: "sdk",
-      title: "Stream me",
-      body: "Done",
-      head: "feat/stream",
-      base: "main",
+    const pr = await client.pullRequests.create({
+      body: {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Stream me",
+        body: "Done",
+        head: "feat/stream",
+        base: "main",
+      },
     })
 
     const event = (await eventPromise) as { type: string; prNumber: number }
