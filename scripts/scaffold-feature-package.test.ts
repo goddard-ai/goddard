@@ -106,7 +106,7 @@ describe("writeFeatureScaffoldPlan", () => {
 
       await expect(
         readFile(join(rootDir, "features/inbox/src/daemon-ipc.ts"), "utf8"),
-      ).resolves.toContain("defineIpcSchema")
+      ).resolves.toContain("defineIpcRoutes")
     } finally {
       await rm(rootDir, { recursive: true, force: true })
     }

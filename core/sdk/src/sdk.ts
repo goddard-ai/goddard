@@ -1,7 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
-import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import type {
@@ -43,7 +42,7 @@ import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plug
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
-import { resolveIpcClient, type IpcClientOptions } from "./ipc-client.ts"
+import { resolveIpcClient, type GoddardClient, type IpcClientOptions } from "./ipc-client.ts"
 import {
   createSessionPermissionResponseMessage,
   createSessionPromptMessage,
@@ -74,15 +73,15 @@ function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue
 }
 
 /** Builds the health namespace with one thin method per daemon health IPC action. */
-function createDaemonNamespace(client: DaemonIpcClient) {
+function createDaemonNamespace(client: any) {
   return {
     /** Probes daemon liveness without adding SDK-specific behavior. */
-    health: async () => client.send("daemon.health"),
+    health: async () => client.daemon.health(),
   }
 }
 
 /** Builds the session namespace with one thin method per daemon session IPC action. */
-function createSessionNamespace(client: DaemonIpcClient) {
+function createSessionNamespace(client: any) {
   const sessionFeature = sessionSdkPlugin.wrap!({ client }).session
 
   return {
@@ -90,180 +89,202 @@ function createSessionNamespace(client: DaemonIpcClient) {
     run: async (input: SessionParams, handler?: acp.Client) => runSession(client, input, handler),
 
     /** Creates one daemon-managed session record. */
-    create: async (input: CreateSessionRequest) => client.send("session.create", input),
+    create: async (input: CreateSessionRequest) => client.session.create({ body: input }),
 
     /** Lists daemon-managed sessions and pagination state. */
-    list: async (input: ListSessionsRequest) => client.send("session.list", input),
+    list: async (input: ListSessionsRequest) => client.session.list({ body: input }),
 
     /** Fetches one daemon-managed session record. */
-    get: async (input: DaemonSessionIdParams) => client.send("session.get", input),
+    get: async (input: DaemonSessionIdParams) => client.session.get({ body: input }),
 
     /** Reconnects to one daemon-managed session record. */
-    connect: async (input: DaemonSessionIdParams) => client.send("session.connect", input),
+    connect: async (input: DaemonSessionIdParams) => client.session.connect({ body: input }),
 
     /** Reads one daemon-managed session history with session identity and connection state. */
-    history: async (input: GetSessionHistoryRequest) => client.send("session.history", input),
+    history: async (input: GetSessionHistoryRequest) => client.session.history({ body: input }),
 
     /** Reads the current git diff for one daemon-managed session workspace. */
-    changes: async (input: GetSessionChangesRequest) => client.send("session.changes", input),
+    changes: async (input: GetSessionChangesRequest) => client.session.changes({ body: input }),
 
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: async (input: SessionComposerSuggestionsRequest) =>
-      client.send("session.composerSuggestions", input),
+      client.session.composerSuggestions({ body: input }),
 
     /** Reads draft composer suggestions that only depend on one repository cwd. */
     draftSuggestions: async (input: SessionDraftSuggestionsRequest) =>
-      client.send("session.draftSuggestions", input),
+      client.session.draftSuggestions({ body: input }),
 
     /** Loads launch-time adapter and repository capabilities before a session is created. */
     launchPreview: async (input: SessionLaunchPreviewRequest) =>
-      client.send("session.launchPreview", input),
+      client.session.launchPreview({ body: input }),
 
     /** Discovers launchable subpackage working directories under one project cwd. */
     subpackages: async (input: SessionSubpackagesRequest) =>
-      client.send("session.subpackages", input),
+      client.session.subpackages({ body: input }),
 
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
-    diagnostics: async (input: DaemonSessionIdParams) => client.send("session.diagnostics", input),
+    diagnostics: async (input: DaemonSessionIdParams) =>
+      client.session.diagnostics({ body: input }),
 
     ...sessionFeature,
 
     /** Reads persisted workforce metadata attached to one daemon-managed session. */
-    workforce: async (input: DaemonSessionIdParams) => client.send("session.workforce.get", input),
+    workforce: async (input: DaemonSessionIdParams) =>
+      client.session.workforce.get({ body: input }),
 
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
-    shutdown: async (input: DaemonSessionIdParams) => client.send("session.shutdown", input),
+    shutdown: async (input: DaemonSessionIdParams) => client.session.shutdown({ body: input }),
 
     /** Marks one session inbox row completed without shutting down the session. */
-    complete: async (input: DaemonSessionIdParams) => client.send("session.complete", input),
+    complete: async (input: DaemonSessionIdParams) => client.session.complete({ body: input }),
 
     /** Records the current session initiative without creating an inbox row. */
     declareInitiative: async (input: DeclareSessionInitiativeRequest) =>
-      client.send("session.declareInitiative", input),
+      client.session.declareInitiative({ body: input }),
 
     /** Reports a session blocker and marks the session inbox row unread. */
     reportBlocker: async (input: ReportSessionBlockerRequest) =>
-      client.send("session.reportBlocker", input),
+      client.session.reportBlocker({ body: input }),
 
     /** Reports an end-of-turn session update when no other entity claimed attention. */
     reportTurnEnded: async (input: ReportSessionTurnEndedRequest) =>
-      client.send("session.reportTurnEnded", input),
+      client.session.reportTurnEnded({ body: input }),
 
     /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
-    cancel: async (input: CancelSessionRequest) => client.send("session.cancel", input),
+    cancel: async (input: CancelSessionRequest) => client.session.cancel({ body: input }),
     /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
-    steer: async (input: SteerSessionRequest) => client.send("session.steer", input),
+    steer: async (input: SteerSessionRequest) => client.session.steer({ body: input }),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
-    send: async (input: SendSessionMessageRequest) => client.send("session.send", input),
+    send: async (input: SendSessionMessageRequest) => client.session.send({ body: input }),
     /** Sends one ACP permission response through the daemon-managed session transport. */
     respondPermission: async (input: SessionPermissionResponseRequest) =>
-      client.send("session.send", {
-        id: input.id,
-        message: createSessionPermissionResponseMessage(input),
+      client.session.send({
+        body: {
+          id: input.id,
+          message: createSessionPermissionResponseMessage(input),
+        },
       }),
     /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
     prompt: async (input: SessionPromptRequest) =>
-      client.send("session.send", {
-        id: input.id,
-        message: createSessionPromptMessage(input),
+      client.session.send({
+        body: {
+          id: input.id,
+          message: createSessionPromptMessage(input),
+        },
       }),
     /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
     subscribe: async (
       input: DaemonSessionIdParams,
       onMessage: (message: acp.AnyMessage) => void,
     ): Promise<() => void> => {
-      return client.subscribe({ name: "session.message", filter: input }, (payload) => {
-        onMessage(payload.message)
-      })
+      const controller = new AbortController()
+      const events = await client.session.messageEvents({ query: input, signal: controller.signal })
+      void (async () => {
+        for await (const payload of events) {
+          if (controller.signal.aborted) {
+            break
+          }
+          onMessage(payload.message)
+        }
+      })()
+      return () => controller.abort()
     },
 
     /** Resolves one daemon session token to its daemon session id. */
     resolveToken: async (input: ResolveSessionTokenRequest) =>
-      client.send("session.resolveToken", input),
+      client.session.resolveToken({ body: input }),
   }
 }
 
 /** Builds the action namespace with one thin method per daemon action IPC call. */
-function createActionNamespace(client: DaemonIpcClient) {
+function createActionNamespace(client: any) {
   return {
     /** Runs one named daemon action and creates the resulting daemon session. */
-    run: async (input: RunNamedActionRequest) => client.send("action.run", input),
+    run: async (input: RunNamedActionRequest) => client.action.run({ body: input }),
   }
 }
 
 /** Builds the loop namespace with one thin method per daemon loop IPC action. */
-function createLoopNamespace(client: DaemonIpcClient) {
+function createLoopNamespace(client: any) {
   return {
     /** Starts or reuses one daemon loop runtime. */
-    start: async (input: StartLoopRequest) => client.send("loop.start", input),
+    start: async (input: StartLoopRequest) => client.loop.start({ body: input }),
 
     /** Fetches one daemon loop runtime and its resolved config. */
-    get: async (input: GetLoopRequest) => client.send("loop.get", input),
+    get: async (input: GetLoopRequest) => client.loop.get({ body: input }),
 
     /** Lists daemon loop runtime summaries. */
-    list: async () => client.send("loop.list"),
+    list: async () => client.loop.list(),
 
     /** Shuts down one daemon loop and reports whether shutdown succeeded. */
-    shutdown: async (input: ShutdownLoopRequest) => client.send("loop.shutdown", input),
+    shutdown: async (input: ShutdownLoopRequest) => client.loop.shutdown({ body: input }),
   }
 }
 
 /** Builds the workforce namespace with one thin method per daemon workforce IPC action. */
-function createWorkforceNamespace(client: DaemonIpcClient) {
+function createWorkforceNamespace(client: any) {
   return {
     /** Starts or reuses one daemon workforce runtime. */
-    start: async (input: StartWorkforceRequest) => client.send("workforce.start", input),
+    start: async (input: StartWorkforceRequest) => client.workforce.start({ body: input }),
 
     /** Discovers package candidates for one repository workforce initialization flow. */
     discoverCandidates: async (input: DiscoverWorkforceCandidatesRequest) =>
-      client.send("workforce.discoverCandidates", input),
+      client.workforce.discoverCandidates({ body: input }),
 
     /** Initializes one repository workforce config and ledger through the daemon. */
     initialize: async (input: InitializeWorkforceRequest) =>
-      client.send("workforce.initialize", input),
+      client.workforce.initialize({ body: input }),
 
     /** Fetches one daemon workforce runtime and its resolved config. */
-    get: async (input: GetWorkforceRequest) => client.send("workforce.get", input),
+    get: async (input: GetWorkforceRequest) => client.workforce.get({ body: input }),
 
     /** Lists daemon workforce runtime summaries. */
-    list: async () => client.send("workforce.list"),
+    list: async () => client.workforce.list(),
 
     /** Subscribes to live daemon-published workforce ledger events for one repository root. */
     subscribe: async (
       input: SubscribeWorkforceEventsRequest,
       onEvent: (event: WorkforceEventEnvelope["event"]) => void,
     ): Promise<() => void> => {
-      return client.subscribe({ name: "workforce.event", filter: input }, (payload) => {
-        onEvent(payload.event)
-      })
+      const controller = new AbortController()
+      const events = await client.workforce.event({ query: input, signal: controller.signal })
+      void (async () => {
+        for await (const payload of events) {
+          if (controller.signal.aborted) {
+            break
+          }
+          onEvent(payload.event)
+        }
+      })()
+      return () => controller.abort()
     },
 
     /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
-    shutdown: async (input: ShutdownWorkforceRequest) => client.send("workforce.shutdown", input),
+    shutdown: async (input: ShutdownWorkforceRequest) => client.workforce.shutdown({ body: input }),
 
     /** Enqueues one workforce request and includes the updated workforce projection. */
-    request: async (input: CreateWorkforceRequest) => client.send("workforce.request", input),
+    request: async (input: CreateWorkforceRequest) => client.workforce.request({ body: input }),
 
     /** Updates one workforce request and includes the updated workforce projection. */
-    update: async (input: UpdateWorkforceRequest) => client.send("workforce.update", input),
+    update: async (input: UpdateWorkforceRequest) => client.workforce.update({ body: input }),
 
     /** Cancels one workforce request and includes the updated workforce projection. */
-    cancel: async (input: CancelWorkforceRequest) => client.send("workforce.cancel", input),
+    cancel: async (input: CancelWorkforceRequest) => client.workforce.cancel({ body: input }),
 
     /** Truncates one workforce queue and includes the updated workforce projection. */
-    truncate: async (input: TruncateWorkforceRequest) => client.send("workforce.truncate", input),
+    truncate: async (input: TruncateWorkforceRequest) => client.workforce.truncate({ body: input }),
 
     /** Responds to one active workforce request and includes the updated workforce projection. */
-    respond: async (input: RespondWorkforceRequest) => client.send("workforce.respond", input),
+    respond: async (input: RespondWorkforceRequest) => client.workforce.respond({ body: input }),
 
     /** Suspends one active workforce request and includes the updated workforce projection. */
-    suspend: async (input: SuspendWorkforceRequest) => client.send("workforce.suspend", input),
+    suspend: async (input: SuspendWorkforceRequest) => client.workforce.suspend({ body: input }),
   }
 }
 
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
 export class GoddardSdk {
-  readonly #client: DaemonIpcClient
+  readonly #client: GoddardClient
   #featureNamespaces: FeatureSdkNamespaces | undefined
 
   constructor(options: GoddardClientOptions) {

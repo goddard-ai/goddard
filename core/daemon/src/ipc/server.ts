@@ -9,7 +9,6 @@ import {
   type InferProvides,
 } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
-import type { Handlers, InferStreamPayload } from "@goddard-ai/ipc"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
@@ -50,7 +49,6 @@ const daemonPlugins = composePlugins([
 configureDbSchema(daemonPlugins.db)
 
 type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
-type DaemonStreamName = keyof typeof daemonIpcSchema.streams & string
 
 export async function startDaemonServer(
   client: BackendPrClient,
@@ -181,10 +179,10 @@ export async function startDaemonServer(
   })
   const sessionFeature = pluginSetup.extensions.session as SessionExtension
 
-  const requestHandlers = {
+  const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
     ...pluginSetup.requestHandlers,
-    "action.run": async (payload) => {
+    "action.run": async (payload: any) => {
       const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
       const session = await sessionFeature.create(
         buildNamedActionSessionParams(action, payload.cwd, {
@@ -202,12 +200,12 @@ export async function startDaemonServer(
       context.setSessionId(session.id)
       return { session }
     },
-    "loop.start": async (payload) => {
+    "loop.start": async (payload: any) => {
       return {
         loop: await loopManager.startLoop(payload),
       }
     },
-    "loop.get": async ({ rootDir, loopName }) => {
+    "loop.get": async ({ rootDir, loopName }: any) => {
       return {
         loop: await loopManager.getLoop(rootDir, loopName),
       }
@@ -217,19 +215,19 @@ export async function startDaemonServer(
         loops: await loopManager.listLoops(),
       }
     },
-    "loop.shutdown": async ({ rootDir, loopName }) => {
+    "loop.shutdown": async ({ rootDir, loopName }: any) => {
       return {
         rootDir,
         loopName,
         success: await loopManager.shutdownLoop(rootDir, loopName),
       }
     },
-    "workforce.start": async ({ rootDir }) => {
+    "workforce.start": async ({ rootDir }: any) => {
       return {
         workforce: await workforceManager.startWorkforce(rootDir),
       }
     },
-    "workforce.discoverCandidates": async ({ rootDir }) => {
+    "workforce.discoverCandidates": async ({ rootDir }: any) => {
       // Canonicalize the repo root inside the daemon so SDK and CLI callers cannot drift.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
@@ -237,14 +235,14 @@ export async function startDaemonServer(
         candidates: await discoverWorkforceInitCandidates(repositoryRoot),
       }
     },
-    "workforce.initialize": async ({ rootDir, packageDirs }) => {
+    "workforce.initialize": async ({ rootDir, packageDirs }: any) => {
       // Re-resolve here for the same reason as discovery: the daemon owns the canonical root.
       const repositoryRoot = await resolveRepositoryRoot(rootDir)
       return {
         initialized: await initializeWorkforce(repositoryRoot, packageDirs),
       }
     },
-    "workforce.get": async ({ rootDir }) => {
+    "workforce.get": async ({ rootDir }: any) => {
       return {
         workforce: await workforceManager.getWorkforce(rootDir),
       }
@@ -254,13 +252,13 @@ export async function startDaemonServer(
         workforces: await workforceManager.listWorkforces(),
       }
     },
-    "workforce.shutdown": async ({ rootDir }) => {
+    "workforce.shutdown": async ({ rootDir }: any) => {
       return {
         rootDir,
         success: await workforceManager.shutdownWorkforce(rootDir),
       }
     },
-    "workforce.request": async (payload) => {
+    "workforce.request": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -273,7 +271,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    "workforce.update": async (payload) => {
+    "workforce.update": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -285,7 +283,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    "workforce.cancel": async (payload) => {
+    "workforce.cancel": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -297,7 +295,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    "workforce.truncate": async (payload) => {
+    "workforce.truncate": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -309,7 +307,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    "workforce.respond": async (payload) => {
+    "workforce.respond": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -321,7 +319,7 @@ export async function startDaemonServer(
         actor,
       )
     },
-    "workforce.suspend": async (payload) => {
+    "workforce.suspend": async (payload: any) => {
       const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
       return workforceManager.appendWorkforceEvent(
         actor.rootDir ?? payload.rootDir,
@@ -333,12 +331,12 @@ export async function startDaemonServer(
         actor,
       )
     },
-  } as Handlers<typeof daemonIpcSchema>
+  }
 
   const ipcServer = createServer({
     port: runtime.port,
-    schema: daemonIpcSchema,
-    handlers: requestHandlers,
+    schema: daemonIpcSchema as any,
+    handlers: requestHandlers as any,
     runHandler: ({ payload }, handler) => {
       const context: IpcRequestContext = {
         opId: randomUUID(),
@@ -389,28 +387,32 @@ export async function startDaemonServer(
     },
     afterSubscribe: async ({ name, filter }) => {
       if (name === "session.message") {
-        const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+        const streamFilter = filter as any
+        const sessionId =
+          typeof streamFilter === "object" && streamFilter && "id" in streamFilter
+            ? streamFilter.id
+            : null
         if (typeof sessionId === "string") {
-          await sessionFeature.subscriberConnected(sessionId)
+          await sessionFeature.subscriberConnected(sessionId as `ses_${string}`)
         }
       }
     },
     afterUnsubscribe: async ({ name, filter }) => {
       if (name === "session.message") {
-        const sessionId = typeof filter === "object" && filter && "id" in filter ? filter.id : null
+        const streamFilter = filter as any
+        const sessionId =
+          typeof streamFilter === "object" && streamFilter && "id" in streamFilter
+            ? streamFilter.id
+            : null
         if (typeof sessionId === "string") {
-          await sessionFeature.subscriberDisconnected(sessionId)
+          await sessionFeature.subscriberDisconnected(sessionId as `ses_${string}`)
         }
       }
     },
   })
 
   publishPluginEvent = (name, payload) => {
-    const streamName = name as DaemonStreamName
-    ipcServer.publish(
-      streamName,
-      payload as InferStreamPayload<typeof daemonIpcSchema, typeof streamName>,
-    )
+    ipcServer.publish(name as never, payload as never)
   }
 
   await once(ipcServer.server, "listening")

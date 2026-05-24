@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, defineIpcSchema, http } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 import {
@@ -9,28 +9,6 @@ import {
   type ReplyPrResponse,
   type SubmitPrResponse,
 } from "./schema.ts"
-
-export const pullRequestIpcSchema = defineIpcSchema({
-  requests: {
-    "pr.submit": {
-      payload: SubmitPrRequest.extend({
-        token: z.string(),
-      }),
-      response: $type<SubmitPrResponse>(),
-    },
-    "pr.get": {
-      payload: GetPullRequestRequest,
-      response: $type<GetPullRequestResponse>(),
-    },
-    "pr.reply": {
-      payload: ReplyPrRequest.extend({
-        token: z.string(),
-      }),
-      response: $type<ReplyPrResponse>(),
-    },
-  },
-  streams: {},
-})
 
 export const SubmitPrRouteRequest = SubmitPrRequest.extend({
   token: z.string(),

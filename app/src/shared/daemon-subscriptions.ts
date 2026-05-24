@@ -1,6 +1,3 @@
-import type { InferStreamPayload } from "@goddard-ai/ipc"
-import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-
 import type {
   DaemonResetSubscriptionsInput,
   DaemonStreamTargetInput,
@@ -8,8 +5,6 @@ import type {
   DaemonUnsubscribeInput,
 } from "./desktop-rpc.ts"
 import type { DaemonStreamEventDetail, DaemonStreamName } from "./global-event-hub.ts"
-
-type DaemonSchema = typeof daemonIpcSchema
 
 type CoordinatorDeps = {
   webviewId: number
@@ -31,7 +26,7 @@ export interface DaemonSubscriptionCoordinator {
   /** Opens one daemon stream subscription and returns an idempotent unsubscribe closure. */
   subscribe<TName extends DaemonStreamName>(
     target: DaemonStreamTargetInput<TName>,
-    onMessage: (payload: InferStreamPayload<DaemonSchema, TName>) => void,
+    onMessage: (payload: any) => void,
   ): Promise<() => void>
 }
 
@@ -69,7 +64,7 @@ export function createDaemonSubscriptionCoordinator(
 
   async function subscribe<TName extends DaemonStreamName>(
     target: DaemonStreamTargetInput<TName>,
-    onMessage: (payload: InferStreamPayload<DaemonSchema, TName>) => void,
+    onMessage: (payload: any) => void,
   ) {
     await reset()
 

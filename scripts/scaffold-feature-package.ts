@@ -296,21 +296,18 @@ function createDaemonIpcEntrypoint(name: string) {
   const identifier = toIdentifier(name)
 
   return `${dedent`
-    import { defineIpcSchema } from "@goddard-ai/ipc"
+    import { defineIpcRoutes } from "@goddard-ai/ipc"
 
-    export const ${identifier}IpcSchema = defineIpcSchema({
-      requests: {},
-      streams: {},
-    })
+    export const ${identifier}IpcRoutes = defineIpcRoutes({})
   `}\n`
 }
 
 function createDaemonEntrypoint(options: FeatureScaffoldOptions, name: string) {
   const identifier = toIdentifier(name)
   const ipcImport = isDaemonIpcNeeded(options)
-    ? `import { ${identifier}IpcSchema } from "./daemon-ipc.ts"\n`
+    ? `import { ${identifier}IpcRoutes } from "./daemon-ipc.ts"\n`
     : ""
-  const ipcProperty = isDaemonIpcNeeded(options) ? `,\n  ipc: ${identifier}IpcSchema` : ""
+  const ipcProperty = isDaemonIpcNeeded(options) ? `,\n  ipcRoutes: ${identifier}IpcRoutes` : ""
 
   return `${dedent`
     import { definePlugin } from "@goddard-ai/daemon-plugin"
@@ -392,7 +389,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
       ? `import { ${identifier}Plugin } from "../src/daemon.ts"`
       : undefined,
     isDaemonIpcNeeded(options)
-      ? `import { ${identifier}IpcSchema } from "../src/daemon-ipc.ts"`
+      ? `import { ${identifier}IpcRoutes } from "../src/daemon-ipc.ts"`
       : undefined,
     hasLayer(options.layers, "sdk")
       ? `import { ${identifier}SdkPlugin } from "../src/sdk.ts"`
@@ -412,9 +409,7 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
     hasLayer(options.layers, "daemon")
       ? `    expect(${identifier}Plugin.name).toBe("${name}")`
       : undefined,
-    isDaemonIpcNeeded(options)
-      ? `    expect(${identifier}IpcSchema).toEqual({ requests: {}, streams: {} })`
-      : undefined,
+    isDaemonIpcNeeded(options) ? `    expect(${identifier}IpcRoutes).toEqual({})` : undefined,
     hasLayer(options.layers, "sdk")
       ? `    expect(${identifier}SdkPlugin.namespace).toBe("${identifier}")`
       : undefined,
