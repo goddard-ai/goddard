@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
+import { actionPlugin } from "@goddard-ai/action/daemon"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
@@ -29,7 +30,6 @@ import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { configureDbSchema, db } from "../persistence/store.ts"
-import { buildNamedActionSessionParams, resolveNamedAction } from "../resolvers/actions.ts"
 import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createACPRegistryService } from "../session/registry.ts"
 import {
@@ -42,6 +42,7 @@ import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { DaemonServer } from "./types.ts"
 
 const daemonPlugins = composePlugins([
+  actionPlugin,
   adapterPlugin,
   authPlugin,
   sessionPlugin,
@@ -182,24 +183,6 @@ export async function startDaemonServer(
   const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
     ...pluginSetup.requestHandlers,
-    "action.run": async (payload: any) => {
-      const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
-      const session = await sessionFeature.create(
-        buildNamedActionSessionParams(action, payload.cwd, {
-          cwd: payload.cwd,
-          agent: payload.agent,
-          mcpServers: payload.mcpServers,
-          env: payload.env,
-          systemPrompt: payload.systemPrompt,
-          repository: payload.repository,
-          prNumber: payload.prNumber,
-          metadata: payload.metadata,
-        }),
-      )
-      const context = requireIpcRequestContext()
-      context.setSessionId(session.id)
-      return { session }
-    },
     "loop.start": async (payload: any) => {
       return {
         loop: await loopManager.startLoop(payload),

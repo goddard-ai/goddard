@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@goddard-ai/action": "workspace:*",
     "@goddard-ai/adapter": "workspace:*",
     "@goddard-ai/auth": "workspace:*",
     "@b9g/async-context": "^0.2.1",

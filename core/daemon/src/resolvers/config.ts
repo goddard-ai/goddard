@@ -7,7 +7,7 @@ import {
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
-import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
+import { LoopConfig, UserConfig } from "@goddard-ai/schema/config"
 import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
@@ -160,11 +160,6 @@ export async function readCurrentRootConfig(cwd: string, provider?: RootConfigPr
     localRoot: snapshot.localRoot,
     config: snapshot.config,
   }
-}
-
-/** Reads and validates one packaged action config document. */
-export async function readActionConfig(path: string): Promise<ActionConfig | undefined> {
-  return readJsonConfig(path, ActionConfig, "Action config", "action.json")
 }
 
 /** Reads and validates one packaged loop config document. */

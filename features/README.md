@@ -44,6 +44,12 @@ feature becomes part of a supported product surface.
 
 ## Current Feature Boundaries
 
+`features/action` owns action schemas, named action config schema metadata,
+daemon action IPC handlers, named action resolution from local/global config
+roots, and SDK action namespace construction. Config file storage and hot
+reload remain daemon/core substrate, and session execution is consumed through
+the first-class session feature extension.
+
 `features/auth` owns auth schemas, backend auth route contracts, daemon auth IPC
 handlers, and SDK auth namespace construction. Backend storage, GitHub device
 flow persistence, daemon token persistence, and HTTP/router substrate remain in

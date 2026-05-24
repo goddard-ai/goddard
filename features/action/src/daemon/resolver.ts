@@ -2,20 +2,31 @@ import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
-import { ActionConfig, type InlineSessionParams } from "@goddard-ai/schema/config"
+import type { InlineSessionParams } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
-import { readActionConfig, readCurrentRootConfig, type RootConfigProvider } from "./config.ts"
+import { ActionConfig } from "../schema.ts"
+
+type RootConfigProvider = {
+  getRootConfig: (cwd: string) => Promise<{
+    globalRoot: string
+    localRoot: string
+    config: {
+      session?: InlineSessionParams
+      actions?: ActionConfig
+    }
+  }>
+}
 
 /** A resolved named action prompt and merged persisted config. */
-export type ResolvedAction = {
+type ResolvedAction = {
   prompt: string
   config: ActionConfig
   path: string
 }
 
 /** Validates that one parsed action config is an object when present. */
-function ensureActionConfig(value: ActionConfig | undefined, path: string): ActionConfig {
+function ensureActionConfig(value: ActionConfig | undefined, path: string) {
   if (!value) {
     return {}
   }
@@ -24,7 +35,27 @@ function ensureActionConfig(value: ActionConfig | undefined, path: string): Acti
     throw new Error(`Action config at ${path} must be an object.`)
   }
 
-  return value
+  return ActionConfig.parse(value)
+}
+
+/** Reads and validates one packaged action config document. */
+async function readActionConfig(path: string) {
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(await readFile(path, "utf-8"))
+  } catch (error) {
+    throw new Error(`Action config at ${path} must be valid JSON.`, { cause: error })
+  }
+
+  const normalized =
+    typeof parsed === "object" && parsed !== null && "$schema" in parsed
+      ? Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
+        )
+      : parsed
+
+  return ActionConfig.parse(normalized)
 }
 
 /** Loads one prompt-only action package. */
@@ -51,16 +82,13 @@ async function loadPackagedAction(path: string): Promise<ResolvedAction> {
 
   return {
     prompt: await readFile(promptPath, "utf-8"),
-    config: ensureActionConfig(await readActionConfig(configPath), configPath),
+    config: await readActionConfig(configPath),
     path,
   }
 }
 
 /** Resolves one action name from a specific `.goddard` root. */
-async function resolveActionFromRoot(
-  actionName: string,
-  goddardRoot: string,
-): Promise<ResolvedAction | null> {
+async function resolveActionFromRoot(actionName: string, goddardRoot: string) {
   const promptPath = join(goddardRoot, "actions", `${actionName}.md`)
   const folderPath = join(goddardRoot, "actions", actionName)
   const hasPromptFile = existsSync(promptPath)
@@ -87,13 +115,10 @@ async function resolveActionFromRoot(
 export async function resolveNamedAction(
   actionName: string,
   cwd: string,
-  rootConfigProvider?: RootConfigProvider,
-): Promise<ResolvedAction> {
+  rootConfigProvider: RootConfigProvider,
+) {
   const resolvedCwd = resolve(cwd)
-  const { config, globalRoot, localRoot } = await readCurrentRootConfig(
-    resolvedCwd,
-    rootConfigProvider,
-  )
+  const { config, globalRoot, localRoot } = await rootConfigProvider.getRootConfig(resolvedCwd)
   const localAction = await resolveActionFromRoot(actionName, localRoot)
   const globalAction = localAction ? null : await resolveActionFromRoot(actionName, globalRoot)
   const action = localAction ?? globalAction

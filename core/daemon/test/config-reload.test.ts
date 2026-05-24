@@ -174,9 +174,11 @@ test(
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-    const firstRun = await client.send("action.run", {
-      actionName: "review",
-      cwd: repoDir,
+    const firstRun = await client.action.run({
+      body: {
+        actionName: "review",
+        cwd: repoDir,
+      },
     })
     expect(firstRun.session.agentName).toBe("Node Agent A")
 
@@ -196,14 +198,16 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    const secondRun = await client.send("action.run", {
-      actionName: "review",
-      cwd: repoDir,
+    const secondRun = await client.action.run({
+      body: {
+        actionName: "review",
+        cwd: repoDir,
+      },
     })
     expect(secondRun.session.agentName).toBe("Node Agent B")
 
-    await client.send("session.shutdown", { id: firstRun.session.id })
-    await client.send("session.shutdown", { id: secondRun.session.id })
+    await client.session.shutdown({ body: { id: firstRun.session.id } })
+    await client.session.shutdown({ body: { id: secondRun.session.id } })
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
 )

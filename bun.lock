@@ -147,6 +147,7 @@
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@b9g/async-context": "^0.2.1",
+        "@goddard-ai/action": "workspace:*",
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/backend-plugin": "workspace:*",
@@ -234,6 +235,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/action": "workspace:*",
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
@@ -250,6 +252,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/action": "workspace:*",
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:^",
@@ -289,6 +292,21 @@
     "core/worktree-plugin": {
       "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
+    },
+    "features/action": {
+      "name": "@goddard-ai/action",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "zod": "catalog:",
+      },
     },
     "features/adapter": {
       "name": "@goddard-ai/adapter",
@@ -700,6 +718,8 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.8", "", { "dependencies": { "@floating-ui/dom": "^1.7.6" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-cC52bHwM/n/CxS87FH0yWdngEZrjdtLW/qVruo68qg+prK7ZQ4YGdut2GyDVpoGeAYe/h899rVeOVm6Oi40k2A=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
+
+    "@goddard-ai/action": ["@goddard-ai/action@workspace:features/action"],
 
     "@goddard-ai/adapter": ["@goddard-ai/adapter@workspace:features/adapter"],
 

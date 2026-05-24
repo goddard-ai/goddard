@@ -1,4 +1,3 @@
-export type * from "./daemon/actions.ts"
 export {
   BulkUpdateInboxItemsRequest,
   InboxEntityId,

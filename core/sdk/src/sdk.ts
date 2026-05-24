@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk"
+import { actionSdkPlugin } from "@goddard-ai/action/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
@@ -20,7 +21,6 @@ import type {
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
   RespondWorkforceRequest,
-  RunNamedActionRequest,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
@@ -52,6 +52,7 @@ import {
 } from "./session.ts"
 
 const sdkPlugins = composeSdkPlugins([
+  actionSdkPlugin,
   adapterSdkPlugin,
   authSdkPlugin,
   inboxSdkPlugin,
@@ -196,14 +197,6 @@ function createSessionNamespace(client: any) {
   }
 }
 
-/** Builds the action namespace with one thin method per daemon action IPC call. */
-function createActionNamespace(client: any) {
-  return {
-    /** Runs one named daemon action and creates the resulting daemon session. */
-    run: async (input: RunNamedActionRequest) => client.action.run({ body: input }),
-  }
-}
-
 /** Builds the loop namespace with one thin method per daemon loop IPC action. */
 function createLoopNamespace(client: any) {
   return {
@@ -323,7 +316,7 @@ export class GoddardSdk {
   }
 
   get action() {
-    return defineCachedNamespace(this, "action", createActionNamespace(this.#client))
+    return defineCachedNamespace(this, "action", this.#features.action)
   }
 
   get loop() {

@@ -1,10 +1,13 @@
-import { auth } from "@goddard-ai/auth/backend"
-import { pullRequests, webhooks } from "@goddard-ai/pull-request/backend"
+import { authBackendRoutes } from "@goddard-ai/auth/backend"
+import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import { expect, test } from "bun:test"
 
 import { repositories } from "../src/backend/routes.ts"
 
 test("backend routes keep their logical resource grouping", () => {
+  const { auth } = authBackendRoutes
+  const { pullRequests, webhooks } = pullRequestBackendRoutes
+
   expect(auth.path.source).toBe("/auth")
   expect(auth.children.device.path.source).toBe("/device")
   expect(auth.children.device.children.start.path?.source).toBe("/start")
