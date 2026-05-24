@@ -1,11 +1,11 @@
 import { appendFile } from "node:fs/promises"
+
 import type {
   WorkforceLedgerEvent,
   WorkforceProjection,
   WorkforceRequestRecord,
   WorkforceTruncateEvent,
-} from "@goddard-ai/schema/workforce"
-
+} from "../schema.ts"
 import { buildWorkforcePaths } from "./paths.ts"
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -11,10 +11,10 @@ import {
   type InferProvides,
 } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
-import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
+import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
-import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
+import { type DaemonSession } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import {
@@ -22,22 +22,16 @@ import {
   sessionPlugin,
   type SessionManager,
 } from "@goddard-ai/session/daemon"
+import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 import { getErrorMessage } from "radashi"
 
 import type { BackendClient } from "../backend.ts"
 import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
-import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
+import { IpcRequestContext, SetupContext } from "../context.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { configureDbSchema, db } from "../persistence/store.ts"
 import { createACPRegistryService } from "../session/registry.ts"
-import {
-  discoverWorkforceInitCandidates,
-  initializeWorkforce,
-  resolveRepositoryRoot,
-} from "../workforce/config.ts"
-import { createWorkforceManager, type WorkforceManager } from "../workforce/index.ts"
-import { normalizeWorkforceRootDir } from "../workforce/paths.ts"
 import type { DaemonServer } from "./types.ts"
 
 const daemonPlugins = composePlugins([
@@ -48,6 +42,7 @@ const daemonPlugins = composePlugins([
   inboxPlugin,
   pullRequestPlugin,
   loopPlugin,
+  workforcePlugin,
 ])
 configureDbSchema(daemonPlugins.db)
 
@@ -76,7 +71,6 @@ export async function startDaemonServer(
   let publishPluginEvent: ((name: string, payload: unknown) => void) | null = null
 
   let sessionManager!: SessionManager
-  let workforceManager!: WorkforceManager
 
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
@@ -85,67 +79,6 @@ export async function startDaemonServer(
     }
 
     return context
-  }
-
-  async function resolveWorkforceActor(
-    token: string | undefined,
-    requestedRootDir: string,
-  ): Promise<WorkforceActorContext> {
-    if (!token) {
-      return {
-        sessionId: null,
-        rootDir: null,
-        agentId: null,
-        requestId: null,
-      }
-    }
-
-    const session = await sessionFeature.resolveTokenScope(token)
-    if (!session) {
-      throw new IpcClientError("Invalid session token")
-    }
-
-    const context = requireIpcRequestContext()
-    context.setSessionId(session.sessionId)
-
-    const workforceRecord =
-      db.workforces.first({
-        where: { sessionId: session.sessionId },
-      }) ?? null
-
-    if (!workforceRecord || typeof workforceRecord.agentId !== "string") {
-      throw new IpcClientError("Session is not attached to a workforce request")
-    }
-
-    if (typeof workforceRecord.rootDir !== "string") {
-      throw new IpcClientError("Session is not attached to a workforce root")
-    }
-
-    const [sessionRootDir, normalizedRequestedRootDir] = await Promise.all([
-      normalizeWorkforceRootDir(workforceRecord.rootDir),
-      normalizeWorkforceRootDir(requestedRootDir),
-    ])
-
-    if (sessionRootDir !== normalizedRequestedRootDir) {
-      throw new IpcClientError(
-        `Session workforce root ${sessionRootDir} does not match requested root ${normalizedRequestedRootDir}`,
-      )
-    }
-
-    return {
-      sessionId: session.sessionId,
-      rootDir: sessionRootDir,
-      agentId: workforceRecord.agentId,
-      requestId: typeof workforceRecord.requestId === "string" ? workforceRecord.requestId : null,
-    }
-  }
-
-  function requireActorRequestId(actor: WorkforceActorContext): string {
-    if (!actor.requestId) {
-      throw new IpcClientError("Session is not attached to an active workforce request")
-    }
-
-    return actor.requestId
   }
 
   const daemonSubstrate = {
@@ -178,119 +111,12 @@ export async function startDaemonServer(
     publishPluginEvent(name, payload)
   })
   const sessionFeature = pluginSetup.extensions.session as SessionExtension
+  const requestHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "request")
+  const streamHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "stream")
 
   const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
-    ...pluginSetup.requestHandlers,
-    "workforce.start": async ({ rootDir }: any) => {
-      return {
-        workforce: await workforceManager.startWorkforce(rootDir),
-      }
-    },
-    "workforce.discoverCandidates": async ({ rootDir }: any) => {
-      // Canonicalize the repo root inside the daemon so SDK and CLI callers cannot drift.
-      const repositoryRoot = await resolveRepositoryRoot(rootDir)
-      return {
-        rootDir: repositoryRoot,
-        candidates: await discoverWorkforceInitCandidates(repositoryRoot),
-      }
-    },
-    "workforce.initialize": async ({ rootDir, packageDirs }: any) => {
-      // Re-resolve here for the same reason as discovery: the daemon owns the canonical root.
-      const repositoryRoot = await resolveRepositoryRoot(rootDir)
-      return {
-        initialized: await initializeWorkforce(repositoryRoot, packageDirs),
-      }
-    },
-    "workforce.get": async ({ rootDir }: any) => {
-      return {
-        workforce: await workforceManager.getWorkforce(rootDir),
-      }
-    },
-    "workforce.list": async () => {
-      return {
-        workforces: await workforceManager.listWorkforces(),
-      }
-    },
-    "workforce.shutdown": async ({ rootDir }: any) => {
-      return {
-        rootDir,
-        success: await workforceManager.shutdownWorkforce(rootDir),
-      }
-    },
-    "workforce.request": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "request",
-          targetAgentId: payload.targetAgentId,
-          input: payload.input,
-          intent: payload.intent,
-        },
-        actor,
-      )
-    },
-    "workforce.update": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "update",
-          requestId: payload.requestId,
-          input: payload.input,
-        },
-        actor,
-      )
-    },
-    "workforce.cancel": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "cancel",
-          requestId: payload.requestId,
-          reason: payload.reason ?? null,
-        },
-        actor,
-      )
-    },
-    "workforce.truncate": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "truncate",
-          agentId: payload.agentId ?? null,
-          reason: payload.reason ?? null,
-        },
-        actor,
-      )
-    },
-    "workforce.respond": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "respond",
-          requestId: requireActorRequestId(actor),
-          output: payload.output,
-        },
-        actor,
-      )
-    },
-    "workforce.suspend": async (payload: any) => {
-      const actor = await resolveWorkforceActor(payload.token, payload.rootDir)
-      return workforceManager.appendWorkforceEvent(
-        actor.rootDir ?? payload.rootDir,
-        {
-          type: "suspend",
-          requestId: requireActorRequestId(actor),
-          reason: payload.reason,
-        },
-        actor,
-      )
-    },
+    ...requestHandlersFromPlugins,
   }
 
   const ipcServer = createServer({
@@ -334,16 +160,7 @@ export async function startDaemonServer(
       })
     },
     beforeSubscribe: async ({ name, filter }) => {
-      if (name === "workforce.event") {
-        const request = filter as SubscribeWorkforceEventsRequest | undefined
-        if (!request) {
-          throw new IpcClientError("Missing workforce event filter")
-        }
-
-        // Subscription setup only validates that this workforce is active; events are
-        // still pushed later from the runtime when new ledger activity is appended.
-        await workforceManager.getWorkforce(request.rootDir)
-      }
+      await runPluginStreamHandler(streamHandlersFromPlugins[name], filter)
     },
     afterSubscribe: async ({ name, filter }) => {
       if (name === "session.message") {
@@ -391,12 +208,6 @@ export async function startDaemonServer(
     },
   })
 
-  workforceManager = createWorkforceManager({
-    sessionManager,
-    publishEvent(payload) {
-      ipcServer.publish("workforce.event", payload)
-    },
-  })
   logger.log("ipc.server_listening", {
     port,
     daemonUrl,
@@ -417,7 +228,6 @@ export async function startDaemonServer(
         daemonUrl,
       })
       await pluginSetup.close().catch(() => {})
-      await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       if (ownsConfigManager) {
         await configManager.close().catch(() => {})
@@ -446,7 +256,7 @@ async function setupDaemonPlugins(
 ) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
-  const requestHandlers: Record<string, unknown> = {}
+  const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of daemonPlugins.plugins) {
@@ -467,7 +277,7 @@ async function setupDaemonPlugins(
     const setup = await plugin.setup?.(context)
 
     if (setup?.ipcHandlers) {
-      Object.assign(requestHandlers, flattenIpcHandlers(setup.ipcHandlers))
+      Object.assign(ipcHandlers, flattenIpcHandlers(setup.ipcHandlers))
     }
 
     if (setup?.close) {
@@ -482,7 +292,7 @@ async function setupDaemonPlugins(
 
   return {
     extensions,
-    requestHandlers,
+    ipcHandlers,
     close: async () => {
       for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
         await closeHandlers[index]?.()
@@ -512,6 +322,34 @@ function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
 
   visit(ipcHandlers, [])
   return requestHandlers
+}
+
+function filterPluginIpcHandlers(ipcHandlers: Record<string, unknown>, kind: "request" | "stream") {
+  const routeNames = kind === "request" ? daemonIpcSchema.requests : daemonIpcSchema.streams
+  return Object.fromEntries(
+    Object.entries(ipcHandlers).filter(([name]) => name in routeNames),
+  ) as Record<string, (payload: any) => any>
+}
+
+async function runPluginStreamHandler(
+  handler: ((payload: unknown) => unknown) | undefined,
+  filter: unknown,
+) {
+  if (!handler) {
+    return
+  }
+
+  const result = handler(filter)
+  if (isAsyncIterator(result)) {
+    await result.next()
+    return
+  }
+
+  await result
+}
+
+function isAsyncIterator(value: unknown): value is AsyncIterator<unknown> {
+  return typeof value === "object" && value !== null && "next" in value
 }
 
 function hasIpcRouteName(routes: Record<string, unknown>, path: readonly string[]) {

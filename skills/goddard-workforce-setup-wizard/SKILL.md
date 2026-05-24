@@ -12,7 +12,7 @@ Set up workforce as a daemon-owned, repository-scoped runtime. Preserve the exis
 - Read `workforce/README.md` for the operator model and first-use flow.
 - Read `spec/daemon/workforce.md` before changing lifecycle assumptions or explaining guarantees.
 - Read `workforce/src/main.ts` for supported commands, flags, and request intents.
-- Read `core/daemon/src/workforce/config.ts` and `core/schema/src/workforce.ts` before editing `.goddard/workforce.json` manually.
+- Read `features/workforce/src/daemon/config.ts` and `features/workforce/src/schema.ts` before editing `.goddard/workforce.json` manually.
 - Read `core/sdk/README.md` when the user wants SDK-driven setup instead of CLI usage.
 
 ## Run The Setup Workflow

@@ -8,93 +8,17 @@ import {
   defineIpcRoutes,
   getResponsePluginMarkerId,
   http,
-  ndjson,
   type HttpRouteTree,
 } from "@goddard-ai/ipc"
 import { loopIpcRoutes } from "@goddard-ai/loop/daemon-ipc"
 import { pullRequestIpcRoutes } from "@goddard-ai/pull-request/daemon-ipc"
 import { sessionIpcRoutes } from "@goddard-ai/session/daemon-ipc"
-
-import {
-  CancelWorkforceRequest,
-  CreateWorkforceRequest,
-  DiscoverWorkforceCandidatesRequest,
-  GetWorkforceRequest,
-  InitializeWorkforceRequest,
-  RespondWorkforceRequest,
-  ShutdownWorkforceRequest,
-  StartWorkforceRequest,
-  SubscribeWorkforceEventsRequest,
-  SuspendWorkforceRequest,
-  TruncateWorkforceRequest,
-  UpdateWorkforceRequest,
-  type DiscoverWorkforceCandidatesResponse,
-  type GetWorkforceResponse,
-  type InitializeWorkforceResponse,
-  type ListWorkforcesResponse,
-  type MutateWorkforceResponse,
-  type ShutdownWorkforceResponse,
-  type StartWorkforceResponse,
-  type WorkforceEventEnvelope,
-} from "./workforce/requests.ts"
+import { workforceIpcRoutes } from "@goddard-ai/workforce/daemon-ipc"
 
 const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
     health: http.get("health", {
       response: $type<{ ok: boolean }>(),
-    }),
-  }),
-  workforce: http.resource("workforce", {
-    start: http.post("start", {
-      body: StartWorkforceRequest,
-      response: $type<StartWorkforceResponse>(),
-    }),
-    discoverCandidates: http.post("discover-candidates", {
-      body: DiscoverWorkforceCandidatesRequest,
-      response: $type<DiscoverWorkforceCandidatesResponse>(),
-    }),
-    initialize: http.post("initialize", {
-      body: InitializeWorkforceRequest,
-      response: $type<InitializeWorkforceResponse>(),
-    }),
-    get: http.post("get", {
-      body: GetWorkforceRequest,
-      response: $type<GetWorkforceResponse>(),
-    }),
-    list: http.get("list", {
-      response: $type<ListWorkforcesResponse>(),
-    }),
-    shutdown: http.post("shutdown", {
-      body: ShutdownWorkforceRequest,
-      response: $type<ShutdownWorkforceResponse>(),
-    }),
-    request: http.post("request", {
-      body: CreateWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    update: http.post("update", {
-      body: UpdateWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    cancel: http.post("cancel", {
-      body: CancelWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    truncate: http.post("truncate", {
-      body: TruncateWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    respond: http.post("respond", {
-      body: RespondWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    suspend: http.post("suspend", {
-      body: SuspendWorkforceRequest,
-      response: $type<MutateWorkforceResponse>(),
-    }),
-    event: http.get("event", {
-      query: SubscribeWorkforceEventsRequest,
-      response: ndjson.$type<WorkforceEventEnvelope>(),
     }),
   }),
 })
@@ -109,6 +33,7 @@ export const daemonIpcRoutes = composeIpcRoutes([
   loopIpcRoutes,
   pullRequestIpcRoutes,
   sessionIpcRoutes,
+  workforceIpcRoutes,
 ])
 
 /** Compatibility schema for the old transport while the daemon server moves to Rouzer. */

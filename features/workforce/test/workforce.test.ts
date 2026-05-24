@@ -2,25 +2,42 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
-import { afterEach, expect, test } from "bun:test"
+import { createNodeClient } from "@goddard-ai/ipc/node"
+import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
+import { afterEach, beforeEach, expect, test } from "bun:test"
 
-import type { BackendClient } from "../src/backend.ts"
-import { startDaemonServer } from "../src/ipc.ts"
-import { configureLogging } from "../src/logging.ts"
-import { createWorkforceManager } from "../src/workforce/manager.ts"
-import { normalizeWorkforceRootDir } from "../src/workforce/paths.ts"
-import { WorkforceRuntime } from "../src/workforce/runtime.ts"
+import type { BackendClient } from "../../../core/daemon/src/backend.ts"
+import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
+import { configureLogging } from "../../../core/daemon/src/logging.ts"
+import { resetDb } from "../../../core/daemon/src/persistence/store.ts"
+import { createWorkforceManager } from "../src/daemon/manager.ts"
+import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
+import { WorkforceRuntime } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
+
+beforeEach(() => {
+  resetDb({ filename: ":memory:" })
+})
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
 })
+
+function createTestSession() {
+  return {
+    create: async () => ({
+      id: "ses_test",
+      acpSessionId: "acp_test",
+      status: "completed",
+    }),
+  }
+}
 
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
@@ -47,7 +64,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     await daemon.close()
   })
 
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const client = createLegacyDaemonClient(daemon.daemonUrl)
   const discovered = await client.send("workforce.discoverCandidates", {
     rootDir: packageDir,
   })
@@ -86,13 +103,20 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
     await daemon.close()
   })
 
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const client = createLegacyDaemonClient(daemon.daemonUrl)
   const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
 
   await expect(
     client.subscribe({ name: "workforce.event", filter: { rootDir } }, () => {}),
   ).rejects.toThrow(`No workforce is running for ${normalizedRootDir}`)
 })
+
+function createLegacyDaemonClient(daemonUrl: string) {
+  return createNodeClient(
+    readDaemonTcpAddressFromDaemonUrl(daemonUrl),
+    daemonIpcSchema as any,
+  ) as any
+}
 
 function createTestBackendClient(): BackendClient {
   return {
@@ -143,7 +167,7 @@ function createTestBackendClient(): BackendClient {
 test("workforce manager reuses one runtime per normalized repository root", async () => {
   const created: string[] = []
   const manager = createWorkforceManager({
-    sessionManager: {} as never,
+    session: createTestSession(),
     createRuntime: async (rootDir) => {
       created.push(rootDir)
       return {
@@ -219,7 +243,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
   let callCount = 0
 
   runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {} as never,
+    session: createTestSession(),
     runSession: async ({ request }) => {
       callCount += 1
 
@@ -326,7 +350,7 @@ test("domain agents can update and cancel requests they originally sent", async 
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   const runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {} as never,
+    session: createTestSession(),
     runSession: async () => {},
   })
 
@@ -439,15 +463,15 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
   const systemPrompts: Record<string, string> = {}
 
   runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {
-      newSession: async (input: { request: CreateSessionRequest }) => {
-        const metadata = input.request.workforce ?? null
+    session: {
+      create: async (input: CreateSessionRequest) => {
+        const metadata = input.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
-        systemPrompts[metadata.agentId] = input.request.systemPrompt
+        systemPrompts[metadata.agentId] = input.systemPrompt
 
         await runtime.respond({
           requestId: metadata.requestId,
@@ -526,22 +550,22 @@ test("create-intent requests target the root agent and specialize the root sessi
   let capturedEnv: Record<string, string> | undefined
 
   runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {
-      newSession: async (input: { request: CreateSessionRequest }) => {
+    session: {
+      create: async (input: CreateSessionRequest) => {
         const initialPrompt =
-          typeof input.request.initialPrompt === "string"
-            ? input.request.initialPrompt
-            : JSON.stringify(input.request.initialPrompt)
-        capturedEnv = input.request.env
+          typeof input.initialPrompt === "string"
+            ? input.initialPrompt
+            : JSON.stringify(input.initialPrompt)
+        capturedEnv = input.env
 
         if (initialPrompt.includes("Request intent: create")) {
-          createSystemPrompt = input.request.systemPrompt
+          createSystemPrompt = input.systemPrompt
           createInitialPrompt = initialPrompt
         } else {
-          defaultSystemPrompt = input.request.systemPrompt
+          defaultSystemPrompt = input.systemPrompt
         }
 
-        const metadata = input.request.workforce ?? null
+        const metadata = input.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -646,11 +670,11 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
   let capturedSystemPrompt = ""
 
   runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {
-      newSession: async (input: { request: CreateSessionRequest }) => {
-        capturedSystemPrompt = input.request.systemPrompt
+    session: {
+      create: async (input: CreateSessionRequest) => {
+        capturedSystemPrompt = input.systemPrompt
 
-        const metadata = input.request.workforce ?? null
+        const metadata = input.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -720,9 +744,9 @@ test("workforce runtime logs request-to-session correlation for launched session
   let runtime!: WorkforceRuntime
   const { logs } = await captureLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
-      sessionManager: {
-        newSession: async (input: { request: CreateSessionRequest }) => {
-          const metadata = input.request.workforce ?? null
+      session: {
+        create: async (input: CreateSessionRequest) => {
+          const metadata = input.workforce ?? null
 
           if (!metadata?.agentId || !metadata.requestId) {
             throw new Error("Missing workforce metadata")
@@ -833,7 +857,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
   })
 
   const runtime = await WorkforceRuntime.start(rootDir, {
-    sessionManager: {} as never,
+    session: createTestSession(),
     runSession: async () => {
       await sessionBlocked
     },

@@ -1,20 +1,28 @@
 import { join } from "node:path"
-import type { WorkforceDescription, WorkforceEventEnvelope } from "@goddard-ai/schema/daemon"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
+import { concat, dedent, getErrorMessage } from "radashi"
+import { ulid } from "ulid"
+
+import {
+  WorkforceActorContext,
+  WorkforceDispatchContext,
+} from "../../../../core/daemon/src/context.ts"
+import {
+  createLogger,
+  createPayloadPreview,
+  isVerboseLogging,
+} from "../../../../core/daemon/src/logging.ts"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,
+  WorkforceDescription,
+  WorkforceEventEnvelope,
   WorkforceLedgerEvent,
   WorkforceProjection,
   WorkforceRequestIntent,
   WorkforceRequestRecord,
   WorkforceStatus,
-} from "@goddard-ai/schema/workforce"
-import type { SessionManager } from "@goddard-ai/session/daemon"
-import { concat, dedent, getErrorMessage } from "radashi"
-import { ulid } from "ulid"
-
-import { WorkforceActorContext, WorkforceDispatchContext } from "../context.ts"
-import { createLogger, createPayloadPreview, isVerboseLogging } from "../logging.ts"
+} from "../schema.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
 import {
   appendWorkforceLedgerEvent,
@@ -44,7 +52,13 @@ export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promis
 
 /** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
-  sessionManager: SessionManager
+  session: {
+    create: (request: CreateSessionRequest) => Promise<{
+      id: string
+      acpSessionId: string
+      status: string
+    }>
+  }
   runSession?: WorkforceSessionRunner
   publishEvent?: (payload: WorkforceEventEnvelope) => void
 }
@@ -269,23 +283,21 @@ async function defaultRunWorkforceSession(
     cwd,
   })
 
-  const session = await deps.sessionManager.newSession({
-    request: {
-      agent: agentDistribution,
-      cwd,
-      workforce: {
-        rootDir: input.rootDir,
-        agentId: input.agent.id,
-        requestId: input.request.id,
-      },
-      mcpServers: [],
-      systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
-      oneShot: true,
-      initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
-      env: {
-        GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
-        GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
-      },
+  const session = await deps.session.create({
+    agent: agentDistribution,
+    cwd,
+    workforce: {
+      rootDir: input.rootDir,
+      agentId: input.agent.id,
+      requestId: input.request.id,
+    },
+    mcpServers: [],
+    systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
+    oneShot: true,
+    initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
+    env: {
+      GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
+      GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
     },
   })
 

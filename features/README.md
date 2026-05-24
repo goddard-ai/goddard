@@ -74,3 +74,10 @@ routes, session lifecycle implementation modules, SDK session method fragments,
 app session metadata, and the first-class daemon `context.session` extension
 that downstream feature packages consume. Low-level linked-worktree substrate
 and third-party worktree provider contracts remain in core packages.
+
+`features/workforce` owns workforce schemas, workforce IPC, daemon workforce
+configuration discovery and initialization, workforce manager/runtime modules,
+SDK workforce namespace construction, and app metadata. The standalone
+`workforce/` CLI remains a public client that talks to the composed SDK/daemon
+surface, while daemon process lifecycle, request context, persistence substrate,
+and the session feature extension remain outside the workforce feature boundary.

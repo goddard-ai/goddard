@@ -7,37 +7,25 @@ import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import type {
   CancelSessionRequest,
-  CancelWorkforceRequest,
   CreateSessionRequest,
-  CreateWorkforceRequest,
   DeclareSessionInitiativeRequest,
-  DiscoverWorkforceCandidatesRequest,
   GetSessionChangesRequest,
   GetSessionHistoryRequest,
-  GetWorkforceRequest,
-  InitializeWorkforceRequest,
   ListSessionsRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
-  RespondWorkforceRequest,
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
   SessionSubpackagesRequest,
-  ShutdownWorkforceRequest,
-  StartWorkforceRequest,
   SteerSessionRequest,
-  SubscribeWorkforceEventsRequest,
-  SuspendWorkforceRequest,
-  TruncateWorkforceRequest,
-  UpdateWorkforceRequest,
-  WorkforceEventEnvelope,
 } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
+import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type GoddardClient, type IpcClientOptions } from "./ipc-client.ts"
@@ -56,6 +44,7 @@ const sdkPlugins = composeSdkPlugins([
   inboxSdkPlugin,
   loopSdkPlugin,
   pullRequestSdkPlugin,
+  workforceSdkPlugin,
 ])
 
 type FeatureSdkNamespaces = InferSdkNamespaces<typeof sdkPlugins>
@@ -196,67 +185,6 @@ function createSessionNamespace(client: any) {
   }
 }
 
-/** Builds the workforce namespace with one thin method per daemon workforce IPC action. */
-function createWorkforceNamespace(client: any) {
-  return {
-    /** Starts or reuses one daemon workforce runtime. */
-    start: async (input: StartWorkforceRequest) => client.workforce.start({ body: input }),
-
-    /** Discovers package candidates for one repository workforce initialization flow. */
-    discoverCandidates: async (input: DiscoverWorkforceCandidatesRequest) =>
-      client.workforce.discoverCandidates({ body: input }),
-
-    /** Initializes one repository workforce config and ledger through the daemon. */
-    initialize: async (input: InitializeWorkforceRequest) =>
-      client.workforce.initialize({ body: input }),
-
-    /** Fetches one daemon workforce runtime and its resolved config. */
-    get: async (input: GetWorkforceRequest) => client.workforce.get({ body: input }),
-
-    /** Lists daemon workforce runtime summaries. */
-    list: async () => client.workforce.list(),
-
-    /** Subscribes to live daemon-published workforce ledger events for one repository root. */
-    subscribe: async (
-      input: SubscribeWorkforceEventsRequest,
-      onEvent: (event: WorkforceEventEnvelope["event"]) => void,
-    ): Promise<() => void> => {
-      const controller = new AbortController()
-      const events = await client.workforce.event({ query: input, signal: controller.signal })
-      void (async () => {
-        for await (const payload of events) {
-          if (controller.signal.aborted) {
-            break
-          }
-          onEvent(payload.event)
-        }
-      })()
-      return () => controller.abort()
-    },
-
-    /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
-    shutdown: async (input: ShutdownWorkforceRequest) => client.workforce.shutdown({ body: input }),
-
-    /** Enqueues one workforce request and includes the updated workforce projection. */
-    request: async (input: CreateWorkforceRequest) => client.workforce.request({ body: input }),
-
-    /** Updates one workforce request and includes the updated workforce projection. */
-    update: async (input: UpdateWorkforceRequest) => client.workforce.update({ body: input }),
-
-    /** Cancels one workforce request and includes the updated workforce projection. */
-    cancel: async (input: CancelWorkforceRequest) => client.workforce.cancel({ body: input }),
-
-    /** Truncates one workforce queue and includes the updated workforce projection. */
-    truncate: async (input: TruncateWorkforceRequest) => client.workforce.truncate({ body: input }),
-
-    /** Responds to one active workforce request and includes the updated workforce projection. */
-    respond: async (input: RespondWorkforceRequest) => client.workforce.respond({ body: input }),
-
-    /** Suspends one active workforce request and includes the updated workforce projection. */
-    suspend: async (input: SuspendWorkforceRequest) => client.workforce.suspend({ body: input }),
-  }
-}
-
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
 export class GoddardSdk {
   readonly #client: GoddardClient
@@ -306,6 +234,6 @@ export class GoddardSdk {
   }
 
   get workforce() {
-    return defineCachedNamespace(this, "workforce", createWorkforceNamespace(this.#client))
+    return defineCachedNamespace(this, "workforce", this.#features.workforce)
   }
 }

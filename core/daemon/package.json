@@ -15,14 +15,6 @@
       },
       "bun": "./src/ipc.ts",
       "import": "./dist/ipc.mjs"
-    },
-    "./workforce": {
-      "types": {
-        "source": "./src/workforce/index.ts",
-        "default": "./dist/workforce/index.d.mts"
-      },
-      "bun": "./src/workforce/index.ts",
-      "import": "./dist/workforce/index.mjs"
     }
   },
   "scripts": {
@@ -52,6 +44,7 @@
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/workforce": "workspace:*",
     "cmd-ts": "catalog:",
     "kindstore": "^0.4.4",
     "kleur": "^4.1.5",

@@ -161,6 +161,7 @@
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
         "cmd-ts": "catalog:",
         "kindstore": "^0.4.4",
         "kleur": "^4.1.5",
@@ -244,6 +245,7 @@
         "@goddard-ai/loop": "workspace:*",
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
         "ai-sdk-json-schema": "catalog:",
         "rouzer": "catalog:",
         "zod": "catalog:",
@@ -265,6 +267,7 @@
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
       },
       "devDependencies": {
         "@goddard-ai/daemon": "workspace:^",
@@ -423,8 +426,24 @@
         "@types/unbzip2-stream": "^1.4.3",
       },
     },
-    "workforce": {
+    "features/workforce": {
       "name": "@goddard-ai/workforce",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "radashi": "catalog:",
+        "ulid": "^3.0.2",
+        "zod": "catalog:",
+      },
+    },
+    "workforce": {
+      "name": "@goddard-ai/workforce-cli",
       "version": "0.1.0",
       "bin": {
         "goddard-workforce": "./dist/main.js",
@@ -784,7 +803,9 @@
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
 
-    "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
+    "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:features/workforce"],
+
+    "@goddard-ai/workforce-cli": ["@goddard-ai/workforce-cli@workspace:workforce"],
 
     "@goddard-ai/worktree-plugin": ["@goddard-ai/worktree-plugin@workspace:core/worktree-plugin"],
 

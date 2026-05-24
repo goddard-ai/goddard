@@ -1,7 +1,7 @@
 # Workforce Runtime Domain Concepts
 
 - Scope:
-  - This document explains the domain concepts that appear in [`core/daemon/src/workforce/runtime.ts`](./runtime.ts).
+  - This document explains the domain concepts that appear in [`features/workforce/src/daemon/runtime.ts`](./runtime.ts).
   - It focuses on the workforce model itself and avoids repeating broader daemon-session concepts.
 - `Workforce Runtime`
   - The daemon-owned coordinator for one repository's active workforce.

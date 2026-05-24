@@ -2,9 +2,9 @@ import { execFile } from "node:child_process"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
-import type { WorkforceAgentConfig, WorkforceConfig } from "@goddard-ai/schema/workforce"
 import { getErrorMessage } from "radashi"
 
+import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"
 import { buildWorkforcePaths } from "./paths.ts"
 
 const execFileAsync = promisify(execFile)

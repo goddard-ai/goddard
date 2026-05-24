@@ -34,6 +34,7 @@
     "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/workforce": "workspace:*",
     "ai-sdk-json-schema": "catalog:",
     "rouzer": "catalog:",
     "zod": "catalog:"

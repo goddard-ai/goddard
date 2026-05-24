@@ -40,7 +40,8 @@
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk-plugin": "workspace:*",
-    "@goddard-ai/session": "workspace:*"
+    "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/workforce": "workspace:*"
   },
   "devDependencies": {
     "@goddard-ai/daemon": "workspace:^"
