@@ -1,11 +1,11 @@
-import type { HttpRouteTree, IpcSchema } from "@goddard-ai/ipc"
+import type { HttpRouteTree } from "@goddard-ai/ipc"
 
 import type {
   ConfigDefinition,
   DbSchemaDefinition,
   FeatureExtensions,
   Plugin,
-  RequestHandlers,
+  RouteHandlers,
   SetupContext,
 } from "./contracts.ts"
 
@@ -23,14 +23,12 @@ type PluginShape<
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
-  TIpc extends IpcSchema | undefined,
   TIpcRoutes extends HttpRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
   OptionalPluginField<"config", TConfig> &
   OptionalPluginField<"db", TDb> &
-  OptionalPluginField<"ipc", TIpc> &
   OptionalPluginField<"ipcRoutes", TIpcRoutes> &
   OptionalPluginField<"lifecycle", TLifecycle> &
   OptionalPluginField<"register", TRegister>
@@ -40,7 +38,6 @@ type PluginOptions<
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinition | undefined,
   TDb extends DbSchemaDefinition | undefined,
-  TIpc extends IpcSchema | undefined,
   TIpcRoutes extends HttpRouteTree | undefined,
   TLifecycle,
   TRegister extends RegisterFunction | undefined,
@@ -50,7 +47,6 @@ type PluginOptions<
   readonly provides?: never
   readonly config?: TConfig
   readonly db?: TDb
-  readonly ipc?: TIpc
   readonly ipcRoutes?: TIpcRoutes
   readonly lifecycle?: TLifecycle
   readonly register?: TRegister
@@ -59,30 +55,30 @@ type PluginOptions<
 type PluginSetup<
   TConsumes extends readonly Plugin[] | undefined,
   TSelf,
-  TIpc,
+  TIpcRoutes,
   TProvides extends FeatureExtensions | undefined,
 > = (
   context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
 ) =>
   | void
-  | SetupContributions<TIpc, TProvides>
-  | Promise<void | SetupContributions<TIpc, TProvides>>
+  | SetupContributions<TIpcRoutes, TProvides>
+  | Promise<void | SetupContributions<TIpcRoutes, TProvides>>
 
 type RequiredPluginSetup<
   TConsumes extends readonly Plugin[] | undefined,
   TSelf,
-  TIpc,
+  TIpcRoutes,
   TProvides extends FeatureExtensions | undefined,
 > = (
   context: SetupContext<ConsumedPlugins<TConsumes>, TSelf>,
-) => SetupContributions<TIpc, TProvides> | Promise<SetupContributions<TIpc, TProvides>>
+) => SetupContributions<TIpcRoutes, TProvides> | Promise<SetupContributions<TIpcRoutes, TProvides>>
 
-type RequestHandlerContributions<TIpc> = TIpc extends IpcSchema
+type RouteHandlerContributions<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
   ? {
-      readonly requestHandlers: RequestHandlers<TIpc>
+      readonly routeHandlers: RouteHandlers<TIpcRoutes>
     }
   : {
-      readonly requestHandlers?: never
+      readonly routeHandlers?: never
     }
 
 type ProvidesContribution<TProvides> = TProvides extends FeatureExtensions
@@ -94,9 +90,9 @@ type ProvidesContribution<TProvides> = TProvides extends FeatureExtensions
     }
 
 type SetupContributions<
-  TIpc,
+  TIpcRoutes,
   TProvides extends FeatureExtensions | undefined,
-> = RequestHandlerContributions<TIpc> & ProvidesContribution<TProvides>
+> = RouteHandlerContributions<TIpcRoutes> & ProvidesContribution<TProvides>
 
 type DefinePlugin = {
   <
@@ -104,35 +100,25 @@ type DefinePlugin = {
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinition | undefined,
     const TDb extends DbSchemaDefinition | undefined,
-    const TIpc extends IpcSchema,
-    const TIpcRoutes extends HttpRouteTree | undefined,
+    const TIpcRoutes extends HttpRouteTree,
     const TLifecycle,
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<
-      TName,
-      TConsumes,
-      TConfig,
-      TDb,
-      TIpc,
-      TIpcRoutes,
-      TLifecycle,
-      TRegister
-    > & {
-      readonly ipc: TIpc
+    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
+      readonly ipcRoutes: TIpcRoutes
       readonly setup: RequiredPluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister>,
-        TIpc,
+        PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+        TIpcRoutes,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
     readonly setup: RequiredPluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, TIpc, TIpcRoutes, TLifecycle, TRegister>,
-      TIpc,
+      PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
+      TIpcRoutes,
       TProvides
     >
   }
@@ -146,28 +132,18 @@ type DefinePlugin = {
     const TRegister extends RegisterFunction | undefined,
     const TProvides extends FeatureExtensions | undefined,
   >(
-    plugin: PluginOptions<
-      TName,
-      TConsumes,
-      TConfig,
-      TDb,
-      undefined,
-      TIpcRoutes,
-      TLifecycle,
-      TRegister
-    > & {
-      readonly ipc?: undefined
+    plugin: PluginOptions<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
       readonly setup?: PluginSetup<
         TConsumes,
-        PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister>,
+        PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
         undefined,
         TProvides
       >
     },
-  ): PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister> & {
+  ): PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister> & {
     readonly setup?: PluginSetup<
       TConsumes,
-      PluginShape<TName, TConsumes, TConfig, TDb, undefined, TIpcRoutes, TLifecycle, TRegister>,
+      PluginShape<TName, TConsumes, TConfig, TDb, TIpcRoutes, TLifecycle, TRegister>,
       undefined,
       TProvides
     >

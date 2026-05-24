@@ -1,11 +1,5 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
-import {
-  type Handlers,
-  type HttpRouteTree,
-  type InferStreamPayload,
-  type IpcSchema,
-  type ValidStreamName,
-} from "@goddard-ai/ipc"
+import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
 
@@ -76,12 +70,14 @@ type InferDb<TPlugin> = TPlugin extends {
   ? TDb
   : {}
 
-/** Request handler map inferred from a plugin IPC schema. */
-export type RequestHandlers<TIpc> = TIpc extends IpcSchema ? Handlers<TIpc> : never
+/** Route handler map inferred from a plugin Rouzer IPC route tree. */
+export type RouteHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
+  ? RouteRequestHandlerMap<TIpcRoutes>
+  : never
 
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
-  readonly requestHandlers?: Record<string, unknown>
+  readonly routeHandlers?: Record<string, unknown>
   readonly provides?: FeatureExtensions
 }
 
@@ -91,15 +87,10 @@ type SetupDbContext<TDb> = keyof TDb extends never
   ? {}
   : { readonly db: DbContext<Extract<TDb, DbSchemaDefinition>> }
 
-type PublishContext<TPlugin> = TPlugin extends { readonly ipc: infer TIpc extends IpcSchema }
-  ? keyof TIpc["streams"] extends never
-    ? {}
-    : {
-        readonly publish: <K extends ValidStreamName<TIpc>>(
-          name: K,
-          payload: InferStreamPayload<TIpc, K>,
-        ) => void
-      }
+type PublishContext<TPlugin> = TPlugin extends { readonly ipcRoutes: HttpRouteTree }
+  ? {
+      readonly publish: (name: string, payload: unknown) => void
+    }
   : {}
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
@@ -177,7 +168,6 @@ export type Plugin = {
   readonly consumes?: readonly Plugin[]
   readonly config?: ConfigDefinition
   readonly db?: DbSchemaDefinition
-  readonly ipc?: IpcSchema
   readonly ipcRoutes?: HttpRouteTree
   readonly lifecycle?: unknown
   // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
@@ -190,7 +180,6 @@ export type Plugin = {
 /** Runtime daemon feature composition produced by static composition roots. */
 export type Composition = {
   readonly plugins: readonly Plugin[]
-  readonly ipc: IpcSchema
   readonly ipcRoutes: HttpRouteTree
   readonly config: Record<string, ConfigDefinition>
   readonly db: DbSchemaDefinition

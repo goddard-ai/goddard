@@ -171,13 +171,13 @@ export async function startDaemonServer(
   } satisfies DaemonSetupSubstrate
 
   const pluginSetup = await setupDaemonPlugins(daemonSubstrate, (plugin, name, payload) => {
-    if (!plugin.ipc?.streams[name]) {
-      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC stream ${name}`)
+    if (!plugin.ipcRoutes || !hasRouteHandlerName(plugin.ipcRoutes, name.split("."))) {
+      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC route ${name}`)
     }
     if (!publishPluginEvent) {
-      throw new Error(`Daemon plugin ${plugin.name} published IPC stream ${name} before startup`)
+      throw new Error(`Daemon plugin ${plugin.name} published IPC route ${name} before startup`)
     }
-    publishPluginEvent(name, payload)
+    publishPluginEvent(toLegacyStreamName(name), payload)
   })
   const sessionFeature = pluginSetup.extensions.session as SessionExtension
 
@@ -508,8 +508,8 @@ async function setupDaemonPlugins(
     )
     const setup = await plugin.setup?.(context)
 
-    if (setup?.requestHandlers) {
-      Object.assign(requestHandlers, setup.requestHandlers)
+    if (setup?.routeHandlers) {
+      Object.assign(requestHandlers, flattenRouteHandlers(setup.routeHandlers))
     }
 
     if (setup?.provides) {
@@ -522,6 +522,56 @@ async function setupDaemonPlugins(
     extensions,
     requestHandlers,
   }
+}
+
+function flattenRouteHandlers(routeHandlers: Record<string, unknown>) {
+  const requestHandlers: Record<string, unknown> = {}
+
+  function visit(node: unknown, path: string[]) {
+    if (typeof node === "function") {
+      requestHandlers[path.join(".")] = (payload: unknown) =>
+        node({ body: payload, query: payload })
+      return
+    }
+
+    if (typeof node !== "object" || !node) {
+      return
+    }
+
+    for (const [key, child] of Object.entries(node)) {
+      visit(child, [...path, key])
+    }
+  }
+
+  visit(routeHandlers, [])
+  return requestHandlers
+}
+
+function hasRouteHandlerName(routes: Record<string, unknown>, path: readonly string[]) {
+  let current: unknown = routes
+
+  for (const segment of path) {
+    if (typeof current !== "object" || !current || !(segment in current)) {
+      return false
+    }
+    const node = current[segment as keyof typeof current]
+    current =
+      typeof node === "object" && node && "children" in node
+        ? ((node as { readonly children: Record<string, unknown> }).children as Record<
+            string,
+            unknown
+          >)
+        : node
+  }
+
+  return typeof current === "object" && current != null && "kind" in current
+}
+
+function toLegacyStreamName(name: string) {
+  if (name === "inbox.itemEvents") {
+    return "inbox.item"
+  }
+  return name
 }
 
 function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {

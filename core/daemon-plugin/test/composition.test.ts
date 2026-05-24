@@ -5,7 +5,7 @@ import { z } from "zod"
 import { composePlugins, definePlugin } from "../src/index.ts"
 
 describe("daemon plugin composition", () => {
-  test("orders plugins by consumed dependencies and composes IPC/config fragments", () => {
+  test("orders plugins by consumed dependencies and composes route/config fragments", () => {
     const session = definePlugin({
       name: "session",
       config: {
@@ -14,13 +14,12 @@ describe("daemon plugin composition", () => {
         }),
         scopes: ["user", "project"],
       },
-      ipc: {
-        requests: {
-          "session.create": {
-            response: {} as { __unchecked__: { id: string } },
-          },
-        },
-        streams: {},
+      ipcRoutes: {
+        session: http.resource("session", {
+          create: http.post("create", {
+            response: $type<{ id: string }>(),
+          }),
+        }),
       },
       setup() {
         return {
@@ -29,8 +28,10 @@ describe("daemon plugin composition", () => {
               start: () => "started",
             },
           },
-          requestHandlers: {
-            "session.create": () => ({ id: "session-1" }),
+          routeHandlers: {
+            session: {
+              create: () => ({ id: "session-1" }),
+            },
           },
         }
       },
@@ -43,7 +44,7 @@ describe("daemon plugin composition", () => {
     const composition = composePlugins([inbox, session])
 
     expect(composition.plugins.map((plugin) => plugin.name)).toEqual(["session", "inbox"])
-    expect(Object.keys(composition.ipc.requests)).toEqual(["session.create"])
+    expect(Object.keys(composition.ipcRoutes.session.children)).toEqual(["create"])
     expect(composition.config.session.scopes).toEqual(["user", "project"])
   })
 

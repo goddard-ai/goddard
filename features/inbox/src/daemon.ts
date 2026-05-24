@@ -1,7 +1,7 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
-import { inboxIpcSchema } from "./daemon-ipc.ts"
+import { inboxIpcRoutes } from "./daemon-ipc.ts"
 import { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 import { inboxDbSchema } from "./daemon/store.ts"
 
@@ -14,12 +14,12 @@ export const inboxPlugin = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin],
   db: inboxDbSchema,
-  ipc: inboxIpcSchema,
+  ipcRoutes: inboxIpcRoutes,
   setup({ db, publish, session }) {
     const inbox = createInboxManager({
       db,
       publishEvent: (payload) => {
-        publish("inbox.item", payload)
+        publish("inbox.itemEvents", payload)
       },
     })
 
@@ -54,10 +54,13 @@ export const inboxPlugin = definePlugin({
           touchInboxItem: inbox.touchInboxItem,
         } satisfies InboxExtension,
       },
-      requestHandlers: {
-        "inbox.list": async (payload) => inbox.listInboxItems(payload),
-        "inbox.update": async (payload) => inbox.updateInboxItem(payload),
-        "inbox.bulkUpdate": async (payload) => inbox.bulkUpdateInboxItems(payload),
+      routeHandlers: {
+        inbox: {
+          list: async ({ body }) => inbox.listInboxItems(body),
+          update: async ({ body }) => inbox.updateInboxItem(body),
+          bulkUpdate: async ({ body }) => inbox.bulkUpdateInboxItems(body),
+          itemEvents: async function* () {},
+        },
       },
     }
   },

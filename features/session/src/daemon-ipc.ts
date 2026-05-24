@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, defineIpcSchema, http } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, defineIpcSchema, http, ndjson } from "@goddard-ai/ipc"
 import {
   CancelSessionRequest,
   CompleteSessionRequest,
@@ -157,6 +157,50 @@ export const sessionIpcSchema = defineIpcSchema({
 
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
+    create: http.post("create", {
+      body: CreateSessionRequest,
+      response: $type<CreateSessionResponse>(),
+    }),
+    list: http.post("list", {
+      body: ListSessionsRequest,
+      response: $type<ListSessionsResponse>(),
+    }),
+    get: http.post("get", {
+      body: DaemonSessionIdParams,
+      response: $type<GetSessionResponse>(),
+    }),
+    connect: http.post("connect", {
+      body: DaemonSessionIdParams,
+      response: $type<GetSessionResponse>(),
+    }),
+    history: http.post("history", {
+      body: GetSessionHistoryRequestSchema,
+      response: $type<GetSessionHistoryResponse>(),
+    }),
+    changes: http.post("changes", {
+      body: GetSessionChangesRequestSchema,
+      response: $type<GetSessionChangesResponse>(),
+    }),
+    composerSuggestions: http.post("composer-suggestions", {
+      body: SessionComposerSuggestionsRequest,
+      response: $type<SessionComposerSuggestionsResponse>(),
+    }),
+    draftSuggestions: http.post("draft-suggestions", {
+      body: SessionDraftSuggestionsRequest,
+      response: $type<SessionComposerSuggestionsResponse>(),
+    }),
+    launchPreview: http.post("launch-preview", {
+      body: SessionLaunchPreviewRequest,
+      response: $type<SessionLaunchPreviewResponse>(),
+    }),
+    subpackages: http.post("subpackages", {
+      body: SessionSubpackagesRequest,
+      response: $type<SessionSubpackagesResponse>(),
+    }),
+    diagnostics: http.post("diagnostics", {
+      body: DaemonSessionIdParams,
+      response: $type<GetSessionDiagnosticsResponse>(),
+    }),
     worktree: http.resource("worktree", {
       get: http.post("get", {
         body: GetSessionWorktreeRequest,
@@ -176,6 +220,52 @@ export const sessionIpcRoutes = defineIpcRoutes({
         body: UnmountSessionReviewSessionRequest,
         response: $type<MutateSessionReviewSessionResponse>(),
       }),
+    }),
+    workforce: http.resource("workforce", {
+      get: http.post("get", {
+        body: DaemonSessionIdParams,
+        response: $type<GetSessionWorkforceResponse>(),
+      }),
+    }),
+    shutdown: http.post("shutdown", {
+      body: DaemonSessionIdParams,
+      response: $type<ShutdownSessionResponse>(),
+    }),
+    cancel: http.post("cancel", {
+      body: CancelSessionRequest,
+      response: $type<CancelSessionResponse>(),
+    }),
+    steer: http.post("steer", {
+      body: SteerSessionRequest,
+      response: $type<SteerSessionResponse>(),
+    }),
+    send: http.post("send", {
+      body: SendSessionMessageRequest,
+      response: $type<{ accepted: true }>(),
+    }),
+    complete: http.post("complete", {
+      body: CompleteSessionRequest,
+      response: $type<CompleteSessionResponse>(),
+    }),
+    declareInitiative: http.post("declare-initiative", {
+      body: DeclareSessionInitiativeRequest,
+      response: $type<ReportSessionResponse>(),
+    }),
+    reportBlocker: http.post("report-blocker", {
+      body: ReportSessionBlockerRequest,
+      response: $type<ReportSessionResponse>(),
+    }),
+    reportTurnEnded: http.post("report-turn-ended", {
+      body: ReportSessionTurnEndedRequest,
+      response: $type<ReportSessionResponse>(),
+    }),
+    resolveToken: http.post("resolve-token", {
+      body: ResolveSessionTokenRequest,
+      response: $type<{ id: string }>(),
+    }),
+    messageEvents: http.get("message-events", {
+      query: DaemonSessionIdParams,
+      response: ndjson.$type<SessionMessageEvent>(),
     }),
   }),
 })

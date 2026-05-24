@@ -1,15 +1,17 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 
-import { adapterIpcSchema } from "./daemon-ipc.ts"
+import { adapterIpcRoutes } from "./daemon-ipc.ts"
 import { listAdapters } from "./list-adapters.ts"
 
 export const adapterPlugin = definePlugin({
   name: "adapter",
-  ipc: adapterIpcSchema,
+  ipcRoutes: adapterIpcRoutes,
   setup(context) {
     return {
-      requestHandlers: {
-        "adapter.list": async (input) => listAdapters(context, input),
+      routeHandlers: {
+        adapter: {
+          list: async ({ body }) => listAdapters(context, body),
+        },
       },
     }
   },

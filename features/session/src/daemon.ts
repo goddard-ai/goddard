@@ -1,8 +1,7 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
-import type { Handlers } from "@goddard-ai/ipc"
 import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
 
-import { sessionIpcSchema } from "./daemon-ipc.ts"
+import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
 import type { SessionManager } from "./daemon/manager.ts"
 
@@ -53,7 +52,7 @@ type SessionExtension = {
 
 export const sessionPlugin = definePlugin({
   name: "session",
-  ipc: sessionIpcSchema,
+  ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const events = createSessionEventEmitter()
     const session = {
@@ -96,63 +95,72 @@ export const sessionPlugin = definePlugin({
       provides: {
         session,
       },
-      requestHandlers: {
-        "session.create": async (payload) => {
-          const response = {
-            session: await session.create(payload),
-          }
-          context.getIpcRequestContext().setSessionId(response.session.id)
-          return response
-        },
-        "session.list": async (payload) => session.list(payload),
-        "session.get": async ({ id }) => ({
-          session: await session.get(id),
-        }),
-        "session.connect": async ({ id }) => ({
-          session: await session.connect(id),
-        }),
-        "session.history": async (payload) => session.history(payload),
-        "session.changes": async ({ id }) => session.changes(id),
-        "session.composerSuggestions": async (payload) => session.composerSuggestions(payload),
-        "session.draftSuggestions": async (payload) => session.draftSuggestions(payload),
-        "session.launchPreview": async (payload) => session.launchPreview(payload),
-        "session.subpackages": async (payload) => session.subpackages(payload),
-        "session.diagnostics": async ({ id }) => session.diagnostics(id),
-        "session.worktree.get": async ({ id }) => session.worktree(id),
-        "session.reviewSession.mount": async ({ id }) => session.mountReviewSession(id),
-        "session.reviewSession.run": async ({ id }) => session.runReviewSession(id),
-        "session.reviewSession.unmount": async ({ id }) => session.unmountReviewSession(id),
-        "session.workforce.get": async ({ id }) => session.workforce(id),
-        "session.shutdown": async ({ id }) => ({
-          id,
-          success: await session.shutdown(id),
-        }),
-        "session.cancel": async ({ id }) => session.cancel(id),
-        "session.steer": async ({ id, prompt }) => session.steer(id, prompt),
-        "session.send": async ({ id, message }) => {
-          await session.sendMessage(id, message as SendSessionMessageRequest["message"])
-          return { accepted: true as const }
-        },
-        "session.complete": async ({ id }) => ({
-          item: await session.complete(id),
-        }),
-        "session.declareInitiative": async ({ id, title }) => ({
-          session: await session.declareInitiative(id, title),
-        }),
-        "session.reportBlocker": async ({ id, reason, scope, headline }) => ({
-          session: await session.reportBlocker(id, reason, { scope, headline }),
-        }),
-        "session.reportTurnEnded": async ({ id, scope, headline }) => ({
-          session: await session.reportTurnEnded(id, { scope, headline }),
-        }),
-        "session.resolveToken": async ({ token }) => {
-          const id = await session.resolveToken(token)
-          context.getIpcRequestContext().setSessionId(id)
-          return {
+      routeHandlers: {
+        session: {
+          create: async ({ body }) => {
+            const response = {
+              session: await session.create(body),
+            }
+            context.getIpcRequestContext().setSessionId(response.session.id)
+            return response
+          },
+          list: async ({ body }) => session.list(body),
+          get: async ({ body: { id } }) => ({
+            session: await session.get(id),
+          }),
+          connect: async ({ body: { id } }) => ({
+            session: await session.connect(id),
+          }),
+          history: async ({ body }) => session.history(body),
+          changes: async ({ body: { id } }) => session.changes(id),
+          composerSuggestions: async ({ body }) => session.composerSuggestions(body),
+          draftSuggestions: async ({ body }) => session.draftSuggestions(body),
+          launchPreview: async ({ body }) => session.launchPreview(body),
+          subpackages: async ({ body }) => session.subpackages(body),
+          diagnostics: async ({ body: { id } }) => session.diagnostics(id),
+          worktree: {
+            get: async ({ body: { id } }) => session.worktree(id),
+          },
+          reviewSession: {
+            mount: async ({ body: { id } }) => session.mountReviewSession(id),
+            run: async ({ body: { id } }) => session.runReviewSession(id),
+            unmount: async ({ body: { id } }) => session.unmountReviewSession(id),
+          },
+          workforce: {
+            get: async ({ body: { id } }) => session.workforce(id),
+          },
+          shutdown: async ({ body: { id } }) => ({
             id,
-          }
+            success: await session.shutdown(id),
+          }),
+          cancel: async ({ body: { id } }) => session.cancel(id),
+          steer: async ({ body: { id, prompt } }) => session.steer(id, prompt),
+          send: async ({ body: { id, message } }) => {
+            await session.sendMessage(id, message as SendSessionMessageRequest["message"])
+            return { accepted: true as const }
+          },
+          complete: async ({ body: { id } }) => ({
+            item: await session.complete(id),
+          }),
+          declareInitiative: async ({ body: { id, title } }) => ({
+            session: await session.declareInitiative(id, title),
+          }),
+          reportBlocker: async ({ body: { id, reason, scope, headline } }) => ({
+            session: await session.reportBlocker(id, reason, { scope, headline }),
+          }),
+          reportTurnEnded: async ({ body: { id, scope, headline } }) => ({
+            session: await session.reportTurnEnded(id, { scope, headline }),
+          }),
+          resolveToken: async ({ body: { token } }) => {
+            const id = await session.resolveToken(token)
+            context.getIpcRequestContext().setSessionId(id)
+            return {
+              id,
+            }
+          },
+          messageEvents: async function* () {},
         },
-      } satisfies Handlers<typeof sessionIpcSchema>,
+      },
     }
   },
 })
