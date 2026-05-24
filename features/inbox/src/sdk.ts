@@ -15,17 +15,39 @@ export const inboxSdkPlugin = defineSdkPlugin({
     return {
       inbox: {
         /** Lists daemon-local inbox rows using daemon ordering and filtering. */
-        list: (input: ListInboxRequest = {}) => client.send("inbox.list", input),
+        list: (input: ListInboxRequest = {}) => client.inbox.list({ body: input }),
 
         /** Updates one daemon-local inbox row by entity id. */
-        update: (input: UpdateInboxItemRequest) => client.send("inbox.update", input),
+        update: (input: UpdateInboxItemRequest) => client.inbox.update({ body: input }),
 
         /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
-        bulkUpdate: (input: BulkUpdateInboxItemsRequest) => client.send("inbox.bulkUpdate", input),
+        bulkUpdate: (input: BulkUpdateInboxItemsRequest) =>
+          client.inbox.bulkUpdate({ body: input }),
 
         /** Subscribes to daemon-published inbox item updates. */
-        subscribe: (onMessage: (payload: InboxItemEvent) => void) =>
-          client.subscribe("inbox.item", onMessage),
+        subscribe: async (onMessage: (payload: InboxItemEvent) => void) => {
+          const controller = new AbortController()
+          const events = await client.inbox.itemEvents({ signal: controller.signal })
+
+          void (async () => {
+            try {
+              for await (const event of events) {
+                if (controller.signal.aborted) {
+                  break
+                }
+                onMessage(event)
+              }
+            } catch (error) {
+              if (!controller.signal.aborted) {
+                throw error
+              }
+            }
+          })()
+
+          return () => {
+            controller.abort()
+          }
+        },
       },
     }
   },

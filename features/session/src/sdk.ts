@@ -15,19 +15,20 @@ export const sessionSdkPlugin = defineSdkPlugin({
     return {
       session: {
         /** Reads persisted worktree metadata attached to one daemon-managed session. */
-        worktree: (input: GetSessionWorktreeRequest) => client.send("session.worktree.get", input),
+        worktree: (input: GetSessionWorktreeRequest) =>
+          client.session.worktree.get({ body: input }),
 
         /** Mounts a review session for one daemon-managed session worktree. */
         mountReviewSession: (input: MountSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.mount", input),
+          client.session.reviewSession.mount({ body: input }),
 
         /** Runs one mounted review session immediately. */
         runReviewSession: (input: RunSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.run", input),
+          client.session.reviewSession.run({ body: input }),
 
         /** Unmounts a review session from one daemon-managed session worktree. */
         unmountReviewSession: (input: UnmountSessionReviewSessionRequest) =>
-          client.send("session.reviewSession.unmount", input),
+          client.session.reviewSession.unmount({ body: input }),
       },
     }
   },

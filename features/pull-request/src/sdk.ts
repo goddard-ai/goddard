@@ -14,13 +14,13 @@ export const pullRequestSdkPlugin = defineSdkPlugin({
     return {
       pr: {
         /** Submits one pull request through the daemon PR contract. */
-        submit: (input: SubmitPrRouteRequest) => client.send("pr.submit", input),
+        submit: (input: SubmitPrRouteRequest) => client.pr.submit({ body: input }),
 
         /** Fetches one daemon-managed pull request by tagged id. */
-        get: (input: GetPullRequestRequest) => client.send("pr.get", input),
+        get: (input: GetPullRequestRequest) => client.pr.get({ body: input }),
 
         /** Posts one pull request reply through the daemon PR contract. */
-        reply: (input: ReplyPrRouteRequest) => client.send("pr.reply", input),
+        reply: (input: ReplyPrRouteRequest) => client.pr.reply({ body: input }),
       },
     }
   },

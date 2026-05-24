@@ -2,10 +2,6 @@
 import { composeIpcRoutes, type HttpRouteTree, type RouzerClient } from "@goddard-ai/ipc"
 
 type SdkNamespaces = Record<string, Record<string, unknown>>
-type LegacyDaemonClient = {
-  readonly send: (...args: any[]) => Promise<any>
-  readonly subscribe: (...args: any[]) => Promise<() => void> | (() => void)
-}
 
 type RuntimeSdkPlugin = {
   readonly name: string
@@ -20,9 +16,7 @@ export type SdkPluginDefinition<
 > = {
   readonly name: string
   readonly ipcRoutes: TRoutes
-  readonly wrap?: (input: {
-    readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
-  }) => TNamespaces
+  readonly wrap?: (input: { readonly client: RouzerClient<TRoutes> }) => TNamespaces
 }
 
 /** Preserves the exact SDK plugin object for composition-time type inference. */
@@ -33,9 +27,7 @@ export function defineSdkPlugin<
 >(plugin: {
   readonly name: TName
   readonly ipcRoutes: TRoutes
-  readonly wrap?: (input: {
-    readonly client: RouzerClient<TRoutes> & LegacyDaemonClient
-  }) => TNamespaces
+  readonly wrap?: (input: { readonly client: RouzerClient<TRoutes> }) => TNamespaces
 }): {
   readonly name: TName
   readonly ipcRoutes: TRoutes

@@ -10,17 +10,17 @@ export const authSdkPlugin = defineSdkPlugin({
     return {
       auth: {
         /** Starts one GitHub device flow through the daemon auth contract. */
-        startDeviceFlow: (input?: DeviceFlowStart) => client.send("auth.device.start", input),
+        startDeviceFlow: (input?: DeviceFlowStart) => client.auth.device.start({ body: input }),
 
         /** Completes one pending GitHub device flow through the daemon auth contract. */
         completeDeviceFlow: (input: DeviceFlowComplete) =>
-          client.send("auth.device.complete", input),
+          client.auth.device.complete({ body: input }),
 
         /** Reads the current daemon-owned auth session as-is. */
-        whoami: () => client.send("auth.whoami"),
+        whoami: () => client.auth.whoami(),
 
         /** Clears the current daemon-owned auth session as-is. */
-        logout: () => client.send("auth.logout"),
+        logout: () => client.auth.logout(),
       },
     }
   },
