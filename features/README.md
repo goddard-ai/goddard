@@ -59,6 +59,11 @@ core packages.
 manager logic, inbox metadata resolution, and inbox item state transitions.
 Daemon persistence remains core substrate.
 
+`features/loop` owns loop schemas, loop IPC, daemon loop manager/runtime,
+packaged-loop resolution from root config, SDK loop namespace construction, and
+app metadata. JSON config file loading/persistence, daemon process lifecycle,
+and session lifecycle mechanics remain core or session-feature substrate.
+
 `features/pull-request` owns pull-request schemas, backend PR route and webhook
 contracts, daemon PR IPC handlers, SDK PR namespace construction, git-backed PR
 request resolution, and PR inbox attention behavior. Backend transport, daemon

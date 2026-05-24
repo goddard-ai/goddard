@@ -34,6 +34,7 @@ type SessionExtension = {
   unmountReviewSession: SessionManager["unmountReviewSession"]
   workforce: SessionManager["getWorkforce"]
   shutdown: SessionManager["shutdownSession"]
+  prompt: SessionManager["promptSession"]
   cancel: SessionManager["cancelSessionTurn"]
   steer: SessionManager["steerSession"]
   sendMessage: SessionManager["sendMessage"]
@@ -73,6 +74,7 @@ export const sessionPlugin = definePlugin({
       unmountReviewSession: (id) => context.sessionManager.unmountReviewSession(id),
       workforce: (id) => context.sessionManager.getWorkforce(id),
       shutdown: (id) => context.sessionManager.shutdownSession(id),
+      prompt: (id, prompt) => context.sessionManager.promptSession(id, prompt),
       cancel: (id) => context.sessionManager.cancelSessionTurn(id),
       steer: (id, prompt) => context.sessionManager.steerSession(id, prompt),
       sendMessage: (id, message) => context.sessionManager.sendMessage(id, message),

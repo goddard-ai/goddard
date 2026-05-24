@@ -97,7 +97,10 @@ type ProvidesContribution<TProvides> = TProvides extends FeatureExtensions
 type SetupContributions<
   TIpcRoutes,
   TProvides extends FeatureExtensions | undefined,
-> = RouteHandlerContributions<TIpcRoutes> & ProvidesContribution<TProvides>
+> = RouteHandlerContributions<TIpcRoutes> &
+  ProvidesContribution<TProvides> & {
+    readonly close?: () => void | Promise<void>
+  }
 
 type DefinePlugin = {
   <

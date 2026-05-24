@@ -12,6 +12,7 @@ import {
 } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { createServer, IpcClientError } from "@goddard-ai/ipc/node"
+import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { type DaemonSession, type SubscribeWorkforceEventsRequest } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
@@ -28,9 +29,7 @@ import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext, type WorkforceActorContext } from "../context.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
-import { createLoopManager, type LoopManager } from "../loop/index.ts"
 import { configureDbSchema, db } from "../persistence/store.ts"
-import { resolveNamedLoopStartRequest } from "../resolvers/loops.ts"
 import { createACPRegistryService } from "../session/registry.ts"
 import {
   discoverWorkforceInitCandidates,
@@ -48,6 +47,7 @@ const daemonPlugins = composePlugins([
   sessionPlugin,
   inboxPlugin,
   pullRequestPlugin,
+  loopPlugin,
 ])
 configureDbSchema(daemonPlugins.db)
 
@@ -76,7 +76,6 @@ export async function startDaemonServer(
   let publishPluginEvent: ((name: string, payload: unknown) => void) | null = null
 
   let sessionManager!: SessionManager
-  let loopManager!: LoopManager
   let workforceManager!: WorkforceManager
 
   function requireIpcRequestContext() {
@@ -183,28 +182,6 @@ export async function startDaemonServer(
   const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
     ...pluginSetup.requestHandlers,
-    "loop.start": async (payload: any) => {
-      return {
-        loop: await loopManager.startLoop(payload),
-      }
-    },
-    "loop.get": async ({ rootDir, loopName }: any) => {
-      return {
-        loop: await loopManager.getLoop(rootDir, loopName),
-      }
-    },
-    "loop.list": async () => {
-      return {
-        loops: await loopManager.listLoops(),
-      }
-    },
-    "loop.shutdown": async ({ rootDir, loopName }: any) => {
-      return {
-        rootDir,
-        loopName,
-        success: await loopManager.shutdownLoop(rootDir, loopName),
-      }
-    },
     "workforce.start": async ({ rootDir }: any) => {
       return {
         workforce: await workforceManager.startWorkforce(rootDir),
@@ -414,13 +391,6 @@ export async function startDaemonServer(
     },
   })
 
-  loopManager = createLoopManager({
-    sessionManager,
-    resolveLoopStartRequest(input) {
-      return resolveNamedLoopStartRequest(input, configManager)
-    },
-  })
-
   workforceManager = createWorkforceManager({
     sessionManager,
     publishEvent(payload) {
@@ -446,7 +416,7 @@ export async function startDaemonServer(
         port,
         daemonUrl,
       })
-      await loopManager.close().catch(() => {})
+      await pluginSetup.close().catch(() => {})
       await workforceManager.close().catch(() => {})
       await sessionManager.close().catch(() => {})
       if (ownsConfigManager) {
@@ -477,6 +447,7 @@ async function setupDaemonPlugins(
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const requestHandlers: Record<string, unknown> = {}
+  const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of daemonPlugins.plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
@@ -499,6 +470,10 @@ async function setupDaemonPlugins(
       Object.assign(requestHandlers, flattenRouteHandlers(setup.routeHandlers))
     }
 
+    if (setup?.close) {
+      closeHandlers.push(setup.close)
+    }
+
     if (setup?.provides) {
       Object.assign(extensions, setup.provides)
       extensionsByPluginName.set(plugin.name, setup.provides)
@@ -508,6 +483,11 @@ async function setupDaemonPlugins(
   return {
     extensions,
     requestHandlers,
+    close: async () => {
+      for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
+        await closeHandlers[index]?.()
+      }
+    },
   }
 }
 

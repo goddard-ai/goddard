@@ -1,10 +1,9 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonLoop, DaemonLoopStatus } from "@goddard-ai/schema/daemon"
-import type { StartLoopRequest } from "@goddard-ai/schema/daemon/loops"
 
-import { createLogger } from "../logging.ts"
-import { resolveNamedLoopStartRequest, type ResolvedLoopStartRequest } from "../resolvers/loops.ts"
+import { createLogger } from "../../../../core/daemon/src/logging.ts"
+import type { DaemonLoop, DaemonLoopStatus, StartLoopRequest } from "../schema.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
+import type { ResolvedLoopStartRequest } from "./resolver.ts"
 import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
 
 const logger = createLogger()
@@ -12,7 +11,7 @@ const logger = createLogger()
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
   createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
-  resolveLoopStartRequest?: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
+  resolveLoopStartRequest: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
 }
 
 /** Daemon-owned loop runtime registry keyed by normalized repository root and loop name. */
@@ -35,9 +34,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
 
   return {
     async startLoop(input: StartLoopRequest): Promise<DaemonLoop> {
-      const resolvedInput = await (deps.resolveLoopStartRequest ?? resolveNamedLoopStartRequest)(
-        input,
-      )
+      const resolvedInput = await deps.resolveLoopStartRequest(input)
       const identity = await normalizeLoopIdentity(resolvedInput.rootDir, resolvedInput.loopName)
       const key = `${identity.rootDir}::${identity.loopName}`
       const existing = runtimes.get(key)
@@ -56,7 +53,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
           loopName: identity.loopName,
         },
         {
-          sessionManager: deps.sessionManager,
+          session: deps.session,
           onStop: ({ rootDir, loopName }) => {
             void buildKey(rootDir, loopName).then((runtimeKey) => {
               runtimes.delete(runtimeKey)

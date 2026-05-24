@@ -1,12 +1,23 @@
 import { existsSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { mergeLoopConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
-import { ResolvedLoopConfig, type LoopConfig } from "@goddard-ai/schema/config"
-import type { CreateSessionRequest, StartLoopRequest } from "@goddard-ai/schema/daemon"
+import { resolveDefaultAgent } from "@goddard-ai/config"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
-import { readCurrentRootConfig, readLoopConfig, type RootConfigProvider } from "./config.ts"
+import { LoopConfig, ResolvedLoopConfig, type StartLoopRequest } from "../schema.ts"
 
 type RequiredObject<T> = Required<Exclude<T, undefined>>
+
+type RootConfigProvider = {
+  getRootConfig: (cwd: string) => Promise<{
+    globalRoot: string
+    localRoot: string
+    config: {
+      session?: StartLoopRequest["session"]
+      loops?: LoopConfig
+    }
+  }>
+}
 
 /** Fully resolved daemon-owned loop runtime config after local package resolution. */
 export type ResolvedLoopStartRequest = {
@@ -32,6 +43,49 @@ const DEFAULT_LOOP_RETRIES = {
   maxDelayMs: 5_000,
   backoffFactor: 2,
   jitterRatio: 0.2,
+}
+
+function selectLast<T, R>(
+  values: ReadonlyArray<T>,
+  predicate: (value: T, index: number) => R | undefined,
+) {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const result = predicate(values[index], index)
+    if (result !== undefined) {
+      return result
+    }
+  }
+
+  return undefined
+}
+
+/** Merges loop config layers using later layers as overrides. */
+function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>) {
+  return LoopConfig.parse({
+    session: selectLast(layers, (layer) => layer?.session),
+    rateLimits: Object.assign({}, ...layers.map((layer) => layer?.rateLimits)),
+    retries: Object.assign({}, ...layers.map((layer) => layer?.retries)),
+  })
+}
+
+/** Reads and validates one packaged loop config document. */
+async function readLoopConfig(path: string) {
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(await readFile(path, "utf-8"))
+  } catch (error) {
+    throw new Error(`Loop config at ${path} must be valid JSON.`, { cause: error })
+  }
+
+  const normalized =
+    typeof parsed === "object" && parsed !== null && "$schema" in parsed
+      ? Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
+        )
+      : parsed
+
+  return LoopConfig.parse(normalized)
 }
 
 /** Resolves one merged loop config document into the fully required runtime contract. */
@@ -138,13 +192,10 @@ async function resolveLoopFromRoot(
 export async function resolveNamedLoop(
   loopName: string,
   rootDir: string,
-  rootConfigProvider?: RootConfigProvider,
+  rootConfigProvider: RootConfigProvider,
 ): Promise<ResolvedLoop> {
   const resolvedRootDir = resolve(rootDir)
-  const { config, globalRoot, localRoot } = await readCurrentRootConfig(
-    resolvedRootDir,
-    rootConfigProvider,
-  )
+  const { config, globalRoot, localRoot } = await rootConfigProvider.getRootConfig(resolvedRootDir)
   const localLoop = await resolveLoopFromRoot(loopName, localRoot)
   const globalLoop = localLoop ? null : await resolveLoopFromRoot(loopName, globalRoot)
   const loop = localLoop ?? globalLoop
@@ -173,7 +224,7 @@ export async function resolveNamedLoop(
 /** Resolves one public loop-start request into the runtime config owned by the daemon. */
 export async function resolveNamedLoopStartRequest(
   input: StartLoopRequest,
-  rootConfigProvider?: RootConfigProvider,
+  rootConfigProvider: RootConfigProvider,
 ): Promise<ResolvedLoopStartRequest> {
   const resolvedRootDir = resolve(input.rootDir)
   const loop = await resolveNamedLoop(input.loopName, resolvedRootDir, rootConfigProvider)

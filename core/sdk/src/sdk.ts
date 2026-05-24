@@ -3,6 +3,7 @@ import { actionSdkPlugin } from "@goddard-ai/action/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
+import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import type {
   CancelSessionRequest,
@@ -11,7 +12,6 @@ import type {
   CreateWorkforceRequest,
   DeclareSessionInitiativeRequest,
   DiscoverWorkforceCandidatesRequest,
-  GetLoopRequest,
   GetSessionChangesRequest,
   GetSessionHistoryRequest,
   GetWorkforceRequest,
@@ -26,9 +26,7 @@ import type {
   SessionDraftSuggestionsRequest,
   SessionLaunchPreviewRequest,
   SessionSubpackagesRequest,
-  ShutdownLoopRequest,
   ShutdownWorkforceRequest,
-  StartLoopRequest,
   StartWorkforceRequest,
   SteerSessionRequest,
   SubscribeWorkforceEventsRequest,
@@ -56,6 +54,7 @@ const sdkPlugins = composeSdkPlugins([
   adapterSdkPlugin,
   authSdkPlugin,
   inboxSdkPlugin,
+  loopSdkPlugin,
   pullRequestSdkPlugin,
 ])
 
@@ -197,23 +196,6 @@ function createSessionNamespace(client: any) {
   }
 }
 
-/** Builds the loop namespace with one thin method per daemon loop IPC action. */
-function createLoopNamespace(client: any) {
-  return {
-    /** Starts or reuses one daemon loop runtime. */
-    start: async (input: StartLoopRequest) => client.loop.start({ body: input }),
-
-    /** Fetches one daemon loop runtime and its resolved config. */
-    get: async (input: GetLoopRequest) => client.loop.get({ body: input }),
-
-    /** Lists daemon loop runtime summaries. */
-    list: async () => client.loop.list(),
-
-    /** Shuts down one daemon loop and reports whether shutdown succeeded. */
-    shutdown: async (input: ShutdownLoopRequest) => client.loop.shutdown({ body: input }),
-  }
-}
-
 /** Builds the workforce namespace with one thin method per daemon workforce IPC action. */
 function createWorkforceNamespace(client: any) {
   return {
@@ -320,7 +302,7 @@ export class GoddardSdk {
   }
 
   get loop() {
-    return defineCachedNamespace(this, "loop", createLoopNamespace(this.#client))
+    return defineCachedNamespace(this, "loop", this.#features.loop)
   }
 
   get workforce() {

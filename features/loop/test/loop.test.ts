@@ -3,10 +3,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { configureLogging } from "../src/logging.ts"
-import { createLoopManager } from "../src/loop/manager.ts"
-import { normalizeLoopRootDir } from "../src/loop/paths.ts"
-import { LoopRuntime } from "../src/loop/runtime.ts"
+import { configureLogging } from "../../../core/daemon/src/logging.ts"
+import { createLoopManager } from "../src/daemon/manager.ts"
+import { normalizeLoopRootDir } from "../src/daemon/paths.ts"
+import { LoopRuntime } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 
@@ -46,7 +46,7 @@ async function waitForExpectation(
 test("loop manager reuses one runtime per normalized repository root and loop name", async () => {
   const created: Array<{ rootDir: string; loopName: string }> = []
   const manager = createLoopManager({
-    sessionManager: {} as never,
+    session: {} as never,
     resolveLoopStartRequest: async (input) => ({
       rootDir: input.rootDir,
       loopName: input.loopName,
@@ -185,19 +185,19 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     { stopReason: "end_turn" },
   ]
 
-  const sessionManager = {
-    async newSession(input: unknown) {
+  const session = {
+    async create(input: unknown) {
       newSessionCalls.push(input)
       return {
-        id: "session-1",
+        id: "ses_session_1",
         acpSessionId: "acp-1",
       }
     },
-    async promptSession(...args: unknown[]) {
+    async prompt(...args: unknown[]) {
       promptSessionCalls.push(args)
       return promptResults[promptResultIndex++] ?? { stopReason: "end_turn" }
     },
-    async shutdownSession(sessionId: string) {
+    async shutdown(sessionId: string) {
       shutdownSessionCalls.push(sessionId)
       return true
     },
@@ -229,7 +229,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
         },
       },
       {
-        sessionManager: sessionManager as never,
+        session: session as never,
       },
     )
 
@@ -238,14 +238,12 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     })
     expect(newSessionCalls[0]).toEqual(
       expect.objectContaining({
-        request: expect.objectContaining({
-          cwd: rootDir,
-          worktree: { enabled: true },
-        }),
+        cwd: rootDir,
+        worktree: { enabled: true },
       }),
     )
     await waitForExpectation(() => {
-      expect(shutdownSessionCalls).toContain("session-1")
+      expect(shutdownSessionCalls).toContain("ses_session_1")
     })
 
     return runtime
@@ -255,7 +253,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   expect(startedLog).toBeTruthy()
   expect((startedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
   expect((startedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
-  expect((startedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("session-1")
+  expect((startedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("ses_session_1")
   expect((startedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe("acp-1")
 
   const promptCompletedLog = logs.find((entry) => entry.event === "loop.prompt_completed")
@@ -263,7 +261,7 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
   expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
   expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe(
-    "session-1",
+    "ses_session_1",
   )
   expect((promptCompletedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe(
     "acp-1",
@@ -273,14 +271,14 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   expect(stoppedLog).toBeTruthy()
   expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.rootDir).toBe(rootDir)
   expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.loopName).toBe("review")
-  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("session-1")
+  expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.sessionId).toBe("ses_session_1")
   expect((stoppedLog?.loop as Record<string, unknown> | undefined)?.acpSessionId).toBe("acp-1")
 
   expect(runtime.getStatus()).toEqual(
     expect.objectContaining({
       rootDir,
       loopName: "review",
-      sessionId: "session-1",
+      sessionId: "ses_session_1",
       acpSessionId: "acp-1",
       cycleCount: 3,
       lastPromptAt: expect.any(String),

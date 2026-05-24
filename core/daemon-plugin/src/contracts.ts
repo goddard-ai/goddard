@@ -86,6 +86,7 @@ export type RouteHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
 export type RuntimeSetupContributions = {
   readonly routeHandlers?: Record<string, unknown>
   readonly provides?: FeatureExtensions
+  readonly close?: () => void | Promise<void>
 }
 
 type SetupConfigContext<TConfig> = keyof TConfig extends never ? {} : { readonly config: TConfig }

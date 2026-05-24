@@ -36,6 +36,7 @@
     "@goddard-ai/daemon-client": "workspace:^",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk-plugin": "workspace:*",

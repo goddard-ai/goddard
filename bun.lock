@@ -156,6 +156,7 @@
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
@@ -240,6 +241,7 @@
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/session": "workspace:*",
         "ai-sdk-json-schema": "catalog:",
@@ -258,6 +260,7 @@
         "@goddard-ai/daemon-client": "workspace:^",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
         "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/sdk-plugin": "workspace:*",
@@ -344,6 +347,22 @@
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
         "kindstore": "^0.4.4",
+        "zod": "catalog:",
+      },
+    },
+    "features/loop": {
+      "name": "@goddard-ai/loop",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "radashi": "catalog:",
         "zod": "catalog:",
       },
     },
@@ -744,6 +763,8 @@
     "@goddard-ai/inbox": ["@goddard-ai/inbox@workspace:features/inbox"],
 
     "@goddard-ai/ipc": ["@goddard-ai/ipc@workspace:core/ipc"],
+
+    "@goddard-ai/loop": ["@goddard-ai/loop@workspace:features/loop"],
 
     "@goddard-ai/paths": ["@goddard-ai/paths@workspace:core/paths"],
 

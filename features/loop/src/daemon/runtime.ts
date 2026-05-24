@@ -1,13 +1,12 @@
 import { pathToFileURL } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
-import type { DaemonLoop, DaemonLoopStatus, DaemonSession } from "@goddard-ai/schema/daemon"
-import type { SessionManager } from "@goddard-ai/session/daemon"
 import { getErrorMessage, proportionalJitter } from "radashi"
 
-import { LoopContext } from "../context.ts"
-import { createLogger, createPayloadPreview } from "../logging.ts"
-import type { ResolvedLoopStartRequest } from "../resolvers/loops.ts"
+import { LoopContext } from "../../../../core/daemon/src/context.ts"
+import { createLogger, createPayloadPreview } from "../../../../core/daemon/src/logging.ts"
+import type { DaemonLoop, DaemonLoopStatus } from "../schema.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
+import type { ResolvedLoopStartRequest } from "./resolver.ts"
 
 const logger = createLogger()
 const LOOP_PAUSE_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -19,7 +18,17 @@ function shouldPauseLoop(cycleCount: number, maxCyclesBeforePause: number): bool
 
 /** Runtime dependencies shared by one daemon-owned loop host. */
 export interface LoopRuntimeDeps {
-  sessionManager: SessionManager
+  session: {
+    create: (request: ResolvedLoopStartRequest["session"]) => Promise<{
+      id: `ses_${string}`
+      acpSessionId: string
+    }>
+    prompt: (
+      id: `ses_${string}`,
+      prompt: string | acp.ContentBlock[],
+    ) => Promise<acp.PromptResponse>
+    shutdown: (id: `ses_${string}`) => Promise<boolean>
+  }
   onStop?: (input: { rootDir: string; loopName: string }) => void
 }
 
@@ -28,7 +37,7 @@ export class LoopRuntime {
   readonly #config: ResolvedLoopStartRequest
   readonly #deps: LoopRuntimeDeps
   readonly #startedAt: string
-  readonly #sessionId: DaemonSession["id"]
+  readonly #sessionId: `ses_${string}`
   readonly #sessionAcpId: string
   readonly #context: LoopContext
   readonly #rateLimiter: LoopRateLimiter
@@ -44,7 +53,7 @@ export class LoopRuntime {
   private constructor(input: {
     config: ResolvedLoopStartRequest
     deps: LoopRuntimeDeps
-    sessionId: DaemonSession["id"]
+    sessionId: `ses_${string}`
     sessionAcpId: string
   }) {
     this.#config = input.config
@@ -69,20 +78,18 @@ export class LoopRuntime {
     config: ResolvedLoopStartRequest,
     deps: LoopRuntimeDeps,
   ): Promise<LoopRuntime> {
-    const session = await deps.sessionManager.newSession({
-      request: {
-        ...config.session,
-        systemPrompt: config.session.systemPrompt ?? "",
-        metadata: {
-          ...config.session.metadata,
-          loop: {
-            rootDir: config.rootDir,
-            loopName: config.loopName,
-            promptModulePath: config.promptModulePath,
-          },
+    const session = await deps.session.create({
+      ...config.session,
+      systemPrompt: config.session.systemPrompt ?? "",
+      metadata: {
+        ...config.session.metadata,
+        loop: {
+          rootDir: config.rootDir,
+          loopName: config.loopName,
+          promptModulePath: config.promptModulePath,
         },
-        worktree: config.session.worktree ?? { enabled: true },
       },
+      worktree: config.session.worktree ?? { enabled: true },
     })
 
     const runtime = new LoopRuntime({
@@ -190,10 +197,7 @@ export class LoopRuntime {
 
       try {
         this.#lastPromptAt = new Date().toISOString()
-        const response = await this.#deps.sessionManager.promptSession(
-          this.#sessionId,
-          promptMessage,
-        )
+        const response = await this.#deps.session.prompt(this.#sessionId, promptMessage)
         logger.log("loop.prompt_completed", {
           cycleCount: this.#cycleCount,
           stopReason: response.stopReason,
@@ -244,7 +248,7 @@ export class LoopRuntime {
         clearTimeout(this.#sleepHandle)
         this.#sleepHandle = null
       }
-      await this.#deps.sessionManager.shutdownSession(this.#sessionId).catch(() => {})
+      await this.#deps.session.shutdown(this.#sessionId).catch(() => {})
       logger.log("loop.runtime_stopped", {
         cycleCount: this.#cycleCount,
       })

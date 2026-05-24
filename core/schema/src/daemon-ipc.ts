@@ -11,18 +11,10 @@ import {
   ndjson,
   type HttpRouteTree,
 } from "@goddard-ai/ipc"
+import { loopIpcRoutes } from "@goddard-ai/loop/daemon-ipc"
 import { pullRequestIpcRoutes } from "@goddard-ai/pull-request/daemon-ipc"
 import { sessionIpcRoutes } from "@goddard-ai/session/daemon-ipc"
 
-import {
-  GetLoopRequest,
-  ShutdownLoopRequest,
-  StartLoopRequest,
-  type GetLoopResponse,
-  type ListLoopsResponse,
-  type ShutdownLoopResponse,
-  type StartLoopResponse,
-} from "./daemon/loops.ts"
 import {
   CancelWorkforceRequest,
   CreateWorkforceRequest,
@@ -50,23 +42,6 @@ const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
     health: http.get("health", {
       response: $type<{ ok: boolean }>(),
-    }),
-  }),
-  loop: http.resource("loop", {
-    start: http.post("start", {
-      body: StartLoopRequest,
-      response: $type<StartLoopResponse>(),
-    }),
-    get: http.post("get", {
-      body: GetLoopRequest,
-      response: $type<GetLoopResponse>(),
-    }),
-    list: http.get("list", {
-      response: $type<ListLoopsResponse>(),
-    }),
-    shutdown: http.post("shutdown", {
-      body: ShutdownLoopRequest,
-      response: $type<ShutdownLoopResponse>(),
     }),
   }),
   workforce: http.resource("workforce", {
@@ -131,6 +106,7 @@ export const daemonIpcRoutes = composeIpcRoutes([
   adapterIpcRoutes,
   authIpcRoutes,
   inboxIpcRoutes,
+  loopIpcRoutes,
   pullRequestIpcRoutes,
   sessionIpcRoutes,
 ])
