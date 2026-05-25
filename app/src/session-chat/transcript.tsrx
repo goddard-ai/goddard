@@ -425,8 +425,9 @@ export component Transcript(props: TranscriptProps) {
       return
     }
 
+    const topInset = getPromptNavigationTopInset(scrollElement)
     const targetIndex = findPromptNavigationTargetIndex({
-      currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin),
+      currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin + topInset),
       defaultRowHeight: DEFAULT_ROW_HEIGHT,
       direction,
       items: renderItems,
@@ -443,10 +444,7 @@ export component Transcript(props: TranscriptProps) {
       align: "start",
     })
     requestAnimationFrame(() => {
-      scrollElement.scrollTop = Math.max(
-        0,
-        scrollElement.scrollTop - getPromptNavigationTopInset(scrollElement),
-      )
+      scrollElement.scrollTop = Math.max(0, scrollElement.scrollTop - topInset)
     })
   })
 
