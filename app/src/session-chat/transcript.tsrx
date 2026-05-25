@@ -217,17 +217,12 @@ export component Transcript(props: TranscriptProps) {
         }
       </tsrx>}
       initialScrollPosition={effectiveInitialScroll}
-      itemNavigation={props.pageEvents
-        ? {
-            matchesItem: (item) => item.kind === "message" && item.role === "user",
-            pageEvents: props.pageEvents,
-          }
-        : undefined}
       items={renderItems}
       loadingFallback={<tsrx>
         <div class={styles.loadingState}>"Preparing transcript layout..."</div>
       </tsrx>}
       overscanPx={VIRTUAL_OVERSCAN_PX}
+      pageEvents={props.pageEvents}
       preserveScrollOnPrepend={Boolean(props.olderHistory)}
       renderRow={(row) => (
         <tsrx>

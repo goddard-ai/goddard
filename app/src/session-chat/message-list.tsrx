@@ -30,10 +30,7 @@ export type MessageListProps<Item> = {
   overscanPx?: number;
   initialScrollPosition?: "top" | "bottom";
   header?: preact.ComponentChild;
-  itemNavigation?: {
-    matchesItem: (item: Item, index: number) => boolean;
-    pageEvents: SigmaTarget<SessionChatPageEvents>;
-  };
+  pageEvents?: SigmaTarget<SessionChatPageEvents>;
   scrollCacheKey?: string;
   stickToBottomKey?: number | string;
   preserveScrollOnPrepend?: boolean;
@@ -65,18 +62,21 @@ function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HT
   )
 }
 
+function isUserPromptItem(item: unknown) {
+  return typeof item === "object" && item !== null && "kind" in item && "role" in item &&
+    item.kind === "message" &&
+    item.role === "user"
+}
+
 /** Finds the row to scroll to for a direction-aware navigation request. */
 function findNavigationTargetIndex<Item>(input: {
   currentOffset: number;
   defaultRowHeight: number;
   direction: "next" | "previous";
   items: readonly Item[];
-  matchesItem: (item: Item, index: number) => boolean;
   measurements: readonly VirtualItem[];
 }) {
-  const targetIndexes = input.items.flatMap(
-    (item, index) => input.matchesItem(item, index) ? [index] : [],
-  )
+  const targetIndexes = input.items.flatMap((item, index) => isUserPromptItem(item) ? [index] : [])
 
   if (targetIndexes.length === 0) {
     return null
@@ -233,10 +233,10 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     scrollElement.scrollTop = scrollElement.scrollHeight
   }
 
-  useListener(props.itemNavigation?.pageEvents ?? null, "scrollToPrompt", ({ direction }) => {
+  useListener(props.pageEvents ?? null, "scrollToPrompt", ({ direction }) => {
     const scrollElement = tabContext.scrollParentRef.current
 
-    if (!props.itemNavigation || !scrollElement || viewport.width <= 0) {
+    if (!scrollElement || viewport.width <= 0) {
       return
     }
 
@@ -245,7 +245,6 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
       defaultRowHeight: props.defaultRowHeight ?? 1,
       direction,
       items: props.items,
-      matchesItem: props.itemNavigation.matchesItem,
       measurements: virtualizer.measurementsCache,
     })
 
