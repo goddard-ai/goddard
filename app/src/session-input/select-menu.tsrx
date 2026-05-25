@@ -13,26 +13,26 @@ import styles from "./select-menu.style.ts"
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
-    value: string;
-    label: string;
-    detail?: string | null;
-    searchText?: string | null;
-    disabled?: boolean;
-  }
+  value: string;
+  label: string;
+  detail?: string | null;
+  searchText?: string | null;
+  disabled?: boolean;
+}
 
 /** Props for one shared launch-session selector menu. */
 export type SessionInputSelectProps = {
-    label: string;
-    placeholder: string;
-    shortcut?: string | null;
-    value: string | null;
-    items: readonly SessionInputSelectItem[];
-    open: Signal<boolean>;
-    disabled?: boolean;
-    filterable?: boolean;
-    loading?: boolean;
-    onValueChange: (value: string) => void;
-  }
+  label: string;
+  placeholder: string;
+  shortcut?: string | null;
+  value: string | null;
+  items: readonly SessionInputSelectItem[];
+  open: Signal<boolean>;
+  disabled?: boolean;
+  filterable?: boolean;
+  loading?: boolean;
+  onValueChange: (value: string) => void;
+}
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
 export component SessionInputSelect(props: SessionInputSelectProps) {

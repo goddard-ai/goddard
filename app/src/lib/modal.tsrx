@@ -10,18 +10,18 @@ export type ModalCloseReason = "escape" | "explicit" | "outside"
 
 /** Configuration for one unstyled modal surface. */
 export type ModalProps = {
-    open: Signal<boolean>;
-    titleId: string;
-    descriptionId?: string;
-    backdropClass?: string;
-    positionerClass?: string;
-    contentClass?: string;
-    closeOnEscape?: boolean;
-    closeOnOutsidePointer?: boolean;
-    initialFocus?: () => HTMLElement | null;
-    onBeforeClose?: (reason: ModalCloseReason) => boolean;
-    children?: preact.ComponentChildren;
-  }
+  open: Signal<boolean>;
+  titleId: string;
+  descriptionId?: string;
+  backdropClass?: string;
+  positionerClass?: string;
+  contentClass?: string;
+  closeOnEscape?: boolean;
+  closeOnOutsidePointer?: boolean;
+  initialFocus?: () => HTMLElement | null;
+  onBeforeClose?: (reason: ModalCloseReason) => boolean;
+  children?: preact.ComponentChildren;
+}
 
 /** Renders one modal dialog with owned focus, dismissal, and portal behavior. */
 export component Modal(props: ModalProps) {

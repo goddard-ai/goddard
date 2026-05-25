@@ -51,8 +51,8 @@ export type ComposerChipData =
 
 /** Serialized JSON shape used when Lexical copies or persists one chip node. */
 export type SerializedComposerChipNode = SerializedLexicalNode & {
-  chip: ComposerChipData;
-}
+    chip: ComposerChipData;
+  }
 
 /** Returns the trigger text used when one chip falls back to plain text outside Lexical. */
 export function chipTextFallback(chip: ComposerChipData) {

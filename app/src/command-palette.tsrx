@@ -35,8 +35,9 @@ component CommandPalette(props: { open: Signal<boolean> }) {
 
   const visibleCommands = (() => {
     const availableCommands = preparedAppCommands.filter(
-      (entry) => entry.command.id !== "navigation.openCommandPalette" &&
-        isCommandPaletteVisible(shortcutRegistry.runtime, entry.command),
+      (entry) =>
+        entry.command.id !== "navigation.openCommandPalette" &&
+          isCommandPaletteVisible(shortcutRegistry.runtime, entry.command),
     )
 
     if (isEmptyQuery(search.value)) {
