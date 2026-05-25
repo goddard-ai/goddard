@@ -82,6 +82,7 @@
         "@tsrx/bun-plugin-preact": "^0.0.37",
         "@tsrx/vite-plugin-preact": "^0.0.39",
         "@types/culori": "^4.0.1",
+        "@types/hash-sum": "^1.0.2",
         "chokidar": "^5.0.0",
         "postcss": "^8.5.10",
         "react": "npm:@preact/compat",
