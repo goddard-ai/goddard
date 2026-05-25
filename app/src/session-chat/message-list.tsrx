@@ -27,6 +27,11 @@ export type MessageListProps<Item> = {
   overscanPx?: number;
   initialScrollPosition?: "top" | "bottom";
   header?: preact.ComponentChild;
+  itemNavigation?: {
+    direction: "next" | "previous";
+    key: number | string;
+    matchesItem: (item: Item, index: number) => boolean;
+  };
   scrollCacheKey?: string;
   stickToBottomKey?: number | string;
   preserveScrollOnPrepend?: boolean;
@@ -58,9 +63,51 @@ function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HT
   )
 }
 
+/** Finds the row to scroll to for a direction-aware navigation request. */
+function findNavigationTargetIndex<Item>(input: {
+  currentOffset: number;
+  defaultRowHeight: number;
+  direction: "next" | "previous";
+  items: readonly Item[];
+  matchesItem: (item: Item, index: number) => boolean;
+  measurements: readonly VirtualItem[];
+}) {
+  const targetIndexes = input.items.flatMap(
+    (item, index) => input.matchesItem(item, index) ? [index] : [],
+  )
+
+  if (targetIndexes.length === 0) {
+    return null
+  }
+
+  const getItemStart = (index: number) => input.measurements[index]?.start ??
+    index * input.defaultRowHeight
+  const scrollThreshold = 8
+
+  if (input.direction === "previous") {
+    for (let index = targetIndexes.length - 1; index >= 0; index -= 1) {
+      const targetIndex = targetIndexes[index]
+
+      if (
+        targetIndex !== undefined &&
+          getItemStart(targetIndex) < input.currentOffset - scrollThreshold
+      ) {
+        return targetIndex
+      }
+    }
+
+    return null
+  }
+
+  return targetIndexes.find(
+    (index) => getItemStart(index) > input.currentOffset + scrollThreshold,
+  ) ?? null
+}
+
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const spacerRef = useRef<HTMLDivElement | null>(null)
+  const lastItemNavigationKeyRef = useRef<number | string | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const userScrollIntentRef = useRef(false)
@@ -184,6 +231,45 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     })
     scrollElement.scrollTop = scrollElement.scrollHeight
   }
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!props.itemNavigation || !scrollElement || viewport.width <= 0) {
+      return
+    }
+
+    if (lastItemNavigationKeyRef.current === props.itemNavigation.key) {
+      return
+    }
+
+    lastItemNavigationKeyRef.current = props.itemNavigation.key
+
+    const targetIndex = findNavigationTargetIndex({
+      currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin),
+      defaultRowHeight: props.defaultRowHeight ?? 1,
+      direction: props.itemNavigation.direction,
+      items: props.items,
+      matchesItem: props.itemNavigation.matchesItem,
+      measurements: virtualizer.measurementsCache,
+    })
+
+    if (targetIndex === null) {
+      return
+    }
+
+    userScrollIntentRef.current = true
+    setIsStickingToBottom(false)
+    virtualizer.scrollToIndex(targetIndex, {
+      align: "start",
+    })
+  }, [
+    props.itemNavigation?.key,
+    tabContext.scrollParentRef,
+    viewport.scrollMargin,
+    viewport.width,
+    virtualizer,
+  ])
 
   useLayoutEffect(() => {
     const scrollElement = tabContext.scrollParentRef.current

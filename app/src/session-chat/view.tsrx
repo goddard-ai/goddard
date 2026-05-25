@@ -2,6 +2,8 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleDot,
   Folder,
   GitBranch,
@@ -42,6 +44,12 @@ export default component SessionChatView(props: {
   <SessionChatPageModelProvider>
     const page = useSessionChatPageModel()
     const [submittedPromptScrollKey, setSubmittedPromptScrollKey] = useState<number | null>(null)
+    const [promptNavigation, setPromptNavigation] = useState<
+      {
+        direction: "next" | "previous";
+        key: number;
+      } | null
+    >(null)
 
     <main class={styles.root}>
       try {
@@ -73,6 +81,9 @@ export default component SessionChatView(props: {
         })
         const protectedChat = castProtected(chat)
         const transcriptMessages = chat.transcriptMessages
+        const userPromptCount = transcriptMessages.filter(
+          (message) => message.kind === "message" && message.role === "user",
+        ).length
 
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
@@ -122,6 +133,44 @@ export default component SessionChatView(props: {
               <div class={styles.headerActions}>
                 const workbenchTabSet = useWorkbenchTabSet()
                 const activeHeaderAction = page.headerAction.activeKey.value
+                const promptNavigationDisabled = userPromptCount === 0
+
+                function navigatePrompts(direction: "next" | "previous") {
+                  setPromptNavigation(
+                    (currentNavigation) => ({
+                      direction,
+                      key: (currentNavigation?.key ?? 0) + 1,
+                    }),
+                  )
+                }
+
+                <GoodTooltip ariaLabel="Previous prompt" content="Previous prompt">
+                  <button
+                    aria-label="Scroll to previous user prompt"
+                    class={styles.headerActionButton}
+                    disabled={promptNavigationDisabled}
+                    type="button"
+                    onClick={() => {
+                      navigatePrompts("previous")
+                    }}
+                  >
+                    <ChevronUp size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
+
+                <GoodTooltip ariaLabel="Next prompt" content="Next prompt">
+                  <button
+                    aria-label="Scroll to next user prompt"
+                    class={styles.headerActionButton}
+                    disabled={promptNavigationDisabled}
+                    type="button"
+                    onClick={() => {
+                      navigatePrompts("next")
+                    }}
+                  >
+                    <ChevronDown size={15} strokeWidth={2.1} />
+                  </button>
+                </GoodTooltip>
 
                 function openSessionChanges() {
                   queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
@@ -311,6 +360,7 @@ export default component SessionChatView(props: {
                 loading: page.olderHistory.isPending.value,
                 onLoad: loadOlderHistory,
               }}
+              promptNavigation={promptNavigation ?? undefined}
               onSelectPermissionOption={async (input) => {
                 await respondSessionPermission({
                   id: chat.session.id,

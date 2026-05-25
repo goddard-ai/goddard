@@ -33,6 +33,10 @@ export type TranscriptProps = {
   messages: readonly TranscriptMessage[];
   class?: string;
   initialScrollPosition?: "top" | "bottom";
+  promptNavigation?: {
+    direction: "next" | "previous";
+    key: number | string;
+  };
   onSelectPermissionOption?: (input: {
     optionId: string;
     requestId: SessionTranscriptPermissionRequest["requestId"];
@@ -214,6 +218,13 @@ export component Transcript(props: TranscriptProps) {
         }
       </tsrx>}
       initialScrollPosition={effectiveInitialScroll}
+      itemNavigation={props.promptNavigation
+        ? {
+            direction: props.promptNavigation.direction,
+            key: props.promptNavigation.key,
+            matchesItem: (item) => item.kind === "message" && item.role === "user",
+          }
+        : undefined}
       items={renderItems}
       loadingFallback={<tsrx>
         <div class={styles.loadingState}>"Preparing transcript layout..."</div>
