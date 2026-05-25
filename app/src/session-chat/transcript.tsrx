@@ -1,17 +1,9 @@
 import { cx } from "@goddard-ai/styled-system/css"
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
 import { AlertCircle, ChevronUp, LoaderCircle } from "lucide-react"
-import { useMemo } from "preact/hooks"
-import type { SigmaTarget } from "preact-sigma"
+import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
+import { useListener, type SigmaTarget } from "preact-sigma"
 
-import type {
-  SessionTranscriptItem,
-  SessionTranscriptPermissionRequest,
-  SessionTranscriptPlanUpdate,
-  SessionTranscriptTextMessage,
-  SessionTranscriptToolCall,
-  SessionTranscriptTurnStop,
-} from "~/sessions/models.ts"
-import { MessageList, type MessageListRow } from "./message-list.tsrx"
 import type { SessionChatPageEvents } from "./page-events.ts"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
 import styles, {
@@ -26,6 +18,15 @@ import { PlanUpdateTranscriptRow } from "./transcript/plan-update-row.tsrx"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
 import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"
+import type {
+  SessionTranscriptItem,
+  SessionTranscriptPermissionRequest,
+  SessionTranscriptPlanUpdate,
+  SessionTranscriptTextMessage,
+  SessionTranscriptToolCall,
+  SessionTranscriptTurnStop,
+} from "~/sessions/models.ts"
+import { useTabContext } from "~/tab-context.tsrx"
 
 /** One transcript row rendered by the session chat surface. */
 export type TranscriptMessage = SessionTranscriptItem
@@ -51,6 +52,16 @@ export type TranscriptProps = {
   stickToBottomKey?: number | string;
 }
 
+const initializedBottomScrollKeys = new Set<string>()
+const transcriptScrollCache = new Map<
+  string,
+  {
+    itemKeys: readonly string[];
+    measurements: readonly VirtualItem[];
+    scrollTop: number;
+  }
+>()
+
 type CoalescedToolTranscriptRow = {
   kind: "toolGroup";
   id: string;
@@ -59,6 +70,18 @@ type CoalescedToolTranscriptRow = {
 
 type RenderTranscriptItem =
   SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
+
+type TranscriptRowContext = {
+  item: RenderTranscriptItem;
+  index: number;
+  viewportWidth: number;
+}
+
+type TranscriptViewport = {
+  scrollMarginMeasured: boolean;
+  scrollMargin: number;
+  width: number;
+}
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
@@ -112,6 +135,60 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   return renderItems
 }
 
+function isScrolledNearBottom(scrollElement: HTMLDivElement) {
+  return scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight <= 8
+}
+
+function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HTMLDivElement) {
+  if (!spacerElement) {
+    return 0
+  }
+
+  return Math.round(
+    spacerElement.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top +
+      scrollElement.scrollTop,
+  )
+}
+
+function findPromptNavigationTargetIndex(input: {
+  currentOffset: number;
+  defaultRowHeight: number;
+  direction: "next" | "previous";
+  items: readonly RenderTranscriptItem[];
+  measurements: readonly VirtualItem[];
+}) {
+  const targetIndexes = input.items.flatMap(
+    (item, index) => item.kind === "message" && item.role === "user" ? [index] : [],
+  )
+
+  if (targetIndexes.length === 0) {
+    return null
+  }
+
+  const getItemStart = (index: number) => input.measurements[index]?.start ??
+    index * input.defaultRowHeight
+  const scrollThreshold = 8
+
+  if (input.direction === "previous") {
+    for (let index = targetIndexes.length - 1; index >= 0; index -= 1) {
+      const targetIndex = targetIndexes[index]
+
+      if (
+        targetIndex !== undefined &&
+          getItemStart(targetIndex) < input.currentOffset - scrollThreshold
+      ) {
+        return targetIndex
+      }
+    }
+
+    return null
+  }
+
+  return targetIndexes.find(
+    (index) => getItemStart(index) > input.currentOffset + scrollThreshold,
+  ) ?? null
+}
+
 function estimateToolGroupRowHeight(
   toolCalls: readonly SessionTranscriptToolCall[],
   viewportWidth: number,
@@ -126,7 +203,7 @@ function estimateToolGroupRowHeight(
 
 /** Renders one transcript row using the row-specific presentation path. */
 component TranscriptRow(props: {
-  row: MessageListRow<RenderTranscriptItem>;
+  row: TranscriptRowContext;
   onSelectPermissionOption?: TranscriptProps["onSelectPermissionOption"];
 }) {
   const item = props.row.item
@@ -144,10 +221,18 @@ component TranscriptRow(props: {
       <PlanUpdateTranscriptRow message={item} />
       return
     case "turnStop":
-      <TurnStopTranscriptRow row={props.row as MessageListRow<SessionTranscriptTurnStop>} />
+      <TurnStopTranscriptRow
+        row={props.row as TranscriptRowContext & {
+          item: SessionTranscriptTurnStop;
+        }}
+      />
       return
     case "message":
-      <TextTranscriptRow row={props.row as MessageListRow<SessionTranscriptTextMessage>} />
+      <TextTranscriptRow
+        row={props.row as TranscriptRowContext & {
+          item: SessionTranscriptTextMessage;
+        }}
+      />
       return
     default:
       throw new Error("Unsupported transcript row.")
@@ -195,43 +280,362 @@ component ThinkingLabel() {
   </div>
 }
 
-/** Renders one chat transcript inside the shared message-list virtualizer. */
+/** Renders one chat transcript with virtualized row layout. */
 export component Transcript(props: TranscriptProps) {
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
   ])
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const spacerRef = useRef<HTMLDivElement | null>(null)
+  const previousScrollHeightRef = useRef(0)
+  const previousItemKeysRef = useRef<readonly string[]>([])
+  const userScrollIntentRef = useRef(false)
+  const [isStickingToBottom, setIsStickingToBottom] = useState(false)
+  const tabContext = useTabContext()
+  const [viewport, setViewport] = useState<TranscriptViewport>({
+    scrollMarginMeasured: false,
+    scrollMargin: 0,
+    width: 0,
+  })
+
+  const effectiveScrollCacheKey = props.scrollCacheKey ?? tabContext.id
+  const itemKeys = useMemo(() => renderItems.map((item) => item.id), [renderItems])
+  const cachedScrollSnapshot = transcriptScrollCache.get(effectiveScrollCacheKey)
+  const restoredScrollSnapshot =
+    cachedScrollSnapshot &&
+    cachedScrollSnapshot.itemKeys.every((itemKey, index) => itemKeys[index] === itemKey)
+      ? cachedScrollSnapshot
+      : undefined
+
+  useLayoutEffect(() => {
+    if (props.stickToBottomKey === undefined) {
+      return
+    }
+
+    userScrollIntentRef.current = false
+    setIsStickingToBottom(true)
+  }, [props.stickToBottomKey])
+
+  useLayoutEffect(() => {
+    const rootElement = rootRef.current
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!rootElement || !scrollElement) {
+      return
+    }
+
+    const updateViewport = () => {
+      const spacerElement = spacerRef.current
+
+      setViewport({
+        scrollMargin: getScrollMargin(spacerElement, scrollElement),
+        scrollMarginMeasured: Boolean(spacerElement),
+        width: rootElement.clientWidth,
+      })
+    }
+
+    updateViewport()
+
+    const resizeObserver = new ResizeObserver(updateViewport)
+    resizeObserver.observe(rootElement)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement || viewport.width <= 0) {
+      return
+    }
+
+    const scrollMargin = getScrollMargin(spacerRef.current, scrollElement)
+
+    if (scrollMargin !== viewport.scrollMargin || !viewport.scrollMarginMeasured) {
+      setViewport(
+        (currentViewport) => ({
+          ...currentViewport,
+          scrollMargin,
+          scrollMarginMeasured: true,
+        }),
+      )
+    }
+  })
+
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: renderItems.length,
+    enabled: viewport.width > 0,
+    estimateSize: (index) => {
+      const item = renderItems[index]
+
+      if (!item) {
+        return DEFAULT_ROW_HEIGHT
+      }
+
+      return Math.max(
+        1,
+        Math.round(
+          item.kind === "toolGroup"
+            ? estimateToolGroupRowHeight(item.toolCalls, viewport.width)
+            : item.kind === "turnStop"
+              ? TURN_STOP_ROW_HEIGHT
+              : estimateTranscriptRowHeight(item, viewport.width),
+        ),
+      )
+    },
+    getItemKey: (index) => itemKeys[index] ?? index,
+    getScrollElement: () => tabContext.scrollParentRef.current,
+    initialMeasurementsCache: restoredScrollSnapshot
+      ? [...restoredScrollSnapshot.measurements]
+      : undefined,
+    initialOffset: restoredScrollSnapshot?.scrollTop,
+    overscan: Math.max(1, Math.ceil(VIRTUAL_OVERSCAN_PX / DEFAULT_ROW_HEIGHT)),
+    scrollMargin: viewport.scrollMargin,
+    useFlushSync: false,
+  })
+  const totalSize = virtualizer.getTotalSize()
+
+  const scrollToBottom = () => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement || renderItems.length === 0) {
+      return
+    }
+
+    virtualizer.scrollToIndex(renderItems.length - 1, {
+      align: "end",
+    })
+    scrollElement.scrollTop = scrollElement.scrollHeight
+  }
+
+  useListener(props.pageEvents ?? null, "scrollToPrompt", ({ direction }) => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement || viewport.width <= 0) {
+      return
+    }
+
+    const targetIndex = findPromptNavigationTargetIndex({
+      currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin),
+      defaultRowHeight: DEFAULT_ROW_HEIGHT,
+      direction,
+      items: renderItems,
+      measurements: virtualizer.measurementsCache,
+    })
+
+    if (targetIndex === null) {
+      return
+    }
+
+    userScrollIntentRef.current = true
+    setIsStickingToBottom(false)
+    virtualizer.scrollToIndex(targetIndex, {
+      align: "start",
+    })
+  })
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement) {
+      return
+    }
+
+    const markUserScrollIntent = () => {
+      userScrollIntentRef.current = true
+    }
+    const markScrollbarPointerIntent = (event: PointerEvent) => {
+      if (event.target !== event.currentTarget) {
+        return
+      }
+
+      userScrollIntentRef.current = true
+    }
+    const markKeyboardScrollIntent = (event: KeyboardEvent) => {
+      if (event.target !== event.currentTarget) {
+        return
+      }
+
+      if (
+        event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home" ||
+          event.key === " "
+      ) {
+        userScrollIntentRef.current = true
+      }
+    }
+    const stopStickingAfterUserScroll = () => {
+      if (!isStickingToBottom || !userScrollIntentRef.current) {
+        return
+      }
+
+      if (isScrolledNearBottom(scrollElement)) {
+        return
+      }
+
+      setIsStickingToBottom(false)
+    }
+
+    scrollElement.addEventListener("wheel", markUserScrollIntent)
+    scrollElement.addEventListener("touchstart", markUserScrollIntent)
+    scrollElement.addEventListener("pointerdown", markScrollbarPointerIntent)
+    scrollElement.addEventListener("keydown", markKeyboardScrollIntent)
+    scrollElement.addEventListener("scroll", stopStickingAfterUserScroll)
+
+    return () => {
+      scrollElement.removeEventListener("wheel", markUserScrollIntent)
+      scrollElement.removeEventListener("touchstart", markUserScrollIntent)
+      scrollElement.removeEventListener("pointerdown", markScrollbarPointerIntent)
+      scrollElement.removeEventListener("keydown", markKeyboardScrollIntent)
+      scrollElement.removeEventListener("scroll", stopStickingAfterUserScroll)
+    }
+  }, [isStickingToBottom, tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement) {
+      return
+    }
+
+    if (props.olderHistory) {
+      let prependedItemCount = 0
+
+      for (const [previousIndex, previousKey] of previousItemKeysRef.current.entries()) {
+        const nextIndex = itemKeys.indexOf(previousKey)
+
+        if (nextIndex >= 0) {
+          prependedItemCount = Math.max(0, nextIndex - previousIndex)
+          break
+        }
+      }
+
+      if (prependedItemCount > 0) {
+        scrollElement.scrollTop += Math.max(
+          0,
+          scrollElement.scrollHeight - previousScrollHeightRef.current,
+        )
+      }
+    }
+
+    previousItemKeysRef.current = itemKeys
+    previousScrollHeightRef.current = scrollElement.scrollHeight
+  }, [itemKeys, props.olderHistory, tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    return () => {
+      const scrollElement = tabContext.scrollParentRef.current
+
+      if (scrollElement) {
+        transcriptScrollCache.set(effectiveScrollCacheKey, {
+          itemKeys,
+          measurements: virtualizer.measurementsCache.map(
+            (measurement) => ({
+              ...measurement,
+            }),
+          ),
+          scrollTop: scrollElement.scrollTop,
+        })
+      }
+    }
+  }, [effectiveScrollCacheKey, itemKeys, tabContext.scrollParentRef, virtualizer])
+
+  useLayoutEffect(() => {
+    if (
+      !isStickingToBottom || renderItems.length === 0 || viewport.width <= 0 ||
+        !viewport.scrollMarginMeasured
+    ) {
+      return
+    }
+
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
+  }, [
+    isStickingToBottom,
+    renderItems.length,
+    totalSize,
+    viewport.scrollMarginMeasured,
+    viewport.width,
+  ])
+
+  useLayoutEffect(() => {
+    if (
+      effectiveInitialScroll !== "bottom" || renderItems.length === 0 || viewport.width <= 0 ||
+        !viewport.scrollMarginMeasured
+    ) {
+      return
+    }
+
+    if (
+      initializedBottomScrollKeys.has(effectiveScrollCacheKey) ||
+        transcriptScrollCache.has(effectiveScrollCacheKey)
+    ) {
+      return
+    }
+
+    initializedBottomScrollKeys.add(effectiveScrollCacheKey)
+    requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(renderItems.length - 1, {
+        align: "end",
+      })
+    })
+  }, [
+    effectiveInitialScroll,
+    effectiveScrollCacheKey,
+    renderItems.length,
+    viewport.scrollMarginMeasured,
+    viewport.width,
+    virtualizer,
+  ])
 
   <div class={cx(styles.transcriptViewport, props.class)}>
-    <MessageList
-      defaultRowHeight={DEFAULT_ROW_HEIGHT}
-      estimateRowHeight={(message, _index, viewportWidth) => message.kind === "toolGroup"
-        ? estimateToolGroupRowHeight(message.toolCalls, viewportWidth)
-        : message.kind === "turnStop"
-          ? TURN_STOP_ROW_HEIGHT
-          : estimateTranscriptRowHeight(message, viewportWidth)}
-      getItemKey={(message) => message.id}
-      header={<tsrx>
+    <div ref={rootRef} style={{ minHeight: "100%" }}>
+      if (viewport.width <= 0) {
+        <div class={styles.loadingState}>"Preparing transcript layout..."</div>
+      } else {
         if (props.olderHistory) {
           <OlderHistoryPager olderHistory={props.olderHistory} />
         }
-      </tsrx>}
-      initialScrollPosition={effectiveInitialScroll}
-      items={renderItems}
-      loadingFallback={<tsrx>
-        <div class={styles.loadingState}>"Preparing transcript layout..."</div>
-      </tsrx>}
-      overscanPx={VIRTUAL_OVERSCAN_PX}
-      pageEvents={props.pageEvents}
-      preserveScrollOnPrepend={Boolean(props.olderHistory)}
-      renderRow={(row) => (
-        <tsrx>
-          <TranscriptRow {row} onSelectPermissionOption={props.onSelectPermissionOption} />
-        </tsrx>
-      )}
-      scrollCacheKey={props.scrollCacheKey}
-      stickToBottomKey={props.stickToBottomKey}
-    />
+        <div
+          ref={spacerRef}
+          class={styles.virtualSpacer}
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualItem) => {
+            const item = renderItems[virtualItem.index]
+
+            if (!item) {
+              return
+            }
+
+            return <tsrx>
+              <div
+                key={virtualItem.key}
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
+                class={styles.virtualRow}
+                style={{
+                  transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+                }}
+              >
+                <TranscriptRow
+                  onSelectPermissionOption={props.onSelectPermissionOption}
+                  row={{
+                    item,
+                    index: virtualItem.index,
+                    viewportWidth: viewport.width,
+                  }}
+                />
+              </div>
+            </tsrx>
+          })}
+        </div>
+      }
+    </div>
     if (props.showThinkingLabel) {
       <ThinkingLabel />
     }

@@ -6,7 +6,6 @@ import type {
   SessionTranscriptTextMessage,
 } from "~/sessions/models.ts"
 import { MarkdownMessage } from "../markdown-message.tsrx"
-import type { MessageListRow } from "../message-list.tsrx"
 import { getBubbleMaxWidth } from "./layout.ts"
 import styles from "./transcript.style.ts"
 
@@ -72,7 +71,11 @@ component TranscriptContentBlock(props: {
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
 export component TextTranscriptRow(props: {
-  row: MessageListRow<SessionTranscriptTextMessage>;
+  row: {
+    item: SessionTranscriptTextMessage;
+    index: number;
+    viewportWidth: number;
+  };
 }) {
   const message = props.row.item
   const isUserMessage = message.role === "user"

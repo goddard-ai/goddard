@@ -9,6 +9,18 @@ export default {
     paddingBottom: "32px",
   }),
 
+  virtualSpacer: css({
+    position: "relative",
+    width: "100%",
+  }),
+
+  virtualRow: css({
+    position: "absolute",
+    top: "0",
+    left: "0",
+    width: "100%",
+  }),
+
   loadingState: css({
     position: "absolute",
     inset: "0",

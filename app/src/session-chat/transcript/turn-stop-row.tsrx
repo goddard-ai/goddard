@@ -1,7 +1,6 @@
 import { AlertCircle, CheckCircle2, PauseCircle, XCircle } from "lucide-react"
 
 import type { SessionTranscriptTurnStop } from "~/sessions/models.ts"
-import type { MessageListRow } from "../message-list.tsrx"
 import styles from "./transcript.style.ts"
 
 function getTurnStopIcon(status: SessionTranscriptTurnStop["status"]) {
@@ -33,7 +32,11 @@ function formatTurnStopTimestamp(timestamp: string) {
 
 /** Renders one compact lifecycle marker after a terminal session turn. */
 export component TurnStopTranscriptRow(props: {
-  row: MessageListRow<SessionTranscriptTurnStop>;
+  row: {
+    item: SessionTranscriptTurnStop;
+    index: number;
+    viewportWidth: number;
+  };
 }) {
   const message = props.row.item
   const StatusIcon = getTurnStopIcon(message.status)
