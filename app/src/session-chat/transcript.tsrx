@@ -157,19 +157,36 @@ function getPromptNavigationTopInset(scrollElement: HTMLDivElement) {
   return (headerElement?.getBoundingClientRect().height ?? 0) + PROMPT_NAVIGATION_TOP_GAP
 }
 
+function getPromptNavigationTargetIndexes(items: readonly RenderTranscriptItem[]) {
+  return items.flatMap(
+    (item, index) => item.kind === "message" && item.role === "user" ? [index] : [],
+  )
+}
+
 function findPromptNavigationTargetIndex(input: {
+  currentItemId: string | null;
   currentOffset: number;
   defaultRowHeight: number;
   direction: "next" | "previous";
   items: readonly RenderTranscriptItem[];
   measurements: readonly VirtualItem[];
 }) {
-  const targetIndexes = input.items.flatMap(
-    (item, index) => item.kind === "message" && item.role === "user" ? [index] : [],
-  )
+  const targetIndexes = getPromptNavigationTargetIndexes(input.items)
 
   if (targetIndexes.length === 0) {
     return null
+  }
+
+  if (input.currentItemId !== null) {
+    const currentTargetIndex = targetIndexes.findIndex(
+      (index) => input.items[index]?.id === input.currentItemId,
+    )
+
+    if (currentTargetIndex >= 0) {
+      return input.direction === "previous"
+        ? targetIndexes[currentTargetIndex - 1] ?? null
+        : targetIndexes[currentTargetIndex + 1] ?? null
+    }
   }
 
   const getItemStart = (index: number) => input.measurements[index]?.start ??
@@ -295,6 +312,7 @@ export component Transcript(props: TranscriptProps) {
   ])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const spacerRef = useRef<HTMLDivElement | null>(null)
+  const lastPromptNavigationItemIdRef = useRef<string | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const userScrollIntentRef = useRef(false)
@@ -427,6 +445,7 @@ export component Transcript(props: TranscriptProps) {
 
     const topInset = getPromptNavigationTopInset(scrollElement)
     const targetIndex = findPromptNavigationTargetIndex({
+      currentItemId: lastPromptNavigationItemIdRef.current,
       currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin + topInset),
       defaultRowHeight: DEFAULT_ROW_HEIGHT,
       direction,
@@ -438,6 +457,7 @@ export component Transcript(props: TranscriptProps) {
       return
     }
 
+    lastPromptNavigationItemIdRef.current = renderItems[targetIndex]?.id ?? null
     userScrollIntentRef.current = true
     setIsStickingToBottom(false)
     virtualizer.scrollToIndex(targetIndex, {
@@ -456,6 +476,7 @@ export component Transcript(props: TranscriptProps) {
     }
 
     const markUserScrollIntent = () => {
+      lastPromptNavigationItemIdRef.current = null
       userScrollIntentRef.current = true
     }
     const markScrollbarPointerIntent = (event: PointerEvent) => {
