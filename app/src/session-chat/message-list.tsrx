@@ -1,7 +1,10 @@
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
+import type { SigmaTarget } from "preact-sigma"
+import { useListener } from "preact-sigma"
 
 import { useTabContext } from "~/tab-context.tsrx"
+import type { SessionChatPageEvents } from "./page-events.ts"
 import styles from "./message-list.style.ts"
 
 const initializedBottomScrollKeys = new Set<string>()
@@ -28,9 +31,8 @@ export type MessageListProps<Item> = {
   initialScrollPosition?: "top" | "bottom";
   header?: preact.ComponentChild;
   itemNavigation?: {
-    direction: "next" | "previous";
-    key: number | string;
     matchesItem: (item: Item, index: number) => boolean;
+    pageEvents: SigmaTarget<SessionChatPageEvents>;
   };
   scrollCacheKey?: string;
   stickToBottomKey?: number | string;
@@ -107,7 +109,6 @@ function findNavigationTargetIndex<Item>(input: {
 export component MessageList<Item>(props: MessageListProps<Item>) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const spacerRef = useRef<HTMLDivElement | null>(null)
-  const lastItemNavigationKeyRef = useRef<number | string | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const userScrollIntentRef = useRef(false)
@@ -232,23 +233,17 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     scrollElement.scrollTop = scrollElement.scrollHeight
   }
 
-  useLayoutEffect(() => {
+  useListener(props.itemNavigation?.pageEvents ?? null, "scrollToPrompt", ({ direction }) => {
     const scrollElement = tabContext.scrollParentRef.current
 
     if (!props.itemNavigation || !scrollElement || viewport.width <= 0) {
       return
     }
 
-    if (lastItemNavigationKeyRef.current === props.itemNavigation.key) {
-      return
-    }
-
-    lastItemNavigationKeyRef.current = props.itemNavigation.key
-
     const targetIndex = findNavigationTargetIndex({
       currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin),
       defaultRowHeight: props.defaultRowHeight ?? 1,
-      direction: props.itemNavigation.direction,
+      direction,
       items: props.items,
       matchesItem: props.itemNavigation.matchesItem,
       measurements: virtualizer.measurementsCache,
@@ -263,13 +258,7 @@ export component MessageList<Item>(props: MessageListProps<Item>) {
     virtualizer.scrollToIndex(targetIndex, {
       align: "start",
     })
-  }, [
-    props.itemNavigation?.key,
-    tabContext.scrollParentRef,
-    viewport.scrollMargin,
-    viewport.width,
-    virtualizer,
-  ])
+  })
 
   useLayoutEffect(() => {
     const scrollElement = tabContext.scrollParentRef.current

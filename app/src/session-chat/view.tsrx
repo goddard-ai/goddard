@@ -12,11 +12,12 @@ import {
   RefreshCcw,
   XCircle,
 } from "lucide-react"
-import { useEffect, useState } from "preact/hooks"
-import { castProtected, useSigmaSync } from "preact-sigma"
+import { useEffect, useMemo, useState } from "preact/hooks"
+import { castProtected, SigmaTarget, useSigmaSync } from "preact-sigma"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
+import type { SessionChatPageEvents } from "./page-events.ts"
 import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import type { SessionChatStatus } from "./model.ts"
@@ -44,12 +45,7 @@ export default component SessionChatView(props: {
   <SessionChatPageModelProvider>
     const page = useSessionChatPageModel()
     const [submittedPromptScrollKey, setSubmittedPromptScrollKey] = useState<number | null>(null)
-    const [promptNavigation, setPromptNavigation] = useState<
-      {
-        direction: "next" | "previous";
-        key: number;
-      } | null
-    >(null)
+    const pageEvents = useMemo(() => new SigmaTarget<SessionChatPageEvents>(), [])
 
     <main class={styles.root}>
       try {
@@ -135,15 +131,6 @@ export default component SessionChatView(props: {
                 const activeHeaderAction = page.headerAction.activeKey.value
                 const promptNavigationDisabled = userPromptCount === 0
 
-                function navigatePrompts(direction: "next" | "previous") {
-                  setPromptNavigation(
-                    (currentNavigation) => ({
-                      direction,
-                      key: (currentNavigation?.key ?? 0) + 1,
-                    }),
-                  )
-                }
-
                 <GoodTooltip ariaLabel="Previous prompt" content="Previous prompt">
                   <button
                     aria-label="Scroll to previous user prompt"
@@ -151,7 +138,7 @@ export default component SessionChatView(props: {
                     disabled={promptNavigationDisabled}
                     type="button"
                     onClick={() => {
-                      navigatePrompts("previous")
+                      pageEvents.emit("scrollToPrompt", { direction: "previous" })
                     }}
                   >
                     <ChevronUp size={15} strokeWidth={2.1} />
@@ -165,7 +152,7 @@ export default component SessionChatView(props: {
                     disabled={promptNavigationDisabled}
                     type="button"
                     onClick={() => {
-                      navigatePrompts("next")
+                      pageEvents.emit("scrollToPrompt", { direction: "next" })
                     }}
                   >
                     <ChevronDown size={15} strokeWidth={2.1} />
@@ -360,7 +347,7 @@ export default component SessionChatView(props: {
                 loading: page.olderHistory.isPending.value,
                 onLoad: loadOlderHistory,
               }}
-              promptNavigation={promptNavigation ?? undefined}
+              {pageEvents}
               onSelectPermissionOption={async (input) => {
                 await respondSessionPermission({
                   id: chat.session.id,

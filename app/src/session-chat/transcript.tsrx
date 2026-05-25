@@ -1,6 +1,7 @@
 import { cx } from "@goddard-ai/styled-system/css"
 import { AlertCircle, ChevronUp, LoaderCircle } from "lucide-react"
 import { useMemo } from "preact/hooks"
+import type { SigmaTarget } from "preact-sigma"
 
 import type {
   SessionTranscriptItem,
@@ -11,6 +12,7 @@ import type {
   SessionTranscriptTurnStop,
 } from "~/sessions/models.ts"
 import { MessageList, type MessageListRow } from "./message-list.tsrx"
+import type { SessionChatPageEvents } from "./page-events.ts"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
 import styles, {
   BODY_LINE_HEIGHT,
@@ -33,10 +35,7 @@ export type TranscriptProps = {
   messages: readonly TranscriptMessage[];
   class?: string;
   initialScrollPosition?: "top" | "bottom";
-  promptNavigation?: {
-    direction: "next" | "previous";
-    key: number | string;
-  };
+  pageEvents?: SigmaTarget<SessionChatPageEvents>;
   onSelectPermissionOption?: (input: {
     optionId: string;
     requestId: SessionTranscriptPermissionRequest["requestId"];
@@ -218,11 +217,10 @@ export component Transcript(props: TranscriptProps) {
         }
       </tsrx>}
       initialScrollPosition={effectiveInitialScroll}
-      itemNavigation={props.promptNavigation
+      itemNavigation={props.pageEvents
         ? {
-            direction: props.promptNavigation.direction,
-            key: props.promptNavigation.key,
             matchesItem: (item) => item.kind === "message" && item.role === "user",
+            pageEvents: props.pageEvents,
           }
         : undefined}
       items={renderItems}
