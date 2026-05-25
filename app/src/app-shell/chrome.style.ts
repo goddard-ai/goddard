@@ -149,6 +149,7 @@ export default {
     height: "31px",
     overflowX: "auto",
     overflowY: "hidden",
+    overscrollBehaviorX: "contain",
     backgroundColor: "surface",
     boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
   }),

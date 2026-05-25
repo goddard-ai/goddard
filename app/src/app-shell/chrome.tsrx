@@ -1,5 +1,6 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { OverlayScrollbars } from "overlayscrollbars"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { useInbox, useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -80,6 +81,30 @@ function useAppShellTabStrip(
       observer.disconnect()
     }
   }, [selectedMainTabId, tabs])
+
+  useEffect(() => {
+    const tabStripElement = tabStripRef.current
+
+    if (!tabStripElement) {
+      return
+    }
+
+    const scrollbar = OverlayScrollbars(tabStripElement, {
+      overflow: {
+        x: "scroll",
+        y: "hidden",
+      },
+      scrollbars: {
+        autoHide: "move",
+        theme: "os-theme-goddard-workbench-tabs",
+        visibility: "auto",
+      },
+    })
+
+    return () => {
+      scrollbar.destroy()
+    }
+  }, [])
 
   return {
     dragSourceTabId,
@@ -236,7 +261,7 @@ export component AppShellChrome() {
     )
 
     <div class={styles.main}>
-      <div ref={tabStrip.tabStripRef} class={styles.tabStrip}>
+      <div ref={tabStrip.tabStripRef} class={styles.tabStrip} data-overlayscrollbars-initialize="">
         <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
           <TabButton
             activeTabId={workbenchTabSet.activeTabId}

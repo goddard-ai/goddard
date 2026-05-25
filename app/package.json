@@ -42,6 +42,7 @@
     "immer": "^11.1.4",
     "lexical": "^0.42.0",
     "lucide-react": "^1.11.0",
+    "overlayscrollbars": "^2.16.0",
     "powerkeys": "0.2.0",
     "preact": "11.0.0-beta.1",
     "preact-comark": "0.2.4",

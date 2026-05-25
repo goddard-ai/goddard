@@ -1,4 +1,24 @@
+@import "overlayscrollbars/overlayscrollbars.css";
+
 @layer reset, base, tokens, recipes, utilities;
+
+.os-theme-goddard-workbench-tabs {
+  --os-size: 5px;
+  --os-padding-perpendicular: 0;
+  --os-padding-axis: 2px;
+  --os-track-bg: transparent;
+  --os-track-bg-hover: transparent;
+  --os-track-bg-active: transparent;
+  --os-handle-border-radius: 999px;
+  --os-handle-bg: color-mix(in srgb, var(--theme-color-accent-strong) 38%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--theme-color-accent-strong) 52%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--theme-color-accent-strong) 68%, transparent);
+  --os-handle-min-size: 40px;
+  --os-handle-perpendicular-size: 3px;
+  --os-handle-perpendicular-size-hover: 5px;
+  --os-handle-perpendicular-size-active: 5px;
+  --os-handle-interactive-area-offset: 3px;
+}
 
 @layer base {
   :root {
