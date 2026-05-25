@@ -10,6 +10,12 @@ test("session.prompt forwards a structured ACP prompt message through session.se
         calls.push({ name, payload })
         return { accepted: true }
       },
+      session: {
+        send: async ({ body }: { body: unknown }) => {
+          calls.push({ name: "session.send", payload: body })
+          return { accepted: true }
+        },
+      },
       subscribe: async () => {
         return () => {}
       },
@@ -48,6 +54,12 @@ test("session.respondPermission forwards a structured ACP permission response th
       send: async (name: string, payload: unknown) => {
         calls.push({ name, payload })
         return { accepted: true }
+      },
+      session: {
+        send: async ({ body }: { body: unknown }) => {
+          calls.push({ name: "session.send", payload: body })
+          return { accepted: true }
+        },
       },
       subscribe: async () => {
         return () => {}

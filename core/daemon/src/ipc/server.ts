@@ -5,23 +5,16 @@ import { actionPlugin } from "@goddard-ai/action/daemon"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
-import {
-  composePlugins,
-  type DaemonSetupSubstrate,
-  type InferProvides,
-} from "@goddard-ai/daemon-plugin"
+import { composePlugins, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
+import { getResponsePluginMarkerId } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
 import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import {
-  createSessionManager,
-  sessionPlugin,
-  type SessionManager,
-} from "@goddard-ai/session/daemon"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 import { getErrorMessage } from "radashi"
 
@@ -46,8 +39,6 @@ const daemonPlugins = composePlugins([
 ])
 configureDbSchema(daemonPlugins.db)
 
-type SessionExtension = InferProvides<typeof sessionPlugin>["session"]
-
 export async function startDaemonServer(
   client: BackendClient,
   options: {
@@ -69,8 +60,7 @@ export async function startDaemonServer(
 
   const registryService = createACPRegistryService()
   let publishPluginEvent: ((name: string, payload: unknown) => void) | null = null
-
-  let sessionManager!: SessionManager
+  let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {
     const context = IpcRequestContext.get()
@@ -82,6 +72,16 @@ export async function startDaemonServer(
   }
 
   const daemonSubstrate = {
+    daemonRuntime: {
+      agentBinDir: runtime.agentBinDir,
+      idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+      getDaemonUrl() {
+        if (!daemonUrl) {
+          throw new Error("Daemon URL is unavailable before startup completes")
+        }
+        return daemonUrl
+      },
+    },
     authTokenStore: {
       set: (token) => {
         db.metadata.set("authToken", token)
@@ -92,27 +92,21 @@ export async function startDaemonServer(
     },
     configManager,
     registryService,
-    get sessionManager() {
-      if (!sessionManager) {
-        throw new Error("Session manager is unavailable before daemon startup completes")
-      }
-      return sessionManager
-    },
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
   const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, (plugin, name, payload) => {
-    if (!plugin.ipcRoutes || !hasIpcRouteName(plugin.ipcRoutes, name.split("."))) {
-      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC route ${name}`)
+    if (!plugin.ipcRoutes || !hasIpcStreamRouteName(plugin.ipcRoutes, name.split("."))) {
+      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC stream ${name}`)
     }
     if (!publishPluginEvent) {
-      throw new Error(`Daemon plugin ${plugin.name} published IPC route ${name} before startup`)
+      throw new Error(`Daemon plugin ${plugin.name} published IPC stream ${name} before startup`)
     }
     publishPluginEvent(name, payload)
   })
-  const sessionFeature = pluginSetup.extensions.session as SessionExtension
   const requestHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "request")
   const streamHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "stream")
+  const streamLifecycleFromPlugins = pluginSetup.ipcStreamLifecycle
 
   const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
@@ -163,28 +157,10 @@ export async function startDaemonServer(
       await runPluginStreamHandler(streamHandlersFromPlugins[name], filter)
     },
     afterSubscribe: async ({ name, filter }) => {
-      if (name === "session.message") {
-        const streamFilter = filter as any
-        const sessionId =
-          typeof streamFilter === "object" && streamFilter && "id" in streamFilter
-            ? streamFilter.id
-            : null
-        if (typeof sessionId === "string") {
-          await sessionFeature.subscriberConnected(sessionId as `ses_${string}`)
-        }
-      }
+      await runPluginStreamLifecycleHook(streamLifecycleFromPlugins[name]?.afterSubscribe, filter)
     },
     afterUnsubscribe: async ({ name, filter }) => {
-      if (name === "session.message") {
-        const streamFilter = filter as any
-        const sessionId =
-          typeof streamFilter === "object" && streamFilter && "id" in streamFilter
-            ? streamFilter.id
-            : null
-        if (typeof sessionId === "string") {
-          await sessionFeature.subscriberDisconnected(sessionId as `ses_${string}`)
-        }
-      }
+      await runPluginStreamLifecycleHook(streamLifecycleFromPlugins[name]?.afterUnsubscribe, filter)
     },
   })
 
@@ -194,19 +170,7 @@ export async function startDaemonServer(
 
   await once(ipcServer.server, "listening")
   const port = readBoundTcpPort(ipcServer.server)
-  const daemonUrl = createDaemonUrl(port)
-
-  sessionManager = createSessionManager({
-    daemonUrl,
-    agentBinDir: runtime.agentBinDir,
-    configManager,
-    registryService,
-    events: sessionFeature.events,
-    idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
-    publish(id, message) {
-      ipcServer.publish("session.message", { id, message })
-    },
-  })
+  daemonUrl = createDaemonUrl(port)
 
   logger.log("ipc.server_listening", {
     port,
@@ -228,7 +192,6 @@ export async function startDaemonServer(
         daemonUrl,
       })
       await pluginSetup.close().catch(() => {})
-      await sessionManager.close().catch(() => {})
       if (ownsConfigManager) {
         await configManager.close().catch(() => {})
       }
@@ -257,6 +220,7 @@ async function setupDaemonPlugins(
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const ipcHandlers: Record<string, unknown> = {}
+  const ipcStreamLifecycle: Record<string, IpcStreamLifecycleHandlers> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of daemonPlugins.plugins) {
@@ -280,6 +244,10 @@ async function setupDaemonPlugins(
       Object.assign(ipcHandlers, flattenIpcHandlers(setup.ipcHandlers))
     }
 
+    if (setup?.ipcStreamLifecycle) {
+      Object.assign(ipcStreamLifecycle, flattenIpcStreamLifecycle(setup.ipcStreamLifecycle))
+    }
+
     if (setup?.close) {
       closeHandlers.push(setup.close)
     }
@@ -293,12 +261,18 @@ async function setupDaemonPlugins(
   return {
     extensions,
     ipcHandlers,
+    ipcStreamLifecycle,
     close: async () => {
       for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
         await closeHandlers[index]?.()
       }
     },
   }
+}
+
+type IpcStreamLifecycleHandlers = {
+  readonly afterSubscribe?: (filter: unknown) => void | Promise<void>
+  readonly afterUnsubscribe?: (filter: unknown) => void | Promise<void>
 }
 
 function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
@@ -322,6 +296,36 @@ function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
 
   visit(ipcHandlers, [])
   return requestHandlers
+}
+
+function flattenIpcStreamLifecycle(lifecycle: Record<string, unknown>) {
+  const handlers: Record<string, IpcStreamLifecycleHandlers> = {}
+
+  function visit(node: unknown, path: string[]) {
+    if (isIpcStreamLifecycleHandlers(node)) {
+      handlers[path.join(".")] = node
+      return
+    }
+
+    if (typeof node !== "object" || !node) {
+      return
+    }
+
+    for (const [key, child] of Object.entries(node)) {
+      visit(child, [...path, key])
+    }
+  }
+
+  visit(lifecycle, [])
+  return handlers
+}
+
+function isIpcStreamLifecycleHandlers(value: unknown): value is IpcStreamLifecycleHandlers {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ("afterSubscribe" in value || "afterUnsubscribe" in value)
+  )
 }
 
 function filterPluginIpcHandlers(ipcHandlers: Record<string, unknown>, kind: "request" | "stream") {
@@ -348,11 +352,22 @@ async function runPluginStreamHandler(
   await result
 }
 
+async function runPluginStreamLifecycleHook(
+  handler: ((filter: unknown) => void | Promise<void>) | undefined,
+  filter: unknown,
+) {
+  if (!handler) {
+    return
+  }
+
+  await handler(filter)
+}
+
 function isAsyncIterator(value: unknown): value is AsyncIterator<unknown> {
   return typeof value === "object" && value !== null && "next" in value
 }
 
-function hasIpcRouteName(routes: Record<string, unknown>, path: readonly string[]) {
+function hasIpcStreamRouteName(routes: Record<string, unknown>, path: readonly string[]) {
   let current: unknown = routes
 
   for (const segment of path) {
@@ -369,7 +384,21 @@ function hasIpcRouteName(routes: Record<string, unknown>, path: readonly string[
         : node
   }
 
-  return typeof current === "object" && current != null && "kind" in current
+  return isIpcStreamRouteNode(current)
+}
+
+function isIpcStreamRouteNode(value: unknown) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("kind" in value) ||
+    value.kind !== "action"
+  ) {
+    return false
+  }
+
+  const response = (value as { readonly schema?: { readonly response?: unknown } }).schema?.response
+  return getResponsePluginMarkerId(response) === "rouzer/ndjson"
 }
 
 function createPluginBackendContext(

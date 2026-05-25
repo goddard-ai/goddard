@@ -11,15 +11,94 @@ import {
 function createSdkWithClient() {
   const send = vi.fn()
   const subscribe = vi.fn()
-  const client: GoddardClient = {
-    send: (name, payload?) => send(name, payload),
-    subscribe: (target, onMessage) => subscribe(target, onMessage),
-  }
+  const client = createMockRouteClient(send, subscribe)
   const sdk = new GoddardSdk({
     client,
   })
 
   return { sdk, send, subscribe }
+}
+
+function createMockRouteClient(
+  send: ReturnType<typeof vi.fn>,
+  subscribe: ReturnType<typeof vi.fn>,
+): GoddardClient {
+  const base = {
+    send: (name: string, payload?: unknown) => send(name, payload),
+    subscribe: (target: unknown, onMessage: (payload: unknown) => void) =>
+      subscribe(target, onMessage),
+  }
+
+  return new Proxy(base, {
+    get(target, property) {
+      if (property in target) {
+        return target[property as keyof typeof target]
+      }
+
+      return createMockRouteNode([String(property)], subscribe, send)
+    },
+  }) as GoddardClient
+}
+
+function createMockRouteNode(
+  path: readonly string[],
+  subscribe: ReturnType<typeof vi.fn>,
+  send: ReturnType<typeof vi.fn>,
+): unknown {
+  const route = async (input: { body?: unknown; query?: unknown; signal?: AbortSignal } = {}) => {
+    const name = path.join(".")
+    if (input.signal) {
+      return createMockStream(name, input, subscribe)
+    }
+
+    return send(name, input.body)
+  }
+
+  return new Proxy(route, {
+    get(_, property) {
+      if (property === "then") {
+        return undefined
+      }
+
+      return createMockRouteNode([...path, String(property)], subscribe, send)
+    },
+  })
+}
+
+async function* createMockStream(
+  name: string,
+  input: { query?: unknown; signal?: AbortSignal },
+  subscribe: ReturnType<typeof vi.fn>,
+) {
+  const queue: unknown[] = []
+  let notify: (() => void) | undefined
+  const target = input.query === undefined ? name : { name, filter: input.query }
+  const unsubscribe = await subscribe(target, (payload: unknown) => {
+    queue.push(payload)
+    notify?.()
+  })
+  input.signal?.addEventListener("abort", () => {
+    notify?.()
+  })
+
+  try {
+    while (!input.signal?.aborted) {
+      const payload = queue.shift()
+      if (payload !== undefined) {
+        yield payload
+        continue
+      }
+      await new Promise<void>((resolve) => {
+        notify = resolve
+      })
+    }
+  } finally {
+    unsubscribe()
+  }
+}
+
+async function flushAsyncStream() {
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
@@ -54,6 +133,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.inbox.subscribe(onItem)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith("inbox.item", expect.any(Function))
     expect(onItem).toHaveBeenCalledWith({
@@ -71,7 +151,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       },
       mutation: "touched",
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("adapter.list forwards to adapter.list", async () => {
@@ -303,7 +385,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         handler: Parameters<GoddardClient["subscribe"]>[1],
       ) => {
         expect(target).toEqual({
-          name: "session.message",
+          name: "session.messageEvents",
           filter: { id: "ses_1" },
         })
         handler({
@@ -319,9 +401,10 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.message", filter: { id: "ses_1" } },
+      { name: "session.messageEvents", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(onMessage).toHaveBeenCalledTimes(1)
@@ -330,7 +413,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       method: acp.CLIENT_METHODS.session_update,
       params: { value: "kept" },
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
@@ -711,7 +796,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.message", filter: { id: "ses_1" } },
+      { name: "session.messageEvents", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
@@ -787,6 +872,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith(
       { name: "workforce.event", filter: { rootDir: "/repo" } },
@@ -803,7 +889,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       intent: "default",
       input: "Review the queue.",
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("AgentSession.setAgentModel forwards the requested model id through ACP", async () => {

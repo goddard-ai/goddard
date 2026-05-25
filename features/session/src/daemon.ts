@@ -3,14 +3,9 @@ import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
-import type { SessionManager } from "./daemon/manager.ts"
+import { createSessionManager, type SessionManager } from "./daemon/manager.ts"
 
-export {
-  createSessionManager,
-  injectSystemPrompt,
-  resolveAgentProcessSpec,
-  type SessionManager,
-} from "./daemon/manager.ts"
+export { injectSystemPrompt, resolveAgentProcessSpec } from "./daemon/manager.ts"
 export { type SessionEventEmitter, type SessionEvents } from "./daemon/events.ts"
 
 /** First-class session methods exposed to other daemon feature plugins. */
@@ -56,46 +51,82 @@ export const sessionPlugin = definePlugin({
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const events = createSessionEventEmitter()
+    let sessionManager: SessionManager | undefined
+
+    function getSessionManager() {
+      sessionManager ??= createSessionManager({
+        daemonUrl: context.daemonRuntime.getDaemonUrl(),
+        agentBinDir: context.daemonRuntime.agentBinDir,
+        configManager: context.configManager,
+        registryService: context.registryService,
+        events,
+        idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
+        publish(id, message) {
+          context.publish("session.messageEvents", { id, message })
+        },
+      })
+      return sessionManager
+    }
+
     const session = {
-      create: (request) => context.sessionManager.newSession({ request }),
-      list: (params) => context.sessionManager.listSessions(params),
-      connect: (id) => context.sessionManager.connectSession(id),
-      get: (id) => context.sessionManager.getSession(id),
-      history: (params) => context.sessionManager.getHistory(params),
-      changes: (id) => context.sessionManager.getChanges(id),
-      composerSuggestions: (params) => context.sessionManager.getComposerSuggestions(params),
-      draftSuggestions: (params) => context.sessionManager.getDraftSuggestions(params),
-      launchPreview: (params) => context.sessionManager.getLaunchPreview(params),
-      subpackages: (params) => context.sessionManager.getSubpackages(params),
-      diagnostics: (id) => context.sessionManager.getDiagnostics(id),
-      worktree: (id) => context.sessionManager.getWorktree(id),
-      mountReviewSession: (id) => context.sessionManager.mountReviewSession(id),
-      runReviewSession: (id) => context.sessionManager.runReviewSession(id),
-      unmountReviewSession: (id) => context.sessionManager.unmountReviewSession(id),
-      workforce: (id) => context.sessionManager.getWorkforce(id),
-      shutdown: (id) => context.sessionManager.shutdownSession(id),
-      prompt: (id, prompt) => context.sessionManager.promptSession(id, prompt),
-      cancel: (id) => context.sessionManager.cancelSessionTurn(id),
-      steer: (id, prompt) => context.sessionManager.steerSession(id, prompt),
-      sendMessage: (id, message) => context.sessionManager.sendMessage(id, message),
-      complete: (id) => context.sessionManager.completeSession(id),
-      declareInitiative: (id, title) => context.sessionManager.declareInitiative(id, title),
+      create: (request) => getSessionManager().newSession({ request }),
+      list: (params) => getSessionManager().listSessions(params),
+      connect: (id) => getSessionManager().connectSession(id),
+      get: (id) => getSessionManager().getSession(id),
+      history: (params) => getSessionManager().getHistory(params),
+      changes: (id) => getSessionManager().getChanges(id),
+      composerSuggestions: (params) => getSessionManager().getComposerSuggestions(params),
+      draftSuggestions: (params) => getSessionManager().getDraftSuggestions(params),
+      launchPreview: (params) => getSessionManager().getLaunchPreview(params),
+      subpackages: (params) => getSessionManager().getSubpackages(params),
+      diagnostics: (id) => getSessionManager().getDiagnostics(id),
+      worktree: (id) => getSessionManager().getWorktree(id),
+      mountReviewSession: (id) => getSessionManager().mountReviewSession(id),
+      runReviewSession: (id) => getSessionManager().runReviewSession(id),
+      unmountReviewSession: (id) => getSessionManager().unmountReviewSession(id),
+      workforce: (id) => getSessionManager().getWorkforce(id),
+      shutdown: (id) => getSessionManager().shutdownSession(id),
+      prompt: (id, prompt) => getSessionManager().promptSession(id, prompt),
+      cancel: (id) => getSessionManager().cancelSessionTurn(id),
+      steer: (id, prompt) => getSessionManager().steerSession(id, prompt),
+      sendMessage: (id, message) => getSessionManager().sendMessage(id, message),
+      complete: (id) => getSessionManager().completeSession(id),
+      declareInitiative: (id, title) => getSessionManager().declareInitiative(id, title),
       reportBlocker: (id, reason, metadata) =>
-        context.sessionManager.reportBlocker(id, reason, metadata),
-      reportTurnEnded: (id, metadata) => context.sessionManager.reportTurnEnded(id, metadata),
+        getSessionManager().reportBlocker(id, reason, metadata),
+      reportTurnEnded: (id, metadata) => getSessionManager().reportTurnEnded(id, metadata),
       recordTurnAttentionActivity: (id, metadata) =>
-        context.sessionManager.recordTurnAttentionActivity(id, metadata),
-      resolveTokenScope: (token) => context.sessionManager.resolveTokenScope(token),
-      allowPullRequest: (id, prNumber) => context.sessionManager.allowPullRequest(id, prNumber),
-      subscriberConnected: (id) => context.sessionManager.sessionSubscriberConnected(id),
-      subscriberDisconnected: (id) => context.sessionManager.sessionSubscriberDisconnected(id),
-      resolveToken: (token) => context.sessionManager.resolveSessionIdByToken(token),
+        getSessionManager().recordTurnAttentionActivity(id, metadata),
+      resolveTokenScope: (token) => getSessionManager().resolveTokenScope(token),
+      allowPullRequest: (id, prNumber) => getSessionManager().allowPullRequest(id, prNumber),
+      subscriberConnected: (id) => getSessionManager().sessionSubscriberConnected(id),
+      subscriberDisconnected: (id) => getSessionManager().sessionSubscriberDisconnected(id),
+      resolveToken: (token) => getSessionManager().resolveSessionIdByToken(token),
       events,
     } satisfies SessionExtension
 
     return {
       provides: {
         session,
+      },
+      close: async () => {
+        await sessionManager?.close()
+      },
+      ipcStreamLifecycle: {
+        session: {
+          messageEvents: {
+            afterSubscribe: async (filter: { readonly id?: unknown } | undefined) => {
+              if (typeof filter?.id === "string") {
+                await session.subscriberConnected(filter.id as `ses_${string}`)
+              }
+            },
+            afterUnsubscribe: async (filter: { readonly id?: unknown } | undefined) => {
+              if (typeof filter?.id === "string") {
+                await session.subscriberDisconnected(filter.id as `ses_${string}`)
+              }
+            },
+          },
+        },
       },
       ipcHandlers: {
         session: {

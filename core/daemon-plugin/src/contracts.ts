@@ -85,6 +85,7 @@ export type IpcHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
   readonly ipcHandlers?: Record<string, unknown>
+  readonly ipcStreamLifecycle?: Record<string, unknown>
   readonly provides?: FeatureExtensions
   readonly close?: () => void | Promise<void>
 }
@@ -107,17 +108,17 @@ type PublishContext<TPlugin> = TPlugin extends { readonly ipcRoutes: HttpRouteTr
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
+  readonly daemonRuntime: {
+    readonly agentBinDir: string
+    readonly idleSessionShutdownTimeoutMs?: number
+    readonly getDaemonUrl: () => string
+  }
   readonly authTokenStore: {
     readonly set: (token: string) => void | Promise<void>
     readonly delete: () => void | Promise<void>
   }
-  readonly configManager: {
-    readonly getRootConfig: (cwd: string) => Promise<any>
-  }
-  readonly registryService: {
-    readonly listAdapters: () => Promise<any>
-  }
-  readonly sessionManager: any
+  readonly configManager: any
+  readonly registryService: any
   readonly getIpcRequestContext: () => {
     readonly setSessionId: (id: `ses_${string}`) => void
   }

@@ -93,7 +93,7 @@ async function createMessageOutputTransport(
   let closed = false
 
   const unsubscribe = await client.subscribe(
-    { name: "session.message", filter: { id } },
+    { name: "session.messageEvents", filter: { id } },
     ({ message }: { message: acp.AnyMessage }) => {
       if (
         closed ||

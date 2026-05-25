@@ -8,7 +8,7 @@ Use the workspace scaffold before adding a new package:
 
 ```sh
 bun run scaffold:feature
-bun run scaffold:feature --name my-feature --layers daemon,sdk,app --schema --daemon-ipc --dry-run
+bun run scaffold:feature --name my-feature --layers daemon,sdk --schema --daemon-ipc --dry-run
 ```
 
 The scaffold creates only the selected layer entrypoints. It does not register
@@ -18,15 +18,14 @@ feature becomes part of a supported product surface.
 ## Boundaries
 
 - Feature packages own product-specific schemas, daemon IPC contracts, daemon
-  handlers, SDK namespace factories, app metadata, feature-owned helpers, and
+  handlers, SDK namespace factories, feature-owned helpers, and
   feature-specific JSON config schemas.
 - Feature schemas are self-declared from the package's own `./schema`
   entrypoint. `@goddard-ai/schema` is reserved for core
   daemon/backend/shared substrate schemas, not feature-owned product schemas.
 - Layer packages own the substrate that composes and runs those contributions:
-  SDK construction, daemon process and persistence substrate, app shell
-  placement, backend authority, JSON config file loading/persistence, and
-  shared diagnostics.
+  SDK construction, daemon process and persistence substrate, backend
+  authority, JSON config file loading/persistence, and shared diagnostics.
 - Feature packages import thin plugin support packages such as
   `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and
   `@goddard-ai/app-plugin`, not public composition roots such as
@@ -41,6 +40,10 @@ feature becomes part of a supported product surface.
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
   precedence, validation, persistence, and hot reload.
+- App plugin packaging is deferred. App shell placement, workbench tab
+  metadata, command routing, app state composition, query cache, and app-only UI
+  composition remain app-owned substrate until a separate app-plugin sprint
+  introduces a reviewed app composition root.
 
 ## Current Feature Boundaries
 
@@ -55,14 +58,15 @@ handlers, and SDK auth namespace construction. Backend storage, GitHub device
 flow persistence, daemon token persistence, and HTTP/router substrate remain in
 core packages.
 
-`features/inbox` owns inbox IPC, SDK namespace construction, app metadata, inbox
-manager logic, inbox metadata resolution, and inbox item state transitions.
-Daemon persistence remains core substrate.
+`features/inbox` owns inbox IPC, SDK namespace construction, inbox manager
+logic, inbox metadata resolution, and inbox item state transitions. Daemon
+persistence remains core substrate.
 
 `features/loop` owns loop schemas, loop IPC, daemon loop manager/runtime,
 packaged-loop resolution from root config, SDK loop namespace construction, and
-app metadata. JSON config file loading/persistence, daemon process lifecycle,
-and session lifecycle mechanics remain core or session-feature substrate.
+loop manager/runtime modules. JSON config file loading/persistence, daemon
+process lifecycle, and session lifecycle mechanics remain core or
+session-feature substrate.
 
 `features/pull-request` owns pull-request schemas, backend PR route and webhook
 contracts, daemon PR IPC handlers, SDK PR namespace construction, git-backed PR
@@ -71,13 +75,13 @@ IPC server mechanics, and daemon persistence substrate remain in core packages.
 
 `features/session` owns session feature schemas, session-owned daemon IPC
 routes, session lifecycle implementation modules, SDK session method fragments,
-app session metadata, and the first-class daemon `context.session` extension
-that downstream feature packages consume. Low-level linked-worktree substrate
-and third-party worktree provider contracts remain in core packages.
+and the first-class daemon `context.session` extension that downstream feature
+packages consume. Low-level linked-worktree substrate and third-party worktree
+provider contracts remain in core packages.
 
 `features/workforce` owns workforce schemas, workforce IPC, daemon workforce
 configuration discovery and initialization, workforce manager/runtime modules,
-SDK workforce namespace construction, and app metadata. The standalone
+and SDK workforce namespace construction. The standalone
 `workforce/` CLI remains a public client that talks to the composed SDK/daemon
 surface, while daemon process lifecycle, request context, persistence substrate,
 and the session feature extension remain outside the workforce feature boundary.

@@ -2382,7 +2382,7 @@ export function createSessionManager(input: {
     await runtime.running.catch(() => {})
   }
 
-  /** Returns how many `session.message` stream subscribers are currently attached to one session id. */
+  /** Returns how many `session.messageEvents` stream subscribers are attached to one session id. */
   function getSessionSubscriberCount(id: SessionId): number {
     return sessionSubscriberCounts.get(id) ?? 0
   }
@@ -2469,14 +2469,14 @@ export function createSessionManager(input: {
     await shutdownSession(id)
   }
 
-  /** Records one new `session.message` subscriber so idle shutdown waits for every attached client to leave. */
+  /** Records one new `session.messageEvents` subscriber so idle shutdown waits for attached clients. */
   async function sessionSubscriberConnected(id: SessionId): Promise<void> {
     await ready
     sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
     refreshIdleShutdownState(id, "subscriber_connected")
   }
 
-  /** Records one departing `session.message` subscriber and starts the timer when the last one leaves. */
+  /** Records one departing `session.messageEvents` subscriber and starts the timer when none remain. */
   async function sessionSubscriberDisconnected(id: SessionId): Promise<void> {
     await ready
     const current = getSessionSubscriberCount(id)

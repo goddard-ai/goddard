@@ -12,6 +12,8 @@ Daemon plugins may also contribute a namespaced JSON config fragment. The featur
 
 Daemon plugins that call backend APIs declare `backendRoutes`. During setup, `context.backend` exposes only the route namespaces declared by that plugin, declared by consumed plugins, or contributed by daemon-owned substrate.
 
+Daemon plugins that own IPC streams may publish only streams declared by their own `ipcRoutes`. Plugins can also return narrow `ipcStreamLifecycle` handlers for stream subscribe/unsubscribe bookkeeping when that lifecycle belongs to the feature rather than the IPC server substrate.
+
 ## Contract Shape
 
 Use `definePlugin()` from `features/<name>/src/daemon.ts` to preserve exact plugin metadata for static composition:
