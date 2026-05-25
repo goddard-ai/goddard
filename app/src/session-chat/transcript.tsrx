@@ -53,6 +53,7 @@ export type TranscriptProps = {
 }
 
 const initializedBottomScrollKeys = new Set<string>()
+const PROMPT_NAVIGATION_TOP_GAP = 8
 const transcriptScrollCache = new Map<
   string,
   {
@@ -148,6 +149,12 @@ function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HT
     spacerElement.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top +
       scrollElement.scrollTop,
   )
+}
+
+function getPromptNavigationTopInset(scrollElement: HTMLDivElement) {
+  const headerElement = scrollElement.querySelector<HTMLElement>("[data-session-chat-header]")
+
+  return (headerElement?.getBoundingClientRect().height ?? 0) + PROMPT_NAVIGATION_TOP_GAP
 }
 
 function findPromptNavigationTargetIndex(input: {
@@ -434,6 +441,12 @@ export component Transcript(props: TranscriptProps) {
     setIsStickingToBottom(false)
     virtualizer.scrollToIndex(targetIndex, {
       align: "start",
+    })
+    requestAnimationFrame(() => {
+      scrollElement.scrollTop = Math.max(
+        0,
+        scrollElement.scrollTop - getPromptNavigationTopInset(scrollElement),
+      )
     })
   })
 

@@ -104,7 +104,7 @@ export default component SessionChatView(props: {
         }
 
         <SessionChatQueryDataProvider value={{ chat: protectedChat, session, sessionHistory }}>
-          <header class={styles.header}>
+          <header class={styles.header} data-session-chat-header="true">
             <div class={styles.headerIdentity}>
               <p class={styles.headerRepository}>
                 <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
