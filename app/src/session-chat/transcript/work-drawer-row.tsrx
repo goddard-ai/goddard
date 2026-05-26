@@ -11,9 +11,11 @@ component WorkDrawerToolContent(props: {
   content: SessionTranscriptToolContent;
 }) {
   if (props.content.type === "content") {
-    <div class={styles.workDrawerDetailText}>
-      {props.content.text?.trim() || "Structured tool output."}
-    </div>
+    const contentText = props.content.text?.trim()
+
+    if (contentText) {
+      <div class={styles.workDrawerDetailText}>{contentText}</div>
+    }
   } else if (props.content.type === "diff") {
     <div class={styles.workDrawerDetailList}>
       if (props.content.path) {
@@ -62,12 +64,6 @@ export component WorkDrawerTranscriptRow(props: {
                 } else {
                   <article class={styles.workDrawerTool}>
                     <div class={styles.workDrawerItemHeading}>{item.title}</div>
-
-                    if (item.content.length === 0) {
-                      <div class={styles.workDrawerDetailText}>
-                        {`${item.toolKind} tool ${item.status}.`}
-                      </div>
-                    }
 
                     for (const content of item.content; index contentIndex) {
                       <WorkDrawerToolContent key={`${item.id}:content:${contentIndex}`} {content} />
