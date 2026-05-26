@@ -1,4 +1,5 @@
 import { useEffect } from "preact/hooks"
+import { Folder } from "lucide-react"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
@@ -57,6 +58,7 @@ export component SessionLaunchForm(props: {
       value: project.path,
       label: project.name,
       detail: project.path,
+      Icon: Folder,
       searchText: project.path,
     }),
   )
