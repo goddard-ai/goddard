@@ -14,7 +14,7 @@ async function flushEffects() {
   })
 }
 
-function renderPopover(props: { closeOnOutsidePointer?: boolean }) {
+function renderPopover(props: { closeOnOutsidePointer?: boolean; restoreFocus?: boolean }) {
   const anchor = document.createElement("button")
   const container = document.createElement("div")
   const menuRoot = document.createElement("div")
@@ -32,6 +32,7 @@ function renderPopover(props: { closeOnOutsidePointer?: boolean }) {
         anchor={() => anchor}
         open={open}
         closeOnOutsidePointer={props.closeOnOutsidePointer}
+        restoreFocus={props.restoreFocus}
       >
         <button>Inside</button>
       </Popover>
@@ -74,5 +75,22 @@ test("Popover does not block outside pointer interactions when outside dismissal
   await harness.render()
 
   expect(harness.menuRoot.querySelector("[data-overlay-pointer-blocker='true']")).toBeNull()
+  harness.cleanup()
+})
+
+test("Popover leaves focus alone when restoreFocus is disabled", async () => {
+  const harness = renderPopover({ restoreFocus: false })
+  const nextButton = document.createElement("button")
+
+  document.body.append(nextButton)
+  await harness.render()
+
+  nextButton.focus()
+  harness.open.value = false
+  await harness.render()
+
+  expect(document.activeElement).toBe(nextButton)
+
+  nextButton.remove()
   harness.cleanup()
 })

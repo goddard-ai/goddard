@@ -89,10 +89,8 @@ export component Popover(props: PopoverProps) {
       stopDismissal()
       unregisterOverlay()
 
-      if ((props.restoreFocus ?? true) && anchorElement instanceof Element) {
-        restoreFocus(anchorElement)
-      } else {
-        restoreFocus(previouslyFocusedElement)
+      if (props.restoreFocus ?? true) {
+        restoreFocus(anchorElement instanceof Element ? anchorElement : previouslyFocusedElement)
       }
     }
   }, [popoverId])
