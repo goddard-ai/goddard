@@ -12,9 +12,9 @@ export const authPlugin = definePlugin({
       ipcHandlers: {
         auth: {
           device: {
-            start: async ({ body }) => backend.auth.device.start({ body }),
+            start: async ({ body }) => backend.auth.device.start(body),
             complete: async ({ body }) => {
-              const session = await backend.auth.device.complete({ body })
+              const session = await backend.auth.device.complete(body)
               await authTokenStore.set(session.token)
               return session
             },

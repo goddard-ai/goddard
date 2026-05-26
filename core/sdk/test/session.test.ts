@@ -11,8 +11,8 @@ test("session.prompt forwards a structured ACP prompt message through session.se
         return { accepted: true }
       },
       session: {
-        send: async ({ body }: { body: unknown }) => {
-          calls.push({ name: "session.send", payload: body })
+        send: async (input: unknown) => {
+          calls.push({ name: "session.send", payload: input })
           return { accepted: true }
         },
       },
@@ -56,8 +56,8 @@ test("session.respondPermission forwards a structured ACP permission response th
         return { accepted: true }
       },
       session: {
-        send: async ({ body }: { body: unknown }) => {
-          calls.push({ name: "session.send", payload: body })
+        send: async (input: unknown) => {
+          calls.push({ name: "session.send", payload: input })
           return { accepted: true }
         },
       },

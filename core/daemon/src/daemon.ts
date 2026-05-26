@@ -127,11 +127,9 @@ export async function runDaemon(input: RunInput): Promise<number> {
 
           try {
             const { managed } = await client.pullRequests.managed({
-              query: {
-                owner: event.owner,
-                repo: event.repo,
-                prNumber: event.prNumber,
-              },
+              owner: event.owner,
+              repo: event.repo,
+              prNumber: event.prNumber,
             })
             if (!managed) {
               logger.log("repo.feedback_ignored", {

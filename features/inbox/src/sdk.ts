@@ -15,19 +15,18 @@ export const inboxSdkPlugin = defineSdkPlugin({
     return {
       inbox: {
         /** Lists daemon-local inbox rows using daemon ordering and filtering. */
-        list: (input: ListInboxRequest = {}) => client.inbox.list({ body: input }),
+        list: (input: ListInboxRequest = {}) => client.inbox.list(input),
 
         /** Updates one daemon-local inbox row by entity id. */
-        update: (input: UpdateInboxItemRequest) => client.inbox.update({ body: input }),
+        update: (input: UpdateInboxItemRequest) => client.inbox.update(input),
 
         /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
-        bulkUpdate: (input: BulkUpdateInboxItemsRequest) =>
-          client.inbox.bulkUpdate({ body: input }),
+        bulkUpdate: (input: BulkUpdateInboxItemsRequest) => client.inbox.bulkUpdate(input),
 
         /** Subscribes to daemon-published inbox item updates. */
         subscribe: async (onMessage: (payload: InboxItemEvent) => void) => {
           const controller = new AbortController()
-          const events = await client.inbox.item({ signal: controller.signal })
+          const events = await client.inbox.item(undefined, { signal: controller.signal })
 
           void (async () => {
             try {

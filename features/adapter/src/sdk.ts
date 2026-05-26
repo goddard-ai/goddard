@@ -10,7 +10,7 @@ export const adapterSdkPlugin = defineSdkPlugin({
     return {
       adapter: {
         /** Lists adapters available for one project or global launch flow. */
-        list: (input: ListAdaptersRequestType) => client.adapter.list({ body: input }),
+        list: (input: ListAdaptersRequestType) => client.adapter.list(input),
       },
     }
   },

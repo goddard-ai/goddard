@@ -45,13 +45,13 @@ function createMockRouteNode(
   subscribe: ReturnType<typeof vi.fn>,
   send: ReturnType<typeof vi.fn>,
 ): unknown {
-  const route = async (input: { body?: unknown; query?: unknown; signal?: AbortSignal } = {}) => {
+  const route = async (input?: unknown, options?: { signal?: AbortSignal }) => {
     const name = path.join(".")
-    if (input.signal) {
-      return createMockStream(name, input, subscribe)
+    if (options?.signal) {
+      return createMockStream(name, input, options.signal, subscribe)
     }
 
-    return send(name, input.body)
+    return send(name, input)
   }
 
   return new Proxy(route, {
@@ -67,22 +67,23 @@ function createMockRouteNode(
 
 async function* createMockStream(
   name: string,
-  input: { query?: unknown; signal?: AbortSignal },
+  input: unknown,
+  signal: AbortSignal,
   subscribe: ReturnType<typeof vi.fn>,
 ) {
   const queue: unknown[] = []
   let notify: (() => void) | undefined
-  const target = input.query === undefined ? name : { name, filter: input.query }
+  const target = input === undefined ? name : { name, filter: input }
   const unsubscribe = await subscribe(target, (payload: unknown) => {
     queue.push(payload)
     notify?.()
   })
-  input.signal?.addEventListener("abort", () => {
+  signal.addEventListener("abort", () => {
     notify?.()
   })
 
   try {
-    while (!input.signal?.aborted) {
+    while (!signal.aborted) {
       const payload = queue.shift()
       if (payload !== undefined) {
         yield payload

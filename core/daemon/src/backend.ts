@@ -117,7 +117,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     stream: {
       subscribe: async () => {
         const abortController = new AbortController()
-        const response = await authorizedClient.repositories.stream({
+        const response = await authorizedClient.repositories.stream(undefined, {
           signal: abortController.signal,
         })
 
@@ -167,8 +167,8 @@ function createAuthorizedRouteClient(
       context[key] = createAuthorizedRouteClient(route.children, source[key], options)
       continue
     }
-    context[key] = async (args?: Record<string, any>) => {
-      return source[key](await addAuthorizationHeader(args, options))
+    context[key] = async (input?: Record<string, any>, requestOptions?: RequestInit) => {
+      return source[key](input, await addAuthorizationHeader(requestOptions, options))
     }
   }
 
@@ -176,18 +176,18 @@ function createAuthorizedRouteClient(
 }
 
 async function addAuthorizationHeader(
-  args: Record<string, any> | undefined,
+  requestOptions: RequestInit | undefined,
   options: BackendClientOptions,
 ) {
   const authorization = await options.getAuthorizationHeader?.()
   if (!authorization) {
-    return args
+    return requestOptions
   }
 
   return {
-    ...args,
+    ...requestOptions,
     headers: {
-      ...args?.headers,
+      ...requestOptions?.headers,
       authorization,
     },
   }

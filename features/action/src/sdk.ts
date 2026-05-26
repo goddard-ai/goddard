@@ -10,7 +10,7 @@ export const actionSdkPlugin = defineSdkPlugin({
     return {
       action: {
         /** Runs one named daemon action and creates the resulting daemon session. */
-        run: (input: RunNamedActionRequest) => client.action.run({ body: input }),
+        run: (input: RunNamedActionRequest) => client.action.run(input),
       },
     }
   },

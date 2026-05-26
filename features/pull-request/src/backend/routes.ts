@@ -3,7 +3,6 @@ import { $type, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
 
 import {
   CreatePrInput,
-  GitHubWebhookInput,
   ManagedPrQuery,
   ReplyPrInput,
   type PullRequestRecord,
@@ -33,7 +32,7 @@ export const pullRequestBackendRoutes = defineBackendRoutes({
   }),
   webhooks: http.resource("webhooks", {
     github: http.post("github", {
-      body: GitHubWebhookInput,
+      body: http.rawBody(),
       response: $type<RepoEvent>(),
     }),
   }),

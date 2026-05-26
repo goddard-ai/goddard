@@ -22,24 +22,20 @@ test("daemon backend client creates PRs and checks managed status through rouzer
       getAuthorizationHeader: () => authorization,
     })
     const pr = await client.pullRequests.create({
-      body: {
-        owner: "goddard-ai",
-        repo: "sdk",
-        title: "Add daemon backend route client",
-        body: "Ship it",
-        head: "feat/daemon-backend-routes",
-        base: "main",
-      },
+      owner: "goddard-ai",
+      repo: "sdk",
+      title: "Add daemon backend route client",
+      body: "Ship it",
+      head: "feat/daemon-backend-routes",
+      base: "main",
     })
 
     expect(pr.number).toBe(1)
     await expect(
       client.pullRequests.managed({
-        query: {
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: pr.number,
-        },
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: pr.number,
       }),
     ).resolves.toEqual({ managed: true })
   } finally {
@@ -58,12 +54,10 @@ test("daemon backend client uses injected auth state for authenticated requests"
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const start = await client.auth.device.start({ body: { githubUsername: "alec" } })
+    const start = await client.auth.device.start({ githubUsername: "alec" })
     const session = await client.auth.device.complete({
-      body: {
-        deviceCode: start.deviceCode,
-        githubUsername: "alec",
-      },
+      deviceCode: start.deviceCode,
+      githubUsername: "alec",
     })
 
     authorization = `Bearer ${session.token}`
@@ -101,14 +95,12 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
     })
 
     const pr = await client.pullRequests.create({
-      body: {
-        owner: "goddard-ai",
-        repo: "sdk",
-        title: "Stream me",
-        body: "Done",
-        head: "feat/stream",
-        base: "main",
-      },
+      owner: "goddard-ai",
+      repo: "sdk",
+      title: "Stream me",
+      body: "Done",
+      head: "feat/stream",
+      base: "main",
     })
 
     const event = (await eventPromise) as { type: string; prNumber: number }

@@ -1,7 +1,7 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
-import type { RepoEvent } from "@goddard-ai/pull-request/schema"
+import { GitHubWebhookInput, type RepoEvent } from "@goddard-ai/pull-request/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
@@ -118,7 +118,8 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
-          const event = await controlPlane.handleGitHubWebhook(ctx.body)
+          const input = GitHubWebhookInput.parse(await ctx.request.json())
+          const event = await controlPlane.handleGitHubWebhook(input)
           await broadcastEvent(env, event)
           return event
         } catch (error) {

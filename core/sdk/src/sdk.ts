@@ -63,18 +63,14 @@ function createSessionNamespace(client: any, sessionFeature: FeatureSdkNamespace
     /** Sends one ACP permission response through the daemon-managed session transport. */
     respondPermission: async (input: SessionPermissionResponseRequest) =>
       client.session.send({
-        body: {
-          id: input.id,
-          message: createSessionPermissionResponseMessage(input),
-        },
+        id: input.id,
+        message: createSessionPermissionResponseMessage(input),
       }),
     /** Sends one prompt to a daemon-managed session without exposing raw ACP message construction. */
     prompt: async (input: SessionPromptRequest) =>
       client.session.send({
-        body: {
-          id: input.id,
-          message: createSessionPromptMessage(input),
-        },
+        id: input.id,
+        message: createSessionPromptMessage(input),
       }),
   }
 }

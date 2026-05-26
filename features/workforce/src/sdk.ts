@@ -24,18 +24,17 @@ export const workforceSdkPlugin = defineSdkPlugin({
     return {
       workforce: {
         /** Starts or reuses one daemon workforce runtime. */
-        start: (input: StartWorkforceRequest) => client.workforce.start({ body: input }),
+        start: (input: StartWorkforceRequest) => client.workforce.start(input),
 
         /** Discovers package candidates for one repository workforce initialization flow. */
         discoverCandidates: (input: DiscoverWorkforceCandidatesRequest) =>
-          client.workforce.discoverCandidates({ body: input }),
+          client.workforce.discoverCandidates(input),
 
         /** Initializes one repository workforce config and ledger through the daemon. */
-        initialize: (input: InitializeWorkforceRequest) =>
-          client.workforce.initialize({ body: input }),
+        initialize: (input: InitializeWorkforceRequest) => client.workforce.initialize(input),
 
         /** Fetches one daemon workforce runtime and its resolved config. */
-        get: (input: GetWorkforceRequest) => client.workforce.get({ body: input }),
+        get: (input: GetWorkforceRequest) => client.workforce.get(input),
 
         /** Lists daemon workforce runtime summaries. */
         list: () => client.workforce.list(),
@@ -46,7 +45,7 @@ export const workforceSdkPlugin = defineSdkPlugin({
           onEvent: (event: WorkforceEventEnvelope["event"]) => void,
         ): Promise<() => void> => {
           const controller = new AbortController()
-          const events = await client.workforce.event({ query: input, signal: controller.signal })
+          const events = await client.workforce.event(input, { signal: controller.signal })
           void (async () => {
             for await (const payload of events) {
               if (controller.signal.aborted) {
@@ -59,25 +58,25 @@ export const workforceSdkPlugin = defineSdkPlugin({
         },
 
         /** Shuts down one daemon workforce runtime and reports whether shutdown succeeded. */
-        shutdown: (input: ShutdownWorkforceRequest) => client.workforce.shutdown({ body: input }),
+        shutdown: (input: ShutdownWorkforceRequest) => client.workforce.shutdown(input),
 
         /** Enqueues one workforce request and includes the updated workforce projection. */
-        request: (input: CreateWorkforceRequest) => client.workforce.request({ body: input }),
+        request: (input: CreateWorkforceRequest) => client.workforce.request(input),
 
         /** Updates one workforce request and includes the updated workforce projection. */
-        update: (input: UpdateWorkforceRequest) => client.workforce.update({ body: input }),
+        update: (input: UpdateWorkforceRequest) => client.workforce.update(input),
 
         /** Cancels one workforce request and includes the updated workforce projection. */
-        cancel: (input: CancelWorkforceRequest) => client.workforce.cancel({ body: input }),
+        cancel: (input: CancelWorkforceRequest) => client.workforce.cancel(input),
 
         /** Truncates one workforce queue and includes the updated workforce projection. */
-        truncate: (input: TruncateWorkforceRequest) => client.workforce.truncate({ body: input }),
+        truncate: (input: TruncateWorkforceRequest) => client.workforce.truncate(input),
 
         /** Responds to one active workforce request and includes the updated workforce projection. */
-        respond: (input: RespondWorkforceRequest) => client.workforce.respond({ body: input }),
+        respond: (input: RespondWorkforceRequest) => client.workforce.respond(input),
 
         /** Suspends one active workforce request and includes the updated workforce projection. */
-        suspend: (input: SuspendWorkforceRequest) => client.workforce.suspend({ body: input }),
+        suspend: (input: SuspendWorkforceRequest) => client.workforce.suspend(input),
       },
     }
   },
