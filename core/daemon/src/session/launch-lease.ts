@@ -40,6 +40,7 @@ export type LaunchLease = {
   configOptions: acp.SessionConfigOption[]
   repoRoot: string | null
   branches: SessionLaunchBranch[]
+  dirty: boolean
   releaseTimer: ReturnType<typeof setTimeout> | null
   closing: Promise<void> | null
 }
@@ -72,6 +73,7 @@ function canPromoteLaunchLease(params: {
     params.existingSession === null &&
     params.worktree === null &&
     params.request.worktree?.enabled !== true &&
+    params.request.localCheckout === undefined &&
     params.request.mcpServers.length === 0 &&
     params.request.env === undefined &&
     params.request.metadata === undefined &&

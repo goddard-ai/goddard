@@ -12,4 +12,9 @@ export default {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
   }),
+  warning: css({
+    color: "muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.45",
+  }),
 }

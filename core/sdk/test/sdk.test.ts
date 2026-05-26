@@ -425,6 +425,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         { name: "main", current: true },
         { name: "feature-a", current: false },
       ],
+      dirty: false,
       models: {
         currentModelId: "gpt-5.4",
         availableModels: [
@@ -458,6 +459,7 @@ describe("@goddard-ai/sdk session namespace", () => {
         { name: "main", current: true },
         { name: "feature-a", current: false },
       ],
+      dirty: false,
       models: {
         currentModelId: "gpt-5.4",
         availableModels: [
@@ -731,6 +733,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(1, "session.create", {
       agent: "pi-acp",
       cwd: "/tmp/project",
+      localCheckout: undefined,
       worktree: undefined,
       mcpServers: [],
       systemPrompt: "Keep responses short.",
@@ -779,6 +782,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(1, "session.create", {
       agent: undefined,
       cwd: "/tmp/project",
+      localCheckout: undefined,
       worktree: undefined,
       mcpServers: [],
       systemPrompt: "",

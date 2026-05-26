@@ -1903,6 +1903,7 @@ test("session.launchPreview loads adapter capabilities and repository branches f
     name: "feature-a",
     current: false,
   })
+  expect(preview.dirty).toBe(false)
   expect(preview.models?.currentModelId).toBe("gpt-5.4")
   expect(preview.configOptions).toContainEqual(
     expect.objectContaining({
@@ -1917,6 +1918,81 @@ test("session.launchPreview loads adapter capabilities and repository branches f
     description: "Create or revise the plan",
     inputHint: "What should change?",
   })
+})
+
+test("session.launchPreview reports dirty local checkout state", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
+
+  const preview = await client.send("session.launchPreview", {
+    agent: createWrappedNodeAgent(launchPreviewAgentPath),
+    cwd: repoDir,
+  })
+
+  expect(preview.dirty).toBe(true)
+})
+
+test("session.create checks out the selected local branch before the initial prompt", async () => {
+  const logPath = await createLaunchPreviewAgentLog()
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const defaultBranch = readGitOutput(repoDir, ["branch", "--show-current"])
+  const agent = createWrappedNodeAgent(launchPreviewAgentPath)
+
+  runGit(repoDir, ["checkout", "-b", "feature-launch"])
+  await writeFile(join(repoDir, "feature.txt"), "feature\n", "utf-8")
+  runGit(repoDir, ["add", "feature.txt"])
+  runGit(repoDir, ["commit", "-m", "feature"])
+  runGit(repoDir, ["checkout", defaultBranch])
+
+  const preview = await client.send("session.launchPreview", {
+    agent,
+    cwd: repoDir,
+  })
+
+  await client.send("session.create", {
+    agent,
+    cwd: repoDir,
+    launchLeaseId: preview.launchLeaseId,
+    localCheckout: { branchName: "feature-launch" },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Start the selected branch session.",
+    oneShot: true,
+  })
+
+  const events = await readLaunchPreviewAgentEvents(logPath)
+  const promptEvent = events.find((event) => event.type === "prompt")
+
+  expect(readGitOutput(repoDir, ["branch", "--show-current"])).toBe("feature-launch")
+  expect(promptEvent).toMatchObject({
+    branchName: "feature-launch",
+  })
+})
+
+test("session.create refuses local branch checkout with uncommitted changes", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  runGit(repoDir, ["branch", "feature-launch"])
+  await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
+
+  await expect(
+    client.send("session.create", {
+      agent: createWrappedNodeAgent(launchPreviewAgentPath),
+      cwd: repoDir,
+      localCheckout: { branchName: "feature-launch" },
+      mcpServers: [],
+      systemPrompt: "Keep responses short.",
+      initialPrompt: "Start the selected branch session.",
+      oneShot: true,
+    }),
+  ).rejects.toThrow(/local checkout has changes/i)
 })
 
 test("session.create promotes compatible launch leases instead of creating a second ACP session", async () => {

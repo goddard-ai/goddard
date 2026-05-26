@@ -175,6 +175,7 @@ export async function runSession(
       : await client.send("session.create", {
           agent: params.agent,
           cwd: params.cwd,
+          localCheckout: params.localCheckout,
           worktree: params.worktree,
           workforce: params.workforce,
           mcpServers: params.mcpServers,

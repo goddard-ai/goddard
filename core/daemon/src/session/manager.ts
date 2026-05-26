@@ -207,6 +207,54 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
   return branches
 }
 
+/** Returns true when branch switching in the requested local checkout would risk user work. */
+async function inspectLaunchCheckoutDirty(cwd: string): Promise<boolean> {
+  const repoRoot = await resolveGitRepoRoot(cwd)
+
+  if (!repoRoot) {
+    return false
+  }
+
+  const result = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=normal"], {
+    cwd: repoRoot,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "ignore",
+  })
+  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
+  await result.exited
+
+  return result.exitCode === 0 && stdout.trim().length > 0
+}
+
+/** Switches the user's local checkout before launching the first prompt. */
+async function checkoutLocalBranch(params: { cwd: string; branchName: string }) {
+  const repoRoot = await resolveGitRepoRoot(params.cwd)
+
+  if (!repoRoot) {
+    throw new IpcClientError("Cannot checkout a branch outside a git repository.")
+  }
+
+  if (await inspectLaunchCheckoutDirty(repoRoot)) {
+    throw new IpcClientError("Cannot checkout a branch while the local checkout has changes.")
+  }
+
+  const result = Bun.spawn(["git", "checkout", params.branchName], {
+    cwd: repoRoot,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "pipe",
+  })
+  const stderr = result.stderr ? await new Response(result.stderr).text() : ""
+  await result.exited
+
+  if (result.exitCode !== 0) {
+    throw new IpcClientError(
+      `Cannot checkout branch ${params.branchName}: ${stderr.trim() || "git checkout failed"}`,
+    )
+  }
+}
+
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
   session: AcpSession
@@ -2622,6 +2670,14 @@ export function createSessionManager(input: {
           message: createPayloadPreview(message),
         })
       }
+
+      if (!worktree && resolvedRequest.localCheckout) {
+        await checkoutLocalBranch({
+          cwd,
+          branchName: resolvedRequest.localCheckout.branchName,
+        })
+      }
+
       const launchLease = launchLeaseStore.takeCompatible({
         launchLeaseId: resolvedRequest.launchLeaseId,
         request: resolvedRequest,
@@ -2642,6 +2698,7 @@ export function createSessionManager(input: {
             ...resolvedRequest,
             cwd,
             launchLeaseId: undefined,
+            localCheckout: undefined,
             metadata: sessionMetadata,
           },
           onMessageWrite,
@@ -2666,6 +2723,7 @@ export function createSessionManager(input: {
             ...resolvedRequest,
             cwd,
             launchLeaseId: undefined,
+            localCheckout: undefined,
             metadata: sessionMetadata,
           },
           resumeAcpId: existingSession?.acpSessionId,
@@ -3036,19 +3094,22 @@ export function createSessionManager(input: {
     await ready
 
     const key = createLaunchLeaseKey(params)
-    const [repoRoot, branches] = await Promise.all([
+    const [repoRoot, branches, dirty] = await Promise.all([
       resolveGitRepoRoot(params.cwd),
       listLaunchBranches(params.cwd),
+      inspectLaunchCheckoutDirty(params.cwd),
     ])
     const existingLease = launchLeaseStore.findByKey(key)
     if (existingLease) {
       launchLeaseStore.reactivate(existingLease)
       existingLease.repoRoot = repoRoot
       existingLease.branches = branches
+      existingLease.dirty = dirty
       return {
         launchLeaseId: existingLease.id,
         repoRoot,
         branches,
+        dirty,
         models: existingLease.models,
         configOptions: existingLease.configOptions,
         slashCommands: getSlashComposerSuggestions(
@@ -3139,6 +3200,7 @@ export function createSessionManager(input: {
         configOptions: session.configOptions ?? [],
         repoRoot,
         branches,
+        dirty,
         releaseTimer: null,
         closing: null,
       }
@@ -3148,6 +3210,7 @@ export function createSessionManager(input: {
         launchLeaseId: lease.id,
         repoRoot: lease.repoRoot,
         branches: lease.branches,
+        dirty: lease.dirty,
         models: lease.models,
         configOptions: lease.configOptions,
         slashCommands: getSlashComposerSuggestions(

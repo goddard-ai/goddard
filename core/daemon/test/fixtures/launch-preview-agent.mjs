@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { appendFileSync } from "node:fs"
 import { Readable, Writable } from "node:stream"
@@ -10,6 +11,15 @@ function recordEvent(event) {
   }
 
   appendFileSync(process.env.LAUNCH_PREVIEW_AGENT_LOG, `${JSON.stringify(event)}\n`)
+}
+
+function readCurrentBranch() {
+  const result = spawnSync("git", ["branch", "--show-current"], {
+    cwd: process.cwd(),
+    encoding: "utf-8",
+  })
+
+  return result.status === 0 ? result.stdout.trim() : null
 }
 
 class LaunchPreviewFixtureAgent {
@@ -169,6 +179,7 @@ class LaunchPreviewFixtureAgent {
       sessionId: params.sessionId,
       modelId: session.currentModelId,
       thinkingLevel: session.thinkingLevel,
+      branchName: readCurrentBranch(),
     })
 
     await this.connection.sessionUpdate({

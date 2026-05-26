@@ -180,12 +180,24 @@ export const SessionLaunchFormState = createModel(function () {
       modelId: draftModelId.value,
       configOptions: initialConfigOptions,
     })
+    const currentBranchName =
+      launchPreview.value?.branches.find((branch) => branch.current)?.name ?? null
+    const selectedLocalBranchName =
+      draftLocation.value === "local" &&
+      launchPreview.value?.dirty !== true &&
+      draftBaseBranchName.value &&
+      draftBaseBranchName.value !== currentBranchName
+        ? draftBaseBranchName.value
+        : null
 
     return {
       agent,
       cwd,
       launchLeaseId:
-        draftLocation.value === "local" ? launchPreview.value?.launchLeaseId : undefined,
+        draftLocation.value === "local" && !selectedLocalBranchName
+          ? launchPreview.value?.launchLeaseId
+          : undefined,
+      localCheckout: selectedLocalBranchName ? { branchName: selectedLocalBranchName } : undefined,
       worktree:
         draftLocation.value === "worktree"
           ? {
@@ -246,7 +258,8 @@ export const SessionLaunchFormState = createModel(function () {
 
     if (
       draftBaseBranchName.value === null ||
-      !availableBranchNames.has(draftBaseBranchName.value)
+      !availableBranchNames.has(draftBaseBranchName.value) ||
+      (nextLaunchPreview.dirty && draftLocation.value === "local")
     ) {
       draftBaseBranchName.value = currentBranchName
     }

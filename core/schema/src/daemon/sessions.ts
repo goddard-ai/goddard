@@ -36,6 +36,13 @@ export const SessionWorktreeParams = z.strictObject({
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
+/** Local-checkout branch switching options accepted by the daemon session API. */
+export const SessionLocalCheckoutParams = z.strictObject({
+  branchName: z.string(),
+})
+
+export type SessionLocalCheckoutParams = z.infer<typeof SessionLocalCheckoutParams>
+
 /** Workforce attachment stored separately from the base daemon session record. */
 export const SessionWorkforceParams = z.strictObject({
   rootDir: z.string().optional(),
@@ -110,6 +117,7 @@ export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]).optional(),
   cwd: z.string(),
   launchLeaseId: z.string().optional(),
+  localCheckout: SessionLocalCheckoutParams.optional(),
   worktree: SessionWorktreeParams.optional(),
   workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
@@ -293,6 +301,7 @@ export type SessionLaunchPreviewResponse = {
   launchLeaseId: string
   repoRoot: string | null
   branches: SessionLaunchBranch[]
+  dirty: boolean
   models: acp.SessionModelState | null
   configOptions: acp.SessionConfigOption[]
   slashCommands: SessionComposerSlashCommandSuggestion[]

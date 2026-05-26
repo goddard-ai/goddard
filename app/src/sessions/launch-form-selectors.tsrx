@@ -211,6 +211,8 @@ export component SessionLaunchPreviewSelectors(props: {
       }),
     ) ??
       []
+  const currentBranchName = preview?.branches.find((branch) => branch.current)?.name ?? null
+  const localCheckoutDirty = form.draftLocation.value === "local" && preview?.dirty === true
   const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =
     previewModels?.availableModels.map(
@@ -268,10 +270,14 @@ export component SessionLaunchPreviewSelectors(props: {
       value={form.draftLocation.value}
       onValueChange={(value) => {
         form.draftLocation.value = value as "local" | "worktree"
+
+        if (value === "local" && preview?.dirty) {
+          form.draftBaseBranchName.value = currentBranchName
+        }
       }}
     />
     <SessionInputSelect
-      disabled={form.draftLocation.value !== "worktree" || branchItems.length === 0}
+      disabled={branchItems.length === 0 || localCheckoutDirty}
       filterable={true}
       items={branchItems}
       label="Git branch"
@@ -284,6 +290,9 @@ export component SessionLaunchPreviewSelectors(props: {
       }}
     />
   </div>
+  if (localCheckoutDirty) {
+    <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
+  }
   <div class={styles.grid}>
     <SessionInputSelect
       disabled={modelItems.length === 0}

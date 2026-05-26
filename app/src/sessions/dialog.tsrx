@@ -27,7 +27,8 @@ component SessionLaunchDialog(props: {
   const initialProjectPath = activeProjectPath ?? projects[0]?.path ?? null
   const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
-    form.draftLocation.value === "worktree" && (form.launchPreview.value?.branches.length ?? 0) > 0
+    (form.launchPreview.value?.branches.length ?? 0) > 0 &&
+      !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true)
   const hasLocationSelector = form.launchPreview.value !== null
   const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
   const hasProjectSelector = projects.length > 0

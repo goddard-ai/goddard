@@ -24,6 +24,7 @@ import type {
   SessionHistoryTurn,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
+  SessionLocalCheckoutParams,
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
@@ -57,6 +58,7 @@ export type {
   ListSessionsResponse,
   ReleaseSessionLaunchLeaseRequest,
   ReleaseSessionLaunchLeaseResponse,
+  SessionLocalCheckoutParams,
   ShutdownSessionResponse,
 }
 
@@ -104,6 +106,7 @@ interface BaseSessionParams {
   agent?: ACPAdapterName | AgentDistribution
   cwd: string
   launchLeaseId?: string
+  localCheckout?: SessionLocalCheckoutParams
   worktree?: SessionWorktreeParams
   workforce?: SessionWorkforceParams
   mcpServers: acp.McpServer[]
