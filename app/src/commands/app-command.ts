@@ -1,31 +1,11 @@
 import { signal } from "@preact/signals"
-import {
-  Bot,
-  Brain,
-  ChevronDown,
-  ChevronUp,
-  Command,
-  Folder,
-  FolderOpen,
-  GitBranch,
-  Inbox,
-  Keyboard,
-  Lightbulb,
-  ListTodo,
-  Map,
-  MapPin,
-  MessageSquarePlus,
-  PanelTopClose,
-  Search,
-  SendHorizontal,
-  Settings,
-} from "lucide-react"
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
 import { SigmaTarget, useListener } from "preact-sigma"
 import { useLayoutEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
 import type { AppCommandId } from "~/shared/app-commands.ts"
+import { AppCommand } from "./app-command-definitions.ts"
 import { getActiveCommandLayerId, useCommandLayer } from "./command-layer.tsrx"
 
 /** Event map for command invocations; event names are generated app command ids. */
@@ -34,7 +14,7 @@ type AppCommandEvents = Record<string, ShortcutMatch | undefined>
 const appCommandBus = new SigmaTarget<AppCommandEvents>()
 const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandId, number>>>>({})
 
-type AppCommandDefinition = RunnableInput & {
+export type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
   label: string
   /** Optional icon for the command menu. */
@@ -51,7 +31,8 @@ type AppCommandDefinition = RunnableInput & {
   description?: string
 }
 
-type AppCommandTable = {
+/** Nested command definitions keyed by namespace and command name. */
+export type AppCommandTable = {
   [namespace: string]: { [commandId: string]: AppCommandDefinition }
 }
 
@@ -66,7 +47,8 @@ type AppCommands<T extends AppCommandTable> = {
   }
 }
 
-function defineAppCommands<const TCommands extends AppCommandTable>(
+/** Creates executable app command functions from the declarative command table. */
+export function defineAppCommands<const TCommands extends AppCommandTable>(
   table: TCommands,
 ): AppCommands<TCommands> {
   return mapValues(table, (namespace, namespaceKey) => {
@@ -90,112 +72,7 @@ function defineAppCommands<const TCommands extends AppCommandTable>(
   }) as any
 }
 
-export const AppCommand = defineAppCommands({
-  workbench: {
-    closeActiveTab: {
-      label: "Close Active Tab",
-      icon: PanelTopClose,
-      when: "workbench.hasClosableActiveTab",
-    },
-  },
-  navigation: {
-    openProposeTaskDialog: {
-      label: "Open Propose Task Dialog",
-      icon: Lightbulb,
-    },
-    openNewSessionDialog: {
-      label: "Open New Session Dialog",
-      icon: MessageSquarePlus,
-    },
-    openSwitchProject: {
-      label: "Switch Project",
-      icon: FolderOpen,
-    },
-    openCommandPalette: {
-      label: "Open Command Menu",
-      icon: Command,
-    },
-    openKeyboardShortcuts: {
-      label: "Open Keyboard Shortcuts",
-      icon: Keyboard,
-    },
-    openInbox: {
-      label: "Open Inbox",
-      icon: Inbox,
-    },
-    openSessions: {
-      label: "Open Sessions",
-      icon: MessageSquarePlus,
-    },
-    openSearch: {
-      label: "Open Search",
-      icon: Search,
-    },
-    openSpecs: {
-      label: "Open Specs",
-      icon: Folder,
-    },
-    openTasks: {
-      label: "Open Tasks",
-      icon: ListTodo,
-    },
-    openRoadmap: {
-      label: "Open Roadmap",
-      icon: Map,
-    },
-    openSettings: {
-      label: "Open Settings",
-      icon: Settings,
-    },
-  },
-  projects: {
-    openFolder: {
-      label: "Projects: Open Folder",
-      icon: FolderOpen,
-      description: "Open a project from your filesystem.",
-    },
-  },
-  sessionInput: {
-    openProjectSelector: {
-      label: "Session Input: Open Project Selector",
-      icon: FolderOpen,
-    },
-    openAdapterSelector: {
-      label: "Session Input: Open Adapter Selector",
-      icon: Bot,
-    },
-    openLocationSelector: {
-      label: "Session Input: Open Launch Location Selector",
-      icon: MapPin,
-    },
-    openBranchSelector: {
-      label: "Session Input: Open Branch Selector",
-      icon: GitBranch,
-    },
-    openModelSelector: {
-      label: "Session Input: Open Model Selector",
-      icon: Brain,
-    },
-    openThinkingLevelSelector: {
-      label: "Session Input: Open Thinking Level Selector",
-      icon: Brain,
-    },
-    submit: {
-      label: "Session Input: Submit",
-      icon: SendHorizontal,
-    },
-  },
-  sessionChat: {
-    skipToPreviousPrompt: {
-      label: "Skip to Previous Prompt",
-      icon: ChevronUp,
-    },
-    skipToNextPrompt: {
-      label: "Skip to Next Prompt",
-      icon: ChevronDown,
-    },
-  },
-})
+export { AppCommand }
 
 export type AppCommand = (typeof AppCommand)[keyof typeof AppCommand] extends infer TNamespace
   ? TNamespace extends object
