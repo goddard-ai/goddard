@@ -4,7 +4,7 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleDot,
-  GitBranch,
+  FileDiff,
   LoaderCircle,
   PauseCircle,
   XCircle,
@@ -167,7 +167,7 @@ export component ListRow(props: {
             event.stopPropagation()
           }}
         >
-          <GitBranch size={15} strokeWidth={2.1} />
+          <FileDiff size={15} strokeWidth={2.1} />
         </button>
       </GoodTooltip>
     </div>

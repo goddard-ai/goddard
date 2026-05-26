@@ -5,8 +5,8 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDot,
+  FileDiff,
   Folder,
-  GitBranch,
   LoaderCircle,
   PauseCircle,
   XCircle,
@@ -193,7 +193,7 @@ export default component SessionChatView(props: {
                     type="button"
                     onClick={openSessionChanges}
                   >
-                    <GitBranch size={15} strokeWidth={2.1} />
+                    <FileDiff size={15} strokeWidth={2.1} />
                   </button>
                 </GoodTooltip>
 
