@@ -627,11 +627,16 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("deriveSessionLaunchModelConfig preserves explicit ACP thinking config options", () => {
+  test("deriveSessionLaunchModelConfig folds thinking suffixes with explicit ACP thinking config options", () => {
     const input = {
       models: {
         currentModelId: "gpt-5.4-medium",
         availableModels: [
+          {
+            modelId: "gpt-5.4-low",
+            name: "GPT-5.4 (Low)",
+            description: "Balanced frontier model",
+          },
           {
             modelId: "gpt-5.4-medium",
             name: "GPT-5.4 (Medium)",
@@ -661,11 +666,20 @@ describe("@goddard-ai/sdk session namespace", () => {
 
     const launchModelConfig = deriveSessionLaunchModelConfig(input)
 
-    expect(launchModelConfig.models).toEqual(input.models)
+    expect(launchModelConfig.models).toEqual({
+      currentModelId: "__goddard_model_0_gpt-5-4",
+      availableModels: [
+        {
+          modelId: "__goddard_model_0_gpt-5-4",
+          name: "GPT-5.4",
+          description: "Balanced frontier model",
+        },
+      ],
+    })
     expect(launchModelConfig.configOptions).toEqual(input.configOptions)
     expect(
       launchModelConfig.resolveSelection({
-        modelId: "gpt-5.4-high",
+        modelId: launchModelConfig.models?.availableModels[0]?.modelId,
         configOptions: [
           {
             configId: "thinking",

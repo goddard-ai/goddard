@@ -77,11 +77,15 @@ export function deriveSessionLaunchModelConfig(input: {
   models: acp.SessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
-  if (
-    !input.models ||
-    input.configOptions.some((option) => option.category === "thought_level") ||
-    input.models.availableModels.length === 0
-  ) {
+  if (!input.models || input.models.availableModels.length === 0) {
+    return createPassthroughLaunchModelConfig(input)
+  }
+
+  const existingThinkingOption = input.configOptions.find(
+    (option) => option.category === "thought_level",
+  )
+
+  if (existingThinkingOption && existingThinkingOption.type !== "select") {
     return createPassthroughLaunchModelConfig(input)
   }
 
@@ -143,32 +147,35 @@ export function deriveSessionLaunchModelConfig(input: {
       currentModelId: currentGroup?.syntheticModelId ?? input.models.currentModelId,
       availableModels,
     },
-    configOptions: [
-      ...input.configOptions,
-      {
-        id: derivedThinkingConfigId,
-        type: "select" as const,
-        name: "Thinking level",
-        category: "thought_level",
-        description: "Derived from ACP model names.",
-        currentValue: currentVariant?.thinkingValue ?? thinkingOptions[0],
-        options: thinkingOptions.map((thinkingValue) => ({
-          value: thinkingValue,
-          name:
-            thinkingLevelLabels.get(thinkingValue as (typeof thinkingLevelOrder)[number]) ??
-            thinkingValue,
-        })),
-      } satisfies acp.SessionConfigOption,
-    ],
+    configOptions: existingThinkingOption
+      ? input.configOptions
+      : [
+          ...input.configOptions,
+          {
+            id: derivedThinkingConfigId,
+            type: "select" as const,
+            name: "Thinking level",
+            category: "thought_level",
+            description: "Derived from ACP model names.",
+            currentValue: currentVariant?.thinkingValue ?? thinkingOptions[0],
+            options: thinkingOptions.map((thinkingValue) => ({
+              value: thinkingValue,
+              name:
+                thinkingLevelLabels.get(thinkingValue as (typeof thinkingLevelOrder)[number]) ??
+                thinkingValue,
+            })),
+          } satisfies acp.SessionConfigOption,
+        ],
     resolveSelection(input: {
       modelId?: string | null
       configOptions?: InitialSessionConfigOption[] | null
     }) {
+      const thinkingConfigId = existingThinkingOption?.id ?? derivedThinkingConfigId
       const remainingConfigOptions = (input.configOptions ?? []).filter(
         (option) => option.configId !== derivedThinkingConfigId,
       )
       const selectedThinkingValue = input.configOptions?.find(
-        (option) => option.configId === derivedThinkingConfigId && "value" in option,
+        (option) => option.configId === thinkingConfigId && "value" in option,
       )
       const selectedGroup = [...groups.values()].find(
         (group) => group.syntheticModelId === input.modelId,
