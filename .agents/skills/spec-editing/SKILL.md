@@ -24,7 +24,7 @@ They are not proposals, implementation plans, status reports, issue trackers, AP
 - Start from `spec/README.md`.
 - `spec/README.md` is the root index for top-level spec areas.
 - A parent concept may live in `spec/name.md`, with children in `spec/name/`.
-- Parent specs with children include an `Encapsulated Sub-Specs` section listing direct children.
+- Parent specs should link to child specs when that makes navigation clearer. Use whatever heading or sentence fits the file.
 - Architecture decision records live in `spec/adr/`; do not restructure that branch unless asked.
 - When one file stops describing one coherent product surface, split it and leave the parent as a concise map.
 
@@ -49,5 +49,5 @@ They are not proposals, implementation plans, status reports, issue trackers, AP
 
 1. Read from `spec/README.md` to find the narrowest relevant spec node.
 2. Edit the smallest set of spec files needed to express the capability or constraint.
-3. Update `Encapsulated Sub-Specs` only when the tree changes.
+3. Update parent navigation only when the tree changes.
 4. Re-read the changed text and remove template prose, implementation detail, and repeated motivation.
