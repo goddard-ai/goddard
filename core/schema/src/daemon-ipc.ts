@@ -51,6 +51,7 @@ import {
   SessionLaunchPreviewRequest,
   SessionMessageEvent,
   SessionSubpackagesRequest,
+  SetSessionConfigOptionRequest,
   SteerSessionRequest,
   UnmountSessionReviewSessionRequest as UnmountSessionReviewSessionRequestSchema,
   type CancelSessionResponse,
@@ -69,6 +70,7 @@ import {
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
   type SessionSubpackagesResponse,
+  type SetSessionConfigOptionResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
 } from "./daemon/sessions.ts"
@@ -218,6 +220,10 @@ export const daemonIpcSchema = {
     "session.send": {
       payload: SendSessionMessageRequest,
       response: $type<{ accepted: true }>(),
+    },
+    "session.configOption.set": {
+      payload: SetSessionConfigOptionRequest,
+      response: $type<SetSessionConfigOptionResponse>(),
     },
     "session.complete": {
       payload: CompleteSessionRequest,

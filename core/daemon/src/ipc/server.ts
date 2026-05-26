@@ -405,6 +405,11 @@ export async function startDaemonServer(
       await sessionManager.sendMessage(id, message as acp.AnyMessage)
       return { accepted: true as const }
     },
+    "session.configOption.set": async (payload) => {
+      return {
+        session: await sessionManager.setSessionConfigOption(payload),
+      }
+    },
     "session.complete": async ({ id }) => {
       return {
         item: await sessionManager.completeSession(id),

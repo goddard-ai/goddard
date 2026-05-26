@@ -188,6 +188,7 @@ export function createSessionRecordUpdate(params: {
     status: DaemonSession["status"]
     stopReason: acp.PromptResponse["stopReason"] | null
     models?: acp.SessionModelState | null
+    configOptions?: acp.SessionConfigOption[] | null
   }
   request: ResolvedCreateSessionRequest
   cwd: string
@@ -230,6 +231,7 @@ export function createSessionRecordUpdate(params: {
     permissions: params.nextPermission,
     metadata: params.sessionMetadata ?? null,
     models: params.initialized.models ?? params.existingSession?.models ?? null,
+    configOptions: params.initialized.configOptions ?? params.existingSession?.configOptions ?? [],
     availableCommands: params.availableCommands,
     contextUsage: params.contextUsage ?? params.existingSession?.contextUsage ?? null,
     errorMessage: null,

@@ -12,6 +12,10 @@ import * as fuzzysort from "fuzzysort2"
 import { lens } from "~/lib/lens.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
+import {
+  findSelectConfigOption,
+  flattenConfigOptionValues,
+} from "~/session-input/config-options.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type SessionLaunchPickerId =
@@ -21,6 +25,7 @@ type SessionLaunchPickerId =
   | "location"
   | "branch"
   | "model"
+  | "mode"
   | "thinking"
 type LaunchPickerId = SessionLaunchPickerId | null
 /** One slash-command suggestion shown in the session launch composer. */
@@ -40,18 +45,6 @@ const preparedSlashCommandSuggestions = new WeakMap<
   readonly PreparedSlashCommandSuggestion[]
 >()
 
-function isConfigOptionGroup(option: unknown): option is {
-  name: string
-  options: Array<{ value: string; name: string; description?: string | null }>
-} {
-  return (
-    typeof option === "object" &&
-    option !== null &&
-    "options" in option &&
-    Array.isArray(option.options)
-  )
-}
-
 /** Returns the prepared slash-command suggestions cached for one suggestion array instance. */
 function getPreparedSlashCommandSuggestions(suggestions: readonly SlashCommandSuggestion[]) {
   const existingSuggestions = preparedSlashCommandSuggestions.get(suggestions)
@@ -69,31 +62,6 @@ function getPreparedSlashCommandSuggestions(suggestions: readonly SlashCommandSu
 
   preparedSlashCommandSuggestions.set(suggestions, nextSuggestions)
   return nextSuggestions
-}
-
-/** Flattens grouped select options into one ordered list of concrete values. */
-export function flattenConfigOptionValues(
-  option: Extract<
-    NonNullable<SessionLaunchPreviewResponse["configOptions"]>[number],
-    { type: "select" }
-  >,
-) {
-  const flattenedOptions: Array<{
-    value: string
-    name: string
-    description?: string | null
-  }> = []
-
-  for (const entry of option.options) {
-    if (isConfigOptionGroup(entry)) {
-      flattenedOptions.push(...entry.options)
-      continue
-    }
-
-    flattenedOptions.push(entry)
-  }
-
-  return flattenedOptions
 }
 
 /** Fuzzy-filters slash-command suggestions while preserving the default result cap. */
@@ -126,6 +94,7 @@ export const SessionLaunchFormState = createModel(function () {
   const draftBaseBranchName = signal<string | null>(null)
   const draftLocation = signal<SessionLaunchLocation>("local")
   const draftModelId = signal<string | null>(null)
+  const draftModeValue = signal<string | null>(null)
   const draftProjectPath = signal<string | null>(null)
   const draftPromptBlocks = signal<ComposerPromptBlocks>([])
   const draftSubpackagePath = signal<string | null>(null)
@@ -144,6 +113,9 @@ export const SessionLaunchFormState = createModel(function () {
       launchModelConfig.value.configOptions.find((option) => option.category === "thought_level") ??
       null,
   )
+  const modeOption = computed(() =>
+    findSelectConfigOption(launchModelConfig.value.configOptions, "mode"),
+  )
   const effectiveCwd = computed(() => draftSubpackagePath.value ?? draftProjectPath.value)
 
   const sessionInput = computed<CreateSessionRequest | null>(() => {
@@ -156,7 +128,15 @@ export const SessionLaunchFormState = createModel(function () {
     }
 
     const initialConfigOptions: InitialSessionConfigOption[] = []
+    const resolvedModeOption = modeOption.value
     const resolvedThinkingOption = thinkingOption.value
+
+    if (resolvedModeOption && typeof draftModeValue.value === "string") {
+      initialConfigOptions.push({
+        configId: resolvedModeOption.id,
+        value: draftModeValue.value,
+      })
+    }
 
     if (
       resolvedThinkingOption?.type === "boolean" &&
@@ -237,6 +217,7 @@ export const SessionLaunchFormState = createModel(function () {
     if (!nextLaunchPreview) {
       draftBaseBranchName.value = null
       draftModelId.value = null
+      draftModeValue.value = null
       draftThinkingValue.value = null
       draftLocation.value = "local"
       return
@@ -274,6 +255,23 @@ export const SessionLaunchFormState = createModel(function () {
       (draftModelId.value && !availableModelIds.has(draftModelId.value))
     ) {
       draftModelId.value = currentModelId
+    }
+
+    const resolvedModeOption = findSelectConfigOption(
+      resolvedLaunchModelConfig.configOptions,
+      "mode",
+    )
+
+    if (!resolvedModeOption) {
+      draftModeValue.value = null
+    } else {
+      const availableModeValues = new Set(
+        flattenConfigOptionValues(resolvedModeOption).map((option) => option.value),
+      )
+
+      if (draftModeValue.value === null || !availableModeValues.has(draftModeValue.value)) {
+        draftModeValue.value = resolvedModeOption.currentValue
+      }
     }
 
     const resolvedThinkingOption =
@@ -316,6 +314,7 @@ export const SessionLaunchFormState = createModel(function () {
     draftBaseBranchName,
     draftLocation,
     draftModelId,
+    draftModeValue,
     draftProjectPath,
     draftPromptBlocks,
     draftSubpackagePath,
@@ -323,6 +322,7 @@ export const SessionLaunchFormState = createModel(function () {
     effectiveCwd,
     launchModelConfig,
     launchPreview,
+    modeOption,
     openPicker,
     reset(preferredProjectPath: string | null = null) {
       const previousProjectPath = draftProjectPath.value
@@ -330,6 +330,7 @@ export const SessionLaunchFormState = createModel(function () {
       draftBaseBranchName.value = null
       draftLocation.value = "local"
       draftModelId.value = null
+      draftModeValue.value = null
       draftProjectPath.value = preferredProjectPath
       draftPromptBlocks.value = []
       draftSubpackagePath.value = null

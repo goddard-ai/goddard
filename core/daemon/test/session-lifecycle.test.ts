@@ -722,6 +722,7 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     },
     metadata: null,
     models: null,
+    configOptions: [],
     availableCommands: [],
     contextUsage: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
@@ -808,6 +809,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     },
     metadata: null,
     models: null,
+    configOptions: [],
     availableCommands: [],
     contextUsage: null,
   })
@@ -1803,6 +1805,7 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
     permissions: null,
     metadata: null,
     models: null,
+    configOptions: [],
     availableCommands: [
       {
         name: "plan",
@@ -2221,6 +2224,12 @@ test("session.create applies initial model and thinking configuration before the
   })
 
   expect(created.session.models?.currentModelId).toBe("gpt-5.4-mini")
+  expect(created.session.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "thinking",
+      currentValue: "high",
+    }),
+  )
 
   const history = await client.send("session.history", {
     id: created.session.id,
@@ -2242,6 +2251,33 @@ test("session.create applies initial model and thinking configuration before the
       }),
     ),
   ).toBe(true)
+})
+
+test("session.configOption.set updates active session config options", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(launchPreviewAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "",
+  })
+
+  const updated = await client.send("session.configOption.set", {
+    id: created.session.id,
+    configId: "thinking",
+    value: "high",
+  })
+
+  expect(updated.session.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "thinking",
+      currentValue: "high",
+    }),
+  )
+
+  await client.send("session.shutdown", { id: created.session.id })
 })
 
 test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap output", async () => {

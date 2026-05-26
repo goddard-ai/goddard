@@ -284,6 +284,9 @@ export class GoddardSdk {
       /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
       send: defineRequest(this.#client, "session.send"),
 
+      /** Updates one ACP config option on an active daemon-managed session. */
+      setConfigOption: defineRequest(this.#client, "session.configOption.set"),
+
       /** Sends one ACP permission response through the daemon-managed session transport. */
       respondPermission: async (input: SessionPermissionResponseRequest) =>
         this.#client.send("session.send", {

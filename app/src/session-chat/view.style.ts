@@ -199,6 +199,11 @@ export default {
     paddingBottom: "20px",
     backgroundColor: "background",
   }),
+  composerControls: css({
+    display: "grid",
+    maxWidth: "240px",
+    marginBottom: "10px",
+  }),
   composerError: css({
     display: "grid",
     gap: "3px",

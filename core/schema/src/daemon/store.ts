@@ -73,6 +73,11 @@ export const DaemonSessionAvailableCommands = z.custom<acp.AvailableCommand[]>()
 
 export type DaemonSessionAvailableCommands = z.output<typeof DaemonSessionAvailableCommands>
 
+/** Latest ACP config options reported by the agent for one daemon session. */
+export const DaemonSessionConfigOptions = z.custom<acp.SessionConfigOption[]>().default([])
+
+export type DaemonSessionConfigOptions = z.output<typeof DaemonSessionConfigOptions>
+
 /** Latest context window usage reported by the agent for one daemon session. */
 export const DaemonSessionContextUsage = z
   .strictObject({
@@ -115,6 +120,7 @@ export const DaemonSession = z.strictObject({
   permissions: DaemonSessionPermissions.nullable().default(null),
   metadata: DaemonSessionMetadata.nullable().default(null),
   models: z.custom<acp.SessionModelState>().nullable().default(null),
+  configOptions: DaemonSessionConfigOptions,
   availableCommands: DaemonSessionAvailableCommands.default([]),
   contextUsage: DaemonSessionContextUsage,
 })

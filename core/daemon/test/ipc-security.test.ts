@@ -568,6 +568,7 @@ async function seedWorkforceSession(input: {
     },
     metadata: null,
     models: null,
+    configOptions: [],
     availableCommands: [],
     contextUsage: null,
   } satisfies Parameters<typeof db.sessions.put>[1]
@@ -616,6 +617,7 @@ function seedAuthorizedSession(input: {
     },
     metadata: null,
     models: null,
+    configOptions: [],
     availableCommands: [],
     contextUsage: null,
   })

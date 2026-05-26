@@ -120,7 +120,10 @@ export component SessionLaunchForm(props: {
           <SessionLaunchLoadingSelect label="Git branch" />
         </div>
         <div class={selectorStyles.grid}>
+          <SessionLaunchLoadingSelect label="Approval preset" />
           <SessionLaunchLoadingSelect label="Model" />
+        </div>
+        <div class={selectorStyles.grid}>
           <SessionLaunchLoadingSelect label="Thinking level" />
         </div>
       </div>

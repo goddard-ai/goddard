@@ -120,11 +120,12 @@ export default {
   }),
   menuButton: css({
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "8px",
     width: "100%",
     minHeight: "32px",
-    padding: "0 12px",
+    paddingBlock: "7px",
+    paddingInline: "12px",
     border: "none",
     backgroundColor: "transparent",
     color: "text",
@@ -141,11 +142,23 @@ export default {
       opacity: "0.5",
     },
   }),
+  menuButtonText: css({
+    display: "grid",
+    gap: "3px",
+    minWidth: "0",
+  }),
   menuButtonLabel: css({
     minWidth: "0",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    lineHeight: "1.35",
+  }),
+  menuButtonDetail: css({
+    minWidth: "0",
+    color: "muted",
+    fontSize: "0.76rem",
+    fontWeight: "480",
     lineHeight: "1.35",
   }),
   menuButtonActive: css({

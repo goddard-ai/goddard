@@ -32,6 +32,7 @@ function createSession(lastAgentMessage: string | null) {
     inboxScope: null,
     lastAgentMessage,
     models: null,
+    configOptions: [],
     availableCommands: [],
     contextUsage: null,
   } satisfies DaemonSession

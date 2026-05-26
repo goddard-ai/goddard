@@ -7,9 +7,11 @@ import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { flattenConfigOptionValues } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
+import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
-import { flattenConfigOptionValues, type SessionLaunchFormState } from "./launch-form-state.ts"
+import { type SessionLaunchFormState } from "./launch-form-state.ts"
 import { releaseSessionLaunchLease } from "./mutations.ts"
 
 function getShortcutLabel(binding: unknown) {
@@ -297,6 +299,14 @@ export component SessionLaunchPreviewSelectors(props: {
     <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
   }
   <div class={styles.grid}>
+    <SessionModeSelector
+      disabled={form.modeOption.value === null}
+      modeOption={form.modeOption.value}
+      open={form.getPickerOpen("mode")}
+      onValueChange={(value) => {
+        form.draftModeValue.value = value
+      }}
+    />
     <SessionInputSelect
       disabled={modelItems.length === 0}
       filterable={true}
@@ -310,6 +320,8 @@ export component SessionLaunchPreviewSelectors(props: {
         form.draftModelId.value = value
       }}
     />
+  </div>
+  <div class={styles.grid}>
     <SessionInputSelect
       disabled={thinkingItems.length === 0}
       filterable={false}

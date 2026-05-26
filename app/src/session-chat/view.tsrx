@@ -1,4 +1,5 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
+import { useSignal } from "@preact/signals"
 import {
   AlertCircle,
   CheckCircle2,
@@ -28,11 +29,14 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { findSelectConfigOption } from "~/session-input/config-options.ts"
+import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import {
   cancelSessionTurn,
   completeSession,
   reconnectSession,
   respondSessionPermission,
+  setSessionConfigOption,
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
@@ -347,6 +351,8 @@ export default component SessionChatView(props: {
           }
           <footer class={styles.composerDock}>
             const submitError = page.submitPrompt.error.value
+            const modePickerOpen = useSignal(false)
+            const modeOption = findSelectConfigOption(chat.session.configOptions, "mode")
 
             if (submitError) {
               <div class={styles.composerError} role="alert">
@@ -354,6 +360,27 @@ export default component SessionChatView(props: {
                 <span class={styles.composerErrorDescription}>
                   "Your draft is still here. Try again when the session is available."
                 </span>
+              </div>
+            }
+            if (modeOption) {
+              <div class={styles.composerControls}>
+                <SessionModeSelector
+                  disabled={!chat.session.activeDaemonSession}
+                  {modeOption}
+                  open={modePickerOpen}
+                  onValueChange={async (value) => {
+                    try {
+                      const result = await setSessionConfigOption({
+                        id: chat.session.id,
+                        configId: modeOption.id,
+                        value,
+                      })
+                      chat.syncSession(result.session)
+                    } catch (error) {
+                      console.error("Failed to update session mode.", error)
+                    }
+                  }}
+                />
               </div>
             }
             <Composer

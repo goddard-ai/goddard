@@ -338,8 +338,15 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   } else if (item.icon) {
                     <img alt="" class={styles.itemIcon} src={item.icon} />
                   }
-                  <span class={styles.menuButtonLabel}>
-                    {item.label}
+                  <span class={styles.menuButtonText}>
+                    <span class={styles.menuButtonLabel}>
+                      {item.label}
+                    </span>
+                    if (item.detail) {
+                      <span class={styles.menuButtonDetail}>
+                        {item.detail}
+                      </span>
+                    }
                   </span>
                 </button>
               </li>
