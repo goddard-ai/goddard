@@ -1,52 +1,39 @@
 # Data Flows
 
-This file captures conceptual end-to-end sequences only. Wire formats and API payload details belong in code.
+This file captures durable cross-component flow guarantees. Wire formats, API payloads, and internal execution steps belong in code.
 
 ## PR Creation (User-Initiated)
 
-1. Developer initiates pull request creation from the desktop app or another approved host.
-2. The host forwards the request through the platform's daemon and backend authority chain.
-3. Backend validates the session, resolves GitHub identity, and records which Goddard user owns the managed pull request.
-4. Backend creates the pull request through delegated GitHub authority and persists enough managed pull request identity to pair later feedback with the owning Goddard user.
-5. Reviewer responds on GitHub with comments or review feedback.
-6. Webhook event enters the backend.
-7. Backend determines whether the referenced pull request is managed and, if so, which Goddard user owns it.
-8. Event delivery is routed onto that user's authenticated stream.
-9. The receiving host updates UI and local state from the delivered event.
+- Pull requests may be initiated from the desktop app or another approved host.
+- Pull request creation must pass through the platform's daemon and backend authority chain.
+- The backend records enough managed pull request ownership to route later feedback to the owning Goddard user.
+- Reviewer feedback on managed pull requests is routed through the authenticated stream for the owning Goddard user.
+- Receiving hosts update UI and local state from delivered managed pull request events.
 
 ## Authentication (Lazy Device Flow)
 
-1. Desktop app or SDK host requests a protected action and starts a device authorization challenge.
-2. Backend creates a pending session.
-3. Host presents the user code and verification URL.
-4. User authorizes in browser.
-5. Backend marks session authorized and stores identity.
-6. Host detects completion and persists token using host-appropriate storage.
+- Desktop app and SDK hosts request authentication only when a protected action requires backend or external service identity.
+- Authentication uses a device authorization challenge that can be completed in the user's browser.
+- Hosts persist authorized session material using host-appropriate storage after completion.
 
 ## Real-Time Event Subscription (Background Runtime)
 
-1. Desktop app or background runtime opens an authenticated managed pull request event stream as part of its local host responsibilities.
-2. Backend validates the session and attaches the subscriber connection to the current Goddard user's stream.
-3. Managed pull request events owned by that user may arrive from multiple repositories over the same stream.
-4. Unmanaged pull request events and events owned by other Goddard users are not delivered on that stream.
-5. The local host interprets the delivered feedback event for its own state and automation decisions.
-6. The subscriber updates workspace state or may launch the PR feedback flow.
+- Desktop app and background runtime hosts consume managed pull request events through an authenticated user-scoped stream.
+- Managed pull request events owned by the authenticated Goddard user may arrive from multiple repositories over one stream.
+- Unmanaged pull requests and events owned by other Goddard users must not be delivered on that stream.
+- Local hosts may use delivered feedback events to update workspace state or launch PR feedback handling.
 
 ## Workforce Orchestration (Daemon-Owned)
 
-1. Operator initializes repository-local workforce intent and starts workforce control through an approved client.
-2. Daemon resolves the target repository workspace and reconstructs current workforce state from durable intent.
-3. Operator or agent appends new delegated work to the repository workforce.
-4. Daemon projects the new intent into current queue state and selects the next eligible work per agent.
-5. Daemon launches a fresh agent session for each newly handled request.
-6. Active agents respond, suspend, or delegate additional work through daemon-backed workforce controls.
-7. Daemon validates those changes, records them durably, and updates projected status.
-8. Operators and clients inspect current workforce status through the daemon.
+- Workforce control starts through an approved client, but runtime ownership remains with the daemon.
+- The daemon reconstructs workforce state from durable repository-local intent before admitting new work.
+- Operators and agents may append delegated work through daemon-backed workforce controls.
+- Each newly handled request runs in a fresh agent session.
+- The daemon validates workforce changes, records them durably, and exposes current status to approved clients.
 
 ## Autonomous Cycle (Loop)
 
-1. A supervising runtime enforces delay and throughput constraints.
-2. Strategy generates the next prompt from cycle context.
-3. Runtime executes the prompt through a persistent `pi-coding-agent` session.
-4. Runtime computes per-cycle token delta and enforces the hard cap.
-5. Runtime updates summary context and decides continue vs `DONE` termination.
+- A supervising runtime enforces cadence, throughput, and token constraints across autonomous cycles.
+- The loop executes cycles through a persistent `pi-coding-agent` session.
+- Per-cycle token limits are hard caps.
+- Summary context carries forward between cycles until completion or termination.

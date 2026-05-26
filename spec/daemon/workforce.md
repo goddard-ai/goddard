@@ -1,12 +1,8 @@
 # Daemon-Owned Workforce Orchestration
 
-## Goal
-Enable repository-scoped multi-agent delegation where the daemon owns workforce lifecycle, recovery, and coordination rather than leaving those responsibilities to individual clients.
+Repository-scoped multi-agent delegation is owned by the daemon so workforce lifecycle, recovery, and coordination are not split across individual clients.
 
-## Hypothesis
-We believe that making the daemon the single authority for workforce runtime state will produce more reliable recovery, clearer operator visibility, and safer collaboration between agents and control surfaces.
-
-## Actors
+## Participants
 - Operator — starts, stops, inspects, and mutates workforce state through approved clients.
 - Daemon Runtime — owns repository-scoped workforce lifecycle, validation, queue projection, and recovery.
 - Root Agent — holds repository-wide coordination responsibility.
@@ -17,7 +13,7 @@ We believe that making the daemon the single authority for workforce runtime sta
 
 `Stopped -> Recovering -> Idle -> Handling -> (Idle | Suspended | Failed) -> ShuttingDown -> Stopped`
 
-## Core Behavior
+## Capabilities
 1. An operator explicitly starts workforce orchestration for a repository workspace.
 2. The daemon reconstructs workforce state from durable repository-local intent before admitting new work.
 3. New work is recorded against the repository workforce and projected into the current queue state.
@@ -28,7 +24,7 @@ We believe that making the daemon the single authority for workforce runtime sta
 8. A response is a validation gate rather than a blind completion signal: the daemon validates attributable git state and only then advances the queue.
 9. Operators and clients inspect current workforce status through the daemon rather than by managing parallel watcher state.
 
-## Hard Constraints
+## Boundaries
 - The daemon is the sole lifecycle authority for workforce runtimes.
 - Only one active workforce runtime may exist for a given repository workspace.
 - Workforce startup is explicit and should safely reuse an already-running runtime for the same repository instead of creating duplicates.
@@ -40,18 +36,14 @@ We believe that making the daemon the single authority for workforce runtime sta
 - A request must not complete while the responding agent still has dirty tracked changes inside its owned paths.
 - If attributable git changes for a request touch paths outside the responding agent's owned paths, the daemon must suspend that request and surface the violation for human review.
 - Workforce orchestration and PR feedback handling remain separate daemon runtime domains even when hosted by the same daemon process.
-
-## Failure Handling Expectations
 - Daemon restart should recover workforce state without losing operator-visible progress.
 - Individual agent-session failure must not corrupt the broader workforce queue.
 - Suspended work must remain blocked until an explicit operator or root-agent action resolves it.
 - Ownership validation failures should suspend the violating request instead of allowing silent completion.
 - Shutdown should stop new handling cleanly and preserve enough durable intent for later restart.
+- SDK clients must not own independent workforce runtime state.
+- Workforce orchestration must not reopen Goddard as a broad interactive terminal-first product.
+- This spec does not define data formats, file layouts, or command syntax.
 
-## Non-Goals
-- Allowing SDK clients to own independent workforce runtime state
-- Reopening Goddard as a broad interactive terminal-first product
-- Defining data formats, file layouts, or command syntax in this spec
-
-## Decision Memory
+## Rationale
 Workforce orchestration moved away from client-owned watcher and long-lived session concepts toward a daemon-owned runtime with fresh per-request sessions so recovery, auditability, and shared control surfaces stay aligned.

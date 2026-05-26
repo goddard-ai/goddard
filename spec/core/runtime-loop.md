@@ -1,12 +1,6 @@
-## Goal
-Define the data structures, behaviors, and limits of the autonomous execution loop to ensure predictable, constrained AI operations.
+# Autonomous Runtime Loop
 
-## Hypothesis
-We believe that explicitly modeling the execution loop, configuration constraints, and rate limits will prevent runaway costs and provide stable unattended operations.
-
-## Sub-Specs
-- `spec/core/architecture.md`: System components and deployment topology.
-- `spec/core/data-flows.md`: Conceptual end-to-end event sequences.
+The autonomous runtime loop provides predictable, constrained AI execution across repeated agent cycles.
 
 ## Configuration Contract
 - **Discovery**: Local workspace configs take precedence over global user configs.
@@ -24,7 +18,7 @@ Rate limiting constrains three dimensions of autonomous loop behavior:
 - Throughput and cadence limits dictate the sleep duration before the next cycle begins.
 - An optional pause threshold allows the loop to hibernate for an extended period after reaching a specific cycle count.
 
-## Runtime Loop Behavior
+## Lifecycle
 - **State Machine**: `Initializing -> Throttling -> Prompting -> Evaluating -> (Continuing | Terminating)`
 - **Persistence**: The loop utilizes a persistent agent session. Context from previous cycles is accumulated and carried forward.
 - **Termination**: 
