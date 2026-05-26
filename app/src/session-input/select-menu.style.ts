@@ -146,6 +146,7 @@ export default {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
+    lineHeight: "1.35",
   }),
   menuButtonActive: css({
     backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 18%, transparent)`,
