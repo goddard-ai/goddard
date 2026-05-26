@@ -203,6 +203,74 @@ test("default keymap dispatches switch-project from Mod+o", async () => {
   }
 })
 
+test("default keymap dispatches session chat prompt navigation from Mod+ArrowUp and Mod+ArrowDown", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const previousMatches: unknown[] = []
+  const nextMatches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(
+      Fragment,
+      {},
+      h(TestCommandHandler, {
+        command: AppCommand.sessionChat.skipToPreviousPrompt,
+        onMatch(match) {
+          previousMatches.push(match)
+        },
+      }),
+      h(TestCommandHandler, {
+        command: AppCommand.sessionChat.skipToNextPrompt,
+        onMatch(match) {
+          nextMatches.push(match)
+        },
+      }),
+    ),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: "ArrowUp",
+      code: "ArrowUp",
+      ctrlKey: true,
+    })
+    dispatchKeydown(runtimeDocument, {
+      key: "ArrowDown",
+      code: "ArrowDown",
+      ctrlKey: true,
+    })
+
+    expect(previousMatches).toHaveLength(1)
+    expect(previousMatches[0]).toMatchObject({
+      combo: "Ctrl+ArrowUp",
+      event: {
+        key: "ArrowUp",
+        modifiers: {
+          ctrl: true,
+        },
+      },
+    })
+    expect(nextMatches).toHaveLength(1)
+    expect(nextMatches[0]).toMatchObject({
+      combo: "Ctrl+ArrowDown",
+      event: {
+        key: "ArrowDown",
+        modifiers: {
+          ctrl: true,
+        },
+      },
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
 test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []

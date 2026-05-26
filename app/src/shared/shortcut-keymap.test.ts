@@ -20,6 +20,8 @@ const openBranchSelector = "sessionInput.openBranchSelector" as const
 const openModelSelector = "sessionInput.openModelSelector" as const
 const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
 const submitSessionInput = "sessionInput.submit" as const
+const skipToPreviousPrompt = "sessionChat.skipToPreviousPrompt" as const
+const skipToNextPrompt = "sessionChat.skipToNextPrompt" as const
 
 test("shortcut keymap overrides accept valid persisted bindings", () => {
   expect(
@@ -78,6 +80,8 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openModelSelector]: ["Mod+Shift+m"],
     [openThinkingLevelSelector]: ["Mod+t"],
     [submitSessionInput]: ["Mod+Enter"],
+    [skipToPreviousPrompt]: ["Mod+ArrowUp"],
+    [skipToNextPrompt]: ["Mod+ArrowDown"],
   })
 })
 
@@ -92,6 +96,8 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     [openInbox]: ["Alt+1"],
     [openKeyboardShortcuts]: ["Mod+/"],
     [openThinkingLevelSelector]: ["Mod+t"],
+    [skipToPreviousPrompt]: ["Mod+ArrowUp"],
+    [skipToNextPrompt]: ["Mod+ArrowDown"],
     unknown: ["Alt+/"],
   })
 })
