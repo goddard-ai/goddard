@@ -36,6 +36,7 @@ They are not proposals, implementation plans, status reports, issue trackers, AP
 - Choose headings that fit the content; do not impose default sections.
 - Add rationale or history only when it prevents a likely future mistake.
 - Keep the smallest wording that preserves the intended product behavior.
+- Trust local context. Use filenames, parent specs, and nearby headings to avoid repeating fully qualified project terms when a shorter term is clear.
 
 ## Keep Out
 
@@ -44,6 +45,7 @@ They are not proposals, implementation plans, status reports, issue trackers, AP
 - Backlog items, ticket notes, temporary status, bug triage, or release planning.
 - Sections added only to satisfy a template.
 - Rationale that merely sells the feature instead of constraining future decisions.
+- Over-qualified wording that restates the same project, product, or domain context already established by the file path or heading.
 
 ## Workflow
 
