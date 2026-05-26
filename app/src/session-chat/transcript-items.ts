@@ -805,14 +805,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
     } satisfies SessionTranscriptTurnStop
   }
 
-  return {
-    kind: "turnStop",
-    id: `${turn.turnId}:stop`,
-    status: "completed",
-    title: "Completed",
-    reason: null,
-    timestamp: turn.completedAt,
-  } satisfies SessionTranscriptTurnStop
+  return null
 }
 
 function formatTurnDuration(startedAt: string, completedAt: string | null) {

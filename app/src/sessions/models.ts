@@ -162,12 +162,7 @@ export type SessionTranscriptPlanUpdate = {
 }
 
 /** Terminal lifecycle states shown after a turn stops producing transcript content. */
-export type SessionTranscriptTurnStopStatus =
-  | "completed"
-  | "stopped"
-  | "failed"
-  | "cancelled"
-  | "interrupted"
+export type SessionTranscriptTurnStopStatus = "stopped" | "failed" | "cancelled" | "interrupted"
 
 /** One compact transcript row that marks how a prompt turn ended. */
 export type SessionTranscriptTurnStop = {

@@ -33,9 +33,7 @@ test("session chat QA scenario covers every generated transcript row family", ()
   expect(permissionStatuses).toEqual(
     new Set(["pending", "allowed", "denied", "failed", "cancelled", "resolved"]),
   )
-  expect(turnStopStatuses).toEqual(
-    new Set(["completed", "stopped", "failed", "cancelled", "interrupted"]),
-  )
+  expect(turnStopStatuses).toEqual(new Set(["stopped", "failed", "cancelled", "interrupted"]))
   expect(
     messages.some(
       (message) =>

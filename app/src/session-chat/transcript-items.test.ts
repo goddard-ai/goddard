@@ -899,14 +899,6 @@ test("buildSessionChatTranscript renders lifecycle rows for terminal and interru
   expect(messages.filter((message) => message.kind === "turnStop")).toEqual([
     {
       kind: "turnStop",
-      id: "turn-completed:stop",
-      status: "completed",
-      title: "Completed",
-      reason: null,
-      timestamp: "2026-04-14T00:00:01.000Z",
-    },
-    {
-      kind: "turnStop",
       id: "turn-stopped:stop",
       status: "stopped",
       title: "Stopped",
