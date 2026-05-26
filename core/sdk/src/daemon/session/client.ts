@@ -34,7 +34,7 @@ function createMessageInputTransport(
         return
       }
 
-      await client.send("session.send", {
+      await client.session.send({
         id,
         message: JSON.parse(trimmed),
       })
@@ -57,7 +57,7 @@ async function flushMessageBuffer(
       continue
     }
 
-    await client.send("session.send", {
+    await client.session.send({
       id,
       message: JSON.parse(trimmed),
     })
@@ -91,10 +91,16 @@ async function createMessageOutputTransport(
   const stream = new TransformStream<Uint8Array, Uint8Array>()
   const writer = stream.writable.getWriter()
   let closed = false
+  const abortController = new AbortController()
 
-  const unsubscribe = await client.subscribe(
-    { name: "session.messageEvents", filter: { id } },
-    ({ message }: { message: acp.AnyMessage }) => {
+  const events = await client.session.messageEvents(
+    { id },
+    {
+      signal: abortController.signal,
+    },
+  )
+  const done = (async () => {
+    for await (const { message } of events) {
       if (
         closed ||
         (typeof message === "object" &&
@@ -107,8 +113,8 @@ async function createMessageOutputTransport(
       }
 
       void writer.write(encoder.encode(`${JSON.stringify(message)}\n`)).catch(() => {})
-    },
-  )
+    }
+  })()
 
   return {
     readable: stream.readable,
@@ -118,7 +124,8 @@ async function createMessageOutputTransport(
       }
 
       closed = true
-      await Promise.resolve(unsubscribe()).catch(() => {})
+      abortController.abort()
+      await done.catch(() => {})
       await writer.close().catch(() => {})
     },
   }
@@ -171,8 +178,8 @@ export async function runSession(
 ): Promise<AgentSession | null> {
   const connectedSession =
     "sessionId" in params && params.sessionId !== undefined
-      ? await client.send("session.connect", { id: params.sessionId })
-      : await client.send("session.create", {
+      ? await client.session.connect({ id: params.sessionId })
+      : await client.session.create({
           agent: params.agent,
           cwd: params.cwd,
           worktree: params.worktree,

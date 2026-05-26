@@ -16,6 +16,7 @@ import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
+import { send } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -175,10 +176,8 @@ test(
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
     const firstRun = await client.action.run({
-      body: {
-        actionName: "review",
-        cwd: repoDir,
-      },
+      actionName: "review",
+      cwd: repoDir,
     })
     expect(firstRun.session.agentName).toBe("Node Agent A")
 
@@ -199,15 +198,13 @@ test(
     })
 
     const secondRun = await client.action.run({
-      body: {
-        actionName: "review",
-        cwd: repoDir,
-      },
+      actionName: "review",
+      cwd: repoDir,
     })
     expect(secondRun.session.agentName).toBe("Node Agent B")
 
-    await client.session.shutdown({ body: { id: firstRun.session.id } })
-    await client.session.shutdown({ body: { id: secondRun.session.id } })
+    await client.session.shutdown({ id: firstRun.session.id })
+    await client.session.shutdown({ id: secondRun.session.id })
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
 )
@@ -275,7 +272,7 @@ test(
     for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
       (value) => value != null,
     )) {
-      await client.send("session.shutdown", { id: sessionId })
+      await send(client, "session.shutdown", { id: sessionId })
     }
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,

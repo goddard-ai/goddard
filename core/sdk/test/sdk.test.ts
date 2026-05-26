@@ -23,11 +23,7 @@ function createMockRouteClient(
   send: ReturnType<typeof vi.fn>,
   subscribe: ReturnType<typeof vi.fn>,
 ): GoddardClient {
-  const base = {
-    send: (name: string, payload?: unknown) => send(name, payload),
-    subscribe: (target: unknown, onMessage: (payload: unknown) => void) =>
-      subscribe(target, onMessage),
-  }
+  const base = {}
 
   return new Proxy(base, {
     get(target, property) {
@@ -109,10 +105,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onItem = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toBe("inbox.item")
         handler({
           item: {
@@ -381,10 +374,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const unsubscribe = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
           name: "session.messageEvents",
           filter: { id: "ses_1" },
@@ -847,10 +837,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const unsubscribe = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
           name: "workforce.event",
           filter: { rootDir: "/repo" },
@@ -918,7 +905,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   })
 
   test("AgentSession.cancel uses the daemon-owned cancel path", async () => {
-    const daemonSend = vi.fn().mockResolvedValueOnce({
+    const cancel = vi.fn().mockResolvedValueOnce({
       id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [],
@@ -928,7 +915,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       "acp-session-1",
       {} as never,
       {
-        send: daemonSend,
+        session: {
+          cancel,
+        },
       } as never,
       vi.fn(),
     )
@@ -939,13 +928,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       abortedQueue: [],
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("session.cancel", {
+    expect(cancel).toHaveBeenCalledWith({
       id: "ses_daemon-session-1",
     })
   })
 
   test("AgentSession.steer uses the daemon-owned steer path", async () => {
-    const daemonSend = vi.fn().mockResolvedValueOnce({
+    const steer = vi.fn().mockResolvedValueOnce({
       id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
@@ -955,7 +944,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       "acp-session-1",
       {} as never,
       {
-        send: daemonSend,
+        session: {
+          steer,
+        },
       } as never,
       vi.fn(),
     )
@@ -966,7 +957,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       response: { stopReason: "end_turn" },
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("session.steer", {
+    expect(steer).toHaveBeenCalledWith({
       id: "ses_daemon-session-1",
       prompt: "Focus on the lint failure.",
     })

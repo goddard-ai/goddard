@@ -10,6 +10,7 @@ import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
+import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -44,7 +45,7 @@ test("daemon submit request requires a valid session token", async () => {
 
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("pr.submit", {
+      send(client, "pr.submit", {
         token: "",
         cwd: process.cwd(),
         title: "Ship daemon security",
@@ -98,7 +99,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("pr.submit", {
+      send(client, "pr.submit", {
         token: "tok_session",
         cwd: repoDir,
         title: "Ship daemon security",
@@ -166,7 +167,7 @@ test("daemon submit request enforces trusted repo context and records created PR
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
-    await client.send("pr.submit", {
+    await send(client, "pr.submit", {
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -218,7 +219,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     scope: "Session",
     headline: "Ship daemon security",
   })
-  await expect(client.send("pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
+  await expect(send(client, "pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
     pullRequest: {
       id: pullRequest!.id,
       owner: "trusted",
@@ -257,7 +258,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("pr.reply", {
+    send(client, "pr.reply", {
       token: "tok_session",
       cwd: repoDir,
       message: "Updated per review",
@@ -283,7 +284,7 @@ test("daemon reply request records pull request checkout locations", async () =>
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("pr.reply", {
+  await send(client, "pr.reply", {
     token: "tok_session",
     cwd: repoDir,
     message: "Updated per review",
@@ -340,7 +341,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     mutation: string
     status: string
   }> = []
-  const unsubscribe = await client.subscribe("inbox.item", ({ item, mutation }) => {
+  const unsubscribe = await subscribe(client, "inbox.item", ({ item, mutation }) => {
     if (item.entityId === "ses_inbox") {
       inboxEvents.push({
         mutation,
@@ -352,7 +353,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     unsubscribe()
   })
 
-  await client.send("session.reportTurnEnded", {
+  await send(client, "session.reportTurnEnded", {
     id: "ses_inbox",
     scope: "Checkout flow",
     headline: "Decision ready for review",
@@ -367,12 +368,12 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     headline: "Decision ready for review",
   })
 
-  await client.send("inbox.update", {
+  await send(client, "inbox.update", {
     entityId: "ses_inbox",
     status: "read",
   })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
-  await client.send("session.complete", { id: "ses_inbox" })
+  await send(client, "session.complete", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
   await waitFor(async () => inboxEvents.length >= 3)
   expect(inboxEvents).toEqual([
@@ -401,7 +402,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.request", {
+    send(client, "workforce.request", {
       rootDir: otherRootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -429,7 +430,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.respond", {
+    send(client, "workforce.respond", {
       rootDir: otherRootDir,
       output: "done",
       token,
@@ -455,7 +456,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.request", {
+    send(client, "workforce.request", {
       rootDir,
       targetAgentId: "root",
       input: "Ship it.",

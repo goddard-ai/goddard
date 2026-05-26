@@ -13,6 +13,7 @@ import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
+import { send } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -665,7 +666,7 @@ async function isDaemonHealthy(port: number) {
     const client = createDaemonIpcClient({
       daemonUrl: createDaemonUrl(port),
     })
-    const response = await client.send("daemon.health")
+    const response = await send(client, "daemon.health")
     return response.ok === true
   } catch {
     return false
