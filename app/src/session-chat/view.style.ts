@@ -101,6 +101,7 @@ export default {
     height: "30px",
     border: "1px solid token(colors.border)",
     borderRadius: "6px",
+    padding: "0",
     backgroundColor: "surface",
     color: "muted",
     _hover: {
@@ -121,6 +122,7 @@ export default {
       color: "accentStrong",
     },
     "& svg": {
+      flexShrink: "0",
       width: "18px",
       height: "18px",
     },
