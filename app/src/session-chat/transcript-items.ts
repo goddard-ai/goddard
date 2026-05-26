@@ -20,6 +20,7 @@ import type {
   SessionTranscriptToolLocation,
   SessionTranscriptToolStatus,
   SessionTranscriptTurnStop,
+  SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
 import { promptBlocksToTranscriptContent } from "./composer-content.ts"
 
@@ -1014,6 +1015,40 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     )
   }
 
+  function insertTurnWorkDrawer(
+    turn: SessionHistoryTurn,
+    turnWorkItems: readonly (SessionTranscriptThought | SessionTranscriptToolCall)[],
+  ) {
+    if (turnWorkItems.length === 0) {
+      return
+    }
+
+    const duration = formatTurnDuration(turn.startedAt, turn.completedAt)
+    const workDrawer: SessionTranscriptWorkDrawer = {
+      kind: "workDrawer",
+      id: `${turn.turnId}:work`,
+      title: `${turn.completedAt === null ? "Working" : "Worked"}${
+        duration ? ` for ${duration}` : ""
+      }`,
+      expandedByDefault: turn.completedAt === null,
+      items: turnWorkItems,
+    }
+    const agentRowIndex = agentRowIndexes.get(`${turn.turnId}:agent`)
+
+    if (agentRowIndex == null) {
+      messages.push(workDrawer)
+      return
+    }
+
+    messages.splice(agentRowIndex, 0, workDrawer)
+
+    for (const [rowKey, rowIndex] of agentRowIndexes) {
+      if (rowIndex >= agentRowIndex) {
+        agentRowIndexes.set(rowKey, rowIndex + 1)
+      }
+    }
+  }
+
   function appendPermissionRequest(
     session: DaemonSession,
     turnId: string,
@@ -1144,22 +1179,10 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
       }
     }
 
+    insertTurnWorkDrawer(turn, turnWorkItems)
+
     if (turnIndex === input.turns.length - 1) {
       appendLatestDaemonSummary(input.session)
-    }
-
-    if (turnWorkItems.length > 0) {
-      const duration = formatTurnDuration(turn.startedAt, turn.completedAt)
-
-      messages.push({
-        kind: "workDrawer",
-        id: `${turn.turnId}:work`,
-        title: `${turn.completedAt === null ? "Working" : "Worked"}${
-          duration ? ` for ${duration}` : ""
-        }`,
-        expandedByDefault: turn.completedAt === null,
-        items: turnWorkItems,
-      })
     }
 
     const turnStopRow = createTurnStopRow(input.session, turn)

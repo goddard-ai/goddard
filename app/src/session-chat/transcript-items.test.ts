@@ -353,6 +353,77 @@ test("buildSessionChatTranscript merges tool_call updates into one stable work d
   ])
 })
 
+test("buildSessionChatTranscript renders turn work before the turn assistant message", () => {
+  const session = createSession(null)
+  const turns = createTurns([
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [{ type: "text", text: "Inspect the transcript implementation." }],
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-1",
+          title: "Read transcript.tsrx",
+          kind: "read",
+          status: "completed",
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "The transcript builder appends each turn's work drawer.",
+          },
+        },
+      },
+    },
+  ])
+
+  expect(
+    withoutTurnStopRows(createTranscriptMessages(session, turns)).map((message) => message.id),
+  ).toEqual(["ses_session-1:context", "turn-1:prompt:0", "turn-1:work", "turn-1:agent"])
+})
+
+test("buildSessionChatTranscript renders turn work before the latest daemon summary", () => {
+  const session = createSession("Finished after reading transcript state.")
+  const turns = createTurns([
+    {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: session.acpSessionId,
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-1",
+          title: "Read transcript state",
+          kind: "read",
+          status: "completed",
+        },
+      },
+    },
+  ])
+
+  expect(
+    withoutTurnStopRows(createTranscriptMessages(session, turns)).map((message) => message.id),
+  ).toEqual(["ses_session-1:context", "turn-1:work", "ses_session-1:latest"])
+})
+
 test("buildSessionChatTranscript renders permission requests and their response states", () => {
   const session = createSession(null)
   const pendingRequest = createPermissionRequestMessage("permission-pending", {
