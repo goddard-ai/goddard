@@ -1,15 +1,11 @@
 import { defineConfig } from "@pandacss/dev"
 
-import { globalCss } from "./src/panda-css/global.css.ts"
-
 export default defineConfig({
-  preflight: true,
   presets: [],
   include: ["./src/**/*.{js,jsx,ts,tsx}"],
   exclude: [],
   outdir: "styled-system",
   jsxFramework: "preact",
-  globalCss,
   theme: {
     semanticTokens: {
       colors: {
