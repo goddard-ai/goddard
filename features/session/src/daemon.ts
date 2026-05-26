@@ -215,9 +215,8 @@ export const sessionPlugin = definePlugin({
             }
           },
           messageEvents: async function* (ctx) {
-            const signal = (ctx as unknown as { readonly signal: AbortSignal }).signal
             const { query } = ctx
-            yield* subscribeSessionMessages(query.id, signal)
+            yield* subscribeSessionMessages(query.id, ctx.request.signal)
           },
         },
       },

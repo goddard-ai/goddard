@@ -217,11 +217,10 @@ export const workforcePlugin = definePlugin({
               actor,
             )
           },
-          event: async function* (ctx) {
-            const signal = (ctx as unknown as { readonly signal: AbortSignal }).signal
+          event: async (ctx) => {
             const { query } = ctx
             const status = await workforce.getWorkforce(query.rootDir)
-            yield* subscribeWorkforceEvents(status.rootDir, signal)
+            return subscribeWorkforceEvents(status.rootDir, ctx.request.signal)
           },
         },
       },

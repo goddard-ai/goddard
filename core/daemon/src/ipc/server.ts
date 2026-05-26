@@ -11,7 +11,7 @@ import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
@@ -94,19 +94,17 @@ export async function startDaemonServer(
   } satisfies DaemonSetupSubstrate
 
   const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client)
-  const requestHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "request")
-  const streamHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "stream")
-
-  const requestHandlers: Record<string, (payload: any) => any> = {
-    "daemon.health": async () => ({ ok: true }),
-    ...requestHandlersFromPlugins,
+  const ipcHandlers = {
+    daemon: {
+      health: async () => ({ ok: true }),
+    },
+    ...pluginSetup.ipcHandlers,
   }
 
   const ipcServer = createServer({
     port: runtime.port,
-    schema: daemonIpcSchema as any,
-    handlers: requestHandlers as any,
-    streamHandlers: streamHandlersFromPlugins as any,
+    routes: daemonIpcRoutes,
+    handlers: ipcHandlers as any,
     runHandler: ({ payload }, handler) => {
       const context: IpcRequestContext = {
         opId: randomUUID(),
@@ -210,7 +208,7 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient
     const setup = await plugin.setup?.(context)
 
     if (setup?.ipcHandlers) {
-      Object.assign(ipcHandlers, flattenIpcHandlers(setup.ipcHandlers))
+      mergeIpcHandlers(ipcHandlers, setup.ipcHandlers as Record<string, unknown>)
     }
 
     if (setup?.close) {
@@ -232,48 +230,6 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient
       }
     },
   }
-}
-
-function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
-  const requestHandlers: Record<string, unknown> = {}
-
-  function visit(node: unknown, path: string[]) {
-    if (typeof node === "function") {
-      requestHandlers[path.join(".")] = (payload: unknown) => {
-        const input =
-          typeof payload === "object" &&
-          payload !== null &&
-          "signal" in payload &&
-          payload.signal instanceof AbortSignal
-            ? (payload as { readonly query?: unknown; readonly signal?: AbortSignal })
-            : null
-        return node({
-          body: payload,
-          query: input ? input.query : payload,
-          signal: input?.signal,
-        })
-      }
-      return
-    }
-
-    if (typeof node !== "object" || !node) {
-      return
-    }
-
-    for (const [key, child] of Object.entries(node)) {
-      visit(child, [...path, key])
-    }
-  }
-
-  visit(ipcHandlers, [])
-  return requestHandlers
-}
-
-function filterPluginIpcHandlers(ipcHandlers: Record<string, unknown>, kind: "request" | "stream") {
-  const routeNames = kind === "request" ? daemonIpcSchema.requests : daemonIpcSchema.streams
-  return Object.fromEntries(
-    Object.entries(ipcHandlers).filter(([name]) => name in routeNames),
-  ) as Record<string, (payload: any) => any>
 }
 
 function createPluginBackendContext(
@@ -303,6 +259,33 @@ function selectBackendClientRoutes(routes: Record<string, any>, source: Record<s
   }
 
   return context
+}
+
+function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string, unknown>) {
+  for (const [key, sourceValue] of Object.entries(source)) {
+    const targetValue = target[key]
+    if (!targetValue) {
+      target[key] = sourceValue
+      continue
+    }
+
+    if (
+      typeof targetValue === "object" &&
+      targetValue !== null &&
+      typeof sourceValue === "object" &&
+      sourceValue !== null &&
+      typeof targetValue !== "function" &&
+      typeof sourceValue !== "function"
+    ) {
+      mergeIpcHandlers(
+        targetValue as Record<string, unknown>,
+        sourceValue as Record<string, unknown>,
+      )
+      continue
+    }
+
+    throw new Error(`Duplicate IPC handler: ${key}`)
+  }
 }
 
 function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {

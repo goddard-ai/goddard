@@ -76,31 +76,18 @@ out of the central SDK file.
 Browser-safe explicit client:
 
 ```ts
-import { createClient } from "@goddard-ai/ipc"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { createRouteClient, ndjson } from "@goddard-ai/ipc"
+import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const desktopHost = globalThis.desktopHost
 
 const sdk = new GoddardSdk({
-  client: createClient(daemonIpcSchema, {
-    send(name, payload) {
-      return desktopHost.send({
-        daemonUrl: "http://127.0.0.1:49827/",
-        name,
-        payload,
-      })
-    },
-    subscribe(name, filter, onMessage) {
-      return desktopHost.subscribe(
-        {
-          daemonUrl: "http://127.0.0.1:49827/",
-          name,
-          filter,
-        },
-        onMessage,
-      )
-    },
+  client: createRouteClient({
+    baseURL: "http://127.0.0.1:49827/",
+    routes: daemonIpcRoutes,
+    plugins: [ndjson.clientPlugin],
+    fetch: desktopHost.fetch,
   }),
 })
 

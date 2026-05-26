@@ -95,8 +95,7 @@ export const inboxPlugin = definePlugin({
           update: async ({ body }) => inbox.updateInboxItem(body),
           bulkUpdate: async ({ body }) => inbox.bulkUpdateInboxItems(body),
           item: async function* (ctx) {
-            const signal = (ctx as unknown as { readonly signal: AbortSignal }).signal
-            yield* subscribeInboxItems(signal)
+            yield* subscribeInboxItems(ctx.request.signal)
           },
         },
       },

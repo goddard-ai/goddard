@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createNodeClient } from "@goddard-ai/ipc/node"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
+import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
 import { afterEach, beforeEach, expect, test } from "bun:test"
@@ -64,8 +64,8 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     await daemon.close()
   })
 
-  const client = createLegacyDaemonClient(daemon.daemonUrl)
-  const discovered = await client.send("workforce.discoverCandidates", {
+  const client = createDaemonClient(daemon.daemonUrl)
+  const discovered = await client.workforce.discoverCandidates({
     rootDir: packageDir,
   })
   const normalizedRootDir = await normalizeWorkforceRootDir(repoDir)
@@ -76,7 +76,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     "packages/ui",
   ])
 
-  const initialized = await client.send("workforce.initialize", {
+  const initialized = await client.workforce.initialize({
     rootDir: packageDir,
     packageDirs: discovered.candidates.map((candidate: any) => candidate.rootDir),
   })
@@ -103,18 +103,18 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
     await daemon.close()
   })
 
-  const client = createLegacyDaemonClient(daemon.daemonUrl)
+  const client = createDaemonClient(daemon.daemonUrl)
   const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
 
-  await expect(
-    client.subscribe({ name: "workforce.event", filter: { rootDir } }, () => {}),
-  ).rejects.toThrow(`No workforce is running for ${normalizedRootDir}`)
+  await expect(client.workforce.event({ rootDir })).rejects.toThrow(
+    `No workforce is running for ${normalizedRootDir}`,
+  )
 })
 
-function createLegacyDaemonClient(daemonUrl: string) {
+function createDaemonClient(daemonUrl: string) {
   return createNodeClient(
     readDaemonTcpAddressFromDaemonUrl(daemonUrl),
-    daemonIpcSchema as any,
+    daemonIpcRoutes as any,
   ) as any
 }
 

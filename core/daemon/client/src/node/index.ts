@@ -71,11 +71,96 @@ export function resolveDaemonUrl(env: DaemonClientEnv = process.env) {
 
 /** Creates the default Node daemon IPC transport from one daemon URL. */
 function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
-  return createRouteClient({
+  const routeClient = createRouteClient({
     baseURL: input.daemonUrl,
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
+    onJsonError: async (response) => {
+      const body = (await response.json().catch(() => undefined)) as
+        | { error?: unknown; message?: unknown }
+        | undefined
+      const message =
+        typeof body?.error === "string"
+          ? body.error
+          : typeof body?.message === "string"
+            ? body.message
+            : `Request failed with status ${response.status}`
+      throw new Error(message)
+    },
+  }) as Record<string, any>
+  const client = wrapRouteClient(routeClient)
+
+  return Object.assign(client, {
+    send: (name: string, payload?: any) => selectRouteFunction(client, name)(payload),
+    subscribe: async (target: any, onMessage: (payload: any) => void) => {
+      const abortController = new AbortController()
+      const name = typeof target === "string" ? target : target.name
+      const filter = typeof target === "string" ? undefined : target.filter
+      const stream = (await selectRouteFunction(client, name)(filter, {
+        signal: abortController.signal,
+      })) as AsyncIterable<unknown>
+      const done = (async () => {
+        for await (const payload of stream) {
+          onMessage(payload)
+        }
+      })()
+
+      return () => {
+        abortController.abort()
+        void done.catch(() => {})
+      }
+    },
   }) as unknown as DaemonIpcClient
+}
+
+function wrapRouteClient(client: Record<string, any>): Record<string, any> {
+  const wrappedClient: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(client)) {
+    if (typeof value === "function") {
+      wrappedClient[key] = (input?: unknown, options?: unknown) =>
+        value(normalizeRouteInput(input), options)
+      continue
+    }
+
+    wrappedClient[key] =
+      value && typeof value === "object" && key !== "clientConfig" ? wrapRouteClient(value) : value
+  }
+
+  return wrappedClient
+}
+
+function normalizeRouteInput(input: unknown) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input
+  }
+
+  const entries = Object.entries(input)
+  if (entries.length === 1 && (entries[0]?.[0] === "body" || entries[0]?.[0] === "query")) {
+    return entries[0][1]
+  }
+
+  return input
+}
+
+function selectRouteFunction(client: Record<string, any>, name: string) {
+  let node: unknown = client
+  for (const segment of normalizeRouteName(name).split(".")) {
+    if (!node || typeof node !== "object" || !(segment in node)) {
+      throw new Error(`Unknown daemon IPC route: ${name}`)
+    }
+    node = (node as Record<string, unknown>)[segment]
+  }
+
+  if (typeof node !== "function") {
+    throw new Error(`Daemon IPC route is not callable: ${name}`)
+  }
+
+  return node
+}
+
+function normalizeRouteName(name: string) {
+  return name === "session.message" ? "session.messageEvents" : name
 }
 
 function resolveDaemonPort(env: DaemonClientEnv) {
