@@ -83,7 +83,7 @@ type InitializedHistoryTurnSeed = {
 }
 
 /** Parsed streamed text chunk shape that can be merged in stored turn history. */
-type AgentMessageChunkParts = {
+type StreamedTextChunkParts = {
   params: Record<string, unknown>
   update: Record<string, unknown>
   content: Record<string, unknown> & {
@@ -97,8 +97,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-/** Extracts one mergeable streamed agent text chunk from ACP session history. */
-function getAgentMessageChunkParts(message: acp.AnyMessage) {
+/** Extracts one mergeable streamed text chunk from ACP session history. */
+function getStreamedTextChunkParts(message: acp.AnyMessage) {
   if (
     !isRecord(message) ||
     "method" in message === false ||
@@ -113,7 +113,11 @@ function getAgentMessageChunkParts(message: acp.AnyMessage) {
   }
 
   const update = isRecord(params.update) ? params.update : null
-  if (!update || update.sessionUpdate !== "agent_message_chunk") {
+  if (
+    !update ||
+    (update.sessionUpdate !== "agent_message_chunk" &&
+      update.sessionUpdate !== "agent_thought_chunk")
+  ) {
     return null
   }
 
@@ -130,7 +134,7 @@ function getAgentMessageChunkParts(message: acp.AnyMessage) {
       type: "text",
       text: content.text,
     },
-  } satisfies AgentMessageChunkParts
+  } satisfies StreamedTextChunkParts
 }
 
 /** Appends one ACP history entry while folding adjacent streamed agent text chunks together. */
@@ -139,10 +143,14 @@ export function appendSessionHistoryMessage(history: acp.AnyMessage[], message: 
     return
   }
 
-  const previousChunk = history.length > 0 ? getAgentMessageChunkParts(history.at(-1)!) : null
-  const nextChunk = getAgentMessageChunkParts(message)
+  const previousChunk = history.length > 0 ? getStreamedTextChunkParts(history.at(-1)!) : null
+  const nextChunk = getStreamedTextChunkParts(message)
 
-  if (previousChunk && nextChunk) {
+  if (
+    previousChunk &&
+    nextChunk &&
+    previousChunk.update.sessionUpdate === nextChunk.update.sessionUpdate
+  ) {
     history[history.length - 1] = {
       ...message,
       params: {

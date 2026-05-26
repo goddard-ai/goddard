@@ -4,6 +4,7 @@ import type {
   SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
   SessionTranscriptToolContent,
+  SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
 import {
   ATTACHMENT_ROW_HEIGHT,
@@ -173,6 +174,21 @@ function estimatePlanUpdateRowHeight(message: SessionTranscriptPlanUpdate, maxWi
   return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 32
 }
 
+function estimateWorkDrawerRowHeight(message: SessionTranscriptWorkDrawer, maxWidth: number) {
+  let approximateLineCount = 1 + estimateLineCount(message.title, maxWidth)
+
+  if (message.expandedByDefault) {
+    for (const item of message.items) {
+      approximateLineCount +=
+        item.kind === "thought"
+          ? 1 + estimateLineCount(item.text, maxWidth)
+          : 1 + estimateLineCount(item.title, maxWidth)
+    }
+  }
+
+  return META_HEIGHT + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 28
+}
+
 /** Rough row estimate used before the real transcript row is measured. */
 export function estimateTranscriptRowHeight(message: SessionTranscriptItem, viewportWidth: number) {
   const textWidth = getTranscriptTextWidth(message, viewportWidth)
@@ -201,6 +217,10 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
 
   if (message.kind === "planUpdate") {
     return estimatePlanUpdateRowHeight(message, textWidth)
+  }
+
+  if (message.kind === "workDrawer") {
+    return estimateWorkDrawerRowHeight(message, textWidth)
   }
 
   let approximateLineCount = 2

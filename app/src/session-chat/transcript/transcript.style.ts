@@ -251,6 +251,112 @@ export default {
     whiteSpace: "pre-wrap",
   }),
 
+  workDrawer: css({
+    display: "grid",
+    gap: "10px",
+    width: "min(100%, 760px)",
+    border: "1px solid token(colors.border)",
+    borderRadius: "8px",
+    paddingBlock: "9px",
+    paddingInline: "10px",
+    backgroundColor: "surface",
+    color: "fg.default",
+  }),
+
+  workDrawerSummary: css({
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "7px",
+    minWidth: "0",
+    color: "fg.muted",
+    listStyle: "none",
+    outline: "none",
+    cursor: "pointer",
+    "&::marker": {
+      content: '""',
+    },
+    "&::-webkit-details-marker": {
+      display: "none",
+    },
+  }),
+
+  workDrawerChevron: css({
+    color: "fg.muted",
+    transition: "transform 140ms ease",
+    "details[open] &": {
+      transform: "rotate(90deg)",
+    },
+  }),
+
+  workDrawerTitle: css({
+    minWidth: "0",
+    fontSize: "0.84rem",
+    fontWeight: "650",
+    lineHeight: "1.45",
+    overflowWrap: "anywhere",
+  }),
+
+  workDrawerItemList: css({
+    display: "grid",
+    gap: "10px",
+    margin: "0",
+    paddingBlock: "8px 2px",
+    paddingInline: "22px 2px",
+    listStyle: "none",
+  }),
+
+  workDrawerItem: css({
+    display: "grid",
+    minWidth: "0",
+    listStyle: "none",
+  }),
+
+  workDrawerThought: css({
+    display: "grid",
+    gap: "4px",
+    minWidth: "0",
+  }),
+
+  workDrawerTool: css({
+    display: "grid",
+    gap: "6px",
+    minWidth: "0",
+  }),
+
+  workDrawerItemHeading: css({
+    color: "fg.default",
+    fontSize: "0.8rem",
+    fontWeight: "700",
+    lineHeight: "1.4",
+    overflowWrap: "anywhere",
+  }),
+
+  workDrawerDetailList: css({
+    display: "grid",
+    gap: "6px",
+    minWidth: "0",
+  }),
+
+  workDrawerDetailText: css({
+    color: "fg.muted",
+    fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
+    fontSize: "0.82rem",
+    fontWeight: "450",
+    lineHeight: "1.55",
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap",
+  }),
+
+  workDrawerDetailMono: css({
+    color: "fg.default",
+    fontFamily: '"SF Mono", "Monaco", monospace',
+    fontSize: "0.8rem",
+    lineHeight: "1.55",
+    overflowWrap: "anywhere",
+    whiteSpace: "pre-wrap",
+  }),
+
   permissionCard: css({
     display: "grid",
     gap: "12px",

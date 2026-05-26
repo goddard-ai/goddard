@@ -18,6 +18,7 @@ import { PlanUpdateTranscriptRow } from "./transcript/plan-update-row.tsrx"
 import { TextTranscriptRow } from "./transcript/text-row.tsrx"
 import { ToolTranscriptRow } from "./transcript/tool-row.tsrx"
 import { TurnStopTranscriptRow } from "./transcript/turn-stop-row.tsrx"
+import { WorkDrawerTranscriptRow } from "./transcript/work-drawer-row.tsrx"
 import type {
   SessionTranscriptItem,
   SessionTranscriptPermissionRequest,
@@ -25,6 +26,7 @@ import type {
   SessionTranscriptTextMessage,
   SessionTranscriptToolCall,
   SessionTranscriptTurnStop,
+  SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
 import { useTabContext } from "~/tab-context.tsrx"
 
@@ -70,7 +72,7 @@ type CoalescedToolTranscriptRow = {
 }
 
 type RenderTranscriptItem =
-  SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate
+  SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate | SessionTranscriptWorkDrawer
 
 type TranscriptRowContext = {
   item: RenderTranscriptItem;
@@ -120,6 +122,11 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
     }
 
     if (message.kind === "planUpdate") {
+      renderItems.push(message)
+      continue
+    }
+
+    if (message.kind === "workDrawer") {
       renderItems.push(message)
       continue
     }
@@ -257,6 +264,9 @@ component TranscriptRow(props: {
       return
     case "planUpdate":
       <PlanUpdateTranscriptRow message={item} />
+      return
+    case "workDrawer":
+      <WorkDrawerTranscriptRow message={item} />
       return
     case "turnStop":
       <TurnStopTranscriptRow
@@ -419,9 +429,11 @@ export component Transcript(props: TranscriptProps) {
         Math.round(
           item.kind === "toolGroup"
             ? estimateToolGroupRowHeight(item.toolCalls, viewport.width)
-            : item.kind === "turnStop"
-              ? TURN_STOP_ROW_HEIGHT
-              : estimateTranscriptRowHeight(item, viewport.width),
+            : item.kind === "workDrawer"
+              ? estimateTranscriptRowHeight(item, viewport.width)
+              : item.kind === "turnStop"
+                ? TURN_STOP_ROW_HEIGHT
+                : estimateTranscriptRowHeight(item, viewport.width),
         ),
       )
     },

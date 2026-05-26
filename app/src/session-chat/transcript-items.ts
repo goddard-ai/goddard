@@ -13,6 +13,7 @@ import type {
   SessionTranscriptPlanEntryStatus,
   SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
+  SessionTranscriptThought,
   SessionTranscriptToolCall,
   SessionTranscriptToolContent,
   SessionTranscriptToolKind,
@@ -56,6 +57,10 @@ type ParsedPermissionResponse =
 type ParsedTranscriptSessionUpdate =
   | {
       kind: "agentMessageChunk"
+      text: string
+    }
+  | {
+      kind: "agentThoughtChunk"
       text: string
     }
   | {
@@ -123,10 +128,7 @@ const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
   "usage_update",
 ])
 
-const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set([
-  "agent_thought_chunk",
-  "user_message_chunk",
-])
+const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set(["user_message_chunk"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -529,8 +531,8 @@ function extractToolCallUpdate(update: Record<string, unknown> | null) {
   return toolCallUpdate
 }
 
-function extractAgentMessageChunkText(update: Record<string, unknown>) {
-  if (update.sessionUpdate !== "agent_message_chunk") {
+function extractTextChunk(update: Record<string, unknown>, sessionUpdate: string) {
+  if (update.sessionUpdate !== sessionUpdate) {
     return undefined
   }
 
@@ -570,7 +572,7 @@ function parseTranscriptSessionUpdate(
     }
   }
 
-  const agentMessageChunkText = extractAgentMessageChunkText(update)
+  const agentMessageChunkText = extractTextChunk(update, "agent_message_chunk")
 
   if (agentMessageChunkText !== undefined) {
     if (agentMessageChunkText === null) {
@@ -583,6 +585,22 @@ function parseTranscriptSessionUpdate(
     return {
       kind: "agentMessageChunk",
       text: agentMessageChunkText,
+    }
+  }
+
+  const agentThoughtChunkText = extractTextChunk(update, "agent_thought_chunk")
+
+  if (agentThoughtChunkText !== undefined) {
+    if (agentThoughtChunkText === null) {
+      return {
+        kind: "unsupported",
+        reason: "agent_thought_chunk only supports text content.",
+      }
+    }
+
+    return {
+      kind: "agentThoughtChunk",
+      text: agentThoughtChunkText,
     }
   }
 
@@ -640,6 +658,13 @@ function createTextRow(input: Omit<SessionTranscriptTextMessage, "kind">) {
     kind: "message",
     ...input,
   } satisfies SessionTranscriptTextMessage
+}
+
+function createThoughtRow(input: Omit<SessionTranscriptThought, "kind">) {
+  return {
+    kind: "thought",
+    ...input,
+  } satisfies SessionTranscriptThought
 }
 
 function extractMessageErrorText(message: SessionHistoryMessage) {
@@ -790,10 +815,28 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
   } satisfies SessionTranscriptTurnStop
 }
 
+function formatTurnDuration(startedAt: string, completedAt: string | null) {
+  const startedTime = Date.parse(startedAt)
+  const completedTime = completedAt ? Date.parse(completedAt) : Date.now()
+
+  if (!Number.isFinite(startedTime) || !Number.isFinite(completedTime)) {
+    return null
+  }
+
+  const totalSeconds = Math.max(0, Math.round((completedTime - startedTime) / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+  }
+
+  return `${seconds}s`
+}
+
 /** Builds one session chat transcript from session state and ACP message history. */
 export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   const agentRowIndexes = new Map<string, number>()
-  const toolRowIndexes = new Map<string, number>()
   let previousPlanFingerprint: string | null = null
   const messages: SessionTranscriptItem[] = [
     createTextRow({
@@ -902,10 +945,12 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   function applyToolCallUpdate(
     session: DaemonSession,
     turnId: string,
+    turnWorkItems: Array<SessionTranscriptThought | SessionTranscriptToolCall>,
+    turnToolRowIndexes: Map<string, number>,
     toolCallUpdate: ParsedToolCallUpdate,
   ) {
     const rowKey = `${turnId}:tool:${toolCallUpdate.toolCallId}`
-    const rowIndex = toolRowIndexes.get(rowKey)
+    const rowIndex = turnToolRowIndexes.get(rowKey)
 
     if (rowIndex == null) {
       const toolKind = toolCallUpdate.toolKind ?? "other"
@@ -925,16 +970,16 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
         locations: toolCallUpdate.locations ?? [],
       }
 
-      toolRowIndexes.set(rowKey, messages.push(toolRow) - 1)
+      turnToolRowIndexes.set(rowKey, turnWorkItems.push(toolRow) - 1)
       return
     }
 
-    const existingRow = messages[rowIndex]
+    const existingRow = turnWorkItems[rowIndex]
     if (existingRow.kind !== "toolCall") {
       return
     }
 
-    messages[rowIndex] = {
+    turnWorkItems[rowIndex] = {
       ...existingRow,
       title: toolCallUpdate.title ?? existingRow.title,
       toolKind: toolCallUpdate.toolKind ?? existingRow.toolKind,
@@ -943,6 +988,37 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
       content: toolCallUpdate.content ?? existingRow.content,
       locations: toolCallUpdate.locations ?? existingRow.locations,
     }
+  }
+
+  function appendThoughtChunk(
+    session: DaemonSession,
+    turnId: string,
+    messageIndex: number,
+    turnWorkItems: Array<SessionTranscriptThought | SessionTranscriptToolCall>,
+    text: string,
+  ) {
+    if (text.length === 0) {
+      return
+    }
+
+    const lastItem = turnWorkItems.at(-1)
+
+    if (lastItem?.kind === "thought") {
+      turnWorkItems[turnWorkItems.length - 1] = {
+        ...lastItem,
+        text: `${lastItem.text}${text}`,
+      }
+      return
+    }
+
+    turnWorkItems.push(
+      createThoughtRow({
+        id: `${turnId}:thought:${messageIndex}`,
+        authorName: session.agentName,
+        timestampLabel: "Thought",
+        text,
+      }),
+    )
   }
 
   function appendPermissionRequest(
@@ -1002,6 +1078,8 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   for (const [turnIndex, turn] of input.turns.entries()) {
     const isStreamingTurn = turn.completedAt === null
     const permissionResponsesByRequestId = buildPermissionResponsesByRequestId(turn.messages)
+    const turnWorkItems: Array<SessionTranscriptThought | SessionTranscriptToolCall> = []
+    const turnToolRowIndexes = new Map<string, number>()
 
     for (const [messageIndex, message] of turn.messages.entries()) {
       const promptContent = extractPromptContent(message)
@@ -1028,7 +1106,13 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
 
       if (sessionUpdate) {
         if (sessionUpdate.kind === "toolCall") {
-          applyToolCallUpdate(input.session, turn.turnId, sessionUpdate.toolCallUpdate)
+          applyToolCallUpdate(
+            input.session,
+            turn.turnId,
+            turnWorkItems,
+            turnToolRowIndexes,
+            sessionUpdate.toolCallUpdate,
+          )
           continue
         }
 
@@ -1039,6 +1123,17 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
             text: sessionUpdate.text,
             turnId: turn.turnId,
           })
+          continue
+        }
+
+        if (sessionUpdate.kind === "agentThoughtChunk") {
+          appendThoughtChunk(
+            input.session,
+            turn.turnId,
+            messageIndex,
+            turnWorkItems,
+            sessionUpdate.text,
+          )
           continue
         }
 
@@ -1058,6 +1153,20 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
 
     if (turnIndex === input.turns.length - 1) {
       appendLatestDaemonSummary(input.session)
+    }
+
+    if (turnWorkItems.length > 0) {
+      const duration = formatTurnDuration(turn.startedAt, turn.completedAt)
+
+      messages.push({
+        kind: "workDrawer",
+        id: `${turn.turnId}:work`,
+        title: `${turn.completedAt === null ? "Working" : "Worked"}${
+          duration ? ` for ${duration}` : ""
+        }`,
+        expandedByDefault: turn.completedAt === null,
+        items: turnWorkItems,
+      })
     }
 
     const turnStopRow = createTurnStopRow(input.session, turn)

@@ -249,7 +249,7 @@ test("buildSessionChatTranscript accumulates agent_message_chunk updates into on
   ])
 })
 
-test("buildSessionChatTranscript merges tool_call updates into one stable tool row", () => {
+test("buildSessionChatTranscript merges tool_call updates into one stable work drawer item", () => {
   const session = createSession(null)
   const turns = createTurns([
     {
@@ -320,25 +320,33 @@ test("buildSessionChatTranscript merges tool_call updates into one stable tool r
       content: [{ type: "text", text: "Inspect the transcript implementation." }],
     },
     {
-      kind: "toolCall",
-      id: "turn-1:tool:tool-1",
-      toolCallId: "tool-1",
-      authorName: "pi",
-      timestampLabel: "Tool",
-      title: "Read transcript.tsrx",
-      toolKind: "read",
-      status: "completed",
-      rawInput: { path: "/repo-a/app/src/session-chat/transcript.tsrx" },
-      content: [
+      kind: "workDrawer",
+      id: "turn-1:work",
+      title: "Worked for 1s",
+      expandedByDefault: false,
+      items: [
         {
-          type: "content",
-          text: "Loaded transcript layout and measured row logic.",
-        },
-      ],
-      locations: [
-        {
-          path: "/repo-a/app/src/session-chat/transcript.tsrx",
-          line: 12,
+          kind: "toolCall",
+          id: "turn-1:tool:tool-1",
+          toolCallId: "tool-1",
+          authorName: "pi",
+          timestampLabel: "Tool",
+          title: "Read transcript.tsrx",
+          toolKind: "read",
+          status: "completed",
+          rawInput: { path: "/repo-a/app/src/session-chat/transcript.tsrx" },
+          content: [
+            {
+              type: "content",
+              text: "Loaded transcript layout and measured row logic.",
+            },
+          ],
+          locations: [
+            {
+              path: "/repo-a/app/src/session-chat/transcript.tsrx",
+              line: 12,
+            },
+          ],
         },
       ],
     },
@@ -641,24 +649,53 @@ test("buildSessionChatTranscript ignores routed session/update payloads without 
   ])
 })
 
-test("buildSessionChatTranscript ignores non-transcript chunk updates without logging", () => {
+test("buildSessionChatTranscript groups thought chunks in the turn work drawer", () => {
   const session = createSession(null)
-  const turns = createTurns([
-    {
-      jsonrpc: "2.0",
-      method: "session/update",
-      params: {
-        sessionId: session.acpSessionId,
-        update: {
-          sessionUpdate: "agent_thought_chunk",
-          content: {
-            type: "text",
-            text: "Hidden reasoning should not render.",
+  const turns = createTurns(
+    [
+      {
+        jsonrpc: "2.0",
+        id: "prompt-1",
+        method: "session/prompt",
+        params: {
+          sessionId: session.acpSessionId,
+          prompt: [{ type: "text", text: "Inspect the current task." }],
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: session.acpSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Read the request. ",
+            },
           },
         },
       },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: session.acpSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Checked the transcript model.",
+            },
+          },
+        },
+      },
+    ],
+    {
+      startedAt: "2026-04-14T00:00:00.000Z",
+      completedAt: "2026-04-14T00:10:25.000Z",
     },
-  ])
+  )
 
   const errors: unknown[][] = []
   const originalConsoleError = console.error
@@ -675,6 +712,29 @@ test("buildSessionChatTranscript ignores non-transcript chunk updates without lo
         authorName: "System",
         timestampLabel: "active",
         content: [{ type: "text", text: "Working directory: /repo-a" }],
+      },
+      {
+        kind: "message",
+        id: "turn-1:prompt:0",
+        role: "user",
+        authorName: "You",
+        timestampLabel: "Prompt",
+        content: [{ type: "text", text: "Inspect the current task." }],
+      },
+      {
+        kind: "workDrawer",
+        id: "turn-1:work",
+        title: "Worked for 10m 25s",
+        expandedByDefault: false,
+        items: [
+          {
+            kind: "thought",
+            id: "turn-1:thought:1",
+            authorName: "pi",
+            timestampLabel: "Thought",
+            text: "Read the request. Checked the transcript model.",
+          },
+        ],
       },
     ])
   } finally {

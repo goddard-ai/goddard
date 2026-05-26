@@ -77,6 +77,27 @@ export type SessionTranscriptToolCall = {
   locations: readonly SessionTranscriptToolLocation[]
 }
 
+/** One normalized thought chunk shown inside a turn work drawer. */
+export type SessionTranscriptThought = {
+  kind: "thought"
+  id: string
+  authorName: string
+  timestampLabel: string
+  text: string
+}
+
+/** One transcript item nested inside the turn work drawer. */
+export type SessionTranscriptWorkItem = SessionTranscriptThought | SessionTranscriptToolCall
+
+/** One collapsible transcript row that groups a turn's thoughts and tool calls. */
+export type SessionTranscriptWorkDrawer = {
+  kind: "workDrawer"
+  id: string
+  title: string
+  expandedByDefault: boolean
+  items: readonly SessionTranscriptWorkItem[]
+}
+
 /** ACP permission option kinds the session transcript can present back to the agent. */
 export type SessionTranscriptPermissionOptionKind =
   | "allow_once"
@@ -161,6 +182,7 @@ export type SessionTranscriptTurnStop = {
 /** One transcript row shown inside the session chat surface. */
 export type SessionTranscriptItem =
   | SessionTranscriptTextMessage
+  | SessionTranscriptWorkDrawer
   | SessionTranscriptToolCall
   | SessionTranscriptPermissionRequest
   | SessionTranscriptPlanUpdate
