@@ -25,6 +25,7 @@ import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -90,6 +91,18 @@ export default component SessionChatView(props: {
         }, [inbox, session.id])
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
+        const canNavigatePrompts = userPromptCount > 0
+
+        function skipToPrompt(direction: "next" | "previous") {
+          pageEvents.emit("scrollToPrompt", { direction })
+        }
+
+        useAppCommand(AppCommand.sessionChat.skipToPreviousPrompt, () => {
+          skipToPrompt("previous")
+        }, { active: canNavigatePrompts })
+        useAppCommand(AppCommand.sessionChat.skipToNextPrompt, () => {
+          skipToPrompt("next")
+        }, { active: canNavigatePrompts })
 
         async function loadOlderHistory() {
           if (!canLoadOlderHistory) {
@@ -129,16 +142,15 @@ export default component SessionChatView(props: {
               <div class={styles.headerActions}>
                 const workbenchTabSet = useWorkbenchTabSet()
                 const activeHeaderAction = page.headerAction.activeKey.value
-                const promptNavigationDisabled = userPromptCount === 0
 
                 <GoodTooltip ariaLabel="Previous prompt" content="Previous prompt">
                   <button
                     aria-label="Scroll to previous user prompt"
                     class={styles.headerActionButton}
-                    disabled={promptNavigationDisabled}
+                    disabled={!canNavigatePrompts}
                     type="button"
                     onClick={() => {
-                      pageEvents.emit("scrollToPrompt", { direction: "previous" })
+                      skipToPrompt("previous")
                     }}
                   >
                     <ChevronUp size={15} strokeWidth={2.1} />
@@ -149,10 +161,10 @@ export default component SessionChatView(props: {
                   <button
                     aria-label="Scroll to next user prompt"
                     class={styles.headerActionButton}
-                    disabled={promptNavigationDisabled}
+                    disabled={!canNavigatePrompts}
                     type="button"
                     onClick={() => {
-                      pageEvents.emit("scrollToPrompt", { direction: "next" })
+                      skipToPrompt("next")
                     }}
                   >
                     <ChevronDown size={15} strokeWidth={2.1} />

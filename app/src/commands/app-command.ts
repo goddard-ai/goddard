@@ -2,6 +2,8 @@ import { signal } from "@preact/signals"
 import {
   Bot,
   Brain,
+  ChevronDown,
+  ChevronUp,
   Command,
   Folder,
   FolderOpen,
@@ -181,6 +183,16 @@ export const AppCommand = defineAppCommands({
     submit: {
       label: "Session Input: Submit",
       icon: SendHorizontal,
+    },
+  },
+  sessionChat: {
+    skipToPreviousPrompt: {
+      label: "Skip to Previous Prompt",
+      icon: ChevronUp,
+    },
+    skipToNextPrompt: {
+      label: "Skip to Next Prompt",
+      icon: ChevronDown,
     },
   },
 })
