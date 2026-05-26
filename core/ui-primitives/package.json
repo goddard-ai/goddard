@@ -1,0 +1,34 @@
+{
+  "name": "@goddard-ai/ui-primitives",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.ts"
+      },
+      "bun": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "bun run ./scripts/build.ts",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsrx-tsc --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
+    "@preact/signals": "^2.9.0",
+    "preact": "11.0.0-beta.1",
+    "tabbable": "^6.4.0"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.9.0",
+    "@tsrx/bun-plugin-preact": "^0.0.37"
+  }
+}

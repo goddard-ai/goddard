@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals"
+import { OverlayPortal } from "@goddard-ai/ui-primitives"
 import { X } from "lucide-react"
 
-import { OverlayPortal } from "./overlay/portal.tsrx"
 import styles from "./good-toaster.style.ts"
 
 type ToastType = "success" | "info" | "error"

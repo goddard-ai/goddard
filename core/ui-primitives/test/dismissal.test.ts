@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 
-import { startOverlayDismissal } from "./dismissal.ts"
-import { overlayStack } from "./stack.ts"
+import { startOverlayDismissal } from "../src/overlay/dismissal.ts"
+import { overlayStack } from "../src/overlay/stack.ts"
 
 test("outside pointer dismissal ignores pointer events inside nested overlay content", () => {
   const dialog = document.createElement("section")

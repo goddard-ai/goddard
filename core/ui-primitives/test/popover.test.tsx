@@ -3,7 +3,8 @@ import { expect, test } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
 
-import { Popover } from "./popover.tsrx"
+import { setOverlayPortalRoots } from "../src/overlay/portal.ts"
+import { Popover } from "../src/popover.tsrx"
 
 const menuPortalId = "menu-portal"
 
@@ -21,6 +22,9 @@ function renderPopover(props: { closeOnOutsidePointer?: boolean }) {
 
   menuRoot.id = menuPortalId
   document.body.append(anchor, menuRoot, container)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
 
   function TestHarness() {
     return (

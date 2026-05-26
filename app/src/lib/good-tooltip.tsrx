@@ -1,6 +1,6 @@
 /** Shared, pre-styled tooltip primitives for app UI chrome. */
 import styles from "./good-tooltip.style.ts"
-import { Tooltip } from "./tooltip.tsrx"
+import { Tooltip } from "@goddard-ai/ui-primitives"
 
 /** Attaches the shared app tooltip treatment to one trigger element. */
 export component GoodTooltip(props: {

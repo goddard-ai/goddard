@@ -27,6 +27,7 @@
     "@goddard-ai/schema": "workspace:^",
     "@goddard-ai/sdk": "workspace:^",
     "@goddard-ai/styled-system": "workspace:^",
+    "@goddard-ai/ui-primitives": "workspace:^",
     "@lexical/react": "^0.42.0",
     "@preact/signals": "^2.9.0",
     "@preact/signals-core": "^1.14.1",

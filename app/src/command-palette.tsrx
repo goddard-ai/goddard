@@ -8,7 +8,7 @@ import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandPaletteVisible } from "./commands/command-context.ts"
-import { Modal } from "./lib/modal.tsrx"
+import { Modal } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "./lib/search-query.ts"
 
 const preparedAppCommands = appCommandList.map(

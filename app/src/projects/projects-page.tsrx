@@ -6,7 +6,7 @@ import { useEffect, useId, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
-import { Modal } from "~/lib/modal.tsrx"
+import { Modal } from "@goddard-ai/ui-primitives"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { openProjectTab, ProjectsPageMutations } from "./mutations.ts"
 import { deriveProjectName } from "./project-name.ts"

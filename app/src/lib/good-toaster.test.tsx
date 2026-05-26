@@ -1,3 +1,4 @@
+import { setOverlayPortalRoots } from "@goddard-ai/ui-primitives"
 import { afterEach, expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
@@ -103,6 +104,9 @@ test("GoodToaster renders a polite live region with close buttons", async () => 
   const menuRoot = document.createElement("div")
   menuRoot.id = "menu-portal"
   document.body.append(container, menuRoot)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
 
   appToaster.create({ id: "info-1", title: "Saved" })
 

@@ -4,7 +4,7 @@ import type { RecordingSession } from "powerkeys"
 import { useEffect, useId, useRef, useState } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
-import { Modal } from "~/lib/modal.tsrx"
+import { Modal } from "@goddard-ai/ui-primitives"
 import styles from "./capture-dialog.style.ts"
 
 export component KeyboardShortcutCaptureDialog(props: {

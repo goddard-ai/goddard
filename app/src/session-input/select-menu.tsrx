@@ -7,7 +7,7 @@ import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { Popover } from "~/lib/popover.tsrx"
+import { Popover } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import styles from "./select-menu.style.ts"
 

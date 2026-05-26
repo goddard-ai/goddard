@@ -46,6 +46,7 @@
         "@goddard-ai/schema": "workspace:^",
         "@goddard-ai/sdk": "workspace:^",
         "@goddard-ai/styled-system": "workspace:^",
+        "@goddard-ai/ui-primitives": "workspace:^",
         "@lexical/react": "^0.42.0",
         "@preact/signals": "^2.9.0",
         "@preact/signals-core": "^1.14.1",
@@ -243,6 +244,20 @@
         "node-notifier": "^10.0.1",
         "radashi": "catalog:",
         "zod": "catalog:",
+      },
+    },
+    "core/ui-primitives": {
+      "name": "@goddard-ai/ui-primitives",
+      "version": "0.1.0",
+      "dependencies": {
+        "@floating-ui/dom": "^1.7.6",
+        "@preact/signals": "^2.9.0",
+        "preact": "11.0.0-beta.1",
+        "tabbable": "^6.4.0",
+      },
+      "devDependencies": {
+        "@happy-dom/global-registrator": "^20.9.0",
+        "@tsrx/bun-plugin-preact": "^0.0.37",
       },
     },
     "core/worktree-plugin": {
@@ -607,6 +622,8 @@
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
+
+    "@goddard-ai/ui-primitives": ["@goddard-ai/ui-primitives@workspace:core/ui-primitives"],
 
     "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
 

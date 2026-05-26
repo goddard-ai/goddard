@@ -5,7 +5,7 @@ import { useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { Popover } from "~/lib/popover.tsrx"
+import { Popover } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"

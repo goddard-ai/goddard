@@ -3,7 +3,8 @@ import { expect, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
 
-import { Modal } from "./modal.tsrx"
+import { Modal } from "../src/modal.tsrx"
+import { setOverlayPortalRoots } from "../src/overlay/portal.ts"
 
 async function flushEffects() {
   await act(async () => {
@@ -22,6 +23,9 @@ function renderModal(props: {
 
   dialogRoot.id = "dialog-portal"
   document.body.append(trigger, dialogRoot, container)
+  setOverlayPortalRoots({
+    dialog: dialogRoot,
+  })
   trigger.focus()
 
   function TestHarness() {

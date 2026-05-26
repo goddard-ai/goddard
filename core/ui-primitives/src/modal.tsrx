@@ -3,7 +3,7 @@ import { useId, useLayoutEffect, useRef } from "preact/hooks"
 
 import { startOverlayDismissal } from "./overlay/dismissal.ts"
 import { focusFirstElement, keepFocusInside, restoreFocus } from "./overlay/focus.ts"
-import { OverlayPortal } from "./overlay/portal.tsrx"
+import { OverlayPortal } from "./overlay/portal.ts"
 import { overlayStack } from "./overlay/stack.ts"
 
 export type ModalCloseReason = "escape" | "explicit" | "outside"

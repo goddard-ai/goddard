@@ -3,7 +3,7 @@ import { useListener } from "preact-sigma"
 import { lazy } from "preact/compat"
 import { useId, useMemo } from "preact/hooks"
 
-import { Modal } from "~/lib/modal.tsrx"
+import { Modal } from "@goddard-ai/ui-primitives"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { useAppCommand } from "./app-command.ts"
 import type { AppCommand as AppCommandType } from "./app-command.ts"

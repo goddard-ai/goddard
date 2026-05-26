@@ -1,7 +1,7 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
+import { OverlayPortal } from "@goddard-ai/ui-primitives"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
 
-import { MenuPortal } from "~/lib/menu-portal.tsrx"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsrx"
 import {
@@ -81,7 +81,7 @@ export component SessionInputMenu(props: {
     return
   }
 
-  <MenuPortal>
+  <OverlayPortal root="menu">
     <div
       {ref props.menuRef}
       class={inputMenuClass}
@@ -144,5 +144,5 @@ export component SessionInputMenu(props: {
         }
       </div>
     </div>
-  </MenuPortal>
+  </OverlayPortal>
 }
