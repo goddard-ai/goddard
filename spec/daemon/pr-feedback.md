@@ -1,20 +1,20 @@
 # PR Feedback Flow
 
-Real-time managed pull request feedback can trigger focused local PR feedback sessions without requiring a human to monitor a live event feed.
+Real-time feedback can trigger focused local handling without requiring a human to monitor a live event feed.
 
 ## Participants
-- Local Runtime Host — desktop app-managed background worker or another supervised local process with repository access.
-- Authenticated Goddard User — the developer identity that owns the daemon's stream and the managed pull requests routed onto it.
+- Local Runtime Host — app-managed background worker or another supervised local process with repository access.
+- Authenticated User — the developer identity that owns the stream and the pull requests routed onto it.
 - Reviewer — submits pull request comments or reviews on GitHub.
-- Goddard GitHub App — origin of managed pull request metadata and webhook events.
+- GitHub App — origin of managed metadata and webhook events.
 
 ## State Model
 
 `Idle -> Connected -> EventReceived -> EligibilityChecked -> FeedbackQueued -> FeedbackHandling -> FeedbackHandled -> Connected`
 
 ## Capabilities
-- Each daemon process maintains one authenticated event stream for the current Goddard user.
-- That stream may carry managed pull request feedback from multiple repositories when those pull requests are owned by the current Goddard user.
+- Each daemon process maintains one authenticated event stream for the current user.
+- That stream may carry feedback from multiple repositories when those pull requests are owned by the current user.
 - The runtime evaluates incoming events for PR feedback eligibility and queues work by pull request, never by repository subscription boundaries.
 - Each PR feedback session always uses the repository and pull request context carried by the event.
 - After each PR feedback session completes, the runtime returns to connected listening mode.
@@ -22,7 +22,7 @@ Real-time managed pull request feedback can trigger focused local PR feedback se
 ## Boundaries
 - Trigger only on pull request comment and review feedback events.
 - Consume a single authenticated stream per daemon process.
-- React only to managed pull requests owned by the authenticated Goddard user.
+- React only to pull requests owned by the authenticated user.
 - Avoid overlapping PR feedback handling for the same pull request.
 - Continue running until interrupted by host supervisor.
 - Stream disconnects should trigger reconnect attempts with bounded backoff.
@@ -33,4 +33,4 @@ Real-time managed pull request feedback can trigger focused local PR feedback se
 - This runtime must not reintroduce a terminal-native GitHub review surface.
 
 ## Rationale
-This runtime originally followed repository-scoped streams. That model no longer matched the actual ownership boundary for managed pull request automation, so the daemon now follows the authenticated Goddard user and consumes one unified stream across repositories.
+This runtime originally followed repository-scoped streams. That model no longer matched the ownership boundary, so the daemon now follows the authenticated user and consumes one unified stream across repositories.

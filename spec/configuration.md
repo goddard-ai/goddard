@@ -1,6 +1,6 @@
 # Configuration
 
-Goddard configuration is machine-readable and machine-writable across user, repository, entity, and runtime scopes.
+Configuration is machine-readable and machine-writable across user, repository, entity, and runtime scopes.
 
 ## Participants
 - Developer maintaining personal defaults across repositories
@@ -35,12 +35,12 @@ Goddard configuration is machine-readable and machine-writable across user, repo
 ## Resolution Model
 - Precedence is deterministic: global configuration is the baseline, local configuration overrides global, entity configuration overrides the inherited global and local defaults for a specific Loop or Action, and runtime configuration is the final override.
 - Persisted configuration resolves from user, repository, and entity JSON sources before any runtime override is applied.
-- Loops and Actions inherit the same user and repository baseline used for broader Goddard behavior, then apply any entity-specific defaults before execution begins.
+- Loops and Actions inherit the same user and repository baseline, then apply any entity-specific defaults before execution begins.
 - Configuration should resolve before execution begins so the active runtime operates against a stable view of intent.
 
 ## Daemon Refresh Behavior
 - A long-running daemon must apply changes to persisted user and repository configuration without requiring the daemon process to restart.
-- Updated persisted configuration affects future daemon-managed work only after the daemon has accepted the new persisted state.
+- Updated persisted configuration affects future work only after the daemon has accepted the new persisted state.
 - Work that already began under an earlier resolved configuration continues against that earlier configuration unless the operator starts a new invocation.
 - If a persisted configuration edit is invalid, the daemon must preserve the last valid behavior until the persisted configuration is corrected.
 
@@ -67,7 +67,7 @@ Goddard configuration is machine-readable and machine-writable across user, repo
 - Prompt content must not double as a configuration transport; document metadata is not a supported configuration surface.
 - Runtime overrides must remain ephemeral and must not implicitly rewrite persisted configuration.
 - Named entities should be discoverable through the same configuration roots used for baseline defaults so repository intent stays co-located.
-- Configuration behavior must remain aligned across SDK consumers and the desktop app; the app must not invent a parallel configuration model.
+- Configuration behavior must remain aligned across SDK consumers and the app; the app must not invent a parallel model.
 - This spec does not define exact configuration payload shapes.
 - This spec does not specify parser internals, merge algorithms, or validation library choices.
 - This spec does not document every possible configurable field for loops, actions, or runtime hosts.

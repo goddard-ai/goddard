@@ -1,13 +1,13 @@
 # Human Attention Inbox
 
-The daemon-local inbox helps humans decide which daemon-managed work needs attention now.
+The inbox helps humans decide which work needs attention now.
 
 ## Core Model
 
 - The inbox stores current attention state, not notification history.
 - Each inbox row belongs to exactly one daemon-owned entity.
-- Supported entities are daemon sessions and daemon-managed pull requests.
-- Inbox rows identify entities through Goddard-generated internal identifiers, not external service identifiers such as GitHub pull request numbers.
+- Supported entities are sessions and managed pull requests.
+- Inbox rows identify entities through internal identifiers, not external service identifiers such as GitHub pull request numbers.
 - The daemon owns inbox row creation and attention refreshes.
 - Clients may list inbox rows and update user workflow state, but they must not create rows or infer attention state independently.
 - Inbox state is local to one daemon store. It is not a backend-synced cross-device inbox.
@@ -18,8 +18,8 @@ The daemon should surface attention when:
 
 - a session reports that it is blocked;
 - a session turn ends without another entity taking responsibility for the turn's attention;
-- a daemon-managed pull request is created;
-- a daemon-managed pull request is updated by daemon-owned activity.
+- a managed pull request is created;
+- a managed pull request is updated by daemon activity.
 
 Daemon attention refreshes reopen the row as needing attention. A refresh should preserve the user's priority choice unless the daemon has a stronger explicit reason to change it.
 
