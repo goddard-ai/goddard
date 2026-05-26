@@ -1,8 +1,8 @@
 # Desktop App Intent Index
 
-The desktop app is the primary human-facing interface to the Goddard runtime. It is not a forked product surface with separate logic. The app should reflect the same daemon-backed control surfaces and backend-owned real-time activity used by other platform consumers.
+The app is the primary human-facing interface to the runtime. It is not a forked product surface with separate logic. It reflects the same daemon control surfaces and backend-owned real-time activity used by other platform consumers.
 
-The desktop app provides a unified workspace where developers can run sessions, review outputs, steer work, and move across repository, GitHub, spec, task, and roadmap context.
+It provides a unified workspace where developers can run sessions, review outputs, steer work, and move across repository, GitHub, spec, task, and roadmap context.
 
 ## Users
 - Developer/operator managing one or more repositories
@@ -12,7 +12,7 @@ The desktop app provides a unified workspace where developers can run sessions, 
 ## Boundaries
 - The app remains lightweight.
 - High-churn views handle streaming updates gracefully.
-- The app must not reintroduce a broad parallel CLI or other terminal-first primary workflow surface.
+- The app must not reintroduce a broad parallel CLI or terminal-first primary workflow.
 - The app must not implement a full in-app code editor.
 
 ## App Specs

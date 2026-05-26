@@ -4,11 +4,11 @@ This file captures durable cross-component flow guarantees. Wire formats, API pa
 
 ## PR Creation (User-Initiated)
 
-- Pull requests may be initiated from the desktop app or another approved host.
+- Pull requests may be initiated from the app or another approved host.
 - Pull request creation must pass through the platform's daemon and backend authority chain.
-- The backend records enough managed pull request ownership to route later feedback to the owning Goddard user.
-- Reviewer feedback on managed pull requests is routed through the authenticated stream for the owning Goddard user.
-- Receiving hosts update UI and local state from delivered managed pull request events.
+- The backend records enough ownership to route later feedback to the owning user.
+- Reviewer feedback is routed through the authenticated stream for the owner.
+- Receiving hosts update UI and local state from delivered events.
 
 ## Authentication (Lazy Device Flow)
 
@@ -18,16 +18,16 @@ This file captures durable cross-component flow guarantees. Wire formats, API pa
 
 ## Real-Time Event Subscription (Background Runtime)
 
-- Desktop app and background runtime hosts consume managed pull request events through an authenticated user-scoped stream.
-- Managed pull request events owned by the authenticated Goddard user may arrive from multiple repositories over one stream.
-- Unmanaged pull requests and events owned by other Goddard users must not be delivered on that stream.
+- App and background hosts consume events through an authenticated user-scoped stream.
+- Events owned by the authenticated user may arrive from multiple repositories over one stream.
+- Unmanaged pull requests and events owned by other users must not be delivered on that stream.
 - Local hosts may use delivered feedback events to update workspace state or launch PR feedback handling.
 
 ## Workforce Orchestration (Daemon-Owned)
 
 - Workforce control starts through an approved client, but runtime ownership remains with the daemon.
 - The daemon reconstructs workforce state from durable repository-local intent before admitting new work.
-- Operators and agents may append delegated work through daemon-backed workforce controls.
+- Operators and agents may append delegated work through daemon controls.
 - Each newly handled request runs in a fresh agent session.
 - The daemon validates workforce changes, records them durably, and exposes current status to approved clients.
 

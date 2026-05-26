@@ -1,10 +1,10 @@
 # Daemon-Owned Workforce Orchestration
 
-Repository-scoped multi-agent delegation is owned by the daemon so workforce lifecycle, recovery, and coordination are not split across individual clients.
+Multi-agent delegation is owned by the daemon so lifecycle, recovery, and coordination are not split across individual clients.
 
 ## Participants
 - Operator — starts, stops, inspects, and mutates workforce state through approved clients.
-- Daemon Runtime — owns repository-scoped workforce lifecycle, validation, queue projection, and recovery.
+- Daemon Runtime — owns lifecycle, validation, queue projection, and recovery.
 - Root Agent — holds repository-wide coordination responsibility.
 - Domain Agent — owns a constrained domain and handles delegated requests within that domain.
 - SDK and Operational CLI Clients — thin control and observation surfaces for the daemon-owned runtime.
@@ -20,7 +20,7 @@ Repository-scoped multi-agent delegation is owned by the daemon so workforce lif
 4. Each agent receives eligible requests sequentially within its owned domain.
 5. Each handled request runs in a fresh agent session with ownership rules, recent workforce context, and daemon-enforced git controls.
 6. Workforce domain agents intentionally share one repository working tree even when they have separate ownership boundaries.
-7. Agents may respond, suspend, or delegate additional work through daemon-backed workforce controls.
+7. Agents may respond, suspend, or delegate additional work through daemon controls.
 8. A response is a validation gate rather than a blind completion signal: the daemon validates attributable git state and only then advances the queue.
 9. Operators and clients inspect current workforce status through the daemon rather than by managing parallel watcher state.
 

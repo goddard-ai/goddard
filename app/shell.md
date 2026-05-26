@@ -1,6 +1,6 @@
 # Desktop App Shell
 
-The desktop shell lets developers move between Goddard domains without losing repository context.
+The shell lets developers move between domains without losing repository context.
 
 ## Users
 - Developer/operator moving across repository operations
@@ -20,6 +20,6 @@ The desktop shell lets developers move between Goddard domains without losing re
 ## Boundaries
 - The shell must remain lightweight.
 - The app must not become a full in-app code editor.
-- Shell behavior must not fork platform behavior away from SDK or daemon-backed contracts.
+- Shell behavior must not fork platform behavior away from SDK or daemon contracts.
 - This spec does not define visual styling, component hierarchy, or implementation framework details.
 - The shell does not replace the developer's existing editor for code-authoring workflows.
