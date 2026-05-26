@@ -29,6 +29,44 @@ function parseThinkingModelName(name: string) {
   }
 }
 
+function parseThinkingModelId(modelId: string) {
+  const match = /^(?<baseName>.+?)\/(?<thinking>[^/]+)$/.exec(modelId.trim())
+  if (!match?.groups) {
+    return null
+  }
+
+  const normalizedThinking = match.groups.thinking
+    .trim()
+    .replace(/[\s_-]+/g, "")
+    .toLowerCase()
+
+  if (!thinkingLevelOrder.includes(normalizedThinking as (typeof thinkingLevelOrder)[number])) {
+    return null
+  }
+
+  return {
+    baseName: match.groups.baseName.trim(),
+    thinkingValue: normalizedThinking,
+  }
+}
+
+function parseThinkingModel(model: acp.ModelInfo) {
+  const parsedName = parseThinkingModelName(model.name)
+  if (parsedName) {
+    return parsedName
+  }
+
+  const parsedId = parseThinkingModelId(model.modelId)
+  if (!parsedId) {
+    return null
+  }
+
+  return {
+    ...parsedId,
+    baseName: model.name.trim() || parsedId.baseName,
+  }
+}
+
 function sortThinkingOptions(values: Iterable<string>) {
   return [...new Set(values)].sort((left, right) => {
     const leftIndex = thinkingLevelOrder.indexOf(left as (typeof thinkingLevelOrder)[number])
@@ -90,8 +128,8 @@ export function deriveSessionLaunchModelConfig(input: {
   }
 
   const parsedModels = input.models.availableModels.map((model) => {
-    const parsedName = parseThinkingModelName(model.name)
-    return parsedName ? { model, ...parsedName } : null
+    const parsedModel = parseThinkingModel(model)
+    return parsedModel ? { model, ...parsedModel } : null
   })
 
   if (parsedModels.some((model) => model === null)) {

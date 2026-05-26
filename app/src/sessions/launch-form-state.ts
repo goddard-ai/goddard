@@ -13,7 +13,7 @@ import { lens } from "~/lib/lens.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import {
-  findSelectConfigOption,
+  findSessionModeConfigOption,
   flattenConfigOptionValues,
 } from "~/session-input/config-options.ts"
 
@@ -114,7 +114,7 @@ export const SessionLaunchFormState = createModel(function () {
       null,
   )
   const modeOption = computed(() =>
-    findSelectConfigOption(launchModelConfig.value.configOptions, "mode"),
+    findSessionModeConfigOption(launchModelConfig.value.configOptions),
   )
   const effectiveCwd = computed(() => draftSubpackagePath.value ?? draftProjectPath.value)
 
@@ -257,10 +257,7 @@ export const SessionLaunchFormState = createModel(function () {
       draftModelId.value = currentModelId
     }
 
-    const resolvedModeOption = findSelectConfigOption(
-      resolvedLaunchModelConfig.configOptions,
-      "mode",
-    )
+    const resolvedModeOption = findSessionModeConfigOption(resolvedLaunchModelConfig.configOptions)
 
     if (!resolvedModeOption) {
       draftModeValue.value = null

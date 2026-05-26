@@ -49,3 +49,16 @@ export function findSelectConfigOption(
     ) ?? null
   )
 }
+
+/** Finds the approval/session-mode selector across known ACP adapter encodings. */
+export function findSessionModeConfigOption(configOptions: readonly SessionConfigOption[]) {
+  return (
+    findSelectConfigOption(configOptions, "mode") ??
+    configOptions.find(
+      (option): option is SelectSessionConfigOption =>
+        option.type === "select" &&
+        (option.id === "mode" || option.name.trim().toLowerCase() === "approval preset"),
+    ) ??
+    null
+  )
+}

@@ -629,6 +629,73 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("deriveSessionLaunchModelConfig folds slash-delimited thinking model ids", () => {
+    const launchModelConfig = deriveSessionLaunchModelConfig({
+      models: {
+        currentModelId: "gpt-5.5/high",
+        availableModels: [
+          {
+            modelId: "gpt-5.5/low",
+            name: "GPT-5.5",
+          },
+          {
+            modelId: "gpt-5.5/high",
+            name: "GPT-5.5",
+          },
+          {
+            modelId: "gpt-5.5-mini/low",
+            name: "GPT-5.5 Mini",
+          },
+          {
+            modelId: "gpt-5.5-mini/high",
+            name: "GPT-5.5 Mini",
+          },
+        ],
+      },
+      configOptions: [],
+    })
+
+    expect(launchModelConfig.models).toEqual({
+      currentModelId: "__goddard_model_0_gpt-5-5",
+      availableModels: [
+        {
+          modelId: "__goddard_model_0_gpt-5-5",
+          name: "GPT-5.5",
+          description: undefined,
+        },
+        {
+          modelId: "__goddard_model_1_gpt-5-5-mini",
+          name: "GPT-5.5 Mini",
+          description: undefined,
+        },
+      ],
+    })
+    expect(launchModelConfig.configOptions).toContainEqual(
+      expect.objectContaining({
+        category: "thought_level",
+        currentValue: "high",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      }),
+    )
+    expect(
+      launchModelConfig.resolveSelection({
+        modelId: launchModelConfig.models?.availableModels[1]?.modelId,
+        configOptions: [
+          {
+            configId: "_goddard_derived_thinking_level",
+            value: "low",
+          },
+        ],
+      }),
+    ).toEqual({
+      initialModelId: "gpt-5.5-mini/low",
+      initialConfigOptions: undefined,
+    })
+  })
+
   test("deriveSessionLaunchModelConfig folds thinking suffixes with explicit ACP thinking config options", () => {
     const input = {
       models: {

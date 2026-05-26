@@ -1,4 +1,4 @@
-import type { DaemonSession } from "@goddard-ai/sdk"
+import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
 import {
   AlertCircle,
@@ -29,7 +29,10 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { findSelectConfigOption } from "~/session-input/config-options.ts"
+import {
+  findSelectConfigOption,
+  findSessionModeConfigOption,
+} from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import {
   SessionConfigOptionSelector,
@@ -359,13 +362,17 @@ export default component SessionChatView(props: {
             const modePickerOpen = useSignal(false)
             const modelPickerOpen = useSignal(false)
             const thinkingPickerOpen = useSignal(false)
-            const modeOption = findSelectConfigOption(chat.session.configOptions, "mode")
+            const sessionModelConfig = deriveSessionLaunchModelConfig({
+              models: chat.session.models,
+              configOptions: chat.session.configOptions,
+            })
+            const modeOption = findSessionModeConfigOption(sessionModelConfig.configOptions)
             const thinkingOption = findSelectConfigOption(
-              chat.session.configOptions,
+              sessionModelConfig.configOptions,
               "thought_level",
             )
             const modelItems: SessionInputSelectItem[] =
-              chat.session.models?.availableModels.map(
+              sessionModelConfig.models?.availableModels.map(
                 (model) => ({
                   value: model.modelId,
                   label: model.name,
@@ -376,6 +383,57 @@ export default component SessionChatView(props: {
                 }),
               ) ??
                 []
+            const currentModelId = sessionModelConfig.models?.currentModelId ?? null
+
+            async function applyResolvedSessionModel(input: {
+              modelId?: string | null;
+              thinkingValue?: string | null;
+            }) {
+              const selectedThinkingValue = input.thinkingValue ?? thinkingOption?.currentValue
+              const selectedConfigOptions =
+                thinkingOption && typeof selectedThinkingValue === "string"
+                  ? [
+                      {
+                        configId: thinkingOption.id,
+                        value: selectedThinkingValue,
+                      },
+                    ]
+                  : []
+              const resolvedSelection = sessionModelConfig.resolveSelection({
+                modelId: input.modelId ?? currentModelId,
+                configOptions: selectedConfigOptions,
+              })
+              let latestSession: DaemonSession | null = null
+
+              const configOptionsToApply =
+                input.thinkingValue === undefined
+                  ? []
+                  : resolvedSelection.initialConfigOptions ?? []
+
+              for (const configOption of configOptionsToApply) {
+                const result = await setSessionConfigOption({
+                  id: chat.session.id,
+                  configId: configOption.configId,
+                  value: String(configOption.value),
+                })
+                latestSession = result.session
+              }
+
+              if (
+                resolvedSelection.initialModelId &&
+                  resolvedSelection.initialModelId !== chat.session.models?.currentModelId
+              ) {
+                const result = await setSessionModel({
+                  id: chat.session.id,
+                  modelId: resolvedSelection.initialModelId,
+                })
+                latestSession = result.session
+              }
+
+              if (latestSession) {
+                chat.syncSession(latestSession)
+              }
+            }
 
             if (submitError) {
               <div class={styles.composerError} role="alert">
@@ -414,14 +472,10 @@ export default component SessionChatView(props: {
                     label="Model"
                     open={modelPickerOpen}
                     placeholder="Use the adapter default model"
-                    value={chat.session.models?.currentModelId ?? null}
+                    value={currentModelId}
                     onValueChange={async (value) => {
                       try {
-                        const result = await setSessionModel({
-                          id: chat.session.id,
-                          modelId: value,
-                        })
-                        chat.syncSession(result.session)
+                        await applyResolvedSessionModel({ modelId: value })
                       } catch (error) {
                         console.error("Failed to update session model.", error)
                       }
@@ -435,12 +489,7 @@ export default component SessionChatView(props: {
                     open={thinkingPickerOpen}
                     onValueChange={async (value) => {
                       try {
-                        const result = await setSessionConfigOption({
-                          id: chat.session.id,
-                          configId: thinkingOption.id,
-                          value,
-                        })
-                        chat.syncSession(result.session)
+                        await applyResolvedSessionModel({ thinkingValue: value })
                       } catch (error) {
                         console.error("Failed to update session thinking level.", error)
                       }
