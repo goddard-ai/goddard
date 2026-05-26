@@ -11,12 +11,22 @@ import { Popover } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import styles from "./select-menu.style.ts"
 
+type SelectItemIconProps = {
+  class?: string;
+  size?: number;
+  strokeWidth?: number;
+  "aria-hidden"?: boolean;
+}
+
+type SelectItemIcon = preact.FunctionComponent<SelectItemIconProps>
+
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
   value: string;
   label: string;
   detail?: string | null;
   icon?: string | null;
+  Icon?: SelectItemIcon;
   searchText?: string | null;
   disabled?: boolean;
 }
@@ -44,6 +54,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
+  const SelectedIcon = selectedItem?.Icon
 
   <div class={styles.field}>
     <GoodTooltip
@@ -90,7 +101,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           }}
         >
           <span class={cx(styles.triggerContent, !selectedItem && styles.triggerPlaceholder)}>
-            if (selectedItem?.icon) {
+            if (SelectedIcon) {
+              <SelectedIcon
+                aria-hidden={true}
+                class={styles.itemIcon}
+                size={16}
+                strokeWidth={2.2}
+              />
+            } else if (selectedItem?.icon) {
               <img alt="" class={styles.itemIcon} src={selectedItem.icon} />
             }
             <span class={styles.triggerLabel}>
@@ -293,6 +311,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         } else {
           <ul class={styles.menuList}>
             for (const item of filteredItems; index index) {
+              const ItemIcon = item.Icon
+
               <li key={item.value}>
                 <button
                   {ref (element) => {
@@ -308,7 +328,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                     commitSelection(item)
                   }}
                 >
-                  if (item.icon) {
+                  if (ItemIcon) {
+                    <ItemIcon
+                      aria-hidden={true}
+                      class={styles.itemIcon}
+                      size={16}
+                      strokeWidth={2.2}
+                    />
+                  } else if (item.icon) {
                     <img alt="" class={styles.itemIcon} src={item.icon} />
                   }
                   <span class={styles.menuButtonLabel}>

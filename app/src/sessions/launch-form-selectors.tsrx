@@ -1,5 +1,6 @@
 import type { SessionSubpackage } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
+import { GitFork, Laptop } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
@@ -191,13 +192,15 @@ export component SessionLaunchPreviewSelectors(props: {
   const locationItems: SessionInputSelectItem[] = [
     {
       value: "local",
-      label: "Local checkout",
+      label: "Work locally",
+      Icon: Laptop,
     },
     ...(preview?.repoRoot
       ? [
           {
             value: "worktree",
-            label: "Linked worktree",
+            label: "New worktree",
+            Icon: GitFork,
           },
         ]
       : []),
