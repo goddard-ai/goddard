@@ -9,7 +9,6 @@ import {
   GitBranch,
   LoaderCircle,
   PauseCircle,
-  RefreshCcw,
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "preact/hooks"
@@ -92,6 +91,10 @@ export default component SessionChatView(props: {
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
         const canNavigatePrompts = userPromptCount > 0
+        const canReconnectSession =
+          chat.connection.reconnectable && !chat.session.activeDaemonSession &&
+            chat.session.connectionMode === "live"
+        const canSubmitPrompt = chat.session.activeDaemonSession || canReconnectSession
 
         function skipToPrompt(direction: "next" | "previous") {
           pageEvents.emit("scrollToPrompt", { direction })
@@ -243,39 +246,6 @@ export default component SessionChatView(props: {
                   </button>
                 </GoodTooltip>
 
-                const canReconnect =
-                  chat.connection.reconnectable && !chat.session.activeDaemonSession &&
-                    chat.session.connectionMode === "live"
-
-                if (canReconnect) {
-                  const reconnectCurrentSession = async () => {
-                    await page.headerAction.run("reconnect", async () => {
-                      try {
-                        const { session } = await reconnectSession(chat.session.id)
-                        chat.syncSession(session)
-                      } catch (error) {
-                        console.error("Failed to reconnect session.", error)
-                        throw {
-                          title: "Reconnect failed",
-                          description: formatSessionRequestError(error),
-                        }
-                      }
-                    }).catch(() => {})
-                  }
-
-                  <GoodTooltip ariaLabel="Reconnect session" content="Reconnect session">
-                    <button
-                      aria-label="Reconnect session"
-                      class={styles.headerActionButton}
-                      disabled={activeHeaderAction !== null}
-                      type="button"
-                      onClick={reconnectCurrentSession}
-                    >
-                      <RefreshCcw size={15} strokeWidth={2.1} />
-                    </button>
-                  </GoodTooltip>
-                }
-
                 const activeTurnId = chat.summary.activeTurnId
                 const cancelRequestedTurnId = page.cancelRequestedTurnId.value
                 const cancelAlreadyRequested =
@@ -388,6 +358,7 @@ export default component SessionChatView(props: {
             }
             <Composer
               contextUsage={chat.summary.contextUsage}
+              disabled={!canSubmitPrompt}
               loadSuggestions={async (input) => {
                 const response = await goddardSdk.session.composerSuggestions({
                   id: chat.session.id,
@@ -405,6 +376,11 @@ export default component SessionChatView(props: {
               onSubmit={async (prompt) => {
                 setSubmittedPromptScrollKey((currentKey) => (currentKey ?? 0) + 1)
                 await page.submitPrompt.run(async () => {
+                  if (canReconnectSession) {
+                    const { session } = await reconnectSession(chat.session.id)
+                    chat.syncSession(session)
+                  }
+
                   await submitSessionPrompt({
                     id: chat.session.id,
                     acpId: chat.session.acpSessionId,

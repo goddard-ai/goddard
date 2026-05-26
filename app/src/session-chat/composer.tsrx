@@ -19,6 +19,7 @@ const composerClasses: SessionInputClasses = {
 }
 
 export component Composer(props: {
+  disabled?: boolean;
   loadSuggestions: SessionInputSuggestionLoader;
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
@@ -30,6 +31,7 @@ export component Composer(props: {
   <SessionInput
     classes={composerClasses}
     contextUsage={props.contextUsage}
+    disabled={props.disabled}
     helperText={props.helperText}
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}

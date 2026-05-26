@@ -45,6 +45,7 @@ type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" 
 export component SessionInput(props: {
   autoFocus?: boolean;
   classes?: Partial<SessionInputClasses>;
+  disabled?: boolean;
   loadSuggestions: SessionInputSuggestionLoader;
   onEscape?: () => void;
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
@@ -84,7 +85,8 @@ export component SessionInput(props: {
   const contextUsagePercent =
     contextUsage ? Math.min(100, Math.round((contextUsage.used / contextUsage.size) * 100)) : null
 
-  const canSubmit = hasPromptContent(promptBlocks) && menu === null && !isSubmitting
+  const disabled = props.disabled ?? false
+  const canSubmit = !disabled && hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
@@ -149,7 +151,7 @@ export component SessionInput(props: {
   }
 
   async function submitPrompt() {
-    if (!hasPromptContent(promptBlocks) || menu !== null || isSubmitting) {
+    if (disabled || !hasPromptContent(promptBlocks) || menu !== null || isSubmitting) {
       return
     }
 
@@ -243,11 +245,20 @@ export component SessionInput(props: {
   }
 
   function submitFromEditor() {
+    if (disabled) {
+      return
+    }
+
     void submitPrompt()
   }
 
   useEffect(() => {
     if (!menu) {
+      return
+    }
+
+    if (disabled) {
+      clearMenuState()
       return
     }
 
@@ -336,8 +347,10 @@ export component SessionInput(props: {
           ErrorBoundary={LexicalErrorBoundary}
           contentEditable={<tsrx>
             <ContentEditable
+              aria-disabled={disabled}
               aria-placeholder={placeholder}
               class={classes.contentEditable}
+              contentEditable={!disabled}
               placeholder={<tsrx>
                 <div class={classes.placeholder}>
                   {placeholder}
