@@ -1,12 +1,8 @@
 # Configuration
 
-## Goal
-Define a clear configuration model for Goddard in which persisted settings are always machine-readable and machine-writable, so humans and tools can safely inspect, generate, and update behavior across user, repository, entity, and runtime scopes.
+Goddard configuration is machine-readable and machine-writable across user, repository, entity, and runtime scopes.
 
-## Hypothesis
-We believe that separating user defaults, repository defaults, entity-level defaults, and runtime overrides into a deterministic JSON-based model will make Goddard easier to automate, easier to maintain across repositories, and less ambiguous for both humans and machines.
-
-## Primary Actors
+## Participants
 - Developer maintaining personal defaults across repositories
 - Repository maintainer defining shared repository behavior
 - Author or maintainer of a Loop or Action definition
@@ -62,7 +58,7 @@ We believe that separating user defaults, repository defaults, entity-level defa
 - If an action carries persisted defaults, those defaults must live in machine-readable JSON associated with the action rather than inside the prompt content itself.
 - Actions are loaded by name at runtime.
 
-## Constraints
+## Boundaries
 - All persisted configuration must be machine-readable and machine-writable.
 - Persisted configuration must be stored as JSON rather than executable source.
 - Repository-scoped configuration must be able to override user-scoped defaults without mutating the user-level source of truth.
@@ -72,16 +68,12 @@ We believe that separating user defaults, repository defaults, entity-level defa
 - Runtime overrides must remain ephemeral and must not implicitly rewrite persisted configuration.
 - Named entities should be discoverable through the same configuration roots used for baseline defaults so repository intent stays co-located.
 - Configuration behavior must remain aligned across SDK consumers and the desktop app; the app must not invent a parallel configuration model.
+- This spec does not define exact configuration payload shapes.
+- This spec does not specify parser internals, merge algorithms, or validation library choices.
+- This spec does not document every possible configurable field for loops, actions, or runtime hosts.
+- Temporary runtime overrides must not become durable repository or user preferences unless explicitly persisted through the configuration model.
+- Executable modules and document headers are not supported persisted configuration mechanisms.
 
-## Non-Goals
-- Defining the exact data shape for configuration payloads.
-- Specifying parser internals, merge algorithms, or validation library choices.
-- Documenting every possible configurable field for loops, actions, or runtime hosts in this file.
-- Treating temporary runtime overrides as durable repository or user preferences.
-- Using executable modules or document headers as alternative persisted configuration mechanisms.
-
-## Decision Memory
-- Goddard needs a configuration model that works at four levels of intent: personal defaults, repository defaults, reusable entity defaults, and invocation-time overrides.
-- Persisted JSON keeps configuration accessible to both humans and automation without requiring code execution to inspect or update it.
+## Rationale
 - Separating prompt content from configuration avoids ambiguous editing surfaces and makes automation safer.
 - Repository-local configuration is the collaboration boundary, entity configuration is the reusable automation boundary, and runtime input is the experimentation boundary.

@@ -2,7 +2,7 @@
 
 Defines the fundamental operations, rules, and runtime components shared by the SDK, desktop app, and background automation.
 
-## Encapsulated Sub-Specs
+## Core Specs
 
 * `spec/core/architecture.md`: Stack choices and boundaries.
 * `spec/core/runtime-loop.md`: Core execution loop, configuration constraints, and rate-limiting limits.

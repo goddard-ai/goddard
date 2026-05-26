@@ -1,20 +1,6 @@
 # Human Attention Inbox
 
-## Goal
-
-Provide a daemon-local inbox that helps humans decide which daemon-managed work needs attention now.
-
-## Hypothesis
-
-We believe that consolidating current attention state for sessions and pull requests will reduce missed handoffs, make agent work easier to scan, and give non-app hosts a shared control surface for attention workflows.
-
-## Actors
-
-- Human operator reviewing daemon-managed work.
-- Agent producing session turns, blockers, pull requests, or pull request replies.
-- Daemon acting as the local authority for inbox state.
-- SDK, desktop app, and approved operational clients listing or updating inbox state.
-- External reviewer whose managed pull request feedback may cause daemon activity.
+The daemon-local inbox helps humans decide which daemon-managed work needs attention now.
 
 ## Core Model
 
@@ -92,7 +78,7 @@ The daemon should preserve the latest usable scope for a session and reuse it wh
 - User workflow updates should not create inbox rows for entities that have never produced daemon attention.
 - Later daemon attention should reopen rows that were previously read, replied, saved, archived, or completed.
 
-## Non-Goals
+## Boundaries
 
 - Aggregating external notification systems such as GitHub's own notification inbox.
 - Providing append-only notification history or an audit trail of all attention events.
@@ -101,7 +87,7 @@ The daemon should preserve the latest usable scope for a session and reuse it wh
 - Defining app visual design, truncation rules, or navigation layout.
 - Syncing inbox state across multiple local daemon stores.
 
-## Decision Memory
+## Rationale
 
 The inbox is intentionally one current row per entity because the immediate product need is "what needs attention now," not historical notification review.
 

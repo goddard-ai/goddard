@@ -1,18 +1,6 @@
 # Goddard Spec Root
 
-## Mission
-
 Goddard unifies local repository workflows with GitHub operations and extends that bridge to autonomous AI execution.
-
-> Goddard provides a framework-agnostic TypeScript daemon control-plane SDK, a Cloudflare-powered real-time backend, and a trusted desktop workspace so developers and agents can control local automation and act from shared local context.
-
-## The Problem
-
-Developer execution is fragmented across GitHub UI, IDEs, chat tools, and ad hoc local scripts. AI agents also lack a principled runtime for safe, long-running or feedback-triggered operation.
-
-Goddard addresses:
-1. **Workspace gap:** a unified local surface for GitHub operations and AI steering with minimal context switching.
-2. **Autonomous gap:** explicit runtimes for repeated cycles, daemon-managed workforce delegation, and daemon-managed pull-request feedback handling.
 
 ## Product Pillars
 
@@ -46,7 +34,7 @@ A thin operator-focused CLI may initialize repository-local automation intent an
 
 All modes share the same backend authority model, with the SDK serving as the daemon control plane where programmatic control is needed.
 
-## Encapsulated Sub-Specs
+## Specs
 
 * `spec/configuration.md`: Configuration hierarchy, precedence, and named configurable entities.
 * `spec/core.md`: Core system runtime shared by SDK, app, and background automation.
