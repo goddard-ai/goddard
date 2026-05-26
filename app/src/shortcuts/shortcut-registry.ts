@@ -49,7 +49,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
 
     this.#runtime = createShortcuts({
       target,
-      editablePolicy: "ignore-editable",
+      editablePolicy: "allow-if-meta",
       getActiveScopes: () => commandContext.activeScopes.peek(),
       canDispatch: (candidate) => {
         const commandId =

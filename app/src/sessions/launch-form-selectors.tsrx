@@ -56,6 +56,7 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
       value: adapter.id,
       label: adapter.name,
       detail: `${adapter.version}${adapter.unofficial ? " · Unofficial" : ""}`,
+      icon: adapter.icon,
       searchText: `${adapter.id}\n${adapter.description ?? ""}`,
     }),
   )
@@ -125,6 +126,10 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
       form.launchPreview.value = null
     }
   }, [form, projectPath, subpackages])
+
+  if (subpackages.length === 0) {
+    return
+  }
 
   <SessionInputSelect
     disabled={!projectPath}

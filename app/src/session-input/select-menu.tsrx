@@ -16,6 +16,7 @@ export type SessionInputSelectItem = {
   value: string;
   label: string;
   detail?: string | null;
+  icon?: string | null;
   searchText?: string | null;
   disabled?: boolean;
 }
@@ -83,12 +84,18 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
 
             if (event.key === "Escape" && props.open.value) {
               event.preventDefault()
+              event.stopPropagation()
               props.open.value = false
             }
           }}
         >
-          <span class={cx(styles.triggerLabel, !selectedItem && styles.triggerPlaceholder)}>
-            {triggerLabel}
+          <span class={cx(styles.triggerContent, !selectedItem && styles.triggerPlaceholder)}>
+            if (selectedItem?.icon) {
+              <img alt="" class={styles.itemIcon} src={selectedItem.icon} />
+            }
+            <span class={styles.triggerLabel}>
+              {triggerLabel}
+            </span>
           </span>
           <ChevronDown
             class={styles.chevron}
@@ -190,8 +197,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         }
 
         const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-        setSelectedIndex(currentIndex >= 0 ? currentIndex : 0)
-      }, [filteredItemSignature, props.open.value, props.value])
+        setSelectedIndex(
+          props.filterable && !isEmptyQuery(query)
+            ? 0
+            : currentIndex >= 0
+              ? currentIndex
+              : 0,
+        )
+      }, [filteredItemSignature, props.filterable, props.open.value, props.value, query])
 
       useEffect(() => {
         if (!props.open.value || !highlightedItem) {
@@ -225,6 +238,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               return
             case "Escape":
               event.preventDefault()
+              event.stopPropagation()
               props.open.value = false
           }
         }}
@@ -237,6 +251,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             value={query}
             onInput={(event) => {
               setQuery(event.currentTarget.value)
+              setSelectedIndex(0)
             }}
             onKeyDown={(event) => {
               switch (event.key) {
@@ -254,6 +269,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   return
                 case "Escape":
                   event.preventDefault()
+                  event.stopPropagation()
                   props.open.value = false
               }
             }}
@@ -292,7 +308,12 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                     commitSelection(item)
                   }}
                 >
-                  {item.label}
+                  if (item.icon) {
+                    <img alt="" class={styles.itemIcon} src={item.icon} />
+                  }
+                  <span class={styles.menuButtonLabel}>
+                    {item.label}
+                  </span>
                 </button>
               </li>
             }

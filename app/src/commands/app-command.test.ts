@@ -123,6 +123,44 @@ test("keydown dispatches one typed app command event", async () => {
   }
 })
 
+test("meta app command bindings dispatch from editable targets", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  const editable = runtimeDocument.createElement("div")
+  editable.contentEditable = "true"
+  runtimeDocument.body.append(container, editable)
+
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openNewSessionDialog,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(editable, {
+      key: "n",
+      code: "KeyN",
+      ctrlKey: true,
+    })
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      combo: "Ctrl+n",
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
 test("default keymap dispatches switch-project from Mod+o", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
