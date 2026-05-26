@@ -1738,7 +1738,7 @@ function normalizeSessionPageSize(limit?: number): number {
 export function createSessionManager(input: {
   daemonUrl: string
   agentBinDir: string
-  publish: (id: SessionId, message: acp.AnyMessage) => void
+  emitMessage: (id: SessionId, message: acp.AnyMessage) => void
   events: SessionEventEmitter
   configManager: ConfigManager
   registryService: ACPRegistryService
@@ -2763,7 +2763,7 @@ export function createSessionManager(input: {
     if (options.persistTurnMessage !== false) {
       appendTurnScopedMessage(active, message)
     }
-    input.publish(active.id, message)
+    input.emitMessage(active.id, message)
   }
 
   async function writeImmediateMessage(

@@ -47,6 +47,8 @@ afterEach(async () => {
 })
 
 async function createFixture() {
+  const systemAlerts = createTestStream<{ message: string; level: "info" | "warn" | "error" }>()
+  const userAlerts = createTestStream<{ userId: string; message: string }>()
   const ipcServer = createServer({
     port: 0,
     schema,
@@ -55,10 +57,14 @@ async function createFixture() {
       echo: ({ text }) => ({ echoed: text }),
       add: ({ a, b }) => ({ sum: a + b }),
     },
-    beforeSubscribe: ({ name, filter }) => {
-      if (name === "userAlert" && filter?.userId === "blocked-user") {
-        throw new IpcClientError("User alerts are disabled for blocked-user")
-      }
+    streamHandlers: {
+      systemAlert: ({ signal }) => systemAlerts.subscribe(() => true, signal),
+      userAlert: ({ query, signal }) => {
+        if (query?.userId === "blocked-user") {
+          throw new IpcClientError("User alerts are disabled for blocked-user")
+        }
+        return userAlerts.subscribe((payload) => payload.userId === query?.userId, signal)
+      },
     },
   })
 
@@ -80,7 +86,53 @@ async function createFixture() {
   return {
     address,
     client: createNodeClient(address, schema),
-    publish: ipcServer.publish,
+    publishSystemAlert: systemAlerts.publish,
+    publishUserAlert: userAlerts.publish,
+  }
+}
+
+function createTestStream<TPayload>() {
+  const listeners = new Set<(payload: TPayload) => void>()
+
+  return {
+    publish(payload: TPayload) {
+      for (const listener of listeners) {
+        listener(payload)
+      }
+    },
+    async *subscribe(filter: (payload: TPayload) => boolean, signal: AbortSignal) {
+      const queue: TPayload[] = []
+      let wake: (() => void) | undefined
+      const listener = (payload: TPayload) => {
+        if (!filter(payload)) {
+          return
+        }
+        queue.push(payload)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      listeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const payload = queue.shift()
+          if (payload) {
+            yield payload
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        listeners.delete(listener)
+      }
+    },
   }
 }
 
@@ -299,7 +351,7 @@ describe("core/ipc", () => {
   })
 
   test("streams ndjson events to subscribed node clients", async () => {
-    const { client, publish } = await createFixture()
+    const { client, publishSystemAlert } = await createFixture()
 
     let resolveAlert:
       | ((payload: { message: string; level: "info" | "warn" | "error" }) => void)
@@ -317,13 +369,13 @@ describe("core/ipc", () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 25))
-    publish("systemAlert", { message: "Heads up", level: "warn" })
+    publishSystemAlert({ message: "Heads up", level: "warn" })
 
     await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
   })
 
   test("applies stream filters on the server side", async () => {
-    const { client, publish } = await createFixture()
+    const { client, publishUserAlert } = await createFixture()
     const onMessage = vi.fn()
 
     const unsubscribe = await client.subscribe(
@@ -335,8 +387,8 @@ describe("core/ipc", () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 25))
-    publish("userAlert", { userId: "user-2", message: "skip me" })
-    publish("userAlert", { userId: "user-1", message: "deliver me" })
+    publishUserAlert({ userId: "user-2", message: "skip me" })
+    publishUserAlert({ userId: "user-1", message: "deliver me" })
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(onMessage).toHaveBeenCalledTimes(1)
@@ -365,11 +417,18 @@ describe("core/ipc", () => {
         echo: ({ text }) => ({ echoed: text }),
         add: ({ a, b }) => ({ sum: a + b }),
       },
-      afterSubscribe: ({ name, filter }) => {
-        events.push({ phase: "subscribe", name, filter })
-      },
-      afterUnsubscribe: ({ name, filter }) => {
-        events.push({ phase: "unsubscribe", name, filter })
+      streamHandlers: {
+        userAlert: ({ name, query, signal }) =>
+          (async function* () {
+            events.push({ phase: "subscribe", name, filter: query })
+            try {
+              while (!signal.aborted) {
+                await new Promise((resolve) => setTimeout(resolve, 0))
+              }
+            } finally {
+              events.push({ phase: "unsubscribe", name, filter: query })
+            }
+          })(),
       },
     })
 

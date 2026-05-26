@@ -85,7 +85,6 @@ export type IpcHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
   readonly ipcHandlers?: Record<string, unknown>
-  readonly ipcStreamLifecycle?: Record<string, unknown>
   readonly provides?: FeatureExtensions
   readonly close?: () => void | Promise<void>
 }
@@ -99,12 +98,6 @@ type SetupDbContext<TDb> = keyof TDb extends never
 type SetupBackendContext<TBackendRoutes> = keyof TBackendRoutes extends never
   ? {}
   : { readonly backend: RouzerClient<Extract<TBackendRoutes, BackendRouteTree>> }
-
-type PublishContext<TPlugin> = TPlugin extends { readonly ipcRoutes: HttpRouteTree }
-  ? {
-      readonly publish: (name: string, payload: unknown) => void
-    }
-  : {}
 
 /** Core daemon runtime substrate available to statically composed daemon plugins. */
 export type DaemonSetupSubstrate = {
@@ -129,7 +122,6 @@ export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
 > = DaemonSetupSubstrate &
-  PublishContext<TSelf> &
   UnionToIntersection<InferProvides<TConsumes[number]>> &
   SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>> &
   SetupDbContext<UnionToIntersection<InferDb<TSelf | TConsumes[number]>>> &

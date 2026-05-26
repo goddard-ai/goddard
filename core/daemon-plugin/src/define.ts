@@ -99,7 +99,6 @@ type SetupContributions<
   TProvides extends FeatureExtensions | undefined,
 > = IpcHandlerContributions<TIpcRoutes> &
   ProvidesContribution<TProvides> & {
-    readonly ipcStreamLifecycle?: Record<string, unknown>
     readonly close?: () => void | Promise<void>
   }
 

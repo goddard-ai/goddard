@@ -12,7 +12,7 @@ Daemon plugins may also contribute a namespaced JSON config fragment. The featur
 
 Daemon plugins that call backend APIs declare `backendRoutes`. During setup, `context.backend` exposes only the route namespaces declared by that plugin, declared by consumed plugins, or contributed by daemon-owned substrate.
 
-Daemon plugins that own IPC streams may publish only streams declared by their own `ipcRoutes`. Plugins can also return narrow `ipcStreamLifecycle` handlers for stream subscribe/unsubscribe bookkeeping when that lifecycle belongs to the feature rather than the IPC server substrate.
+Daemon plugins that own IPC streams implement those stream handlers directly. The daemon IPC server owns transport mechanics and socket cancellation, while the feature package decides how each stream subscribes to its internal data source and how generator cleanup should run when the client disconnects.
 
 ## Contract Shape
 

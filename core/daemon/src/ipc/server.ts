@@ -7,7 +7,6 @@ import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import { composePlugins, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
-import { getResponsePluginMarkerId } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
@@ -59,7 +58,6 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
 
   const registryService = createACPRegistryService()
-  let publishPluginEvent: ((name: string, payload: unknown) => void) | null = null
   let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {
@@ -95,18 +93,9 @@ export async function startDaemonServer(
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, (plugin, name, payload) => {
-    if (!plugin.ipcRoutes || !hasIpcStreamRouteName(plugin.ipcRoutes, name.split("."))) {
-      throw new Error(`Daemon plugin ${plugin.name} cannot publish undeclared IPC stream ${name}`)
-    }
-    if (!publishPluginEvent) {
-      throw new Error(`Daemon plugin ${plugin.name} published IPC stream ${name} before startup`)
-    }
-    publishPluginEvent(name, payload)
-  })
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client)
   const requestHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "request")
   const streamHandlersFromPlugins = filterPluginIpcHandlers(pluginSetup.ipcHandlers, "stream")
-  const streamLifecycleFromPlugins = pluginSetup.ipcStreamLifecycle
 
   const requestHandlers: Record<string, (payload: any) => any> = {
     "daemon.health": async () => ({ ok: true }),
@@ -117,6 +106,7 @@ export async function startDaemonServer(
     port: runtime.port,
     schema: daemonIpcSchema as any,
     handlers: requestHandlers as any,
+    streamHandlers: streamHandlersFromPlugins as any,
     runHandler: ({ payload }, handler) => {
       const context: IpcRequestContext = {
         opId: randomUUID(),
@@ -153,20 +143,7 @@ export async function startDaemonServer(
         errorMessage: getErrorMessage(error),
       })
     },
-    beforeSubscribe: async ({ name, filter }) => {
-      await runPluginStreamHandler(streamHandlersFromPlugins[name], filter)
-    },
-    afterSubscribe: async ({ name, filter }) => {
-      await runPluginStreamLifecycleHook(streamLifecycleFromPlugins[name]?.afterSubscribe, filter)
-    },
-    afterUnsubscribe: async ({ name, filter }) => {
-      await runPluginStreamLifecycleHook(streamLifecycleFromPlugins[name]?.afterUnsubscribe, filter)
-    },
   })
-
-  publishPluginEvent = (name, payload) => {
-    ipcServer.publish(name as never, payload as never)
-  }
 
   await once(ipcServer.server, "listening")
   const port = readBoundTcpPort(ipcServer.server)
@@ -212,15 +189,10 @@ export async function startDaemonServer(
   }
 }
 
-async function setupDaemonPlugins(
-  substrate: DaemonSetupSubstrate,
-  backendClient: BackendClient,
-  publish: (plugin: (typeof daemonPlugins.plugins)[number], name: string, payload: unknown) => void,
-) {
+async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient: BackendClient) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const ipcHandlers: Record<string, unknown> = {}
-  const ipcStreamLifecycle: Record<string, IpcStreamLifecycleHandlers> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of daemonPlugins.plugins) {
@@ -232,9 +204,6 @@ async function setupDaemonPlugins(
       {
         db: createPluginDbContext(plugin),
         backend: createPluginBackendContext(plugin, backendClient),
-        publish: (name: string, payload: unknown) => {
-          publish(plugin, name, payload)
-        },
       },
       ...consumedExtensions,
     )
@@ -242,10 +211,6 @@ async function setupDaemonPlugins(
 
     if (setup?.ipcHandlers) {
       Object.assign(ipcHandlers, flattenIpcHandlers(setup.ipcHandlers))
-    }
-
-    if (setup?.ipcStreamLifecycle) {
-      Object.assign(ipcStreamLifecycle, flattenIpcStreamLifecycle(setup.ipcStreamLifecycle))
     }
 
     if (setup?.close) {
@@ -261,7 +226,6 @@ async function setupDaemonPlugins(
   return {
     extensions,
     ipcHandlers,
-    ipcStreamLifecycle,
     close: async () => {
       for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
         await closeHandlers[index]?.()
@@ -270,18 +234,25 @@ async function setupDaemonPlugins(
   }
 }
 
-type IpcStreamLifecycleHandlers = {
-  readonly afterSubscribe?: (filter: unknown) => void | Promise<void>
-  readonly afterUnsubscribe?: (filter: unknown) => void | Promise<void>
-}
-
 function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
   const requestHandlers: Record<string, unknown> = {}
 
   function visit(node: unknown, path: string[]) {
     if (typeof node === "function") {
-      requestHandlers[path.join(".")] = (payload: unknown) =>
-        node({ body: payload, query: payload })
+      requestHandlers[path.join(".")] = (payload: unknown) => {
+        const input =
+          typeof payload === "object" &&
+          payload !== null &&
+          "signal" in payload &&
+          payload.signal instanceof AbortSignal
+            ? (payload as { readonly query?: unknown; readonly signal?: AbortSignal })
+            : null
+        return node({
+          body: payload,
+          query: input ? input.query : payload,
+          signal: input?.signal,
+        })
+      }
       return
     }
 
@@ -298,107 +269,11 @@ function flattenIpcHandlers(ipcHandlers: Record<string, unknown>) {
   return requestHandlers
 }
 
-function flattenIpcStreamLifecycle(lifecycle: Record<string, unknown>) {
-  const handlers: Record<string, IpcStreamLifecycleHandlers> = {}
-
-  function visit(node: unknown, path: string[]) {
-    if (isIpcStreamLifecycleHandlers(node)) {
-      handlers[path.join(".")] = node
-      return
-    }
-
-    if (typeof node !== "object" || !node) {
-      return
-    }
-
-    for (const [key, child] of Object.entries(node)) {
-      visit(child, [...path, key])
-    }
-  }
-
-  visit(lifecycle, [])
-  return handlers
-}
-
-function isIpcStreamLifecycleHandlers(value: unknown): value is IpcStreamLifecycleHandlers {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    ("afterSubscribe" in value || "afterUnsubscribe" in value)
-  )
-}
-
 function filterPluginIpcHandlers(ipcHandlers: Record<string, unknown>, kind: "request" | "stream") {
   const routeNames = kind === "request" ? daemonIpcSchema.requests : daemonIpcSchema.streams
   return Object.fromEntries(
     Object.entries(ipcHandlers).filter(([name]) => name in routeNames),
   ) as Record<string, (payload: any) => any>
-}
-
-async function runPluginStreamHandler(
-  handler: ((payload: unknown) => unknown) | undefined,
-  filter: unknown,
-) {
-  if (!handler) {
-    return
-  }
-
-  const result = handler(filter)
-  if (isAsyncIterator(result)) {
-    await result.next()
-    return
-  }
-
-  await result
-}
-
-async function runPluginStreamLifecycleHook(
-  handler: ((filter: unknown) => void | Promise<void>) | undefined,
-  filter: unknown,
-) {
-  if (!handler) {
-    return
-  }
-
-  await handler(filter)
-}
-
-function isAsyncIterator(value: unknown): value is AsyncIterator<unknown> {
-  return typeof value === "object" && value !== null && "next" in value
-}
-
-function hasIpcStreamRouteName(routes: Record<string, unknown>, path: readonly string[]) {
-  let current: unknown = routes
-
-  for (const segment of path) {
-    if (typeof current !== "object" || !current || !(segment in current)) {
-      return false
-    }
-    const node = current[segment as keyof typeof current]
-    current =
-      typeof node === "object" && node && "children" in node
-        ? ((node as { readonly children: Record<string, unknown> }).children as Record<
-            string,
-            unknown
-          >)
-        : node
-  }
-
-  return isIpcStreamRouteNode(current)
-}
-
-function isIpcStreamRouteNode(value: unknown) {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("kind" in value) ||
-    value.kind !== "action"
-  ) {
-    return false
-  }
-
-  const response = (value as { readonly schema?: { readonly response?: unknown } }).schema?.response
-  return getResponsePluginMarkerId(response) === "rouzer/ndjson"
 }
 
 function createPluginBackendContext(

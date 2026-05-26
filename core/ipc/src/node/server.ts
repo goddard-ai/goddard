@@ -3,7 +3,6 @@ import * as http from "node:http"
 import { IpcClientError } from "../errors.ts"
 import {
   type InferStreamFilter,
-  type InferStreamPayload,
   type IpcSchema,
   type ValidRequestName,
   type ValidStreamName,
@@ -55,32 +54,6 @@ function getStreamSchemas<TSchema extends IpcSchema, K extends ValidStreamName<T
   }
 }
 
-/** Matches one published stream payload against one validated stream filter. */
-function matchesStreamFilter(filter: unknown, payload: unknown): boolean {
-  if (filter === undefined) {
-    return true
-  }
-
-  if (
-    typeof filter !== "object" ||
-    filter === null ||
-    typeof payload !== "object" ||
-    payload === null
-  ) {
-    return Object.is(filter, payload)
-  }
-
-  return Object.entries(filter).every(([key, value]) =>
-    Object.is((payload as Record<string, unknown>)[key], value),
-  )
-}
-
-/** Optional hooks that run when one client subscribes to a server-published stream. */
-type SubscribeHookInput<TSchema extends IpcSchema> = {
-  name: ValidStreamName<TSchema>
-  filter: InferStreamFilter<TSchema, ValidStreamName<TSchema>> | undefined
-}
-
 /** Request metadata made available to request wrappers and lifecycle hooks. */
 type RequestHookInput<TSchema extends IpcSchema> = {
   name: ValidRequestName<TSchema>
@@ -108,27 +81,27 @@ type RunHandlerHook<TSchema extends IpcSchema> = <T>(
   handler: () => Promise<T> | T,
 ) => Promise<T> | T
 
+type StreamHandlerInput<TSchema extends IpcSchema> = {
+  name: ValidStreamName<TSchema>
+  query: InferStreamFilter<TSchema, ValidStreamName<TSchema>> | undefined
+  signal: AbortSignal
+}
+
+type StreamHandlers<TSchema extends IpcSchema> = Partial<
+  Record<ValidStreamName<TSchema>, (input: StreamHandlerInput<TSchema>) => AsyncIterable<unknown>>
+>
+
 /** Optional hooks that run during request and stream-filter handling. */
 type CreateServerConfig<TSchema extends IpcSchema> = {
   port: number
   hostname?: string
   schema: TSchema
   handlers: Handlers<TSchema>
+  streamHandlers?: StreamHandlers<TSchema>
   runHandler?: RunHandlerHook<TSchema>
   onRequestReceived?: (input: RequestReceivedHookInput<TSchema>) => Promise<void> | void
   onResponseSent?: (input: ResponseSentHookInput<TSchema>) => Promise<void> | void
   onRequestFailed?: (input: RequestFailedHookInput<TSchema>) => Promise<void> | void
-  beforeSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
-  afterSubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
-  afterUnsubscribe?: (input: SubscribeHookInput<TSchema>) => Promise<void> | void
-}
-
-/** Runs one best-effort stream lifecycle hook without letting teardown paths throw into Node event handlers. */
-function invokeStreamLifecycleHook<TSchema extends IpcSchema>(
-  hook: ((input: SubscribeHookInput<TSchema>) => Promise<void> | void) | undefined,
-  input: SubscribeHookInput<TSchema>,
-): Promise<void> {
-  return Promise.resolve(hook?.(input))
 }
 
 /** Creates the Node IPC server for one TCP-backed application schema. */
@@ -142,33 +115,8 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
     onRequestReceived,
     onResponseSent,
     onRequestFailed,
-    beforeSubscribe,
-    afterSubscribe,
-    afterUnsubscribe,
   } = config
-  const streamClients = new Set<{
-    name: string
-    filter: unknown
-    res: http.ServerResponse
-  }>()
-
-  function publish<K extends ValidStreamName<TSchema>>(
-    name: K,
-    payload: InferStreamPayload<TSchema, K>,
-  ) {
-    const chunk = JSON.stringify({ name, payload }) + "\n"
-
-    for (const client of streamClients) {
-      if (
-        client.name === name &&
-        matchesStreamFilter(client.filter, payload) &&
-        !client.res.destroyed &&
-        !client.res.writableEnded
-      ) {
-        client.res.write(chunk)
-      }
-    }
-  }
+  const streamHandlers: StreamHandlers<TSchema> = config.streamHandlers ?? {}
 
   async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const startedAt = Date.now()
@@ -297,69 +245,71 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
       return
     }
 
+    const streamName = name as ValidStreamName<TSchema>
+    const handler = streamHandlers[streamName]
+    if (!handler) {
+      res.writeHead(404, { "Content-Type": "text/plain" })
+      res.end(`No handler for stream ${name}`)
+      return
+    }
+
+    const socket = req.socket
+    const abortController = new AbortController()
+    const abortStream = () => {
+      abortController.abort()
+    }
+    res.on("close", abortStream)
+    socket.on("close", abortStream)
+
+    let stream: AsyncIterable<unknown>
     try {
-      await beforeSubscribe?.({
-        name: name as ValidStreamName<TSchema>,
-        filter,
+      stream = handler({
+        name: streamName,
+        query: filter,
+        signal: abortController.signal,
       })
     } catch (error) {
+      abortController.abort()
+      res.off("close", abortStream)
+      socket.off("close", abortStream)
       const { statusCode, message } = getErrorResponse(error)
       res.writeHead(statusCode, { "Content-Type": "text/plain" })
       res.end(message)
       return
     }
 
-    const subscribeInput: SubscribeHookInput<TSchema> = {
-      name: name as ValidStreamName<TSchema>,
-      filter,
-    }
-    const socket = req.socket
-    const client = { name, filter, res }
-    let removed = false
-    let subscribed = false
-    const removeClient = () => {
-      if (removed) {
-        return
-      }
-
-      removed = true
-      res.off("close", removeClient)
-      socket.off("close", removeClient)
-      streamClients.delete(client)
-      if (!subscribed) {
-        return
-      }
-
-      void invokeStreamLifecycleHook(afterUnsubscribe, subscribeInput).catch(() => {})
-    }
-
-    res.on("close", removeClient)
-    socket.on("close", removeClient)
-    streamClients.add(client)
-
-    try {
-      await invokeStreamLifecycleHook(afterSubscribe, subscribeInput)
-    } catch (error) {
-      removeClient()
-      const { statusCode, message } = getErrorResponse(error)
-      if (!res.destroyed && !res.writableEnded) {
-        res.writeHead(statusCode, { "Content-Type": "text/plain" })
-        res.end(message)
-      }
-      return
-    }
-
-    if (removed) {
-      return
-    }
-
-    subscribed = true
     res.writeHead(200, {
       "Content-Type": "application/x-ndjson",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     })
     res.flushHeaders()
+
+    const iterator = stream[Symbol.asyncIterator]()
+
+    try {
+      while (!abortController.signal.aborted) {
+        const item = await iterator.next()
+        if (item.done) {
+          break
+        }
+        if (!res.destroyed && !res.writableEnded) {
+          res.write(JSON.stringify({ name, payload: item.value }) + "\n")
+        }
+      }
+    } catch (error) {
+      if (!abortController.signal.aborted && !res.destroyed) {
+        res.destroy(error instanceof Error ? error : undefined)
+      }
+    } finally {
+      abortController.abort()
+      res.off("close", abortStream)
+      socket.off("close", abortStream)
+      await iterator.return?.().catch(() => {})
+      if (!res.destroyed && !res.writableEnded) {
+        res.end()
+      }
+    }
   }
 
   const server = http.createServer((req, res) => {
@@ -381,5 +331,5 @@ export function createServer<TSchema extends IpcSchema>(config: CreateServerConf
 
   server.listen(port, hostname)
 
-  return { server, publish }
+  return { server }
 }

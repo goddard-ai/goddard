@@ -1,5 +1,5 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
-import type { SendSessionMessageRequest } from "@goddard-ai/schema/daemon"
+import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
@@ -51,6 +51,7 @@ export const sessionPlugin = definePlugin({
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const events = createSessionEventEmitter()
+    const messageListeners = new Set<(event: SessionMessageEvent) => void>()
     let sessionManager: SessionManager | undefined
 
     function getSessionManager() {
@@ -61,11 +62,49 @@ export const sessionPlugin = definePlugin({
         registryService: context.registryService,
         events,
         idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
-        publish(id, message) {
-          context.publish("session.messageEvents", { id, message })
+        emitMessage(id, message) {
+          for (const listener of messageListeners) {
+            listener({ id, message })
+          }
         },
       })
       return sessionManager
+    }
+
+    async function* subscribeSessionMessages(id: `ses_${string}`, signal: AbortSignal) {
+      const queue: SessionMessageEvent[] = []
+      let wake: (() => void) | undefined
+      const listener = (event: SessionMessageEvent) => {
+        if (event.id !== id) {
+          return
+        }
+        queue.push(event)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      await session.subscriberConnected(id)
+      messageListeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const event = queue.shift()
+          if (event) {
+            yield event
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        messageListeners.delete(listener)
+        await session.subscriberDisconnected(id)
+      }
     }
 
     const session = {
@@ -111,22 +150,6 @@ export const sessionPlugin = definePlugin({
       },
       close: async () => {
         await sessionManager?.close()
-      },
-      ipcStreamLifecycle: {
-        session: {
-          messageEvents: {
-            afterSubscribe: async (filter: { readonly id?: unknown } | undefined) => {
-              if (typeof filter?.id === "string") {
-                await session.subscriberConnected(filter.id as `ses_${string}`)
-              }
-            },
-            afterUnsubscribe: async (filter: { readonly id?: unknown } | undefined) => {
-              if (typeof filter?.id === "string") {
-                await session.subscriberDisconnected(filter.id as `ses_${string}`)
-              }
-            },
-          },
-        },
       },
       ipcHandlers: {
         session: {
@@ -191,7 +214,11 @@ export const sessionPlugin = definePlugin({
               id,
             }
           },
-          messageEvents: async function* () {},
+          messageEvents: async function* (ctx) {
+            const signal = (ctx as unknown as { readonly signal: AbortSignal }).signal
+            const { query } = ctx
+            yield* subscribeSessionMessages(query.id, signal)
+          },
         },
       },
     }

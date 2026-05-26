@@ -10,18 +10,56 @@ import {
 } from "./daemon/config.ts"
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
+import type { WorkforceEventEnvelope } from "./schema.ts"
 
 export const workforcePlugin = definePlugin({
   name: "workforce",
   consumes: [sessionPlugin],
   ipcRoutes: workforceIpcRoutes,
-  setup({ getIpcRequestContext, publish, session }) {
+  setup({ getIpcRequestContext, session }) {
+    const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
     const workforce = createWorkforceManager({
       session,
       publishEvent: (payload) => {
-        publish("workforce.event", payload)
+        for (const listener of eventListeners) {
+          listener(payload)
+        }
       },
     })
+
+    async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
+      const queue: WorkforceEventEnvelope[] = []
+      let wake: (() => void) | undefined
+      const listener = (event: WorkforceEventEnvelope) => {
+        if (event.rootDir !== rootDir) {
+          return
+        }
+        queue.push(event)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      eventListeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const event = queue.shift()
+          if (event) {
+            yield event
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        eventListeners.delete(listener)
+      }
+    }
 
     async function resolveWorkforceActor(token: string | undefined, requestedRootDir: string) {
       if (!token) {
@@ -179,9 +217,11 @@ export const workforcePlugin = definePlugin({
               actor,
             )
           },
-          event: async function* ({ query }) {
-            await workforce.getWorkforce(query.rootDir)
-            yield* [] as Iterable<never>
+          event: async function* (ctx) {
+            const signal = (ctx as unknown as { readonly signal: AbortSignal }).signal
+            const { query } = ctx
+            const status = await workforce.getWorkforce(query.rootDir)
+            yield* subscribeWorkforceEvents(status.rootDir, signal)
           },
         },
       },
