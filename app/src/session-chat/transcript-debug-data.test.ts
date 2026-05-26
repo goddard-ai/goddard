@@ -12,7 +12,11 @@ test("session chat QA scenario covers every generated transcript row family", ()
     messages.flatMap((message) => (message.kind === "message" ? [message.role] : [])),
   )
   const toolStatuses = new Set(
-    messages.flatMap((message) => (message.kind === "toolCall" ? [message.status] : [])),
+    messages.flatMap((message) =>
+      message.kind === "workDrawer"
+        ? message.items.flatMap((item) => (item.kind === "toolCall" ? [item.status] : []))
+        : [],
+    ),
   )
   const permissionStatuses = new Set(
     messages.flatMap((message) => (message.kind === "permissionRequest" ? [message.status] : [])),
@@ -22,7 +26,7 @@ test("session chat QA scenario covers every generated transcript row family", ()
   )
 
   expect(rowKinds).toEqual(
-    new Set(["message", "toolCall", "permissionRequest", "planUpdate", "turnStop"]),
+    new Set(["message", "permissionRequest", "planUpdate", "workDrawer", "turnStop"]),
   )
   expect(textRoles).toEqual(new Set(["system", "user", "assistant"]))
   expect(toolStatuses).toEqual(new Set(["pending", "in_progress", "completed", "failed"]))
