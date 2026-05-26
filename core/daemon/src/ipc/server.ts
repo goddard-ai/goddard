@@ -410,6 +410,11 @@ export async function startDaemonServer(
         session: await sessionManager.setSessionConfigOption(payload),
       }
     },
+    "session.model.set": async (payload) => {
+      return {
+        session: await sessionManager.setSessionModel(payload),
+      }
+    },
     "session.complete": async ({ id }) => {
       return {
         item: await sessionManager.completeSession(id),

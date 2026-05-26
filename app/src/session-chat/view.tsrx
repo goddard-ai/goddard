@@ -30,13 +30,18 @@ import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { findSelectConfigOption } from "~/session-input/config-options.ts"
-import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
+import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
+import {
+  SessionConfigOptionSelector,
+  SessionModeSelector,
+} from "~/session-input/session-mode-selector.tsrx"
 import {
   cancelSessionTurn,
   completeSession,
   reconnectSession,
   respondSessionPermission,
   setSessionConfigOption,
+  setSessionModel,
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
@@ -352,7 +357,25 @@ export default component SessionChatView(props: {
           <footer class={styles.composerDock}>
             const submitError = page.submitPrompt.error.value
             const modePickerOpen = useSignal(false)
+            const modelPickerOpen = useSignal(false)
+            const thinkingPickerOpen = useSignal(false)
             const modeOption = findSelectConfigOption(chat.session.configOptions, "mode")
+            const thinkingOption = findSelectConfigOption(
+              chat.session.configOptions,
+              "thought_level",
+            )
+            const modelItems: SessionInputSelectItem[] =
+              chat.session.models?.availableModels.map(
+                (model) => ({
+                  value: model.modelId,
+                  label: model.name,
+                  detail: model.description ?? model.modelId,
+                  searchText: [model.name, model.description, model.modelId].filter(Boolean).join(
+                    "\n",
+                  ),
+                }),
+              ) ??
+                []
 
             if (submitError) {
               <div class={styles.composerError} role="alert">
@@ -362,25 +385,68 @@ export default component SessionChatView(props: {
                 </span>
               </div>
             }
-            if (modeOption) {
+            if (modeOption || modelItems.length > 0 || thinkingOption) {
               <div class={styles.composerControls}>
-                <SessionModeSelector
-                  disabled={!chat.session.activeDaemonSession}
-                  {modeOption}
-                  open={modePickerOpen}
-                  onValueChange={async (value) => {
-                    try {
-                      const result = await setSessionConfigOption({
-                        id: chat.session.id,
-                        configId: modeOption.id,
-                        value,
-                      })
-                      chat.syncSession(result.session)
-                    } catch (error) {
-                      console.error("Failed to update session mode.", error)
-                    }
-                  }}
-                />
+                if (modeOption) {
+                  <SessionModeSelector
+                    disabled={!chat.session.activeDaemonSession}
+                    {modeOption}
+                    open={modePickerOpen}
+                    onValueChange={async (value) => {
+                      try {
+                        const result = await setSessionConfigOption({
+                          id: chat.session.id,
+                          configId: modeOption.id,
+                          value,
+                        })
+                        chat.syncSession(result.session)
+                      } catch (error) {
+                        console.error("Failed to update session mode.", error)
+                      }
+                    }}
+                  />
+                }
+                if (modelItems.length > 0) {
+                  <SessionInputSelect
+                    disabled={!chat.session.activeDaemonSession}
+                    filterable={true}
+                    items={modelItems}
+                    label="Model"
+                    open={modelPickerOpen}
+                    placeholder="Use the adapter default model"
+                    value={chat.session.models?.currentModelId ?? null}
+                    onValueChange={async (value) => {
+                      try {
+                        const result = await setSessionModel({
+                          id: chat.session.id,
+                          modelId: value,
+                        })
+                        chat.syncSession(result.session)
+                      } catch (error) {
+                        console.error("Failed to update session model.", error)
+                      }
+                    }}
+                  />
+                }
+                if (thinkingOption) {
+                  <SessionConfigOptionSelector
+                    disabled={!chat.session.activeDaemonSession}
+                    option={thinkingOption}
+                    open={thinkingPickerOpen}
+                    onValueChange={async (value) => {
+                      try {
+                        const result = await setSessionConfigOption({
+                          id: chat.session.id,
+                          configId: thinkingOption.id,
+                          value,
+                        })
+                        chat.syncSession(result.session)
+                      } catch (error) {
+                        console.error("Failed to update session thinking level.", error)
+                      }
+                    }}
+                  />
+                }
               </div>
             }
             <Composer

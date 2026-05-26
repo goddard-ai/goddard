@@ -4,6 +4,7 @@ import type {
   SessionPermissionResponseRequest,
   SessionPromptRequest,
   SetSessionConfigOptionRequest,
+  SetSessionModelRequest,
 } from "@goddard-ai/sdk"
 
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
@@ -50,6 +51,15 @@ export async function submitSessionPrompt(props: SessionPromptRequest) {
  */
 export async function setSessionConfigOption(props: SetSessionConfigOptionRequest) {
   const result = await goddardSdk.session.setConfigOption(props)
+  refreshSessionViews(props.id)
+  return result
+}
+
+/**
+ * Updates one active ACP session model and refreshes the affected session views.
+ */
+export async function setSessionModel(props: SetSessionModelRequest) {
+  const result = await goddardSdk.session.setModel(props)
   refreshSessionViews(props.id)
   return result
 }

@@ -201,8 +201,12 @@ export default {
   }),
   composerControls: css({
     display: "grid",
-    maxWidth: "240px",
+    gridTemplateColumns: "1fr",
+    gap: "10px",
     marginBottom: "10px",
+    "@media (min-width: 720px)": {
+      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    },
   }),
   composerError: css({
     display: "grid",

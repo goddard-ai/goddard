@@ -46,6 +46,7 @@ import type {
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
   SetSessionConfigOptionRequest,
+  SetSessionModelRequest,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
@@ -342,6 +343,12 @@ type PendingConfigOptionRequest = {
   reject: (error: Error) => void
 }
 
+/** Pending session model request waiting for the agent response frame. */
+type PendingModelRequest = {
+  resolve: (response: acp.SetSessionModelResponse) => void
+  reject: (error: Error) => void
+}
+
 /** Holds the live runtime state for a daemon-owned session process. */
 type ActiveSession = {
   id: SessionId
@@ -363,6 +370,7 @@ type ActiveSession = {
   clientRequests: ClientRequestMap
   pendingPrompts: Map<string | number, PendingPromptRequest>
   pendingConfigOptions: Map<string | number, PendingConfigOptionRequest>
+  pendingModels: Map<string | number, PendingModelRequest>
   promptQueue: QueuedPromptEntry[]
   blockingPromptRequestId: string | number | null
   pendingSteer: PendingSteerRequest | null
@@ -430,6 +438,7 @@ export type SessionManager = {
   completeSession: (id: SessionId) => Promise<ReturnType<InboxManager["completeSession"]>>
   sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
   setSessionConfigOption: (params: SetSessionConfigOptionRequest) => Promise<DaemonSession>
+  setSessionModel: (params: SetSessionModelRequest) => Promise<DaemonSession>
   cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
   steerSession: (
     id: SessionId,
@@ -900,6 +909,23 @@ function settlePendingConfigOption(active: ActiveSession, message: acp.AnyMessag
   }
 }
 
+/** Resolves or rejects one pending model update when its agent response frame arrives. */
+function settlePendingModel(active: ActiveSession, message: acp.AnyMessage): void {
+  if ("id" in message === false || message.id == null) {
+    return
+  }
+  const pending = active.pendingModels.get(message.id)
+  if (!pending) {
+    return
+  }
+  active.pendingModels.delete(message.id)
+  if ("error" in message) {
+    pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
+  } else if ("result" in message) {
+    pending.resolve(getAcpMessageResult<acp.SetSessionModelResponse>(message))
+  }
+}
+
 /** Rejects any in-flight prompt waits when a daemon session is torn down. */
 function rejectPendingPrompts(active: ActiveSession, error: Error): void {
   for (const pending of active.pendingPrompts.values()) {
@@ -910,6 +936,10 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
     pending.reject(error)
   }
   active.pendingConfigOptions.clear()
+  for (const pending of active.pendingModels.values()) {
+    pending.reject(error)
+  }
+  active.pendingModels.clear()
   for (const queued of active.promptQueue) {
     queued.reject?.(error)
   }
@@ -2398,6 +2428,7 @@ export function createSessionManager(input: {
       clientRequests: new Map(),
       pendingPrompts: new Map(),
       pendingConfigOptions: new Map(),
+      pendingModels: new Map(),
       promptQueue: [],
       blockingPromptRequestId: null,
       pendingSteer: null,
@@ -2445,13 +2476,16 @@ export function createSessionManager(input: {
             },
           )
         }
-        shouldPersistMessage = clientRequest?.method !== acp.AGENT_METHODS.session_set_config_option
+        shouldPersistMessage =
+          clientRequest?.method !== acp.AGENT_METHODS.session_set_config_option &&
+          clientRequest?.method !== acp.AGENT_METHODS.session_set_model
 
         if (clientRequest) {
           activeSession.clientRequests.delete(message.id)
         }
         settlePendingPrompt(activeSession, message)
         settlePendingConfigOption(activeSession, message)
+        settlePendingModel(activeSession, message)
 
         if (message.id === activeSession.blockingPromptRequestId) {
           activeSession.blockingPromptRequestId = null
@@ -3643,6 +3677,49 @@ export function createSessionManager(input: {
     }
   }
 
+  async function setSessionModel(params: SetSessionModelRequest) {
+    await ready
+    const active = activeSessions.get(params.id)
+    if (!active) {
+      throw new IpcClientError(`Session ${params.id} is not active`)
+    }
+
+    const requestId = randomUUID()
+    const response = new Promise<acp.SetSessionModelResponse>((resolve, reject) => {
+      active.pendingModels.set(requestId, { resolve, reject })
+    })
+
+    try {
+      await writeImmediateMessage(
+        active,
+        {
+          jsonrpc: "2.0",
+          id: requestId,
+          method: acp.AGENT_METHODS.session_set_model,
+          params: {
+            sessionId: active.acpSessionId,
+            modelId: params.modelId,
+          },
+        } satisfies acp.AnyMessage,
+        { persistTurnMessage: false },
+      )
+      await response
+      const session = requireSessionDocument(params.id)
+      updateSession(params.id, {
+        models: session.models
+          ? {
+              ...session.models,
+              currentModelId: params.modelId,
+            }
+          : null,
+      })
+      return getSession(params.id)
+    } catch (error) {
+      active.pendingModels.delete(requestId)
+      throw error
+    }
+  }
+
   async function promptSession(
     id: SessionId,
     prompt: string | acp.ContentBlock[],
@@ -3852,6 +3929,7 @@ export function createSessionManager(input: {
     completeSession,
     sendMessage,
     setSessionConfigOption,
+    setSessionModel,
     cancelSessionTurn,
     steerSession,
     promptSession,

@@ -9,9 +9,27 @@ export component SessionModeSelector(props: {
   open: Signal<boolean>;
   onValueChange: (value: string) => void;
 }) {
-  const modeItems: SessionInputSelectItem[] =
-    props.modeOption
-      ? flattenConfigOptionValues(props.modeOption).map(
+  <SessionConfigOptionSelector
+    disabled={props.disabled}
+    option={props.modeOption}
+    open={props.open}
+    label="Approval preset"
+    placeholder="Use the adapter default"
+    onValueChange={props.onValueChange}
+  />
+}
+
+export component SessionConfigOptionSelector(props: {
+  disabled?: boolean;
+  label?: string;
+  option: SelectSessionConfigOption | null;
+  open: Signal<boolean>;
+  placeholder?: string;
+  onValueChange: (value: string) => void;
+}) {
+  const optionItems: SessionInputSelectItem[] =
+    props.option
+      ? flattenConfigOptionValues(props.option).map(
           (option) => ({
             value: option.value,
             label: option.name,
@@ -22,13 +40,13 @@ export component SessionModeSelector(props: {
       : []
 
   <SessionInputSelect
-    disabled={props.disabled || modeItems.length === 0}
+    disabled={props.disabled || optionItems.length === 0}
     filterable={false}
-    items={modeItems}
-    label={props.modeOption?.name ?? "Approval preset"}
+    items={optionItems}
+    label={props.option?.name ?? props.label ?? "Session option"}
     open={props.open}
-    placeholder="Use the adapter default"
-    value={props.modeOption?.currentValue ?? null}
+    placeholder={props.placeholder ?? "Use the adapter default"}
+    value={props.option?.currentValue ?? null}
     onValueChange={props.onValueChange}
   />
 }

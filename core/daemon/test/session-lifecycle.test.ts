@@ -2280,6 +2280,27 @@ test("session.configOption.set updates active session config options", async () 
   await client.send("session.shutdown", { id: created.session.id })
 })
 
+test("session.model.set updates active session model", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(launchPreviewAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    systemPrompt: "",
+  })
+
+  const updated = await client.send("session.model.set", {
+    id: created.session.id,
+    modelId: "gpt-5.4-mini",
+  })
+
+  expect(updated.session.models?.currentModelId).toBe("gpt-5.4-mini")
+
+  await client.send("session.shutdown", { id: created.session.id })
+})
+
 test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap output", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

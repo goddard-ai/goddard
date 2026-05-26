@@ -31,6 +31,7 @@ import type {
   SessionWorkforceParams,
   SessionWorktreeParams,
   SetSessionConfigOptionRequest,
+  SetSessionModelRequest,
   ShutdownSessionResponse,
 } from "@goddard-ai/schema/daemon"
 
@@ -51,6 +52,7 @@ export type {
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
   SetSessionConfigOptionRequest,
+  SetSessionModelRequest,
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,

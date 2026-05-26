@@ -362,6 +362,13 @@ export const SetSessionConfigOptionRequest = DaemonSessionIdParams.extend({
 
 export type SetSessionConfigOptionRequest = z.infer<typeof SetSessionConfigOptionRequest>
 
+/** Request payload used to update the active ACP session model. */
+export const SetSessionModelRequest = DaemonSessionIdParams.extend({
+  modelId: z.string(),
+})
+
+export type SetSessionModelRequest = z.infer<typeof SetSessionModelRequest>
+
 /** Request payload used to declare the current initiative for one daemon session. */
 export const DeclareSessionInitiativeRequest = DaemonSessionIdParams.extend({
   title: z.string().trim().min(1),
@@ -398,6 +405,11 @@ export type ReportSessionResponse = {
 
 /** Response payload returned after updating one ACP session config option. */
 export type SetSessionConfigOptionResponse = {
+  session: DaemonSession
+}
+
+/** Response payload returned after updating the active ACP session model. */
+export type SetSessionModelResponse = {
   session: DaemonSession
 }
 
