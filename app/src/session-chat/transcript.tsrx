@@ -166,6 +166,7 @@ function getPromptNavigationTargetIndexes(items: readonly RenderTranscriptItem[]
 function findPromptNavigationTargetIndex(input: {
   currentItemId: string | null;
   currentOffset: number;
+  currentVisibleEndOffset: number;
   defaultRowHeight: number;
   direction: "next" | "previous";
   items: readonly RenderTranscriptItem[];
@@ -192,6 +193,19 @@ function findPromptNavigationTargetIndex(input: {
   const getItemStart = (index: number) => input.measurements[index]?.start ??
     index * input.defaultRowHeight
   const scrollThreshold = 8
+
+  if (input.direction === "next") {
+    const currentVisibleTargetIndex = targetIndexes.findIndex((index) => {
+      const itemStart = getItemStart(index)
+
+      return itemStart >= input.currentOffset - scrollThreshold &&
+        itemStart < input.currentVisibleEndOffset - scrollThreshold
+    })
+
+    if (currentVisibleTargetIndex >= 0) {
+      return targetIndexes[currentVisibleTargetIndex + 1] ?? null
+    }
+  }
 
   if (input.direction === "previous") {
     for (let index = targetIndexes.length - 1; index >= 0; index -= 1) {
@@ -447,6 +461,10 @@ export component Transcript(props: TranscriptProps) {
     const targetIndex = findPromptNavigationTargetIndex({
       currentItemId: lastPromptNavigationItemIdRef.current,
       currentOffset: Math.max(0, scrollElement.scrollTop - viewport.scrollMargin + topInset),
+      currentVisibleEndOffset: Math.max(
+        0,
+        scrollElement.scrollTop - viewport.scrollMargin + scrollElement.clientHeight,
+      ),
       defaultRowHeight: DEFAULT_ROW_HEIGHT,
       direction,
       items: renderItems,
