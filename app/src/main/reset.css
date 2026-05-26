@@ -9,12 +9,14 @@
     margin: 0;
     padding: 0;
     font: inherit;
+    user-select: inherit;
   }
 
   html {
     block-size: 100%;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    user-select: none;
   }
 
   body {
@@ -55,6 +57,13 @@
   select {
     border: 0;
     background: none;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"]) {
+    user-select: text;
   }
 
   textarea {

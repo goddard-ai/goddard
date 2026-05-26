@@ -146,6 +146,7 @@ export default {
     display: "grid",
     gap: "10px",
     minWidth: 0,
+    userSelect: "text",
   }),
 
   attachmentCard: css({
