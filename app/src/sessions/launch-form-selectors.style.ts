@@ -12,12 +12,4 @@ export default {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     },
   }),
-  adapterCard: css({
-    display: "grid",
-    gap: "4px",
-    padding: "12px",
-    borderRadius: "14px",
-    border: "1px solid {colors.border}",
-    backgroundColor: "background",
-  }),
 }

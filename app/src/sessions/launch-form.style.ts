@@ -68,18 +68,4 @@ export default {
       opacity: "0.52",
     },
   }),
-  adapterMeta: css({
-    color: "text",
-    fontSize: "0.9rem",
-    fontWeight: "600",
-  }),
-  mutedMeta: css({
-    color: "muted",
-    fontWeight: "560",
-  }),
-  adapterDescription: css({
-    color: "muted",
-    fontSize: "0.88rem",
-    lineHeight: "1.5",
-  }),
 }

@@ -133,10 +133,6 @@ export const SessionLaunchFormState = createModel(function () {
   const launchPreview = signal<SessionLaunchPreviewResponse | null>(null)
   const openPicker = signal<LaunchPickerId>(null)
 
-  const selectedAdapter = computed(
-    () =>
-      adapterCatalog.value?.adapters.find((adapter) => adapter.id === draftAdapterId.value) ?? null,
-  )
   const launchModelConfig = computed(() =>
     deriveSessionLaunchModelConfig({
       models: launchPreview.value?.models ?? null,
@@ -332,7 +328,6 @@ export const SessionLaunchFormState = createModel(function () {
         syncAdapterSelection(adapterCatalog.value)
       }
     },
-    selectedAdapter,
     sessionInput,
     getPickerOpen(picker: SessionLaunchPickerId) {
       return lens(

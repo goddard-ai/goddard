@@ -60,7 +60,6 @@ export component SessionLaunchForm(props: {
       searchText: project.path,
     }),
   )
-  const selectedAdapter = form.selectedAdapter.value
   const projectShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openProjectSelector.id]?.[0],
   )
@@ -110,29 +109,6 @@ export component SessionLaunchForm(props: {
         <SessionLaunchLoadingSelect label="Adapter" />
       }
     </div>
-    if (selectedAdapter) {
-      <div class={selectorStyles.adapterCard}>
-        <p class={styles.adapterMeta}>
-          <span class={styles.mutedMeta}>
-            "Adapter"
-            " · "
-          </span>
-          <span>
-            {selectedAdapter.name}
-          </span>
-          <span class={styles.mutedMeta}>
-            " · "
-            {selectedAdapter.id}
-            {selectedAdapter.unofficial ? " · Unofficial" : ""}
-          </span>
-        </p>
-        if (selectedAdapter.description) {
-          <p class={styles.adapterDescription}>
-            {selectedAdapter.description}
-          </p>
-        }
-      </div>
-    }
     try {
       <SessionLaunchPreviewSelectors {form} />
     } pending {
