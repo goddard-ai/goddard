@@ -24,14 +24,17 @@ export type ReplyPrRouteRequest = z.infer<typeof ReplyPrRouteRequest>
 
 export const pullRequestIpcRoutes = defineIpcRoutes({
   pr: http.resource("pr", {
+    /** Submits one pull request through the daemon PR contract. */
     submit: http.post("submit", {
       body: SubmitPrRouteRequest,
       response: $type<SubmitPrResponse>(),
     }),
+    /** Fetches one daemon-managed pull request by tagged id. */
     get: http.post("get", {
       body: GetPullRequestRequest,
       response: $type<GetPullRequestResponse>(),
     }),
+    /** Posts one pull request reply through the daemon PR contract. */
     reply: http.post("reply", {
       body: ReplyPrRouteRequest,
       response: $type<ReplyPrResponse>(),

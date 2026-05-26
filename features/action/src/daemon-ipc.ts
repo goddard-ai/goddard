@@ -5,6 +5,7 @@ import { RunNamedActionRequest } from "./schema.ts"
 
 export const actionIpcRoutes = defineIpcRoutes({
   action: http.resource("action", {
+    /** Runs one named daemon action and creates the resulting daemon session. */
     run: http.post("run", {
       body: RunNamedActionRequest,
       response: $type<CreateSessionResponse>(),

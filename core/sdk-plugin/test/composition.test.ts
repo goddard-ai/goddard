@@ -110,11 +110,20 @@ describe("SDK plugin composition", () => {
   })
 
   test("allows route-only plugins without custom wrappers", () => {
+    const list = () => ({ items: [] })
     const plugin = defineSdkPlugin({
       name: "route-only",
       ipcRoutes: testIpcRoutes,
     })
 
-    expect(composeSdkPlugins([plugin]).wrap({ client: {} })).toEqual({})
+    expect(
+      composeSdkPlugins([plugin]).wrap({
+        client: {
+          inbox: { list },
+        },
+      }),
+    ).toEqual({
+      inbox: { list },
+    })
   })
 })
