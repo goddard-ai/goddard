@@ -16,6 +16,7 @@ const FULL_CHECK_FILE_GLOBS = [
     `scripts/**/*.${extension}`,
     `*.test.${extension}`,
   ]),
+  "bun.lock",
   "tsconfig.json",
   "tsconfig.*.json",
   "package.json",
@@ -144,9 +145,13 @@ function runBun(repoRoot: string, args: string[]) {
   return result.status === 0
 }
 
-/** Installs dependencies and runs the full repo check when the push requires it. */
-function runRepoCheck(repoRoot: string) {
-  return runBun(repoRoot, ["install", "--frozen-lockfile"]) && runBun(repoRoot, ["run", "check"])
+/** Installs dependencies only when the lockfile changed, then runs the full repo check. */
+function runRepoCheck(repoRoot: string, changedFiles: string[]) {
+  if (changedFiles.includes("bun.lock") && !runBun(repoRoot, ["install", "--frozen-lockfile"])) {
+    return false
+  }
+
+  return runBun(repoRoot, ["run", "check"])
 }
 
 /** Runs the pre-push guard and returns a process exit code. */
@@ -161,19 +166,18 @@ async function main(argv = process.argv.slice(2)) {
   const repoRoot = getRepoRoot()
 
   if (!hasOriginMain(repoRoot)) {
-    return runRepoCheck(repoRoot) ? 0 : 1
+    return runRepoCheck(repoRoot, []) ? 0 : 1
   }
 
   const branchPoint = getMergeBase(repoRoot, pushedSha)
 
   if (!branchPoint) {
-    return runRepoCheck(repoRoot) ? 0 : 1
+    return runRepoCheck(repoRoot, []) ? 0 : 1
   }
 
-  if (
-    shouldRunRepoCheck(getChangedFiles(repoRoot, branchPoint, pushedSha)) &&
-    !runRepoCheck(repoRoot)
-  ) {
+  const changedFiles = getChangedFiles(repoRoot, branchPoint, pushedSha)
+
+  if (shouldRunRepoCheck(changedFiles) && !runRepoCheck(repoRoot, changedFiles)) {
     return 1
   }
 
