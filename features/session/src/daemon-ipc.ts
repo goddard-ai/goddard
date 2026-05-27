@@ -7,6 +7,7 @@ import {
   DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
+  GetSessionPromptHistoryRequest,
   GetSessionWorktreeRequest,
   ListSessionsRequest,
   ReleaseSessionLaunchLeaseRequest,
@@ -29,6 +30,7 @@ import {
   type GetSessionChangesResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
+  type GetSessionPromptHistoryResponse,
   type GetSessionResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
@@ -69,6 +71,11 @@ export const sessionIpcRoutes = defineIpcRoutes({
     history: http.post("history", {
       body: GetSessionHistoryRequestSchema,
       response: $type<GetSessionHistoryResponse>(),
+    }),
+    /** Reads recent submitted prompts from daemon sessions under one project tree. */
+    promptHistory: http.post("prompt-history", {
+      body: GetSessionPromptHistoryRequest,
+      response: $type<GetSessionPromptHistoryResponse>(),
     }),
     /** Reads the current git diff for one daemon-managed session workspace. */
     changes: http.post("changes", {

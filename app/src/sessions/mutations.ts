@@ -16,6 +16,7 @@ function refreshSessionViews(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
   queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.promptHistory)
 }
 
 /**
@@ -24,6 +25,7 @@ function refreshSessionViews(sessionId: DaemonSession["id"]) {
 export async function createSession(input: CreateSessionRequest) {
   const result = await goddardSdk.session.create(input)
   queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
+  queryClient.invalidate(goddardSdk.session.promptHistory)
   return result
 }
 

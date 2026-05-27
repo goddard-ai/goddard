@@ -45,6 +45,14 @@ export type SessionInputContextUsage = {
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
+function clonePromptBlocks(blocks: SessionInputPromptBlocks): SessionInputPromptBlocks {
+  return blocks.map((block) => ({ ...block }))
+}
+
+function arePromptBlocksEqual(left: SessionInputPromptBlocks, right: SessionInputPromptBlocks) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 export component SessionInput(props: {
   autoFocus?: boolean;
   classes?: Partial<SessionInputClasses>;
@@ -59,6 +67,7 @@ export component SessionInput(props: {
   footerInsideFrame?: boolean;
   iconOnlySubmit?: boolean;
   initialPrompt?: SessionInputPromptBlocks;
+  promptHistory?: readonly SessionInputPromptBlocks[];
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) {
@@ -66,6 +75,8 @@ export component SessionInput(props: {
   const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
+  const historyDraftRef = useRef<SessionInputPromptBlocks | null>(null)
+  const historyIndexRef = useRef<number | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>(
     () => props.initialPrompt ?? [],
   )
@@ -240,8 +251,69 @@ export component SessionInput(props: {
   }
 
   function updatePromptBlocks(nextPromptBlocks: SessionInputPromptBlocks) {
+    const historyIndex = historyIndexRef.current
+
+    if (historyIndex !== null) {
+      const historyPrompt = props.promptHistory?.[historyIndex]
+
+      if (!historyPrompt || !arePromptBlocksEqual(nextPromptBlocks, historyPrompt)) {
+        historyIndexRef.current = null
+        historyDraftRef.current = null
+      }
+    }
+
     setPromptBlocks(nextPromptBlocks)
     props.onPromptChange?.(nextPromptBlocks)
+  }
+
+  function setPromptFromHistory(nextPromptBlocks: SessionInputPromptBlocks) {
+    const prompt = clonePromptBlocks(nextPromptBlocks)
+
+    setPromptBlocks(prompt)
+    props.onPromptChange?.(prompt)
+
+    if (editorRef.current) {
+      setSessionInputEditorPrompt(editorRef.current, prompt)
+      focusEditor()
+    }
+  }
+
+  function navigatePromptHistory(direction: "next" | "previous") {
+    const promptHistory = props.promptHistory ?? []
+
+    if (promptHistory.length === 0) {
+      return false
+    }
+
+    if (historyIndexRef.current === null) {
+      if (direction === "next") {
+        return false
+      }
+
+      historyDraftRef.current = clonePromptBlocks(promptBlocks)
+      historyIndexRef.current = promptHistory.length - 1
+      setPromptFromHistory(promptHistory[historyIndexRef.current])
+      return true
+    }
+
+    if (direction === "previous") {
+      historyIndexRef.current = Math.max(0, historyIndexRef.current - 1)
+      setPromptFromHistory(promptHistory[historyIndexRef.current])
+      return true
+    }
+
+    if (historyIndexRef.current >= promptHistory.length - 1) {
+      const draft = historyDraftRef.current ?? []
+
+      historyIndexRef.current = null
+      historyDraftRef.current = null
+      setPromptFromHistory(draft)
+      return true
+    }
+
+    historyIndexRef.current += 1
+    setPromptFromHistory(promptHistory[historyIndexRef.current])
+    return true
   }
 
   function registerEditor(editor: LexicalEditor) {
@@ -385,6 +457,8 @@ export component SessionInput(props: {
           onMenuChange={updateMenu}
           onPromptBlocksChange={updatePromptBlocks}
           onEscape={props.onEscape}
+          onHistoryNext={() => navigatePromptHistory("next")}
+          onHistoryPrevious={() => navigatePromptHistory("previous")}
           onSubmit={submitFromEditor}
         />
 

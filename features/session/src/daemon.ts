@@ -216,6 +216,7 @@ export const sessionPlugin = definePlugin({
             session: await sessionManager.connectSession(id),
           }),
           history: async ({ body }) => sessionManager.getHistory(body),
+          promptHistory: async ({ body }) => sessionManager.getPromptHistory(body),
           changes: async ({ body: { id } }) => sessionManager.getChanges(id),
           composerSuggestions: async ({ body }) => sessionManager.getComposerSuggestions(body),
           draftSuggestions: async ({ body }) => sessionManager.getDraftSuggestions(body),

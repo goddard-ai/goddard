@@ -8,6 +8,8 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import type { LexicalEditor } from "lexical"
 import {
   COMMAND_PRIORITY_HIGH,
+  $getSelection,
+  $isRangeSelection,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
@@ -73,6 +75,8 @@ export component SessionInputPlugins(props: {
   onMenuChange: (menu: SessionInputMenuState | null) => void;
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void;
   onEscape?: () => void;
+  onHistoryNext?: () => boolean;
+  onHistoryPrevious?: () => boolean;
   onSubmit: () => void;
   onAcceptMenu: () => void;
 }) {
@@ -130,6 +134,11 @@ export component SessionInputPlugins(props: {
       KEY_ARROW_DOWN_COMMAND,
       (event) => {
         if (!props.menu) {
+          if (props.onHistoryNext?.()) {
+            event?.preventDefault()
+            return true
+          }
+
           return false
         }
 
@@ -143,6 +152,11 @@ export component SessionInputPlugins(props: {
       KEY_ARROW_UP_COMMAND,
       (event) => {
         if (!props.menu) {
+          if (isSelectionAtComposerStart() && props.onHistoryPrevious?.()) {
+            event?.preventDefault()
+            return true
+          }
+
           return false
         }
 
@@ -205,4 +219,30 @@ export component SessionInputPlugins(props: {
       props.onPromptBlocksChange(serializeComposerEditorState(editorState))
     }}
   />
+}
+
+function isSelectionAtComposerStart() {
+  const selection = $getSelection()
+
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+    return false
+  }
+
+  const anchor = selection.anchor
+
+  if (anchor.offset !== 0) {
+    return false
+  }
+
+  let node = anchor.getNode()
+
+  while (node.getParent() !== null) {
+    if (node.getPreviousSibling() !== null) {
+      return false
+    }
+
+    node = node.getParentOrThrow()
+  }
+
+  return true
 }

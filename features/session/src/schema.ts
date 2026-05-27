@@ -305,6 +305,14 @@ export const GetSessionHistoryRequest = SessionIdParams.extend({
 
 export type GetSessionHistoryRequest = z.infer<typeof GetSessionHistoryRequest>
 
+/** Request payload used to read recent prompt history for one local project tree. */
+export const GetSessionPromptHistoryRequest = z.strictObject({
+  cwd: z.string(),
+  limit: z.number().int().positive().optional(),
+})
+
+export type GetSessionPromptHistoryRequest = z.infer<typeof GetSessionPromptHistoryRequest>
+
 /** Request payload used to read the current git diff for one daemon-managed session workspace. */
 export const GetSessionChangesRequest = SessionIdParams
 
@@ -657,6 +665,20 @@ export type GetSessionHistoryResponse = SessionIdentity & {
   turns: SessionHistoryTurn[]
   nextCursor: string | null
   hasMore: boolean
+}
+
+/** One submitted prompt entry returned by project-scoped prompt history. */
+export type SessionPromptHistoryItem = {
+  sessionId: SessionId
+  turnId: string
+  promptRequestId: string | number
+  submittedAt: string
+  prompt: acp.ContentBlock[]
+}
+
+/** Response payload returned after reading project-scoped prompt history. */
+export type GetSessionPromptHistoryResponse = {
+  prompts: SessionPromptHistoryItem[]
 }
 
 /** Response payload returned after one daemon-managed session git-diff fetch. */

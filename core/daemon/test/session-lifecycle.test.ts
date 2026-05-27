@@ -130,6 +130,135 @@ test("daemon persists repository context into durable session storage", async ()
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("daemon reads deduplicated prompt history across sessions in one project tree", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture({ includeSrc: true })
+  const otherRepoDir = await createRepoFixture()
+  const srcDir = join(repoDir, "src")
+
+  function seedSession(cwd: string) {
+    const sessionId = db.sessions.newId()
+
+    db.sessions.put(sessionId, {
+      acpSessionId: `acp-${sessionId}`,
+      status: "active",
+      stopReason: null,
+      agent: "pi-acp",
+      agentName: "node",
+      cwd,
+      title: "New session",
+      titleState: "placeholder",
+      mcpServers: [],
+      connectionMode: "history",
+      supportsLoadSession: false,
+      activeDaemonSession: false,
+      completedHidden: false,
+      errorMessage: null,
+      blockedReason: null,
+      initiative: null,
+      inboxScope: null,
+      lastAgentMessage: null,
+      repository: null,
+      prNumber: null,
+      token: null,
+      permissions: null,
+      metadata: null,
+      models: null,
+      configOptions: [],
+      availableCommands: [],
+      contextUsage: null,
+    } satisfies Parameters<typeof db.sessions.put>[1])
+
+    return sessionId
+  }
+
+  function seedPromptTurn(input: {
+    sessionId: ReturnType<typeof db.sessions.newId>
+    turnId: string
+    sequence: number
+    promptRequestId: string
+    startedAt: string
+    text: string
+  }) {
+    db.sessionTurns.create({
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      sequence: input.sequence,
+      promptRequestId: input.promptRequestId,
+      startedAt: input.startedAt,
+      completedAt: input.startedAt,
+      completionKind: "result",
+      stopReason: "end_turn",
+      inboxScope: null,
+      inboxHeadline: null,
+      messages: [
+        {
+          jsonrpc: "2.0",
+          id: input.promptRequestId,
+          method: "session/prompt",
+          params: {
+            sessionId: `acp-${input.sessionId}`,
+            prompt: [{ type: "text", text: input.text }],
+          },
+        },
+      ],
+    })
+  }
+
+  const rootSessionId = seedSession(repoDir)
+  const subdirSessionId = seedSession(srcDir)
+  const otherSessionId = seedSession(otherRepoDir)
+
+  seedPromptTurn({
+    sessionId: rootSessionId,
+    turnId: "turn-root",
+    sequence: 1,
+    promptRequestId: "prompt-root",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    text: "Repeat this prompt",
+  })
+  seedPromptTurn({
+    sessionId: subdirSessionId,
+    turnId: "turn-subdir-repeat",
+    sequence: 1,
+    promptRequestId: "prompt-subdir-repeat",
+    startedAt: "2026-04-14T00:00:01.000Z",
+    text: "Repeat this prompt",
+  })
+  seedPromptTurn({
+    sessionId: subdirSessionId,
+    turnId: "turn-subdir-latest",
+    sequence: 2,
+    promptRequestId: "prompt-subdir-latest",
+    startedAt: "2026-04-14T00:00:02.000Z",
+    text: "Use the latest project prompt",
+  })
+  seedPromptTurn({
+    sessionId: otherSessionId,
+    turnId: "turn-other",
+    sequence: 1,
+    promptRequestId: "prompt-other",
+    startedAt: "2026-04-14T00:00:03.000Z",
+    text: "Do not include this prompt",
+  })
+
+  await expect(client.session.promptHistory({ cwd: repoDir })).resolves.toMatchObject({
+    prompts: [
+      {
+        sessionId: subdirSessionId,
+        turnId: "turn-subdir-repeat",
+        prompt: [{ type: "text", text: "Repeat this prompt" }],
+      },
+      {
+        sessionId: subdirSessionId,
+        turnId: "turn-subdir-latest",
+        prompt: [{ type: "text", text: "Use the latest project prompt" }],
+      },
+    ],
+  })
+})
+
 test("daemon resolves the default agent for direct session creation", async () => {
   await useTempHome()
   const require = createRequire(import.meta.url)

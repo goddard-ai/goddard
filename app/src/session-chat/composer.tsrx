@@ -28,6 +28,7 @@ export component Composer(props: {
   helperText?: preact.ComponentChildren;
   footerControls?: preact.ComponentChildren;
   contextUsage?: SessionInputContextUsage | null;
+  promptHistory?: readonly SessionInputPromptBlocks[];
   submitLabel?: string;
 }) {
   <SessionInput
@@ -41,6 +42,7 @@ export component Composer(props: {
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}
     placeholder={props.placeholder}
+    promptHistory={props.promptHistory}
     submitLabel={props.submitLabel}
     onSubmit={props.onSubmit}
   />

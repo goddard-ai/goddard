@@ -491,6 +491,44 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.promptHistory forwards project-scoped prompt history reads", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      prompts: [
+        {
+          sessionId: "ses_1",
+          turnId: "turn-1",
+          promptRequestId: "prompt-1",
+          submittedAt: "2026-04-14T00:00:00.000Z",
+          prompt: [{ type: "text", text: "Review the app composer." }],
+        },
+      ],
+    })
+
+    await expect(
+      sdk.session.promptHistory({
+        cwd: "/repo",
+        limit: 25,
+      }),
+    ).resolves.toEqual({
+      prompts: [
+        {
+          sessionId: "ses_1",
+          turnId: "turn-1",
+          promptRequestId: "prompt-1",
+          submittedAt: "2026-04-14T00:00:00.000Z",
+          prompt: [{ type: "text", text: "Review the app composer." }],
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("session.promptHistory", {
+      cwd: "/repo",
+      limit: 25,
+    })
+  })
+
   test("session.launchPreview forwards launch capability inspection requests", async () => {
     const { sdk, send } = createSdkWithClient()
 

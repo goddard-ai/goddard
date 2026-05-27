@@ -32,6 +32,7 @@ import {
   findSelectConfigOption,
   findSessionModeConfigOption,
 } from "~/session-input/config-options.ts"
+import type { SessionInputPromptBlocks } from "~/session-input/input.tsrx"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import {
   SessionConfigOptionSelector,
@@ -47,6 +48,45 @@ import {
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
+
+function readComposerHistoryPrompt(blocks: readonly unknown[]) {
+  const prompt: SessionInputPromptBlocks = []
+
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null || !("type" in block)) {
+      continue
+    }
+
+    if (block.type === "text") {
+      if ("text" in block && typeof block.text === "string") {
+        prompt.push({
+          type: "text",
+          text: block.text,
+        })
+      }
+
+      continue
+    }
+
+    if (
+      block.type === "resource_link" && "name" in block && typeof block.name === "string" &&
+        "uri" in block &&
+        typeof block.uri === "string"
+    ) {
+      prompt.push({
+        type: "resource_link",
+        name: block.name,
+        uri: block.uri,
+        title: "title" in block && typeof block.title === "string" ? block.title : undefined,
+        description: "description" in block && typeof block.description === "string"
+          ? block.description
+          : undefined,
+      })
+    }
+  }
+
+  return prompt.length > 0 ? prompt : null
+}
 
 export default component SessionChatView(props: {
   projectPath: string | null;
@@ -94,9 +134,16 @@ export default component SessionChatView(props: {
         const userPromptCount = transcriptMessages.filter(
           (message) => message.kind === "message" && message.role === "user",
         ).length
-
         const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
         useReportTabProject(resolvedProjectPath)
+        const promptHistory = useQuery(goddardSdk.session.promptHistory, {
+          params: [{ cwd: resolvedProjectPath ?? chat.session.cwd }],
+          refetchOnWindowReactivate: false,
+        }).prompts.flatMap((item) => {
+          const prompt = readComposerHistoryPrompt(item.prompt)
+
+          return prompt ? [prompt] : []
+        })
 
         const inbox = useInbox()
         useEffect(() => {
@@ -616,6 +663,7 @@ export default component SessionChatView(props: {
                   page.submitPrompt.clearError()
                 }
               }}
+              {promptHistory}
               onSubmit={async (prompt) => {
                 setSubmittedPromptScrollKey((currentKey) => (currentKey ?? 0) + 1)
                 await page.submitPrompt.run(async () => {

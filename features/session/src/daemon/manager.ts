@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { isAbsolute, relative, resolve } from "node:path"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
@@ -50,6 +51,8 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryRequest,
   type GetSessionHistoryResponse,
+  type GetSessionPromptHistoryRequest,
+  type GetSessionPromptHistoryResponse,
   type GetSessionWorktreeResponse,
   type InitialPromptOption,
   type ListSessionsRequest,
@@ -900,6 +903,8 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
 
 const DEFAULT_SESSION_PAGE_SIZE = 20
 const MAX_SESSION_PAGE_SIZE = 100
+const DEFAULT_PROMPT_HISTORY_LIMIT = 50
+const MAX_PROMPT_HISTORY_LIMIT = 100
 
 export type SessionAttentionEvent = {
   sessionId: SessionId
@@ -985,6 +990,24 @@ function normalizeSessionPageSize(limit?: number): number {
     Math.max(Math.trunc(limit ?? DEFAULT_SESSION_PAGE_SIZE), 1),
     MAX_SESSION_PAGE_SIZE,
   )
+}
+
+/** Normalizes optional prompt history limits to the daemon's supported bounds. */
+function normalizePromptHistoryLimit(limit?: number): number {
+  if (!Number.isFinite(limit)) {
+    return DEFAULT_PROMPT_HISTORY_LIMIT
+  }
+
+  return Math.min(
+    Math.max(Math.trunc(limit ?? DEFAULT_PROMPT_HISTORY_LIMIT), 1),
+    MAX_PROMPT_HISTORY_LIMIT,
+  )
+}
+
+function isPathAtOrUnder(root: string, candidate: string) {
+  const relativePath = relative(resolve(root), resolve(candidate))
+
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath))
 }
 
 /** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
@@ -2900,6 +2923,108 @@ export function createSessionManager(input: {
     }
   }
 
+  function getPromptFromTurn(turn: SessionHistoryTurn) {
+    for (const message of turn.messages) {
+      if (
+        isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt) &&
+        Array.isArray(message.params.prompt)
+      ) {
+        return message.params.prompt
+      }
+    }
+
+    return null
+  }
+
+  async function getPromptHistory(
+    params: GetSessionPromptHistoryRequest,
+  ): Promise<GetSessionPromptHistoryResponse> {
+    await ready
+    const limit = normalizePromptHistoryLimit(params.limit)
+    const prompts: GetSessionPromptHistoryResponse["prompts"] = []
+
+    for (const session of db.sessions.findMany()) {
+      if (session.completedHidden || !isPathAtOrUnder(params.cwd, session.cwd)) {
+        continue
+      }
+
+      const active = activeSessions.get(session.id)
+
+      if (active?.activeTurn) {
+        const turn = toSessionHistoryTurnFromActiveTurn(active.activeTurn)
+        const prompt = getPromptFromTurn(turn)
+
+        if (prompt) {
+          prompts.push({
+            sessionId: session.id,
+            turnId: turn.turnId,
+            promptRequestId: turn.promptRequestId,
+            submittedAt: turn.startedAt,
+            prompt,
+          })
+        }
+      } else {
+        const draftRecord = readLatestTurnDraft(session.id)
+
+        if (draftRecord) {
+          const turn = toSessionHistoryTurnFromDraft(draftRecord)
+          const prompt = getPromptFromTurn(turn)
+
+          if (prompt) {
+            prompts.push({
+              sessionId: session.id,
+              turnId: turn.turnId,
+              promptRequestId: turn.promptRequestId,
+              submittedAt: turn.startedAt,
+              prompt,
+            })
+          }
+        }
+      }
+
+      for (const turnRecord of db.sessionTurns.findMany({
+        where: { sessionId: session.id },
+        orderBy: {
+          sessionId: "asc",
+          sequence: "desc",
+        },
+      })) {
+        const turn = toSessionHistoryTurnFromRecord(turnRecord)
+        const prompt = getPromptFromTurn(turn)
+
+        if (!prompt) {
+          continue
+        }
+
+        prompts.push({
+          sessionId: session.id,
+          turnId: turn.turnId,
+          promptRequestId: turn.promptRequestId,
+          submittedAt: turn.startedAt,
+          prompt,
+        })
+      }
+    }
+
+    const seenPrompts = new Set<string>()
+    const recentPrompts = prompts
+      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
+      .filter((prompt) => {
+        const promptKey = JSON.stringify(prompt.prompt)
+
+        if (seenPrompts.has(promptKey)) {
+          return false
+        }
+
+        seenPrompts.add(promptKey)
+        return true
+      })
+      .slice(0, limit)
+      .reverse()
+
+    return { prompts: recentPrompts }
+  }
+
   async function getChanges(id: SessionId): Promise<GetSessionChangesResponse> {
     await ready
     const session = await getSession(id)
@@ -3671,6 +3796,7 @@ export function createSessionManager(input: {
     connectSession,
     getSession,
     getHistory,
+    getPromptHistory,
     getChanges,
     getComposerSuggestions,
     getDraftSuggestions,
