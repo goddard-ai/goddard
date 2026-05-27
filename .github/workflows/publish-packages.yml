@@ -97,17 +97,14 @@ jobs:
 
       - name: Pack package
         if: steps.version.outputs.changed == 'true'
-        id: pack
-        run: |
-          tarball="$(bun pm pack --quiet)"
-          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+        run: bun pm pack --quiet --filename "$PWD/package.tgz"
         working-directory: ${{ matrix.path }}
 
       - name: Publish package
         if: steps.version.outputs.changed == 'true'
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: bunx npm publish "./${{ steps.pack.outputs.tarball }}" --provenance --access public
+        run: bunx npm publish ./package.tgz --provenance --access public
         working-directory: ${{ matrix.path }}
 
       - name: Push release commit and tag
