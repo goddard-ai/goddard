@@ -115,39 +115,13 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish ${{ matrix.name }} to npm
+    name: Publish and push ${{ matrix.name }} release
     runs-on: ubuntu-latest
     needs: build-pack
     if: needs.build-pack.outputs.changed == 'true'
     permissions:
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ui-primitives
-            path: core/ui-primitives
-
-    steps:
-      - name: Download package artifact
-        uses: actions/download-artifact@v6
-        with:
-          name: ${{ matrix.name }}-package
-          path: ${{ matrix.path }}
-
-      - name: Publish package
-        run: npm publish ./package.tgz --provenance --access public --ignore-scripts
-        working-directory: ${{ matrix.path }}
-
-  push-release:
-    name: Push ${{ matrix.name }} release
-    runs-on: ubuntu-latest
-    needs:
-      - build-pack
-      - publish
-    if: needs.build-pack.outputs.changed == 'true'
-    permissions:
       contents: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -166,6 +140,16 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Download package artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ matrix.name }}-package
+          path: ${{ matrix.path }}
+
+      - name: Publish package
+        run: npm publish ./package.tgz --provenance --access public --ignore-scripts
+        working-directory: ${{ matrix.path }}
 
       - name: Configure release git identity
         run: |
