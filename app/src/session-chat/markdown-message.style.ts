@@ -37,6 +37,12 @@ export default {
       margin: "0",
       paddingInlineStart: "22px",
     },
+    "& ul": {
+      listStyle: "disc",
+    },
+    "& ol": {
+      listStyle: "decimal",
+    },
     "& li + li": {
       marginTop: "6px",
     },
