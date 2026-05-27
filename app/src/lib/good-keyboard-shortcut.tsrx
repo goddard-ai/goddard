@@ -39,6 +39,17 @@ const shortcutSymbolLabels: Record<string, string> = {
   up: "↑",
 }
 
+const shortcutNonMacModifierLabels: Record<string, string> = {
+  alt: "Alt",
+  cmd: "Cmd",
+  command: "Cmd",
+  control: "Ctrl",
+  ctrl: "Ctrl",
+  mod: "Ctrl",
+  option: "Alt",
+  shift: "Shift",
+}
+
 const shortcutNamedLabels: Record<string, string> = {
   end: "End",
   fn: "fn",
@@ -50,8 +61,29 @@ function formatCharacterKey(key: string) {
   return key.length === 1 && key.toLowerCase() !== key.toUpperCase() ? key.toUpperCase() : key
 }
 
+function isApplePlatform() {
+  const platform =
+    globalThis.navigator && "userAgentData" in globalThis.navigator
+      ? (globalThis.navigator.userAgentData as { platform?: string }).platform
+      : globalThis.navigator?.platform
+
+  return /Mac|iPhone|iPad|iPod/.test(platform ?? "")
+}
+
 function getShortcutPart(key: string): ShortcutPart {
   const normalizedKey = key.toLowerCase()
+  const nonMacModifierLabel = isApplePlatform()
+    ? undefined
+    : shortcutNonMacModifierLabels[normalizedKey]
+
+  if (nonMacModifierLabel) {
+    return {
+      key,
+      label: nonMacModifierLabel,
+      kind: "named",
+    }
+  }
+
   const symbolLabel = shortcutSymbolLabels[normalizedKey]
 
   if (symbolLabel) {
