@@ -5,9 +5,15 @@ import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { SessionParams } from "../../session.ts"
 import { AgentSession } from "./client-session.ts"
 
+type CreateRunSessionParams = Extract<SessionParams, { sessionId?: undefined }>
+
 /** Detects the session-creation case that returns no live client session object. */
 function shouldExitAfterInitialPrompt(params: SessionParams): boolean {
-  return "sessionId" in params === false && params.oneShot === true
+  return isNewSessionParams(params) && params.oneShot === true
+}
+
+function isNewSessionParams(params: SessionParams): params is CreateRunSessionParams {
+  return !("sessionId" in params) || params.sessionId === undefined
 }
 
 /** Turns a writable ACP transport into daemon `session.send` requests. */
@@ -169,26 +175,25 @@ export async function runSession(
   params: SessionParams,
   handler?: acp.Client,
 ): Promise<AgentSession | null> {
-  const connectedSession =
-    "sessionId" in params && params.sessionId !== undefined
-      ? await client.send("session.connect", { id: params.sessionId })
-      : await client.send("session.create", {
-          agent: params.agent,
-          cwd: params.cwd,
-          localCheckout: params.localCheckout,
-          worktree: params.worktree,
-          workforce: params.workforce,
-          mcpServers: params.mcpServers,
-          systemPrompt: params.systemPrompt ?? "",
-          initialModelId: params.initialModelId,
-          initialConfigOptions: params.initialConfigOptions,
-          env: params.env,
-          repository: params.repository,
-          prNumber: params.prNumber,
-          metadata: params.metadata,
-          initialPrompt: params.initialPrompt,
-          oneShot: params.oneShot,
-        })
+  const connectedSession = isNewSessionParams(params)
+    ? await client.send("session.create", {
+        agent: params.agent,
+        cwd: params.cwd,
+        localCheckout: params.localCheckout,
+        worktree: params.worktree,
+        workforce: params.workforce,
+        mcpServers: params.mcpServers,
+        systemPrompt: params.systemPrompt,
+        initialModelId: params.initialModelId,
+        initialConfigOptions: params.initialConfigOptions,
+        env: params.env,
+        repository: params.repository,
+        prNumber: params.prNumber,
+        metadata: params.metadata,
+        initialPrompt: params.initialPrompt,
+        oneShot: params.oneShot,
+      })
+    : await client.send("session.connect", { id: params.sessionId })
 
   if (shouldExitAfterInitialPrompt(params)) {
     return null

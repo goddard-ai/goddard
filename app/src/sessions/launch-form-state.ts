@@ -186,7 +186,6 @@ export const SessionLaunchFormState = createModel(function () {
             }
           : undefined,
       mcpServers: [],
-      systemPrompt: "",
       initialModelId: resolvedSelection.initialModelId,
       initialConfigOptions: resolvedSelection.initialConfigOptions,
       initialPrompt,

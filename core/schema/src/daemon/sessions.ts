@@ -121,7 +121,7 @@ export const CreateSessionRequest = z.strictObject({
   worktree: SessionWorktreeParams.optional(),
   workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
-  systemPrompt: z.string(),
+  systemPrompt: z.string().optional(),
   initialModelId: z.string().optional(),
   initialConfigOptions: z.array(InitialSessionConfigOption).optional(),
   env: z.record(z.string(), z.string()).optional(),

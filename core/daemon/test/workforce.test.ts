@@ -458,7 +458,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
           throw new Error("Missing workforce metadata")
         }
 
-        systemPrompts[metadata.agentId] = input.request.systemPrompt
+        systemPrompts[metadata.agentId] = input.request.systemPrompt ?? ""
 
         await runtime.respond({
           requestId: metadata.requestId,
@@ -547,10 +547,10 @@ test("create-intent requests target the root agent and specialize the root sessi
         capturedEnv = input.request.env
 
         if (initialPrompt.includes("Request intent: create")) {
-          createSystemPrompt = input.request.systemPrompt
+          createSystemPrompt = input.request.systemPrompt ?? ""
           createInitialPrompt = initialPrompt
         } else {
-          defaultSystemPrompt = input.request.systemPrompt
+          defaultSystemPrompt = input.request.systemPrompt ?? ""
         }
 
         const metadata = input.request.workforce ?? null
@@ -661,7 +661,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
   runtime = await WorkforceRuntime.start(rootDir, {
     sessionManager: {
       newSession: async (input: { request: CreateSessionRequest }) => {
-        capturedSystemPrompt = input.request.systemPrompt
+        capturedSystemPrompt = input.request.systemPrompt ?? ""
 
         const metadata = input.request.workforce ?? null
 

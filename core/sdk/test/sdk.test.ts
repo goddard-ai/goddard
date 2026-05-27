@@ -852,7 +852,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       localCheckout: undefined,
       worktree: undefined,
       mcpServers: [],
-      systemPrompt: "",
+      systemPrompt: undefined,
       initialModelId: undefined,
       initialConfigOptions: undefined,
       env: undefined,

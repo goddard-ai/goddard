@@ -31,8 +31,9 @@ export type ExistingSessionArtifacts = {
 }
 
 /** Internal launch request shape after the daemon has resolved the effective agent. */
-export type ResolvedCreateSessionRequest = CreateSessionRequest & {
+export type ResolvedCreateSessionRequest = Omit<CreateSessionRequest, "agent" | "systemPrompt"> & {
   agent: NonNullable<CreateSessionRequest["agent"]>
+  systemPrompt: string
 }
 
 /** Reads the highest persisted turn sequence across completed turns and any durable draft. */

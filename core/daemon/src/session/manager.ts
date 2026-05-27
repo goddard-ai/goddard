@@ -75,6 +75,7 @@ import {
   type SessionDiagnosticEvent,
 } from "../persistence/session-state.ts"
 import { db } from "../persistence/store.ts"
+import * as prompts from "../prompts/index.ts"
 import { prepareFreshWorktree } from "../worktrees/bootstrap.ts"
 import { createWorktree } from "../worktrees/index.ts"
 import { createWorktreePluginManager } from "../worktrees/plugin-manager.ts"
@@ -516,6 +517,37 @@ function shouldExitAfterInitialPrompt(params: SessionLaunchParams): boolean {
   return params.request.oneShot === true && params.request.initialPrompt !== undefined
 }
 
+function renderPrompt(template: string, variables: Record<string, string>): string {
+  return template.replace(/\${(\w+)}/g, (_, key) => {
+    const value = variables[key]
+    if (typeof value !== "string") {
+      throw new Error(`Prompt variable "${key}" is not a string`)
+    }
+
+    return value
+  })
+}
+
+function buildForegroundSystemPrompt() {
+  return renderPrompt(prompts.FOREGROUND, {
+    declare_initiative: prompts.CMD_DECLARE_INITIATIVE,
+    report_blocker: prompts.CMD_REPORT_BLOCKER,
+    global_rules: prompts.GLOBAL_RULES,
+  })
+}
+
+function resolveSystemPrompt(request: CreateSessionRequest) {
+  if (request.systemPrompt !== undefined) {
+    return request.systemPrompt
+  }
+
+  if (request.oneShot === true || request.workforce !== undefined) {
+    return ""
+  }
+
+  return buildForegroundSystemPrompt()
+}
+
 /** Returns true when the ACP adapter can reopen this session later via `session/load`. */
 function supportsSessionLoad(initialized: Pick<InitializedSession, "agentCapabilities">): boolean {
   return initialized.agentCapabilities?.loadSession === true
@@ -538,7 +570,7 @@ type InitializedSession = acp.InitializeResponse & {
 async function runLaunchInitialPrompt(params: {
   session: AcpSession
   acpSessionId: string
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   isFirstPrompt: boolean
   history: acp.AnyMessage[]
   onMessageWrite?: (message: acp.AnyMessage) => void
@@ -607,7 +639,7 @@ async function runLaunchInitialPrompt(params: {
 async function initializeSession(params: {
   input: AgentInputStream
   output: AgentOutputStream
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   resumeAcpId?: string
   onMessageWrite?: (message: acp.AnyMessage) => void
 }): Promise<InitializedSession> {
@@ -703,7 +735,7 @@ async function initializeSession(params: {
 /** Promotes one prepared launch lease by applying final launch options and optional initial prompt. */
 async function initializeSessionFromLaunchLease(params: {
   lease: LaunchLease
-  request: CreateSessionRequest
+  request: ResolvedCreateSessionRequest
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
   try {
@@ -843,6 +875,7 @@ async function resolveSessionRequestAgent(
   return {
     ...request,
     agent: request.agent ?? (await resolveDefaultAgent(config)),
+    systemPrompt: resolveSystemPrompt(request),
   }
 }
 
@@ -2887,7 +2920,7 @@ export function createSessionManager(input: {
         initialized,
         nextTurnSequence,
         sessionLogger,
-        systemPrompt: params.request.systemPrompt,
+        systemPrompt: resolvedRequest.systemPrompt,
       })
       if (mountedReviewSessionState && worktree) {
         await startReviewSessionRuntime(id, worktree.state, sessionLogger)

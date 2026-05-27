@@ -12,6 +12,7 @@ import {
   getGlobalConfigPath,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
+import type { GetSessionHistoryResponse } from "@goddard-ai/schema/daemon"
 import { matchAcpRequest } from "acp-client"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
@@ -33,6 +34,17 @@ const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let sharedHomeDir: string | null = null
+
+function findSessionPromptRequest(history: GetSessionHistoryResponse) {
+  return history.turns
+    .flatMap((turn) => turn.messages)
+    .map((message) =>
+      matchAcpRequest<{
+        prompt?: Array<{ type?: string; text?: string }>
+      }>(message, "session/prompt"),
+    )
+    .find((request) => request?.prompt)
+}
 
 afterEach(async () => {
   if (originalPath === undefined) {
@@ -2256,6 +2268,59 @@ test("session.create applies initial model and thinking configuration before the
       }),
     ),
   ).toBe(true)
+})
+
+test("session.create applies the foreground prompt to interactive initial prompts by default", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    initialPrompt: "Start the session.",
+  })
+
+  const history = await client.send("session.history", {
+    id: created.session.id,
+  })
+  const promptRequest = findSessionPromptRequest(history)
+
+  expect(promptRequest?.prompt?.[0]?.text).toContain('<system-prompt name="goddard">')
+  expect(promptRequest?.prompt?.[0]?.text).toContain("goddard end-turn")
+  expect(promptRequest?.prompt?.[1]).toEqual({
+    type: "text",
+    text: "Start the session.",
+  })
+
+  await client.send("session.shutdown", { id: created.session.id })
+})
+
+test("session.create leaves one-shot initial prompts unframed by default", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await client.send("session.create", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    mcpServers: [],
+    initialPrompt: "Run once.",
+    oneShot: true,
+  })
+
+  const history = await client.send("session.history", {
+    id: created.session.id,
+  })
+  const promptRequest = findSessionPromptRequest(history)
+
+  expect(promptRequest?.prompt).toEqual([
+    {
+      type: "text",
+      text: "Run once.",
+    },
+  ])
 })
 
 test("session.configOption.set updates active session config options", async () => {
