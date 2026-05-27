@@ -7,7 +7,8 @@ import {
   ChevronUp,
   CircleDot,
   FileDiff,
-  Folder,
+  GitFork,
+  Laptop,
   LoaderCircle,
   PauseCircle,
   XCircle,
@@ -61,13 +62,16 @@ export default component SessionChatView(props: {
 
     <main class={styles.root}>
       try {
-        const [sessionHistory, { session }] = useQueries(
+        const [sessionHistory, { session }, sessionWorktree] = useQueries(
           (query) => [
             query(goddardSdk.session.history, {
               params: [{ id: props.sessionId }],
               refetchOnWindowReactivate: false,
             }),
             query(goddardSdk.session.get, {
+              params: [{ id: props.sessionId }],
+            }),
+            query(goddardSdk.session.worktree, {
               params: [{ id: props.sessionId }],
             }),
           ],
@@ -135,7 +139,11 @@ export default component SessionChatView(props: {
           <header class={styles.header} data-session-chat-header="true">
             <div class={styles.headerIdentity}>
               <p class={styles.headerRepository}>
-                <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
+                if (sessionWorktree.worktree) {
+                  <GitFork aria-hidden={true} size={16} strokeWidth={2.1} />
+                } else {
+                  <Laptop aria-hidden={true} size={16} strokeWidth={2.1} />
+                }
                 {chat.repositoryLabel}
               </p>
             </div>
