@@ -374,6 +374,9 @@ export default component SessionChatView(props: {
             const modePickerOpen = useSignal(false)
             const modelPickerOpen = useSignal(false)
             const thinkingPickerOpen = useSignal(false)
+            const draftModeValue = useSignal<string | null>(null)
+            const draftModelId = useSignal<string | null>(null)
+            const draftThinkingValue = useSignal<string | null>(null)
             const sessionModelConfig = deriveSessionLaunchModelConfig({
               models: chat.session.models,
               configOptions: chat.session.configOptions,
@@ -397,11 +400,11 @@ export default component SessionChatView(props: {
                 []
             const currentModelId = sessionModelConfig.models?.currentModelId ?? null
 
-            async function applyResolvedSessionModel(input: {
-              modelId?: string | null;
-              thinkingValue?: string | null;
-            }) {
-              const selectedThinkingValue = input.thinkingValue ?? thinkingOption?.currentValue
+            async function applyDraftSessionControls() {
+              const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
+              const selectedModelId = draftModelId.value ?? currentModelId
+              const selectedThinkingValue =
+                draftThinkingValue.value ?? thinkingOption?.currentValue ?? null
               const selectedConfigOptions =
                 thinkingOption && typeof selectedThinkingValue === "string"
                   ? [
@@ -412,27 +415,40 @@ export default component SessionChatView(props: {
                     ]
                   : []
               const resolvedSelection = sessionModelConfig.resolveSelection({
-                modelId: input.modelId ?? currentModelId,
+                modelId: selectedModelId,
                 configOptions: selectedConfigOptions,
               })
+              const shouldApplyMode =
+                modeOption && draftModeValue.value !== null &&
+                  selectedModeValue !== modeOption.currentValue
+              const shouldApplyThinking =
+                thinkingOption && draftThinkingValue.value !== null &&
+                  selectedThinkingValue !== thinkingOption.currentValue
+              const shouldApplyModel = draftModelId.value !== null || shouldApplyThinking
               let latestSession: DaemonSession | null = null
 
-              const configOptionsToApply =
-                input.thinkingValue === undefined
-                  ? []
-                  : resolvedSelection.initialConfigOptions ?? []
-
-              for (const configOption of configOptionsToApply) {
+              if (shouldApplyMode && typeof selectedModeValue === "string") {
                 const result = await setSessionConfigOption({
                   id: chat.session.id,
-                  configId: configOption.configId,
-                  value: String(configOption.value),
+                  configId: modeOption.id,
+                  value: selectedModeValue,
                 })
                 latestSession = result.session
               }
 
+              if (shouldApplyThinking) {
+                for (const configOption of resolvedSelection.initialConfigOptions ?? []) {
+                  const result = await setSessionConfigOption({
+                    id: chat.session.id,
+                    configId: configOption.configId,
+                    value: String(configOption.value),
+                  })
+                  latestSession = result.session
+                }
+              }
+
               if (
-                resolvedSelection.initialModelId &&
+                shouldApplyModel && resolvedSelection.initialModelId &&
                   resolvedSelection.initialModelId !== chat.session.models?.currentModelId
               ) {
                 const result = await setSessionModel({
@@ -445,6 +461,10 @@ export default component SessionChatView(props: {
               if (latestSession) {
                 chat.syncSession(latestSession)
               }
+
+              draftModeValue.value = null
+              draftModelId.value = null
+              draftThinkingValue.value = null
             }
 
             if (submitError) {
@@ -463,52 +483,38 @@ export default component SessionChatView(props: {
                   <div class={styles.composerControls}>
                     if (modeOption) {
                       <SessionModeSelector
-                        disabled={!chat.session.activeDaemonSession}
-                        {modeOption}
+                        modeOption={{
+                          ...modeOption,
+                          currentValue: draftModeValue.value ?? modeOption.currentValue,
+                        }}
                         open={modePickerOpen}
-                        onValueChange={async (value) => {
-                          try {
-                            const result = await setSessionConfigOption({
-                              id: chat.session.id,
-                              configId: modeOption.id,
-                              value,
-                            })
-                            chat.syncSession(result.session)
-                          } catch (error) {
-                            console.error("Failed to update session mode.", error)
-                          }
+                        onValueChange={(value) => {
+                          draftModeValue.value = value
                         }}
                       />
                     }
                     if (modelItems.length > 0) {
                       <SessionInputSelect
-                        disabled={!chat.session.activeDaemonSession}
                         filterable={true}
                         items={modelItems}
                         label="Model"
                         open={modelPickerOpen}
                         placeholder="Use the adapter default model"
-                        value={currentModelId}
-                        onValueChange={async (value) => {
-                          try {
-                            await applyResolvedSessionModel({ modelId: value })
-                          } catch (error) {
-                            console.error("Failed to update session model.", error)
-                          }
+                        value={draftModelId.value ?? currentModelId}
+                        onValueChange={(value) => {
+                          draftModelId.value = value
                         }}
                       />
                     }
                     if (thinkingOption) {
                       <SessionConfigOptionSelector
-                        disabled={!chat.session.activeDaemonSession}
-                        option={thinkingOption}
+                        option={{
+                          ...thinkingOption,
+                          currentValue: draftThinkingValue.value ?? thinkingOption.currentValue,
+                        }}
                         open={thinkingPickerOpen}
-                        onValueChange={async (value) => {
-                          try {
-                            await applyResolvedSessionModel({ thinkingValue: value })
-                          } catch (error) {
-                            console.error("Failed to update session thinking level.", error)
-                          }
+                        onValueChange={(value) => {
+                          draftThinkingValue.value = value
                         }}
                       />
                     }
@@ -538,6 +544,7 @@ export default component SessionChatView(props: {
                     chat.syncSession(session)
                   }
 
+                  await applyDraftSessionControls()
                   await submitSessionPrompt({
                     id: chat.session.id,
                     acpId: chat.session.acpSessionId,
