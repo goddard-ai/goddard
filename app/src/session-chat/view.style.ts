@@ -1,4 +1,5 @@
 import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 
 export default {
   root: css({
@@ -195,15 +196,16 @@ export default {
     position: "sticky",
     bottom: "0",
     zIndex: "1",
+    paddingTop: "42px",
     paddingInline: "20px",
     paddingBottom: "20px",
-    backgroundColor: "background",
+    background: `linear-gradient(to bottom, transparent 0, ${token.var("colors.background")} 42px)`,
   }),
   composerControls: css({
     display: "grid",
     gridTemplateColumns: "1fr",
-    gap: "10px",
-    marginBottom: "10px",
+    alignItems: "center",
+    gap: "12px",
     "@media (min-width: 720px)": {
       gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     },

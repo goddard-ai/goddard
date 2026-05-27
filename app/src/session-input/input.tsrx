@@ -32,6 +32,7 @@ export type SessionInputClasses = {
   contentEditable: string;
   placeholder: string;
   footer: string;
+  footerControls?: string;
   helperText: string;
   contextUsage?: string;
   submitButton: string;
@@ -53,6 +54,9 @@ export component SessionInput(props: {
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: preact.ComponentChildren;
+  footerControls?: preact.ComponentChildren;
+  footerInsideFrame?: boolean;
+  iconOnlySubmit?: boolean;
   initialPrompt?: SessionInputPromptBlocks;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
@@ -73,15 +77,16 @@ export component SessionInput(props: {
   const classes = props.classes ?? {}
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
   const helperText =
-    props.helperText ??
-      <tsrx>
-        <GoodKeyboardShortcut expression="Enter" />
-        " sends, "
-        <GoodKeyboardShortcut expression="Shift+Enter" />
-        " inserts a newline, and "
-        <span>"@, $, or /"</span>
-        " open suggestions."
-      </tsrx>
+    props.helperText === undefined
+      ? <tsrx>
+          <GoodKeyboardShortcut expression="Enter" />
+          " sends, "
+          <GoodKeyboardShortcut expression="Shift+Enter" />
+          " inserts a newline, and "
+          <span>"@, $, or /"</span>
+          " open suggestions."
+        </tsrx>
+      : props.helperText
   const submitLabel = props.submitLabel ?? "Send"
   const contextUsage =
     props.contextUsage && props.contextUsage.size > 0
@@ -384,6 +389,18 @@ export component SessionInput(props: {
           onEscape={props.onEscape}
           onSubmit={submitFromEditor}
         />
+        if (props.footerInsideFrame) {
+          <SessionInputFooter
+            {canSubmit}
+            {classes}
+            {contextUsage}
+            {contextUsagePercent}
+            footerControls={props.footerControls}
+            {helperText}
+            iconOnlySubmit={props.iconOnlySubmit}
+            {submitLabel}
+          />
+        }
       </div>
     </LexicalComposer>
     <SessionInputMenu
@@ -397,33 +414,71 @@ export component SessionInput(props: {
       onAcceptSuggestion={acceptSuggestion}
       onHighlight={highlightSuggestion}
     />
-    <div class={classes.footer}>
-      <p class={classes.helperText}>
+    if (!props.footerInsideFrame) {
+      <SessionInputFooter
+        {canSubmit}
+        {classes}
+        {contextUsage}
+        {contextUsagePercent}
+        footerControls={props.footerControls}
         {helperText}
-      </p>
-      if (contextUsage) {
-        <div
-          aria-label={`Context usage ${contextUsagePercent}%`}
-          class={classes.contextUsage}
-          title={`${contextUsage.used.toLocaleString()} of ${contextUsage.size.toLocaleString()} context tokens used`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 36 36">
-            <circle cx="18" cy="18" r="15.5" />
-            <circle
-              cx="18"
-              cy="18"
-              r="15.5"
-              pathLength="100"
-              strokeDasharray={`${contextUsagePercent} 100`}
-            />
-          </svg>
-          <span>{`${contextUsagePercent}%`}</span>
-        </div>
-      }
-      <button class={classes.submitButton} disabled={!canSubmit} type="submit">
+        iconOnlySubmit={props.iconOnlySubmit}
         {submitLabel}
-        <SendHorizontal size={15} strokeWidth={2.2} />
-      </button>
-    </div>
+      />
+    }
   </form>
+}
+
+component SessionInputFooter(props: {
+  canSubmit: boolean;
+  classes: Partial<SessionInputClasses>;
+  contextUsage: SessionInputContextUsage | null;
+  contextUsagePercent: number | null;
+  footerControls?: preact.ComponentChildren;
+  helperText: preact.ComponentChildren;
+  iconOnlySubmit?: boolean;
+  submitLabel: string;
+}) {
+  <div class={props.classes.footer}>
+    if (props.footerControls) {
+      <div class={props.classes.footerControls}>
+        {props.footerControls}
+      </div>
+    }
+    if (props.helperText) {
+      <p class={props.classes.helperText}>
+        {props.helperText}
+      </p>
+    }
+    if (props.contextUsage) {
+      <div
+        aria-label={`Context usage ${props.contextUsagePercent}%`}
+        class={props.classes.contextUsage}
+        title={`${props.contextUsage.used.toLocaleString()} of ${props.contextUsage.size.toLocaleString()} context tokens used`}
+      >
+        <svg aria-hidden="true" viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="15.5" />
+          <circle
+            cx="18"
+            cy="18"
+            r="15.5"
+            pathLength="100"
+            strokeDasharray={`${props.contextUsagePercent} 100`}
+          />
+        </svg>
+        <span>{`${props.contextUsagePercent}%`}</span>
+      </div>
+    }
+    <button
+      aria-label={props.submitLabel}
+      class={props.classes.submitButton}
+      disabled={!props.canSubmit}
+      type="submit"
+    >
+      if (!props.iconOnlySubmit) {
+        {props.submitLabel}
+      }
+      <SendHorizontal size={15} strokeWidth={2.2} />
+    </button>
+  </div>
 }

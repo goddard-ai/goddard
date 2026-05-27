@@ -443,64 +443,67 @@ export default component SessionChatView(props: {
                 </span>
               </div>
             }
-            if (modeOption || modelItems.length > 0 || thinkingOption) {
-              <div class={styles.composerControls}>
-                if (modeOption) {
-                  <SessionModeSelector
-                    disabled={!chat.session.activeDaemonSession}
-                    {modeOption}
-                    open={modePickerOpen}
-                    onValueChange={async (value) => {
-                      try {
-                        const result = await setSessionConfigOption({
-                          id: chat.session.id,
-                          configId: modeOption.id,
-                          value,
-                        })
-                        chat.syncSession(result.session)
-                      } catch (error) {
-                        console.error("Failed to update session mode.", error)
-                      }
-                    }}
-                  />
-                }
-                if (modelItems.length > 0) {
-                  <SessionInputSelect
-                    disabled={!chat.session.activeDaemonSession}
-                    filterable={true}
-                    items={modelItems}
-                    label="Model"
-                    open={modelPickerOpen}
-                    placeholder="Use the adapter default model"
-                    value={currentModelId}
-                    onValueChange={async (value) => {
-                      try {
-                        await applyResolvedSessionModel({ modelId: value })
-                      } catch (error) {
-                        console.error("Failed to update session model.", error)
-                      }
-                    }}
-                  />
-                }
-                if (thinkingOption) {
-                  <SessionConfigOptionSelector
-                    disabled={!chat.session.activeDaemonSession}
-                    option={thinkingOption}
-                    open={thinkingPickerOpen}
-                    onValueChange={async (value) => {
-                      try {
-                        await applyResolvedSessionModel({ thinkingValue: value })
-                      } catch (error) {
-                        console.error("Failed to update session thinking level.", error)
-                      }
-                    }}
-                  />
-                }
-              </div>
-            }
             <Composer
               contextUsage={chat.summary.contextUsage}
               disabled={!canSubmitPrompt}
+              footerControls={<tsrx>
+                if (modeOption || modelItems.length > 0 || thinkingOption) {
+                  <div class={styles.composerControls}>
+                    if (modeOption) {
+                      <SessionModeSelector
+                        disabled={!chat.session.activeDaemonSession}
+                        {modeOption}
+                        open={modePickerOpen}
+                        onValueChange={async (value) => {
+                          try {
+                            const result = await setSessionConfigOption({
+                              id: chat.session.id,
+                              configId: modeOption.id,
+                              value,
+                            })
+                            chat.syncSession(result.session)
+                          } catch (error) {
+                            console.error("Failed to update session mode.", error)
+                          }
+                        }}
+                      />
+                    }
+                    if (modelItems.length > 0) {
+                      <SessionInputSelect
+                        disabled={!chat.session.activeDaemonSession}
+                        filterable={true}
+                        items={modelItems}
+                        label="Model"
+                        open={modelPickerOpen}
+                        placeholder="Use the adapter default model"
+                        value={currentModelId}
+                        onValueChange={async (value) => {
+                          try {
+                            await applyResolvedSessionModel({ modelId: value })
+                          } catch (error) {
+                            console.error("Failed to update session model.", error)
+                          }
+                        }}
+                      />
+                    }
+                    if (thinkingOption) {
+                      <SessionConfigOptionSelector
+                        disabled={!chat.session.activeDaemonSession}
+                        option={thinkingOption}
+                        open={thinkingPickerOpen}
+                        onValueChange={async (value) => {
+                          try {
+                            await applyResolvedSessionModel({ thinkingValue: value })
+                          } catch (error) {
+                            console.error("Failed to update session thinking level.", error)
+                          }
+                        }}
+                      />
+                    }
+                  </div>
+                }
+              </tsrx>}
+              helperText={null}
               loadSuggestions={async (input) => {
                 const response = await goddardSdk.session.composerSuggestions({
                   id: chat.session.id,

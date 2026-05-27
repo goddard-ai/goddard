@@ -13,6 +13,7 @@ const composerClasses: SessionInputClasses = {
   contentEditable: styles.contentEditable,
   placeholder: styles.placeholder,
   footer: styles.footer,
+  footerControls: styles.footerControls,
   helperText: styles.helperText,
   contextUsage: styles.contextUsage,
   submitButton: styles.submitButton,
@@ -24,7 +25,8 @@ export component Composer(props: {
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
-  helperText?: string;
+  helperText?: preact.ComponentChildren;
+  footerControls?: preact.ComponentChildren;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) {
@@ -32,7 +34,10 @@ export component Composer(props: {
     classes={composerClasses}
     contextUsage={props.contextUsage}
     disabled={props.disabled}
+    footerInsideFrame={true}
+    footerControls={props.footerControls}
     helperText={props.helperText}
+    iconOnlySubmit={true}
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}
     placeholder={props.placeholder}
