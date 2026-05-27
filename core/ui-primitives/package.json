@@ -6,7 +6,8 @@
   "files": [
     "dist",
     "docs",
-    "examples"
+    "examples",
+    "src"
   ],
   "exports": {
     ".": {
