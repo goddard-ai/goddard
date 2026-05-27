@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Runs the main-branch pre-push guard from TypeScript so the Husky hook stays
+ * Runs the protected-branch pre-push guard from TypeScript so the Husky hook stays
  * thin and the repo-check rules live in a discoverable place.
  */
 import { execFileSync, spawnSync } from "node:child_process"
 import globrex from "globrex"
+
+const CHECKED_REMOTE_BRANCH_REFS = ["refs/heads/main", "refs/heads/next"]
 
 const CHECKED_SOURCE_FILE_EXTENSIONS = ["ts", "tsrx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
 
@@ -71,14 +73,15 @@ function parsePushUpdates(stdinText: string) {
     })
 }
 
-/** Selects the pushed commit only when origin/main is being updated by a non-delete ref. */
-function findMainPushSha(remoteName: string, updates: PushUpdate[]) {
+/** Selects the pushed commit only when a checked origin branch is being updated by a non-delete ref. */
+function findCheckedBranchPushSha(remoteName: string, updates: PushUpdate[]) {
   if (remoteName !== "origin") {
     return undefined
   }
 
   return updates.find(
-    ({ localRef, remoteRef }) => remoteRef === "refs/heads/main" && localRef !== "(delete)",
+    ({ localRef, remoteRef }) =>
+      CHECKED_REMOTE_BRANCH_REFS.includes(remoteRef) && localRef !== "(delete)",
   )?.localSha
 }
 
@@ -149,7 +152,7 @@ function runRepoCheck(repoRoot: string) {
 /** Runs the pre-push guard and returns a process exit code. */
 async function main(argv = process.argv.slice(2)) {
   const [remoteName = ""] = argv
-  const pushedSha = findMainPushSha(remoteName, parsePushUpdates(await readStdinText()))
+  const pushedSha = findCheckedBranchPushSha(remoteName, parsePushUpdates(await readStdinText()))
 
   if (!pushedSha) {
     return 0

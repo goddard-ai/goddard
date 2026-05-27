@@ -1,0 +1,58 @@
+name: Fast-forward Main
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - next
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fast-forward-main
+  cancel-in-progress: false
+
+jobs:
+  fast-forward:
+    name: Fast-forward main to next
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'next'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.MAIN_FAST_FORWARD_TOKEN || github.token }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fast-forward main
+        run: |
+          git fetch origin main next
+
+          if ! git merge-base --is-ancestor origin/main origin/next; then
+            echo "main cannot be fast-forwarded to next because the branches have diverged." >&2
+            exit 1
+          fi
+
+          if [ "$(git rev-parse origin/main)" = "$(git rev-parse origin/next)" ]; then
+            echo "main already matches next."
+            exit 0
+          fi
+
+          git merge --ff-only origin/next
+          git push origin HEAD:main
