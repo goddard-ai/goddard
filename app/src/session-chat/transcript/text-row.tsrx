@@ -1,10 +1,12 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import { BookOpen, Link2 } from "lucide-react"
+import { BookOpen, Check, Copy, Link2 } from "lucide-react"
+import { useEffect, useRef, useState } from "preact/hooks"
 
 import type {
   SessionTranscriptContentBlock,
   SessionTranscriptTextMessage,
 } from "~/sessions/models.ts"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { MarkdownMessage } from "../markdown-message.tsrx"
 import { getBubbleMaxWidth } from "./layout.ts"
 import styles from "./transcript.style.ts"
@@ -31,6 +33,60 @@ function getResourceLinkDetail(block: Extract<SessionTranscriptContentBlock, {
   }
 
   return block.uri
+}
+
+component CopyMessageMarkdownButton(props: {
+  markdown: string;
+}) {
+  const [copied, setCopied] = useState(false)
+  const resetTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current)
+      }
+    }
+  }, [])
+
+  const copyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(props.markdown)
+    } catch (error) {
+      console.error("Failed to copy transcript markdown.", error)
+      return
+    }
+
+    setCopied(true)
+
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current)
+    }
+
+    resetTimerRef.current = window.setTimeout(() => {
+      setCopied(false)
+      resetTimerRef.current = null
+    }, 1250)
+  }
+
+  <GoodTooltip
+    ariaLabel={copied ? "Copied markdown" : "Copy markdown"}
+    content={copied ? "Copied" : "Copy markdown"}
+    side="top"
+  >
+    <button
+      aria-label={copied ? "Copied message markdown" : "Copy message markdown"}
+      class={styles.copyMarkdownButton}
+      type="button"
+      onClick={copyMarkdown}
+    >
+      if (copied) {
+        <Check size={14} strokeWidth={2.3} />
+      } else {
+        <Copy size={14} strokeWidth={2.3} />
+      }
+    </button>
+  </GoodTooltip>
 }
 
 component TranscriptContentBlock(props: {
@@ -85,6 +141,9 @@ export component TextTranscriptRow(props: {
   const alignmentStyle = isUserMessage
     ? { justifyContent: "flex-end" }
     : { justifyContent: "flex-start" }
+  const rawMarkdown = message.content.flatMap(
+    (block) => block.type === "text" ? [block.text] : [],
+  ).join("\n\n")
 
   if (message.role === "system") {
     return
@@ -116,6 +175,11 @@ export component TextTranscriptRow(props: {
               />
             }
           </div>
+          if (rawMarkdown.length > 0) {
+            <div class={styles.messageActions}>
+              <CopyMessageMarkdownButton markdown={rawMarkdown} />
+            </div>
+          }
         </div>
       </div>
     </div>

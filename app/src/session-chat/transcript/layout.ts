@@ -12,6 +12,7 @@ import {
   BUBBLE_PADDING_X,
   BUBBLE_PADDING_Y,
   CONTENT_BLOCK_GAP,
+  MESSAGE_ACTION_HEIGHT,
   META_HEIGHT,
   MIN_TEXT_WIDTH,
   NARROW_BUBBLE_WIDTH_BREAKPOINT,
@@ -204,7 +205,13 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
 
     const bubblePaddingY = message.role === "assistant" ? 0 : BUBBLE_PADDING_Y
 
-    return META_HEIGHT + bubblePaddingY + Math.max(contentHeight, BODY_LINE_HEIGHT) + ROW_GAP
+    return (
+      META_HEIGHT +
+      bubblePaddingY +
+      Math.max(contentHeight, BODY_LINE_HEIGHT) +
+      MESSAGE_ACTION_HEIGHT +
+      ROW_GAP
+    )
   }
 
   if (message.kind === "turnStop") {

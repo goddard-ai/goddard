@@ -149,6 +149,36 @@ export default {
     userSelect: "text",
   }),
 
+  messageActions: css({
+    display: "flex",
+    justifyContent: "flex-end",
+    paddingTop: "8px",
+  }),
+
+  copyMarkdownButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "28px",
+    height: "28px",
+    border: "1px solid transparent",
+    borderRadius: "6px",
+    backgroundColor: "transparent",
+    color: "fg.muted",
+    cursor: "pointer",
+    userSelect: "none",
+    _hover: {
+      border: "1px solid {colors.border}",
+      backgroundColor: "bg.hover",
+      color: "fg.default",
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+  }),
+
   attachmentCard: css({
     display: "grid",
     gap: "6px",
@@ -700,6 +730,7 @@ export const DEFAULT_ROW_HEIGHT = 104
 export const NARROW_BUBBLE_WIDTH_BREAKPOINT = 520
 export const WIDE_BUBBLE_WIDTH_BREAKPOINT = 760
 export const CONTENT_BLOCK_GAP = 10
+export const MESSAGE_ACTION_HEIGHT = 36
 export const ATTACHMENT_ROW_HEIGHT = 68
 export const TOOL_DIFF_PREVIEW_LINE_LIMIT = 6
 export const TURN_STOP_ROW_HEIGHT = 40
