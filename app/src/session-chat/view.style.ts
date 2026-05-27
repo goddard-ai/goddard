@@ -195,6 +195,10 @@ export default {
     paddingInline: "20px",
     paddingBottom: "20px",
     background: `linear-gradient(to bottom, transparent 0, ${token.var("colors.background")} 42px)`,
+    pointerEvents: "none",
+    "& > *": {
+      pointerEvents: "auto",
+    },
   }),
   composerControls: css({
     display: "grid",
