@@ -175,12 +175,17 @@ export component TextTranscriptRow(props: {
               />
             }
           </div>
-          if (rawMarkdown.length > 0) {
-            <div class={styles.messageActions}>
+          if (!isUserMessage && rawMarkdown.length > 0) {
+            <div class={cx(styles.messageActions, styles.messageActionsLeft)}>
               <CopyMessageMarkdownButton markdown={rawMarkdown} />
             </div>
           }
         </div>
+        if (isUserMessage && rawMarkdown.length > 0) {
+          <div class={cx(styles.messageActions, styles.messageActionsRight)}>
+            <CopyMessageMarkdownButton markdown={rawMarkdown} />
+          </div>
+        }
       </div>
     </div>
   </article>

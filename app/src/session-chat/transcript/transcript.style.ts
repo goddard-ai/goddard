@@ -151,8 +151,15 @@ export default {
 
   messageActions: css({
     display: "flex",
-    justifyContent: "flex-end",
     paddingTop: "8px",
+  }),
+
+  messageActionsLeft: css({
+    justifyContent: "flex-start",
+  }),
+
+  messageActionsRight: css({
+    justifyContent: "flex-end",
   }),
 
   copyMarkdownButton: css({
