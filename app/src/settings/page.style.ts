@@ -29,8 +29,7 @@ export default {
     backgroundColor: "panel",
     boxShadow: "none",
     "@media (max-width: 900px)": {
-      position: "static",
-      order: "-1",
+      display: "none",
     },
   }),
   sidebarTitle: css({
