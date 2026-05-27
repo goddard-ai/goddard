@@ -4,6 +4,7 @@ import type { RecordingSession } from "powerkeys"
 import { useEffect, useId, useRef, useState } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import styles from "./capture-dialog.style.ts"
 
@@ -119,7 +120,7 @@ export component KeyboardShortcutCaptureDialog(props: {
         <div class={styles.metaRow}>
           <dt class={styles.metaTerm}>"Current shortcut"</dt>
           <dd class={styles.metaDetail}>
-            {props.currentExpression}
+            <GoodKeyboardShortcut expression={props.currentExpression} />
           </dd>
         </div>
       }
@@ -141,7 +142,7 @@ export component KeyboardShortcutCaptureDialog(props: {
       </div>
       <div class={styles.captureValue}>
         if (draftExpression) {
-          {draftExpression}
+          <GoodKeyboardShortcut expression={draftExpression} />
         } else {
           <span class={styles.capturePlaceholder}>"Type a key combination or sequence"</span>
         }

@@ -8,6 +8,7 @@ import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandList } from "~/commands/app-command.ts"
 import { Menu, MenuItem } from "@goddard-ai/ui-primitives"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
 import { KeyboardShortcutCaptureDialog } from "./capture-dialog.tsrx"
@@ -344,7 +345,11 @@ component KeyboardShortcutsView(props: { class?: string }) {
                       }
                     }}
                   >
-                    {row.shortcut ?? "Add shortcut"}
+                    if (row.shortcut) {
+                      <GoodKeyboardShortcut expression={row.shortcut} />
+                    } else {
+                      "Add shortcut"
+                    }
                   </button>
 
                   <Menu

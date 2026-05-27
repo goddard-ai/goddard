@@ -8,6 +8,7 @@ import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandPaletteVisible } from "./commands/command-context.ts"
+import GoodKeyboardShortcut from "./lib/good-keyboard-shortcut.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "./lib/search-query.ts"
 
@@ -205,9 +206,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
               </span>
 
               if (shortcut) {
-                <span class={styles.shortcut}>
-                  {shortcut}
-                </span>
+                <GoodKeyboardShortcut class={styles.shortcut} expression={shortcut} />
               }
             </div>
           }

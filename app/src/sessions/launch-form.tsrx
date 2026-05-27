@@ -3,6 +3,7 @@ import { Folder } from "lucide-react"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsrx"
@@ -131,7 +132,16 @@ export component SessionLaunchForm(props: {
     <SessionInput
       autoFocus={true}
       classes={launchInputClasses}
-      helperText="Enter launches, Shift+Enter inserts a newline, Mod+Enter launches from the dialog, and @, $, or / open suggestions."
+      helperText={<tsrx>
+        <GoodKeyboardShortcut expression="Enter" />
+        " launches, "
+        <GoodKeyboardShortcut expression="Shift+Enter" />
+        " inserts a newline, "
+        <GoodKeyboardShortcut expression="Mod+Enter" />
+        " launches from the dialog, and "
+        <span>"@, $, or /"</span>
+        " open suggestions."
+      </tsrx>}
       initialPrompt={form.draftPromptBlocks.value}
       loadSuggestions={async (input) => {
         const cwd = form.effectiveCwd.value

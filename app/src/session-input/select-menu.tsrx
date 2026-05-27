@@ -7,6 +7,7 @@ import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import { Popover } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import styles from "./select-menu.style.ts"
@@ -51,7 +52,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const filterInputRef = useRef<HTMLInputElement>(null)
 
   const selectedItem = props.items.find((item) => item.value === props.value) ?? null
-  const shortcutLabel = props.shortcut ? `${props.shortcut} opens menu` : "No shortcut assigned"
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
   const SelectedIcon = selectedItem?.Icon
@@ -65,7 +65,12 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             {props.label}
           </span>
           <span class={styles.tooltipShortcut}>
-            {shortcutLabel}
+            if (props.shortcut) {
+              <GoodKeyboardShortcut expression={props.shortcut} />
+              " opens menu"
+            } else {
+              "No shortcut assigned"
+            }
           </span>
         </span>
       </tsrx>}

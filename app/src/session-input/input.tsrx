@@ -9,6 +9,7 @@ import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
@@ -51,7 +52,7 @@ export component SessionInput(props: {
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
-  helperText?: string;
+  helperText?: preact.ComponentChildren;
   initialPrompt?: SessionInputPromptBlocks;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
@@ -73,7 +74,14 @@ export component SessionInput(props: {
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
   const helperText =
     props.helperText ??
-      "Enter sends, Shift+Enter inserts a newline, and @, $, or / open suggestions."
+      <tsrx>
+        <GoodKeyboardShortcut expression="Enter" />
+        " sends, "
+        <GoodKeyboardShortcut expression="Shift+Enter" />
+        " inserts a newline, and "
+        <span>"@, $, or /"</span>
+        " open suggestions."
+      </tsrx>
   const submitLabel = props.submitLabel ?? "Send"
   const contextUsage =
     props.contextUsage && props.contextUsage.size > 0
