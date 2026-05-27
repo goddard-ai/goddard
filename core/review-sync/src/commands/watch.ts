@@ -293,6 +293,7 @@ async function cleanupWatchExit(input: {
   const notes: string[] = []
   let latest = input.session
   let paused = false
+  let restoreFailed = false
 
   try {
     latest = await pauseSession(input.session)
@@ -333,6 +334,7 @@ async function cleanupWatchExit(input: {
           notes.push(`Checked out ${input.startedBranch}.`)
         }
       } catch (error) {
+        restoreFailed = true
         failures.push(
           `Could not check out ${input.startedBranch} in ${latest.reviewWorktree}: ${formatThrownError(error)}`,
         )
@@ -353,10 +355,22 @@ async function cleanupWatchExit(input: {
           notes.push("No starting branch was checked out, so no branch was restored.")
         }
       } catch (error) {
+        restoreFailed = true
         failures.push(
           `Could not restore detached HEAD in ${latest.reviewWorktree}: ${formatThrownError(error)}`,
         )
       }
+    }
+  }
+
+  if (restoreFailed) {
+    try {
+      const currentBranch = await resolveCurrentBranch(latest.reviewWorktree, input.context)
+      if (currentBranch === latest.reviewBranch) {
+        return { latest, notes, failures }
+      }
+    } catch {
+      return { latest, notes, failures }
     }
   }
 
@@ -1226,7 +1240,13 @@ async function createFsWatchers(
           filename: filename?.toString() ?? null,
         })
       })
-      watcher.on("error", events.fail)
+      watcher.on("error", (error) => {
+        if (shouldIgnoreWatchFailure(target.source, error)) {
+          return
+        }
+
+        events.fail(error)
+      })
       watchers.push(watcher)
     }
   } catch (error) {
@@ -1264,6 +1284,20 @@ function shouldIgnoreWatchEvent(source: "worktree" | "git", filename: string | B
 
   const path = filename.toString()
   return path === ".git" || path.startsWith(".git/") || path.startsWith(".git\\")
+}
+
+/** Ignores Git's transient lock files when recursive metadata watching races their removal. */
+function shouldIgnoreWatchFailure(source: "worktree" | "git", error: unknown) {
+  if (source !== "git" || !(error instanceof Error)) {
+    return false
+  }
+
+  const nodeError = error as { code?: unknown; path?: unknown }
+  return (
+    nodeError.code === "ENOENT" &&
+    typeof nodeError.path === "string" &&
+    nodeError.path.endsWith(".lock")
+  )
 }
 
 /** Stops all filesystem watchers associated with one watch command. */

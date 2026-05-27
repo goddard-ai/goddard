@@ -267,6 +267,7 @@ test("watch explains when restoring the starting review branch fails", async () 
     expect(stopped.message).toContain("Cleanup did not complete")
     expect(stopped.message).toContain("Could not check out review-base")
     expect(stopped.message).toContain("pathspec")
+    expect(stopped.message).not.toContain("Could not delete review-sync/codex/review-sync-test")
     expect(controller.signal.reason).not.toBe(timeoutReason)
     expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
       true,
