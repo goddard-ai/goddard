@@ -5,9 +5,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { useInbox, useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
-import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
@@ -23,6 +23,15 @@ import { MainWorkbenchView, WorkbenchScrollPanel, WorkbenchTabPanel } from "./vi
 
 const accentStrongColor = token.var("colors.accentStrong")
 const textColor = token.var("colors.text")
+
+const mainTabCommands: Record<MainTabItemId, AppCommand> = {
+  inbox: AppCommand.navigation.openInbox,
+  sessions: AppCommand.navigation.openSessions,
+  search: AppCommand.navigation.openSearch,
+  specs: AppCommand.navigation.openSpecs,
+  tasks: AppCommand.navigation.openTasks,
+  roadmap: AppCommand.navigation.openRoadmap,
+}
 
 function useAppShellTabStrip(
   activeTabId: string,
@@ -240,14 +249,12 @@ export component AppShellChrome() {
 
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "primary")}
-        onMainTabSelect={navigateMainTab}
         {sidebarState}
         selectedMainTabId={mainTab.selectedKind}
       />
       <div aria-hidden="true" class={styles.navDivider} />
       <AppShellSidebarSection
         items={mainTabItems.filter((item) => item.group === "secondary")}
-        onMainTabSelect={navigateMainTab}
         {sidebarState}
         selectedMainTabId={mainTab.selectedKind}
       />
@@ -352,21 +359,20 @@ component AppShellSidebarSection(props: {
   items: Array<MainTabItem & {
     icon: SvgIconName;
   }>;
-  onMainTabSelect: (id: MainTabItemId) => void;
   sidebarState: AppShellSidebarState;
   selectedMainTabId: MainTabItemId;
 }) {
   for (const item of props.items) {
+    const command = mainTabCommands[item.id]
+
     <SidebarItem
+      {command}
       dot={appShellSidebarDots[item.id] ?? appShellDefaultSidebarDot}
       icon={item.icon}
       isSelected={item.id === props.selectedMainTabId}
       key={item.id}
       label={item.label}
       sidebarState={props.sidebarState}
-      onSelect={() => {
-        props.onMainTabSelect(item.id)
-      }}
     />
   }
 }
@@ -389,18 +395,24 @@ component ActionButton(props: {
 }
 
 component SidebarItem(props: {
+  command: AppCommand;
   dot: AppShellSidebarDot;
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
   sidebarState: AppShellSidebarState;
-  onSelect: () => void;
 }) {
   const hasDot = props.dot.isVisible(props.sidebarState)
   const ariaLabel =
     hasDot ? props.dot.getAriaLabel(props.label) : props.label
 
-  <GoodTooltip content={props.label} group="app-shell-sidebar" side="right" sideOffset={10}>
+  <AppCommandTooltip
+    command={props.command}
+    group="app-shell-sidebar"
+    label={props.label}
+    side="right"
+    sideOffset={10}
+  >
     <button
       aria-current={props.isSelected ? "page" : undefined}
       aria-label={ariaLabel}
@@ -409,14 +421,16 @@ component SidebarItem(props: {
         color: props.isSelected ? textColor : `color-mix(in srgb, ${textColor} 38%, transparent)`,
       }}
       type="button"
-      onClick={props.onSelect}
+      onClick={() => {
+        props.command()
+      }}
     >
       <InlineSvgIcon icon={props.icon} size="22px 21px" />
       if (hasDot) {
         <span aria-hidden="true" class={styles.sidebarUnreadDot} />
       }
     </button>
-  </GoodTooltip>
+  </AppCommandTooltip>
 }
 
 component TabButton(props: {

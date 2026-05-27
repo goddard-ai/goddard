@@ -25,8 +25,9 @@ import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
-import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -166,33 +167,39 @@ export default component SessionChatView(props: {
                 const workbenchTabSet = useWorkbenchTabSet()
                 const activeHeaderAction = page.headerAction.activeKey.value
 
-                <GoodTooltip ariaLabel="Previous prompt" content="Previous prompt">
+                <AppCommandTooltip
+                  command={AppCommand.sessionChat.skipToPreviousPrompt}
+                  label="Previous prompt"
+                >
                   <button
                     aria-label="Scroll to previous user prompt"
                     class={styles.headerActionButton}
                     disabled={!canNavigatePrompts}
                     type="button"
                     onClick={() => {
-                      skipToPrompt("previous")
+                      AppCommand.sessionChat.skipToPreviousPrompt()
                     }}
                   >
                     <ChevronUp size={15} strokeWidth={2.1} />
                   </button>
-                </GoodTooltip>
+                </AppCommandTooltip>
 
-                <GoodTooltip ariaLabel="Next prompt" content="Next prompt">
+                <AppCommandTooltip
+                  command={AppCommand.sessionChat.skipToNextPrompt}
+                  label="Next prompt"
+                >
                   <button
                     aria-label="Scroll to next user prompt"
                     class={styles.headerActionButton}
                     disabled={!canNavigatePrompts}
                     type="button"
                     onClick={() => {
-                      skipToPrompt("next")
+                      AppCommand.sessionChat.skipToNextPrompt()
                     }}
                   >
                     <ChevronDown size={15} strokeWidth={2.1} />
                   </button>
-                </GoodTooltip>
+                </AppCommandTooltip>
 
                 function openSessionChanges() {
                   queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])

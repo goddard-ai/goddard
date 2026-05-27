@@ -11,6 +11,7 @@ import { isCommandPaletteVisible } from "./commands/command-context.ts"
 import GoodKeyboardShortcut from "./lib/good-keyboard-shortcut.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "./lib/search-query.ts"
+import { getShortcutBindingExpression } from "./shared/shortcut-keymap.ts"
 
 const preparedAppCommands = appCommandList.map(
   (command) => ({
@@ -161,11 +162,9 @@ component CommandPalette(props: { open: Signal<boolean> }) {
             const isActive = activeCommand?.id === command.id
             const itemId = `${listboxId}-${command.id}`
             const Icon = command.icon
-            const shortcutBinding = shortcutRegistry.resolvedBindings[command.id]?.[0]
-            const shortcut =
-              typeof shortcutBinding === "string"
-                ? shortcutBinding
-                : shortcutBinding?.combo ?? shortcutBinding?.sequence
+            const shortcut = getShortcutBindingExpression(
+              shortcutRegistry.resolvedBindings[command.id]?.[0],
+            )
 
             <div
               id={itemId}
