@@ -53,6 +53,7 @@ export async function createBaseRepo(sprint: string) {
     await baseRepoTemplate(sprint),
     repo,
   ])
+  await configureTestGitIdentity(repo)
 
   return repo
 }
@@ -278,8 +279,7 @@ async function createBaseRepoTemplate(sprint: string) {
   templateRepos.push(repo)
 
   await git(repo, ["init"])
-  await git(repo, ["config", "user.name", "Test"])
-  await git(repo, ["config", "user.email", "test@example.com"])
+  await configureTestGitIdentity(repo)
   await git(repo, ["checkout", "-b", "main"])
   await fs.writeFile(path.join(repo, "README.md"), "# Test\n")
   await fs.mkdir(path.join(repo, "sprints", sprint), { recursive: true })
@@ -289,6 +289,12 @@ async function createBaseRepoTemplate(sprint: string) {
   await commitAll(repo, "init")
 
   return repo
+}
+
+/** Configures commit identity for test repositories that perform rebases. */
+async function configureTestGitIdentity(repo: string) {
+  await git(repo, ["config", "user.name", "Test"])
+  await git(repo, ["config", "user.email", "test@example.com"])
 }
 
 /** Registers synchronous cleanup because process exit hooks cannot await temp directory removal. */
