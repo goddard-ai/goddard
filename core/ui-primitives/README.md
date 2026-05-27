@@ -69,6 +69,7 @@ export function ExamplePopover() {
 
 - [`docs/agent-reference.md`](./docs/agent-reference.md): compact API and usage reference optimized for coding agents.
 - [`docs/context.md`](./docs/context.md): concepts, lifecycle rules, invariants, and API-selection guidance.
+- [`examples/`](./examples): copyable component patterns for portal setup, popovers, modals, menus, and tooltips.
 - Generated declarations in `dist/index.d.ts`: exact published signatures after build.
 
 ## Public entrypoint

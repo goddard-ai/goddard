@@ -116,6 +116,16 @@ Useful props:
 
 Tooltips use `Popover` with `focusOnOpen={false}`, `restoreFocus={false}`, `role="tooltip"`, and fixed positioning.
 
+## Runnable examples
+
+Prefer copying from `examples/` when adding UI code:
+
+- `examples/portal-roots.ts`: application-owned portal root setup.
+- `examples/popover.tsx`: anchored popover.
+- `examples/modal.tsx`: labelled modal with explicit close.
+- `examples/menu.tsx`: button-triggered menu.
+- `examples/tooltip.tsx`: single-trigger tooltip.
+
 ## Common patterns
 
 ### Modal with explicit close
