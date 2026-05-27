@@ -20,7 +20,7 @@ import {
 
 ## Setup checklist
 
-1. Configure portal roots once with `setOverlayPortalRoots`.
+1. Configure portal roots once with `setOverlayPortalRoots` from application setup code only. Do not call it from reusable library code.
 2. Store open state in a `Signal<boolean>`.
 3. Keep anchor refs stable before opening anchored overlays.
 4. Pass labels or labelled-by IDs for accessible names.
@@ -36,7 +36,7 @@ import {
 | `MenuItem` | component | Selectable item inside `Menu`; closes the containing menu after selection. |
 | `Tooltip` | component | Non-interactive tooltip attached to one trigger child. |
 | `OverlayPortal` | component | Low-level portal helper for overlay primitives. |
-| `setOverlayPortalRoots` | function | Configure `dialog` and `menu` host elements. |
+| `setOverlayPortalRoots` | function | Configure `dialog` and `menu` host elements from application code. Do not call from libraries. |
 | `startFloatingPosition` | function | Position a custom floating element against an element or `{ x, y }` point. |
 
 Exported types: `MenuProps`, `MenuItemProps`, `ModalProps`, `ModalCloseReason`, `PopoverProps`, `PopoverCloseReason`, `OverlayPortalRoot`, `OverlayPortalRootResolver`, `FloatingPoint`, `FloatingReference`, and `FloatingPositionOptions`.
