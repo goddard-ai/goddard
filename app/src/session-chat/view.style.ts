@@ -58,13 +58,11 @@ export default {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: "7px",
     flexShrink: "0",
+    width: "28px",
     minHeight: "28px",
     border: "1px solid {colors.border}",
-    borderRadius: "999px",
-    paddingBlock: "4px",
-    paddingInline: "10px",
+    borderRadius: "6px",
     backgroundColor: "surface",
     color: "muted",
     fontSize: "0.78rem",
@@ -84,9 +82,6 @@ export default {
     '&[data-tone="completed"]': {
       color: "text",
     },
-  }),
-  headerStatusLabel: css({
-    whiteSpace: "nowrap",
   }),
   headerActions: css({
     display: "inline-flex",

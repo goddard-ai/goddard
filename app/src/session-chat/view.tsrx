@@ -159,9 +159,6 @@ export default component SessionChatView(props: {
                 title={status.description}
               >
                 <StatusIcon size={15} strokeWidth={2.2} />
-                <span class={styles.headerStatusLabel}>
-                  {status.label}
-                </span>
               </div>
               <div class={styles.headerActions}>
                 const workbenchTabSet = useWorkbenchTabSet()
