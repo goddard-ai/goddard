@@ -23,6 +23,8 @@ export default {
     },
   }),
   contentEditable: css({
+    boxSizing: "border-box",
+    display: "block",
     width: "100%",
     minHeight: "88px",
     padding: "14px 16px",
@@ -33,6 +35,9 @@ export default {
     outline: "none",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+    "& p": {
+      margin: "0",
+    },
   }),
   placeholder: css({
     position: "absolute",
