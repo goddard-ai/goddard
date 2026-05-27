@@ -1392,6 +1392,7 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
     prompt: "replacement",
   })
   await waitFor(async () => events.includes("result:prompt-1:cancelled"))
+  await waitFor(async () => events.includes("chunk:prompt_started:replacement"))
   await Promise.resolve(unsubscribe()).catch(() => {})
 
   expect(steered.abortedQueue).toEqual([
@@ -1473,6 +1474,7 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
     prompt: "replacement",
   })
   await waitFor(async () => events.includes("result:prompt-1:cancelled"))
+  await waitFor(async () => events.includes("chunk:prompt_started:replacement"))
   await Promise.resolve(unsubscribe()).catch(() => {})
 
   expect(steered.abortedQueue).toEqual([
