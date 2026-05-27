@@ -49,8 +49,14 @@ jobs:
           PACKAGE_RELEASE_NAME: ${{ matrix.name }}
         run: |
           current_version="$(bun -e "console.log(require('./$PACKAGE_DIR/package.json').version)")"
-          current_tag="${PACKAGE_RELEASE_NAME}@${current_version}"
-          bumped_tag="$(git-cliff --bumped-version --tag "$current_tag" --tag-pattern "${PACKAGE_RELEASE_NAME}@[0-9]*" --include-path "${PACKAGE_DIR}/**")"
+          latest_tag="$(git tag --merged HEAD --list "${PACKAGE_RELEASE_NAME}@[0-9]*" --sort=-v:refname | head -n 1)"
+
+          if [ -z "$latest_tag" ]; then
+            bumped_tag="${PACKAGE_RELEASE_NAME}@0.1.0"
+          else
+            bumped_tag="$(git-cliff --bumped-version --use-branch-tags --tag "$latest_tag" --tag-pattern "${PACKAGE_RELEASE_NAME}@[0-9]*" --include-path "${PACKAGE_DIR}/**")"
+          fi
+
           next_version="${bumped_tag#${PACKAGE_RELEASE_NAME}@}"
 
           echo "current=$current_version" >> "$GITHUB_OUTPUT"
