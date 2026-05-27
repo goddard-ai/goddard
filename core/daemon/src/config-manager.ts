@@ -154,9 +154,14 @@ export function createConfigManager() {
 
   function shouldHandleWatchEvent(
     state: WatchedConfigState,
+    eventType: string,
     watchMode: WatchMode,
     filename: string | Buffer | null,
   ) {
+    if (watchMode === "root" && eventType === "rename") {
+      return true
+    }
+
     if (filename == null) {
       return true
     }
@@ -200,7 +205,7 @@ export function createConfigManager() {
       if (
         previousWatchMode !== state.watchMode ||
         previousWatchedDir !== state.watchedDir ||
-        shouldHandleWatchEvent(state, previousWatchMode, filename ?? null)
+        shouldHandleWatchEvent(state, eventType, previousWatchMode, filename ?? null)
       ) {
         onChange()
       }

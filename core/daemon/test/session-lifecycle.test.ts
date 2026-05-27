@@ -498,7 +498,10 @@ test("daemon stores usage updates on the session instead of durable turn history
   })
 
   await waitFor(async () => {
-    return db.sessions.get(created.session.id)?.stopReason === "end_turn"
+    return (
+      db.sessions.get(created.session.id)?.stopReason === "end_turn" &&
+      liveUsageUpdates.length === 1
+    )
   })
 
   await Promise.resolve(unsubscribe()).catch(() => {})
