@@ -747,7 +747,14 @@ export class WorkforceRuntime {
             recentActivity: buildRecentActivity(this.#events, request),
           })
         } catch (error) {
+          if (this.#stopped.value) {
+            return
+          }
           await this.handleAttemptFailure(requestId, agentId, attempt, error)
+          return
+        }
+
+        if (this.#stopped.value) {
           return
         }
 
@@ -772,6 +779,10 @@ export class WorkforceRuntime {
     attempt: number,
     error: unknown,
   ): Promise<void> {
+    if (this.#stopped.value) {
+      return
+    }
+
     const errorMessage = getErrorMessage(error)
     if (attempt >= 3) {
       await this.appendEvent({

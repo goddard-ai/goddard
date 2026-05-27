@@ -262,6 +262,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
       })
     },
   })
+  cleanup.push(() => runtime.stop())
 
   await runtime.createRequest({
     targetAgentId: "root",
@@ -338,6 +339,7 @@ test("domain agents can update and cancel requests they originally sent", async 
     sessionManager: {} as never,
     runSession: async () => {},
   })
+  cleanup.push(() => runtime.stop())
 
   const requestId = await runtime.createRequest({
     targetAgentId: "ui",
@@ -473,6 +475,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
       },
     } as never,
   })
+  cleanup.push(() => runtime.stop())
 
   await runtime.createRequest({
     targetAgentId: "root",
@@ -571,6 +574,7 @@ test("create-intent requests target the root agent and specialize the root sessi
       },
     } as never,
   })
+  cleanup.push(() => runtime.stop())
 
   await runtime.createRequest({
     targetAgentId: "root",
@@ -680,6 +684,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
       },
     } as never,
   })
+  cleanup.push(() => runtime.stop())
 
   await runtime.createRequest({
     targetAgentId: "api",
@@ -756,6 +761,7 @@ test("workforce runtime logs request-to-session correlation for launched session
         },
       } as never,
     })
+    cleanup.push(() => runtime.stop())
 
     await runtime.createRequest({
       targetAgentId: "root",
@@ -847,6 +853,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
       await sessionBlocked
     },
   })
+  cleanup.push(() => runtime.stop())
 
   const requestId = await runtime.createRequest({
     targetAgentId: "root",
