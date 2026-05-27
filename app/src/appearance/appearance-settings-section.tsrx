@@ -43,7 +43,7 @@ const themeModeOptions: readonly {
 export component AppearanceSettingsSection() {
   const appearance = useAppearance()
 
-  <SettingsSection aria-labelledby="settings-appearance-heading">
+  <SettingsSection id="settings-appearance" aria-labelledby="settings-appearance-heading">
     <SettingsSectionHeader>
       <SettingsSectionTitle id="settings-appearance-heading">"Appearance"</SettingsSectionTitle>
       <SettingsSectionDescription>
