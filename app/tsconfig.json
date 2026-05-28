@@ -11,6 +11,7 @@
     "lib": ["es2022", "dom", "dom.iterable"],
     "customConditions": ["browser", "source", "import", "default"],
     "allowArbitraryExtensions": true,
+    "rootDir": "..",
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
     "declaration": false,
