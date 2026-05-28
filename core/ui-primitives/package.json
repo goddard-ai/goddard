@@ -16,7 +16,6 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "bun": "./dist/index.mjs",
       "import": "./dist/index.mjs"
     }
   },
