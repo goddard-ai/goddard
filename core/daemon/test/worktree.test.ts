@@ -24,7 +24,11 @@ afterEach(async () => {
 })
 
 test("requires the cwd to be a git repository", async () => {
-  expect(resolveWorktreePlugin({ cwd: "/tmp/not-a-repo" })).rejects.toThrow("Not a git repository")
+  const missingRepoDir = join(tmpdir(), "goddard-not-a-repo")
+
+  await expect(resolveWorktreePlugin({ cwd: missingRepoDir })).rejects.toThrow(
+    "Not a git repository",
+  )
 })
 
 test("default worktree setup creates and cleans up a workspace inside an explicit directory", async () => {
@@ -40,7 +44,7 @@ test("default worktree setup creates and cleans up a workspace inside an explici
   expect(created.repoRoot).toBe(normalizedRepoDir)
   expect(created.requestedCwd).toBe(normalizedRepoDir)
   expect(created.effectiveCwd).toBe(created.worktreeDir)
-  expect(created.worktreeDir).toMatch(/\.custom-dir\/feature-1-\d+$/)
+  expect(created.worktreeDir).toMatch(/\.custom-dir[\\/]feature-1-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
   expect(created.poweredBy).toBe(defaultPlugin.name)
   expect(await resolveGitCommonDir(created.repoRoot)).toBe(

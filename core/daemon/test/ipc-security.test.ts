@@ -552,18 +552,18 @@ function createTestBackendClient(
   return {
     auth: {
       device: {
-        start: ({ body }: any = {}) => input.auth?.start?.(body),
-        complete: ({ body }: any) => input.auth?.complete?.(body),
+        start: (body?: any) => input.auth?.start?.(body),
+        complete: (body: any) => input.auth?.complete?.(body),
       },
       session: {
         current: () => input.auth?.current?.(),
       },
     },
     pullRequests: {
-      create: ({ body }: any) => input.pullRequests?.create?.(body),
+      create: (body: any) => input.pullRequests?.create?.(body),
       managed: async () => ({ managed: true }),
       comments: {
-        create: ({ body }: any) => input.pullRequests?.reply?.(body),
+        create: (body: any) => input.pullRequests?.reply?.(body),
       },
     },
     webhooks: {

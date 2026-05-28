@@ -72,7 +72,7 @@ export default component SessionChatView(props: {
             query(goddardSdk.session.get, {
               params: [{ id: props.sessionId }],
             }),
-            query(goddardSdk.session.worktree, {
+            query(goddardSdk.session.worktree.get, {
               params: [{ id: props.sessionId }],
             }),
           ],

@@ -18,7 +18,7 @@ test("getDatabasePath keeps the production path by default", () => {
   delete process.env.NODE_ENV
   delete process.env.GODDARD_DATA_PROFILE
 
-  expect(getDatabasePath()).toBe("/tmp/goddard-home/.goddard/goddard.db")
+  expect(getDatabasePath()).toBe(join("/tmp/goddard-home", ".goddard", "goddard.db"))
 })
 
 test("getDatabasePath isolates development data when the daemon data profile is set", () => {

@@ -42,24 +42,25 @@ describe("parseScaffoldArgs", () => {
 
 describe("createFeatureScaffoldPlan", () => {
   test("creates SDK and daemon IPC files only when their layers need them", () => {
+    const rootDir = join("/", "repo")
     const plan = createFeatureScaffoldPlan({
       name: "inbox",
-      rootDir: "/repo",
+      rootDir,
       layers: ["daemon", "sdk", "app"],
       includeDaemonIpc: true,
       includeStyledSystem: false,
     })
 
     expect(plan.files.map((file) => file.path)).toEqual([
-      "/repo/features/inbox/package.json",
-      "/repo/features/inbox/tsconfig.json",
-      "/repo/features/inbox/test/tsconfig.json",
-      "/repo/features/inbox/tsdown.config.ts",
-      "/repo/features/inbox/test/feature.test.ts",
-      "/repo/features/inbox/src/app.tsx",
-      "/repo/features/inbox/src/daemon.ts",
-      "/repo/features/inbox/src/daemon-ipc.ts",
-      "/repo/features/inbox/src/sdk.ts",
+      join(rootDir, "features", "inbox", "package.json"),
+      join(rootDir, "features", "inbox", "tsconfig.json"),
+      join(rootDir, "features", "inbox", "test", "tsconfig.json"),
+      join(rootDir, "features", "inbox", "tsdown.config.ts"),
+      join(rootDir, "features", "inbox", "test", "feature.test.ts"),
+      join(rootDir, "features", "inbox", "src", "app.tsx"),
+      join(rootDir, "features", "inbox", "src", "daemon.ts"),
+      join(rootDir, "features", "inbox", "src", "daemon-ipc.ts"),
+      join(rootDir, "features", "inbox", "src", "sdk.ts"),
     ])
 
     const packageJson = JSON.parse(plan.files[0]!.content)

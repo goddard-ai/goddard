@@ -1525,6 +1525,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture({ includeSrc: true })
   const requestedCwd = join(repoDir, "src")
+  const resolvedRequestedCwd = await realpath(requestedCwd)
 
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -1540,8 +1541,8 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   const worktree = fetchedWorktree.worktree
   expect(worktree).toBeTruthy()
   expect(fetchedWorktree.id).toBe(created.session.id)
-  expect(worktree?.requestedCwd.endsWith("/src")).toBe(true)
-  expect(worktree?.effectiveCwd).toMatch(/\/src$/)
+  expect(worktree?.requestedCwd).toBe(resolvedRequestedCwd)
+  expect(worktree?.effectiveCwd).toBe(join(worktree!.worktreeDir, "src"))
   expect(worktree?.worktreeDir).not.toBe(repoDir)
   expect(existsSync(worktree!.worktreeDir)).toBe(true)
   expect(existsSync(worktree!.effectiveCwd)).toBe(true)
