@@ -71,16 +71,27 @@ export const sessionPlugin = definePlugin({
       }
     }
 
-    const { close, ...sessionMethods } = sessionManager
-
     return {
       provides: {
         session: {
-          ...sessionMethods,
+          newSession: sessionManager.newSession,
+          getWorkforce: sessionManager.getWorkforce,
+          promptSession: sessionManager.promptSession,
+          shutdownSession: sessionManager.shutdownSession,
+          recordTurnAttentionActivity: sessionManager.recordTurnAttentionActivity,
+          resolveTokenScope: sessionManager.resolveTokenScope,
+          allowPullRequest: sessionManager.allowPullRequest,
+          getSession: sessionManager.getSession,
+          getWorktree: sessionManager.getWorktree,
+          requireWorktree: sessionManager.requireWorktree,
+          listWorktrees: sessionManager.listWorktrees,
+          findWorktreeByDir: sessionManager.findWorktreeByDir,
+          isActive: sessionManager.isActive,
+          emitDiagnostic: sessionManager.emitDiagnostic,
           events,
         },
       },
-      close,
+      close: sessionManager.close,
       ipcHandlers: {
         session: {
           create: async ({ body }) => {
