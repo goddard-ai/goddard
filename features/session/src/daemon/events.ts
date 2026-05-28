@@ -2,6 +2,7 @@
 import type { InboxHeadline, InboxItem, InboxScope } from "@goddard-ai/inbox/schema"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import mitt, { type Handler } from "mitt"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -18,6 +19,10 @@ type EventResult<TEvents, TName extends keyof TEvents> = TEvents[TName] extends 
 ) => infer TResult
   ? Awaited<TResult>
   : never
+
+type SessionEventPayloads = {
+  [TName in keyof SessionEvents]: EventPayload<SessionEvents, TName>
+}
 
 /** Minimal typed async emitter used for feature-to-feature daemon integration. */
 export type SessionEventEmitter = {
@@ -100,23 +105,20 @@ export type SessionEvents = {
 
 /** Creates the session feature event emitter provided to consuming daemon plugins. */
 export function createSessionEventEmitter(): SessionEventEmitter {
-  const listeners = new Map<keyof SessionEvents, Set<SessionEvents[keyof SessionEvents]>>()
+  const emitter = mitt<SessionEventPayloads>()
 
   return {
     on(eventName, listener) {
-      let eventListeners = listeners.get(eventName)
-      if (!eventListeners) {
-        eventListeners = new Set()
-        listeners.set(eventName, eventListeners)
-      }
-
-      eventListeners.add(listener)
+      const handler = listener as Handler<SessionEventPayloads[typeof eventName]>
+      emitter.on(eventName, handler)
       return () => {
-        eventListeners.delete(listener)
+        emitter.off(eventName, handler)
       }
     },
     async emit(eventName, payload) {
-      const eventListeners = [...(listeners.get(eventName) ?? [])]
+      const eventListeners = [...(emitter.all.get(eventName) ?? [])] as Array<
+        SessionEvents[typeof eventName]
+      >
       const results = []
 
       for (const listener of eventListeners) {
