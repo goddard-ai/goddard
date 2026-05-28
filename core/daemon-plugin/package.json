@@ -23,8 +23,8 @@
   },
   "dependencies": {
     "@goddard-ai/backend-plugin": "workspace:*",
-    "@goddard-ai/ipc": "workspace:^",
-    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
     "kindstore": "catalog:",
     "zod": "catalog:"
   }

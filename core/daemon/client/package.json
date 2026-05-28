@@ -29,9 +29,9 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@goddard-ai/ipc": "workspace:^",
-    "@goddard-ai/paths": "workspace:^",
-    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/paths": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
     "radashi": "catalog:"
   }
 }

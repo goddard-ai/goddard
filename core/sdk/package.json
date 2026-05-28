@@ -33,18 +33,18 @@
     "@goddard-ai/action": "workspace:*",
     "@goddard-ai/adapter": "workspace:*",
     "@goddard-ai/auth": "workspace:*",
-    "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
-    "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/review-session": "workspace:*",
-    "@goddard-ai/schema": "workspace:^",
+    "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/workforce": "workspace:*"
   },
   "devDependencies": {
-    "@goddard-ai/daemon": "workspace:^"
+    "@goddard-ai/daemon": "workspace:*"
   }
 }
