@@ -126,18 +126,20 @@ test("daemon submit request enforces trusted repo context and records created PR
   const daemon = await startServer({
     sdk: {
       auth: {
-        startDeviceFlow: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        completeDeviceFlow: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
+        device: {
+          start: async () => ({
+            deviceCode: "dev_1",
+            userCode: "ABCD-1234",
+            verificationUri: "https://github.com/login/device",
+            expiresIn: 900,
+            interval: 5,
+          }),
+          complete: async () => ({
+            token: "tok_1",
+            githubUsername: "alec",
+            githubUserId: 42,
+          }),
+        },
         whoami: async () => ({
           token: "tok_1",
           githubUsername: "alec",
@@ -469,8 +471,10 @@ type StartServerOptions = {
   useExistingHome?: boolean
   sdk?: {
     auth?: {
-      startDeviceFlow?: (input?: any) => Promise<any>
-      completeDeviceFlow?: (input: any) => Promise<any>
+      device?: {
+        start?: (input?: any) => Promise<any>
+        complete?: (input: any) => Promise<any>
+      }
       whoami?: () => Promise<any>
     }
     pr?: {
@@ -489,7 +493,7 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
     createTestBackendClient({
       auth: {
         start:
-          options.sdk?.auth?.startDeviceFlow ??
+          options.sdk?.auth?.device?.start ??
           (async (_input?: any) => ({
             deviceCode: "dev_1",
             userCode: "ABCD-1234",
@@ -498,7 +502,7 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
             interval: 5,
           })),
         complete:
-          options.sdk?.auth?.completeDeviceFlow ??
+          options.sdk?.auth?.device?.complete ??
           (async (_input: any) => ({
             token: "tok_1",
             githubUsername: "alec",

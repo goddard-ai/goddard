@@ -35,7 +35,7 @@ export async function releaseSessionLaunchLease(launchLeaseId: string | null | u
     return
   }
 
-  await goddardSdk.session.releaseLaunchLease({ launchLeaseId })
+  await goddardSdk.session.launchLease.release({ launchLeaseId })
 }
 
 /**
@@ -50,7 +50,7 @@ export async function submitSessionPrompt(props: SessionPromptRequest) {
  * Updates one active ACP session config option and refreshes the affected session views.
  */
 export async function setSessionConfigOption(props: SetSessionConfigOptionRequest) {
-  const result = await goddardSdk.session.setConfigOption(props)
+  const result = await goddardSdk.session.configOption.set(props)
   refreshSessionViews(props.id)
   return result
 }
@@ -59,7 +59,7 @@ export async function setSessionConfigOption(props: SetSessionConfigOptionReques
  * Updates one active ACP session model and refreshes the affected session views.
  */
 export async function setSessionModel(props: SetSessionModelRequest) {
-  const result = await goddardSdk.session.setModel(props)
+  const result = await goddardSdk.session.model.set(props)
   refreshSessionViews(props.id)
   return result
 }

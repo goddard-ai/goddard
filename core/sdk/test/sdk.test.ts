@@ -278,7 +278,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session review session helpers forward the expected daemon requests", async () => {
+  test("session review session routes forward the expected daemon requests", async () => {
     const { sdk, send } = createSdkWithClient()
     const reviewSession = {
       sessionId: "review-session-1",
@@ -347,13 +347,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       warnings: [],
     })
 
-    await expect(sdk.session.mountReviewSession({ id: "ses_1" })).resolves.toMatchObject({
+    await expect(sdk.session.reviewSession.mount({ id: "ses_1" })).resolves.toMatchObject({
       worktree: { reviewSession },
     })
-    await expect(sdk.session.runReviewSession({ id: "ses_1" })).resolves.toMatchObject({
+    await expect(sdk.session.reviewSession.run({ id: "ses_1" })).resolves.toMatchObject({
       worktree: { reviewSession },
     })
-    await expect(sdk.session.unmountReviewSession({ id: "ses_1" })).resolves.toMatchObject({
+    await expect(sdk.session.reviewSession.unmount({ id: "ses_1" })).resolves.toMatchObject({
       worktree: { reviewSession: null },
     })
 
@@ -563,7 +563,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session.releaseLaunchLease forwards launch lease release requests", async () => {
+  test("session.launchLease.release forwards launch lease release requests", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
@@ -572,7 +572,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     await expect(
-      sdk.session.releaseLaunchLease({
+      sdk.session.launchLease.release({
         launchLeaseId: "lease_1",
       }),
     ).resolves.toEqual({
