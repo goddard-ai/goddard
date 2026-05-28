@@ -8,6 +8,7 @@ minimumReleaseAgeExcludes = [
   "electrobun",
   "powerkeys",
   "preact-sigma",
+  "procband",
   "radashi",
   "rouzer",
 
