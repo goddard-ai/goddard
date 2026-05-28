@@ -61,7 +61,7 @@
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "radashi": "catalog:",
-    "ulid": "catalog:",
+    "ulid": "^3.0.2",
     "zod": "catalog:"
   }
 }
