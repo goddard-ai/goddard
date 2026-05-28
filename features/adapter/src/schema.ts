@@ -1,7 +1,4 @@
-import {
-  AdapterCatalogEntry as AdapterCatalogEntrySchema,
-  type AdapterCatalogEntry as AcpAdapterCatalogEntry,
-} from "acp-client/node"
+import type * as acpClient from "acp-client/node"
 import { z } from "zod"
 
 /** Request payload used to list adapters available to one project or global session launch flow. */
@@ -13,14 +10,14 @@ export type ListAdaptersRequest = z.infer<typeof ListAdaptersRequest>
 export type ListAdaptersRequestType = ListAdaptersRequest
 
 /** One adapter entry surfaced to SDK and app consumers for launch selection and install flows. */
-export const AdapterCatalogEntry = AdapterCatalogEntrySchema
+export { AdapterCatalogEntry } from "acp-client/node"
 
-export type AdapterCatalogEntry = AcpAdapterCatalogEntry
-export type AdapterCatalogEntryType = AdapterCatalogEntry
+/** One adapter entry surfaced to SDK and app consumers for launch selection and install flows. */
+export type AdapterCatalogEntryType = acpClient.AdapterCatalogEntry
 
 /** Response payload returned after reading the effective adapter catalog for one launch context. */
 export type ListAdaptersResponse = {
-  adapters: AdapterCatalogEntry[]
+  adapters: acpClient.AdapterCatalogEntry[]
   defaultAdapterId: string | null
   registrySource: "cache" | "fallback"
   lastSuccessfulSyncAt: string | null
