@@ -1,5 +1,6 @@
 /** Typed lifecycle events emitted by the session feature for downstream daemon plugins. */
 import type { InboxHeadline, InboxItem, InboxScope } from "@goddard-ai/inbox/schema"
+import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 type MaybePromise<T> = T | Promise<T>
@@ -37,8 +38,49 @@ type SessionAttentionEvent = {
   turnId: string | null
 }
 
+/** Worktree lifecycle data exposed to daemon plugins without exposing session persistence. */
+export type SessionWorktreeLifecycleState = {
+  sessionId: DaemonSessionId
+  repoRoot: string
+  requestedCwd: string
+  effectiveCwd: string
+  worktreeDir: string
+  branchName: string
+  poweredBy: string
+}
+
+/** Worktree lifecycle event payload shared by launch-time session hooks. */
+type SessionWorktreeLifecycleEvent = {
+  sessionId: DaemonSessionId
+  worktree: SessionWorktreeLifecycleState
+}
+
 /** Events that represent session lifecycle changes other features may react to. */
 export type SessionEvents = {
+  "lifecycle.worktreePrepared": EventListener<
+    SessionWorktreeLifecycleEvent & {
+      request: CreateSessionRequest
+    }
+  >
+  "lifecycle.sessionActivated": EventListener<{
+    sessionId: DaemonSessionId
+    worktree: SessionWorktreeLifecycleState | null
+  }>
+  "lifecycle.launchFinished": EventListener<
+    SessionWorktreeLifecycleEvent & {
+      reason: "one_shot_completed"
+    }
+  >
+  "lifecycle.launchFailed": EventListener<
+    SessionWorktreeLifecycleEvent & {
+      error: unknown
+    }
+  >
+  "lifecycle.sessionStopping": EventListener<{
+    sessionId: DaemonSessionId
+    reason: "agent_process_exit" | "session_shutdown" | "daemon_shutdown"
+    worktree: SessionWorktreeLifecycleState | null
+  }>
   "lifecycle.blocked": EventListener<
     SessionAttentionEvent & {
       reason: string

@@ -41,14 +41,7 @@ import {
 } from "@goddard-ai/schema/daemon/sessions"
 import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 
-import {
-  GetSessionWorktreeRequest,
-  MountSessionReviewSessionRequest,
-  RunSessionReviewSessionRequest,
-  UnmountSessionReviewSessionRequest,
-  type GetSessionWorktreeResponse,
-  type MutateSessionReviewSessionResponse,
-} from "./schema.ts"
+import { GetSessionWorktreeRequest, type GetSessionWorktreeResponse } from "./schema.ts"
 
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
@@ -119,23 +112,6 @@ export const sessionIpcRoutes = defineIpcRoutes({
       get: http.post("get", {
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
-      }),
-    }),
-    reviewSession: http.resource("review-session", {
-      /** Mounts a review session for one daemon-managed session worktree. */
-      mount: http.post("mount", {
-        body: MountSessionReviewSessionRequest,
-        response: $type<MutateSessionReviewSessionResponse>(),
-      }),
-      /** Runs one mounted review session immediately. */
-      run: http.post("run", {
-        body: RunSessionReviewSessionRequest,
-        response: $type<MutateSessionReviewSessionResponse>(),
-      }),
-      /** Unmounts a review session from one daemon-managed session worktree. */
-      unmount: http.post("unmount", {
-        body: UnmountSessionReviewSessionRequest,
-        response: $type<MutateSessionReviewSessionResponse>(),
       }),
     }),
     workforce: http.resource("workforce", {

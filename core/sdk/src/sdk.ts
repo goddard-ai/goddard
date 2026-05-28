@@ -5,6 +5,7 @@ import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
+import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
@@ -26,6 +27,7 @@ const sdkPlugins = composeSdkPlugins([
   inboxSdkPlugin,
   loopSdkPlugin,
   pullRequestSdkPlugin,
+  reviewSessionSdkPlugin,
   sessionSdkPlugin,
   workforceSdkPlugin,
 ])
@@ -123,6 +125,10 @@ export class GoddardSdk {
       "session",
       createSessionNamespace(this.#client, this.#features.session),
     )
+  }
+
+  get reviewSession() {
+    return defineCachedNamespace(this, "reviewSession", this.#features.reviewSession)
   }
 
   get action() {

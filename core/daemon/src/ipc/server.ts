@@ -10,6 +10,7 @@ import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
+import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
 import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
@@ -33,6 +34,7 @@ const daemonPlugins = composePlugins([
   sessionPlugin,
   inboxPlugin,
   pullRequestPlugin,
+  reviewSessionPlugin,
   loopPlugin,
   workforcePlugin,
 ])

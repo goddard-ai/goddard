@@ -278,7 +278,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session review session routes forward the expected daemon requests", async () => {
+  test("reviewSession routes forward the expected daemon requests", async () => {
     const { sdk, send } = createSdkWithClient()
     const reviewSession = {
       sessionId: "review-session-1",
@@ -314,8 +314,8 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        reviewSession,
       },
+      reviewSession,
       warnings: [],
     })
     send.mockResolvedValueOnce({
@@ -328,8 +328,8 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        reviewSession,
       },
+      reviewSession,
       warnings: [],
     })
     send.mockResolvedValueOnce({
@@ -342,28 +342,28 @@ describe("@goddard-ai/sdk session namespace", () => {
         worktreeDir: "/repo/wt",
         branchName: "goddard-ses_1",
         poweredBy: "default",
-        reviewSession: null,
       },
+      reviewSession: null,
       warnings: [],
     })
 
-    await expect(sdk.session.reviewSession.mount({ id: "ses_1" })).resolves.toMatchObject({
-      worktree: { reviewSession },
+    await expect(sdk.reviewSession.mount({ id: "ses_1" })).resolves.toMatchObject({
+      reviewSession,
     })
-    await expect(sdk.session.reviewSession.run({ id: "ses_1" })).resolves.toMatchObject({
-      worktree: { reviewSession },
+    await expect(sdk.reviewSession.run({ id: "ses_1" })).resolves.toMatchObject({
+      reviewSession,
     })
-    await expect(sdk.session.reviewSession.unmount({ id: "ses_1" })).resolves.toMatchObject({
-      worktree: { reviewSession: null },
+    await expect(sdk.reviewSession.unmount({ id: "ses_1" })).resolves.toMatchObject({
+      reviewSession: null,
     })
 
-    expect(send).toHaveBeenNthCalledWith(1, "session.reviewSession.mount", {
+    expect(send).toHaveBeenNthCalledWith(1, "reviewSession.mount", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(2, "session.reviewSession.run", {
+    expect(send).toHaveBeenNthCalledWith(2, "reviewSession.run", {
       id: "ses_1",
     })
-    expect(send).toHaveBeenNthCalledWith(3, "session.reviewSession.unmount", {
+    expect(send).toHaveBeenNthCalledWith(3, "reviewSession.unmount", {
       id: "ses_1",
     })
   })

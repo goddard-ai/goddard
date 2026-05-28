@@ -1,20 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { realpath } from "node:fs/promises"
-import { resolve } from "node:path"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import { IpcClientError } from "@goddard-ai/ipc"
-import {
-  listReviewSessions,
-  startReviewSync,
-  statusReviewSession,
-  stopReviewSession,
-  syncReviewSession,
-  watchReviewSession,
-  type ReviewSyncResult,
-  type ReviewSyncStatusData,
-} from "@goddard-ai/review-sync"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
   AbortedSessionPrompt,
@@ -49,10 +37,7 @@ import type {
   SetSessionModelRequest,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
-import type {
-  GetSessionWorktreeResponse,
-  MutateSessionReviewSessionResponse,
-} from "@goddard-ai/session/schema"
+import type { GetSessionWorktreeResponse } from "@goddard-ai/session/schema"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
   createAcpClient,
@@ -97,7 +82,7 @@ import {
   MAX_COMPOSER_SUGGESTION_LIMIT,
   normalizeComposerSuggestionLimit,
 } from "./composer-suggestions.ts"
-import type { SessionEventEmitter } from "./events.ts"
+import type { SessionEventEmitter, SessionWorktreeLifecycleState } from "./events.ts"
 import { createLaunchLeaseKey, createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
 import { resolveSessionAttentionMetadata } from "./metadata.ts"
 import {
@@ -398,11 +383,6 @@ type ActiveSession = {
   idleShutdownTimer: ReturnType<typeof setTimeout> | null
 }
 
-type ReviewSessionRuntime = {
-  abortController: AbortController
-  running: Promise<void>
-}
-
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
 interface SessionLaunchParams {
   request: CreateSessionRequest
@@ -441,9 +421,11 @@ export type SessionManager = {
   getSubpackages: (params: SessionSubpackagesRequest) => Promise<SessionSubpackagesResponse>
   getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
   getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
-  mountReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
-  runReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
-  unmountReviewSession: (id: SessionId) => Promise<MutateSessionReviewSessionResponse>
+  requireWorktree: (id: SessionId) => Promise<SessionWorktreeLifecycleState>
+  listWorktrees: () => Promise<SessionWorktreeLifecycleState[]>
+  findWorktreeByDir: (worktreeDir: string) => Promise<SessionWorktreeLifecycleState | null>
+  isActive: (id: SessionId) => boolean
+  emitDiagnostic: (id: SessionId, type: string, detail?: Record<string, unknown>) => void
   getWorkforce: (id: SessionId) => Promise<GetSessionWorkforceResponse>
   declareInitiative: (id: SessionId, title: string) => Promise<DaemonSession>
   reportBlocker: (
@@ -1048,7 +1030,7 @@ function normalizeSessionPageSize(limit?: number): number {
 
 /** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
 export function createSessionManager(input: {
-  daemonUrl: string
+  getDaemonUrl: () => string
   agentBinDir: string
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
   events: SessionEventEmitter
@@ -1061,7 +1043,6 @@ export function createSessionManager(input: {
   const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
   const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
-  const reviewSessionRuntimes = new Map<SessionId, ReviewSessionRuntime>()
   const idleSessionShutdownTimeoutMs =
     input.idleSessionShutdownTimeoutMs ?? DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS
   const worktreePluginManager = createWorktreePluginManager({
@@ -1584,14 +1565,23 @@ export function createSessionManager(input: {
     })
   }
 
-  function toSessionWorktreeValue(
-    record: SessionWorktreeDoc,
-    reviewSession: ReviewSyncStatusData | null,
-  ) {
+  function toSessionWorktreeValue(record: SessionWorktreeDoc) {
     const { id: _id, sessionId: _sessionId, ...worktree } = record
+    return worktree
+  }
+
+  function toSessionWorktreeLifecycleState(
+    record: SessionWorktreeDoc | SessionWorktreeState,
+    sessionId: SessionId,
+  ): SessionWorktreeLifecycleState {
     return {
-      ...worktree,
-      reviewSession,
+      sessionId,
+      repoRoot: record.repoRoot,
+      requestedCwd: record.requestedCwd,
+      effectiveCwd: record.effectiveCwd,
+      worktreeDir: record.worktreeDir,
+      branchName: record.branchName,
+      poweredBy: record.poweredBy,
     }
   }
 
@@ -1601,114 +1591,6 @@ export function createSessionManager(input: {
         where: { sessionId: id },
       }) ?? null
     )
-  }
-
-  async function resolveReviewSessionState(worktreeRecord: SessionWorktreeDoc | null) {
-    if (!worktreeRecord) {
-      return null
-    }
-
-    return await readReviewSessionState(worktreeRecord)
-  }
-
-  async function readReviewSessionState(worktreeRecord: SessionWorktreeDoc | SessionWorktreeState) {
-    try {
-      const result = await statusReviewSession({
-        cwd: worktreeRecord.worktreeDir,
-        json: true,
-      })
-      return result.data ?? null
-    } catch (error) {
-      if (isMissingReviewSessionError(error)) {
-        return null
-      }
-      throw error
-    }
-  }
-
-  async function readRequiredReviewSessionState(
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-  ) {
-    const state = await readReviewSessionState(worktreeRecord)
-    if (!state) {
-      throw new Error(`Review session is missing for ${worktreeRecord.worktreeDir}.`)
-    }
-    return state
-  }
-
-  async function findMountedReviewSessionByPrimaryDir(primaryDir: string) {
-    const normalizedPrimaryDir = await normalizeExistingPath(primaryDir)
-    const sessions = await listReviewSessions({ cwd: normalizedPrimaryDir })
-    return sessions.find((session) => session.reviewWorktree === normalizedPrimaryDir) ?? null
-  }
-
-  function findPersistedWorktreeRecordByDir(worktreeDir: string) {
-    return db.worktrees.findMany().find((record) => record.worktreeDir === worktreeDir) ?? null
-  }
-
-  function createReviewSessionWarnings(result: ReviewSyncResult) {
-    return result.status === "rejected-human-patch" ? [result.message] : []
-  }
-
-  function emitReviewSessionWarnings(
-    id: SessionId,
-    reason: string,
-    result: ReviewSyncResult,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    for (const warning of createReviewSessionWarnings(result)) {
-      emitDiagnostic(
-        id,
-        "review_session.warning",
-        {
-          reason,
-          warning,
-          acceptedPatchPath: result.acceptedPatchPath,
-          rejectedPatchPath: result.rejectedPatchPath,
-        },
-        diagnosticLogger,
-      )
-    }
-  }
-
-  function emitReviewSessionResult(
-    id: SessionId,
-    reason: string,
-    result: ReviewSyncResult,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    if (result.status === "error") {
-      emitDiagnostic(
-        id,
-        "review_session.warning",
-        { reason, errorMessage: result.message },
-        diagnosticLogger,
-      )
-      return
-    }
-    emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
-  }
-
-  function isMissingReviewSessionError(error: unknown) {
-    return (
-      error instanceof Error &&
-      error.message.includes("No review-sync session matches the current worktree.")
-    )
-  }
-
-  async function normalizeExistingPath(value: string) {
-    return await realpath(resolve(value))
-  }
-
-  async function stopReviewSessionRuntime(id: SessionId) {
-    const runtime = reviewSessionRuntimes.get(id)
-    if (!runtime) {
-      return
-    }
-
-    runtime.abortController.abort()
-    reviewSessionRuntimes.delete(id)
-    await runtime.running.catch(() => {})
   }
 
   /** Returns how many `session.messageEvents` stream subscribers are attached to one session id. */
@@ -1817,143 +1699,6 @@ export function createSessionManager(input: {
     refreshIdleShutdownState(id, "subscriber_disconnected")
   }
 
-  async function runReviewSessionCycle(
-    id: SessionId,
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-    reason: string,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    emitDiagnostic(id, "review_session.started", { reason }, diagnosticLogger)
-    const result = await syncReviewSession({ cwd: worktreeRecord.worktreeDir })
-    emitReviewSessionWarnings(id, reason, result, diagnosticLogger)
-    const state = await readRequiredReviewSessionState(worktreeRecord)
-    emitDiagnostic(
-      id,
-      "review_session.completed",
-      {
-        reason,
-        warningCount: createReviewSessionWarnings(result).length,
-        lastSync: state.lastSync,
-      },
-      diagnosticLogger,
-    )
-    return {
-      state,
-      warnings: createReviewSessionWarnings(result),
-    }
-  }
-
-  async function startReviewSessionRuntime(
-    id: SessionId,
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    await stopReviewSessionRuntime(id)
-
-    const state = await readReviewSessionState(worktreeRecord)
-    if (!state || !activeSessions.has(id)) {
-      return
-    }
-
-    const abortController = new AbortController()
-    const running = watchReviewSession({
-      cwd: worktreeRecord.worktreeDir,
-      agentBranch: worktreeRecord.branchName,
-      signal: abortController.signal,
-      onResult: (result) => {
-        emitReviewSessionResult(id, "watch", result, diagnosticLogger)
-      },
-    })
-      .then((result) => {
-        emitReviewSessionResult(id, "watch", result, diagnosticLogger)
-      })
-      .catch((error) => {
-        if (abortController.signal.aborted) {
-          return
-        }
-        emitDiagnostic(
-          id,
-          "review_session.warning",
-          {
-            reason: "watch",
-            errorMessage: getErrorMessage(error),
-          },
-          diagnosticLogger,
-        )
-      })
-
-    reviewSessionRuntimes.set(id, { abortController, running })
-    emitDiagnostic(
-      id,
-      "review_session.watcher_started",
-      { agentBranch: state.agentBranch, reviewBranch: state.reviewBranch },
-      diagnosticLogger,
-    )
-  }
-
-  async function replaceMountedReviewSessionIfNeeded(
-    id: SessionId,
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    const mounted = await findMountedReviewSessionByPrimaryDir(worktreeRecord.repoRoot)
-    const previousWorktreeRecord = mounted
-      ? findPersistedWorktreeRecordByDir(mounted.agentWorktree)
-      : null
-    if (!mounted || previousWorktreeRecord?.sessionId === id) {
-      return
-    }
-
-    if (previousWorktreeRecord) {
-      await stopReviewSessionRuntime(previousWorktreeRecord.sessionId)
-    }
-    await stopReviewSession({ cwd: mounted.agentWorktree })
-
-    if (previousWorktreeRecord) {
-      emitDiagnostic(
-        previousWorktreeRecord.sessionId,
-        "review_session.replaced",
-        { replacedBySessionId: id },
-        activeSessions.get(previousWorktreeRecord.sessionId)?.logger ?? logger,
-      )
-    }
-
-    emitDiagnostic(
-      id,
-      "review_session.replaced",
-      {
-        previousSessionId: previousWorktreeRecord?.sessionId ?? null,
-        previousReviewSessionId: mounted.sessionId,
-      },
-      diagnosticLogger,
-    )
-  }
-
-  async function mountReviewSessionForWorktree(
-    id: SessionId,
-    worktreeRecord: SessionWorktreeDoc | SessionWorktreeState,
-    diagnosticLogger: ReturnType<typeof createLogger>,
-  ) {
-    await replaceMountedReviewSessionIfNeeded(id, worktreeRecord, diagnosticLogger)
-    const result = await startReviewSync({
-      cwd: worktreeRecord.repoRoot,
-      agentBranch: worktreeRecord.branchName,
-    })
-    emitReviewSessionResult(id, "mount", result, diagnosticLogger)
-    const state = await readRequiredReviewSessionState(worktreeRecord)
-    emitDiagnostic(
-      id,
-      "review_session.mounted",
-      {
-        reviewSessionId: state.sessionId,
-        agentBranch: state.agentBranch,
-        reviewBranch: state.reviewBranch,
-      },
-      diagnosticLogger,
-    )
-    return state
-  }
-
   async function reconcilePersistedSessions(): Promise<void> {
     let persistedSessions: SessionDoc[]
 
@@ -1978,27 +1723,6 @@ export function createSessionManager(input: {
             sessionId: session.id,
             events: [],
           })
-        }
-
-        const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
-        if (worktreeRecord) {
-          const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
-            () => null,
-          )
-          if (mountedReviewSessionState) {
-            try {
-              const stopped = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
-              emitDiagnostic(session.id, "review_session.unmounted", {
-                reason: "daemon_reconciliation",
-                reviewSessionId: stopped.sessionId,
-              })
-            } catch (error) {
-              emitDiagnostic(session.id, "review_session.warning", {
-                reason: "daemon_reconciliation",
-                errorMessage: getErrorMessage(error),
-              })
-            }
-          }
         }
 
         const draftRecord =
@@ -2566,7 +2290,6 @@ export function createSessionManager(input: {
       } catch {}
       cancelIdleShutdownTimer(activeSession, "agent_process_exit")
       activeSessions.delete(activeSession.id)
-      await stopReviewSessionRuntime(activeSession.id)
       rejectPendingPrompts(
         activeSession,
         new Error(`Session ${activeSession.id} ended before the prompt completed.`),
@@ -2575,35 +2298,22 @@ export function createSessionManager(input: {
       await activeSession.subscription.close().catch(() => {})
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
-      if (worktreeRecord) {
-        const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
-          () => null,
-        )
-        if (mountedReviewSessionState) {
-          try {
-            const stopped = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
-            emitDiagnostic(
-              activeSession.id,
-              "review_session.unmounted",
-              {
-                reason: "agent_process_exit",
-                reviewSessionId: stopped.sessionId,
-              },
-              activeSession.logger,
-            )
-          } catch (error) {
-            emitDiagnostic(
-              activeSession.id,
-              "review_session.warning",
-              {
-                reason: "agent_process_exit",
-                errorMessage: getErrorMessage(error),
-              },
-              activeSession.logger,
-            )
-          }
-        }
-      }
+      await input.events
+        .emit("lifecycle.sessionStopping", {
+          sessionId: activeSession.id,
+          reason: "agent_process_exit",
+          worktree: worktreeRecord
+            ? toSessionWorktreeLifecycleState(worktreeRecord, activeSession.id)
+            : null,
+        })
+        .catch((error) => {
+          emitDiagnostic(
+            activeSession.id,
+            "session_stop_cleanup_failed",
+            { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
+            activeSession.logger,
+          )
+        })
 
       const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
       if (code !== 0 && code !== null) {
@@ -2722,9 +2432,6 @@ export function createSessionManager(input: {
     })
 
     const scope = parseRepoScope(resolvedRequest)
-    const reviewSessionEnabled =
-      worktree && resolvedRequest.worktree?.reviewSession?.enabled === true
-
     const nextPermission = {
       owner: scope.owner,
       repo: scope.repo,
@@ -2733,7 +2440,6 @@ export function createSessionManager(input: {
 
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
-    let mountedReviewSessionState: ReviewSyncStatusData | null = null
     let spawnedAgentProcess: AgentProcessHandle | null = null
 
     try {
@@ -2786,12 +2492,12 @@ export function createSessionManager(input: {
         )
       }
 
-      if (worktree && reviewSessionEnabled) {
-        mountedReviewSessionState = await mountReviewSessionForWorktree(
-          id,
-          worktree.state,
-          sessionLogger,
-        )
+      if (worktree) {
+        await input.events.emit("lifecycle.worktreePrepared", {
+          sessionId: id,
+          request: resolvedRequest,
+          worktree: toSessionWorktreeLifecycleState(worktree.state, id),
+        })
       }
 
       const onMessageWrite = (message: acp.AnyMessage) => {
@@ -2837,7 +2543,7 @@ export function createSessionManager(input: {
         })
       } else {
         agentProcess = await spawnAgentProcess({
-          daemonUrl: input.daemonUrl,
+          daemonUrl: input.getDaemonUrl(),
           token,
           agent: resolvedRequest.agent,
           cwd,
@@ -2933,8 +2639,12 @@ export function createSessionManager(input: {
           sessionLogger,
           supportsLoadSession: sessionSupportsLoad,
         })
-        if (mountedReviewSessionState && worktree) {
-          await stopReviewSession({ cwd: worktree.state.worktreeDir }).catch(() => {})
+        if (worktree) {
+          await input.events.emit("lifecycle.launchFinished", {
+            sessionId: id,
+            reason: "one_shot_completed",
+            worktree: toSessionWorktreeLifecycleState(worktree.state, id),
+          })
         }
         return completedSession
       }
@@ -2949,8 +2659,11 @@ export function createSessionManager(input: {
         sessionLogger,
         systemPrompt: resolvedRequest.systemPrompt,
       })
-      if (mountedReviewSessionState && worktree) {
-        await startReviewSessionRuntime(id, worktree.state, sessionLogger)
+      if (worktree) {
+        await input.events.emit("lifecycle.sessionActivated", {
+          sessionId: id,
+          worktree: toSessionWorktreeLifecycleState(worktree.state, id),
+        })
       }
       return liveSession
     } catch (error) {
@@ -2963,9 +2676,12 @@ export function createSessionManager(input: {
         await treeKill(spawnedAgentProcess).catch(() => {})
         await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
       }
-      if (mountedReviewSessionState && worktree) {
-        await stopReviewSessionRuntime(id)
-        await stopReviewSession({ cwd: worktree.state.worktreeDir }).catch(() => {})
+      if (worktree) {
+        await input.events.emit("lifecycle.launchFailed", {
+          sessionId: id,
+          error,
+          worktree: toSessionWorktreeLifecycleState(worktree.state, id),
+        })
       }
       if (!existingSession) {
         for (const turnRecord of db.sessionTurns.findMany({
@@ -3259,7 +2975,7 @@ export function createSessionManager(input: {
     const launchLeaseId = randomUUID()
     const token = randomBytes(32).toString("hex")
     const agentProcess = await spawnAgentProcess({
-      daemonUrl: input.daemonUrl,
+      daemonUrl: input.getDaemonUrl(),
       token,
       agent: params.agent,
       cwd: params.cwd,
@@ -3423,84 +3139,38 @@ export function createSessionManager(input: {
     return {
       id: session.id,
       acpSessionId: session.acpSessionId,
-      worktree: worktreeRecord
-        ? toSessionWorktreeValue(worktreeRecord, await resolveReviewSessionState(worktreeRecord))
-        : null,
+      worktree: worktreeRecord ? toSessionWorktreeValue(worktreeRecord) : null,
     }
   }
 
-  async function mountReviewSession(id: SessionId): Promise<MutateSessionReviewSessionResponse> {
+  async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
     await ready
-    const session = await getSession(id)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (!worktreeRecord) {
       throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
     }
 
-    const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    await mountReviewSessionForWorktree(id, worktreeRecord, diagnosticLogger)
-    if (activeSessions.has(id)) {
-      await startReviewSessionRuntime(id, worktreeRecord, diagnosticLogger)
-    }
-
-    const response = await getWorktree(id)
-    return {
-      id: session.id,
-      acpSessionId: session.acpSessionId,
-      worktree: response.worktree,
-      warnings: [],
-    }
+    return toSessionWorktreeLifecycleState(worktreeRecord, id)
   }
 
-  async function runReviewSession(id: SessionId): Promise<MutateSessionReviewSessionResponse> {
+  async function listWorktrees(): Promise<SessionWorktreeLifecycleState[]> {
     await ready
-    const session = await getSession(id)
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-    if (!worktreeRecord) {
-      throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
-    }
-
-    const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    emitDiagnostic(id, "review_session.requested", { reason: "manual" }, diagnosticLogger)
-    const result = await runReviewSessionCycle(id, worktreeRecord, "manual", diagnosticLogger)
-    const response = await getWorktree(id)
-    return {
-      id: session.id,
-      acpSessionId: session.acpSessionId,
-      worktree: response.worktree,
-      warnings: result.warnings,
-    }
+    return db.worktrees
+      .findMany()
+      .map((record) => toSessionWorktreeLifecycleState(record, record.sessionId))
   }
 
-  async function unmountReviewSession(id: SessionId): Promise<MutateSessionReviewSessionResponse> {
+  async function findWorktreeByDir(worktreeDir: string) {
     await ready
-    const session = await getSession(id)
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-    if (!worktreeRecord) {
-      throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
-    }
+    const record =
+      db.worktrees
+        .findMany()
+        .find((worktreeRecord) => worktreeRecord.worktreeDir === worktreeDir) ?? null
+    return record ? toSessionWorktreeLifecycleState(record, record.sessionId) : null
+  }
 
-    await stopReviewSessionRuntime(id)
-    const diagnosticLogger = activeSessions.get(id)?.logger ?? logger
-    const state = await readReviewSessionState(worktreeRecord)
-    const result = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
-    emitDiagnostic(
-      id,
-      "review_session.unmounted",
-      {
-        reason: "manual",
-        reviewSessionId: result.sessionId ?? state?.sessionId,
-      },
-      diagnosticLogger,
-    )
-
-    const response = await getWorktree(id)
-    return {
-      id: session.id,
-      acpSessionId: session.acpSessionId,
-      worktree: response.worktree,
-      warnings: [],
-    }
+  function isActive(id: SessionId) {
+    return activeSessions.has(id)
   }
 
   async function getWorkforce(id: SessionId): Promise<GetSessionWorkforceResponse> {
@@ -3922,36 +3592,22 @@ export function createSessionManager(input: {
     cancelIdleShutdownTimer(active, "session_shutdown")
     emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-    if (worktreeRecord) {
-      const mountedReviewSessionState = await readReviewSessionState(worktreeRecord).catch(
-        () => null,
+    try {
+      await input.events.emit("lifecycle.sessionStopping", {
+        sessionId: id,
+        reason: "session_shutdown",
+        worktree: worktreeRecord ? toSessionWorktreeLifecycleState(worktreeRecord, id) : null,
+      })
+    } catch (error) {
+      emitDiagnostic(
+        id,
+        "session_shutdown_failed",
+        {
+          errorMessage: getErrorMessage(error),
+        },
+        active.logger,
       )
-      if (mountedReviewSessionState) {
-        try {
-          await stopReviewSessionRuntime(id)
-          const result = await stopReviewSession({ cwd: worktreeRecord.worktreeDir })
-          emitDiagnostic(
-            id,
-            "review_session.unmounted",
-            {
-              reason: "session_shutdown",
-              reviewSessionId: result.sessionId ?? mountedReviewSessionState.sessionId,
-            },
-            active.logger,
-          )
-        } catch (error) {
-          emitDiagnostic(
-            id,
-            "review_session.warning",
-            {
-              reason: "session_shutdown",
-              errorMessage: getErrorMessage(error),
-            },
-            active.logger,
-          )
-          return false
-        }
-      }
+      return false
     }
     await treeKill(active.process)
     await waitForAgentProcessExit(active.process)
@@ -3977,13 +3633,16 @@ export function createSessionManager(input: {
 
     for (const session of activeSessions.values()) {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
-      await stopReviewSessionRuntime(session.id)
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
-      if (worktreeRecord) {
-        if (await readReviewSessionState(worktreeRecord).catch(() => null)) {
-          await stopReviewSession({ cwd: worktreeRecord.worktreeDir }).catch(() => {})
-        }
-      }
+      await input.events
+        .emit("lifecycle.sessionStopping", {
+          sessionId: session.id,
+          reason: "daemon_shutdown",
+          worktree: worktreeRecord
+            ? toSessionWorktreeLifecycleState(worktreeRecord, session.id)
+            : null,
+        })
+        .catch(() => {})
       emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
@@ -4015,9 +3674,11 @@ export function createSessionManager(input: {
     getSubpackages,
     getDiagnostics,
     getWorktree,
-    mountReviewSession,
-    runReviewSession,
-    unmountReviewSession,
+    requireWorktree,
+    listWorktrees,
+    findWorktreeByDir,
+    isActive,
+    emitDiagnostic,
     getWorkforce,
     declareInitiative,
     reportBlocker,

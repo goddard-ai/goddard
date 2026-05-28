@@ -2417,8 +2417,10 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
   })
 
   const worktree = (await send(client, "session.worktree.get", { id: created.session.id })).worktree
-  expect(worktree?.reviewSession?.agentBranch).toBe(worktree?.branchName)
-  expect(worktree?.reviewSession?.reviewBranch).toBe(`review-sync/${worktree?.branchName}`)
+  const reviewSession = (await send(client, "reviewSession.get", { id: created.session.id }))
+    .reviewSession
+  expect(reviewSession?.agentBranch).toBe(worktree?.branchName)
+  expect(reviewSession?.reviewBranch).toBe(`review-sync/${worktree?.branchName}`)
   expect(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
     "install\n",
   )

@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { ReviewSessionLaunchParams } from "@goddard-ai/review-session/schema"
 import { SessionWorktreeParams } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
@@ -27,6 +28,13 @@ export const SessionLocalCheckoutParams = z.strictObject({
 })
 
 export type SessionLocalCheckoutParams = z.infer<typeof SessionLocalCheckoutParams>
+
+/** Worktree options accepted by the daemon session API, including feature-owned launch options. */
+export const CreateSessionWorktreeParams = SessionWorktreeParams.extend({
+  reviewSession: ReviewSessionLaunchParams.optional(),
+})
+
+export type CreateSessionWorktreeParams = z.infer<typeof CreateSessionWorktreeParams>
 
 /** Workforce attachment stored separately from the base daemon session record. */
 export const SessionWorkforceParams = z.strictObject({
@@ -58,7 +66,7 @@ export const CreateSessionRequest = z.strictObject({
   cwd: z.string(),
   launchLeaseId: z.string().optional(),
   localCheckout: SessionLocalCheckoutParams.optional(),
-  worktree: SessionWorktreeParams.optional(),
+  worktree: CreateSessionWorktreeParams.optional(),
   workforce: SessionWorkforceParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
   systemPrompt: z.string().optional(),

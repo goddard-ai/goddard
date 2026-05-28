@@ -5,6 +5,7 @@ import { inboxIpcRoutes } from "@goddard-ai/inbox/daemon-ipc"
 import { $type, composeIpcRoutes, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { loopIpcRoutes } from "@goddard-ai/loop/daemon-ipc"
 import { pullRequestIpcRoutes } from "@goddard-ai/pull-request/daemon-ipc"
+import { reviewSessionIpcRoutes } from "@goddard-ai/review-session/daemon-ipc"
 import { sessionIpcRoutes } from "@goddard-ai/session/daemon-ipc"
 import { workforceIpcRoutes } from "@goddard-ai/workforce/daemon-ipc"
 
@@ -25,6 +26,7 @@ export const daemonIpcRoutes = composeIpcRoutes([
   inboxIpcRoutes,
   loopIpcRoutes,
   pullRequestIpcRoutes,
+  reviewSessionIpcRoutes,
   sessionIpcRoutes,
   workforceIpcRoutes,
 ])
