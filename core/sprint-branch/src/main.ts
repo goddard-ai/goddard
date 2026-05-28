@@ -22,6 +22,7 @@ import {
   runUnpark,
   SprintMutationError,
 } from "./mutations"
+import { formatSprintRestoreReport, runRestoreSprint } from "./sprint-backup"
 import { SprintInferenceError } from "./state/inference"
 import { buildStatusReport, formatStatusReport } from "./status"
 import { formatSprintSyncReport, runSprintSync } from "./sync"
@@ -459,6 +460,34 @@ export async function main(argv: string[]) {
             args.json,
             runResetState({ cwd: process.cwd(), ...args, interactive: !args.json }),
           )
+        },
+      }),
+      "restore-sprint": command({
+        name: "restore-sprint",
+        description: "Restore a missing sprint folder from the latest local backup",
+        args: {
+          sprint: sprintOption(),
+          lastSprint: lastSprintFlag(),
+          dryRun: dryRunFlag(),
+          json: jsonFlag(),
+          force: flag({
+            long: "force",
+            description: "Replace an existing sprint folder with the latest local backup",
+          }),
+        },
+        handler: async ({ sprint, lastSprint, dryRun, json, force }) => {
+          const report = await runRestoreSprint({
+            cwd: process.cwd(),
+            sprint,
+            lastSprint,
+            dryRun,
+            force,
+            interactive: !json,
+          })
+          writeOutput(json, report, formatSprintRestoreReport(report))
+          if (!report.ok) {
+            process.exitCode = 1
+          }
         },
       }),
       park: command({

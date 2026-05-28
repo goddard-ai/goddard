@@ -26,6 +26,9 @@ export function formatHumanCommandReport(report: SprintLandReport | SprintCleanu
       "",
       "State files to remove:",
       ...formatList(report.stateFilesToRemove),
+      "",
+      "Sprint folder backups to remove:",
+      ...formatList(report.backupPathsToRemove),
     )
   }
 

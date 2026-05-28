@@ -79,6 +79,11 @@
     - Rebuild private sprint state around a selected next task.
     - Audience: agents recovering or replanning.
     - Mutates: sprint state only.
+  - [`restore-sprint`](./commands/restore-sprint.md)
+    - Restore an accidentally removed `sprints/<name>/` folder from the latest
+      local backup.
+    - Audience: agents and humans recovering local sprint plans.
+    - Mutates: working tree sprint task files.
   - [`park`](./commands/park.md)
     - Hide a sprint from default active selection.
     - Audience: agents and humans.

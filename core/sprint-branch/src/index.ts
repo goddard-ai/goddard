@@ -30,6 +30,8 @@ export {
 } from "./state/paths"
 export { parseSprintState } from "./state/schema"
 export { buildStatusReport, formatStatusReport } from "./status"
+export { formatSprintRestoreReport, runRestoreSprint } from "./sprint-backup"
+export type { SprintRestoreReport } from "./sprint-backup"
 export { formatSprintSyncReport, runSprintSync } from "./sync"
 export {
   createSprintSyncStopControl,

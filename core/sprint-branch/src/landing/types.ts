@@ -77,4 +77,5 @@ export type SprintCleanupReport = HumanCommandReport & {
   branchesToDelete: string[]
   worktreesToDetach: SprintBranchWorktree[]
   stateFilesToRemove: string[]
+  backupPathsToRemove: string[]
 }

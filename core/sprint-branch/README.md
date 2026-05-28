@@ -18,6 +18,8 @@ Each sprint state records `lastActedAt`, the time `sprint-branch` last acted on 
 
 `sprint-branch reset-state [--task <task>] [--force]` recreates only the Git-private state file after a sprint plan is reworked. It makes the first task, or the selected task, the next valid `start` target by recording earlier task files as approved; it does not move Git branches.
 
+Successful sprint state writes keep one latest Git-private backup of `sprints/<name>/` while that folder exists. `sprint-branch restore-sprint [--sprint <name>]` restores an accidentally removed sprint folder from that backup without changing branch state. `cleanup` removes the related backup with the selected sprint's private state.
+
 `sprint-branch rebase <target>` rebases the recorded approved, review, and existing next sprint branches onto a target Git ref. Git performs the rebases; sprint state records the new base ref only after every branch rebase succeeds.
 
 `sprint-branch sync [--sprint <name>]` watches `review-sync` for the active sprint review branch in process, matching `review-sync watch <agent-branch>` after sprint resolution. The command resolves the active sprint the same way as read-only sprint commands: explicit `--sprint`, current sprint branch, `sprints/<name>` working directory, or interactive selection from active sprint state.
@@ -35,6 +37,7 @@ Each sprint state records `lastActedAt`, the time `sprint-branch` last acted on 
 - `sprint-branch cleanup <target> [name]`
 - `sprint-branch init`
 - `sprint-branch reset-state`
+- `sprint-branch restore-sprint`
 - `sprint-branch park`
 - `sprint-branch unpark`
 - `sprint-branch start`

@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 
 import { ensureGitInfoExcludeEntry } from "../git/repository"
+import { backupSprintFolder } from "../sprint-backup"
 import { sprintStateDisplayPath, sprintStatePath } from "../state/paths"
 import { clearTransientConflict } from "../transient-conflict"
 import type { SprintBranchState } from "../types"
@@ -23,6 +24,7 @@ type StoredSprintState = {
 export async function writeSprintState(rootDir: string, state: SprintBranchState) {
   await ensureGitInfoExcludeEntry(rootDir, "sprints/")
   state.lastActedAt = new Date().toISOString()
+  await backupSprintFolder(rootDir, state)
   await writeSprintStateAtomic(
     await sprintStatePath(rootDir, state.sprint),
     storedSprintState(state),

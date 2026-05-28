@@ -4,6 +4,7 @@ import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { executeCleanupOperations, executeLandOperations } from "../src/landing"
+import { backupSprintFolder, sprintBackupPath } from "../src/sprint-backup"
 import { sprintStatePath } from "../src/state/paths"
 import {
   branchExists,
@@ -37,6 +38,7 @@ type HumanCommandOutput = {
   branchesToDelete?: string[]
   worktreesToDetach?: Array<{ path: string }>
   stateFilesToRemove?: string[]
+  backupPathsToRemove?: string[]
 }
 
 const extraPaths: string[] = []
@@ -284,6 +286,7 @@ describe("sprint-branch human landing commands", () => {
     )
     expect(cleanup.gitOperations).toContain("git branch -d sprint/example/review")
     expect(cleanup.stateFilesToRemove).toEqual([".git/sprint-branch/example/state.json"])
+    expect(cleanup.backupPathsToRemove).toEqual([".git/sprint-branch/example/sprints-backup"])
   })
 
   test("allows cleanup from a clean worktree checked out on a sprint branch", async () => {
@@ -321,6 +324,7 @@ describe("sprint-branch human landing commands", () => {
       { createNextBranch: true },
     )
     const state = await readState(repo, "example")
+    await backupSprintFolder(repo, state)
     const branchWorktree = await fs.mkdtemp(path.join(os.tmpdir(), "sprint-review-worktree-"))
     extraPaths.push(branchWorktree)
     await fs.rm(branchWorktree, { recursive: true, force: true })
@@ -342,6 +346,7 @@ describe("sprint-branch human landing commands", () => {
     )
 
     expect(await stateFileExists(repo, "example")).toBe(false)
+    expect(await pathExists(await sprintBackupPath(repo, "example"))).toBe(false)
     expect(await pathExists(path.dirname(await sprintStatePath(repo, "example")))).toBe(false)
     expect(await branchExists(repo, "sprint/example/review")).toBe(false)
     expect(await branchExists(repo, "sprint/example/approved")).toBe(false)

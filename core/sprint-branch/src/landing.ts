@@ -21,6 +21,7 @@ import {
   pushTargetBranchDiagnostics,
 } from "./landing/validation"
 import { cleanupBranches, listWorktrees, sprintBranchWorktrees } from "./landing/worktrees"
+import { removeSprintFolderBackup, sprintBackupDisplayPath } from "./sprint-backup"
 import { writeSprintLastActedAt } from "./state/activity"
 import { sprintStateDisplayPath, sprintStatePath } from "./state/paths"
 import type { SprintBranchState, SprintDiagnostic } from "./types"
@@ -148,6 +149,7 @@ export async function runCleanup(input: CleanupInput) {
   const targetCommit = await getBranchHead(rootDir, input.target)
   const branchesToDelete = state ? await cleanupBranches(rootDir, state) : []
   const stateFileToRemove = state ? sprintStateDisplayPath(state.sprint) : null
+  const backupPathToRemove = state ? sprintBackupDisplayPath(state.sprint) : null
   const worktreesToDetach = state
     ? await sprintBranchWorktrees(rootDir, branchesToDelete, diagnostics)
     : []
@@ -184,6 +186,7 @@ export async function runCleanup(input: CleanupInput) {
     branchesToDelete,
     worktreesToDetach,
     stateFilesToRemove: stateFileToRemove ? [stateFileToRemove] : [],
+    backupPathsToRemove: backupPathToRemove ? [backupPathToRemove] : [],
   } satisfies SprintCleanupReport
 
   if (input.dryRun || !report.ok || !state) {
@@ -220,6 +223,7 @@ export async function executeCleanupOperations(
   }
   const statePath = await sprintStatePath(rootDir, state.sprint)
   await fs.rm(statePath, { force: true })
+  await removeSprintFolderBackup(rootDir, state.sprint)
   // Prune only the now-empty sprint directory so unexpected metadata survives.
   try {
     await fs.rmdir(path.dirname(statePath))

@@ -2,6 +2,8 @@
 
 - **Setup**
   - Create the sprint branch scaffold with `init`.
+  - Restore an accidentally removed sprint folder with `restore-sprint` when a
+    local backup exists.
   - Restore or realign private sprint state with `reset-state` when a sprint
     plan has changed or state needs recovery.
 
@@ -43,7 +45,7 @@
     - Landed sprint branches are removed.
     - Clean worktrees checked out on sprint branches are detached.
     - Detached review snapshots are left in place.
-    - Private sprint state is removed.
+    - Private sprint state and the local sprint folder backup are removed.
 
 - **Recovery**
   - Use `doctor` whenever state is unclear.

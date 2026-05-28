@@ -12,13 +12,15 @@
 - **What it removes**
   - Landed sprint branches.
   - Private sprint state for the selected sprint.
+  - The selected sprint's local sprint folder backup.
   - The optional `next` branch when it exists.
 
 - **What it changes**
   - Clean worktrees checked out on sprint branches are detached so those
     branches can be deleted.
   - Detached review snapshots are left in place.
-  - Local sprint branches and private state are removed.
+  - Local sprint branches, private state, and the local sprint folder backup are
+    removed.
   - The target branch is not advanced by cleanup.
 
 - **Guardrails**
@@ -38,7 +40,8 @@
   - Real execution is not available in JSON or non-interactive mode.
   - Non-interactive JSON output is available for `--dry-run` inspection.
   - Dry run reports what would be detached or removed without changing
-    worktrees, deleting branches, or deleting private sprint state.
+    worktrees, deleting branches, deleting private sprint state, or deleting the
+    sprint folder backup.
 
 - **Why it exists**
   - Cleanup is intentionally separate from landing.
