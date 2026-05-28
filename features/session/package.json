@@ -71,22 +71,17 @@
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/worktree-plugin": "workspace:*",
     "@openrouter/ai-sdk-provider": "^2.5.1",
-    "acp-client": "^0.4.1",
+    "acp-client": "catalog:",
     "ai": "^6.0.158",
     "ai-sdk-json-schema": "catalog:",
     "hash-sum": "catalog:",
     "kindstore": "catalog:",
     "kleur": "catalog:",
     "mitt": "catalog:",
-    "node-stream-zip": "^1.15.0",
     "radashi": "catalog:",
-    "tar-fs": "^3.1.2",
-    "unbzip2-stream": "^1.4.3",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/hash-sum": "catalog:",
-    "@types/tar-fs": "^2.0.4",
-    "@types/unbzip2-stream": "^1.4.3"
+    "@types/hash-sum": "catalog:"
   }
 }

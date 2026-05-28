@@ -13,15 +13,16 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
 import type { AgentInputStream, AgentOutputStream } from "acp-client"
-import type { AcpAdapterId, AcpRegistryService } from "acp-client/node"
-import { getErrorMessage } from "radashi"
-
-import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
 import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
-} from "./archive.ts"
+  type AcpAdapterId,
+  type AcpRegistryService,
+} from "acp-client/node"
+import { getErrorMessage } from "radashi"
+
+import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
 type AgentProcessSpec = {
