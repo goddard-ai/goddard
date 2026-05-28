@@ -19,7 +19,7 @@
 - Do not ship `app/` ahead of `core/sdk/` when the feature depends on shared data or system configuration. If `core/sdk/` cannot support that behavior yet, treat the `app/` work as incomplete.
 - When adding new UI components or interactive elements in `app/`, use the local `pandark-ui` skill to align Panda CSS and Ark UI composition with the existing design system.
 - New cross-layer product capabilities should normally start as internal feature packages under `features/<name>`. Use `bun run scaffold:feature` for a consistent package shape, then wire selected entrypoints into the public composition roots.
-- Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and `@goddard-ai/app-plugin` instead of the public packages that bundle them.
+- Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin` and `@goddard-ai/daemon-plugin` instead of the public packages that bundle them.
 - Feature packages self-declare their schemas from their own `schema` entrypoint. Do not add feature-owned schemas to `@goddard-ai/schema`; that package is reserved for core daemon/backend/shared substrate schemas.
 - Daemon feature packages that own persistence declare their kindstore schema through the daemon plugin `db` option and use inferred setup `context.db`; do not import the core daemon persistence singleton for feature-owned tables.
 - `spec/` is the canonical source of product behavior and intent.

@@ -58,7 +58,6 @@ Examples:
 
 - `@goddard-ai/sdk-plugin`
 - `@goddard-ai/daemon-plugin`
-- `@goddard-ai/app-plugin`
 
 For the SDK layer, `@goddard-ai/sdk-plugin` should have close to zero runtime code. Its primary job is to expose types and a `defineSdkPlugin()` helper that exists for type inference.
 

@@ -1,12 +1,10 @@
-import { defineAppPlugin } from "@goddard-ai/app-plugin"
-
 import { inboxSdkPlugin } from "./sdk.ts"
 
 export type InboxAppSdkRequirements = {
   readonly inbox: ReturnType<NonNullable<typeof inboxSdkPlugin.wrap>>["inbox"]
 }
 
-export const inboxAppPlugin = defineAppPlugin({
+export const inboxAppPlugin = {
   name: "inbox",
   sdk: {} as InboxAppSdkRequirements,
   navigation: {
@@ -26,4 +24,4 @@ export const inboxAppPlugin = defineAppPlugin({
       targetNavId: "inbox",
     },
   },
-})
+} as const

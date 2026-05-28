@@ -1,10 +1,8 @@
-import { defineAppPlugin } from "@goddard-ai/app-plugin"
-
-export const actionAppPlugin = defineAppPlugin({
+export const actionAppPlugin = {
   name: "action",
   routes: [],
   commands: [],
   sdk: {
     namespaces: ["action"],
   },
-})
+} as const

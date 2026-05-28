@@ -54,10 +54,10 @@ Unless stated otherwise, commands below are run from `./app`.
 ## Feature Composition
 
 App feature entrypoints live in internal feature packages under
-`features/<name>/src/app.tsx` and use `@goddard-ai/app-plugin` for static
-metadata. The app composition root owns shell placement, navigation slots,
-command routing, shortcut conflict semantics, desktop bridge boundaries, and the
-actual SDK instance.
+`features/<name>/src/app.tsx` and export static metadata directly. The app
+composition root owns shell placement, navigation slots, command routing,
+shortcut conflict semantics, desktop bridge boundaries, and the actual SDK
+instance.
 
 Feature app entrypoints should not import `@goddard-ai/sdk`. When a feature
 also contributes an SDK namespace, the app entrypoint can express type-level SDK

@@ -1,10 +1,8 @@
-import { defineAppPlugin } from "@goddard-ai/app-plugin"
-
-export const workforceAppPlugin = defineAppPlugin({
+export const workforceAppPlugin = {
   name: "workforce",
   routes: [],
   commands: [],
   sdk: {
     namespaces: ["workforce"],
   },
-})
+} as const

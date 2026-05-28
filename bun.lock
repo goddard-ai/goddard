@@ -100,10 +100,6 @@
         "@pandacss/dev": "catalog:",
       },
     },
-    "core/app-plugin": {
-      "name": "@goddard-ai/app-plugin",
-      "version": "0.1.0",
-    },
     "core/backend": {
       "name": "@goddard-ai/backend",
       "version": "0.1.0",
@@ -327,7 +323,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
-        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
@@ -366,7 +361,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
-        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
@@ -381,7 +375,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
-        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
@@ -421,7 +414,6 @@
         "@ai-sdk/openai-compatible": "^2.0.41",
         "@alloc/tree-kill": "^1.3.0",
         "@b9g/async-context": "^0.2.1",
-        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
@@ -456,7 +448,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
-        "@goddard-ai/app-plugin": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
@@ -805,8 +796,6 @@
     "@goddard-ai/adapter": ["@goddard-ai/adapter@workspace:features/adapter"],
 
     "@goddard-ai/app": ["@goddard-ai/app@workspace:app"],
-
-    "@goddard-ai/app-plugin": ["@goddard-ai/app-plugin@workspace:core/app-plugin"],
 
     "@goddard-ai/auth": ["@goddard-ai/auth@workspace:features/auth"],
 

@@ -1,10 +1,8 @@
-import { defineAppPlugin } from "@goddard-ai/app-plugin"
-
-export const loopAppPlugin = defineAppPlugin({
+export const loopAppPlugin = {
   name: "loop",
   routes: [],
   commands: [],
   sdk: {
     namespaces: ["loop"],
   },
-})
+} as const

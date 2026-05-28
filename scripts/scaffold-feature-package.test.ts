@@ -64,7 +64,6 @@ describe("createFeatureScaffoldPlan", () => {
 
     const packageJson = JSON.parse(plan.files[0]!.content)
     expect(packageJson.dependencies).toEqual({
-      "@goddard-ai/app-plugin": "workspace:*",
       "@goddard-ai/daemon-plugin": "workspace:*",
       "@goddard-ai/ipc": "workspace:*",
       "@goddard-ai/sdk-plugin": "workspace:*",
@@ -82,7 +81,6 @@ describe("createFeatureScaffoldPlan", () => {
 
     const packageJson = JSON.parse(plan.files[0]!.content)
     expect(packageJson.dependencies).toEqual({
-      "@goddard-ai/app-plugin": "workspace:*",
       "@goddard-ai/styled-system": "workspace:*",
     })
     expect(plan.files.some((file) => file.path.endsWith("src/app.style.ts"))).toBe(true)

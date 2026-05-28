@@ -105,9 +105,8 @@ The public packages remain the composition roots. For example, `core/sdk`
 imports a feature's SDK entrypoint, the daemon imports a feature's daemon
 entrypoint or handler factory, and the app imports app contribution metadata.
 Feature packages import thin support packages such as
-`@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and
-`@goddard-ai/app-plugin`; they do not import the public package that later
-bundles them.
+`@goddard-ai/sdk-plugin` and `@goddard-ai/daemon-plugin`; they do not import the
+public package that later bundles them.
 
 `features/inbox` is the reference daemon + SDK + app feature package. Use it
 when adding a new feature that needs shared daemon IPC, SDK methods, and app

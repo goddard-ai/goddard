@@ -1,5 +1,3 @@
-import { defineAppPlugin } from "@goddard-ai/app-plugin"
-
 import { sessionSdkPlugin } from "./sdk.ts"
 
 /** SDK surface the app composition root must provide to session app contributions. */
@@ -7,7 +5,7 @@ export type SessionAppSdkRequirements = {
   readonly session: ReturnType<NonNullable<typeof sessionSdkPlugin.wrap>>["session"]
 }
 
-export const sessionAppPlugin = defineAppPlugin({
+export const sessionAppPlugin = {
   name: "session",
   sdk: {} as SessionAppSdkRequirements,
   navigation: {
@@ -20,4 +18,4 @@ export const sessionAppPlugin = defineAppPlugin({
     kind: "sessions",
     icon: "tabs/sessions",
   },
-})
+} as const

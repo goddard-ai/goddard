@@ -173,7 +173,6 @@ function createPackageJson(options: FeatureScaffoldOptions, packageName: string)
   const exports: Record<string, ReturnType<typeof createExportTarget>> = {}
 
   if (hasLayer(options.layers, "app")) {
-    dependencies["@goddard-ai/app-plugin"] = "workspace:*"
     exports["./app"] = createExportTarget("app.tsx")
   }
 
@@ -321,7 +320,7 @@ function createDaemonEntrypoint(options: FeatureScaffoldOptions, name: string) {
 
 function createAppEntrypoint(options: FeatureScaffoldOptions, name: string) {
   const identifier = toIdentifier(name)
-  const styleImport = isStyledSystemNeeded(options)
+  const imports = isStyledSystemNeeded(options)
     ? `import { ${identifier}RootClass } from "./app.style.ts"\n`
     : ""
   const sdkRequirement = hasLayer(options.layers, "sdk")
@@ -331,14 +330,12 @@ function createAppEntrypoint(options: FeatureScaffoldOptions, name: string) {
     ? `,\n  styles: {\n    rootClass: ${identifier}RootClass,\n  }`
     : ""
 
-  return `${dedent`
-    import { defineAppPlugin } from "@goddard-ai/app-plugin"
-    ${styleImport}
-    export const ${identifier}AppPlugin = defineAppPlugin({
+  return `${imports}${imports ? "\n" : ""}${dedent`
+    export const ${identifier}AppPlugin = {
       name: "${name}",
       routes: [],
       commands: []${sdkRequirement}${styles},
-    })
+    } as const
   `}\n`
 }
 

@@ -27,9 +27,8 @@ feature becomes part of a supported product surface.
   SDK construction, daemon process and persistence substrate, backend
   authority, JSON config file loading/persistence, and shared diagnostics.
 - Feature packages import thin plugin support packages such as
-  `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and
-  `@goddard-ai/app-plugin`, not public composition roots such as
-  `@goddard-ai/sdk`.
+  `@goddard-ai/sdk-plugin` and `@goddard-ai/daemon-plugin`, not public
+  composition roots such as `@goddard-ai/sdk`.
 - Feature packages must not circularly depend on other feature packages.
   Daemon feature interop goes through explicit `consumes` declarations and
   first-class `context.<feature>` extensions.
@@ -42,7 +41,7 @@ feature becomes part of a supported product surface.
   precedence, validation, persistence, and hot reload.
 - App plugin packaging is deferred. App shell placement, workbench tab
   metadata, command routing, app state composition, query cache, and app-only UI
-  composition remain app-owned substrate until a separate app-plugin sprint
+  composition remain app-owned substrate until a separate app composition sprint
   introduces a reviewed app composition root.
 
 ## Current Feature Boundaries

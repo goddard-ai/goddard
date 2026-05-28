@@ -6,7 +6,7 @@ Product ambiguity status: resolved.
 
 Explore the app-level capabilities that feature packages are very likely to need when contributing UI, navigation, state integration, and user workflows.
 
-This document is generic. It should guide the eventual shape of `@goddard-ai/app-plugin`, not define one feature's concrete UI.
+This document is generic. It should guide the eventual app composition shape, not define one feature's concrete UI.
 
 ## Likely Feature Inputs
 
@@ -29,7 +29,7 @@ Feature app entrypoints should not depend on `@goddard-ai/sdk` directly, even wh
 
 Instead, app plugins should provide type-level SDK requirements that describe the SDK namespace or feature service shape they expect. The static app composition root already owns the composed SDK instance and should verify that the app context satisfies those requirements. A feature app entrypoint may import local types from its own `sdk.ts` entrypoint or shared feature schemas, but it should receive the runtime SDK object through the statically composed app context.
 
-The `@goddard-ai/app-plugin` support package should remain SDK-agnostic. It can model generic app plugin requirements and context typing, but it should not import or know about `@goddard-ai/sdk`.
+Any app composition support surface should remain SDK-agnostic. It can model generic app plugin requirements and context typing, but it should not import or know about `@goddard-ai/sdk`.
 
 ## Likely Feature Contributions
 
@@ -108,6 +108,6 @@ Keyboard shortcut conflicts must be tolerated. User-defined shortcuts take prece
 ## Implementation Planning Questions
 
 - Should `defineAppPlugin()` use one `const` type parameter for the full plugin object, or separate `const` parameters for name, routes, slots, commands, and dependency metadata?
-- Should `@goddard-ai/app-plugin` re-export stable design-system primitives, or should feature packages import `@goddard-ai/styled-system` directly when they need styling?
+- Should an app composition support surface re-export stable design-system primitives, or should feature packages import `@goddard-ai/styled-system` directly when they need styling?
 - Should routes be declared as data, components, or both?
 - Should feature packages own their data hooks, or should hooks stay in app composition code?
