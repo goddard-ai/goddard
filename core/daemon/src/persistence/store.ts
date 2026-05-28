@@ -1,15 +1,8 @@
 import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
-import {
-  DaemonPullRequest,
-  DaemonSession,
-  DaemonSessionDiagnostics,
-  DaemonSessionTurn,
-  DaemonSessionTurnDraft,
-  DaemonWorkforce,
-  DaemonWorktree,
-} from "@goddard-ai/schema/daemon/store"
+import { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
+import type { sessionDbSchema } from "@goddard-ai/session/daemon"
 import {
   kind,
   kindstore,
@@ -30,50 +23,6 @@ const metadata = {
 }
 
 const coreDbSchema = {
-  sessions: kind("ses", DaemonSession)
-    .createdAt()
-    .updatedAt()
-    .index("acpSessionId")
-    .index("repository")
-    .index("token")
-    .multi("repository_prNumber", {
-      repository: "asc",
-      prNumber: "asc",
-    })
-    .multi("updatedAt_id", {
-      updatedAt: "desc",
-      id: "desc",
-    })
-    .multi("completedHidden_updatedAt_id", {
-      completedHidden: "asc",
-      updatedAt: "desc",
-      id: "desc",
-    }),
-
-  sessionTurns: kind("trn", DaemonSessionTurn)
-    .index("sessionId", { type: "text" })
-    .index("sequence", { type: "integer" })
-    .multi("sessionId_sequence", {
-      sessionId: "asc",
-      sequence: "desc",
-    }),
-
-  sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
-    .index("sessionId", { type: "text" })
-    .index("sequence", { type: "integer" })
-    .multi("sessionId_sequence", {
-      sessionId: "asc",
-      sequence: "desc",
-    }),
-
-  sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", {
-    type: "text",
-  }),
-
-  worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
-
-  workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
-
   pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
     "host_owner_repo_prNumber",
     {
@@ -86,7 +35,10 @@ const coreDbSchema = {
   ),
 }
 
-type DaemonStore = Kindstore<typeof coreDbSchema & KindRegistry, typeof metadata>
+type DaemonStore = Kindstore<
+  typeof coreDbSchema & typeof sessionDbSchema & KindRegistry,
+  typeof metadata
+>
 
 let activeSchema: KindRegistry = coreDbSchema
 let activeConnection: StoreConnectionOptions = { filename: getDatabasePath() }

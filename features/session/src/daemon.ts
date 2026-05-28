@@ -5,7 +5,9 @@ import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter } from "./daemon/events.ts"
 import { createSessionManager } from "./daemon/manager.ts"
+import { sessionDbSchema } from "./daemon/store.ts"
 
+export { sessionDbSchema } from "./daemon/store.ts"
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type { LoadSessionParams, NewSessionParams, SessionLaunchParams } from "./daemon/manager.ts"
@@ -17,6 +19,7 @@ export {
 
 export const sessionPlugin = definePlugin({
   name: "session",
+  db: sessionDbSchema,
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const events = createSessionEventEmitter()
