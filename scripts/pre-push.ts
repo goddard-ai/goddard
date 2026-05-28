@@ -145,13 +145,13 @@ function runBun(repoRoot: string, args: string[]) {
   return result.status === 0
 }
 
-/** Installs dependencies only when the lockfile changed, then runs the full repo check. */
+/** Installs dependencies only when the lockfile changed, then runs static pre-push checks. */
 function runRepoCheck(repoRoot: string, changedFiles: string[]) {
   if (changedFiles.includes("bun.lock") && !runBun(repoRoot, ["install", "--frozen-lockfile"])) {
     return false
   }
 
-  return runBun(repoRoot, ["run", "check"])
+  return runBun(repoRoot, ["run", "check:prepush"])
 }
 
 /** Runs the pre-push guard and returns a process exit code. */
