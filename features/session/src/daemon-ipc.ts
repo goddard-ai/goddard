@@ -98,6 +98,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
       response: $type<SessionLaunchPreviewResponse>(),
     }),
     launchLease: http.resource("launch-lease", {
+      /** Schedules one abandoned launch lease for delayed release. */
       release: http.post("release", {
         body: ReleaseSessionLaunchLeaseRequest,
         response: $type<ReleaseSessionLaunchLeaseResponse>(),
@@ -114,26 +115,31 @@ export const sessionIpcRoutes = defineIpcRoutes({
       response: $type<GetSessionDiagnosticsResponse>(),
     }),
     worktree: http.resource("worktree", {
+      /** Reads persisted worktree metadata attached to one daemon-managed session. */
       get: http.post("get", {
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
       }),
     }),
     reviewSession: http.resource("review-session", {
+      /** Mounts a review session for one daemon-managed session worktree. */
       mount: http.post("mount", {
         body: MountSessionReviewSessionRequest,
         response: $type<MutateSessionReviewSessionResponse>(),
       }),
+      /** Runs one mounted review session immediately. */
       run: http.post("run", {
         body: RunSessionReviewSessionRequest,
         response: $type<MutateSessionReviewSessionResponse>(),
       }),
+      /** Unmounts a review session from one daemon-managed session worktree. */
       unmount: http.post("unmount", {
         body: UnmountSessionReviewSessionRequest,
         response: $type<MutateSessionReviewSessionResponse>(),
       }),
     }),
     workforce: http.resource("workforce", {
+      /** Reads persisted workforce metadata attached to one daemon-managed session. */
       get: http.post("get", {
         body: DaemonSessionIdParams,
         response: $type<GetSessionWorkforceResponse>(),
@@ -160,12 +166,14 @@ export const sessionIpcRoutes = defineIpcRoutes({
       response: $type<{ accepted: true }>(),
     }),
     configOption: http.resource("config-option", {
+      /** Updates one ACP config option on an active daemon-managed session. */
       set: http.post("set", {
         body: SetSessionConfigOptionRequest,
         response: $type<SetSessionConfigOptionResponse>(),
       }),
     }),
     model: http.resource("model", {
+      /** Updates the ACP model on an active daemon-managed session. */
       set: http.post("set", {
         body: SetSessionModelRequest,
         response: $type<SetSessionModelResponse>(),
