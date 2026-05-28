@@ -83,11 +83,13 @@ export const inboxPlugin = definePlugin({
       return inbox.completeSession(event.sessionId)
     })
 
+    const inboxExtension: InboxExtension = {
+      touchInboxItem: inbox.touchInboxItem,
+    }
+
     return {
       provides: {
-        inbox: {
-          touchInboxItem: inbox.touchInboxItem,
-        } satisfies InboxExtension,
+        inbox: inboxExtension,
       },
       ipcHandlers: {
         inbox: {
