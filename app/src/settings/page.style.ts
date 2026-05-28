@@ -13,6 +13,37 @@ export default {
       gridTemplateColumns: "minmax(0, 1fr)",
     },
   }),
+  searchField: css({
+    position: "sticky",
+    top: "0",
+    zIndex: "2",
+    gridColumn: "1 / -1",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    height: "42px",
+    paddingInline: "12px",
+    borderRadius: "8px",
+    backgroundColor: "panel",
+    color: "muted",
+  }),
+  searchIcon: css({
+    flexShrink: "0",
+  }),
+  searchInput: css({
+    width: "100%",
+    minWidth: "0",
+    height: "100%",
+    padding: "0",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: "text",
+    fontSize: "0.88rem",
+    "&::placeholder": {
+      color: "muted",
+    },
+  }),
   content: css({
     display: "grid",
     gap: "24px",
@@ -64,5 +95,8 @@ export default {
       outline: "2px solid {colors.accent}",
       outlineOffset: "2px",
     },
+  }),
+  srOnly: css({
+    srOnly: true,
   }),
 }

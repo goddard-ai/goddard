@@ -18,6 +18,12 @@ import {
 } from "~/settings/styled.tsrx"
 import type { AppearanceMode } from "./theme.ts"
 
+export const appearanceSettingsSectionMetadata = {
+  description: "Choose how the workbench resolves theme and contrast.",
+  id: "settings-appearance",
+  title: "Appearance",
+}
+
 const themeModeOptions: readonly {
   mode: AppearanceMode;
   label: string;
@@ -43,11 +49,16 @@ const themeModeOptions: readonly {
 export component AppearanceSettingsSection() {
   const appearance = useAppearance()
 
-  <SettingsSection id="settings-appearance" aria-labelledby="settings-appearance-heading">
+  <SettingsSection
+    id={appearanceSettingsSectionMetadata.id}
+    aria-labelledby="settings-appearance-heading"
+  >
     <SettingsSectionHeader>
-      <SettingsSectionTitle id="settings-appearance-heading">"Appearance"</SettingsSectionTitle>
+      <SettingsSectionTitle id="settings-appearance-heading">
+        {appearanceSettingsSectionMetadata.title}
+      </SettingsSectionTitle>
       <SettingsSectionDescription>
-        "Choose how the workbench resolves theme and contrast."
+        {appearanceSettingsSectionMetadata.description}
       </SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
