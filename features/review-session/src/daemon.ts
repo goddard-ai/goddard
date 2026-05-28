@@ -12,6 +12,7 @@ import {
   type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import {
   sessionPlugin,
   type SessionEventEmitter,
@@ -25,13 +26,13 @@ import type { ReviewSessionResponse } from "./schema.ts"
 
 /** Narrow session feature extension surface consumed by review-session runtime orchestration. */
 type SessionExtension = {
-  getSession: (id: `ses_${string}`) => Promise<DaemonSession>
-  getWorktree: (id: `ses_${string}`) => Promise<GetSessionWorktreeResponse>
-  requireWorktree: (id: `ses_${string}`) => Promise<SessionWorktreeLifecycleState>
+  getSession: (id: DaemonSessionId) => Promise<DaemonSession>
+  getWorktree: (id: DaemonSessionId) => Promise<GetSessionWorktreeResponse>
+  requireWorktree: (id: DaemonSessionId) => Promise<SessionWorktreeLifecycleState>
   listWorktrees: () => Promise<SessionWorktreeLifecycleState[]>
   findWorktreeByDir: (worktreeDir: string) => Promise<SessionWorktreeLifecycleState | null>
-  isActive: (id: `ses_${string}`) => boolean
-  emitDiagnostic: (id: `ses_${string}`, type: string, detail?: Record<string, unknown>) => void
+  isActive: (id: DaemonSessionId) => boolean
+  emitDiagnostic: (id: DaemonSessionId, type: string, detail?: Record<string, unknown>) => void
   events: SessionEventEmitter
 }
 
@@ -43,11 +44,11 @@ type ReviewSessionRuntime = {
 
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
 function createReviewSessionManager(session: SessionExtension) {
-  const runtimes = new Map<string, ReviewSessionRuntime>()
-  const pendingLaunchMounts = new Set<string>()
+  const runtimes = new Map<DaemonSessionId, ReviewSessionRuntime>()
+  const pendingLaunchMounts = new Set<DaemonSessionId>()
 
   async function toResponse(
-    id: `ses_${string}`,
+    id: DaemonSessionId,
     reviewSession: ReviewSyncStatusData | null,
     warnings: string[] = [],
   ) {
@@ -102,7 +103,7 @@ function createReviewSessionManager(session: SessionExtension) {
   }
 
   function emitReviewSessionWarnings(
-    id: `ses_${string}`,
+    id: DaemonSessionId,
     reason: string,
     result: ReviewSyncResult,
   ) {
@@ -116,7 +117,7 @@ function createReviewSessionManager(session: SessionExtension) {
     }
   }
 
-  function emitReviewSessionResult(id: `ses_${string}`, reason: string, result: ReviewSyncResult) {
+  function emitReviewSessionResult(id: DaemonSessionId, reason: string, result: ReviewSyncResult) {
     if (result.status === "error") {
       session.emitDiagnostic(id, "review_session.warning", {
         reason,
@@ -138,7 +139,7 @@ function createReviewSessionManager(session: SessionExtension) {
     return await realpath(resolve(value))
   }
 
-  async function stopRuntime(id: `ses_${string}`) {
+  async function stopRuntime(id: DaemonSessionId) {
     const runtime = runtimes.get(id)
     if (!runtime) {
       return
@@ -149,7 +150,7 @@ function createReviewSessionManager(session: SessionExtension) {
     await runtime.running.catch(() => {})
   }
 
-  async function runCycle(id: `ses_${string}`, worktree: SessionWorktreeLifecycleState) {
+  async function runCycle(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
     session.emitDiagnostic(id, "review_session.started", { reason: "manual" })
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
@@ -165,7 +166,7 @@ function createReviewSessionManager(session: SessionExtension) {
     }
   }
 
-  async function startRuntime(id: `ses_${string}`, worktree: SessionWorktreeLifecycleState) {
+  async function startRuntime(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
     await stopRuntime(id)
 
     const state = await readReviewSessionState(worktree)
@@ -203,7 +204,7 @@ function createReviewSessionManager(session: SessionExtension) {
   }
 
   async function replaceMountedReviewSessionIfNeeded(
-    id: `ses_${string}`,
+    id: DaemonSessionId,
     worktree: SessionWorktreeLifecycleState,
   ) {
     const mounted = await findMountedReviewSessionByPrimaryDir(worktree.repoRoot)
@@ -229,7 +230,7 @@ function createReviewSessionManager(session: SessionExtension) {
     })
   }
 
-  async function mountForWorktree(id: `ses_${string}`, worktree: SessionWorktreeLifecycleState) {
+  async function mountForWorktree(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
     await replaceMountedReviewSessionIfNeeded(id, worktree)
     const result = await startReviewSync({
       cwd: worktree.repoRoot,
@@ -246,7 +247,7 @@ function createReviewSessionManager(session: SessionExtension) {
   }
 
   async function cleanupMountedReviewSession(
-    id: `ses_${string}`,
+    id: DaemonSessionId,
     worktree: SessionWorktreeLifecycleState,
     reason: string,
   ) {
@@ -277,12 +278,12 @@ function createReviewSessionManager(session: SessionExtension) {
       }
     },
 
-    async get(id: `ses_${string}`) {
+    async get(id: DaemonSessionId) {
       const worktree = await session.requireWorktree(id)
       return toResponse(id, await readReviewSessionState(worktree))
     },
 
-    async mount(id: `ses_${string}`) {
+    async mount(id: DaemonSessionId) {
       const worktree = await session.requireWorktree(id)
       const state = await mountForWorktree(id, worktree)
       if (session.isActive(id)) {
@@ -292,14 +293,14 @@ function createReviewSessionManager(session: SessionExtension) {
       return toResponse(id, state)
     },
 
-    async run(id: `ses_${string}`) {
+    async run(id: DaemonSessionId) {
       const worktree = await session.requireWorktree(id)
       session.emitDiagnostic(id, "review_session.requested", { reason: "manual" })
       const result = await runCycle(id, worktree)
       return toResponse(id, result.state, result.warnings)
     },
 
-    async unmount(id: `ses_${string}`) {
+    async unmount(id: DaemonSessionId) {
       const worktree = await session.requireWorktree(id)
       await cleanupMountedReviewSession(id, worktree, "manual")
       return toResponse(id, null)
@@ -307,12 +308,12 @@ function createReviewSessionManager(session: SessionExtension) {
 
     async close() {
       for (const id of runtimes.keys()) {
-        await stopRuntime(id as `ses_${string}`)
+        await stopRuntime(id)
       }
     },
 
     onWorktreePrepared: async (event: {
-      sessionId: `ses_${string}`
+      sessionId: DaemonSessionId
       request: { worktree?: { reviewSession?: { enabled?: boolean } } }
       worktree: SessionWorktreeLifecycleState
     }) => {
@@ -325,7 +326,7 @@ function createReviewSessionManager(session: SessionExtension) {
     },
 
     onSessionActivated: async (event: {
-      sessionId: `ses_${string}`
+      sessionId: DaemonSessionId
       worktree: SessionWorktreeLifecycleState | null
     }) => {
       if (!event.worktree || !pendingLaunchMounts.has(event.sessionId)) {
@@ -337,7 +338,7 @@ function createReviewSessionManager(session: SessionExtension) {
     },
 
     onLaunchFinished: async (event: {
-      sessionId: `ses_${string}`
+      sessionId: DaemonSessionId
       reason: string
       worktree: SessionWorktreeLifecycleState
     }) => {
@@ -349,7 +350,7 @@ function createReviewSessionManager(session: SessionExtension) {
     },
 
     onLaunchFailed: async (event: {
-      sessionId: `ses_${string}`
+      sessionId: DaemonSessionId
       error: unknown
       worktree: SessionWorktreeLifecycleState
     }) => {
@@ -363,7 +364,7 @@ function createReviewSessionManager(session: SessionExtension) {
     },
 
     onSessionStopping: async (event: {
-      sessionId: `ses_${string}`
+      sessionId: DaemonSessionId
       reason: string
       worktree: SessionWorktreeLifecycleState | null
     }) => {

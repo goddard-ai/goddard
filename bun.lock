@@ -194,6 +194,7 @@
       "dependencies": {
         "@goddard-ai/backend-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/schema": "workspace:^",
         "kindstore": "^0.4.4",
         "zod": "catalog:",
       },

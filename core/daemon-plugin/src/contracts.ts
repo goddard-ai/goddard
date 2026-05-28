@@ -1,6 +1,7 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
 
@@ -113,7 +114,7 @@ export type DaemonSetupSubstrate = {
   readonly configManager: any
   readonly registryService: any
   readonly getIpcRequestContext: () => {
-    readonly setSessionId: (id: `ses_${string}`) => void
+    readonly setSessionId: (id: DaemonSessionId) => void
   }
 }
 
