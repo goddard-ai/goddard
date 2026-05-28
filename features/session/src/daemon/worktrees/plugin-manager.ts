@@ -6,33 +6,16 @@ import type { WorktreePluginReference } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import hashSum from "hash-sum"
 
+import type { ConfigManager } from "../../../../../core/daemon/src/config-manager.ts"
+import type { DaemonLogger } from "../../../../../core/daemon/src/logging.ts"
+
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 type LoadedWorktreePluginSet = {
   signature: string
   plugins: WorktreePlugin[]
 }
 
-type WorktreeRootConfigSnapshot = {
-  config: {
-    worktrees?: {
-      plugins?: WorktreePluginReference[]
-    }
-  }
-  globalRoot: string
-  version: number
-}
-
-type WorktreeConfigManager = {
-  getRootConfig: (cwd: string) => Promise<WorktreeRootConfigSnapshot>
-}
-
-type WorktreePluginLogger = {
-  log: (event: string, fields?: Record<string, unknown>) => void
-}
-
-const noopLogger: WorktreePluginLogger = {
-  log() {},
-}
+type WorktreeRootConfigSnapshot = Awaited<ReturnType<ConfigManager["getRootConfig"]>>
 
 /** Session-owned contract for loading custom worktree plugins from root config. */
 export interface WorktreePluginManager {
@@ -43,10 +26,9 @@ export interface WorktreePluginManager {
  * Creates a loader that resolves configured custom worktree plugins from the global config.
  */
 export function createWorktreePluginManager(input: {
-  configManager: WorktreeConfigManager
-  logger?: WorktreePluginLogger
+  configManager: ConfigManager
+  logger: DaemonLogger
 }) {
-  const logger = input.logger ?? noopLogger
   const lastSuccessfulLoads = new Map<string, LoadedWorktreePluginSet>()
 
   async function getPlugins(cwd: string) {
@@ -69,7 +51,7 @@ export function createWorktreePluginManager(input: {
       return plugins
     } catch (error) {
       if (previousLoad) {
-        logger.log("worktree.plugins_load_failed", {
+        input.logger.log("worktree.plugins_load_failed", {
           cwd,
           globalRoot: snapshot.globalRoot,
           usingLastGoodPlugins: true,

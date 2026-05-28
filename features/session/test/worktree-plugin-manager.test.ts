@@ -17,6 +17,12 @@ const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
+const testLogger = {
+  log() {},
+  snapshot() {
+    return testLogger
+  },
+}
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -92,7 +98,7 @@ test("loads a configured path plugin from the global config", async () => {
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager })
+  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
   const created = await createWorktree({
     cwd: repoDir,
     branchName: "feature-1",
@@ -193,7 +199,7 @@ test("loads a configured package plugin from a resolvable package specifier", as
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager })
+  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
   const created = await createWorktree({
     cwd: repoDir,
     branchName: "feature-2",
@@ -261,7 +267,7 @@ test("falls back to the default plugin when a configured plugin does not create 
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager })
+  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
 
   const created = await createWorktree({
     cwd: repoDir,
