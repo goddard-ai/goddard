@@ -788,6 +788,7 @@ export async function runRebase(input: MutationInput & { target: string }) {
   const originalApprovedHead = readConflictString(retryConflict, "approvedHead") ?? approvedHead
   const originalReviewHead = readConflictString(retryConflict, "reviewHead") ?? reviewHead
   const originalNextHead = readConflictString(retryConflict, "nextHead") ?? nextHead
+  const ignoredNextBranchAtFinalize = isIgnoredNextBranchAtFinalize(state, reviewHead, nextHead)
   const nextState = cloneState(state)
   nextState.baseBranch = targetRef
   nextState.conflict = null
@@ -835,6 +836,7 @@ export async function runRebase(input: MutationInput & { target: string }) {
       approvedHead,
       reviewHead,
       nextHead,
+      ignoredNextBranchAtFinalize,
       diagnostics,
     )
   }
@@ -859,7 +861,7 @@ export async function runRebase(input: MutationInput & { target: string }) {
       upstream: originalApprovedHead,
     })
   }
-  if (nextHead && originalReviewHead) {
+  if (nextHead && originalReviewHead && !ignoredNextBranchAtFinalize) {
     steps.push({
       branch: state.branches.next,
       onto: state.branches.review,
@@ -920,6 +922,13 @@ export async function runRebase(input: MutationInput & { target: string }) {
         await runGit(context.rootDir, ["checkout", context.currentBranch])
       }
 
+      if (ignoredNextBranchAtFinalize) {
+        recordIgnoredNextBranchAtFinalize(
+          nextState,
+          await getBranchHead(context.rootDir, state.branches.review),
+          await getBranchHead(context.rootDir, state.branches.next),
+        )
+      }
       await writeSprintState(context.rootDir, nextState)
       return { ...plan, state: nextState, executed: true }
     } catch (error) {
@@ -1097,6 +1106,7 @@ async function pushRebaseStackDiagnostics(
   approvedHead: string | null,
   reviewHead: string | null,
   nextHead: string | null,
+  ignoredNextBranchAtFinalize: boolean,
   diagnostics: SprintDiagnostic[],
 ) {
   if (
@@ -1113,6 +1123,7 @@ async function pushRebaseStackDiagnostics(
   if (
     nextHead &&
     reviewHead &&
+    !ignoredNextBranchAtFinalize &&
     !(await isAncestor(rootDir, state.branches.review, state.branches.next))
   ) {
     diagnostics.push({

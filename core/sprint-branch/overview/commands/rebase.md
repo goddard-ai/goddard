@@ -31,6 +31,8 @@
   - The recorded branch stack must already be coherent:
     - `review` must descend from `approved`.
     - `next`, when present, must descend from `review`.
+      - A dormant `next` divergence that was explicitly accepted by a
+        successful `finalize --ignore-next-branch` is skipped instead.
   - If a conflict interrupts the transition:
     - The prior base remains recorded.
     - `rebase` can be retried after conflict resolution.

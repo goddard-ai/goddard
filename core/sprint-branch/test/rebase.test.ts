@@ -8,6 +8,7 @@ import {
   commitAll,
   createSprintRepo,
   currentBranch,
+  diagnosticCodes,
   git,
   isAncestor,
   readState,
@@ -64,6 +65,44 @@ describe("sprint-branch rebase", () => {
     ).toBe(true)
     expect(await branchHead(repo, "sprint/example/approved")).toBe(approvedBefore)
     expect((await readState(repo, "example")).baseBranch).toBe("main")
+  })
+
+  test("rebases finalized review after an ignored dormant next branch", async () => {
+    const repo = await createSprintRepo(
+      "example",
+      {
+        review: null,
+        next: null,
+        approved: ["010-task-name"],
+      },
+      { createNextBranch: true },
+    )
+    await git(repo, ["checkout", "sprint/example/next"])
+    await fs.writeFile(path.join(repo, "next.txt"), "stale rewritten next\n")
+    await commitAll(repo, "add divergent next work")
+    await runCli(repo, ["finalize", "--sprint", "example", "--ignore-next-branch", "--json"])
+    const nextBefore = await branchHead(repo, "sprint/example/next")
+
+    await git(repo, ["checkout", "main"])
+    await fs.writeFile(path.join(repo, "base.txt"), "new base\n")
+    await commitAll(repo, "advance base")
+    await git(repo, ["tag", "new-base", "main"])
+
+    const result = await runCli(repo, ["rebase", "new-base", "--sprint", "example", "--json"])
+    const rebase = JSON.parse(result.stdout) as MutationOutput
+    const state = await readState(repo, "example")
+
+    expect(result.exitCode).toBe(0)
+    expect(rebase.ok).toBe(true)
+    expect(diagnosticCodes(rebase)).not.toContain("next_not_based_on_review")
+    expect(rebase.gitOperations).not.toContain("git checkout sprint/example/next")
+    expect(await branchHead(repo, "sprint/example/next")).toBe(nextBefore)
+    expect(await isAncestor(repo, "new-base", "sprint/example/review")).toBe(true)
+    expect(state.baseBranch).toBe("new-base")
+    expect(state.ignoredNextBranchAtFinalize).toEqual({
+      reviewCommit: await branchHead(repo, "sprint/example/review"),
+      nextCommit: nextBefore,
+    })
   })
 })
 
