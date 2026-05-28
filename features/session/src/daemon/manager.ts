@@ -384,7 +384,7 @@ type ActiveSession = {
 }
 
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
-interface SessionLaunchParams {
+export interface SessionLaunchParams {
   request: CreateSessionRequest
   token?: string
   config?: UserConfig
@@ -392,10 +392,10 @@ interface SessionLaunchParams {
 }
 
 /** Fresh daemon session input accepted by `SessionManager.newSession()`. */
-interface NewSessionParams extends SessionLaunchParams {}
+export interface NewSessionParams extends SessionLaunchParams {}
 
 /** Stored daemon session input accepted by `SessionManager.loadSession()`. */
-interface LoadSessionParams extends SessionLaunchParams {
+export interface LoadSessionParams extends SessionLaunchParams {
   id: SessionId
 }
 

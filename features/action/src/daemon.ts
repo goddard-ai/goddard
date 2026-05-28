@@ -20,8 +20,8 @@ export const actionPlugin = definePlugin({
           run: async ({ body: payload }) => {
             const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
             const response = {
-              session: await session.create(
-                buildNamedActionSessionParams(action, payload.cwd, {
+              session: await session.newSession({
+                request: buildNamedActionSessionParams(action, payload.cwd, {
                   cwd: payload.cwd,
                   agent: payload.agent,
                   mcpServers: payload.mcpServers,
@@ -31,7 +31,7 @@ export const actionPlugin = definePlugin({
                   prNumber: payload.prNumber,
                   metadata: payload.metadata,
                 }),
-              ),
+              }),
             }
             getIpcRequestContext().setSessionId(response.session.id)
             return response

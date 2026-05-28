@@ -19,15 +19,15 @@ function shouldPauseLoop(cycleCount: number, maxCyclesBeforePause: number): bool
 /** Runtime dependencies shared by one daemon-owned loop host. */
 export interface LoopRuntimeDeps {
   session: {
-    create: (request: ResolvedLoopStartRequest["session"]) => Promise<{
+    newSession: (params: { request: ResolvedLoopStartRequest["session"] }) => Promise<{
       id: `ses_${string}`
       acpSessionId: string
     }>
-    prompt: (
+    promptSession: (
       id: `ses_${string}`,
       prompt: string | acp.ContentBlock[],
     ) => Promise<acp.PromptResponse>
-    shutdown: (id: `ses_${string}`) => Promise<boolean>
+    shutdownSession: (id: `ses_${string}`) => Promise<boolean>
   }
   onStop?: (input: { rootDir: string; loopName: string }) => void
 }
@@ -78,18 +78,20 @@ export class LoopRuntime {
     config: ResolvedLoopStartRequest,
     deps: LoopRuntimeDeps,
   ): Promise<LoopRuntime> {
-    const session = await deps.session.create({
-      ...config.session,
-      systemPrompt: config.session.systemPrompt ?? "",
-      metadata: {
-        ...config.session.metadata,
-        loop: {
-          rootDir: config.rootDir,
-          loopName: config.loopName,
-          promptModulePath: config.promptModulePath,
+    const session = await deps.session.newSession({
+      request: {
+        ...config.session,
+        systemPrompt: config.session.systemPrompt ?? "",
+        metadata: {
+          ...config.session.metadata,
+          loop: {
+            rootDir: config.rootDir,
+            loopName: config.loopName,
+            promptModulePath: config.promptModulePath,
+          },
         },
+        worktree: config.session.worktree ?? { enabled: true },
       },
-      worktree: config.session.worktree ?? { enabled: true },
     })
 
     const runtime = new LoopRuntime({
@@ -197,7 +199,7 @@ export class LoopRuntime {
 
       try {
         this.#lastPromptAt = new Date().toISOString()
-        const response = await this.#deps.session.prompt(this.#sessionId, promptMessage)
+        const response = await this.#deps.session.promptSession(this.#sessionId, promptMessage)
         logger.log("loop.prompt_completed", {
           cycleCount: this.#cycleCount,
           stopReason: response.stopReason,
@@ -248,7 +250,7 @@ export class LoopRuntime {
         clearTimeout(this.#sleepHandle)
         this.#sleepHandle = null
       }
-      await this.#deps.session.shutdown(this.#sessionId).catch(() => {})
+      await this.#deps.session.shutdownSession(this.#sessionId).catch(() => {})
       logger.log("loop.runtime_stopped", {
         cycleCount: this.#cycleCount,
       })

@@ -31,7 +31,7 @@ afterEach(async () => {
 
 function createTestSession() {
   return {
-    create: async () => ({
+    newSession: async () => ({
       id: "ses_test",
       acpSessionId: "acp_test",
       status: "completed",
@@ -464,14 +464,14 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   runtime = await WorkforceRuntime.start(rootDir, {
     session: {
-      create: async (input: CreateSessionRequest) => {
+      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
         const metadata = input.workforce ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
         }
 
-        systemPrompts[metadata.agentId] = input.systemPrompt
+        systemPrompts[metadata.agentId] = input.systemPrompt ?? ""
 
         await runtime.respond({
           requestId: metadata.requestId,
@@ -551,7 +551,7 @@ test("create-intent requests target the root agent and specialize the root sessi
 
   runtime = await WorkforceRuntime.start(rootDir, {
     session: {
-      create: async (input: CreateSessionRequest) => {
+      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
         const initialPrompt =
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
@@ -559,10 +559,10 @@ test("create-intent requests target the root agent and specialize the root sessi
         capturedEnv = input.env
 
         if (initialPrompt.includes("Request intent: create")) {
-          createSystemPrompt = input.systemPrompt
+          createSystemPrompt = input.systemPrompt ?? ""
           createInitialPrompt = initialPrompt
         } else {
-          defaultSystemPrompt = input.systemPrompt
+          defaultSystemPrompt = input.systemPrompt ?? ""
         }
 
         const metadata = input.workforce ?? null
@@ -671,8 +671,8 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   runtime = await WorkforceRuntime.start(rootDir, {
     session: {
-      create: async (input: CreateSessionRequest) => {
-        capturedSystemPrompt = input.systemPrompt
+      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
+        capturedSystemPrompt = input.systemPrompt ?? ""
 
         const metadata = input.workforce ?? null
 
@@ -745,7 +745,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   const { logs } = await captureLogs(async () => {
     runtime = await WorkforceRuntime.start(rootDir, {
       session: {
-        create: async (input: CreateSessionRequest) => {
+        newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
           const metadata = input.workforce ?? null
 
           if (!metadata?.agentId || !metadata.requestId) {

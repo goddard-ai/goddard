@@ -78,7 +78,7 @@ export const workforcePlugin = definePlugin({
 
       getIpcRequestContext().setSessionId(tokenScope.sessionId)
 
-      const { workforce: workforceRecord } = await session.workforce(tokenScope.sessionId)
+      const { workforce: workforceRecord } = await session.getWorkforce(tokenScope.sessionId)
       if (!workforceRecord || typeof workforceRecord.agentId !== "string") {
         throw new IpcClientError("Session is not attached to a workforce request")
       }

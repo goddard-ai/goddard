@@ -53,7 +53,7 @@ export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promis
 /** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
   session: {
-    create: (request: CreateSessionRequest) => Promise<{
+    newSession: (params: { request: CreateSessionRequest }) => Promise<{
       id: string
       acpSessionId: string
       status: string
@@ -283,21 +283,23 @@ async function defaultRunWorkforceSession(
     cwd,
   })
 
-  const session = await deps.session.create({
-    agent: agentDistribution,
-    cwd,
-    workforce: {
-      rootDir: input.rootDir,
-      agentId: input.agent.id,
-      requestId: input.request.id,
-    },
-    mcpServers: [],
-    systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
-    oneShot: true,
-    initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
-    env: {
-      GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
-      GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
+  const session = await deps.session.newSession({
+    request: {
+      agent: agentDistribution,
+      cwd,
+      workforce: {
+        rootDir: input.rootDir,
+        agentId: input.agent.id,
+        requestId: input.request.id,
+      },
+      mcpServers: [],
+      systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
+      oneShot: true,
+      initialPrompt: buildInitialPrompt(input.rootDir, input.request, input.recentActivity),
+      env: {
+        GODDARD_WORKFORCE_ROOT_DIR: input.rootDir,
+        GODDARD_WORKFORCE_AGENT_ID: input.agent.id,
+      },
     },
   })
 

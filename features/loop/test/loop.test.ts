@@ -186,18 +186,18 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
   ]
 
   const session = {
-    async create(input: unknown) {
+    async newSession(input: unknown) {
       newSessionCalls.push(input)
       return {
         id: "ses_session_1",
         acpSessionId: "acp-1",
       }
     },
-    async prompt(...args: unknown[]) {
+    async promptSession(...args: unknown[]) {
       promptSessionCalls.push(args)
       return promptResults[promptResultIndex++] ?? { stopReason: "end_turn" }
     },
-    async shutdown(sessionId: string) {
+    async shutdownSession(sessionId: string) {
       shutdownSessionCalls.push(sessionId)
       return true
     },
@@ -238,8 +238,10 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     })
     expect(newSessionCalls[0]).toEqual(
       expect.objectContaining({
-        cwd: rootDir,
-        worktree: { enabled: true },
+        request: expect.objectContaining({
+          cwd: rootDir,
+          worktree: { enabled: true },
+        }),
       }),
     )
     await waitForExpectation(() => {

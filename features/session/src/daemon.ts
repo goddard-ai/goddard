@@ -1,41 +1,19 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
-import type {
-  CreateSessionRequest,
-  SendSessionMessageRequest,
-  SessionMessageEvent,
-} from "@goddard-ai/schema/daemon"
+import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter } from "./daemon/events.ts"
-import { createSessionManager, type SessionManager } from "./daemon/manager.ts"
+import { createSessionManager } from "./daemon/manager.ts"
 
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
+export type { LoadSessionParams, NewSessionParams, SessionLaunchParams } from "./daemon/manager.ts"
 export {
   type SessionEventEmitter,
   type SessionEvents,
   type SessionWorktreeLifecycleState,
 } from "./daemon/events.ts"
-
-/** First-class session methods exposed to daemon plugins that extend session behavior. */
-type SessionExtension = {
-  readonly create: (request: CreateSessionRequest) => ReturnType<SessionManager["newSession"]>
-  readonly workforce: SessionManager["getWorkforce"]
-  readonly shutdown: SessionManager["shutdownSession"]
-  readonly prompt: SessionManager["promptSession"]
-  readonly recordTurnAttentionActivity: SessionManager["recordTurnAttentionActivity"]
-  readonly resolveTokenScope: SessionManager["resolveTokenScope"]
-  readonly allowPullRequest: SessionManager["allowPullRequest"]
-  readonly getSession: SessionManager["getSession"]
-  readonly getWorktree: SessionManager["getWorktree"]
-  readonly requireWorktree: SessionManager["requireWorktree"]
-  readonly listWorktrees: SessionManager["listWorktrees"]
-  readonly findWorktreeByDir: SessionManager["findWorktreeByDir"]
-  readonly isActive: SessionManager["isActive"]
-  readonly emitDiagnostic: SessionManager["emitDiagnostic"]
-  readonly events: ReturnType<typeof createSessionEventEmitter>
-}
 
 export const sessionPlugin = definePlugin({
   name: "session",
@@ -93,30 +71,16 @@ export const sessionPlugin = definePlugin({
       }
     }
 
+    const { close, ...sessionMethods } = sessionManager
+
     return {
       provides: {
         session: {
-          create: (request) => sessionManager.newSession({ request }),
-          workforce: (id) => sessionManager.getWorkforce(id),
-          shutdown: (id) => sessionManager.shutdownSession(id),
-          prompt: (id, prompt) => sessionManager.promptSession(id, prompt),
-          recordTurnAttentionActivity: (id, metadata) =>
-            sessionManager.recordTurnAttentionActivity(id, metadata),
-          resolveTokenScope: (token) => sessionManager.resolveTokenScope(token),
-          allowPullRequest: (id, prNumber) => sessionManager.allowPullRequest(id, prNumber),
-          getSession: (id) => sessionManager.getSession(id),
-          getWorktree: (id) => sessionManager.getWorktree(id),
-          requireWorktree: (id) => sessionManager.requireWorktree(id),
-          listWorktrees: () => sessionManager.listWorktrees(),
-          findWorktreeByDir: (worktreeDir) => sessionManager.findWorktreeByDir(worktreeDir),
-          isActive: (id) => sessionManager.isActive(id),
-          emitDiagnostic: (id, type, detail) => sessionManager.emitDiagnostic(id, type, detail),
+          ...sessionMethods,
           events,
-        } satisfies SessionExtension,
+        },
       },
-      close: async () => {
-        await sessionManager.close()
-      },
+      close,
       ipcHandlers: {
         session: {
           create: async ({ body }) => {
