@@ -30,13 +30,13 @@
     "preact": ">=10.0.0"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.7.6",
-    "@preact/signals": "^2.9.0",
-    "tabbable": "^6.4.0"
+    "@floating-ui/dom": "catalog:",
+    "@preact/signals": "catalog:",
+    "tabbable": "catalog:"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^20.9.0",
-    "@tsrx/bun-plugin-preact": "^0.0.37",
-    "preact": "11.0.0-beta.1"
+    "@happy-dom/global-registrator": "catalog:",
+    "@tsrx/bun-plugin-preact": "catalog:",
+    "preact": "catalog:"
   }
 }
