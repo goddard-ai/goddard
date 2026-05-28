@@ -17,6 +17,7 @@
     "declarationMap": false,
     "paths": {
       "~/*": ["./src/*"],
+      "@goddard-ai/ui-primitives": ["../core/ui-primitives/src/index.ts"],
       "react": ["./node_modules/preact/compat"],
       "react-dom": ["./node_modules/preact/compat"]
     }
