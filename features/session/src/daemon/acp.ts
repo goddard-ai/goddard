@@ -1,5 +1,5 @@
 import { Readable, Writable } from "node:stream"
-import * as acp from "@agentclientprotocol/sdk"
+import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
 import { createLogger } from "../../../../core/daemon/src/logging.ts"

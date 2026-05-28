@@ -39,7 +39,6 @@
       "name": "@goddard-ai/app",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@chenglou/pretext": "^0.0.4",
         "@floating-ui/dom": "catalog:",
         "@goddard-ai/daemon-client": "workspace:*",
@@ -56,6 +55,7 @@
         "@tanstack/react-virtual": "^3.13.24",
         "@tsrx/preact": "^0.1.14",
         "@xterm/headless": "^6.0.0",
+        "acp-client": "catalog:",
         "bun-pty": "^0.4.8",
         "comark": "0.2.1",
         "culori": "^4.0.2",
@@ -175,6 +175,7 @@
         "@goddard-ai/backend": "workspace:*",
         "@goddard-ai/worktree-plugin": "workspace:*",
         "@types/hash-sum": "catalog:",
+        "acp-client": "catalog:",
         "hash-sum": "catalog:",
       },
     },
@@ -230,7 +231,6 @@
       "name": "@goddard-ai/schema",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/action": "workspace:*",
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/auth": "workspace:*",
@@ -251,7 +251,6 @@
       "name": "@goddard-ai/sdk",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/action": "workspace:*",
         "@goddard-ai/adapter": "workspace:*",
         "@goddard-ai/auth": "workspace:*",
@@ -371,13 +370,13 @@
       "name": "@goddard-ai/loop",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
+        "acp-client": "catalog:",
         "radashi": "catalog:",
         "zod": "catalog:",
       },
@@ -418,7 +417,6 @@
       "name": "@goddard-ai/session",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@ai-sdk/anthropic": "^3.0.69",
         "@ai-sdk/google": "^3.0.62",
         "@ai-sdk/openai": "^3.0.52",
@@ -471,9 +469,9 @@
         "sdk-agent-loop-poc": "./bin/sdk-agent-loop-poc",
       },
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@clack/prompts": "catalog:",
         "@goddard-ai/sdk": "workspace:*",
+        "acp-client": "catalog:",
         "nanocolors": "^0.2.13",
       },
       "devDependencies": {

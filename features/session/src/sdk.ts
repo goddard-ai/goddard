@@ -1,6 +1,6 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
+import type * as acp from "acp-client/protocol"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 

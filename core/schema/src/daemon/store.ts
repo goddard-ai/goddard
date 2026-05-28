@@ -1,5 +1,5 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import type { AcpAdapterId } from "acp-client/node"
+import type * as acp from "acp-client/protocol"
 import { z } from "zod"
 
 import { AgentDistribution } from "../agent-distribution.ts"

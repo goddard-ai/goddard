@@ -1,4 +1,3 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import { actionSdkPlugin } from "@goddard-ai/action/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
@@ -9,6 +8,7 @@ import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
+import type * as acp from "acp-client/protocol"
 
 import { runSession } from "./daemon/session/client.ts"
 import { resolveIpcClient, type GoddardClient, type IpcClientOptions } from "./ipc-client.ts"

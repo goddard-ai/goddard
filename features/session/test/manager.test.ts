@@ -1,8 +1,8 @@
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import * as acp from "@agentclientprotocol/sdk"
 import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
+import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
 import { resetDb } from "../../../core/daemon/src/persistence/store.ts"

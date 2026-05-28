@@ -54,7 +54,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "catalog:",
+    "acp-client": "catalog:",
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",

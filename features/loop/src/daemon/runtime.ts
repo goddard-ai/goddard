@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url"
-import * as acp from "@agentclientprotocol/sdk"
+import * as acp from "acp-client/protocol"
 import { getErrorMessage, proportionalJitter } from "radashi"
 
 import { LoopContext } from "../../../../core/daemon/src/context.ts"

@@ -1,24 +1,30 @@
-import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
 import type {
   DaemonSession,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
 } from "@goddard-ai/schema/daemon"
+import * as acp from "acp-client/protocol"
+
+/** Minimal ACP client surface used by daemon-backed SDK sessions. */
+export type AgentSessionAcpClient = {
+  prompt(params: acp.PromptRequest): Promise<acp.PromptResponse>
+  unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse>
+}
 
 /** Managed agent session connected to the daemon over IPC. */
 export class AgentSession {
   public readonly sessionId: DaemonSession["id"]
 
   private readonly acpSessionId: string
-  private readonly acpClient: acp.ClientSideConnection
+  private readonly acpClient: AgentSessionAcpClient
   private readonly daemonClient: DaemonIpcClient
   private readonly closeStream: () => Promise<void> | void
 
   constructor(
     sessionId: DaemonSession["id"],
     acpSessionId: string,
-    acpClient: acp.ClientSideConnection,
+    acpClient: AgentSessionAcpClient,
     daemonClient: DaemonIpcClient,
     closeStream: () => Promise<void> | void,
   ) {

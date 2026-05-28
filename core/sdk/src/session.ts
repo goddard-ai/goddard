@@ -1,5 +1,4 @@
 /** SDK-owned session helpers and wrapper params for daemon-backed sessions. */
-import * as acp from "@agentclientprotocol/sdk"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type {
   CreateSessionRequest,
@@ -34,6 +33,7 @@ import type {
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { SessionWorktreeParams } from "@goddard-ai/session/schema"
 import type { AcpAdapterId } from "acp-client/node"
+import * as acp from "acp-client/protocol"
 
 export type {
   CreateSessionRequest,

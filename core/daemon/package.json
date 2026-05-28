@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "acp-client": "catalog:",
     "@goddard-ai/backend": "workspace:*",
     "@goddard-ai/worktree-plugin": "workspace:*",
     "@types/hash-sum": "catalog:",

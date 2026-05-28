@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
+import * as acp from "acp-client/protocol"
 import hashSum from "hash-sum"
 import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"

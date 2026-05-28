@@ -54,7 +54,6 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "catalog:",
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.62",
     "@ai-sdk/openai": "^3.0.52",

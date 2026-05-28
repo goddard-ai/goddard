@@ -1,5 +1,5 @@
-import * as acp from "@agentclientprotocol/sdk"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
+import * as acp from "acp-client/protocol"
 
 import { SessionChat } from "./model.ts"
 

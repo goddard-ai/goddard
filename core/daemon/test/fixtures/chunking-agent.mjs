@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto"
 import { Readable, Writable } from "node:stream"
-import * as acp from "@agentclientprotocol/sdk"
+import * as acp from "acp-client/protocol"
+
+import { createFixtureAgentConnection } from "./acp-fixture-connection.mjs"
 
 class ChunkingFixtureAgent {
   constructor(connection) {
@@ -62,4 +64,4 @@ const input = Writable.toWeb(process.stdout)
 const output = Readable.toWeb(process.stdin)
 const stream = acp.ndJsonStream(input, output)
 
-new acp.AgentSideConnection((connection) => new ChunkingFixtureAgent(connection), stream)
+createFixtureAgentConnection((connection) => new ChunkingFixtureAgent(connection), stream)

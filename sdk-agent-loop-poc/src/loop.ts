@@ -1,5 +1,5 @@
-import type * as acp from "@agentclientprotocol/sdk"
 import type { AgentSession } from "@goddard-ai/sdk"
+import type * as acp from "acp-client/protocol"
 import { bold, cyan, dim, green, red, yellow } from "nanocolors"
 
 /** Interrupt signal shared between process handlers, sleeps, and active prompt cancellation. */

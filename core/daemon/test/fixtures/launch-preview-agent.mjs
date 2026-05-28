@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { appendFileSync } from "node:fs"
 import { Readable, Writable } from "node:stream"
-import * as acp from "@agentclientprotocol/sdk"
+import * as acp from "acp-client/protocol"
+
+import { createFixtureAgentConnection } from "./acp-fixture-connection.mjs"
 
 function recordEvent(event) {
   if (!process.env.LAUNCH_PREVIEW_AGENT_LOG) {
@@ -205,4 +207,4 @@ const input = Writable.toWeb(process.stdout)
 const output = Readable.toWeb(process.stdin)
 const stream = acp.ndJsonStream(input, output)
 
-new acp.AgentSideConnection((connection) => new LaunchPreviewFixtureAgent(connection), stream)
+createFixtureAgentConnection((connection) => new LaunchPreviewFixtureAgent(connection), stream)
