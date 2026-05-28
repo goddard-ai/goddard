@@ -22,22 +22,9 @@ Use `@goddard-ai/sdk` for explicit browser-safe daemon calls, or `@goddard-ai/sd
 
 ```ts
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { createClient } from "@goddard-ai/ipc"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-
-const desktopHost = globalThis.desktopHost
 
 const client = createDaemonIpcClient({
   daemonUrl: "http://127.0.0.1:49827/",
-  createClient: ({ daemonUrl }) =>
-    createClient(daemonIpcSchema, {
-      send(name, payload) {
-        return desktopHost.send({ daemonUrl, name, payload })
-      },
-      subscribe(name, filter, onMessage) {
-        return desktopHost.subscribe({ daemonUrl, name, filter }, onMessage)
-      },
-    }),
 })
 ```
 

@@ -1,5 +1,5 @@
-import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/common/params"
 import type { InboxEntityId, InboxItem } from "@goddard-ai/schema/daemon"
+import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
 
 /** Entity families supported by daemon-local inbox rows. */
 export type InboxEntityKind = "session" | "pullRequest"

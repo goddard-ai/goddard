@@ -1,20 +1,16 @@
-import type { InferStreamPayload, ValidStreamName } from "@goddard-ai/ipc"
-import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import { SigmaTarget } from "preact-sigma"
 
 import type { AppCommandId } from "./app-commands.ts"
 import type { DebugMenuSurface } from "./debug-menu.ts"
 
-type DaemonSchema = typeof daemonIpcSchema
-
 /** One daemon IPC stream name that the app bridge can forward from the Bun host. */
-export type DaemonStreamName = ValidStreamName<DaemonSchema>
+export type DaemonStreamName = string
 
 /** One daemon stream payload envelope dispatched from the Bun host into the active webview. */
 export type DaemonStreamEventDetail<Name extends DaemonStreamName = DaemonStreamName> = {
   subscriptionId: string
   name: Name
-  payload: InferStreamPayload<DaemonSchema, Name>
+  payload: any
 }
 
 /** Shared typed global events dispatched across the active webview. */

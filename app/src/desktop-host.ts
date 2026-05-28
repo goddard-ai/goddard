@@ -1,5 +1,3 @@
-import type { InferStreamPayload, StreamTarget } from "@goddard-ai/ipc"
-import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
 import { listen } from "preact-sigma"
@@ -18,8 +16,6 @@ import type {
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import { goddardSdk } from "./sdk.ts"
-
-type DaemonSchema = typeof daemonIpcSchema
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's
@@ -72,8 +68,8 @@ export interface DesktopHostBridge {
 
   /** Opens one daemon IPC stream subscription through the Bun host bridge. */
   daemonSubscribe<Name extends DaemonStreamName>(
-    target: StreamTarget<DaemonSchema, Name>,
-    onMessage: (payload: InferStreamPayload<DaemonSchema, Name>) => void,
+    target: DaemonStreamTargetInput<Name>,
+    onMessage: (payload: any) => void,
   ): Promise<() => void>
 
   /** Shared SDK instance backed by the Bun-owned daemon client bridge. */
@@ -182,7 +178,7 @@ export async function daemonSend<Name extends DaemonRequestName>(
 }
 
 function normalizeDaemonStreamTarget<Name extends DaemonStreamName>(
-  target: StreamTarget<DaemonSchema, Name>,
+  target: Name | DaemonStreamTargetInput<Name>,
 ): DaemonStreamTargetInput<Name> {
   if (typeof target === "string") {
     return {
@@ -199,8 +195,8 @@ function normalizeDaemonStreamTarget<Name extends DaemonStreamName>(
 
 /** Opens one daemon IPC stream subscription through the Bun host bridge. */
 export async function daemonSubscribe<Name extends DaemonStreamName>(
-  target: StreamTarget<DaemonSchema, Name>,
-  onMessage: (payload: InferStreamPayload<DaemonSchema, Name>) => void,
+  target: Name | DaemonStreamTargetInput<Name>,
+  onMessage: (payload: any) => void,
 ): Promise<() => void> {
   return await getDaemonSubscriptionCoordinator().subscribe(
     normalizeDaemonStreamTarget(target),

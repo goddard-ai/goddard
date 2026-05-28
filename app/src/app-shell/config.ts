@@ -1,3 +1,4 @@
+import { inboxAppPlugin } from "@goddard-ai/inbox/app"
 import type { Protected } from "preact-sigma"
 
 import type { Inbox } from "~/inbox/model.ts"
@@ -22,7 +23,7 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
 
 /** Optional dot predicates keyed by sidebar main tab item. */
 export const appShellSidebarDots: Partial<Record<MainTabItemId, AppShellSidebarDot>> = {
-  inbox: {
+  [inboxAppPlugin.navigation.id]: {
     getAriaLabel: (label) => `${label}, unread items`,
     isVisible: (state) => state.inbox.hasUnreadItems,
   },

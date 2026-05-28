@@ -11,15 +11,91 @@ import {
 function createSdkWithClient() {
   const send = vi.fn()
   const subscribe = vi.fn()
-  const client: GoddardClient = {
-    send: (name, payload?) => send(name, payload),
-    subscribe: (target, onMessage) => subscribe(target, onMessage),
-  }
+  const client = createMockRouteClient(send, subscribe)
   const sdk = new GoddardSdk({
     client,
   })
 
   return { sdk, send, subscribe }
+}
+
+function createMockRouteClient(
+  send: ReturnType<typeof vi.fn>,
+  subscribe: ReturnType<typeof vi.fn>,
+): GoddardClient {
+  const base = {}
+
+  return new Proxy(base, {
+    get(target, property) {
+      if (property in target) {
+        return target[property as keyof typeof target]
+      }
+
+      return createMockRouteNode([String(property)], subscribe, send)
+    },
+  }) as GoddardClient
+}
+
+function createMockRouteNode(
+  path: readonly string[],
+  subscribe: ReturnType<typeof vi.fn>,
+  send: ReturnType<typeof vi.fn>,
+): unknown {
+  const route = async (input?: unknown, options?: { signal?: AbortSignal }) => {
+    const name = path.join(".")
+    if (options?.signal) {
+      return createMockStream(name, input, options.signal, subscribe)
+    }
+
+    return send(name, input)
+  }
+
+  return new Proxy(route, {
+    get(_, property) {
+      if (property === "then") {
+        return undefined
+      }
+
+      return createMockRouteNode([...path, String(property)], subscribe, send)
+    },
+  })
+}
+
+async function* createMockStream(
+  name: string,
+  input: unknown,
+  signal: AbortSignal,
+  subscribe: ReturnType<typeof vi.fn>,
+) {
+  const queue: unknown[] = []
+  let notify: (() => void) | undefined
+  const target = input === undefined ? name : { name, filter: input }
+  const unsubscribe = await subscribe(target, (payload: unknown) => {
+    queue.push(payload)
+    notify?.()
+  })
+  signal.addEventListener("abort", () => {
+    notify?.()
+  })
+
+  try {
+    while (!signal.aborted) {
+      const payload = queue.shift()
+      if (payload !== undefined) {
+        yield payload
+        continue
+      }
+      await new Promise<void>((resolve) => {
+        notify = resolve
+      })
+    }
+  } finally {
+    unsubscribe()
+  }
+}
+
+async function flushAsyncStream() {
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
@@ -29,10 +105,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const onItem = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toBe("inbox.item")
         handler({
           item: {
@@ -54,6 +127,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.inbox.subscribe(onItem)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith("inbox.item", expect.any(Function))
     expect(onItem).toHaveBeenCalledWith({
@@ -71,7 +145,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       },
       mutation: "touched",
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("adapter.list forwards to adapter.list", async () => {
@@ -298,12 +374,9 @@ describe("@goddard-ai/sdk session namespace", () => {
     const unsubscribe = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
-          name: "session.message",
+          name: "session.messageEvents",
           filter: { id: "ses_1" },
         })
         handler({
@@ -319,9 +392,10 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.message", filter: { id: "ses_1" } },
+      { name: "session.messageEvents", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(onMessage).toHaveBeenCalledTimes(1)
@@ -330,7 +404,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       method: acp.CLIENT_METHODS.session_update,
       params: { value: "kept" },
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
@@ -819,7 +895,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.message", filter: { id: "ses_1" } },
+      { name: "session.messageEvents", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
@@ -870,10 +946,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const unsubscribe = vi.fn()
 
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
           name: "workforce.event",
           filter: { rootDir: "/repo" },
@@ -896,6 +969,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
+    await flushAsyncStream()
 
     expect(subscribe).toHaveBeenCalledWith(
       { name: "workforce.event", filter: { rootDir: "/repo" } },
@@ -912,7 +986,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       intent: "default",
       input: "Review the queue.",
     })
-    expect(result).toBe(unsubscribe)
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("AgentSession.setAgentModel forwards the requested model id through ACP", async () => {
@@ -938,7 +1014,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   })
 
   test("AgentSession.cancel uses the daemon-owned cancel path", async () => {
-    const daemonSend = vi.fn().mockResolvedValueOnce({
+    const cancel = vi.fn().mockResolvedValueOnce({
       id: "ses_daemon-session-1",
       activeTurnCancelled: true,
       abortedQueue: [],
@@ -948,7 +1024,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       "acp-session-1",
       {} as never,
       {
-        send: daemonSend,
+        session: {
+          cancel,
+        },
       } as never,
       vi.fn(),
     )
@@ -959,13 +1037,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       abortedQueue: [],
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("session.cancel", {
+    expect(cancel).toHaveBeenCalledWith({
       id: "ses_daemon-session-1",
     })
   })
 
   test("AgentSession.steer uses the daemon-owned steer path", async () => {
-    const daemonSend = vi.fn().mockResolvedValueOnce({
+    const steer = vi.fn().mockResolvedValueOnce({
       id: "ses_daemon-session-1",
       abortedQueue: [],
       response: { stopReason: "end_turn" },
@@ -975,7 +1053,9 @@ describe("@goddard-ai/sdk session namespace", () => {
       "acp-session-1",
       {} as never,
       {
-        send: daemonSend,
+        session: {
+          steer,
+        },
       } as never,
       vi.fn(),
     )
@@ -986,7 +1066,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       response: { stopReason: "end_turn" },
     })
 
-    expect(daemonSend).toHaveBeenCalledWith("session.steer", {
+    expect(steer).toHaveBeenCalledWith({
       id: "ses_daemon-session-1",
       prompt: "Focus on the lint failure.",
     })

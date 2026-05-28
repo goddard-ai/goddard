@@ -42,6 +42,7 @@
         "@chenglou/pretext": "^0.0.4",
         "@floating-ui/dom": "^1.7.6",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
         "@goddard-ai/paths": "workspace:^",
         "@goddard-ai/schema": "workspace:^",
@@ -99,6 +100,10 @@
         "@pandacss/dev": "catalog:",
       },
     },
+    "core/app-plugin": {
+      "name": "@goddard-ai/app-plugin",
+      "version": "0.1.0",
+    },
     "core/backend": {
       "name": "@goddard-ai/backend",
       "version": "0.1.0",
@@ -106,6 +111,9 @@
         "goddard-backend": "./dist/server.mjs",
       },
       "dependencies": {
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/backend-plugin": "workspace:*",
+        "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
         "@hattip/adapter-cloudflare-workers": "^0.0.49",
         "@hattip/adapter-node": "^0.0.49",
@@ -119,6 +127,13 @@
         "@cloudflare/workers-types": "^4.20260425.1",
         "alchemy": "^0.90.1",
         "wrangler": "^4.71.0",
+      },
+    },
+    "core/backend-plugin": {
+      "name": "@goddard-ai/backend-plugin",
+      "version": "0.1.0",
+      "dependencies": {
+        "rouzer": "catalog:",
       },
     },
     "core/config": {
@@ -135,41 +150,55 @@
         "goddard-daemon": "./dist/main.mjs",
       },
       "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
         "@ai-sdk/anthropic": "^3.0.69",
         "@ai-sdk/google": "^3.0.62",
         "@ai-sdk/openai": "^3.0.52",
         "@ai-sdk/openai-compatible": "^2.0.41",
         "@alloc/tree-kill": "^1.3.0",
         "@b9g/async-context": "^0.2.1",
+        "@goddard-ai/action": "workspace:*",
+        "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/backend-plugin": "workspace:*",
         "@goddard-ai/config": "workspace:^",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
         "@goddard-ai/paths": "workspace:^",
-        "@goddard-ai/review-sync": "workspace:^",
+        "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
-        "@goddard-ai/worktree-plugin": "workspace:^",
-        "@openrouter/ai-sdk-provider": "^2.5.1",
+        "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
         "acp-client": "catalog:",
-        "ai": "^6.0.158",
-        "ai-sdk-json-schema": "catalog:",
         "cmd-ts": "catalog:",
-        "hash-sum": "^2.0.0",
         "kindstore": "^0.4.4",
         "kleur": "^4.1.5",
-        "node-stream-zip": "^1.15.0",
         "radashi": "catalog:",
         "rouzer": "catalog:",
-        "tar-fs": "^3.1.2",
         "ulid": "^3.0.2",
-        "unbzip2-stream": "^1.4.3",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/backend": "workspace:^",
+        "@goddard-ai/worktree-plugin": "workspace:^",
         "@types/hash-sum": "^1.0.2",
         "@types/tar-fs": "^2.0.4",
-        "@types/unbzip2-stream": "^1.4.3",
+        "hash-sum": "^2.0.0",
+        "tar-fs": "^3.1.2",
+      },
+    },
+    "core/daemon-plugin": {
+      "name": "@goddard-ai/daemon-plugin",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/backend-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:^",
+        "kindstore": "^0.4.4",
+        "zod": "catalog:",
       },
     },
     "core/daemon/client": {
@@ -186,6 +215,7 @@
       "name": "@goddard-ai/ipc",
       "version": "0.1.0",
       "dependencies": {
+        "rouzer": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -213,7 +243,15 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/action": "workspace:*",
+        "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
+        "@goddard-ai/pull-request": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
         "ai-sdk-json-schema": "catalog:",
         "rouzer": "catalog:",
         "zod": "catalog:",
@@ -224,12 +262,28 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/action": "workspace:*",
+        "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:^",
+        "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:^",
+        "@goddard-ai/loop": "workspace:*",
+        "@goddard-ai/pull-request": "workspace:*",
         "@goddard-ai/schema": "workspace:^",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
       },
       "devDependencies": {
         "@goddard-ai/daemon": "workspace:^",
+      },
+    },
+    "core/sdk-plugin": {
+      "name": "@goddard-ai/sdk-plugin",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/ipc": "workspace:*",
       },
     },
     "core/sprint-branch": {
@@ -249,7 +303,7 @@
     },
     "core/ui-primitives": {
       "name": "@goddard-ai/ui-primitives",
-      "version": "0.1.0",
+      "version": "0.0.0",
       "dependencies": {
         "@floating-ui/dom": "^1.7.6",
         "@preact/signals": "^2.9.0",
@@ -268,6 +322,151 @@
       "name": "@goddard-ai/worktree-plugin",
       "version": "0.1.0",
     },
+    "features/action": {
+      "name": "@goddard-ai/action",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
+    "features/adapter": {
+      "name": "@goddard-ai/adapter",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-client": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
+    "features/auth": {
+      "name": "@goddard-ai/auth",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/backend-plugin": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
+    "features/inbox": {
+      "name": "@goddard-ai/inbox",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "kindstore": "^0.4.4",
+        "zod": "catalog:",
+      },
+    },
+    "features/loop": {
+      "name": "@goddard-ai/loop",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "radashi": "catalog:",
+        "zod": "catalog:",
+      },
+    },
+    "features/pull-request": {
+      "name": "@goddard-ai/pull-request",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/backend-plugin": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/inbox": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/paths": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "kindstore": "^0.4.4",
+        "zod": "catalog:",
+      },
+    },
+    "features/session": {
+      "name": "@goddard-ai/session",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@ai-sdk/anthropic": "^3.0.69",
+        "@ai-sdk/google": "^3.0.62",
+        "@ai-sdk/openai": "^3.0.52",
+        "@ai-sdk/openai-compatible": "^2.0.41",
+        "@alloc/tree-kill": "^1.3.0",
+        "@b9g/async-context": "^0.2.1",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/config": "workspace:*",
+        "@goddard-ai/daemon-client": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/inbox": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/paths": "workspace:*",
+        "@goddard-ai/review-sync": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/worktree-plugin": "workspace:*",
+        "@openrouter/ai-sdk-provider": "^2.5.1",
+        "acp-client": "catalog:",
+        "ai": "^6.0.158",
+        "ai-sdk-json-schema": "catalog:",
+        "hash-sum": "^2.0.0",
+        "kindstore": "^0.4.4",
+        "kleur": "^4.1.5",
+        "node-stream-zip": "^1.15.0",
+        "radashi": "catalog:",
+        "tar-fs": "^3.1.2",
+        "unbzip2-stream": "^1.4.3",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/hash-sum": "^1.0.2",
+        "@types/tar-fs": "^2.0.4",
+        "@types/unbzip2-stream": "^1.4.3",
+      },
+    },
+    "features/workforce": {
+      "name": "@goddard-ai/workforce",
+      "version": "0.1.0",
+      "dependencies": {
+        "@agentclientprotocol/sdk": "catalog:",
+        "@goddard-ai/app-plugin": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "radashi": "catalog:",
+        "ulid": "^3.0.2",
+        "zod": "catalog:",
+      },
+    },
     "sdk-agent-loop-poc": {
       "name": "@goddard-ai/sdk-agent-loop-poc",
       "version": "0.1.0",
@@ -285,7 +484,7 @@
       },
     },
     "workforce": {
-      "name": "@goddard-ai/workforce",
+      "name": "@goddard-ai/workforce-cli",
       "version": "0.1.0",
       "bin": {
         "goddard-workforce": "./dist/main.js",
@@ -307,7 +506,7 @@
     "bun": "1.3.13",
     "cmd-ts": "^0.15.0",
     "radashi": "^12.8.0",
-    "rouzer": "^2.0.0",
+    "rouzer": "^5.0.0",
     "zod": "^4.3.6",
   },
   "packages": {
@@ -601,9 +800,19 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
 
+    "@goddard-ai/action": ["@goddard-ai/action@workspace:features/action"],
+
+    "@goddard-ai/adapter": ["@goddard-ai/adapter@workspace:features/adapter"],
+
     "@goddard-ai/app": ["@goddard-ai/app@workspace:app"],
 
+    "@goddard-ai/app-plugin": ["@goddard-ai/app-plugin@workspace:core/app-plugin"],
+
+    "@goddard-ai/auth": ["@goddard-ai/auth@workspace:features/auth"],
+
     "@goddard-ai/backend": ["@goddard-ai/backend@workspace:core/backend"],
+
+    "@goddard-ai/backend-plugin": ["@goddard-ai/backend-plugin@workspace:core/backend-plugin"],
 
     "@goddard-ai/config": ["@goddard-ai/config@workspace:core/config"],
 
@@ -611,9 +820,17 @@
 
     "@goddard-ai/daemon-client": ["@goddard-ai/daemon-client@workspace:core/daemon/client"],
 
+    "@goddard-ai/daemon-plugin": ["@goddard-ai/daemon-plugin@workspace:core/daemon-plugin"],
+
+    "@goddard-ai/inbox": ["@goddard-ai/inbox@workspace:features/inbox"],
+
     "@goddard-ai/ipc": ["@goddard-ai/ipc@workspace:core/ipc"],
 
+    "@goddard-ai/loop": ["@goddard-ai/loop@workspace:features/loop"],
+
     "@goddard-ai/paths": ["@goddard-ai/paths@workspace:core/paths"],
+
+    "@goddard-ai/pull-request": ["@goddard-ai/pull-request@workspace:features/pull-request"],
 
     "@goddard-ai/review-sync": ["@goddard-ai/review-sync@workspace:core/review-sync"],
 
@@ -623,13 +840,19 @@
 
     "@goddard-ai/sdk-agent-loop-poc": ["@goddard-ai/sdk-agent-loop-poc@workspace:sdk-agent-loop-poc"],
 
+    "@goddard-ai/sdk-plugin": ["@goddard-ai/sdk-plugin@workspace:core/sdk-plugin"],
+
+    "@goddard-ai/session": ["@goddard-ai/session@workspace:features/session"],
+
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 
     "@goddard-ai/styled-system": ["@goddard-ai/styled-system@workspace:app/styled-system"],
 
     "@goddard-ai/ui-primitives": ["@goddard-ai/ui-primitives@workspace:core/ui-primitives"],
 
-    "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:workforce"],
+    "@goddard-ai/workforce": ["@goddard-ai/workforce@workspace:features/workforce"],
+
+    "@goddard-ai/workforce-cli": ["@goddard-ai/workforce-cli@workspace:workforce"],
 
     "@goddard-ai/worktree-plugin": ["@goddard-ai/worktree-plugin@workspace:core/worktree-plugin"],
 
@@ -1045,7 +1268,7 @@
 
     "@quansync/fs": ["@quansync/fs@1.0.0", "", { "dependencies": { "quansync": "^1.0.0" } }, "sha512-4TJ3DFtlf1L5LDMaM6CanJ/0lckGNtJcMjQ1NAV6zDmA0tEHKZtxNKin8EgPaVX1YzljbxckyT2tJrpQKAtngQ=="],
 
-    "@remix-run/route-pattern": ["@remix-run/route-pattern@0.15.3", "", {}, "sha512-7s4Oy9q6Oz9Vfwg0iZscpmYVASNG9fLqbCa+YY0+SWKksDpvCRiW46xp3S3zEvT7zEP7G55FKA+JdrqqK2AOXw=="],
+    "@remix-run/route-pattern": ["@remix-run/route-pattern@0.21.1", "", {}, "sha512-vXTyJPwicRY2PyNoT3l6Ql4EM4eenPyDOAQGxH4p/+jIDuX3312xxQe3BQ+fhdspobJtnKaEgTWVKBZb+9ArWQ=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.0-rc.17", "", { "os": "android", "cpu": "arm64" }, "sha512-s70pVGhw4zqGeFnXWvAzJDlvxhlRollagdCCKRgOsgUOH3N1l0LIxf83AtGzmb5SiVM4Hjl5HyarMRfdfj3DaQ=="],
 
@@ -2211,7 +2434,7 @@
 
     "router": ["router@2.2.0", "", { "dependencies": { "debug": "^4.4.0", "depd": "^2.0.0", "is-promise": "^4.0.0", "parseurl": "^1.3.3", "path-to-regexp": "^8.0.0" } }, "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ=="],
 
-    "rouzer": ["rouzer@2.0.0", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.15.3", "alien-middleware": "^0.11.4" }, "peerDependencies": { "zod": ">=4" } }, "sha512-wrH/pwsNSyDD8Ed+Tw/Q3u9FsRqIO+E5LJEErtg7DRXDBh+HJCiGrnugorTiJHNNxD1Tc0GoHeXJLzYPnXP0fA=="],
+    "rouzer": ["rouzer@5.1.0", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.21.1", "alien-middleware": "^0.11.6" }, "peerDependencies": { "zod": ">=4" } }, "sha512-YuA6a4eOcE+YRgBELIh9HsV2eKaUGhljkz74Eq3DRn47m+NZecQO93XjSMYtYQtE4qm4w5DdoBBtWlxWo033dA=="],
 
     "run-applescript": ["run-applescript@7.1.0", "", {}, "sha512-DPe5pVFaAsinSaV6QjQ6gdiedWDcRCbUuiQfQa2wmWV7+xC9bGulGI8+TdRmoFkAPaBXk8CrAbnlY2ISniJ47Q=="],
 

@@ -1,14 +1,16 @@
 import { randomBytes } from "node:crypto"
 import type {
   AuthSession,
-  CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+} from "@goddard-ai/auth/schema"
+import type {
+  CreatePrInput,
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
-} from "@goddard-ai/schema/backend"
+} from "@goddard-ai/pull-request/schema"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"

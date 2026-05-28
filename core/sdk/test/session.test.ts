@@ -18,6 +18,20 @@ test("session.prompt reconnects before forwarding a structured ACP prompt messag
 
         return { accepted: true }
       },
+      session: {
+        connect: async (input: unknown) => {
+          calls.push({ name: "session.connect", payload: input })
+          return {
+            session: {
+              acpSessionId: "acp-session-reconnected",
+            },
+          }
+        },
+        send: async (input: unknown) => {
+          calls.push({ name: "session.send", payload: input })
+          return { accepted: true }
+        },
+      },
       subscribe: async () => {
         return () => {}
       },
@@ -62,6 +76,12 @@ test("session.respondPermission forwards a structured ACP permission response th
       send: async (name: string, payload: unknown) => {
         calls.push({ name, payload })
         return { accepted: true }
+      },
+      session: {
+        send: async (input: unknown) => {
+          calls.push({ name: "session.send", payload: input })
+          return { accepted: true }
+        },
       },
       subscribe: async () => {
         return () => {}

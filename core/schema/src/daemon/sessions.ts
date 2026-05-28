@@ -1,9 +1,10 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { SessionWorktreeParams } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
 import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
-import { DaemonSessionId, DaemonSessionIdParams } from "../common/params.ts"
+import { DaemonSessionId, DaemonSessionIdParams } from "../id.ts"
 import { SessionInboxMetadataInput, type InboxItem } from "./inbox.ts"
 import {
   DaemonSessionMetadata,
@@ -20,22 +21,6 @@ export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.Con
 
 export type InitialPromptOption = z.infer<typeof InitialPromptOption>
 
-/** Review-session options accepted by the daemon session API. */
-export const SessionReviewSessionParams = z.strictObject({
-  enabled: z.boolean().optional(),
-})
-
-export type SessionReviewSessionParams = z.infer<typeof SessionReviewSessionParams>
-
-/** Worktree options accepted by the daemon session API. */
-export const SessionWorktreeParams = z.strictObject({
-  enabled: z.boolean().optional(),
-  baseBranchName: z.string().optional(),
-  reviewSession: SessionReviewSessionParams.optional(),
-})
-
-export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
-
 /** Local-checkout branch switching options accepted by the daemon session API. */
 export const SessionLocalCheckoutParams = z.strictObject({
   branchName: z.string(),
@@ -51,51 +36,6 @@ export const SessionWorkforceParams = z.strictObject({
 })
 
 export type SessionWorkforceParams = z.infer<typeof SessionWorkforceParams>
-
-/** Live review-session state returned exactly as the review session engine reports it. */
-export const SessionReviewSessionState = z.strictObject({
-  sessionId: z.string(),
-  agentWorktree: z.string(),
-  reviewWorktree: z.string(),
-  agentBranch: z.string(),
-  reviewBranch: z.string(),
-  paused: z.boolean(),
-  refs: z.strictObject({
-    agentSnapshot: z.string(),
-    renderedSnapshot: z.string(),
-  }),
-  agentSnapshot: z.string().nullable(),
-  renderedSnapshot: z.string().nullable(),
-  lastSync: z.strictObject({
-    status: z.union([
-      z.literal("synced"),
-      z.literal("rejected-human-patch"),
-      z.literal("paused"),
-      z.literal("error"),
-    ]),
-    acceptedPatch: z.string().nullable(),
-    rejectedPatch: z.string().nullable(),
-  }),
-  patchCounts: z.strictObject({
-    accepted: z.number().int(),
-    rejected: z.number().int(),
-  }),
-})
-
-export type SessionReviewSessionState = z.infer<typeof SessionReviewSessionState>
-
-/** Response payload fragment returned after one daemon-managed session worktree fetch. */
-export const SessionWorktree = z.strictObject({
-  repoRoot: z.string(),
-  requestedCwd: z.string(),
-  effectiveCwd: z.string(),
-  worktreeDir: z.string(),
-  branchName: z.string(),
-  poweredBy: z.string(),
-  reviewSession: SessionReviewSessionState.nullable(),
-})
-
-export type SessionWorktree = z.infer<typeof SessionWorktree>
 
 /** Request payload used to create one daemon-managed session. */
 export const InitialSessionConfigOption = z.union([
@@ -520,32 +460,6 @@ export type GetSessionChangesResponse = SessionIdentity & {
 export type GetSessionDiagnosticsResponse = SessionIdentity & {
   connection: SessionConnection
   events: SessionDiagnosticEvent[]
-}
-
-/** Response payload returned after one daemon-managed session worktree fetch. */
-export type GetSessionWorktreeResponse = SessionIdentity & {
-  worktree: SessionWorktree | null
-}
-
-/** Request payload used to mount a review session for one daemon-managed session worktree. */
-export const MountSessionReviewSessionRequest = DaemonSessionIdParams
-
-export type MountSessionReviewSessionRequest = z.infer<typeof MountSessionReviewSessionRequest>
-
-/** Request payload used to run one mounted review session immediately. */
-export const RunSessionReviewSessionRequest = DaemonSessionIdParams
-
-export type RunSessionReviewSessionRequest = z.infer<typeof RunSessionReviewSessionRequest>
-
-/** Request payload used to unmount a review session from one daemon-managed session worktree. */
-export const UnmountSessionReviewSessionRequest = DaemonSessionIdParams
-
-export type UnmountSessionReviewSessionRequest = z.infer<typeof UnmountSessionReviewSessionRequest>
-
-/** Response payload returned after one daemon-managed review session mutation. */
-export type MutateSessionReviewSessionResponse = SessionIdentity & {
-  worktree: SessionWorktree | null
-  warnings: string[]
 }
 
 /** Response payload returned after one daemon-managed session workforce fetch. */

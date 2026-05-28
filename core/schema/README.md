@@ -1,6 +1,6 @@
 # @goddard-ai/schema
 
-This package contains shared communication types and their Zod validation schemas for the Goddard AI project. It is used to enforce strict data validation between the backend and SDK.
+This package contains schemas for Goddard's core daemon, backend, and shared substrate contracts. Feature-owned product schemas live in the owning feature package's `./schema` entrypoint instead of being added or re-exported here.
 
 ## Related Docs
 
@@ -8,12 +8,9 @@ This package contains shared communication types and their Zod validation schema
 
 ## Usage
 
-```typescript
-import { CreatePrInput } from "@goddard-ai/schema/backend"
-
-// Validate payload
-const input = CreatePrInput.parse(payload)
-```
+Core packages import core schemas from this package. Feature-owned schemas should
+be imported from their owning feature package, such as
+`@goddard-ai/pull-request/schema`.
 
 ## License
 

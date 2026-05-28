@@ -5,7 +5,6 @@ import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
 import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
-import { inspectAdapterSession, listAdapterSessions } from "../core/daemon/src/session/inspect.ts"
 import { ACPAdapterNames } from "../core/schema/src/acp-adapters.ts"
 import { GoddardSdk } from "../core/sdk/src/node/index.ts"
 import {
@@ -14,6 +13,10 @@ import {
   type GetSessionHistoryResponse,
   type SessionHistoryTurn,
 } from "../core/sdk/src/session.ts"
+import {
+  inspectAdapterSession,
+  listAdapterSessions,
+} from "../features/session/src/daemon/inspect.ts"
 
 const DEFAULT_PROMPT =
   "Reply in two short sentences so I can verify the session update stream is working."

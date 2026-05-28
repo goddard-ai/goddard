@@ -74,7 +74,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
 
   const response = await router(
     createContext(
-      new Request("https://example.test/stream", {
+      new Request("https://example.test/repositories/stream", {
         headers: { authorization: "Bearer tok_1" },
       }),
     ) as any,
@@ -99,7 +99,7 @@ test("createBackendRouter serializes HttpError responses", async () => {
 
   const response = await router(
     createContext(
-      new Request("https://example.test/auth/session", {
+      new Request("https://example.test/auth/session/current", {
         headers: { authorization: "Bearer bad" },
       }),
     ) as any,

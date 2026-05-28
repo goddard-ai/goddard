@@ -1,0 +1,229 @@
+import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { IpcClientError } from "@goddard-ai/ipc"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
+
+import { workforceIpcRoutes } from "./daemon-ipc.ts"
+import {
+  discoverWorkforceInitCandidates,
+  initializeWorkforce,
+  resolveRepositoryRoot,
+} from "./daemon/config.ts"
+import { createWorkforceManager } from "./daemon/manager.ts"
+import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
+import type { WorkforceEventEnvelope } from "./schema.ts"
+
+export const workforcePlugin = definePlugin({
+  name: "workforce",
+  consumes: [sessionPlugin],
+  ipcRoutes: workforceIpcRoutes,
+  setup({ getIpcRequestContext, session }) {
+    const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
+    const workforce = createWorkforceManager({
+      session,
+      publishEvent: (payload) => {
+        for (const listener of eventListeners) {
+          listener(payload)
+        }
+      },
+    })
+
+    async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
+      const queue: WorkforceEventEnvelope[] = []
+      let wake: (() => void) | undefined
+      const listener = (event: WorkforceEventEnvelope) => {
+        if (event.rootDir !== rootDir) {
+          return
+        }
+        queue.push(event)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      eventListeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const event = queue.shift()
+          if (event) {
+            yield event
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        eventListeners.delete(listener)
+      }
+    }
+
+    async function resolveWorkforceActor(token: string | undefined, requestedRootDir: string) {
+      if (!token) {
+        return {
+          sessionId: null,
+          rootDir: null,
+          agentId: null,
+          requestId: null,
+        }
+      }
+
+      const tokenScope = await session.resolveTokenScope(token)
+      if (!tokenScope) {
+        throw new IpcClientError("Invalid session token")
+      }
+
+      getIpcRequestContext().setSessionId(tokenScope.sessionId)
+
+      const { workforce: workforceRecord } = await session.workforce(tokenScope.sessionId)
+      if (!workforceRecord || typeof workforceRecord.agentId !== "string") {
+        throw new IpcClientError("Session is not attached to a workforce request")
+      }
+
+      if (typeof workforceRecord.rootDir !== "string") {
+        throw new IpcClientError("Session is not attached to a workforce root")
+      }
+
+      const [sessionRootDir, normalizedRequestedRootDir] = await Promise.all([
+        normalizeWorkforceRootDir(workforceRecord.rootDir),
+        normalizeWorkforceRootDir(requestedRootDir),
+      ])
+
+      if (sessionRootDir !== normalizedRequestedRootDir) {
+        throw new IpcClientError(
+          `Session workforce root ${sessionRootDir} does not match requested root ${normalizedRequestedRootDir}`,
+        )
+      }
+
+      return {
+        sessionId: tokenScope.sessionId,
+        rootDir: sessionRootDir,
+        agentId: workforceRecord.agentId,
+        requestId: typeof workforceRecord.requestId === "string" ? workforceRecord.requestId : null,
+      }
+    }
+
+    function requireActorRequestId(actor: { readonly requestId: string | null }) {
+      if (!actor.requestId) {
+        throw new IpcClientError("Session is not attached to an active workforce request")
+      }
+
+      return actor.requestId
+    }
+
+    return {
+      close: () => workforce.close(),
+      ipcHandlers: {
+        workforce: {
+          start: async ({ body: { rootDir } }) => ({
+            workforce: await workforce.startWorkforce(rootDir),
+          }),
+          discoverCandidates: async ({ body: { rootDir } }) => {
+            const repositoryRoot = await resolveRepositoryRoot(rootDir)
+            return {
+              rootDir: repositoryRoot,
+              candidates: await discoverWorkforceInitCandidates(repositoryRoot),
+            }
+          },
+          initialize: async ({ body: { rootDir, packageDirs } }) => {
+            const repositoryRoot = await resolveRepositoryRoot(rootDir)
+            return {
+              initialized: await initializeWorkforce(repositoryRoot, packageDirs),
+            }
+          },
+          get: async ({ body: { rootDir } }) => ({
+            workforce: await workforce.getWorkforce(rootDir),
+          }),
+          list: async () => ({
+            workforces: await workforce.listWorkforces(),
+          }),
+          shutdown: async ({ body: { rootDir } }) => ({
+            rootDir,
+            success: await workforce.shutdownWorkforce(rootDir),
+          }),
+          request: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "request",
+                targetAgentId: body.targetAgentId,
+                input: body.input,
+                intent: body.intent,
+              },
+              actor,
+            )
+          },
+          update: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "update",
+                requestId: body.requestId,
+                input: body.input,
+              },
+              actor,
+            )
+          },
+          cancel: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "cancel",
+                requestId: body.requestId,
+                reason: body.reason ?? null,
+              },
+              actor,
+            )
+          },
+          truncate: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "truncate",
+                agentId: body.agentId ?? null,
+                reason: body.reason ?? null,
+              },
+              actor,
+            )
+          },
+          respond: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "respond",
+                requestId: requireActorRequestId(actor),
+                output: body.output,
+              },
+              actor,
+            )
+          },
+          suspend: async ({ body }) => {
+            const actor = await resolveWorkforceActor(body.token, body.rootDir)
+            return workforce.appendWorkforceEvent(
+              actor.rootDir ?? body.rootDir,
+              {
+                type: "suspend",
+                requestId: requireActorRequestId(actor),
+                reason: body.reason,
+              },
+              actor,
+            )
+          },
+          event: async (ctx) => {
+            const { query } = ctx
+            const status = await workforce.getWorkforce(query.rootDir)
+            return subscribeWorkforceEvents(status.rootDir, ctx.request.signal)
+          },
+        },
+      },
+    }
+  },
+})

@@ -1,11 +1,11 @@
 /** Daemon-owned ACP registry cache and fallback catalog service. */
 import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
+import { readAdapterCatalogFromRegistryDir } from "@goddard-ai/adapter/catalog"
+import type { AdapterCatalogEntry } from "@goddard-ai/adapter/schema"
 import { getAcpRegistryCacheDir } from "@goddard-ai/paths/node"
-import type { AdapterCatalogEntry } from "@goddard-ai/schema/daemon"
 import { getErrorMessage } from "radashi"
 
-import { readAdapterCatalogFromRegistryDir } from "./registry-catalog.ts"
 import { ACPRegistryFallbackCatalog } from "./registry-fallback.ts"
 
 const ACP_REGISTRY_URL = "https://github.com/agentclientprotocol/registry"

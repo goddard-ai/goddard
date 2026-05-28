@@ -41,6 +41,10 @@ const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtime
 
 ## Notes
 
+- JSON configuration support is daemon/core substrate, not a feature package.
+  Feature packages may contribute typed, namespaced config fragments through
+  daemon plugin metadata, but this package and the daemon config manager own
+  persisted config merging and validation.
 - Persisted loop config must remain JSON-safe. `nextPrompt` is not stored in JSON.
 - Runnable loop packages load `nextPrompt` from `prompt.js`.
 - Prompt frontmatter is not a supported config surface.

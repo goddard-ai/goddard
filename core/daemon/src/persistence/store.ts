@@ -2,7 +2,6 @@ import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import {
-  DaemonInboxItem,
   DaemonPullRequest,
   DaemonSession,
   DaemonSessionDiagnostics,
@@ -11,7 +10,14 @@ import {
   DaemonWorkforce,
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
-import { kind, kindstore, UnrecoverableStoreOpenError, type DatabaseOptions } from "kindstore"
+import {
+  kind,
+  kindstore,
+  UnrecoverableStoreOpenError,
+  type DatabaseOptions,
+  type KindRegistry,
+  type Kindstore,
+} from "kindstore"
 import { z } from "zod"
 
 type StoreConnectionOptions = {
@@ -23,7 +29,7 @@ const metadata = {
   authToken: z.string(),
 }
 
-const schema = {
+const coreDbSchema = {
   sessions: kind("ses", DaemonSession)
     .createdAt()
     .updatedAt()
@@ -78,17 +84,17 @@ const schema = {
     },
     { unique: true },
   ),
-
-  inboxItems: kind("inb", DaemonInboxItem)
-    .index("entityId", { type: "text", unique: true })
-    .index("status")
-    .multi("updatedAt_id", {
-      updatedAt: "desc",
-      id: "desc",
-    }),
 }
 
-function createStore(options: StoreConnectionOptions) {
+type DaemonStore = Kindstore<typeof coreDbSchema & KindRegistry, typeof metadata>
+
+let activeSchema: KindRegistry = coreDbSchema
+let activeConnection: StoreConnectionOptions = { filename: getDatabasePath() }
+
+/** Opens one kindstore handle for a concrete daemon store schema. */
+function createStore<const TSchema extends KindRegistry>(
+  options: StoreConnectionOptions & { schema: keyof TSchema extends never ? never : TSchema },
+) {
   if (options.filename !== ":memory:") {
     mkdirSync(dirname(options.filename), { recursive: true })
   }
@@ -97,7 +103,7 @@ function createStore(options: StoreConnectionOptions) {
     filename: options.filename,
     databaseOptions: options.databaseOptions,
     metadata,
-    schema,
+    schema: options.schema,
   })
 }
 
@@ -109,25 +115,48 @@ function removeDatabaseArtifacts(filename: string) {
 
 function openStore(connection: StoreConnectionOptions) {
   try {
-    return createStore(connection)
+    return createStore({ ...connection, schema: activeSchema }) as DaemonStore
   } catch (error) {
     if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
       throw error
     }
 
     removeDatabaseArtifacts(connection.filename)
-    return createStore(connection)
+    return createStore({ ...connection, schema: activeSchema }) as DaemonStore
   }
+}
+
+/** Sets the feature-contributed store schema before the shared daemon store is opened. */
+export function configureDbSchema(pluginSchema: KindRegistry) {
+  activeSchema = mergeDbSchema(pluginSchema)
+  if (process.env.NODE_ENV !== "test" || db) {
+    db?.close()
+    db = openStore(activeConnection)
+  }
+}
+
+function mergeDbSchema(pluginSchema: KindRegistry) {
+  const schema: KindRegistry = { ...coreDbSchema }
+
+  for (const [key, kindDefinition] of Object.entries(pluginSchema)) {
+    if (Object.hasOwn(coreDbSchema, key)) {
+      throw new Error(`Daemon plugin DB collection conflicts with core store schema: ${key}`)
+    }
+    schema[key] = kindDefinition
+  }
+
+  return schema
 }
 
 /**
  * Shared kindstore handle for daemon persistence.
  * Tests that override HOME should call `resetDb()` after changing it.
  */
-export let db = process.env.NODE_ENV !== "test" ? openStore({ filename: getDatabasePath() }) : null!
+export let db: DaemonStore = null!
 
 /** Recreates the shared kindstore handle, optionally with explicit connection options. */
 export function resetDb(connection: StoreConnectionOptions = { filename: getDatabasePath() }) {
+  activeConnection = connection
   db?.close()
   db = openStore(connection)
   return db

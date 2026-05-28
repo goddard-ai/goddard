@@ -1,4 +1,4 @@
-import type { DaemonPullRequestId } from "@goddard-ai/schema/common/params"
+import type { DaemonPullRequestId } from "@goddard-ai/schema/id"
 import { ExternalLink, GitPullRequest } from "lucide-react"
 import { useState } from "preact/hooks"
 import { isPromise } from "radashi"

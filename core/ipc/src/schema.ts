@@ -1,9 +1,6 @@
 import { z } from "zod"
 
-/** Marks a compile-time type without producing any runtime schema. */
-export function $type<T>() {
-  return {} as { __unchecked__: T }
-}
+export { $type } from "rouzer"
 
 /** Carries a type through schema declarations without runtime validation logic. */
 type TypeMarker<T = unknown> = {
@@ -27,6 +24,55 @@ type StreamSchema = TypeMarker | StreamSchemaWithFilter
 export type IpcSchema = {
   requests: Record<string, RequestSchema>
   streams: Record<string, StreamSchema>
+}
+
+type UnionToIntersection<TUnion> = (
+  TUnion extends unknown ? (value: TUnion) => void : never
+) extends (value: infer TIntersection) => void
+  ? TIntersection
+  : never
+
+type ComposeIpcSchemaRecord<
+  TSchemas extends readonly IpcSchema[],
+  TKey extends keyof IpcSchema,
+> = UnionToIntersection<TSchemas[number][TKey]>
+
+/** Infers the exact route map produced by composing IPC schema fragments. */
+export type ComposeIpcSchemas<TSchemas extends readonly IpcSchema[]> = {
+  requests: ComposeIpcSchemaRecord<TSchemas, "requests">
+  streams: ComposeIpcSchemaRecord<TSchemas, "streams">
+}
+
+/** Preserves the exact IPC schema object for composition-time type inference. */
+export function defineIpcSchema<const TSchema extends IpcSchema>(schema: TSchema) {
+  return schema
+}
+
+/** Combines IPC schema fragments and rejects ambiguous request or stream ownership. */
+export function composeIpcSchemas<const TSchemas extends readonly IpcSchema[]>(schemas: TSchemas) {
+  const requests: IpcSchema["requests"] = {}
+  const streams: IpcSchema["streams"] = {}
+
+  for (const schema of schemas) {
+    for (const [name, definition] of Object.entries(schema.requests)) {
+      if (requests[name]) {
+        throw new Error(`Duplicate IPC request: ${name}`)
+      }
+      requests[name] = definition
+    }
+
+    for (const [name, definition] of Object.entries(schema.streams)) {
+      if (streams[name]) {
+        throw new Error(`Duplicate IPC stream: ${name}`)
+      }
+      streams[name] = definition
+    }
+  }
+
+  return {
+    requests,
+    streams,
+  } as ComposeIpcSchemas<TSchemas>
 }
 
 /** Resolves one stream definition into its payload marker. */

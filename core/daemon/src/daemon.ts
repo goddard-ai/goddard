@@ -1,4 +1,4 @@
-import type { RepoEvent } from "@goddard-ai/schema/backend"
+import type { RepoEvent } from "@goddard-ai/pull-request/schema"
 import { getErrorMessage } from "radashi"
 
 import {
@@ -126,7 +126,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
           runningPrs.add(requestKey)
 
           try {
-            const managed = await client.pr.isManaged({
+            const { managed } = await client.pullRequests.managed({
               owner: event.owner,
               repo: event.repo,
               prNumber: event.prNumber,
@@ -203,9 +203,6 @@ async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClien
     getAuthorizationHeader: async () => {
       const token = db.metadata.get("authToken") ?? null
       return token ? `Bearer ${token}` : null
-    },
-    clearAuthorization: async () => {
-      db.metadata.delete("authToken")
     },
   })
 }

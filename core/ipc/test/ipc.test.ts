@@ -6,37 +6,35 @@ import { afterEach, describe, expect, test, vi } from "bun:test"
 import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
-import { $type, IpcClientError, type IpcSchema } from "../src/index.ts"
+import { $type, http, IpcClientError, ndjson, type HttpRouteTree } from "../src/index.ts"
 import { createNodeClient } from "../src/node/client.ts"
 import { createServer } from "../src/node/server.ts"
 
-const schema = {
-  requests: {
-    ping: {
-      response: $type<{ ok: true }>(),
-    },
-    echo: {
-      payload: z.object({ text: z.string() }),
-      response: $type<{ echoed: string }>(),
-    },
-    add: {
-      payload: z.object({ a: z.number(), b: z.number() }),
-      response: $type<{ sum: number }>(),
-    },
-  },
-  streams: {
-    systemAlert: $type<{ message: string; level: "info" | "warn" | "error" }>(),
-    userAlert: {
-      payload: $type<{
-        userId: string
-        message: string
-      }>(),
-      filter: z.object({
-        userId: z.string(),
-      }),
-    },
-  },
-} satisfies IpcSchema
+const routes = {
+  ping: http.get("ping", {
+    response: $type<{ ok: true }>(),
+  }),
+  echo: http.post("echo", {
+    body: z.object({ text: z.string() }),
+    response: $type<{ echoed: string }>(),
+  }),
+  add: http.post("add", {
+    body: z.object({ a: z.number(), b: z.number() }),
+    response: $type<{ sum: number }>(),
+  }),
+  systemAlert: http.get("system-alert", {
+    response: ndjson.$type<{ message: string; level: "info" | "warn" | "error" }>(),
+  }),
+  userAlert: http.get("user-alert", {
+    query: z.object({
+      userId: z.string(),
+    }),
+    response: ndjson.$type<{
+      userId: string
+      message: string
+    }>(),
+  }),
+} satisfies HttpRouteTree
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -47,18 +45,22 @@ afterEach(async () => {
 })
 
 async function createFixture() {
+  const systemAlerts = createTestStream<{ message: string; level: "info" | "warn" | "error" }>()
+  const userAlerts = createTestStream<{ userId: string; message: string }>()
   const ipcServer = createServer({
     port: 0,
-    schema,
+    routes,
     handlers: {
       ping: () => ({ ok: true as const }),
-      echo: ({ text }) => ({ echoed: text }),
-      add: ({ a, b }) => ({ sum: a + b }),
-    },
-    beforeSubscribe: ({ name, filter }) => {
-      if (name === "userAlert" && filter?.userId === "blocked-user") {
-        throw new IpcClientError("User alerts are disabled for blocked-user")
-      }
+      echo: ({ body: { text } }) => ({ echoed: text }),
+      add: ({ body: { a, b } }) => ({ sum: a + b }),
+      systemAlert: ({ request }) => systemAlerts.subscribe(() => true, request.signal),
+      userAlert: ({ query, request }) => {
+        if (query.userId === "blocked-user") {
+          throw new IpcClientError("User alerts are disabled for blocked-user")
+        }
+        return userAlerts.subscribe((payload) => payload.userId === query.userId, request.signal)
+      },
     },
   })
 
@@ -79,25 +81,77 @@ async function createFixture() {
 
   return {
     address,
-    client: createNodeClient(address, schema),
-    publish: ipcServer.publish,
+    client: createNodeClient(address, routes),
+    publishSystemAlert: systemAlerts.publish,
+    publishUserAlert: userAlerts.publish,
   }
 }
 
-async function postRaw(address: { hostname: string; port: number }, body: unknown) {
-  const payload = JSON.stringify(body)
+function createTestStream<TPayload>() {
+  const listeners = new Set<(payload: TPayload) => void>()
+
+  return {
+    publish(payload: TPayload) {
+      for (const listener of listeners) {
+        listener(payload)
+      }
+    },
+    async *subscribe(filter: (payload: TPayload) => boolean, signal: AbortSignal) {
+      const queue: TPayload[] = []
+      let wake: (() => void) | undefined
+      const listener = (payload: TPayload) => {
+        if (!filter(payload)) {
+          return
+        }
+        queue.push(payload)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      listeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const payload = queue.shift()
+          if (payload) {
+            yield payload
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        listeners.delete(listener)
+      }
+    },
+  }
+}
+
+async function requestRaw(
+  address: { hostname: string; port: number },
+  input: { method: string; path: string; body?: unknown },
+) {
+  const payload = input.body === undefined ? undefined : JSON.stringify(input.body)
 
   return new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
     const req = request(
       {
         hostname: address.hostname,
         port: address.port,
-        path: "/",
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
-        },
+        path: input.path,
+        method: input.method,
+        headers:
+          payload === undefined
+            ? undefined
+            : {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload),
+              },
       },
       (res) => {
         let responseBody = ""
@@ -115,7 +169,9 @@ async function postRaw(address: { hostname: string; port: number }, body: unknow
     )
 
     req.on("error", reject)
-    req.write(payload)
+    if (payload !== undefined) {
+      req.write(payload)
+    }
     req.end()
   })
 }
@@ -164,44 +220,44 @@ async function getUnusedTcpAddress() {
   }
 }
 
+async function readFirst<T>(stream: AsyncIterable<T>) {
+  for await (const item of stream) {
+    return item
+  }
+  throw new Error("Stream ended before yielding an item")
+}
+
 describe("core/ipc", () => {
   test("sends validated request/response messages over TCP", async () => {
     const { client } = await createFixture()
 
-    await expect(client.send("ping")).resolves.toEqual({ ok: true })
-    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({ echoed: "hello" })
-    await expect(client.send("add", { a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
+    await expect(client.ping()).resolves.toEqual({ ok: true })
+    await expect(client.echo({ text: "hello" })).resolves.toEqual({ echoed: "hello" })
+    await expect(client.add({ a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
   })
 
   test("rejects invalid request payloads before they cross the process boundary", async () => {
     const { client } = await createFixture()
 
-    await expect(client.send("add", { a: 2, b: "3" } as never)).rejects.toThrow()
+    await expect(client.add({ a: 2, b: "3" } as never)).rejects.toThrow()
   })
 
-  test("describes the expected payload shape when a request payload object is omitted", async () => {
-    const { client } = await createFixture()
-    const expectedMessage = ["Expected input shape:", "{", "  text: string", "}"].join("\n")
-
-    await expect((client.send as any)("echo")).rejects.toThrow(expectedMessage)
-  })
-
-  test("returns a structured error for unknown requests", async () => {
+  test("describes invalid raw request bodies", async () => {
     const { address } = await createFixture()
 
-    await expect(postRaw(address, { name: "missing", payload: {} })).resolves.toEqual({
-      statusCode: 400,
-      body: JSON.stringify({ error: "Unknown request: missing" }),
-    })
+    const response = await requestRaw(address, { method: "POST", path: "/echo" })
+    expect(response.statusCode).toBe(400)
+    expect(JSON.parse(response.body)).toMatchObject({ message: "Invalid request body" })
   })
 
-  test("returns the expected payload shape when a raw request omits its payload object", async () => {
+  test("returns not found for unknown routes", async () => {
     const { address } = await createFixture()
-    const expectedMessage = ["Expected input shape:", "{", "  text: string", "}"].join("\n")
 
-    await expect(postRaw(address, { name: "echo" })).resolves.toEqual({
-      statusCode: 400,
-      body: JSON.stringify({ error: expectedMessage }),
+    await expect(
+      requestRaw(address, { method: "POST", path: "/missing", body: {} }),
+    ).resolves.toEqual({
+      statusCode: 404,
+      body: "Not Found",
     })
   })
 
@@ -227,21 +283,23 @@ describe("core/ipc", () => {
     }
     const ipcServer = createServer({
       port: 0,
-      schema,
+      routes,
       handlers: {
         ping: () => {
           handlerContexts.push(readTraceId())
           return { ok: true as const }
         },
-        echo: ({ text }) => {
+        echo: ({ body: { text } }) => {
           const traceId = readTraceId()
           handlerContexts.push(traceId)
           return { echoed: `${text}:${traceId}` }
         },
-        add: ({ a, b }) => {
+        add: ({ body: { a, b } }) => {
           handlerContexts.push(readTraceId())
           return { sum: a + b }
         },
+        systemAlert: () => [],
+        userAlert: () => [],
       },
       runHandler: ({ name }, handler) =>
         requestContext.run(
@@ -272,9 +330,9 @@ describe("core/ipc", () => {
       })
     })
 
-    const client = createNodeClient(address, schema)
-    await expect(client.send("ping")).resolves.toEqual({ ok: true })
-    await expect(client.send("echo", { text: "hello" })).resolves.toEqual({
+    const client = createNodeClient(address, routes)
+    await expect(client.ping()).resolves.toEqual({ ok: true })
+    await expect(client.echo({ text: "hello" })).resolves.toEqual({
       echoed: "hello:echo-2",
     })
 
@@ -299,44 +357,43 @@ describe("core/ipc", () => {
   })
 
   test("streams ndjson events to subscribed node clients", async () => {
-    const { client, publish } = await createFixture()
-
-    let resolveAlert:
-      | ((payload: { message: string; level: "info" | "warn" | "error" }) => void)
-      | null = null
-    const alertPromise = new Promise<{ message: string; level: "info" | "warn" | "error" }>(
-      (resolve) => {
-        resolveAlert = resolve
-      },
-    )
-    const unsubscribe = await client.subscribe("systemAlert", (payload) => {
-      resolveAlert?.(payload)
-    })
+    const { client, publishSystemAlert } = await createFixture()
+    const abortController = new AbortController()
     cleanups.push(async () => {
-      unsubscribe()
+      abortController.abort()
     })
+
+    const stream = await client.systemAlert(undefined, { signal: abortController.signal })
+    const alertPromise = readFirst(stream)
 
     await new Promise((resolve) => setTimeout(resolve, 25))
-    publish("systemAlert", { message: "Heads up", level: "warn" })
+    publishSystemAlert({ message: "Heads up", level: "warn" })
 
     await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
   })
 
   test("applies stream filters on the server side", async () => {
-    const { client, publish } = await createFixture()
+    const { client, publishUserAlert } = await createFixture()
+    const abortController = new AbortController()
     const onMessage = vi.fn()
-
-    const unsubscribe = await client.subscribe(
-      { name: "userAlert", filter: { userId: "user-1" } },
-      onMessage,
-    )
     cleanups.push(async () => {
-      unsubscribe()
+      abortController.abort()
+    })
+
+    const stream = await client.userAlert({ userId: "user-1" }, { signal: abortController.signal })
+    const readPromise = (async () => {
+      for await (const payload of stream) {
+        onMessage(payload)
+      }
+    })()
+    cleanups.push(async () => {
+      abortController.abort()
+      await readPromise.catch(() => {})
     })
 
     await new Promise((resolve) => setTimeout(resolve, 25))
-    publish("userAlert", { userId: "user-2", message: "skip me" })
-    publish("userAlert", { userId: "user-1", message: "deliver me" })
+    publishUserAlert({ userId: "user-2", message: "skip me" })
+    publishUserAlert({ userId: "user-1", message: "deliver me" })
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(onMessage).toHaveBeenCalledTimes(1)
@@ -346,30 +403,47 @@ describe("core/ipc", () => {
   test("rejects stream filters when the server-side validator fails", async () => {
     const { client } = await createFixture()
 
-    await expect(
-      client.subscribe({ name: "userAlert", filter: { userId: "blocked-user" } }, () => {}),
-    ).rejects.toThrow("User alerts are disabled for blocked-user")
+    await expect(client.userAlert({ userId: "blocked-user" })).rejects.toThrow(
+      "User alerts are disabled for blocked-user",
+    )
   })
 
-  test("fires stream lifecycle hooks and unsubscribes exactly once", async () => {
+  test("stream handlers subscribe and unsubscribe exactly once", async () => {
     const events: Array<{
       phase: "subscribe" | "unsubscribe"
-      name: string
       filter: unknown
     }> = []
     const ipcServer = createServer({
       port: 0,
-      schema,
+      routes,
       handlers: {
         ping: () => ({ ok: true as const }),
-        echo: ({ text }) => ({ echoed: text }),
-        add: ({ a, b }) => ({ sum: a + b }),
-      },
-      afterSubscribe: ({ name, filter }) => {
-        events.push({ phase: "subscribe", name, filter })
-      },
-      afterUnsubscribe: ({ name, filter }) => {
-        events.push({ phase: "unsubscribe", name, filter })
+        echo: ({ body: { text } }) => ({ echoed: text }),
+        add: ({ body: { a, b } }) => ({ sum: a + b }),
+        systemAlert: () => [],
+        userAlert: ({ query, request }) => {
+          events.push({ phase: "subscribe", filter: query })
+          return (async function* () {
+            const signal = request.signal
+            let wake: (() => void) | undefined
+            const abort = () => {
+              wake?.()
+            }
+            signal.addEventListener("abort", abort)
+            try {
+              yield { userId: query.userId, message: "ready" }
+              while (!signal.aborted) {
+                await new Promise<void>((resolve) => {
+                  wake = resolve
+                })
+                wake = undefined
+              }
+            } finally {
+              signal.removeEventListener("abort", abort)
+              events.push({ phase: "unsubscribe", filter: query })
+            }
+          })()
+        },
       },
     })
 
@@ -387,26 +461,22 @@ describe("core/ipc", () => {
       })
     })
 
-    const client = createNodeClient(address, schema)
-    const unsubscribe = await client.subscribe(
-      { name: "userAlert", filter: { userId: "user-1" } },
-      () => {},
-    )
+    const client = createNodeClient(address, routes)
+    const abortController = new AbortController()
+    const stream = await client.userAlert({ userId: "user-1" }, { signal: abortController.signal })
 
-    await new Promise((resolve) => setTimeout(resolve, 25))
-    unsubscribe()
-    unsubscribe()
+    await expect(readFirst(stream)).resolves.toEqual({ userId: "user-1", message: "ready" })
+    abortController.abort()
+    abortController.abort()
     await new Promise((resolve) => setTimeout(resolve, 25))
 
     expect(events).toEqual([
       {
         phase: "subscribe",
-        name: "userAlert",
         filter: { userId: "user-1" },
       },
       {
         phase: "unsubscribe",
-        name: "userAlert",
         filter: { userId: "user-1" },
       },
     ])
@@ -423,13 +493,15 @@ describe("core/ipc", () => {
     }> = []
     const ipcServer = createServer({
       port: 0,
-      schema,
+      routes,
       handlers: {
         ping: () => ({ ok: true as const }),
-        echo: ({ text }) => ({ echoed: text }),
+        echo: ({ body: { text } }) => ({ echoed: text }),
         add: () => {
           throw new Error("handler exploded")
         },
+        systemAlert: () => [],
+        userAlert: () => [],
       },
       runHandler: (_input, handler) => requestContext.run({ traceId: "trace-add" }, handler),
       onRequestFailed: ({ name, payload, error, durationMs }) => {
@@ -462,8 +534,8 @@ describe("core/ipc", () => {
       })
     })
 
-    const client = createNodeClient(address, schema)
-    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Internal server error")
+    const client = createNodeClient(address, routes)
+    await expect(client.add({ a: 1, b: 2 })).rejects.toThrow("Internal server error")
 
     expect(failures).toHaveLength(1)
     expect(failures[0]).toMatchObject({
@@ -478,13 +550,15 @@ describe("core/ipc", () => {
   test("returns client-visible handler failures unchanged", async () => {
     const ipcServer = createServer({
       port: 0,
-      schema,
+      routes,
       handlers: {
         ping: () => ({ ok: true as const }),
-        echo: ({ text }) => ({ echoed: text }),
+        echo: ({ body: { text } }) => ({ echoed: text }),
         add: () => {
           throw new IpcClientError("Add is disabled")
         },
+        systemAlert: () => [],
+        userAlert: () => [],
       },
     })
 
@@ -502,24 +576,24 @@ describe("core/ipc", () => {
       })
     })
 
-    const client = createNodeClient(address, schema)
-    await expect(client.send("add", { a: 1, b: 2 })).rejects.toThrow("Add is disabled")
+    const client = createNodeClient(address, routes)
+    await expect(client.add({ a: 1, b: 2 })).rejects.toThrow("Add is disabled")
   })
 
-  test("rewords missing IPC send failures", async () => {
+  test("rewords missing IPC request failures", async () => {
     const missingAddress = await getUnusedTcpAddress()
-    const client = createNodeClient(missingAddress, schema)
+    const client = createNodeClient(missingAddress, routes)
 
-    await expect(client.send("ping")).rejects.toThrow(
+    await expect(client.ping()).rejects.toThrow(
       `Could not connect to IPC server at http://${missingAddress.hostname}:${missingAddress.port}/.`,
     )
   })
 
-  test("rewords missing IPC subscribe failures", async () => {
+  test("rewords missing IPC stream failures", async () => {
     const missingAddress = await getUnusedTcpAddress()
-    const client = createNodeClient(missingAddress, schema)
+    const client = createNodeClient(missingAddress, routes)
 
-    await expect(client.subscribe("systemAlert", () => {})).rejects.toThrow(
+    await expect(client.systemAlert()).rejects.toThrow(
       `Could not connect to IPC server at http://${missingAddress.hostname}:${missingAddress.port}/.`,
     )
   })
@@ -527,13 +601,15 @@ describe("core/ipc", () => {
   test("returns generic raw errors for unexpected handler failures", async () => {
     const ipcServer = createServer({
       port: 0,
-      schema,
+      routes,
       handlers: {
         ping: () => ({ ok: true as const }),
-        echo: ({ text }) => ({ echoed: text }),
+        echo: ({ body: { text } }) => ({ echoed: text }),
         add: () => {
           throw new Error("handler exploded")
         },
+        systemAlert: () => [],
+        userAlert: () => [],
       },
     })
 
@@ -551,7 +627,13 @@ describe("core/ipc", () => {
       })
     })
 
-    await expect(postRaw(address, { name: "add", payload: { a: 1, b: 2 } })).resolves.toEqual({
+    const response = await requestRaw(address, {
+      method: "POST",
+      path: "/add",
+      body: { a: 1, b: 2 },
+    })
+
+    expect(response).toEqual({
       statusCode: 500,
       body: JSON.stringify({ error: "Internal server error" }),
     })

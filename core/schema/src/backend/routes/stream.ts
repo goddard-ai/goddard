@@ -1,10 +1,9 @@
-import { route } from "rouzer"
+import { BearerHeaders } from "@goddard-ai/auth/schema"
+import * as http from "rouzer/http"
 
-import { BearerHeaders } from "../../common/auth.ts"
-
-/** Opens the authenticated user-scoped feedback stream. */
-export const repoStreamRoute = route("stream", {
-  GET: {
+/** Repository-scoped backend routes owned by the core backend substrate. */
+export const repositories = http.resource("repositories", {
+  stream: http.get("stream", {
     headers: BearerHeaders,
-  },
+  }),
 })

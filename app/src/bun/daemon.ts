@@ -86,11 +86,10 @@ export async function daemonSend<Name extends DaemonRequestName>(
   input: DaemonSendInput<Name>,
 ): Promise<DaemonRequestResponse<Name>> {
   const client = await getDaemonClient()
-  const send = client.send as (
-    name: Name,
-    payload?: DaemonSendInput<Name>["payload"],
-  ) => Promise<unknown>
-  return (await send(input.name, input.payload)) as DaemonRequestResponse<Name>
+  return (await selectRouteFunction(
+    client,
+    input.name,
+  )(input.payload)) as DaemonRequestResponse<Name>
 }
 
 /** Opens one daemon IPC stream subscription on behalf of one Electrobun webview. */
@@ -101,24 +100,32 @@ export async function daemonSubscribe(input: DaemonSubscribeInput) {
 
   const client = await getDaemonClient()
   await removeDaemonSubscription(input.subscriptionId)
+  const abortController = new AbortController()
+  const stream = (await selectRouteFunction(client, input.target.name)(input.target.filter, {
+    signal: abortController.signal,
+  })) as AsyncIterable<unknown>
+  const done = (async () => {
+    for await (const payload of stream) {
+      if (!daemonStreamSubscriptions.has(input.subscriptionId)) {
+        return
+      }
 
-  const unsubscribe = await client.subscribe(input.target as never, (payload) => {
-    if (!daemonStreamSubscriptions.has(input.subscriptionId)) {
-      return
+      publishGlobalEvent(input.webviewId, {
+        name: "daemonStream",
+        detail: {
+          subscriptionId: input.subscriptionId,
+          name: input.target.name,
+          payload,
+        },
+      })
     }
-
-    publishGlobalEvent(input.webviewId, {
-      name: "daemonStream",
-      detail: {
-        subscriptionId: input.subscriptionId,
-        name: input.target.name,
-        payload,
-      },
-    })
-  })
+  })()
 
   daemonStreamSubscriptions.set(input.subscriptionId, {
-    unsubscribe,
+    unsubscribe: () => {
+      abortController.abort()
+      void done.catch(() => {})
+    },
     webviewId: input.webviewId,
   })
   addDaemonSubscriptionOwner(input.webviewId, input.subscriptionId)
@@ -146,4 +153,20 @@ export async function daemonResetSubscriptions(input: DaemonResetSubscriptionsIn
   return {
     removedCount: subscriptionIds.length,
   }
+}
+
+function selectRouteFunction(client: Record<string, any>, name: string) {
+  let node: unknown = client
+  for (const segment of name.split(".")) {
+    if (!node || typeof node !== "object" || !(segment in node)) {
+      throw new Error(`Unknown daemon IPC route: ${name}`)
+    }
+    node = (node as Record<string, unknown>)[segment]
+  }
+
+  if (typeof node !== "function") {
+    throw new Error(`Daemon IPC route is not callable: ${name}`)
+  }
+
+  return node
 }

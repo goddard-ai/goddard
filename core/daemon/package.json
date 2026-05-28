@@ -15,14 +15,6 @@
       },
       "bun": "./src/ipc.ts",
       "import": "./dist/ipc.mjs"
-    },
-    "./workforce": {
-      "types": {
-        "source": "./src/workforce/index.ts",
-        "default": "./dist/workforce/index.d.mts"
-      },
-      "bun": "./src/workforce/index.ts",
-      "import": "./dist/workforce/index.mjs"
     }
   },
   "scripts": {
@@ -36,40 +28,44 @@
     "test": "bun test --dots"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
     "acp-client": "catalog:",
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.62",
     "@ai-sdk/openai": "^3.0.52",
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@alloc/tree-kill": "^1.3.0",
+    "@goddard-ai/action": "workspace:*",
+    "@goddard-ai/adapter": "workspace:*",
+    "@goddard-ai/auth": "workspace:*",
     "@b9g/async-context": "^0.2.1",
+    "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/config": "workspace:^",
     "@goddard-ai/daemon-client": "workspace:^",
+    "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:^",
+    "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/paths": "workspace:^",
-    "@goddard-ai/review-sync": "workspace:^",
+    "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:^",
-    "@goddard-ai/worktree-plugin": "workspace:^",
-    "@openrouter/ai-sdk-provider": "^2.5.1",
-    "ai": "^6.0.158",
-    "ai-sdk-json-schema": "catalog:",
+    "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/workforce": "workspace:*",
     "cmd-ts": "catalog:",
-    "hash-sum": "^2.0.0",
     "kindstore": "^0.4.4",
     "kleur": "^4.1.5",
-    "node-stream-zip": "^1.15.0",
     "radashi": "catalog:",
     "rouzer": "catalog:",
-    "tar-fs": "^3.1.2",
     "ulid": "^3.0.2",
-    "unbzip2-stream": "^1.4.3",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/backend": "workspace:^",
+    "@goddard-ai/worktree-plugin": "workspace:^",
     "@types/hash-sum": "^1.0.2",
     "@types/tar-fs": "^2.0.4",
-    "@types/unbzip2-stream": "^1.4.3"
+    "hash-sum": "^2.0.0",
+    "tar-fs": "^3.1.2"
   }
 }

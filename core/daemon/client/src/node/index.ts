@@ -1,14 +1,10 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
 import { readFileSync } from "node:fs"
-import { createNodeClient } from "@goddard-ai/ipc/node"
+import { createRouteClient, ndjson } from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
-import { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
-import {
-  createDaemonUrl,
-  DEFAULT_DAEMON_PORT,
-  readDaemonTcpAddressFromDaemonUrl,
-} from "@goddard-ai/schema/daemon-url"
+import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
+import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
 import { getErrorMessage } from "radashi"
 
 import {
@@ -75,8 +71,23 @@ export function resolveDaemonUrl(env: DaemonClientEnv = process.env) {
 
 /** Creates the default Node daemon IPC transport from one daemon URL. */
 function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
-  const address = readDaemonTcpAddressFromDaemonUrl(input.daemonUrl)
-  return createNodeClient(address, daemonIpcSchema)
+  return createRouteClient({
+    baseURL: input.daemonUrl,
+    routes: daemonIpcRoutes,
+    plugins: [ndjson.clientPlugin],
+    onJsonError: async (response) => {
+      const body = (await response.json().catch(() => undefined)) as
+        | { error?: unknown; message?: unknown }
+        | undefined
+      const message =
+        typeof body?.error === "string"
+          ? body.error
+          : typeof body?.message === "string"
+            ? body.message
+            : `Request failed with status ${response.status}`
+      throw new Error(message)
+    },
+  }) as DaemonIpcClient
 }
 
 function resolveDaemonPort(env: DaemonClientEnv) {

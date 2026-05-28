@@ -1,34 +1,22 @@
-import type {
-  InferRequestPayload,
-  InferResponseType,
-  InferStreamFilter,
-  ValidRequestName,
-} from "@goddard-ai/ipc"
-import type { daemonIpcSchema } from "@goddard-ai/schema/daemon-ipc"
 import type { RPCSchema } from "electrobun/bun"
 
 import type { AppStateSnapshot } from "./app-state.ts"
 import type { DaemonStreamName, GlobalEventEnvelope } from "./global-event-hub.ts"
 import type { ShortcutKeymapFile } from "./shortcut-keymap.ts"
 
-/** Daemon IPC schema type reused for webview-to-Bun request forwarding. */
-type DaemonSchema = typeof daemonIpcSchema
-
 /** Valid daemon IPC request names forwarded through the desktop host. */
-export type DaemonRequestName = ValidRequestName<DaemonSchema>
+export type DaemonRequestName = string
 
 /** Payload type for one forwarded daemon IPC request. */
-export type DaemonRequestPayload<Name extends DaemonRequestName = DaemonRequestName> =
-  InferRequestPayload<DaemonSchema, Name>
+export type DaemonRequestPayload<_Name extends DaemonRequestName = DaemonRequestName> = any
 
 /** Response type for one forwarded daemon IPC request. */
-export type DaemonRequestResponse<Name extends DaemonRequestName = DaemonRequestName> =
-  InferResponseType<DaemonSchema, Name>
+export type DaemonRequestResponse<_Name extends DaemonRequestName = DaemonRequestName> = any
 
 /** One normalized daemon IPC stream target forwarded through the Electrobun bridge. */
 export type DaemonStreamTargetInput<Name extends DaemonStreamName = DaemonStreamName> = {
   name: Name
-  filter: InferStreamFilter<DaemonSchema, Name> | undefined
+  filter: any
 }
 
 /** Bun-host RPC payload for forwarding one daemon IPC request. */

@@ -21,7 +21,7 @@ test("daemon backend client creates PRs and checks managed status through rouzer
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const pr = await client.pr.create({
+    const pr = await client.pullRequests.create({
       owner: "goddard-ai",
       repo: "sdk",
       title: "Add daemon backend route client",
@@ -32,12 +32,12 @@ test("daemon backend client creates PRs and checks managed status through rouzer
 
     expect(pr.number).toBe(1)
     await expect(
-      client.pr.isManaged({
+      client.pullRequests.managed({
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: pr.number,
       }),
-    ).resolves.toBe(true)
+    ).resolves.toEqual({ managed: true })
   } finally {
     await server.close()
   }
@@ -53,21 +53,15 @@ test("daemon backend client uses injected auth state for authenticated requests"
     const client = createBackendClient({
       baseUrl,
       getAuthorizationHeader: () => authorization,
-      clearAuthorization: () => {
-        authorization = null
-      },
     })
-    const start = await client.auth.startDeviceFlow({ githubUsername: "alec" })
-    const session = await client.auth.completeDeviceFlow({
+    const start = await client.auth.device.start({ githubUsername: "alec" })
+    const session = await client.auth.device.complete({
       deviceCode: start.deviceCode,
       githubUsername: "alec",
     })
 
     authorization = `Bearer ${session.token}`
-    await expect(client.auth.whoami()).resolves.toEqual(session)
-
-    await client.auth.logout()
-    expect(authorization).toBeNull()
+    await expect(client.auth.session.current()).resolves.toEqual(session)
   } finally {
     await server.close()
   }
@@ -100,7 +94,7 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       subscription!.on("event", resolve)
     })
 
-    const pr = await client.pr.create({
+    const pr = await client.pullRequests.create({
       owner: "goddard-ai",
       repo: "sdk",
       title: "Stream me",

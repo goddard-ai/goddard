@@ -1,4 +1,7 @@
-import type { RepoEvent } from "@goddard-ai/schema/backend"
+import { authBackendRoutes } from "@goddard-ai/auth/backend"
+import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
+import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
+import { GitHubWebhookInput, type RepoEvent } from "@goddard-ai/pull-request/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
@@ -7,6 +10,8 @@ import { createRouter } from "rouzer"
 import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
+
+const backendRoutes = composeBackendRoutes([authBackendRoutes, pullRequestBackendRoutes, routes])
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
@@ -21,40 +26,40 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
   const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
 
-  return createRouter<Env>({ debug: false }).use(routes, {
-    authDeviceStartRoute: {
-      POST: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.startDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+  return createRouter<Env>({ debug: false }).use(backendRoutes, {
+    auth: {
+      device: {
+        start: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            return await controlPlane.startDeviceFlow(ctx.body)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+        complete: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            return await controlPlane.completeDeviceFlow(ctx.body)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+      },
+      session: {
+        current: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            const token = readBearerToken(ctx.headers.authorization)
+            return await controlPlane.getSession(token)
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
     },
-    authDeviceCompleteRoute: {
-      POST: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          return await controlPlane.completeDeviceFlow(ctx.body)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-    },
-    authSessionRoute: {
-      GET: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          return await controlPlane.getSession(token)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-    },
-    prCreateRoute: {
-      POST: async (ctx) => {
+    pullRequests: {
+      create: async (ctx) => {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
@@ -76,9 +81,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           return toErrorResponse(error)
         }
       },
-    },
-    prManagedRoute: {
-      GET: async (ctx) => {
+      managed: async (ctx) => {
         try {
           const controlPlane = createControlPlane(readEnv(ctx))
           const token = readBearerToken(ctx.headers.authorization)
@@ -96,26 +99,27 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           return toErrorResponse(error)
         }
       },
-    },
-    prReplyRoute: {
-      POST: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          await controlPlane.replyToPr(token, ctx.body, env)
-          return { success: true }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      comments: {
+        create: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const token = readBearerToken(ctx.headers.authorization)
+            await controlPlane.replyToPr(token, ctx.body, env)
+            return { success: true }
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
     },
-    githubWebhookRoute: {
-      POST: async (ctx) => {
+    webhooks: {
+      github: async (ctx) => {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
-          const event = await controlPlane.handleGitHubWebhook(ctx.body)
+          const input = GitHubWebhookInput.parse(await ctx.request.json())
+          const event = await controlPlane.handleGitHubWebhook(input)
           await broadcastEvent(env, event)
           return event
         } catch (error) {
@@ -123,8 +127,8 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         }
       },
     },
-    repoStreamRoute: {
-      GET: async (ctx) => {
+    repositories: {
+      stream: async (ctx) => {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)

@@ -6,6 +6,7 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
+import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { SetupContext } from "../src/context.ts"
@@ -15,6 +16,7 @@ import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
+import { send } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -173,7 +175,7 @@ test(
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-    const firstRun = await client.send("action.run", {
+    const firstRun = await client.action.run({
       actionName: "review",
       cwd: repoDir,
     })
@@ -195,14 +197,14 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    const secondRun = await client.send("action.run", {
+    const secondRun = await client.action.run({
       actionName: "review",
       cwd: repoDir,
     })
     expect(secondRun.session.agentName).toBe("Node Agent B")
 
-    await client.send("session.shutdown", { id: firstRun.session.id })
-    await client.send("session.shutdown", { id: secondRun.session.id })
+    await client.session.shutdown({ id: firstRun.session.id })
+    await client.session.shutdown({ id: secondRun.session.id })
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
 )
@@ -270,7 +272,7 @@ test(
     for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
       (value) => value != null,
     )) {
-      await client.send("session.shutdown", { id: sessionId })
+      await send(client, "session.shutdown", { id: sessionId })
     }
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
@@ -301,32 +303,7 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
   const runtime = resolveRuntimeConfig({
     port: 0,
   })
-  const daemonClient = {
-    auth: {
-      startDeviceFlow: async () => ({
-        deviceCode: "dev_1",
-        userCode: "ABCD-1234",
-        verificationUri: "https://github.com/login/device",
-        expiresIn: 900,
-        interval: 5,
-      }),
-      completeDeviceFlow: async () => ({
-        token: "tok_1",
-        githubUsername: "alec",
-        githubUserId: 42,
-      }),
-      whoami: async () => ({
-        token: "tok_1",
-        githubUsername: "alec",
-        githubUserId: 42,
-      }),
-      logout: async () => {},
-    },
-    pr: {
-      create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
-      reply: async () => ({ success: true }),
-    },
-  }
+  const daemonClient = createTestBackendClient()
   const daemon = await SetupContext.run({ runtime, configManager }, () =>
     startDaemonServer(daemonClient, {
       port: runtime.port,
@@ -337,6 +314,52 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
     await daemon.close()
   })
   return daemon
+}
+
+function createTestBackendClient(): BackendClient {
+  return {
+    auth: {
+      device: {
+        start: async () => ({
+          deviceCode: "dev_1",
+          userCode: "ABCD-1234",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 5,
+        }),
+        complete: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+      session: {
+        current: async () => ({
+          token: "tok_1",
+          githubUsername: "alec",
+          githubUserId: 42,
+        }),
+      },
+    },
+    pullRequests: {
+      create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
+      managed: async () => ({ managed: true }),
+      comments: {
+        create: async () => ({ success: true }),
+      },
+    },
+    webhooks: {
+      github: async () => ({ type: "noop" }),
+    },
+    repositories: {
+      stream: async () => new Response(),
+    },
+    stream: {
+      subscribe: async () => {
+        throw new Error("not used")
+      },
+    },
+  } as unknown as BackendClient
 }
 
 async function useTempHome() {

@@ -6,10 +6,11 @@ import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
+import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import type { BackendPrClient } from "../src/ipc/types.ts"
 import { configureLogging } from "../src/logging.ts"
 import { db, resetDb } from "../src/persistence/store.ts"
+import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -44,7 +45,7 @@ test("daemon submit request requires a valid session token", async () => {
 
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("pr.submit", {
+      send(client, "pr.submit", {
         token: "",
         cwd: process.cwd(),
         title: "Ship daemon security",
@@ -98,7 +99,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await expect(
-      client.send("pr.submit", {
+      send(client, "pr.submit", {
         token: "tok_session",
         cwd: repoDir,
         title: "Ship daemon security",
@@ -142,7 +143,6 @@ test("daemon submit request enforces trusted repo context and records created PR
           githubUsername: "alec",
           githubUserId: 42,
         }),
-        logout: async () => {},
       },
       pr: {
         create: async (input) => {
@@ -167,7 +167,7 @@ test("daemon submit request enforces trusted repo context and records created PR
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
-    await client.send("pr.submit", {
+    await send(client, "pr.submit", {
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -219,7 +219,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     scope: "Session",
     headline: "Ship daemon security",
   })
-  await expect(client.send("pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
+  await expect(send(client, "pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
     pullRequest: {
       id: pullRequest!.id,
       owner: "trusted",
@@ -258,7 +258,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("pr.reply", {
+    send(client, "pr.reply", {
       token: "tok_session",
       cwd: repoDir,
       message: "Updated per review",
@@ -284,7 +284,7 @@ test("daemon reply request records pull request checkout locations", async () =>
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await client.send("pr.reply", {
+  await send(client, "pr.reply", {
     token: "tok_session",
     cwd: repoDir,
     message: "Updated per review",
@@ -341,7 +341,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     mutation: string
     status: string
   }> = []
-  const unsubscribe = await client.subscribe("inbox.item", ({ item, mutation }) => {
+  const unsubscribe = await subscribe(client, "inbox.item", ({ item, mutation }) => {
     if (item.entityId === "ses_inbox") {
       inboxEvents.push({
         mutation,
@@ -353,7 +353,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     unsubscribe()
   })
 
-  await client.send("session.reportTurnEnded", {
+  await send(client, "session.reportTurnEnded", {
     id: "ses_inbox",
     scope: "Checkout flow",
     headline: "Decision ready for review",
@@ -368,12 +368,12 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     headline: "Decision ready for review",
   })
 
-  await client.send("inbox.update", {
+  await send(client, "inbox.update", {
     entityId: "ses_inbox",
     status: "read",
   })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
-  await client.send("session.complete", { id: "ses_inbox" })
+  await send(client, "session.complete", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
   await waitFor(async () => inboxEvents.length >= 3)
   expect(inboxEvents).toEqual([
@@ -402,7 +402,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.request", {
+    send(client, "workforce.request", {
       rootDir: otherRootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -430,7 +430,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.respond", {
+    send(client, "workforce.respond", {
       rootDir: otherRootDir,
       output: "done",
       token,
@@ -456,7 +456,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    client.send("workforce.request", {
+    send(client, "workforce.request", {
       rootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -468,8 +468,15 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 type StartServerOptions = {
   useExistingHome?: boolean
   sdk?: {
-    auth?: Partial<BackendPrClient["auth"]>
-    pr?: Partial<BackendPrClient["pr"]>
+    auth?: {
+      startDeviceFlow?: (input?: any) => Promise<any>
+      completeDeviceFlow?: (input: any) => Promise<any>
+      whoami?: () => Promise<any>
+    }
+    pr?: {
+      create?: (input: any) => Promise<any>
+      reply?: (input: any) => Promise<any>
+    }
   }
 }
 
@@ -479,43 +486,42 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
   }
 
   const daemon = await startDaemonServer(
-    {
+    createTestBackendClient({
       auth: {
-        startDeviceFlow:
+        start:
           options.sdk?.auth?.startDeviceFlow ??
-          (async () => ({
+          (async (_input?: any) => ({
             deviceCode: "dev_1",
             userCode: "ABCD-1234",
             verificationUri: "https://github.com/login/device",
             expiresIn: 900,
             interval: 5,
           })),
-        completeDeviceFlow:
+        complete:
           options.sdk?.auth?.completeDeviceFlow ??
-          (async () => ({
+          (async (_input: any) => ({
             token: "tok_1",
             githubUsername: "alec",
             githubUserId: 42,
           })),
-        whoami:
+        current:
           options.sdk?.auth?.whoami ??
           (async () => ({
             token: "tok_1",
             githubUsername: "alec",
             githubUserId: 42,
           })),
-        logout: options.sdk?.auth?.logout ?? (async () => {}),
       },
-      pr: {
+      pullRequests: {
         create:
           options.sdk?.pr?.create ??
-          (async () => ({
+          (async (_input: any) => ({
             number: 12,
             url: "https://github.com/trusted/widgets/pull/12",
           })),
-        reply: options.sdk?.pr?.reply ?? (async () => ({ success: true })),
+        reply: options.sdk?.pr?.reply ?? (async (_input: any) => ({ success: true })),
       },
-    },
+    }),
     { port: 0 },
   )
 
@@ -524,6 +530,50 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
   })
 
   return daemon
+}
+
+function createTestBackendClient(
+  input: {
+    auth?: {
+      start?: (input?: any) => Promise<any>
+      complete?: (input: any) => Promise<any>
+      current?: () => Promise<any>
+    }
+    pullRequests?: {
+      create?: (input: any) => Promise<any>
+      reply?: (input: any) => Promise<any>
+    }
+  } = {},
+): BackendClient {
+  return {
+    auth: {
+      device: {
+        start: ({ body }: any = {}) => input.auth?.start?.(body),
+        complete: ({ body }: any) => input.auth?.complete?.(body),
+      },
+      session: {
+        current: () => input.auth?.current?.(),
+      },
+    },
+    pullRequests: {
+      create: ({ body }: any) => input.pullRequests?.create?.(body),
+      managed: async () => ({ managed: true }),
+      comments: {
+        create: ({ body }: any) => input.pullRequests?.reply?.(body),
+      },
+    },
+    webhooks: {
+      github: async () => ({ type: "noop" }),
+    },
+    repositories: {
+      stream: async () => new Response(),
+    },
+    stream: {
+      subscribe: async () => {
+        throw new Error("not used")
+      },
+    },
+  } as unknown as BackendClient
 }
 
 async function useTempHome(): Promise<void> {

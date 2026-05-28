@@ -1,13 +1,15 @@
 import type {
   AuthSession,
-  CreatePrInput,
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+} from "@goddard-ai/auth/schema"
+import type {
+  CreatePrInput,
   GitHubWebhookInput,
   PullRequestRecord,
   RepoEvent,
-} from "@goddard-ai/schema/backend"
+} from "@goddard-ai/pull-request/schema"
 import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"

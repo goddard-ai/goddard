@@ -1,0 +1,67 @@
+{
+  "name": "@goddard-ai/inbox",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./app": {
+      "types": {
+        "source": "./src/app.tsx",
+        "default": "./dist/app.d.mts"
+      },
+      "bun": "./src/app.tsx",
+      "import": "./dist/app.mjs"
+    },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon.ts",
+        "default": "./dist/daemon.d.mts"
+      },
+      "bun": "./src/daemon.ts",
+      "import": "./dist/daemon.mjs"
+    },
+    "./daemon-ipc": {
+      "types": {
+        "source": "./src/daemon-ipc.ts",
+        "default": "./dist/daemon-ipc.d.mts"
+      },
+      "bun": "./src/daemon-ipc.ts",
+      "import": "./dist/daemon-ipc.mjs"
+    },
+    "./schema": {
+      "types": {
+        "source": "./src/schema.ts",
+        "default": "./dist/schema.d.mts"
+      },
+      "bun": "./src/schema.ts",
+      "import": "./dist/schema.mjs"
+    },
+    "./sdk": {
+      "types": {
+        "source": "./src/sdk.ts",
+        "default": "./dist/sdk.d.mts"
+      },
+      "bun": "./src/sdk.ts",
+      "import": "./dist/sdk.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
+    "@goddard-ai/app-plugin": "workspace:*",
+    "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/sdk-plugin": "workspace:*",
+    "@goddard-ai/session": "workspace:*",
+    "kindstore": "^0.4.4",
+    "zod": "catalog:"
+  }
+}

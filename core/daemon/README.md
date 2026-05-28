@@ -6,9 +6,39 @@ The Goddard Daemon is a local background process that executes autonomous coding
 
 - [Daemon Glossary](./glossary.md)
 - [Daemon IPC Server Concepts](./src/ipc/server.md)
-- [Session Manager Domain Concepts](./src/session/manager.md)
-- [Session Turn History Design](./src/session/turn-history-design.md)
-- [Workforce Runtime Domain Concepts](./src/workforce/runtime.md)
+- [Session Manager Domain Concepts](../../features/session/src/daemon/manager.md)
+- [Session Turn History Design](../../features/session/src/daemon/turn-history-design.md)
+- [Workforce Runtime Domain Concepts](../../features/workforce/src/daemon/runtime.md)
+
+## Feature Composition
+
+The daemon remains the local runtime substrate: process lifecycle, IPC server
+mechanics, persistence setup, request context, logging, and startup policy live
+here. Product-specific daemon contributions can live in internal feature
+packages under `features/<name>/src/daemon.ts`.
+
+Feature packages should import `@goddard-ai/daemon-plugin` for static plugin
+metadata and `@goddard-ai/ipc` for daemon IPC schema fragments. They should not
+import the daemon package that bundles them.
+
+Daemon plugins can declare feature interop through `provides` and `consumes`.
+Consumed feature extensions are typed as first-class setup context fields, such
+as `context.session`, so methods and event channels can share one feature-owned
+extension surface without a generic service locator.
+
+The daemon also owns JSON configuration substrate. Feature packages can
+contribute namespaced config schemas through daemon plugins, but config files,
+scope precedence, validation errors, persistence, and hot reload remain daemon
+or core config responsibilities.
+
+The adapter feature owns adapter catalog request handling and catalog
+merge/parsing helpers. The daemon still owns the registry cache service and
+root-config manager that supply substrate data to that feature.
+
+`features/inbox` is the current reference daemon feature package. It owns the
+inbox IPC contract and request-handler factory while the daemon composition root
+still injects the daemon-owned inbox manager until inbox state is fully moved
+behind a feature-owned substrate boundary.
 
 ## Launch Contract
 
