@@ -2,14 +2,11 @@ import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { inboxIpcRoutes } from "./daemon-ipc.ts"
-import { createInboxManager, type InboxManager } from "./daemon/manager.ts"
+import { createInboxManager } from "./daemon/manager.ts"
 import { inboxDbSchema } from "./daemon/store.ts"
 import type { InboxItemEvent } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
-
-/** First-class inbox methods exposed to daemon plugins that create attention items. */
-type InboxExtension = Pick<InboxManager, "touchInboxItem">
 
 export const inboxPlugin = definePlugin({
   name: "inbox",
@@ -83,13 +80,11 @@ export const inboxPlugin = definePlugin({
       return inbox.completeSession(event.sessionId)
     })
 
-    const inboxExtension: InboxExtension = {
-      touchInboxItem: inbox.touchInboxItem,
-    }
-
     return {
       provides: {
-        inbox: inboxExtension,
+        inbox: {
+          touchInboxItem: inbox.touchInboxItem,
+        },
       },
       ipcHandlers: {
         inbox: {
