@@ -5,7 +5,7 @@ import { promisify } from "node:util"
 import { getErrorMessage } from "radashi"
 
 import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"
-import { buildWorkforcePaths } from "./paths.ts"
+import { buildWorkforcePaths, normalizeWorkforceRootDir } from "./paths.ts"
 
 const execFileAsync = promisify(execFile)
 
@@ -221,7 +221,7 @@ export async function resolveRepositoryRoot(startDir: string): Promise<string> {
     const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
       cwd: resolve(startDir),
     })
-    return stdout.trim()
+    return await normalizeWorkforceRootDir(stdout.trim())
   } catch (error) {
     throw new Error(
       `Unable to resolve the repository root from ${resolve(startDir)}: ${getErrorMessage(error)}`,
