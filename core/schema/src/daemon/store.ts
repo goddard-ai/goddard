@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk"
+import type { AcpAdapterId } from "acp-client/node"
 import { z } from "zod"
 
-import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonPullRequestId, DaemonSessionId } from "../id.ts"
 import { InboxHeadline, InboxScope } from "./inbox.ts"
@@ -90,7 +90,7 @@ export const DaemonSession = z.strictObject({
   status: DaemonSessionStatus,
   stopReason: DaemonSessionStopReason.nullable().default(null),
   agent: z
-    .union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution])
+    .union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution])
     .nullable()
     .default(null),
   agentName: z.string(),

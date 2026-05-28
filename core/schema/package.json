@@ -16,7 +16,6 @@
     "./json/*": "./json/*"
   },
   "scripts": {
-    "prepare": "bun run scripts/generate-acp-adapters.js",
     "build": "tsdown --unused && bun run generate-schemas",
     "generate-schemas": "bun run scripts/generate-json-schemas.ts && prettier -w json/",
     "lint": "oxlint",
@@ -36,6 +35,7 @@
     "@goddard-ai/review-session": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/workforce": "workspace:*",
+    "acp-client": "catalog:",
     "ai-sdk-json-schema": "catalog:",
     "rouzer": "catalog:",
     "zod": "catalog:"

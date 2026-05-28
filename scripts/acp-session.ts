@@ -2,10 +2,10 @@
 /** ACP debugging CLI for daemon-backed sessions and raw adapters. */
 import { resolve } from "node:path"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
+import { knownAcpAdapterIds } from "acp-client/node"
 import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
-import { ACPAdapterNames } from "../core/schema/src/acp-adapters.ts"
 import { GoddardSdk } from "../core/sdk/src/node/index.ts"
 import {
   createSessionPromptMessage,
@@ -365,10 +365,10 @@ async function resumeSession(id: string, initialPrompt?: string) {
   }
 }
 
-/** Prints the generated ACP adapter ids accepted by daemon-backed session creation. */
+/** Prints the bundled ACP adapter ids accepted by daemon-backed session creation. */
 function listAgents() {
   writeJson({
-    agents: ACPAdapterNames,
+    agents: knownAcpAdapterIds,
   })
 }
 

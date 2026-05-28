@@ -6,7 +6,6 @@ import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
-import type { ACPAdapterName } from "@goddard-ai/schema/acp-adapters"
 import {
   agentBinaryPlatforms,
   type AgentBinaryPlatform,
@@ -14,6 +13,7 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
 import type { AgentInputStream, AgentOutputStream } from "acp-client"
+import type { AcpAdapterId } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
 import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
@@ -158,7 +158,7 @@ export function waitForAgentProcessExit(process: AgentProcessHandle) {
 export async function spawnAgentProcess(params: {
   daemonUrl: string
   token: string
-  agent: ACPAdapterName | AgentDistribution
+  agent: AcpAdapterId | AgentDistribution
   cwd: string
   agentBinDir: string
   env?: Record<string, string>

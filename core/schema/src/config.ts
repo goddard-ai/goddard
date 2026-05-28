@@ -1,13 +1,13 @@
 import * as acp from "@agentclientprotocol/sdk"
+import { knownAcpAdapterIds, type AcpAdapterId } from "acp-client/node"
 import { textModelConfigSchema, type ModelConfig } from "ai-sdk-json-schema"
 import { z } from "zod"
 
-import { ACPAdapterNames, type ACPAdapterName } from "./acp-adapters.ts"
 import { AgentDistribution } from "./agent-distribution.ts"
 import { DaemonSessionMetadata } from "./daemon/store.ts"
 
 export const AgentSetting = z.union([
-  z.string().min(1) as z.ZodType<ACPAdapterName>,
+  z.string().min(1) as z.ZodType<AcpAdapterId>,
   AgentDistribution,
 ])
 export type AgentSetting = z.infer<typeof AgentSetting>
@@ -379,7 +379,7 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   // Types inherited from ACP schema: https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json
   acpRegistry.add(McpServer)
 
-  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...ACPAdapterNames] })
+  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...knownAcpAdapterIds] })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(ActionConfig, { id: "ActionConfig" })
   z.globalRegistry.add(LoopConfig, { id: "LoopConfig" })

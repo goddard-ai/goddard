@@ -1,9 +1,9 @@
 import * as acp from "@agentclientprotocol/sdk"
 import { ReviewSessionLaunchParams } from "@goddard-ai/review-session/schema"
 import { SessionWorktreeParams } from "@goddard-ai/session/schema"
+import type { AcpAdapterId } from "acp-client/node"
 import { z } from "zod"
 
-import { ACPAdapterName } from "../acp-adapters.ts"
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId, DaemonSessionIdParams } from "../id.ts"
 import { SessionInboxMetadataInput, type InboxItem } from "./inbox.ts"
@@ -62,7 +62,7 @@ export type InitialSessionConfigOption = z.infer<typeof InitialSessionConfigOpti
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
-  agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]).optional(),
+  agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]).optional(),
   cwd: z.string(),
   launchLeaseId: z.string().optional(),
   localCheckout: SessionLocalCheckoutParams.optional(),
@@ -205,7 +205,7 @@ export type SessionLaunchBranch = z.infer<typeof SessionLaunchBranch>
 
 /** Request payload used to inspect launch-time adapter and repository capabilities. */
 export const SessionLaunchPreviewRequest = z.strictObject({
-  agent: z.union([z.string() as z.ZodType<ACPAdapterName>, AgentDistribution]),
+  agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]),
   cwd: z.string(),
 })
 
