@@ -172,6 +172,10 @@ export function createConfigManager() {
       : normalizedName === basename(state.rootDir)
   }
 
+  function isMissingWatchTarget(error: unknown) {
+    return typeof error === "object" && error != null && "code" in error && error.code === "ENOENT"
+  }
+
   function ensureWatchTarget(state: WatchedConfigState, onChange: () => void) {
     if (closed) {
       return
@@ -188,28 +192,51 @@ export function createConfigManager() {
 
     closeWatchTarget(state)
 
-    const watcher = watch(nextTarget.watchedDir, (eventType, filename) => {
-      if (closed || state.watcher !== watcher) {
+    let watcher: FSWatcher
+    try {
+      watcher = watch(nextTarget.watchedDir, (eventType, filename) => {
+        if (closed || state.watcher !== watcher) {
+          return
+        }
+
+        const previousWatchMode = state.watchMode ?? nextTarget.watchMode
+        const previousWatchedDir = state.watchedDir ?? nextTarget.watchedDir
+
+        ensureWatchTarget(state, onChange)
+
+        if (eventType !== "change" && eventType !== "rename") {
+          return
+        }
+
+        if (
+          previousWatchMode !== state.watchMode ||
+          previousWatchedDir !== state.watchedDir ||
+          shouldHandleWatchEvent(state, eventType, previousWatchMode, filename ?? null)
+        ) {
+          onChange()
+        }
+      })
+    } catch (error) {
+      if (closed) {
         return
       }
 
-      const previousWatchMode = state.watchMode ?? nextTarget.watchMode
-      const previousWatchedDir = state.watchedDir ?? nextTarget.watchedDir
+      logger.log("config.watcher_degraded", {
+        watchScope: state.scope,
+        watchRoot: nextTarget.watchedDir,
+        configPath: state.configPath,
+        errorMessage: getErrorMessage(error),
+      })
 
-      ensureWatchTarget(state, onChange)
-
-      if (eventType !== "change" && eventType !== "rename") {
+      if (isMissingWatchTarget(error)) {
+        if (nextTarget.watchMode === "root" && !existsSync(nextTarget.watchedDir)) {
+          ensureWatchTarget(state, onChange)
+        }
         return
       }
 
-      if (
-        previousWatchMode !== state.watchMode ||
-        previousWatchedDir !== state.watchedDir ||
-        shouldHandleWatchEvent(state, eventType, previousWatchMode, filename ?? null)
-      ) {
-        onChange()
-      }
-    })
+      throw error
+    }
 
     watcher.on("error", (error) => {
       if (state.watcher !== watcher) {
