@@ -7,11 +7,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import {
-  getAcpRegistryCacheDir,
-  getGlobalConfigPath,
-  getLocalConfigPath,
-} from "@goddard-ai/paths/node"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import type { GetSessionHistoryResponse } from "@goddard-ai/schema/daemon"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
@@ -642,70 +638,6 @@ test("daemon marks pending title generation as failed when provider config is pr
   })
 
   await send(client, "session.shutdown", { id: created.session.id })
-})
-
-test("daemon lists adapters through the shared registry service and config default", async () => {
-  await useTempHome()
-  const repoDir = await createRepoFixture()
-  const registryCacheDir = getAcpRegistryCacheDir()
-  const adapterDir = join(registryCacheDir, "pi-acp")
-  await mkdir(join(registryCacheDir, ".git"), { recursive: true })
-  await mkdir(adapterDir, { recursive: true })
-  await writeFile(
-    join(registryCacheDir, ".goddard-registry-state.json"),
-    JSON.stringify({
-      lastAttemptedSyncAt: "2026-04-11T00:00:00.000Z",
-      lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
-      lastError: null,
-    }),
-    "utf8",
-  )
-  await writeFile(
-    join(adapterDir, "agent.json"),
-    JSON.stringify(
-      {
-        id: "pi-acp",
-        name: "pi ACP",
-        version: "0.0.25",
-        description: "ACP adapter for pi coding agent",
-        repository: "https://github.com/svkozak/pi-acp",
-        authors: ["Sergii Kozak <svkozak@gmail.com>"],
-        license: "MIT",
-        distribution: {
-          npx: {
-            package: "pi-acp@0.0.25",
-          },
-        },
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  )
-  await writeFile(
-    getGlobalConfigPath(),
-    JSON.stringify({
-      session: {
-        agent: "pi-acp",
-      },
-    }),
-    "utf8",
-  )
-
-  const daemon = await startServer({ useExistingHome: true })
-  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-
-  const response = await send(client, "adapter.list", { cwd: repoDir })
-
-  expect(response.defaultAdapterId).toBe("pi-acp")
-  expect(response.registrySource).toBe("cache")
-  expect(response.lastSuccessfulSyncAt).toBe("2026-04-11T00:00:00.000Z")
-  expect(response.adapters).toHaveLength(1)
-  expect(response.adapters[0]).toMatchObject({
-    id: "pi-acp",
-    unofficial: true,
-    source: "registry",
-  })
 })
 
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {

@@ -48,6 +48,7 @@ import {
   type AgentInputStream,
   type AgentOutputStream,
 } from "acp-client"
+import type { AcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
 import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
@@ -64,7 +65,6 @@ import {
   type SessionDiagnosticEvent,
 } from "../../../../core/daemon/src/persistence/session-state.ts"
 import { db } from "../../../../core/daemon/src/persistence/store.ts"
-import type { ACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
 import { prepareFreshWorktree } from "../../../../core/daemon/src/worktrees/bootstrap.ts"
 import { createWorktree } from "../../../../core/daemon/src/worktrees/index.ts"
 import { createWorktreePluginManager } from "../../../../core/daemon/src/worktrees/plugin-manager.ts"
@@ -974,7 +974,7 @@ export function createSessionManager(input: {
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
   events: SessionEventEmitter
   configManager: ConfigManager
-  registryService: ACPRegistryService
+  registryService: AcpRegistryService
   idleSessionShutdownTimeoutMs?: number
 }) {
   const activeSessions = new Map<SessionId, ActiveSession>()

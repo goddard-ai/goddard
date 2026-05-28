@@ -2,7 +2,6 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import {
-  GODDARD_ACP_REGISTRY_CACHE_DIRECTORY,
   GODDARD_APP_STATE_FILENAME,
   GODDARD_AUTH_TOKEN_FILENAME,
   GODDARD_CACHE_DIRECTORY_NAME,
@@ -52,11 +51,6 @@ export function getGoddardCacheDir(): string {
     process.env.XDG_CACHE_HOME || join(resolveHomeDir(), ".cache"),
     GODDARD_CACHE_DIRECTORY_NAME,
   )
-}
-
-/** Returns the OS cache directory reserved for the ACP registry clone. */
-export function getAcpRegistryCacheDir(): string {
-  return join(getGoddardCacheDir(), GODDARD_ACP_REGISTRY_CACHE_DIRECTORY)
 }
 
 /** Returns the global root config file path. */

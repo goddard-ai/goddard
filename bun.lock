@@ -338,6 +338,7 @@
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
+        "acp-client": "catalog:",
         "zod": "catalog:",
       },
     },

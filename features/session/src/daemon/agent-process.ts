@@ -13,11 +13,10 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
 import type { AgentInputStream, AgentOutputStream } from "acp-client"
-import type { AcpAdapterId } from "acp-client/node"
+import type { AcpAdapterId, AcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
 import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
-import type { ACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
 import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
@@ -162,7 +161,7 @@ export async function spawnAgentProcess(params: {
   cwd: string
   agentBinDir: string
   env?: Record<string, string>
-  registryService: ACPRegistryService
+  registryService: AcpRegistryService
   registry?: Record<string, AgentDistribution>
 }): Promise<AgentProcessHandle> {
   let agent = params.agent

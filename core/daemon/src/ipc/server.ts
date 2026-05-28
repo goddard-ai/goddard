@@ -16,6 +16,7 @@ import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
+import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
 import type { BackendClient } from "../backend.ts"
@@ -24,7 +25,6 @@ import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext } from "../context.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
 import { configureDbSchema, db } from "../persistence/store.ts"
-import { createACPRegistryService } from "../session/registry.ts"
 import type { DaemonServer } from "./types.ts"
 
 const daemonPlugins = composePlugins([
@@ -59,7 +59,7 @@ export async function startDaemonServer(
   const configManager = setupContext?.configManager ?? createConfigManager()
   const ownsConfigManager = setupContext == null
 
-  const registryService = createACPRegistryService()
+  const registryService = createAcpRegistryService()
   let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {

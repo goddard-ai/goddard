@@ -1,9 +1,9 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
 import { createAcpClient } from "acp-client"
+import { createAcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
 
-import { createACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
 import { spawnAgentProcess } from "./agent-process.ts"
 
 /** Starts one raw ACP adapter and returns a client connection for inspection commands. */
@@ -14,7 +14,7 @@ async function startAdapterInspection(adapter: string, cwd: string) {
     agent: adapter,
     cwd,
     agentBinDir: os.tmpdir(),
-    registryService: createACPRegistryService(),
+    registryService: createAcpRegistryService(),
   })
   try {
     const sessionUpdates: acp.AnyMessage[] = []

@@ -25,9 +25,6 @@ export const GODDARD_SESSION_PERMISSIONS_FILENAME = "session-permissions.json"
 /** Filename used for daemon-managed pull request location metadata. */
 export const GODDARD_MANAGED_PR_LOCATIONS_FILENAME = "managed-pr-locations.json"
 
-/** Directory name used for the cached ACP registry clone. */
-export const GODDARD_ACP_REGISTRY_CACHE_DIRECTORY = "acp-registry"
-
 /** Directory name used for app-only user preference files. */
 export const GODDARD_USER_DIRECTORY = "user"
 
