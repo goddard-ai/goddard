@@ -54,7 +54,7 @@
   - TypeScript type aliases and interfaces, except types inferred from a same-name Zod schema
 - Comments should explain the non-obvious what or why. Do not add `@param` or `@returns` boilerplate, and do not restate the code.
 - Maintain code comments when editing nearby logic. If a change makes an existing comment stale, update or remove the comment in the same patch.
-- Add short comments for non-obvious correctness constraints, invariants, external workarounds, or edge-case failure modes.
+- For patches, add short comments only when non-obvious code structure, such as control flow, helper state, retry logic, synchronization, or error handling, is needed to handle a specific constraint; name the race, invariant, platform behavior, ordering requirement, or failure mode, especially if observed in production/CI or covered by a test, but do not restate obvious code behavior, overfit to one test, or speculate beyond the evidence.
 - Do not add comments that merely narrate the code, restate names/types, or compensate for code that should instead be renamed or simplified.
 - Minimize churn: touch as few files as possible, avoid unrelated cleanup or formatting, and do not rename or move files unless necessary.
 - If refactoring is required for correctness, keep it mechanical and separate from behavior changes when possible.

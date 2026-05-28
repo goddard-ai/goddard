@@ -229,6 +229,8 @@ export function createConfigManager() {
       })
 
       if (isMissingWatchTarget(error)) {
+        // fs.watch can lose the root to CI cleanup after target resolution; retrying lets
+        // the next pass fall back to watching the parent directory.
         if (nextTarget.watchMode === "root" && !existsSync(nextTarget.watchedDir)) {
           ensureWatchTarget(state, onChange)
         }
