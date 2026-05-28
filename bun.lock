@@ -2434,7 +2434,7 @@
 
     "router": ["router@2.2.0", "", { "dependencies": { "debug": "^4.4.0", "depd": "^2.0.0", "is-promise": "^4.0.0", "parseurl": "^1.3.3", "path-to-regexp": "^8.0.0" } }, "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ=="],
 
-    "rouzer": ["rouzer@5.1.0", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.21.1", "alien-middleware": "^0.11.6" }, "peerDependencies": { "zod": ">=4" } }, "sha512-YuA6a4eOcE+YRgBELIh9HsV2eKaUGhljkz74Eq3DRn47m+NZecQO93XjSMYtYQtE4qm4w5DdoBBtWlxWo033dA=="],
+    "rouzer": ["rouzer@5.1.1", "", { "dependencies": { "@hattip/core": "^0.0.49", "@remix-run/route-pattern": "^0.21.1", "alien-middleware": "^0.11.6" }, "peerDependencies": { "zod": ">=4" } }, "sha512-nHbPaM8fAKI3HVFoRxe5U+k44LQW+eWZBonHJYsr+D/qSiuywe9EXnJm88e2Gsrtg8JdNci5J4cgqQTCOR/JKQ=="],
 
     "run-applescript": ["run-applescript@7.1.0", "", {}, "sha512-DPe5pVFaAsinSaV6QjQ6gdiedWDcRCbUuiQfQa2wmWV7+xC9bGulGI8+TdRmoFkAPaBXk8CrAbnlY2ISniJ47Q=="],
 

@@ -1,15 +1,17 @@
 [install]
 minimumReleaseAge = 1209600 # 14 days
 minimumReleaseAgeExcludes = [
-  "@clack/core",
-  "@clack/prompts",
   "@agentclientprotocol/sdk",
+  "@remix-run/route-pattern",
   "acp-client",
   "ai-sdk-json-schema",
   "electrobun",
   "powerkeys",
   "preact-sigma",
   "radashi",
+  "rouzer",
+
+  # Turbo
   "turbo",
   "@turbo/darwin-64",
   "@turbo/darwin-arm64",
@@ -25,7 +27,6 @@ minimumReleaseAgeExcludes = [
   "@tsrx/eslint-plugin",
   "@tsrx/preact",
   "@tsrx/prettier-plugin",
-  "@tsrx/ripple",
   "@tsrx/typescript-plugin",
   "@tsrx/vite-plugin-preact",
   "esrap",
