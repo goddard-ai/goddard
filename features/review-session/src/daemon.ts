@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type InferProvides } from "@goddard-ai/daemon-plugin"
 import {
   listReviewSessions,
   startReviewSync,
@@ -11,30 +11,12 @@ import {
   type ReviewSyncResult,
   type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
-import {
-  sessionPlugin,
-  type SessionEventEmitter,
-  type SessionWorktreeLifecycleState,
-} from "@goddard-ai/session/daemon"
-import type { GetSessionWorktreeResponse } from "@goddard-ai/session/schema"
+import { sessionPlugin, type SessionWorktreeLifecycleState } from "@goddard-ai/session/daemon"
 import { getErrorMessage } from "radashi"
 
 import { reviewSessionIpcRoutes } from "./daemon-ipc.ts"
 import type { ReviewSessionResponse } from "./schema.ts"
-
-/** Narrow session feature extension surface consumed by review-session runtime orchestration. */
-type SessionExtension = {
-  getSession: (id: DaemonSessionId) => Promise<DaemonSession>
-  getWorktree: (id: DaemonSessionId) => Promise<GetSessionWorktreeResponse>
-  requireWorktree: (id: DaemonSessionId) => Promise<SessionWorktreeLifecycleState>
-  listWorktrees: () => Promise<SessionWorktreeLifecycleState[]>
-  findWorktreeByDir: (worktreeDir: string) => Promise<SessionWorktreeLifecycleState | null>
-  isActive: (id: DaemonSessionId) => boolean
-  emitDiagnostic: (id: DaemonSessionId, type: string, detail?: Record<string, unknown>) => void
-  events: SessionEventEmitter
-}
 
 /** In-process watcher task for one mounted review-sync session. */
 type ReviewSessionRuntime = {
@@ -43,7 +25,7 @@ type ReviewSessionRuntime = {
 }
 
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
-function createReviewSessionManager(session: SessionExtension) {
+function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>["session"]) {
   const runtimes = new Map<DaemonSessionId, ReviewSessionRuntime>()
   const pendingLaunchMounts = new Set<DaemonSessionId>()
 
