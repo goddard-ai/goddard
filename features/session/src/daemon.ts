@@ -2,26 +2,12 @@ import { definePlugin } from "@goddard-ai/daemon-plugin"
 import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import { createSessionEventEmitter, type SessionEventEmitter } from "./daemon/events.ts"
-import { createSessionManager, type SessionManager } from "./daemon/manager.ts"
+import { createSessionEventEmitter } from "./daemon/events.ts"
+import { createSessionManager } from "./daemon/manager.ts"
 
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export { type SessionEventEmitter, type SessionEvents } from "./daemon/events.ts"
-
-/** First-class session methods exposed to other daemon feature plugins. */
-type SessionExtension = {
-  create: SessionManager["newSession"] extends (input: { request: infer TRequest }) => unknown
-    ? (request: TRequest) => ReturnType<SessionManager["newSession"]>
-    : never
-  workforce: SessionManager["getWorkforce"]
-  shutdown: SessionManager["shutdownSession"]
-  prompt: SessionManager["promptSession"]
-  recordTurnAttentionActivity: SessionManager["recordTurnAttentionActivity"]
-  resolveTokenScope: SessionManager["resolveTokenScope"]
-  allowPullRequest: SessionManager["allowPullRequest"]
-  events: SessionEventEmitter
-}
 
 export const sessionPlugin = definePlugin({
   name: "session",
@@ -91,7 +77,7 @@ export const sessionPlugin = definePlugin({
           resolveTokenScope: (token) => sessionManager.resolveTokenScope(token),
           allowPullRequest: (id, prNumber) => sessionManager.allowPullRequest(id, prNumber),
           events,
-        } satisfies SessionExtension,
+        },
       },
       close: async () => {
         await sessionManager.close()
