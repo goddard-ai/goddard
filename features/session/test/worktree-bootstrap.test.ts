@@ -5,8 +5,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { prepareFreshWorktree } from "../src/worktrees/bootstrap.ts"
-import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
+import { prepareFreshWorktree } from "../src/daemon/worktrees/bootstrap.ts"
+import { createWorktree, deleteWorktree } from "../src/daemon/worktrees/index.ts"
 
 const cleanup: string[] = []
 const originalPath = process.env.PATH

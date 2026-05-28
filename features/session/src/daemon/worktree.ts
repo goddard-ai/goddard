@@ -4,7 +4,7 @@ import { resolve } from "node:path"
 import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
-import { deleteWorktree } from "../../../../core/daemon/src/worktrees/index.ts"
+import { deleteWorktree } from "./worktrees/index.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 

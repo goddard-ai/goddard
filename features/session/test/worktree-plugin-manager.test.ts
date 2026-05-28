@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
-import { createConfigManager } from "../src/config-manager.ts"
-import { readMergedRootConfig } from "../src/resolvers/config.ts"
-import { createWorktree, deleteWorktree } from "../src/worktrees/index.ts"
-import { createWorktreePluginManager } from "../src/worktrees/plugin-manager.ts"
-import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
+import { createConfigManager } from "../../../core/daemon/src/config-manager.ts"
+import { readMergedRootConfig } from "../../../core/daemon/src/resolvers/config.ts"
+import { createWorktree, deleteWorktree } from "../src/daemon/worktrees/index.ts"
+import { createWorktreePluginManager } from "../src/daemon/worktrees/plugin-manager.ts"
+import { defaultPlugin } from "../src/daemon/worktrees/plugins/default.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME

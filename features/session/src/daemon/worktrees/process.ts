@@ -1,4 +1,4 @@
-/** Async subprocess helpers shared by daemon-owned worktree integrations. */
+/** Async subprocess helpers shared by session-owned worktree integrations. */
 import { spawn } from "node:child_process"
 
 /**

@@ -17,7 +17,7 @@ import {
   type UnresolvedModelLoadPlan,
 } from "ai-sdk-json-schema"
 
-import { runCommand } from "../../../../core/daemon/src/worktrees/process.ts"
+import { runCommand } from "./worktrees/process.ts"
 
 export {
   AdapterConfigurationError,

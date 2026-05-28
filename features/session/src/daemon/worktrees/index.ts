@@ -1,4 +1,4 @@
-/** Daemon-owned worktree creation and cleanup helpers with pluggable strategies. */
+/** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
 import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"

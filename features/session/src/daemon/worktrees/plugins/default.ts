@@ -1,4 +1,4 @@
-/** Default worktree plugin that creates linked git worktrees under daemon control. */
+/** Default worktree plugin that creates linked git worktrees for sessions. */
 import * as crypto from "node:crypto"
 import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"

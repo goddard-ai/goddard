@@ -1,4 +1,4 @@
-/** Daemon-owned loader for custom worktree plugins declared in global config. */
+/** Session-owned loader for custom worktree plugins declared in global config. */
 import { access } from "node:fs/promises"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -6,16 +6,35 @@ import type { WorktreePluginReference } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import hashSum from "hash-sum"
 
-import type { ConfigManager, RootConfigSnapshot } from "../config-manager.ts"
-import { createLogger } from "../logging.ts"
-
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 type LoadedWorktreePluginSet = {
   signature: string
   plugins: WorktreePlugin[]
 }
 
-/** Daemon-owned contract for loading custom worktree plugins from root config. */
+type WorktreeRootConfigSnapshot = {
+  config: {
+    worktrees?: {
+      plugins?: WorktreePluginReference[]
+    }
+  }
+  globalRoot: string
+  version: number
+}
+
+type WorktreeConfigManager = {
+  getRootConfig: (cwd: string) => Promise<WorktreeRootConfigSnapshot>
+}
+
+type WorktreePluginLogger = {
+  log: (event: string, fields?: Record<string, unknown>) => void
+}
+
+const noopLogger: WorktreePluginLogger = {
+  log() {},
+}
+
+/** Session-owned contract for loading custom worktree plugins from root config. */
 export interface WorktreePluginManager {
   getPlugins: (cwd: string) => Promise<WorktreePlugin[]>
 }
@@ -24,10 +43,10 @@ export interface WorktreePluginManager {
  * Creates a loader that resolves configured custom worktree plugins from the global config.
  */
 export function createWorktreePluginManager(input: {
-  configManager: ConfigManager
-  logger?: ReturnType<typeof createLogger>
+  configManager: WorktreeConfigManager
+  logger?: WorktreePluginLogger
 }) {
-  const logger = input.logger ?? createLogger()
+  const logger = input.logger ?? noopLogger
   const lastSuccessfulLoads = new Map<string, LoadedWorktreePluginSet>()
 
   async function getPlugins(cwd: string) {
@@ -73,7 +92,7 @@ export function createWorktreePluginManager(input: {
  */
 async function loadConfiguredWorktreePlugins(params: {
   references: WorktreePluginReference[]
-  snapshot: RootConfigSnapshot
+  snapshot: WorktreeRootConfigSnapshot
 }) {
   const plugins: WorktreePlugin[] = []
   const seenNames = new Set<string>()
@@ -104,7 +123,7 @@ async function loadConfiguredWorktreePlugins(params: {
  */
 async function loadConfiguredWorktreePlugin(params: {
   reference: WorktreePluginReference
-  snapshot: RootConfigSnapshot
+  snapshot: WorktreeRootConfigSnapshot
 }) {
   const moduleNamespace =
     params.reference.type === "path"
@@ -121,7 +140,7 @@ async function loadConfiguredWorktreePlugin(params: {
  */
 async function importConfiguredPathPlugin(
   reference: Extract<WorktreePluginReference, { type: "path" }>,
-  snapshot: RootConfigSnapshot,
+  snapshot: WorktreeRootConfigSnapshot,
 ) {
   const resolvedPath = path.isAbsolute(reference.path)
     ? path.resolve(reference.path)
@@ -198,7 +217,7 @@ function describeWorktreePluginReference(reference: WorktreePluginReference, exp
 /**
  * Uses the config snapshot root as the cache partition for one daemon-wide plugin registry.
  */
-function createPluginSetCacheKey(snapshot: RootConfigSnapshot) {
+function createPluginSetCacheKey(snapshot: WorktreeRootConfigSnapshot) {
   return path.resolve(snapshot.globalRoot)
 }
 

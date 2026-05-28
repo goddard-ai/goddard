@@ -5,8 +5,12 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { createWorktree, deleteWorktree, resolveWorktreePlugin } from "../src/worktrees/index.ts"
-import { defaultPlugin } from "../src/worktrees/plugins/default.ts"
+import {
+  createWorktree,
+  deleteWorktree,
+  resolveWorktreePlugin,
+} from "../src/daemon/worktrees/index.ts"
+import { defaultPlugin } from "../src/daemon/worktrees/plugins/default.ts"
 
 const cleanup: string[] = []
 const originalHome = process.env.HOME

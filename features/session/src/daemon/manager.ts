@@ -60,10 +60,7 @@ import {
   type SessionDiagnosticEvent,
 } from "../../../../core/daemon/src/persistence/session-state.ts"
 import { db } from "../../../../core/daemon/src/persistence/store.ts"
-import { prepareFreshWorktree } from "../../../../core/daemon/src/worktrees/bootstrap.ts"
-import { createWorktree } from "../../../../core/daemon/src/worktrees/index.ts"
-import { createWorktreePluginManager } from "../../../../core/daemon/src/worktrees/plugin-manager.ts"
-import { defaultPlugin } from "../../../../core/daemon/src/worktrees/plugins/default.ts"
+import type { ACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
 import {
   spawnAgentProcess,
   waitForAgentProcessExit,
@@ -120,6 +117,10 @@ import {
   type PreparedSessionWorktree,
   type SessionWorktreeState,
 } from "./worktree.ts"
+import { prepareFreshWorktree } from "./worktrees/bootstrap.ts"
+import { createWorktree } from "./worktrees/index.ts"
+import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
+import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
 export { resolveAgentProcessSpec } from "./agent-process.ts"
 
