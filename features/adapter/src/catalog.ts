@@ -1,10 +1,10 @@
 /** Shared ACP adapter catalog merge helpers for the adapter feature. */
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 
-import { AdapterCatalogEntry, type AdapterCatalogEntryType } from "./schema.ts"
+import { AdapterCatalogEntry } from "./schema.ts"
 
 /** Sorts adapter catalog entries into a stable user-facing order. */
-export function sortAdapterCatalogEntries(entries: AdapterCatalogEntryType[]) {
+export function sortAdapterCatalogEntries(entries: AdapterCatalogEntry[]) {
   return [...entries].sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name, undefined, {
       sensitivity: "base",
@@ -35,8 +35,8 @@ export function createConfigAdapterCatalogEntries(
 
 /** Applies config-declared registry overrides on top of the upstream adapter catalog. */
 export function mergeAdapterCatalogEntries(
-  registryEntries: AdapterCatalogEntryType[],
-  configEntries: AdapterCatalogEntryType[],
+  registryEntries: AdapterCatalogEntry[],
+  configEntries: AdapterCatalogEntry[],
 ) {
   const mergedById = new Map(registryEntries.map((entry) => [entry.id, entry] as const))
 

@@ -3,13 +3,13 @@ import type { UserConfig } from "@goddard-ai/schema/config"
 
 import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from "./catalog.ts"
 import type {
-  AdapterCatalogEntryType,
+  AdapterCatalogEntry,
   ListAdaptersRequestType,
   ListAdaptersResponse,
 } from "./schema.ts"
 
 type AdapterRegistrySnapshot = Omit<ListAdaptersResponse, "adapters" | "defaultAdapterId"> & {
-  adapters: AdapterCatalogEntryType[]
+  adapters: AdapterCatalogEntry[]
 }
 
 export type AdapterRegistryService = {
