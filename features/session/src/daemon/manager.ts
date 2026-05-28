@@ -16,7 +16,6 @@ import type {
   GetSessionHistoryResponse,
   GetSessionWorkforceResponse,
   InboxHeadline,
-  InboxItem,
   InboxScope,
   InitialPromptOption,
   ListSessionsRequest,
@@ -399,68 +398,8 @@ export interface LoadSessionParams extends SessionLaunchParams {
   id: SessionId
 }
 
-/** Exposes the daemon operations for creating, connecting to, and controlling sessions. */
-export type SessionManager = {
-  newSession: (params: NewSessionParams) => Promise<DaemonSession>
-  loadSession: (params: LoadSessionParams) => Promise<DaemonSession>
-  listSessions: (params: ListSessionsRequest) => Promise<ListSessionsResponse>
-  connectSession: (id: SessionId) => Promise<DaemonSession>
-  getSession: (id: SessionId) => Promise<DaemonSession>
-  getHistory: (params: GetSessionHistoryRequest) => Promise<GetSessionHistoryResponse>
-  getChanges: (id: SessionId) => Promise<GetSessionChangesResponse>
-  getComposerSuggestions: (
-    params: SessionComposerSuggestionsRequest,
-  ) => Promise<SessionComposerSuggestionsResponse>
-  getDraftSuggestions: (
-    params: SessionDraftSuggestionsRequest,
-  ) => Promise<SessionComposerSuggestionsResponse>
-  getLaunchPreview: (params: SessionLaunchPreviewRequest) => Promise<SessionLaunchPreviewResponse>
-  releaseLaunchLease: (
-    params: ReleaseSessionLaunchLeaseRequest,
-  ) => Promise<ReleaseSessionLaunchLeaseResponse>
-  getSubpackages: (params: SessionSubpackagesRequest) => Promise<SessionSubpackagesResponse>
-  getDiagnostics: (id: SessionId) => Promise<GetSessionDiagnosticsResponse>
-  getWorktree: (id: SessionId) => Promise<GetSessionWorktreeResponse>
-  requireWorktree: (id: SessionId) => Promise<SessionWorktreeLifecycleState>
-  listWorktrees: () => Promise<SessionWorktreeLifecycleState[]>
-  findWorktreeByDir: (worktreeDir: string) => Promise<SessionWorktreeLifecycleState | null>
-  isActive: (id: SessionId) => boolean
-  emitDiagnostic: (id: SessionId, type: string, detail?: Record<string, unknown>) => void
-  getWorkforce: (id: SessionId) => Promise<GetSessionWorkforceResponse>
-  declareInitiative: (id: SessionId, title: string) => Promise<DaemonSession>
-  reportBlocker: (
-    id: SessionId,
-    reason: string,
-    metadata?: SessionInboxMetadataInput,
-  ) => Promise<DaemonSession>
-  reportTurnEnded: (id: SessionId, metadata?: SessionInboxMetadataInput) => Promise<DaemonSession>
-  recordTurnAttentionActivity: (
-    id: SessionId,
-    metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string },
-  ) => Promise<{ scope: InboxScope; headline: InboxHeadline; turnId: string | null }>
-  resolveTokenScope: (token: string) => Promise<{
-    readonly sessionId: SessionId
-    readonly owner: string | null
-    readonly repo: string | null
-    readonly allowedPrNumbers: readonly number[]
-  } | null>
-  allowPullRequest: (id: SessionId, prNumber: number) => Promise<void>
-  completeSession: (id: SessionId) => Promise<InboxItem | null>
-  sendMessage: (id: SessionId, message: acp.AnyMessage) => Promise<void>
-  setSessionConfigOption: (params: SetSessionConfigOptionRequest) => Promise<DaemonSession>
-  setSessionModel: (params: SetSessionModelRequest) => Promise<DaemonSession>
-  cancelSessionTurn: (id: SessionId) => Promise<CancelSessionResponse>
-  steerSession: (
-    id: SessionId,
-    prompt: string | acp.ContentBlock[],
-  ) => Promise<SteerSessionResponse>
-  promptSession: (id: SessionId, prompt: string | acp.ContentBlock[]) => Promise<acp.PromptResponse>
-  shutdownSession: (id: SessionId) => Promise<boolean>
-  sessionSubscriberConnected: (id: SessionId) => Promise<void>
-  sessionSubscriberDisconnected: (id: SessionId) => Promise<void>
-  resolveSessionIdByToken: (token: string) => Promise<SessionId>
-  close: () => Promise<void>
-}
+/** Exposes the inferred daemon operations for creating, connecting to, and controlling sessions. */
+export type SessionManager = ReturnType<typeof createSessionManager>
 
 /** Ensures the daemon's system prompt is prepended to the first user prompt sent to an agent. */
 export function injectSystemPrompt(
@@ -1037,7 +976,7 @@ export function createSessionManager(input: {
   configManager: ConfigManager
   registryService: ACPRegistryService
   idleSessionShutdownTimeoutMs?: number
-}): SessionManager {
+}) {
   const activeSessions = new Map<SessionId, ActiveSession>()
   const launchLeaseStore = createLaunchLeaseStore({ logger })
   const sessionSubscriberCounts = new Map<SessionId, number>()
