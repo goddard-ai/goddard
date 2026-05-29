@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 
 import { resolveRuntimeConfig } from "../src/config.ts"
@@ -155,12 +156,14 @@ test(
     expect(
       db.sessions
         .findMany()
-        .map(({ repository, prNumber, stopReason }) => ({
+        .map(({ repository, prNumber, stopReason }: DaemonSession) => ({
           repository,
           prNumber,
           stopReason,
         }))
-        .sort((left, right) => (left.repository ?? "").localeCompare(right.repository ?? "")),
+        .sort((left: DaemonSession, right: DaemonSession) =>
+          (left.repository ?? "").localeCompare(right.repository ?? ""),
+        ),
     ).toEqual([
       {
         repository: "other/repo",

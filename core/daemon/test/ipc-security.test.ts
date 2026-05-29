@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
@@ -189,7 +190,7 @@ test("daemon submit request enforces trusted repo context and records created PR
   ])
   expect(db.sessions.get("ses_42")?.permissions?.allowedPrNumbers).toEqual([42])
   expect(
-    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }) => ({
+    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }: DaemonPullRequest) => ({
       host,
       owner,
       repo,
@@ -293,7 +294,7 @@ test("daemon reply request records pull request checkout locations", async () =>
   })
 
   expect(
-    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }) => ({
+    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }: DaemonPullRequest) => ({
       host,
       owner,
       repo,

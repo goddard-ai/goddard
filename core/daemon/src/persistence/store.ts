@@ -2,14 +2,12 @@ import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import { DaemonPullRequest, DaemonWorkforce } from "@goddard-ai/schema/daemon/store"
-import type { sessionDbSchema } from "@goddard-ai/session/daemon"
 import {
   kind,
   kindstore,
   UnrecoverableStoreOpenError,
   type DatabaseOptions,
   type KindRegistry,
-  type Kindstore,
 } from "kindstore"
 import { z } from "zod"
 
@@ -37,10 +35,7 @@ const coreDbSchema = {
   ),
 }
 
-type DaemonStore = Kindstore<
-  typeof coreDbSchema & typeof sessionDbSchema & KindRegistry,
-  typeof metadata
->
+type DaemonStore = any
 
 let activeSchema: KindRegistry = coreDbSchema
 let activeConnection: StoreConnectionOptions = { filename: getDatabasePath() }

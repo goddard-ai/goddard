@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import type { GetSessionHistoryResponse } from "@goddard-ai/schema/daemon"
+import type { DaemonSessionDiagnosticEvent } from "@goddard-ai/schema/daemon/store"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
@@ -1119,7 +1120,7 @@ test("agent process exit clears pending idle auto-shutdown timers", async () => 
 
   const diagnosticTypes = getDiagnosticEventTypes(created.session.id)
   expect(
-    diagnosticTypes.filter((type) => type === "session_idle_shutdown_timer_started").length,
+    diagnosticTypes.filter((type: string) => type === "session_idle_shutdown_timer_started").length,
   ).toBeGreaterThanOrEqual(2)
   expect(diagnosticTypes).toContain("session_idle_shutdown_timer_cancelled")
   expect(diagnosticTypes).not.toContain("session_idle_shutdown_timer_expired")
@@ -2588,7 +2589,7 @@ function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>
     db.sessionDiagnostics.first({
       where: { sessionId },
     })?.events ?? []
-  ).map((event) => event.type)
+  ).map((event: DaemonSessionDiagnosticEvent) => event.type)
 }
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000) {

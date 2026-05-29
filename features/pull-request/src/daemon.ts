@@ -2,6 +2,7 @@ import { definePlugin, type Plugin } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { db } from "../../../core/daemon/src/persistence/store.ts"
@@ -31,7 +32,7 @@ function requireRepositorySession(session: PullRequestSessionRecord | null) {
   }
 }
 
-async function recordPullRequest(record: Parameters<typeof db.pullRequests.create>[0]) {
+async function recordPullRequest(record: Omit<DaemonPullRequest, "id" | "updatedAt">) {
   return db.pullRequests.putByUnique(
     {
       host: record.host,

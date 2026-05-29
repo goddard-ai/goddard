@@ -7,8 +7,12 @@ import type {
   SessionConnection,
   SessionHistoryTurn,
 } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSessionTurnDraft,
+  DaemonWorkforce,
+  DaemonWorktree,
+} from "@goddard-ai/schema/daemon/store"
 import type * as acp from "acp-client/protocol"
-import type { KindInput, KindOutput } from "kindstore"
 
 import type { SessionConnectionMode } from "../../../../core/daemon/src/persistence/session-state.ts"
 import { db } from "../../../../core/daemon/src/persistence/store.ts"
@@ -16,10 +20,10 @@ import { toCompletedTurnInput } from "./turn-history.ts"
 import type { PreparedSessionWorktree, SessionWorktreeState } from "./worktree.ts"
 
 type SessionId = DaemonSession["id"]
-type SessionDoc = KindOutput<typeof db.schema.sessions>
-type SessionTurnDraftDoc = KindOutput<typeof db.schema.sessionTurnDrafts>
-type SessionWorktreeDoc = KindOutput<typeof db.schema.worktrees>
-type SessionWorkforceDoc = KindOutput<typeof db.schema.workforces>
+type SessionDoc = DaemonSession
+type SessionTurnDraftDoc = DaemonSessionTurnDraft
+type SessionWorktreeDoc = DaemonWorktree
+type SessionWorkforceDoc = DaemonWorkforce
 
 /** Loads persisted session-side artifacts that need to be reused during launch. */
 export type ExistingSessionArtifacts = {
@@ -271,7 +275,7 @@ export function persistLaunchedSession(params: {
   }
 
   if (params.workforceMetadata) {
-    const nextWorkforce: KindInput<typeof db.schema.workforces> = {
+    const nextWorkforce: Omit<DaemonWorkforce, "id"> = {
       sessionId: params.id,
       rootDir: params.workforceMetadata.rootDir,
       agentId: params.workforceMetadata.agentId,

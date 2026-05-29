@@ -36,6 +36,12 @@ import type {
   SetSessionModelRequest,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
+import type {
+  DaemonSessionDiagnosticEvent,
+  DaemonSessionTurn,
+  DaemonSessionTurnDraft,
+  DaemonWorktree,
+} from "@goddard-ai/schema/daemon/store"
 import type { GetSessionWorktreeResponse } from "@goddard-ai/session/schema"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
@@ -49,7 +55,6 @@ import {
 } from "acp-client"
 import type { AcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
-import type { KindInput, KindOutput } from "kindstore"
 import { getErrorMessage, omit } from "radashi"
 
 import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
@@ -143,9 +148,9 @@ type SessionId = DaemonSession["id"]
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
-type SessionDoc = KindOutput<typeof db.schema.sessions>
-type SessionTurnDraftDoc = KindOutput<typeof db.schema.sessionTurnDrafts>
-type SessionWorktreeDoc = KindOutput<typeof db.schema.worktrees>
+type SessionDoc = DaemonSession
+type SessionTurnDraftDoc = DaemonSessionTurnDraft
+type SessionWorktreeDoc = DaemonWorktree
 
 type SessionTitleGeneratorConfig = NonNullable<
   NonNullable<UserConfig["sessionTitles"]>["generator"]
@@ -910,7 +915,7 @@ export function createSessionManager(input: {
 
   function updateSession(
     id: SessionId,
-    update: Partial<KindInput<typeof db.schema.sessions>>,
+    update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
     diagnosticLogger?: ReturnType<typeof createLogger>,
   ) {
@@ -1595,8 +1600,11 @@ export function createSessionManager(input: {
               .findMany({
                 where: { sessionId: session.id },
               })
-              .sort((left, right) => left.sequence - right.sequence)
-              .flatMap((turn) => turn.messages),
+              .sort(
+                (left: DaemonSessionTurn, right: DaemonSessionTurn) =>
+                  left.sequence - right.sequence,
+              )
+              .flatMap((turn: DaemonSessionTurn) => turn.messages),
             ...(draftRecord?.messages ?? []),
           ],
         })
@@ -2183,7 +2191,7 @@ export function createSessionManager(input: {
           )
         })
 
-      const nextUpdate: Partial<KindInput<typeof db.schema.sessions>> = {}
+      const nextUpdate: Partial<DaemonSession> = {}
       if (code !== 0 && code !== null) {
         nextUpdate.status = "error"
         nextUpdate.errorMessage = `Exited with code ${code}`
@@ -3017,7 +3025,7 @@ export function createSessionManager(input: {
         mode: session.connectionMode,
         activeDaemonSession: session.activeDaemonSession,
       }),
-      events: (diagnosticsRecord?.events ?? []).map((event) => ({
+      events: (diagnosticsRecord?.events ?? []).map((event: DaemonSessionDiagnosticEvent) => ({
         ...event,
         sessionId: session.id,
       })),
@@ -3050,7 +3058,7 @@ export function createSessionManager(input: {
     await ready
     return db.worktrees
       .findMany()
-      .map((record) => toSessionWorktreeLifecycleState(record, record.sessionId))
+      .map((record: DaemonWorktree) => toSessionWorktreeLifecycleState(record, record.sessionId))
   }
 
   async function findWorktreeByDir(worktreeDir: string) {
@@ -3058,7 +3066,8 @@ export function createSessionManager(input: {
     const record =
       db.worktrees
         .findMany()
-        .find((worktreeRecord) => worktreeRecord.worktreeDir === worktreeDir) ?? null
+        .find((worktreeRecord: DaemonWorktree) => worktreeRecord.worktreeDir === worktreeDir) ??
+      null
     return record ? toSessionWorktreeLifecycleState(record, record.sessionId) : null
   }
 

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
@@ -240,8 +241,10 @@ test(
     expect(firstExitCode).toBe(0)
 
     const firstSessions = db.sessions.findMany()
-    const firstSessionIds = new Set(firstSessions.map((session) => session.id))
-    expect(firstSessions.map((session) => session.agentName)).toEqual(["Node Agent A"])
+    const firstSessionIds = new Set(firstSessions.map((session: DaemonSession) => session.id))
+    expect(firstSessions.map((session: DaemonSession) => session.agentName)).toEqual([
+      "Node Agent A",
+    ])
 
     await writeGlobalRootConfig({
       session: {
@@ -266,7 +269,7 @@ test(
 
     const secondSession = db.sessions
       .findMany()
-      .find((session) => firstSessionIds.has(session.id) === false)
+      .find((session: DaemonSession) => firstSessionIds.has(session.id) === false)
     expect(secondSession?.agentName).toBe("Node Agent B")
 
     for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
