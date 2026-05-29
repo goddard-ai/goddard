@@ -149,6 +149,35 @@ export default {
     userSelect: "text",
   }),
 
+  userPromptClampedContent: css({
+    maxHeight: "360px",
+    overflow: "hidden",
+  }),
+
+  seeFullMessageButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifySelf: "start",
+    gap: "6px",
+    border: "0",
+    padding: "0",
+    backgroundColor: "transparent",
+    boxShadow: "none",
+    color: "fg.muted",
+    cursor: "pointer",
+    fontSize: "0.82rem",
+    fontWeight: "650",
+    lineHeight: "1.35",
+    _hover: {
+      color: "fg.default",
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+  }),
+
   messageActions: css({
     display: "flex",
     paddingTop: "8px",

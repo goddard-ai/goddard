@@ -1,6 +1,6 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import { BookOpen, Check, Copy, Link2 } from "lucide-react"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { BookOpen, Check, ChevronDown, Copy, Link2 } from "lucide-react"
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import type {
   SessionTranscriptContentBlock,
@@ -125,6 +125,69 @@ component TranscriptContentBlock(props: {
   }
 }
 
+component UserPromptContent(props: {
+  lastTextBlockIndex: number;
+  message: SessionTranscriptTextMessage;
+  messageId: string;
+}) {
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [clamped, setClamped] = useState(false)
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [props.messageId])
+
+  useLayoutEffect(() => {
+    const contentElement = contentRef.current
+
+    if (!contentElement) {
+      return
+    }
+
+    const updateClampedState = () => {
+      setClamped(contentElement.scrollHeight > contentElement.clientHeight + 1)
+    }
+
+    updateClampedState()
+
+    const resizeObserver = new ResizeObserver(updateClampedState)
+    resizeObserver.observe(contentElement)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [expanded, props.messageId])
+
+  <div
+    ref={contentRef}
+    aria-expanded={expanded ? "true" : undefined}
+    class={cx(styles.transcriptContent, !expanded && styles.userPromptClampedContent)}
+  >
+    for (const block of props.message.content; index blockIndex) {
+      <TranscriptContentBlock
+        key={`${props.message.id}:block:${blockIndex}`}
+        {block}
+        {blockIndex}
+        lastTextBlockIndex={props.lastTextBlockIndex}
+        message={props.message}
+      />
+    }
+  </div>
+  if (clamped && !expanded) {
+    <button
+      class={styles.seeFullMessageButton}
+      type="button"
+      onClick={() => {
+        setExpanded(true)
+      }}
+    >
+      <span>"See full message"</span>
+      <ChevronDown size={15} strokeWidth={2.2} />
+    </button>
+  }
+}
+
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
 export component TextTranscriptRow(props: {
   row: {
@@ -165,14 +228,18 @@ export component TextTranscriptRow(props: {
             : cx(styles.assistantMessage, styles.assistantBubble)}
         >
           <div class={styles.transcriptContent}>
-            for (const block of message.content; index blockIndex) {
-              <TranscriptContentBlock
-                key={`${message.id}:block:${blockIndex}`}
-                {block}
-                {blockIndex}
-                {lastTextBlockIndex}
-                {message}
-              />
+            if (isUserMessage) {
+              <UserPromptContent {lastTextBlockIndex} {message} messageId={message.id} />
+            } else {
+              for (const block of message.content; index blockIndex) {
+                <TranscriptContentBlock
+                  key={`${message.id}:block:${blockIndex}`}
+                  {block}
+                  {blockIndex}
+                  {lastTextBlockIndex}
+                  {message}
+                />
+              }
             }
           </div>
           if (!isUserMessage && rawMarkdown.length > 0) {
