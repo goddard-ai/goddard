@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { once } from "node:events"
 import { request, type Server } from "node:http"
 import { createServer as createTcpServer } from "node:net"
-import { afterEach, describe, expect, test, vi } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
@@ -84,17 +84,29 @@ async function createFixture() {
     client: createNodeClient(address, routes),
     publishSystemAlert: systemAlerts.publish,
     publishUserAlert: userAlerts.publish,
+    waitForSystemAlertSubscription: systemAlerts.waitForSubscriber,
+    waitForUserAlertSubscription: userAlerts.waitForSubscriber,
   }
 }
 
 function createTestStream<TPayload>() {
   const listeners = new Set<(payload: TPayload) => void>()
+  const subscriberWaiters = new Set<() => void>()
 
   return {
     publish(payload: TPayload) {
       for (const listener of listeners) {
         listener(payload)
       }
+    },
+    waitForSubscriber() {
+      if (listeners.size > 0) {
+        return Promise.resolve()
+      }
+
+      return new Promise<void>((resolve) => {
+        subscriberWaiters.add(resolve)
+      })
     },
     async *subscribe(filter: (payload: TPayload) => boolean, signal: AbortSignal) {
       const queue: TPayload[] = []
@@ -111,6 +123,10 @@ function createTestStream<TPayload>() {
       }
 
       listeners.add(listener)
+      for (const resolve of subscriberWaiters) {
+        resolve()
+      }
+      subscriberWaiters.clear()
       signal.addEventListener("abort", abort)
       try {
         while (!signal.aborted) {
@@ -357,7 +373,7 @@ describe("core/ipc", () => {
   })
 
   test("streams ndjson events to subscribed node clients", async () => {
-    const { client, publishSystemAlert } = await createFixture()
+    const { client, publishSystemAlert, waitForSystemAlertSubscription } = await createFixture()
     const abortController = new AbortController()
     cleanups.push(async () => {
       abortController.abort()
@@ -366,16 +382,23 @@ describe("core/ipc", () => {
     const stream = await client.systemAlert(undefined, { signal: abortController.signal })
     const alertPromise = readFirst(stream)
 
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForSystemAlertSubscription()
     publishSystemAlert({ message: "Heads up", level: "warn" })
 
     await expect(alertPromise).resolves.toEqual({ message: "Heads up", level: "warn" })
   })
 
   test("applies stream filters on the server side", async () => {
-    const { client, publishUserAlert } = await createFixture()
+    const { client, publishUserAlert, waitForUserAlertSubscription } = await createFixture()
     const abortController = new AbortController()
-    const onMessage = vi.fn()
+    const delivered: Array<{
+      userId: string
+      message: string
+    }> = []
+    let resolveDelivered: (() => void) | undefined
+    const deliveredPromise = new Promise<void>((resolve) => {
+      resolveDelivered = resolve
+    })
     cleanups.push(async () => {
       abortController.abort()
     })
@@ -383,7 +406,8 @@ describe("core/ipc", () => {
     const stream = await client.userAlert({ userId: "user-1" }, { signal: abortController.signal })
     const readPromise = (async () => {
       for await (const payload of stream) {
-        onMessage(payload)
+        delivered.push(payload)
+        resolveDelivered?.()
       }
     })()
     cleanups.push(async () => {
@@ -391,13 +415,13 @@ describe("core/ipc", () => {
       await readPromise.catch(() => {})
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 25))
+    await waitForUserAlertSubscription()
     publishUserAlert({ userId: "user-2", message: "skip me" })
     publishUserAlert({ userId: "user-1", message: "deliver me" })
+    await deliveredPromise
     await new Promise((resolve) => setTimeout(resolve, 25))
 
-    expect(onMessage).toHaveBeenCalledTimes(1)
-    expect(onMessage).toHaveBeenCalledWith({ userId: "user-1", message: "deliver me" })
+    expect(delivered).toEqual([{ userId: "user-1", message: "deliver me" }])
   })
 
   test("rejects stream filters when the server-side validator fails", async () => {
