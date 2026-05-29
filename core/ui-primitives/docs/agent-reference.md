@@ -12,9 +12,9 @@ import {
   MenuItem,
   Modal,
   Popover,
-  Tooltip,
   setOverlayPortalRoots,
   startFloatingPosition,
+  Tooltip,
 } from "@goddard-ai/ui-primitives"
 ```
 
@@ -28,16 +28,16 @@ import {
 
 ## Public exports
 
-| Export | Kind | Use when |
-| --- | --- | --- |
-| `Modal` | component | Blocking dialog with focus ownership and portal rendering. |
-| `Popover` | component | Anchored overlay with floating positioning, dismissal, and optional focus behavior. |
-| `Menu` | component | Menu popover with keyboard navigation. |
-| `MenuItem` | component | Selectable item inside `Menu`; closes the containing menu after selection. |
-| `Tooltip` | component | Non-interactive tooltip attached to one trigger child. |
-| `OverlayPortal` | component | Low-level portal helper for overlay primitives. |
-| `setOverlayPortalRoots` | function | Configure `dialog` and `menu` host elements from application code. Do not call from libraries. |
-| `startFloatingPosition` | function | Position a custom floating element against an element or `{ x, y }` point. |
+| Export                  | Kind      | Use when                                                                                       |
+| ----------------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `Modal`                 | component | Blocking dialog with focus ownership and portal rendering.                                     |
+| `Popover`               | component | Anchored overlay with floating positioning, dismissal, and optional focus behavior.            |
+| `Menu`                  | component | Menu popover with keyboard navigation.                                                         |
+| `MenuItem`              | component | Selectable item inside `Menu`; closes the containing menu after selection.                     |
+| `Tooltip`               | component | Non-interactive tooltip attached to one trigger child.                                         |
+| `OverlayPortal`         | component | Low-level portal helper for overlay primitives.                                                |
+| `setOverlayPortalRoots` | function  | Configure `dialog` and `menu` host elements from application code. Do not call from libraries. |
+| `startFloatingPosition` | function  | Position a custom floating element against an element or `{ x, y }` point.                     |
 
 Exported types: `MenuProps`, `MenuItemProps`, `ModalProps`, `ModalCloseReason`, `PopoverProps`, `PopoverCloseReason`, `OverlayPortalRoot`, `OverlayPortalRootResolver`, `FloatingPoint`, `FloatingReference`, and `FloatingPositionOptions`.
 

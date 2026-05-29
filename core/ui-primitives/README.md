@@ -34,8 +34,8 @@ Primary tradeoff: the package keeps behavior centralized and styling external. Y
 This example demonstrates the core contract: configure portal roots once, own `open` as a signal, anchor the overlay to a DOM element, and style externally.
 
 ```tsx
-import { signal } from "@preact/signals"
 import { Popover, setOverlayPortalRoots } from "@goddard-ai/ui-primitives"
+import { signal } from "@preact/signals"
 
 setOverlayPortalRoots({
   dialog: () => document.getElementById("dialog-root"),
