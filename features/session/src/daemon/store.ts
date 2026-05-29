@@ -3,7 +3,6 @@ import {
   DaemonSessionDiagnostics,
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
-  DaemonWorkforce,
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
 import { kind } from "kindstore"
@@ -51,6 +50,4 @@ export const sessionDbSchema = {
   }),
 
   worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
-
-  workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
 }
