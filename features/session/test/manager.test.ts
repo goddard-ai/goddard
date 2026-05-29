@@ -23,7 +23,7 @@ afterEach(async () => {
   }
 
   while (cleanupDirs.length > 0) {
-    await rm(cleanupDirs.pop()!, { recursive: true, force: true })
+    await rm(cleanupDirs.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
 
