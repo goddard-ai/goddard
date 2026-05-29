@@ -36,30 +36,25 @@
 
 ## Code Style And Patch Discipline
 
-- Make the smallest correct change. Preserve existing architecture, naming, and file layout unless the task requires refactoring.
-- Counteract overengineering bias. Implement only the narrow change required by the current request.
-- Prefer private over public, local over exported, concrete implementation over abstraction, one code path over configurable behavior, existing APIs over new APIs, and existing files over new files.
-- Do not add new public exports, optional parameters, config flags, interfaces or base classes, generic utility modules, lifecycle hooks, extension/plugin systems, endpoint variants, or future-proof abstractions unless explicitly required.
-- Do not add code until it is needed by the current change. Avoid speculative helpers, abstractions, options, and extension points.
-- Do not export a symbol unless the current change imports it from another module. Keep single-module implementation details private.
-- Prefer readability and local reasoning over new abstractions.
-- Avoid extracting local helpers that are only used once; prefer inline logic until reuse or a clear readability win justifies abstraction.
-- Name helper functions like actions or questions instead of variables. Prefer clear prefixes such as `find`, `build`, `resolve`, `parse`, `create`, `is`, `has`, or `get`; avoid a `From` infix unless needed to distinguish two otherwise identical names.
-- Prefer feature-local modules with sharp names and focused ownership over broad catch-all files. Split helpers by concern when a module starts mixing filters, type guards, search, formatting, data shaping, or actions.
-- Use broad filenames like `presentation.ts` only when the contents are truly a small, cohesive presentation layer; otherwise choose narrower names such as `filters.ts`, `entity-kind.ts`, `search.ts`, or `format.ts`.
-- Do not declare explicit function return types.
-- Add human-readable `/** ... */` description comments to:
-  - exported modules
-  - non-trivial top-level functions
-  - TypeScript type aliases and interfaces, except types inferred from a same-name Zod schema
-- Comments should explain the non-obvious what or why. Do not add `@param` or `@returns` boilerplate, and do not restate the code.
-- Maintain code comments when editing nearby logic. If a change makes an existing comment stale, update or remove the comment in the same patch.
-- For patches, add short comments only when non-obvious code structure, such as control flow, helper state, retry logic, synchronization, or error handling, is needed to handle a specific constraint; name the race, invariant, platform behavior, ordering requirement, or failure mode, especially if observed in production/CI or covered by a test, but do not restate obvious code behavior, overfit to one test, or speculate beyond the evidence.
-- Do not add comments that merely narrate the code, restate names/types, or compensate for code that should instead be renamed or simplified.
+- Make the smallest responsible change that fixes the current problem. Preserve existing architecture, naming, and file layout unless changing them is the simplest way to make the fix correct, readable, and maintainable.
+- Prefer local, concrete, private implementation over exported, configurable, or abstract structure. Follow the existing local pattern with the lowest architectural impact.
+- Counteract overengineering bias: do not add new public exports, optional parameters, config flags, interfaces, base classes, generic utility modules, lifecycle hooks, plugin systems, endpoint variants, or future-proof abstractions unless the current change requires them.
+- Do not add code before it is needed. Avoid speculative helpers, abstractions, options, extension points, or alternate code paths.
+- Do not export a symbol unless another module imports it or a framework/tooling contract requires it. Keep single-module implementation details private.
+- Prefer readability and local reasoning over new abstractions. Avoid extracting local helpers that are only used once unless the helper produces a clear readability win or isolates a meaningful constraint.
+- Name helper functions by the operation or predicate they represent. Prefer clear verbs or predicates such as `find`, `build`, `resolve`, `parse`, `create`, `is`, `has`, or `get`; avoid a `From` infix unless needed to distinguish two otherwise identical names.
+- Prefer feature-local modules with sharp names and focused ownership over broad catch-all files. Split helpers by concern only when the current change would otherwise make a module mix unrelated filtering, type guards, search, formatting, data shaping, or actions.
+- Use broad filenames like `presentation.ts` only when the contents are truly a small, cohesive presentation layer. Otherwise choose narrower names such as `filters.ts`, `entity-kind.ts`, `search.ts`, or `format.ts`.
+- Avoid explicit function return types unless they are needed to preserve a public contract, constrain inference, clarify recursion, or prevent an unsafe or unclear inferred type.
+- Add human-readable `/** ... */` description comments for exported modules, TypeScript type aliases and interfaces except types inferred from a same-name Zod schema, and top-level functions whose purpose, constraints, or domain role are not obvious from their name and body.
+- Comments should explain non-obvious correctness constraints, invariants, external/platform workarounds, or edge-case failure modes. Do not add `@param` or `@returns` boilerplate, narrate the code, restate names/types, or compensate for code that should instead be renamed or simplified.
+- For patches, add short comments only when non-obvious code structure, such as control flow, helper state, retry logic, synchronization, or error handling, is needed to handle a specific constraint. Name the race, invariant, platform behavior, ordering requirement, or failure mode, especially if observed in production/CI or covered by a test, but do not overfit to one test or speculate beyond the evidence.
+- Maintain nearby comments when editing logic. If a change makes an existing comment stale, update or remove the comment in the same patch.
 - Minimize churn: touch as few files as possible, avoid unrelated cleanup or formatting, and do not rename or move files unless necessary.
 - If refactoring is required for correctness, keep it mechanical and separate from behavior changes when possible.
+- Fix the smallest responsible class of bug rather than overfitting to the exact failing example.
 - After implementation, perform a YAGNI pass and remove unnecessary configurability, exposure, abstraction, files, functions, classes, or unused code.
-- When uncertain, follow the existing local pattern with the lowest architectural impact.
+- Prefer rules in this order: correctness, compatibility with existing behavior, local consistency, minimal public surface, minimal churn.
 
 ## Git
 
