@@ -134,11 +134,11 @@ export component SessionLaunchForm(props: {
       classes={launchInputClasses}
       helperText={<tsrx>
         <GoodKeyboardShortcut expression="Enter" />
-        " launches, "
+        " launches at the end, "
         <GoodKeyboardShortcut expression="Shift+Enter" />
         " inserts a newline, "
         <GoodKeyboardShortcut expression="Mod+Enter" />
-        " launches from the dialog, and "
+        " launches anywhere, and "
         <span>"@, $, or /"</span>
         " open suggestions."
       </tsrx>}

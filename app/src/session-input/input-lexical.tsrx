@@ -18,6 +18,7 @@ import {
   getSessionInputMenuAnchorPosition,
   type SessionInputMenuState,
 } from "./input-menu-detection.ts"
+import { isSessionInputCaretAtPromptEnd } from "./input-selection.ts"
 import type { SessionInputPromptBlocks } from "./input.tsrx"
 
 export const sessionInputInitialConfig = {
@@ -77,6 +78,10 @@ export component SessionInputPlugins(props: {
         }
 
         if (event?.shiftKey) {
+          return false
+        }
+
+        if (!event?.metaKey && !event?.ctrlKey && !isSessionInputCaretAtPromptEnd()) {
           return false
         }
 

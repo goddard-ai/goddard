@@ -80,7 +80,9 @@ export component SessionInput(props: {
     props.helperText === undefined
       ? <tsrx>
           <GoodKeyboardShortcut expression="Enter" />
-          " sends, "
+          " sends at the end, "
+          <GoodKeyboardShortcut expression="Mod+Enter" />
+          " sends anywhere, "
           <GoodKeyboardShortcut expression="Shift+Enter" />
           " inserts a newline, and "
           <span>"@, $, or /"</span>
