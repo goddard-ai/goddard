@@ -19,6 +19,11 @@ export default {
     fontWeight: "680",
     lineHeight: "1.2",
   }),
+  link: css({
+    color: "inherit",
+    cursor: "pointer",
+    textDecoration: "none",
+  }),
   muted: css({
     color: "muted",
   }),

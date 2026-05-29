@@ -136,6 +136,16 @@ function serializeChip(chip: ComposerChipData) {
     } satisfies ComposerPromptBlock
   }
 
+  if (chip.kind === "link") {
+    return {
+      type: "resource_link",
+      name: chip.label,
+      uri: chip.uri,
+      title: chip.label,
+      description: chip.uri,
+    } satisfies ComposerPromptBlock
+  }
+
   return {
     type: "resource_link",
     name: chip.label,

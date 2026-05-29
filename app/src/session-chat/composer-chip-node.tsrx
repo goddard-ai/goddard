@@ -10,7 +10,7 @@ import type {
   SerializedLexicalNode,
 } from "lexical"
 import { $applyNodeReplacement, DecoratorNode } from "lexical"
-import { BookOpen, Command, File, Folder } from "lucide-react"
+import { BookOpen, Command, File, Folder, Link2 } from "lucide-react"
 import type { JSX } from "preact"
 
 import styles from "./composer-chip-node.style.ts"
@@ -45,9 +45,16 @@ export type ComposerSlashCommandChipData = {
   inputHint: string | null;
 }
 
+/** Web link chip data inserted from one pasted URL. */
+export type ComposerWebLinkChipData = {
+  kind: "link";
+  label: string;
+  uri: string;
+}
+
 /** One atomic chip payload stored inside the Lexical session composer. */
 export type ComposerChipData =
-  ComposerFilesystemChipData | ComposerSkillChipData | ComposerSlashCommandChipData
+  ComposerFilesystemChipData | ComposerSkillChipData | ComposerSlashCommandChipData | ComposerWebLinkChipData
 
 /** Serialized JSON shape used when Lexical copies or persists one chip node. */
 export type SerializedComposerChipNode = SerializedLexicalNode & {
@@ -58,6 +65,10 @@ export type SerializedComposerChipNode = SerializedLexicalNode & {
 export function chipTextFallback(chip: ComposerChipData) {
   if (chip.kind === "slash_command") {
     return `/${chip.label}`
+  }
+
+  if (chip.kind === "link") {
+    return chip.label
   }
 
   return `${chip.kind === "skill" ? "$" : "@"}${chip.label}`
@@ -87,6 +98,10 @@ function isComposerChipData(value: unknown) {
   if (record.kind === "slash_command") {
     return typeof record.label === "string" && typeof record.description === "string" &&
       (typeof record.inputHint === "string" || record.inputHint === null)
+  }
+
+  if (record.kind === "link") {
+    return typeof record.label === "string" && typeof record.uri === "string"
   }
 
   return false
@@ -132,6 +147,9 @@ component ChipIcon(props: { chip: ComposerChipData }) {
     case "slash_command":
       <Command size={14} strokeWidth={2.2} />
       break
+    case "link":
+      <Link2 size={14} strokeWidth={2.2} />
+      break
   }
 }
 
@@ -141,9 +159,29 @@ component ComposerChipView(props: { chip: ComposerChipData }) {
     <span class={cx(styles.muted)} aria-hidden="true">
       <ChipIcon chip={props.chip} />
     </span>
-    <span class={styles.label}>
-      {props.chip.kind === "slash_command" ? `/${props.chip.label}` : props.chip.label}
-    </span>
+    if (props.chip.kind === "link") {
+      <a
+        class={cx(styles.label, styles.link)}
+        href={props.chip.uri}
+        rel="noreferrer"
+        target="_blank"
+        title="Cmd-click to open"
+        onClick={(event) => {
+          if (!event.metaKey) {
+            event.preventDefault()
+            return
+          }
+
+          event.stopPropagation()
+        }}
+      >
+        {props.chip.label}
+      </a>
+    } else {
+      <span class={styles.label}>
+        {props.chip.kind === "slash_command" ? `/${props.chip.label}` : props.chip.label}
+      </span>
+    }
   </span>
 }
 

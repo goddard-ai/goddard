@@ -17,6 +17,15 @@ import {
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputPromptBlocks, SessionInputSuggestion } from "./input.tsrx"
 
+function isWebLinkUri(uri: string) {
+  try {
+    const url = new URL(uri)
+    return url.protocol === "http:" || url.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
 function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData {
   switch (suggestion.type) {
     case "slash_command":
@@ -63,6 +72,16 @@ export function clearSessionInputEditor(editor: LexicalEditor) {
 function createComposerChipFromPromptBlock(block: SessionInputPromptBlocks[number]) {
   if (block.type !== "resource_link") {
     return null
+  }
+
+  if (isWebLinkUri(block.uri)) {
+    const chip: ComposerChipData = {
+      kind: "link",
+      label: block.name,
+      uri: block.uri,
+    }
+
+    return chip
   }
 
   if (block.title?.endsWith(" skill")) {
@@ -151,6 +170,27 @@ export function insertSessionInputSuggestion(
       const paragraph = $createParagraphNode()
       paragraph.append($createComposerChipNode(chip), trailingSpace)
       $getRoot().append(paragraph)
+      trailingSpace.selectEnd()
+    },
+    { discrete: true },
+  )
+}
+
+export function insertSessionInputWebLink(
+  editor: LexicalEditor,
+  link: { label: string; uri: string },
+) {
+  editor.update(
+    () => {
+      const trailingSpace = $createTextNode(" ")
+      $insertNodes([
+        $createComposerChipNode({
+          kind: "link",
+          label: link.label,
+          uri: link.uri,
+        }),
+        trailingSpace,
+      ])
       trailingSpace.selectEnd()
     },
     { discrete: true },

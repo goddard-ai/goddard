@@ -57,6 +57,12 @@ test("serializeComposerEditorState preserves text order, slash chips, and resour
         detail: "./.agents/skills/preact-sigma/SKILL.md",
         source: "local",
       }),
+      $createTextNode(" and "),
+      $createComposerChipNode({
+        kind: "link",
+        label: "https://example.com/docs",
+        uri: "https://example.com/docs",
+      }),
     )
     $getRoot().append(paragraph)
   })
@@ -83,6 +89,17 @@ test("serializeComposerEditorState preserves text order, slash chips, and resour
       uri: "file:///repo/.agents/skills/preact-sigma/SKILL.md",
       title: "preact-sigma skill",
       description: "./.agents/skills/preact-sigma/SKILL.md",
+    },
+    {
+      type: "text",
+      text: " and ",
+    },
+    {
+      type: "resource_link",
+      name: "https://example.com/docs",
+      uri: "https://example.com/docs",
+      title: "https://example.com/docs",
+      description: "https://example.com/docs",
     },
   ] satisfies ComposerPromptBlock[])
 })

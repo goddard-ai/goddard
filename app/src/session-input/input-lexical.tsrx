@@ -8,11 +8,13 @@ import {
   KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
+  PASTE_COMMAND,
 } from "lexical"
 import { useEffect } from "preact/hooks"
 
 import { ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
 import { serializeComposerEditorState } from "~/session-chat/composer-content.ts"
+import { insertSessionInputWebLink } from "./input-editor-content.ts"
 import {
   detectSessionInputMenuState,
   getSessionInputMenuAnchorPosition,
@@ -27,6 +29,33 @@ export const sessionInputInitialConfig = {
   onError(error: Error) {
     throw error
   },
+}
+
+function readPastedWebLink(event: Event) {
+  if (typeof ClipboardEvent === "undefined" || !(event instanceof ClipboardEvent)) {
+    return null
+  }
+
+  const text = event.clipboardData?.getData("text/plain").trim()
+
+  if (!text || /\s/.test(text)) {
+    return null
+  }
+
+  try {
+    const url = new URL(text)
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null
+    }
+
+    return {
+      label: text,
+      uri: url.href,
+    }
+  } catch {
+    return null
+  }
 }
 
 export component SessionInputPlugins(props: {
@@ -136,12 +165,28 @@ export component SessionInputPlugins(props: {
       },
       COMMAND_PRIORITY_HIGH,
     )
+    const unregisterPaste = editor.registerCommand(
+      PASTE_COMMAND,
+      (event) => {
+        const link = readPastedWebLink(event)
+
+        if (!link) {
+          return false
+        }
+
+        event.preventDefault()
+        insertSessionInputWebLink(editor, link)
+        return true
+      },
+      COMMAND_PRIORITY_HIGH,
+    )
 
     return () => {
       unregisterEnter()
       unregisterArrowDown()
       unregisterArrowUp()
       unregisterEscape()
+      unregisterPaste()
     }
   }, [editor, props])
 
