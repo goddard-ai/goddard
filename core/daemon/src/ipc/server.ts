@@ -7,12 +7,12 @@ import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import { composePlugins, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
+import { $type, composeIpcRoutes, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
-import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
@@ -27,18 +27,42 @@ import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logg
 import { configureDbSchema, db } from "../persistence/store.ts"
 import type { DaemonServer } from "./types.ts"
 
-const daemonPlugins = composePlugins([
-  actionPlugin,
-  adapterPlugin,
-  authPlugin,
-  sessionPlugin,
-  inboxPlugin,
-  pullRequestPlugin,
-  reviewSessionPlugin,
-  loopPlugin,
-  workforcePlugin,
-])
-configureDbSchema(daemonPlugins.db)
+type DaemonPluginComposition = ReturnType<typeof composePlugins>
+type ComposedDaemonPlugin = DaemonPluginComposition["plugins"][number]
+
+const coreDaemonIpcRoutes = defineIpcRoutes({
+  daemon: http.resource("daemon", {
+    health: http.get("health", {
+      response: $type<{ ok: boolean }>(),
+    }),
+  }),
+})
+
+let daemonPlugins: DaemonPluginComposition | null = null
+
+function getDaemonPlugins() {
+  if (!daemonPlugins) {
+    daemonPlugins = composePlugins([
+      actionPlugin,
+      adapterPlugin,
+      authPlugin,
+      sessionPlugin,
+      inboxPlugin,
+      pullRequestPlugin,
+      reviewSessionPlugin,
+      loopPlugin,
+      workforcePlugin,
+    ])
+    configureDbSchema(daemonPlugins.db)
+  }
+
+  return daemonPlugins
+}
+
+/** Ensures daemon plugin composition has contributed schemas before tests reset the store. */
+export function initializeDaemonPluginComposition() {
+  getDaemonPlugins()
+}
 
 export async function startDaemonServer(
   client: BackendClient,
@@ -105,7 +129,7 @@ export async function startDaemonServer(
 
   const ipcServer = createServer({
     port: runtime.port,
-    routes: daemonIpcRoutes,
+    routes: composeIpcRoutes([coreDaemonIpcRoutes, getDaemonPlugins().ipcRoutes]),
     handlers: ipcHandlers as any,
     runHandler: ({ payload }, handler) => {
       const context: IpcRequestContext = {
@@ -195,7 +219,7 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
-  for (const plugin of daemonPlugins.plugins) {
+  for (const plugin of getDaemonPlugins().plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
       (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
     )
@@ -234,10 +258,7 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient
   }
 }
 
-function createPluginBackendContext(
-  plugin: (typeof daemonPlugins.plugins)[number],
-  client: BackendClient,
-) {
+function createPluginBackendContext(plugin: ComposedDaemonPlugin, client: BackendClient) {
   const routes = composeBackendRoutes([
     ...(plugin.consumes ?? []).map((consumedPlugin) => consumedPlugin.backendRoutes ?? {}),
     plugin.backendRoutes ?? {},
@@ -290,7 +311,7 @@ function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string
   }
 }
 
-function createPluginDbContext(plugin: (typeof daemonPlugins.plugins)[number]) {
+function createPluginDbContext(plugin: ComposedDaemonPlugin) {
   const schema: Record<string, unknown> = {}
   for (const consumedPlugin of plugin.consumes ?? []) {
     Object.assign(schema, consumedPlugin.db)

@@ -67,6 +67,10 @@ export type SessionEvents = {
       request: CreateSessionRequest
     }
   >
+  "lifecycle.sessionPersisted": EventListener<{
+    sessionId: DaemonSessionId
+    request: CreateSessionRequest
+  }>
   "lifecycle.sessionActivated": EventListener<{
     sessionId: DaemonSessionId
     worktree: SessionWorktreeLifecycleState | null

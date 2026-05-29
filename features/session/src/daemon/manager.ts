@@ -55,7 +55,7 @@ import {
 } from "acp-client"
 import type { AcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
-import { getErrorMessage, omit } from "radashi"
+import { getErrorMessage } from "radashi"
 
 import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
 import { SessionContext } from "../../../../core/daemon/src/context.ts"
@@ -2285,10 +2285,6 @@ export function createSessionManager(input: {
       existingSession?.metadata,
       resolvedRequest.metadata,
     )
-    const existingWorkforceMetadata = existingArtifacts.workforceRecord
-      ? omit(existingArtifacts.workforceRecord, ["id", "sessionId"])
-      : undefined
-    const workforceMetadata = resolvedRequest.workforce ?? existingWorkforceMetadata
     const sessionContext = buildSessionContext({
       sessionId: id,
       request: resolvedRequest,
@@ -2299,7 +2295,7 @@ export function createSessionManager(input: {
     const sessionLogContext = buildSessionLogContext({
       request: resolvedRequest,
       cwd,
-      workforce: workforceMetadata ?? undefined,
+      workforce: resolvedRequest.workforce,
       extraContext: worktree
         ? {
             worktreeDir: worktree.state.worktreeDir,
@@ -2487,10 +2483,12 @@ export function createSessionManager(input: {
         existingSession,
         initialTurn,
         existingWorktreeRecord: existingArtifacts.worktreeRecord,
-        existingWorkforceRecord: existingArtifacts.workforceRecord,
         worktree,
-        workforceMetadata,
         sessionRecord,
+      })
+      await input.events.emit("lifecycle.sessionPersisted", {
+        sessionId: id,
+        request: resolvedRequest,
       })
       emitDiagnostic(
         id,

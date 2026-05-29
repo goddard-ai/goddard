@@ -7,11 +7,7 @@ import type {
   SessionConnection,
   SessionHistoryTurn,
 } from "@goddard-ai/schema/daemon"
-import type {
-  DaemonSessionTurnDraft,
-  DaemonWorkforce,
-  DaemonWorktree,
-} from "@goddard-ai/schema/daemon/store"
+import type { DaemonSessionTurnDraft, DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type * as acp from "acp-client/protocol"
 
 import type { SessionConnectionMode } from "../../../../core/daemon/src/persistence/session-state.ts"
@@ -23,7 +19,6 @@ type SessionId = DaemonSession["id"]
 type SessionDoc = DaemonSession
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree
-type SessionWorkforceDoc = DaemonWorkforce
 
 /** Loads persisted session-side artifacts that need to be reused during launch. */
 export type ExistingSessionArtifacts = {
@@ -31,7 +26,6 @@ export type ExistingSessionArtifacts = {
   nextTurnSequence: number
   worktreeRecord: SessionWorktreeDoc | null
   worktree: SessionWorktreeState | null
-  workforceRecord: SessionWorkforceDoc | null
 }
 
 /** Internal launch request shape after the daemon has resolved the effective agent. */
@@ -73,7 +67,6 @@ export function resolveExistingSessionArtifacts(
       nextTurnSequence: 1,
       worktreeRecord: null,
       worktree: null,
-      workforceRecord: null,
     }
   }
 
@@ -85,17 +78,11 @@ export function resolveExistingSessionArtifacts(
     db.worktrees.first({
       where: { sessionId: id },
     }) ?? null
-  const workforceRecord =
-    db.workforces.first({
-      where: { sessionId: id },
-    }) ?? null
-
   return {
     draftRecord,
     nextTurnSequence: resolveLatestStoredTurnSequence(id) + 1,
     worktreeRecord,
     worktree: toSessionWorktreeState(worktreeRecord),
-    workforceRecord,
   }
 }
 
@@ -253,9 +240,7 @@ export function persistLaunchedSession(params: {
   existingSession: SessionDoc | null
   initialTurn: SessionHistoryTurn | null
   existingWorktreeRecord: SessionWorktreeDoc | null
-  existingWorkforceRecord: SessionWorkforceDoc | null
   worktree: PreparedSessionWorktree | null
-  workforceMetadata: CreateSessionRequest["workforce"] | undefined
   sessionRecord: ReturnType<typeof createSessionRecordUpdate>
 }) {
   if (params.initialTurn) {
@@ -271,20 +256,6 @@ export function persistLaunchedSession(params: {
       db.worktrees.put(params.existingWorktreeRecord.id, nextWorktree)
     } else {
       db.worktrees.create(nextWorktree)
-    }
-  }
-
-  if (params.workforceMetadata) {
-    const nextWorkforce: Omit<DaemonWorkforce, "id"> = {
-      sessionId: params.id,
-      rootDir: params.workforceMetadata.rootDir,
-      agentId: params.workforceMetadata.agentId,
-      requestId: params.workforceMetadata.requestId,
-    }
-    if (params.existingWorkforceRecord) {
-      db.workforces.put(params.existingWorkforceRecord.id, nextWorkforce)
-    } else {
-      db.workforces.create(nextWorkforce)
     }
   }
 

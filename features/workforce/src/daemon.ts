@@ -10,13 +10,17 @@ import {
 } from "./daemon/config.ts"
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
+import { workforceDbSchema } from "./daemon/store.ts"
 import type { WorkforceEventEnvelope } from "./schema.ts"
+
+export { workforceDbSchema } from "./daemon/store.ts"
 
 export const workforcePlugin = definePlugin({
   name: "workforce",
   consumes: [sessionPlugin],
+  db: workforceDbSchema,
   ipcRoutes: workforceIpcRoutes,
-  setup({ getIpcRequestContext, session }) {
+  setup({ db, getIpcRequestContext, session }) {
     const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
     const workforce = createWorkforceManager({
       session,
@@ -26,6 +30,30 @@ export const workforcePlugin = definePlugin({
         }
       },
     })
+    const unsubscribeSessionPersisted = session.events.on(
+      "lifecycle.sessionPersisted",
+      ({ request, sessionId }) => {
+        if (!request.workforce) {
+          return
+        }
+
+        const nextWorkforce = {
+          sessionId,
+          rootDir: request.workforce.rootDir,
+          agentId: request.workforce.agentId,
+          requestId: request.workforce.requestId,
+        }
+        const existingRecord =
+          db.workforces.first({
+            where: { sessionId },
+          }) ?? null
+        if (existingRecord) {
+          db.workforces.put(existingRecord.id, nextWorkforce)
+        } else {
+          db.workforces.create(nextWorkforce)
+        }
+      },
+    )
 
     async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
       const queue: WorkforceEventEnvelope[] = []
@@ -78,7 +106,10 @@ export const workforcePlugin = definePlugin({
 
       getIpcRequestContext().setSessionId(tokenScope.sessionId)
 
-      const { workforce: workforceRecord } = await session.getWorkforce(tokenScope.sessionId)
+      const workforceRecord =
+        db.workforces.first({
+          where: { sessionId: tokenScope.sessionId },
+        }) ?? null
       if (!workforceRecord || typeof workforceRecord.agentId !== "string") {
         throw new IpcClientError("Session is not attached to a workforce request")
       }
@@ -115,7 +146,10 @@ export const workforcePlugin = definePlugin({
     }
 
     return {
-      close: () => workforce.close(),
+      close: () => {
+        unsubscribeSessionPersisted()
+        workforce.close()
+      },
       ipcHandlers: {
         workforce: {
           start: async ({ body: { rootDir } }) => ({

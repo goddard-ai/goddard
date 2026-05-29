@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
-import { DaemonPullRequest, DaemonWorkforce } from "@goddard-ai/schema/daemon/store"
+import { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import {
   kind,
   kindstore,
@@ -21,8 +21,6 @@ const metadata = {
 }
 
 const coreDbSchema = {
-  workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
-
   pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
     "host_owner_repo_prNumber",
     {
