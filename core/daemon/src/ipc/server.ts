@@ -24,7 +24,7 @@ import { createConfigManager } from "../config-manager.ts"
 import { resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SetupContext } from "../context.ts"
 import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
-import { configureDbSchema, db } from "../persistence/store.ts"
+import { configureDbSchema, openDaemonStore, type DaemonStore } from "../persistence/store.ts"
 import type { DaemonServer } from "./types.ts"
 
 type DaemonPluginComposition = ReturnType<typeof composePlugins>
@@ -70,6 +70,7 @@ export async function startDaemonServer(
     port?: number
     agentBinDir?: string
     idleSessionShutdownTimeoutMs?: number
+    store?: DaemonStore
   } = {},
 ): Promise<DaemonServer> {
   const logger = createLogger()
@@ -82,6 +83,8 @@ export async function startDaemonServer(
     })
   const configManager = setupContext?.configManager ?? createConfigManager()
   const ownsConfigManager = setupContext == null
+  const store = options.store ?? openDaemonStore()
+  const ownsStore = options.store == null
 
   const registryService = createAcpRegistryService()
   let daemonUrl: string | undefined
@@ -108,10 +111,10 @@ export async function startDaemonServer(
     },
     authTokenStore: {
       set: (token) => {
-        db.metadata.set("authToken", token)
+        store.metadata.set("authToken", token)
       },
       delete: () => {
-        db.metadata.delete("authToken")
+        store.metadata.delete("authToken")
       },
     },
     configManager,
@@ -119,7 +122,7 @@ export async function startDaemonServer(
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client)
+  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, store)
   const ipcHandlers = {
     daemon: {
       health: async () => ({ ok: true }),
@@ -209,11 +212,18 @@ export async function startDaemonServer(
         port,
         daemonUrl,
       })
+      if (ownsStore) {
+        store.close()
+      }
     },
   }
 }
 
-async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient: BackendClient) {
+async function setupDaemonPlugins(
+  substrate: DaemonSetupSubstrate,
+  backendClient: BackendClient,
+  store: DaemonStore,
+) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const ipcHandlers: Record<string, unknown> = {}
@@ -226,7 +236,7 @@ async function setupDaemonPlugins(substrate: DaemonSetupSubstrate, backendClient
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
-        db: createPluginDbContext(plugin),
+        db: createPluginDbContext(plugin, store),
         backend: createPluginBackendContext(plugin, backendClient),
       },
       ...consumedExtensions,
@@ -311,7 +321,7 @@ function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string
   }
 }
 
-function createPluginDbContext(plugin: ComposedDaemonPlugin) {
+function createPluginDbContext(plugin: ComposedDaemonPlugin, store: DaemonStore) {
   const schema: Record<string, unknown> = {}
   for (const consumedPlugin of plugin.consumes ?? []) {
     Object.assign(schema, consumedPlugin.db)
@@ -321,14 +331,14 @@ function createPluginDbContext(plugin: ComposedDaemonPlugin) {
   const contextSchema: Record<string, unknown> = {}
   const context: Record<string, unknown> = {
     schema: contextSchema,
-    batch: (...args: unknown[]) => db.batch(...(args as never[])),
+    batch: (...args: unknown[]) => store.batch(...(args as never[])),
   }
 
   for (const key of Object.keys(schema)) {
-    contextSchema[key] = db.schema[key]
+    contextSchema[key] = store.schema[key]
     Object.defineProperty(context, key, {
       enumerable: true,
-      get: () => db[key],
+      get: () => store[key],
     })
   }
 

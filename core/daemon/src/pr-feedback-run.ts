@@ -8,7 +8,7 @@ import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createLogger } from "./logging.ts"
-import { db } from "./persistence/store.ts"
+import { openDaemonStore, type DaemonStore } from "./persistence/store.ts"
 import * as prompts from "./prompts/index.ts"
 
 /** Launch input for a daemon-managed PR feedback flow. */
@@ -19,6 +19,7 @@ export type PrFeedbackFlowInput = {
   agentBinDir: string
   env?: Record<string, string>
   configManager?: Pick<ConfigManager, "getRootConfig">
+  store?: DaemonStore
   resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
 }
 
@@ -59,13 +60,18 @@ function buildBackgroundSystemPrompt(): string {
 /** Creates the daemon session that handles one managed PR feedback event within the flow. */
 export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<number> {
   const logger = createLogger()
+  const store = input.store ?? openDaemonStore()
+  const ownsStore = input.store == null
   const projectDir =
-    (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(input.event))
+    (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(store, input.event))
   if (!projectDir) {
     logger.log("pr_feedback.repository_lookup_failed", {
       repository: `${input.event.owner}/${input.event.repo}`,
       prNumber: input.event.prNumber,
     })
+    if (ownsStore) {
+      store.close()
+    }
     return 1
   }
 
@@ -97,12 +103,16 @@ export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<num
       errorMessage: getErrorMessage(error),
     })
     return 1
+  } finally {
+    if (ownsStore) {
+      store.close()
+    }
   }
 }
 
-async function resolveProjectDir(event: FeedbackEvent): Promise<string | null> {
+async function resolveProjectDir(store: DaemonStore, event: FeedbackEvent): Promise<string | null> {
   return (
-    db.pullRequests.first({
+    store.pullRequests.first({
       where: {
         host: "github",
         owner: event.owner,

@@ -10,19 +10,19 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { db, resetDb } from "../src/persistence/store.ts"
+import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 let sharedHomeDir: string | null = null
+let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
-
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
 
   if (sharedHomeDir) {
     await rm(sharedHomeDir, { recursive: true, force: true })
@@ -527,7 +527,7 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
         reply: options.sdk?.pr?.reply ?? (async (_input: any) => ({ success: true })),
       },
     }),
-    { port: 0 },
+    { port: 0, store: db },
   )
 
   cleanup.push(async () => {
@@ -584,7 +584,7 @@ function createTestBackendClient(
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-home-"))
   process.env.HOME = sharedHomeDir
-  resetDb()
+  db = resetDb()
 }
 
 async function seedWorkforceSession(input: {

@@ -20,13 +20,14 @@ const metadata = {
 
 const coreDbSchema = {}
 
-type DaemonStore = any
+/** Runtime daemon store handle opened against the composed plugin schema. */
+export type DaemonStore = any
 
 let activeSchema: KindRegistry = coreDbSchema
 let activeConnection: StoreConnectionOptions = { filename: getDatabasePath() }
 
 /** Opens one kindstore handle for a concrete daemon store schema. */
-function createStore<const TSchema extends KindRegistry>(
+function openKindstore<const TSchema extends KindRegistry>(
   options: StoreConnectionOptions & { schema: keyof TSchema extends never ? never : TSchema },
 ) {
   if (options.filename !== ":memory:") {
@@ -47,30 +48,25 @@ function removeDatabaseArtifacts(filename: string) {
   }
 }
 
-function openStore(connection: StoreConnectionOptions) {
-  if (Object.keys(activeSchema).length === 0) {
-    return null as DaemonStore
-  }
-
+/** Opens one daemon store connection against the currently configured plugin schema. */
+export function openDaemonStore(
+  connection: StoreConnectionOptions = activeConnection,
+): DaemonStore {
   try {
-    return createStore({ ...connection, schema: activeSchema }) as DaemonStore
+    return openKindstore({ ...connection, schema: activeSchema }) as DaemonStore
   } catch (error) {
     if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
       throw error
     }
 
     removeDatabaseArtifacts(connection.filename)
-    return createStore({ ...connection, schema: activeSchema }) as DaemonStore
+    return openKindstore({ ...connection, schema: activeSchema }) as DaemonStore
   }
 }
 
-/** Sets the feature-contributed store schema before the shared daemon store is opened. */
+/** Sets the feature-contributed store schema before daemon store handles are opened. */
 export function configureDbSchema(pluginSchema: KindRegistry) {
   activeSchema = mergeDbSchema(pluginSchema)
-  if (process.env.NODE_ENV !== "test" || db) {
-    db?.close()
-    db = openStore(activeConnection)
-  }
 }
 
 function mergeDbSchema(pluginSchema: KindRegistry) {
@@ -86,16 +82,8 @@ function mergeDbSchema(pluginSchema: KindRegistry) {
   return schema
 }
 
-/**
- * Shared kindstore handle for daemon persistence.
- * Tests that override HOME should call `resetDb()` after changing it.
- */
-export let db: DaemonStore = null!
-
-/** Recreates the shared kindstore handle, optionally with explicit connection options. */
+/** Opens a fresh daemon store handle for tests, optionally with explicit connection options. */
 export function resetDb(connection: StoreConnectionOptions = { filename: getDatabasePath() }) {
   activeConnection = connection
-  db?.close()
-  db = openStore(connection)
-  return db
+  return openDaemonStore(connection)
 }

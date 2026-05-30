@@ -15,7 +15,7 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { db, resetDb } from "../src/persistence/store.ts"
+import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
@@ -33,6 +33,7 @@ const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let sharedHomeDir: string | null = null
+let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 function findSessionPromptRequest(history: GetSessionHistoryResponse) {
   return history.turns
@@ -58,7 +59,7 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -2410,6 +2411,7 @@ async function startServer(
   const daemon = await startDaemonServer(createTestBackendClient(), {
     port: 0,
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+    store: db,
   })
 
   cleanup.push(async () => {
@@ -2471,7 +2473,7 @@ function createTestBackendClient(): BackendClient {
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-home-"))
   process.env.HOME = sharedHomeDir
-  resetDb()
+  db = resetDb()
 }
 
 async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {

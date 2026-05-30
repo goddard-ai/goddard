@@ -5,7 +5,11 @@ import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
-import { resetDb } from "../../../core/daemon/src/persistence/store.ts"
+import {
+  detectBinaryTargetPayloadFormat,
+  installBinaryTargetPayload,
+  resolveInstalledBinaryCommand,
+} from "../src/daemon/archive.ts"
 import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
@@ -14,7 +18,6 @@ const originalFetch = globalThis.fetch
 
 afterEach(async () => {
   globalThis.fetch = originalFetch
-  resetDb({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -31,7 +34,6 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-home-"))
   cleanupDirs.push(homeDir)
   process.env.HOME = homeDir
-  resetDb()
 
   const fetchMock = vi.fn(async () => new Response("#!/bin/sh\nexit 0\n", { status: 200 }))
   globalThis.fetch = fetchMock as unknown as typeof fetch

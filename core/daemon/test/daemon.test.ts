@@ -12,7 +12,7 @@ import { afterEach, expect, test } from "bun:test"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
-import { db, resetDb } from "../src/persistence/store.ts"
+import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
 
@@ -24,9 +24,10 @@ const fastFixtureAgentPath = fileURLToPath(
 )
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
+let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 afterEach(async () => {
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -88,6 +89,7 @@ test(
         port,
         agentBinDir,
         logMode: "json",
+        store: db,
       })
       const stopDaemon = createDaemonStopper()
 
@@ -223,6 +225,7 @@ test(
         enableIpc: true,
         enableStream: false,
         logMode: "json",
+        store: db,
       })
       const stopDaemon = createDaemonStopper()
 
@@ -261,6 +264,7 @@ test(
         enableIpc: false,
         enableStream: true,
         logMode: "json",
+        store: db,
       })
       const stopDaemon = createDaemonStopper()
 
@@ -319,6 +323,7 @@ test(
         port,
         agentBinDir,
         logMode: "json",
+        store: db,
       })
       const stopDaemon = createDaemonStopper()
 
@@ -362,6 +367,7 @@ test("daemon run defaults to concise pretty terminal logs", async () => {
       baseUrl: "",
       enableIpc: false,
       enableStream: false,
+      store: db,
     }),
   )
 
@@ -378,6 +384,7 @@ test("daemon run supports raw json terminal logs when requested", async () => {
       enableIpc: false,
       enableStream: false,
       logMode: "json",
+      store: db,
     }),
   )
 
@@ -394,6 +401,7 @@ test("daemon run supports verbose terminal logs with expanded fields", async () 
       enableIpc: false,
       enableStream: false,
       logMode: "verbose",
+      store: db,
     }),
   )
 
@@ -477,7 +485,7 @@ async function useTempHome() {
     await rm(homeDir, { recursive: true, force: true })
   })
   process.env.HOME = homeDir
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
   return homeDir
 }
 

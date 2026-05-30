@@ -12,7 +12,7 @@ import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
-import { db } from "./persistence/store.ts"
+import { openDaemonStore, type DaemonStore } from "./persistence/store.ts"
 import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
@@ -23,6 +23,7 @@ export type RunInput = {
   enableIpc?: boolean
   enableStream?: boolean
   logMode?: LogMode
+  store?: DaemonStore
 }
 
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
@@ -39,6 +40,8 @@ export async function runDaemon(input: RunInput): Promise<number> {
     agentBinDir: input.agentBinDir,
   })
   const configManager = createConfigManager()
+  const store = input.store ?? openDaemonStore()
+  const ownsStore = input.store == null
   let ipcServer: DaemonServer | undefined
 
   try {
@@ -53,12 +56,13 @@ export async function runDaemon(input: RunInput): Promise<number> {
       return 0
     }
 
-    const client = await defaultCreateBackendClient(runtime.baseUrl)
+    const client = await defaultCreateBackendClient(runtime.baseUrl, store)
     if (enableIpc) {
       ipcServer = await SetupContext.run({ runtime, configManager }, () =>
         startDaemonServer(client, {
           port: runtime.port,
           agentBinDir: runtime.agentBinDir,
+          store,
         }),
       )
     }
@@ -147,6 +151,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
               daemonUrl: activeIpcServer.daemonUrl,
               agentBinDir: runtime.agentBinDir,
               configManager,
+              store,
             })
             logger.log("pr_feedback.finish", {
               exitCode,
@@ -182,6 +187,9 @@ export async function runDaemon(input: RunInput): Promise<number> {
       await ipcServer.close().catch(() => {})
     }
     await configManager.close().catch(() => {})
+    if (ownsStore) {
+      store.close()
+    }
     restoreLogging()
   }
 }
@@ -197,11 +205,14 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
 }
 
 /** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
-async function defaultCreateBackendClient(baseUrl: string): Promise<BackendClient> {
+async function defaultCreateBackendClient(
+  baseUrl: string,
+  store: DaemonStore,
+): Promise<BackendClient> {
   return createBackendClient({
     baseUrl,
     getAuthorizationHeader: async () => {
-      const token = db.metadata.get("authToken") ?? null
+      const token = store.metadata.get("authToken") ?? null
       return token ? `Bearer ${token}` : null
     },
   })

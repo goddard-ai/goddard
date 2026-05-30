@@ -14,7 +14,7 @@ import { SetupContext } from "../src/context.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { db, resetDb } from "../src/persistence/store.ts"
+import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
@@ -27,13 +27,13 @@ const rootConfigSchemaUrl =
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
 )
+let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
-
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -236,6 +236,7 @@ test(
       daemonUrl: daemon.daemonUrl,
       agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
       configManager,
+      store: db,
       resolveProjectDir: () => repoDir,
     })
     expect(firstExitCode).toBe(0)
@@ -263,6 +264,7 @@ test(
       daemonUrl: daemon.daemonUrl,
       agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
       configManager,
+      store: db,
       resolveProjectDir: () => repoDir,
     })
     expect(secondExitCode).toBe(0)
@@ -311,6 +313,7 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
     startDaemonServer(daemonClient, {
       port: runtime.port,
       agentBinDir: runtime.agentBinDir,
+      store: db,
     }),
   )
   cleanup.push(async () => {
@@ -368,7 +371,7 @@ function createTestBackendClient(): BackendClient {
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-home-"))
   process.env.HOME = homeDir
-  resetDb()
+  db = resetDb()
   cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
   return homeDir
 }

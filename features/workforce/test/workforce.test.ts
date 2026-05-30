@@ -11,16 +11,17 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 import type { BackendClient } from "../../../core/daemon/src/backend.ts"
 import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
 import { configureLogging } from "../../../core/daemon/src/logging.ts"
-import { resetDb } from "../../../core/daemon/src/persistence/store.ts"
+import { resetDb, type DaemonStore } from "../../../core/daemon/src/persistence/store.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
 import { WorkforceRuntime } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
+let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 beforeEach(() => {
-  resetDb({ filename: ":memory:" })
+  db = resetDb({ filename: ":memory:" })
 })
 
 afterEach(async () => {
@@ -59,6 +60,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
 
   const daemon = await startDaemonServer(createTestBackendClient(), {
     port: 0,
+    store: db,
   })
   cleanup.push(async () => {
     await daemon.close()
@@ -98,6 +100,7 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
 
   const daemon = await startDaemonServer(createTestBackendClient(), {
     port: 0,
+    store: db,
   })
   cleanup.push(async () => {
     await daemon.close()
