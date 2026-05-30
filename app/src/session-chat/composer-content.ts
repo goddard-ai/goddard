@@ -1,5 +1,6 @@
 /** Shared session-composer serialization helpers for Lexical editor state and transcript content. */
 import type { SessionPromptRequest } from "@goddard-ai/sdk"
+import { $isListItemNode, $isListNode } from "@lexical/list"
 import {
   $createLineBreakNode,
   $createParagraphNode,
@@ -46,6 +47,8 @@ type ComposerContentPart =
       chip: ComposerChipData
     }
 
+const LIST_INDENT = "    "
+
 /** Coalesces adjacent text blocks while preserving non-text ACP content order. */
 function mergeTextBlocks(blocks: ComposerPromptBlock[]) {
   const mergedBlocks: ComposerPromptBlock[] = []
@@ -64,6 +67,62 @@ function mergeTextBlocks(blocks: ComposerPromptBlock[]) {
   }
 
   return mergedBlocks.filter((block) => block.type !== "text" || block.text.length > 0)
+}
+
+function appendTextPart(parts: ComposerContentPart[], text: string) {
+  parts.push({
+    type: "text",
+    text,
+  })
+}
+
+function appendListParts(node: LexicalNode, parts: ComposerContentPart[], depth: number) {
+  if (!$isListNode(node)) {
+    return
+  }
+
+  let itemIndex = 0
+
+  for (const child of node.getChildren()) {
+    if (!$isListItemNode(child)) {
+      appendNodeParts(child, parts)
+      continue
+    }
+
+    const firstChild = child.getFirstChild()
+
+    if (child.getChildrenSize() === 1 && $isListNode(firstChild)) {
+      if (itemIndex > 0) {
+        appendTextPart(parts, "\n")
+      }
+
+      appendListParts(firstChild, parts, depth + 1)
+      continue
+    }
+
+    if (itemIndex > 0) {
+      appendTextPart(parts, "\n")
+    }
+
+    appendTextPart(
+      parts,
+      `${LIST_INDENT.repeat(depth)}${
+        node.getListType() === "number" ? `${node.getStart() + itemIndex}. ` : "- "
+      }`,
+    )
+
+    for (const itemChild of child.getChildren()) {
+      if ($isListNode(itemChild)) {
+        appendTextPart(parts, "\n")
+        appendListParts(itemChild, parts, depth + 1)
+        continue
+      }
+
+      appendNodeParts(itemChild, parts)
+    }
+
+    itemIndex++
+  }
 }
 
 /** Appends one lexical node subtree into the ordered composer content part list. */
@@ -91,6 +150,11 @@ function appendNodeParts(node: LexicalNode, parts: ComposerContentPart[]) {
       type: "text",
       text: "\n",
     })
+    return
+  }
+
+  if ($isListNode(node)) {
+    appendListParts(node, parts, 0)
     return
   }
 

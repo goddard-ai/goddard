@@ -49,6 +49,8 @@
         "@goddard-ai/sdk": "workspace:*",
         "@goddard-ai/styled-system": "workspace:*",
         "@goddard-ai/ui-primitives": "workspace:*",
+        "@lexical/list": "^0.42.0",
+        "@lexical/markdown": "^0.42.0",
         "@lexical/react": "^0.42.0",
         "@preact/signals": "catalog:",
         "@preact/signals-core": "^1.14.1",

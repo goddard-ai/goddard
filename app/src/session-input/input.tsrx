@@ -2,7 +2,7 @@ import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { ContentEditable } from "@lexical/react/LexicalContentEditable"
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary"
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin"
+import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin"
 import type { LexicalEditor } from "lexical"
 import { SendHorizontal } from "lucide-react"
 import { useListener } from "preact-sigma"
@@ -358,7 +358,7 @@ export component SessionInput(props: {
   >
     <LexicalComposer initialConfig={sessionInputInitialConfig}>
       <div class={classes.editorFrame}>
-        <PlainTextPlugin
+        <RichTextPlugin
           ErrorBoundary={LexicalErrorBoundary}
           contentEditable={<tsrx>
             <ContentEditable

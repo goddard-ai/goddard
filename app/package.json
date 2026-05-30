@@ -18,7 +18,6 @@
     "typecheck": "bun run panda:codegen && tsrx-tsc --noEmit"
   },
   "dependencies": {
-    "acp-client": "catalog:",
     "@chenglou/pretext": "^0.0.4",
     "@floating-ui/dom": "catalog:",
     "@goddard-ai/daemon-client": "workspace:*",
@@ -29,12 +28,15 @@
     "@goddard-ai/sdk": "workspace:*",
     "@goddard-ai/styled-system": "workspace:*",
     "@goddard-ai/ui-primitives": "workspace:*",
+    "@lexical/list": "^0.42.0",
+    "@lexical/markdown": "^0.42.0",
     "@lexical/react": "^0.42.0",
     "@preact/signals": "catalog:",
     "@preact/signals-core": "^1.14.1",
     "@tanstack/react-virtual": "^3.13.24",
     "@tsrx/preact": "^0.1.14",
     "@xterm/headless": "^6.0.0",
+    "acp-client": "catalog:",
     "bun-pty": "^0.4.8",
     "comark": "0.2.1",
     "culori": "^4.0.2",

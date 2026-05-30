@@ -1,4 +1,5 @@
 import type { SessionPromptRequest } from "@goddard-ai/sdk"
+import { $createListItemNode, $createListNode, ListItemNode, ListNode } from "@lexical/list"
 import { expect, test } from "bun:test"
 import {
   $createParagraphNode,
@@ -19,7 +20,7 @@ type ComposerPromptBlock = Exclude<SessionPromptRequest["prompt"], string>[numbe
 
 function buildEditorState(build: () => void): EditorState {
   const editor = createEditor({
-    nodes: [ComposerChipNode],
+    nodes: [ComposerChipNode, ListNode, ListItemNode],
     onError(error) {
       throw error
     },
@@ -100,6 +101,33 @@ test("serializeComposerEditorState preserves text order, slash chips, and resour
       uri: "https://example.com/docs",
       title: "https://example.com/docs",
       description: "https://example.com/docs",
+    },
+  ] satisfies ComposerPromptBlock[])
+})
+
+test("serializeComposerEditorState preserves rendered list markers", () => {
+  const editorState = buildEditorState(() => {
+    const bulletList = $createListNode("bullet")
+    const firstBullet = $createListItemNode()
+    const secondBullet = $createListItemNode()
+    firstBullet.append($createTextNode("first"))
+    secondBullet.append($createTextNode("second"))
+    bulletList.append(firstBullet, secondBullet)
+
+    const numberedList = $createListNode("number", 3)
+    const firstNumbered = $createListItemNode()
+    const secondNumbered = $createListItemNode()
+    firstNumbered.append($createTextNode("third"))
+    secondNumbered.append($createTextNode("fourth"))
+    numberedList.append(firstNumbered, secondNumbered)
+
+    $getRoot().append(bulletList, numberedList)
+  })
+
+  expect(serializeComposerEditorState(editorState)).toEqual([
+    {
+      type: "text",
+      text: "- first\n- second\n3. third\n4. fourth",
     },
   ] satisfies ComposerPromptBlock[])
 })

@@ -1,5 +1,9 @@
+import { ListItemNode, ListNode } from "@lexical/list"
+import { ORDERED_LIST, UNORDERED_LIST } from "@lexical/markdown"
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin"
+import { ListPlugin } from "@lexical/react/LexicalListPlugin"
+import { MarkdownShortcutPlugin } from "@lexical/react/LexicalMarkdownShortcutPlugin"
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import type { LexicalEditor } from "lexical"
 import {
@@ -23,9 +27,11 @@ import {
 import { isSessionInputCaretAtPromptEnd } from "./input-selection.ts"
 import type { SessionInputPromptBlocks } from "./input.tsrx"
 
+const sessionInputMarkdownTransformers = [UNORDERED_LIST, ORDERED_LIST]
+
 export const sessionInputInitialConfig = {
   namespace: "session-input",
-  nodes: [ComposerChipNode],
+  nodes: [ComposerChipNode, ListNode, ListItemNode],
   onError(error: Error) {
     throw error
   },
@@ -191,6 +197,8 @@ export component SessionInputPlugins(props: {
   }, [editor, props])
 
   <HistoryPlugin />
+  <ListPlugin />
+  <MarkdownShortcutPlugin transformers={sessionInputMarkdownTransformers} />
   <OnChangePlugin
     ignoreSelectionChange={true}
     onChange={(editorState) => {

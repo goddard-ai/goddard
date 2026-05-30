@@ -28,6 +28,22 @@ export default {
     outline: "none",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+    "& p": {
+      margin: "0",
+    },
+    "& ul, & ol": {
+      margin: "0",
+      paddingInlineStart: "22px",
+    },
+    "& ul": {
+      listStyle: "disc",
+    },
+    "& ol": {
+      listStyle: "decimal",
+    },
+    "& li + li": {
+      marginTop: "4px",
+    },
   }),
   placeholder: css({
     position: "absolute",
