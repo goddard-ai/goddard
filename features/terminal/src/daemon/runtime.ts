@@ -1,4 +1,4 @@
-/** Daemon-owned terminal wrappers around `bun-pty`. */
+/** Daemon-owned terminal wrappers around Bun's native PTY support. */
 import type {
   TerminalCloseRequest,
   TerminalConnectionId,
@@ -13,13 +13,15 @@ import type {
   TerminalRuntimeMetadata,
   TerminalSpawnOptions,
 } from "@goddard-ai/schema/daemon/terminals"
-import { spawn, type IDisposable, type IExitEvent, type IPty } from "bun-pty"
 
 const DEFAULT_TERMINAL_NAME = "xterm-256color"
 const DEFAULT_TERMINAL_DIMENSIONS = {
   cols: 80,
   rows: 24,
 }
+
+type TerminalProcess = ReturnType<typeof Bun.spawn>
+type NativeTerminal = NonNullable<TerminalProcess["terminal"]>
 
 /** Options used to connect one daemon terminal connection to its owning event stream. */
 export type DaemonTerminalConnectionOptions = {
@@ -167,14 +169,16 @@ export class DaemonTerminalConnection {
   }
 }
 
-/** Wrapper for one live `bun-pty` terminal. */
+/** Wrapper for one live Bun PTY terminal. */
 class DaemonTerminal {
   readonly connectionId: TerminalConnectionId
   readonly instanceId: TerminalInstanceId
   readonly options: TerminalSpawnOptions
-  readonly #pty: IPty
+  readonly #process: TerminalProcess
+  readonly #terminal: NativeTerminal
   readonly #onEvent: (event: TerminalDaemonEvent) => void
-  readonly #subscriptions: IDisposable[]
+  readonly #decoder = new TextDecoder()
+  #dimensions: TerminalDimensions
   #state: TerminalRuntimeMetadata["state"] = "running"
   #exitCode: number | null = null
   #signal: string | null = null
@@ -190,28 +194,46 @@ class DaemonTerminal {
     this.instanceId = instanceId
     this.options = options
     this.#onEvent = onEvent
-    this.#pty = spawn(resolveTerminalCommand(options.command), resolveTerminalArgs(options), {
-      name: DEFAULT_TERMINAL_NAME,
+    this.#dimensions = {
       cols: options.dimensions?.cols ?? DEFAULT_TERMINAL_DIMENSIONS.cols,
       rows: options.dimensions?.rows ?? DEFAULT_TERMINAL_DIMENSIONS.rows,
-      cwd: options.cwd,
-      env: resolveTerminalEnv(options.env),
-    })
-    this.#subscriptions = [
-      this.#pty.onData((data) => {
-        if (data.length > 0) {
-          this.#onEvent({
-            type: "terminal.output",
-            connectionId: this.connectionId,
-            instanceId: this.instanceId,
-            data,
-          })
-        }
-      }),
-      this.#pty.onExit((event) => {
-        this.#recordExit(event)
-      }),
-    ]
+    }
+    this.#process = Bun.spawn(
+      [resolveTerminalCommand(options.command), ...resolveTerminalArgs(options)],
+      {
+        cwd: options.cwd,
+        env: resolveTerminalEnv(options.env),
+        terminal: {
+          name: DEFAULT_TERMINAL_NAME,
+          cols: this.#dimensions.cols,
+          rows: this.#dimensions.rows,
+          data: (_terminal, data) => {
+            this.#emitOutput(this.#decoder.decode(data, { stream: true }))
+          },
+        },
+      },
+    )
+    if (!this.#process.terminal) {
+      throw new Error("Bun did not create a native terminal for the spawned process.")
+    }
+    this.#terminal = this.#process.terminal
+    void this.#process.exited.then(
+      (exitCode) => {
+        this.#recordExit(exitCode, null)
+      },
+      (error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.#onEvent({
+          type: "terminal.error",
+          connectionId: this.connectionId,
+          instanceId: this.instanceId,
+          code: "internal-error",
+          message,
+          recoverable: false,
+        })
+        this.#recordExit(null, null)
+      },
+    )
   }
 
   get metadata() {
@@ -219,22 +241,20 @@ class DaemonTerminal {
       instanceId: this.instanceId,
       state: this.#state,
       cwd: this.options.cwd ?? process.cwd(),
-      title: this.options.title ?? this.#pty.process,
-      dimensions: {
-        cols: this.#pty.cols,
-        rows: this.#pty.rows,
-      },
+      title: this.options.title ?? resolveTerminalCommand(this.options.command),
+      dimensions: this.#dimensions,
       exitCode: this.#exitCode,
       signal: this.#signal,
     } satisfies TerminalRuntimeMetadata
   }
 
   write(data: string) {
-    this.#pty.write(data)
+    this.#terminal.write(data)
   }
 
   resize(dimensions: TerminalDimensions) {
-    this.#pty.resize(dimensions.cols, dimensions.rows)
+    this.#dimensions = dimensions
+    this.#terminal.resize(dimensions.cols, dimensions.rows)
   }
 
   close() {
@@ -243,14 +263,20 @@ class DaemonTerminal {
     }
 
     this.#closed = true
-    this.#pty.kill()
-    this.#disposeSubscriptions()
+    this.#terminal.close()
+    this.#process.kill()
+    this.#recordExit(null, null)
   }
 
-  #recordExit(event: IExitEvent) {
+  #recordExit(exitCode: number | null, signal: string | null) {
+    if (this.#state === "closed" || this.#state === "exited") {
+      return
+    }
+
+    this.#emitOutput(this.#decoder.decode())
     this.#state = this.#closed ? "closed" : "exited"
-    this.#exitCode = event.exitCode
-    this.#signal = event.signal === undefined ? null : String(event.signal)
+    this.#exitCode = exitCode
+    this.#signal = signal
     this.#onEvent({
       type: "terminal.exit",
       connectionId: this.connectionId,
@@ -258,14 +284,18 @@ class DaemonTerminal {
       exitCode: this.#exitCode,
       signal: this.#signal,
     })
-    this.#disposeSubscriptions()
   }
 
-  #disposeSubscriptions() {
-    for (const subscription of this.#subscriptions) {
-      subscription.dispose()
+  #emitOutput(data: string) {
+    if (data.length === 0) {
+      return
     }
-    this.#subscriptions.length = 0
+    this.#onEvent({
+      type: "terminal.output",
+      connectionId: this.connectionId,
+      instanceId: this.instanceId,
+      data,
+    })
   }
 }
 

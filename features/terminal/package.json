@@ -59,7 +59,6 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/styled-system": "workspace:*",
-    "bun-pty": "^0.4.8",
     "zod": "catalog:"
   }
 }
