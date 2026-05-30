@@ -1,6 +1,6 @@
 ---
 name: spec-calibration
-description: Thoroughly review the repository `spec/` tree by creating a mirrored `spec-review/` tree whose files evaluate the corresponding spec files for contract clarity, coverage, boundaries, and fit with neighboring specs.
+description: Thoroughly review the repository `spec/` tree by creating a mirrored `spec-review/` tree whose files focus on missing behavior, spec drift, and high-risk ambiguity in the corresponding spec files.
 ---
 
 # Spec Calibration
@@ -25,7 +25,7 @@ It produces review artifacts. It does not edit `spec/` unless the user separatel
 
 ## Review File Shape
 
-Each mirrored spec review file should be thorough, but keep the structure stable and skimmable:
+Each mirrored spec review file should be thorough, but high-signal. Focus on missing behavior, spec drift, and high-risk ambiguity rather than trivial wording, formatting, or preference issues.
 
 ```markdown
 # Review: spec/path.md
@@ -39,17 +39,18 @@ Each mirrored spec review file should be thorough, but keep the structure stable
 
 - Findings ordered by severity or importance.
 - Each finding should explain the spec risk and the smallest likely correction.
+- Include only findings that could cause future implementation divergence, incorrect product behavior, inconsistent specs, or repeated confusion.
 
 ## Coverage Questions
 
-- Product questions that must be answered before the contract is complete.
+- Product questions that must be answered before the contract is complete enough to guide implementation.
 
 ## Neighbor Checks
 
 - Relevant consistency checks against parent, child, sibling, README, glossary, or ADR context.
 ```
 
-Omit empty sections only when they would add no signal. Prefer specific findings over generic praise.
+Omit empty sections only when they would add no signal. Prefer specific findings over generic praise. If a review has no material missing behavior, drift, or risky ambiguity, say that directly instead of filling space.
 
 `spec-review/__tree-structure-review.md` should focus on tree-level concerns:
 
@@ -61,8 +62,9 @@ Omit empty sections only when they would add no signal. Prefer specific findings
 ## Calibration Principles
 
 - Be deliberately thorough. Read enough parent, child, sibling, README, glossary, and ADR context to judge fit, not just grammar.
+- Apply a high finding bar. Do not record typos, local phrasing preferences, minor organization nits, or speculative improvements unless they create meaningful contract risk.
 - Treat specs as durable product contracts, not plans, implementation notes, roadmaps, tickets, or persuasive briefs.
-- Identify unclear capabilities, missing boundaries, conflicting terms, duplicated responsibilities, stale rationale, implementation leakage, and places where the tree shape hides important behavior.
+- Identify missing behavior, spec drift, and high-risk ambiguity, including unclear capabilities, missing boundaries, conflicting terms, duplicated responsibilities, stale rationale, implementation leakage, and places where the tree shape hides important behavior.
 - Separate review from repair. Recommend the smallest corrective edit, split, merge, move, or deletion, but leave actual `spec/` changes to `spec-editing`.
 - Bias toward contract strength. Call out weak descriptive prose when the intended requirement, guarantee, or prohibition is not explicit.
 - Preserve local vocabulary unless terminology itself is inconsistent or misleading.
@@ -76,7 +78,7 @@ Omit empty sections only when they would add no signal. Prefer specific findings
 3. For each spec file, read nearby context needed to judge that file's role: parent specs, child specs, sibling indexes, local `glossary.md`, and relevant ADRs.
 4. Create or update `spec-review/__tree-structure-review.md` for the reviewed scope's structure.
 5. Create or update each mirrored review file under `spec-review/`.
-6. Re-read the reviews for actionable signal. Remove generic commentary, duplicated summaries, and findings that do not point to a concrete spec risk.
+6. Re-read the reviews for actionable signal. Remove generic commentary, duplicated summaries, low-impact issues, and findings that do not point to missing behavior, spec drift, high-risk ambiguity, or another concrete spec risk.
 7. If the calibration reveals that the requested scope misses related files, either add those files to the review or call out the omitted scope explicitly.
 
 ## Pairing With Spec Editing
