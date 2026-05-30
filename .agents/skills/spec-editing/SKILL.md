@@ -25,7 +25,6 @@ They are not proposals, implementation plans, status reports, issue trackers, AP
 - `spec/README.md` is the root index for top-level spec areas.
 - A parent concept may live in `spec/name.md`, with children in `spec/name/`.
 - Parent specs should link to child specs when that makes navigation clearer. Use whatever heading or sentence fits the file.
-- Architecture decision records live in `spec/adr/`; do not restructure that branch unless asked.
 - When one file stops describing one coherent product surface, split it and leave the parent as a concise map.
 
 ## Writing Values
