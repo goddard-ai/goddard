@@ -2,14 +2,14 @@ import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { UserConfig } from "@goddard-ai/schema/config"
 
 import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from "./catalog.ts"
-import type {
+import {
   AdapterCatalogEntry,
-  ListAdaptersRequestType,
-  ListAdaptersResponse,
+  type ListAdaptersRequestType,
+  type ListAdaptersResponse,
 } from "./schema.ts"
 
 type AdapterRegistrySnapshot = Omit<ListAdaptersResponse, "adapters" | "defaultAdapterId"> & {
-  adapters: AdapterCatalogEntry[]
+  adapters: readonly unknown[]
 }
 
 export type AdapterRegistryService = {
@@ -22,20 +22,23 @@ export type AdapterConfigManager = {
 
 export type ListAdaptersContext = {
   registryService: AdapterRegistryService
-  configManager: AdapterConfigManager
+  configProvider: AdapterConfigManager
 }
 
 /** Lists adapters from registry and config substrate using adapter feature merge semantics. */
 export async function listAdapters(
-  { registryService, configManager }: ListAdaptersContext,
+  { registryService, configProvider }: ListAdaptersContext,
   { cwd }: ListAdaptersRequestType,
 ) {
   const [registrySnapshot, resolvedConfig] = await Promise.all([
     registryService.listAdapters(),
-    cwd ? configManager.getRootConfig(cwd).then((snapshot) => snapshot.config) : undefined,
+    cwd ? configProvider.getRootConfig(cwd).then((snapshot) => snapshot.config) : undefined,
   ])
+  const registryAdapters = registrySnapshot.adapters.map((adapter) =>
+    AdapterCatalogEntry.parse(adapter),
+  )
   const mergedAdapters = mergeAdapterCatalogEntries(
-    registrySnapshot.adapters,
+    registryAdapters,
     createConfigAdapterCatalogEntries(resolvedConfig?.registry),
   )
   const defaultAgent = await resolveDefaultAgent(resolvedConfig)

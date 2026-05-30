@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
+import type { ACPRegistryService, DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
 import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
 import {
   agentBinaryPlatforms,
@@ -17,11 +18,8 @@ import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
-  type AcpRegistryService,
 } from "acp-client/node"
 import { getErrorMessage } from "radashi"
-
-import { prependAgentBinToPath } from "../../../../core/daemon/src/config.ts"
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
 type AgentProcessSpec = {
@@ -60,12 +58,12 @@ async function pathExists(path: string): Promise<boolean> {
 function buildAgentProcessEnv(input: {
   daemonUrl: string
   token: string
-  agentBinDir: string
+  createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>
 }): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    ...prependAgentBinToPath(input.agentBinDir, input.env),
+    ...input.createAgentEnvironment({ env: input.env }),
     GODDARD_DAEMON_URL: input.daemonUrl,
     GODDARD_SESSION_TOKEN: input.token,
   }
@@ -159,9 +157,9 @@ export async function spawnAgentProcess(params: {
   token: string
   agent: AcpAdapterId | AgentDistribution
   cwd: string
-  agentBinDir: string
+  createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>
-  registryService: AcpRegistryService
+  registryService: ACPRegistryService
   registry?: Record<string, AgentDistribution>
 }): Promise<AgentProcessHandle> {
   let agent = params.agent
@@ -187,7 +185,7 @@ export async function spawnAgentProcess(params: {
     env: buildAgentProcessEnv({
       daemonUrl: params.daemonUrl,
       token: params.token,
-      agentBinDir: params.agentBinDir,
+      createAgentEnvironment: params.createAgentEnvironment,
       env: {
         ...env,
         ...params.env,

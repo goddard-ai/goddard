@@ -1,8 +1,5 @@
 import { Readable, Writable } from "node:stream"
 import * as acp from "acp-client/protocol"
-import { getErrorMessage } from "radashi"
-
-import { createLogger } from "../../../../core/daemon/src/logging.ts"
 
 export type AnyRequest = acp.AnyMessage & { params: unknown }
 
@@ -46,7 +43,6 @@ export function createAgentConnection(
   stdout: AgentOutputStream,
   hooks: AgentStreamHooks = {},
 ) {
-  const logger = createLogger()
   const stream = createAgentMessageStream(stdin, stdout, hooks)
 
   return {
@@ -68,9 +64,7 @@ export function createAgentConnection(
               return
             }
 
-            logger.log("agent.message_handler_failed", {
-              errorMessage: getErrorMessage(error),
-            })
+            throw error
           })
         }
       })()

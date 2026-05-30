@@ -3,6 +3,7 @@
 import { resolve } from "node:path"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
 import { knownAcpAdapterIds } from "acp-client"
+import { createAcpRegistryService } from "acp-client/node"
 import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 
@@ -192,7 +193,7 @@ async function streamSession(args: { agent?: string; model?: string; prompt?: st
 
 /** Opens one raw adapter session and prints the negotiated ACP surface. */
 async function showAdapter(adapter: string) {
-  const inspection = await inspectAdapterSession(adapter, process.cwd())
+  const inspection = await inspectAdapterSession(adapter, process.cwd(), createAcpRegistryService())
 
   try {
     writeJson({
@@ -210,7 +211,12 @@ async function showAdapter(adapter: string) {
 /** Calls ACP `session/list` on one raw adapter and prints the first requested page. */
 async function showAdapterSessionList(args: { adapter: string; cwd?: string; cursor?: string }) {
   const request = buildSessionListRequest(args)
-  const inspection = await listAdapterSessions(args.adapter, process.cwd(), request)
+  const inspection = await listAdapterSessions(
+    args.adapter,
+    process.cwd(),
+    request,
+    createAcpRegistryService(),
+  )
 
   try {
     writeJson({

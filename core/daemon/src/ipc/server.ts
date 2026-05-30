@@ -21,9 +21,14 @@ import { getErrorMessage } from "radashi"
 
 import type { BackendClient } from "../backend.ts"
 import { createConfigManager } from "../config-manager.ts"
-import { resolveRuntimeConfig } from "../config.ts"
-import { IpcRequestContext, SetupContext } from "../context.ts"
-import { createLogger, createPayloadPreview, readSessionIdForLog } from "../logging.ts"
+import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
+import { IpcRequestContext, SessionContext, SetupContext } from "../context.ts"
+import {
+  createChunkPreview,
+  createLogger,
+  createPayloadPreview,
+  readSessionIdForLog,
+} from "../logging.ts"
 import { configureDbSchema, openDaemonStore, type DaemonStore } from "../persistence/store.ts"
 import type { DaemonServer } from "./types.ts"
 
@@ -108,6 +113,9 @@ export async function startDaemonServer(
         }
         return daemonUrl
       },
+      createAgentEnvironment({ env }) {
+        return prependAgentBinToPath(runtime.agentBinDir, env)
+      },
     },
     authTokenStore: {
       set: (token) => {
@@ -117,8 +125,19 @@ export async function startDaemonServer(
         store.metadata.delete("authToken")
       },
     },
-    configManager,
+    configProvider: {
+      getRootConfig: configManager.getRootConfig,
+      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
+    },
+    log: {
+      createLogger,
+      createPayloadPreview,
+      createChunkPreview,
+    },
     registryService,
+    sessionContext: {
+      run: (context, callback) => SessionContext.run(context, callback),
+    },
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 

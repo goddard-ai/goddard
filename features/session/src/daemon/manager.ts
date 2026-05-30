@@ -2,7 +2,16 @@ import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
-import type { DbContext } from "@goddard-ai/daemon-plugin"
+import type {
+  ACPRegistryService,
+  DaemonAgentEnvironmentService,
+  DaemonConfigProvider,
+  DaemonLogger,
+  DaemonLogService,
+  DaemonSessionContext,
+  DaemonSessionContextService,
+  DbContext,
+} from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
@@ -53,13 +62,9 @@ import {
   type AgentInputStream,
   type AgentOutputStream,
 } from "acp-client"
-import type { AcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
-import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
-import { SessionContext } from "../../../../core/daemon/src/context.ts"
-import { createLogger, createPayloadPreview } from "../../../../core/daemon/src/logging.ts"
 import {
   spawnAgentProcess,
   waitForAgentProcessExit,
@@ -136,8 +141,6 @@ function getPackageVersion(): string {
     return "0.0.0"
   }
 }
-
-const logger = createLogger()
 
 type SessionId = DaemonSession["id"]
 type SessionDb = DbContext<typeof sessionDbSchema>
@@ -336,7 +339,7 @@ type PendingSteerRequest = {
 type ActiveSession = {
   id: SessionId
   acpSessionId: string
-  logger: ReturnType<typeof createLogger>
+  logger: DaemonLogger
   token: string
   supportsLoadSession: boolean
   process: AgentProcessHandle
@@ -801,7 +804,7 @@ function buildSessionContext(params: {
   cwd: string
   worktree?: PreparedSessionWorktree | null
 }) {
-  const sessionContext: SessionContext = {
+  const sessionContext: DaemonSessionContext = {
     sessionId: params.sessionId,
     acpSessionId: null,
     cwd: params.cwd,
@@ -828,7 +831,8 @@ async function resolveSessionRequestAgent(
 
 /** Logs ACP messages in a structured form without dumping full payloads verbatim. */
 function logAgentMessage(
-  diagnosticLogger: ReturnType<typeof createLogger>,
+  diagnosticLogger: DaemonLogger,
+  createPayloadPreview: DaemonLogService["createPayloadPreview"],
   event: "agent.message_read" | "agent.message_write",
   sessionId: SessionId,
   acpSessionId: string | undefined,
@@ -890,14 +894,17 @@ function normalizeSessionPageSize(limit?: number): number {
 export function createSessionManager(input: {
   db: SessionDb
   getDaemonUrl: () => string
-  agentBinDir: string
+  createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
   events: SessionEventEmitter
-  configManager: ConfigManager
-  registryService: AcpRegistryService
+  configProvider: DaemonConfigProvider
+  log: DaemonLogService
+  registryService: ACPRegistryService
+  sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
 }) {
   const db = input.db
+  const logger = input.log.createLogger()
   const activeSessions = new Map<SessionId, ActiveSession>()
   const activeSessionsByAcpSessionId = new Map<string, ActiveSession>()
   const launchLeaseStore = createLaunchLeaseStore({ logger })
@@ -907,7 +914,7 @@ export function createSessionManager(input: {
   const idleSessionShutdownTimeoutMs =
     input.idleSessionShutdownTimeoutMs ?? DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS
   const worktreePluginManager = createWorktreePluginManager({
-    configManager: input.configManager,
+    configProvider: input.configProvider,
     logger,
   })
   const ready = reconcilePersistedSessions()
@@ -916,7 +923,7 @@ export function createSessionManager(input: {
     id: SessionId,
     update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
-    diagnosticLogger?: ReturnType<typeof createLogger>,
+    diagnosticLogger?: DaemonLogger,
   ) {
     const active = activeSessions.get(id)
     const previousRecord = db.sessions.get(id) ?? null
@@ -1107,7 +1114,7 @@ export function createSessionManager(input: {
   function persistTurnDraftAsInterruptedTurn(
     sessionId: SessionId,
     draftRecord: SessionTurnDraftDoc,
-    diagnosticLogger: ReturnType<typeof createLogger>,
+    diagnosticLogger: DaemonLogger,
   ) {
     const existingTurn =
       db.sessionTurns.first({
@@ -1232,7 +1239,7 @@ export function createSessionManager(input: {
     sessionId: SessionId,
     type: string,
     detail?: Record<string, unknown>,
-    diagnosticLogger: ReturnType<typeof createLogger> = logger,
+    diagnosticLogger: DaemonLogger = logger,
   ) {
     const event: DaemonSessionDiagnosticEvent = {
       type,
@@ -1263,7 +1270,7 @@ export function createSessionManager(input: {
     generatorConfig: SessionTitleGeneratorConfig
     fallbackTitle: string
     promptText: string
-    diagnosticLogger?: ReturnType<typeof createLogger>
+    diagnosticLogger?: DaemonLogger
   }) {
     if (pendingSessionTitleGenerations.has(params.id)) {
       return
@@ -1346,7 +1353,7 @@ export function createSessionManager(input: {
   function queueSessionTitlePreparation(params: {
     id: SessionId
     prompt: string | acp.ContentBlock[]
-    diagnosticLogger?: ReturnType<typeof createLogger>
+    diagnosticLogger?: DaemonLogger
   }) {
     const sessionRecord = db.sessions.get(params.id) ?? null
     if (
@@ -1358,12 +1365,12 @@ export function createSessionManager(input: {
     }
 
     const task = (async () => {
-      let generatorConfig = input.configManager.getLastKnownRootConfig(sessionRecord.cwd)?.config
+      let generatorConfig = input.configProvider.getLastKnownRootConfig(sessionRecord.cwd)?.config
         .sessionTitles?.generator
 
       if (!generatorConfig) {
         try {
-          generatorConfig = (await input.configManager.getRootConfig(sessionRecord.cwd)).config
+          generatorConfig = (await input.configProvider.getRootConfig(sessionRecord.cwd)).config
             .sessionTitles?.generator
         } catch {}
       }
@@ -1707,7 +1714,14 @@ export function createSessionManager(input: {
       }
     }
 
-    logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
+    logAgentMessage(
+      active.logger,
+      input.log.createPayloadPreview,
+      "agent.message_write",
+      active.id,
+      active.acpSessionId,
+      message,
+    )
     emitDiagnostic(
       active.id,
       "session_message_sent",
@@ -1733,7 +1747,14 @@ export function createSessionManager(input: {
       params,
     } satisfies acp.AnyMessage
 
-    logAgentMessage(active.logger, "agent.message_read", active.id, active.acpSessionId, message)
+    logAgentMessage(
+      active.logger,
+      input.log.createPayloadPreview,
+      "agent.message_read",
+      active.id,
+      active.acpSessionId,
+      message,
+    )
     publishSessionMessage(active, message)
     await handleSteerBoundary(active, message)
   }
@@ -1761,7 +1782,14 @@ export function createSessionManager(input: {
         params,
       } satisfies acp.AnyMessage
 
-      logAgentMessage(active.logger, "agent.message_read", active.id, active.acpSessionId, message)
+      logAgentMessage(
+        active.logger,
+        input.log.createPayloadPreview,
+        "agent.message_read",
+        active.id,
+        active.acpSessionId,
+        message,
+      )
       publishSessionMessage(active, message)
     })
   }
@@ -1806,6 +1834,7 @@ export function createSessionManager(input: {
 
       logAgentMessage(
         active.logger,
+        input.log.createPayloadPreview,
         "agent.message_read",
         active.id,
         active.acpSessionId,
@@ -1834,6 +1863,7 @@ export function createSessionManager(input: {
 
       logAgentMessage(
         active.logger,
+        input.log.createPayloadPreview,
         "agent.message_read",
         active.id,
         active.acpSessionId,
@@ -2088,7 +2118,7 @@ export function createSessionManager(input: {
     id: SessionId
     initialized: InitializedSession
     agentProcess: AgentProcessHandle
-    sessionLogger: ReturnType<typeof createLogger>
+    sessionLogger: DaemonLogger
     supportsLoadSession: boolean
   }) {
     params.agentProcess.onceExit((code, signal) => {
@@ -2135,7 +2165,7 @@ export function createSessionManager(input: {
     agentProcess: AgentProcessHandle
     initialized: InitializedSession
     nextTurnSequence: number
-    sessionLogger: ReturnType<typeof createLogger>
+    sessionLogger: DaemonLogger
     systemPrompt: string
   }) {
     const activeSession: ActiveSession = {
@@ -2258,8 +2288,8 @@ export function createSessionManager(input: {
     const existingArtifacts = resolveExistingSessionArtifacts(db, id, existingSession)
     const resolvedConfig =
       params.config ??
-      (input.configManager
-        ? (await input.configManager.getRootConfig(params.request.cwd)).config
+      (input.configProvider
+        ? (await input.configProvider.getRootConfig(params.request.cwd)).config
         : undefined)
     const resolvedWorktreePlugins =
       params.worktreePlugins ??
@@ -2311,7 +2341,7 @@ export function createSessionManager(input: {
     }
 
     let sessionLogger = logger
-    sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
+    sessionLogger = input.sessionContext.run(sessionContext, () => sessionLogger.snapshot())
     let spawnedAgentProcess: AgentProcessHandle | null = null
     let initializedClient: AcpClient | null = null
 
@@ -2378,7 +2408,7 @@ export function createSessionManager(input: {
           direction: "write",
           hasId: "id" in message && message.id != null,
           method: "method" in message ? message.method : undefined,
-          message: createPayloadPreview(message),
+          message: input.log.createPayloadPreview(message),
         })
       }
 
@@ -2421,7 +2451,7 @@ export function createSessionManager(input: {
           token,
           agent: resolvedRequest.agent,
           cwd,
-          agentBinDir: input.agentBinDir,
+          createAgentEnvironment: input.createAgentEnvironment,
           env: resolvedRequest.env,
           registryService: input.registryService,
           registry: resolvedRegistry,
@@ -2851,7 +2881,7 @@ export function createSessionManager(input: {
       }
     }
 
-    const resolvedConfig = await input.configManager
+    const resolvedConfig = await input.configProvider
       .getRootConfig(params.cwd)
       .then((root) => root.config)
     const resolvedRegistry = resolvedConfig?.registry
@@ -2862,7 +2892,7 @@ export function createSessionManager(input: {
       token,
       agent: params.agent,
       cwd: params.cwd,
-      agentBinDir: input.agentBinDir,
+      createAgentEnvironment: input.createAgentEnvironment,
       registryService: input.registryService,
       registry: resolvedRegistry,
     })
@@ -2998,7 +3028,7 @@ export function createSessionManager(input: {
   ): Promise<SessionSubpackagesResponse> {
     await ready
 
-    const config = await input.configManager.getRootConfig(params.cwd).then((root) => root.config)
+    const config = await input.configProvider.getRootConfig(params.cwd).then((root) => root.config)
 
     return {
       subpackages: await discoverSessionSubpackages({

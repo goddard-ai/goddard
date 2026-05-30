@@ -14,10 +14,10 @@ export const loopPlugin = definePlugin({
     scopes: ["user", "project"],
   },
   ipcRoutes: loopIpcRoutes,
-  setup({ configManager, session }) {
+  setup({ configProvider, session }) {
     const loop = createLoopManager({
       session,
-      resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configManager),
+      resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configProvider),
     })
 
     return {

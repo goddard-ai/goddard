@@ -2,12 +2,10 @@
 import { access } from "node:fs/promises"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
+import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
 import type { WorktreePluginReference } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import hashSum from "hash-sum"
-
-import type { ConfigManager } from "../../../../../core/daemon/src/config-manager.ts"
-import type { DaemonLogger } from "../../../../../core/daemon/src/logging.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 type LoadedWorktreePluginSet = {
@@ -15,7 +13,7 @@ type LoadedWorktreePluginSet = {
   plugins: WorktreePlugin[]
 }
 
-type WorktreeRootConfigSnapshot = Awaited<ReturnType<ConfigManager["getRootConfig"]>>
+type WorktreeRootConfigSnapshot = Awaited<ReturnType<DaemonConfigProvider["getRootConfig"]>>
 
 /** Session-owned contract for loading custom worktree plugins from root config. */
 export interface WorktreePluginManager {
@@ -26,13 +24,13 @@ export interface WorktreePluginManager {
  * Creates a loader that resolves configured custom worktree plugins from the global config.
  */
 export function createWorktreePluginManager(input: {
-  configManager: ConfigManager
+  configProvider: DaemonConfigProvider
   logger: DaemonLogger
 }) {
   const lastSuccessfulLoads = new Map<string, LoadedWorktreePluginSet>()
 
   async function getPlugins(cwd: string) {
-    const snapshot = await input.configManager.getRootConfig(cwd)
+    const snapshot = await input.configProvider.getRootConfig(cwd)
     const references = snapshot.config.worktrees?.plugins ?? []
     const cacheKey = createPluginSetCacheKey(snapshot)
     const previousLoad = lastSuccessfulLoads.get(cacheKey) ?? null

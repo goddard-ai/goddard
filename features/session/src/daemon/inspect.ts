@@ -1,20 +1,28 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
+import { delimiter } from "node:path"
+import type { ACPRegistryService } from "@goddard-ai/daemon-plugin"
 import { createAcpClient } from "acp-client"
-import { createAcpRegistryService } from "acp-client/node"
 import * as acp from "acp-client/protocol"
 
 import { spawnAgentProcess } from "./agent-process.ts"
 
 /** Starts one raw ACP adapter and returns a client connection for inspection commands. */
-async function startAdapterInspection(adapter: string, cwd: string) {
+async function startAdapterInspection(
+  adapter: string,
+  cwd: string,
+  registryService: ACPRegistryService,
+) {
   const processHandle = await spawnAgentProcess({
     daemonUrl: "http://localhost:0",
     token: "test-token",
     agent: adapter,
     cwd,
-    agentBinDir: os.tmpdir(),
-    registryService: createAcpRegistryService(),
+    createAgentEnvironment: ({ env }) => ({
+      ...env,
+      PATH: [os.tmpdir(), env?.PATH ?? process.env.PATH].filter(Boolean).join(delimiter),
+    }),
+    registryService,
   })
   try {
     const sessionUpdates: acp.AnyMessage[] = []
@@ -54,8 +62,12 @@ async function startAdapterInspection(adapter: string, cwd: string) {
 }
 
 /** Starts one raw ACP adapter, initializes it, and opens a fresh session for inspection. */
-export async function inspectAdapterSession(adapter: string, cwd: string) {
-  const inspection = await startAdapterInspection(adapter, cwd)
+export async function inspectAdapterSession(
+  adapter: string,
+  cwd: string,
+  registryService: ACPRegistryService,
+) {
+  const inspection = await startAdapterInspection(adapter, cwd, registryService)
 
   try {
     const session = await inspection.client.newSession({
@@ -80,8 +92,9 @@ export async function listAdapterSessions(
   adapter: string,
   cwd: string,
   request: acp.ListSessionsRequest,
+  registryService: ACPRegistryService,
 ) {
-  const inspection = await startAdapterInspection(adapter, cwd)
+  const inspection = await startAdapterInspection(adapter, cwd, registryService)
 
   try {
     const initialize = inspection.client.initialize

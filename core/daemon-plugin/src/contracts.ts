@@ -1,6 +1,9 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import type { UserConfig } from "@goddard-ai/schema/config"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
@@ -32,6 +35,88 @@ export type DbContext<TDb extends DbSchemaDefinition> = {
   readonly batch: Kindstore<TDb, {}>["batch"]
 } & {
   readonly [K in keyof TDb]: Kindstore<TDb, {}>[K]
+}
+
+/** One validated merged root-config snapshot made available to daemon plugins. */
+export type RootConfigSnapshot = {
+  readonly globalRoot: string
+  readonly localRoot: string
+  readonly config: UserConfig
+  readonly version: number
+  readonly loadedAt: string
+}
+
+/** Narrow config reader exposed to daemon plugins instead of the concrete config manager. */
+export type DaemonConfigProvider = {
+  readonly getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot>
+  readonly getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot | null
+}
+
+/** Shared daemon logger surface exposed to daemon plugins. */
+export type DaemonLogger = {
+  readonly log: (event: string, fields?: Record<string, unknown>) => void
+  readonly snapshot: () => DaemonLogger
+}
+
+/** Structured preview emitted when long text must be truncated for logs. */
+export type TextPreview = {
+  readonly text: string
+  readonly byteLength: number
+  readonly truncated: boolean
+}
+
+/** Logging and preview helpers exposed to daemon plugins. */
+export type DaemonLogService = {
+  readonly createLogger: () => DaemonLogger
+  readonly createPayloadPreview: (
+    value: unknown,
+    options?: {
+      readonly maxStringLength?: number
+      readonly parentKey?: string
+    },
+  ) => unknown
+  readonly createChunkPreview: (value: Uint8Array) => TextPreview
+}
+
+/** Stable session metadata carried through live daemon session work. */
+export type DaemonSessionContext = {
+  sessionId: DaemonSession["id"]
+  acpSessionId: string | null
+  cwd: string
+  repository: string | null
+  prNumber: number | null
+  worktreeDir: string | null
+  worktreePoweredBy: string | null
+}
+
+/** Async log-context runner exposed to daemon plugins that manage sessions. */
+export type DaemonSessionContextService = {
+  readonly run: <TResult>(context: DaemonSessionContext, callback: () => TResult) => TResult
+}
+
+/** Public daemon surface for reading adapter catalog state from the registry cache. */
+export type ACPRegistryService = {
+  readonly listAdapters: () => Promise<{
+    readonly adapters: readonly (AgentDistribution & Record<string, unknown>)[]
+    readonly registrySource: "cache" | "fallback"
+    readonly lastSuccessfulSyncAt: string | null
+    readonly stale: boolean
+    readonly lastError: string | null
+  }>
+  readonly getAdapter: (id: string) => Promise<{
+    readonly adapter: AgentDistribution | null
+    readonly registrySource: "cache" | "fallback"
+    readonly lastSuccessfulSyncAt: string | null
+    readonly stale: boolean
+    readonly lastError: string | null
+  }>
+}
+
+/** Builds environment fragments used by daemon-managed agent processes. */
+export type DaemonAgentEnvironmentService = {
+  readonly createAgentEnvironment: (input: {
+    readonly env?: Record<string, string>
+  }) => Record<string, string>
 }
 
 type SetupResult<TPlugin> = TPlugin extends {
@@ -106,13 +191,15 @@ export type DaemonSetupSubstrate = {
     readonly agentBinDir: string
     readonly idleSessionShutdownTimeoutMs?: number
     readonly getDaemonUrl: () => string
-  }
+  } & DaemonAgentEnvironmentService
   readonly authTokenStore: {
     readonly set: (token: string) => void | Promise<void>
     readonly delete: () => void | Promise<void>
   }
-  readonly configManager: any
-  readonly registryService: any
+  readonly configProvider: DaemonConfigProvider
+  readonly log: DaemonLogService
+  readonly registryService: ACPRegistryService
+  readonly sessionContext: DaemonSessionContextService
   readonly getIpcRequestContext: () => {
     readonly setSessionId: (id: DaemonSessionId) => void
   }

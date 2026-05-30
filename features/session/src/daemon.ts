@@ -27,9 +27,11 @@ export const sessionPlugin = definePlugin({
     const sessionManager = createSessionManager({
       db: context.db,
       getDaemonUrl: context.daemonRuntime.getDaemonUrl,
-      agentBinDir: context.daemonRuntime.agentBinDir,
-      configManager: context.configManager,
+      createAgentEnvironment: context.daemonRuntime.createAgentEnvironment,
+      configProvider: context.configProvider,
+      log: context.log,
       registryService: context.registryService,
+      sessionContext: context.sessionContext,
       events,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
       emitMessage(id, message) {

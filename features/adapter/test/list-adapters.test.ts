@@ -32,7 +32,7 @@ describe("adapter listing", () => {
               }
             },
           },
-          configManager: {
+          configProvider: {
             async getRootConfig() {
               return {
                 config: {
@@ -148,7 +148,7 @@ describe("adapter listing", () => {
               }
             },
           },
-          configManager: {
+          configProvider: {
             async getRootConfig() {
               return {
                 config: {

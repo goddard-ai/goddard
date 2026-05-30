@@ -98,7 +98,10 @@ test("loads a configured path plugin from the global config", async () => {
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
+  const pluginManager = createWorktreePluginManager({
+    configProvider: configManager,
+    logger: testLogger,
+  })
   const created = await createWorktree({
     cwd: repoDir,
     branchName: "feature-1",
@@ -199,7 +202,10 @@ test("loads a configured package plugin from a resolvable package specifier", as
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
+  const pluginManager = createWorktreePluginManager({
+    configProvider: configManager,
+    logger: testLogger,
+  })
   const created = await createWorktree({
     cwd: repoDir,
     branchName: "feature-2",
@@ -267,7 +273,10 @@ test("falls back to the default plugin when a configured plugin does not create 
     },
   })
 
-  const pluginManager = createWorktreePluginManager({ configManager, logger: testLogger })
+  const pluginManager = createWorktreePluginManager({
+    configProvider: configManager,
+    logger: testLogger,
+  })
 
   const created = await createWorktree({
     cwd: repoDir,

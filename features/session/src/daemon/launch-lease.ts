@@ -1,5 +1,6 @@
 /** Launch-lease bookkeeping for ACP sessions prepared before durable daemon session creation. */
 import treeKill from "@alloc/tree-kill"
+import type { DaemonLogger } from "@goddard-ai/daemon-plugin"
 import type {
   CreateSessionRequest,
   SessionLaunchBranch,
@@ -9,7 +10,6 @@ import type { AcpClient, AcpSession } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
-import type { createLogger } from "../../../../core/daemon/src/logging.ts"
 import { waitForAgentProcessExit, type AgentProcessHandle } from "./agent-process.ts"
 import type { ResolvedCreateSessionRequest } from "./session-records.ts"
 import type { PreparedSessionWorktree } from "./worktree.ts"
@@ -80,7 +80,7 @@ function canPromoteLaunchLease(params: {
 }
 
 /** Creates the daemon-local registry that owns launch lease lookup, release, and cleanup. */
-export function createLaunchLeaseStore(input: { logger: ReturnType<typeof createLogger> }) {
+export function createLaunchLeaseStore(input: { logger: DaemonLogger }) {
   const launchLeases = new Map<string, LaunchLease>()
   const launchLeaseIdsByKey = new Map<string, string>()
 

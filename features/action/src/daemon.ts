@@ -13,12 +13,12 @@ export const actionPlugin = definePlugin({
     scopes: ["user", "project"],
   },
   ipcRoutes: actionIpcRoutes,
-  setup({ configManager, getIpcRequestContext, session }) {
+  setup({ configProvider, getIpcRequestContext, session }) {
     return {
       ipcHandlers: {
         action: {
           run: async ({ body: payload }) => {
-            const action = await resolveNamedAction(payload.actionName, payload.cwd, configManager)
+            const action = await resolveNamedAction(payload.actionName, payload.cwd, configProvider)
             const response = {
               session: await session.newSession({
                 request: buildNamedActionSessionParams(action, payload.cwd, {
