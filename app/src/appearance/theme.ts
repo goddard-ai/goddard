@@ -168,7 +168,7 @@ function deriveThemeVariables(themeName: BuiltInThemeName, highContrast: boolean
     foreground,
     highContrast ? 4.5 : 3.4,
   )
-  const overlay = withAlpha(mixColors(foreground, background, isDark ? 0.18 : 0.42), 0.52)
+  const overlay = withAlpha(mixColors(background, foreground, isDark ? 0.18 : 0.12), 0.9)
   const shadow = withAlpha(mixColors(foreground, background, isDark ? 0.08 : 0.6), 0.18)
   const transcriptGlowBase = mixColors(accent, background, isDark ? 0.54 : 0.78)
   const transcriptGlow = withAlpha(transcriptGlowBase, isDark ? 0.26 : 0.16)

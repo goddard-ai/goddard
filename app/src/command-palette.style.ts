@@ -5,7 +5,6 @@ export default {
     position: "fixed",
     inset: "0",
     backgroundColor: "overlay",
-    backdropFilter: "blur(6px)",
     opacity: "1",
     transition: "opacity 160ms cubic-bezier(0.23, 1, 0.32, 1)",
     zIndex: "50",

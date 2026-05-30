@@ -6,7 +6,6 @@ export default {
     inset: "0",
     zIndex: "60",
     backgroundColor: "overlay",
-    backdropFilter: "blur(4px)",
   }),
   positioner: css({
     position: "fixed",

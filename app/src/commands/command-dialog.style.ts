@@ -4,7 +4,7 @@ export default {
   failureBackdrop: css({
     position: "fixed",
     inset: "0",
-    backgroundColor: "rgba(7, 10, 15, 0.42)",
+    backgroundColor: "overlay",
   }),
   failurePositioner: css({
     position: "fixed",
