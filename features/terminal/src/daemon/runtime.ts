@@ -1,4 +1,4 @@
-/** Daemon-owned terminal wrappers around Bun's native PTY support. */
+/** Daemon-owned terminal sessions backed by Bun's native PTY support. */
 import type {
   TerminalCloseRequest,
   TerminalConnectionId,
@@ -51,7 +51,7 @@ export class DaemonTerminalError extends Error {
 
 /** Daemon-side owner for the PTYs created by one terminal stream connection. */
 export class DaemonTerminalConnection {
-  readonly #terminals = new Map<TerminalInstanceId, DaemonTerminal>()
+  readonly #terminals = new Map<TerminalInstanceId, Terminal>()
   readonly #connectionId: TerminalConnectionId
   readonly #onEvent: (event: TerminalDaemonEvent) => void
 
@@ -75,9 +75,9 @@ export class DaemonTerminalConnection {
       )
     }
 
-    let terminal: DaemonTerminal
+    let terminal: Terminal
     try {
-      terminal = new DaemonTerminal(
+      terminal = new Terminal(
         this.#connectionId,
         request.instanceId,
         request.options ?? {},
@@ -169,11 +169,12 @@ export class DaemonTerminalConnection {
   }
 }
 
-/** Wrapper for one live Bun PTY terminal. */
-class DaemonTerminal {
+/** One live daemon-owned terminal. */
+class Terminal {
   readonly connectionId: TerminalConnectionId
   readonly instanceId: TerminalInstanceId
   readonly options: TerminalSpawnOptions
+  readonly #command: string
   readonly #process: TerminalProcess
   readonly #terminal: NativeTerminal
   readonly #onEvent: (event: TerminalDaemonEvent) => void
@@ -194,25 +195,23 @@ class DaemonTerminal {
     this.instanceId = instanceId
     this.options = options
     this.#onEvent = onEvent
+    this.#command = resolveTerminalCommand(options.command)
     this.#dimensions = {
       cols: options.dimensions?.cols ?? DEFAULT_TERMINAL_DIMENSIONS.cols,
       rows: options.dimensions?.rows ?? DEFAULT_TERMINAL_DIMENSIONS.rows,
     }
-    this.#process = Bun.spawn(
-      [resolveTerminalCommand(options.command), ...resolveTerminalArgs(options)],
-      {
-        cwd: options.cwd,
-        env: resolveTerminalEnv(options.env),
-        terminal: {
-          name: DEFAULT_TERMINAL_NAME,
-          cols: this.#dimensions.cols,
-          rows: this.#dimensions.rows,
-          data: (_terminal, data) => {
-            this.#emitOutput(this.#decoder.decode(data, { stream: true }))
-          },
+    this.#process = Bun.spawn([this.#command, ...resolveTerminalArgs(options)], {
+      cwd: options.cwd,
+      env: resolveTerminalEnv(options.env),
+      terminal: {
+        name: DEFAULT_TERMINAL_NAME,
+        cols: this.#dimensions.cols,
+        rows: this.#dimensions.rows,
+        data: (_terminal, data) => {
+          this.#emitOutput(this.#decoder.decode(data, { stream: true }))
         },
       },
-    )
+    })
     if (!this.#process.terminal) {
       throw new Error("Bun did not create a native terminal for the spawned process.")
     }
@@ -241,7 +240,7 @@ class DaemonTerminal {
       instanceId: this.instanceId,
       state: this.#state,
       cwd: this.options.cwd ?? process.cwd(),
-      title: this.options.title ?? resolveTerminalCommand(this.options.command),
+      title: this.options.title ?? this.#command,
       dimensions: this.#dimensions,
       exitCode: this.#exitCode,
       signal: this.#signal,
