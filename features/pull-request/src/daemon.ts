@@ -9,6 +9,9 @@ import { db } from "../../../core/daemon/src/persistence/store.ts"
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
+import { pullRequestDbSchema } from "./daemon/store.ts"
+
+export { pullRequestDbSchema } from "./daemon/store.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -47,6 +50,7 @@ async function recordPullRequest(record: Omit<DaemonPullRequest, "id" | "updated
 export const pullRequestPlugin: Plugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin, inboxPlugin],
+  db: pullRequestDbSchema,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, getIpcRequestContext, inbox, session }) {

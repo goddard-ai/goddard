@@ -1,9 +1,7 @@
 import { mkdirSync, rmSync } from "node:fs"
 import { dirname } from "node:path"
 import { getDatabasePath } from "@goddard-ai/paths/node"
-import { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import {
-  kind,
   kindstore,
   UnrecoverableStoreOpenError,
   type DatabaseOptions,
@@ -20,18 +18,7 @@ const metadata = {
   authToken: z.string(),
 }
 
-const coreDbSchema = {
-  pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
-    "host_owner_repo_prNumber",
-    {
-      host: "asc",
-      owner: "asc",
-      repo: "asc",
-      prNumber: "asc",
-    },
-    { unique: true },
-  ),
-}
+const coreDbSchema = {}
 
 type DaemonStore = any
 
@@ -61,6 +48,10 @@ function removeDatabaseArtifacts(filename: string) {
 }
 
 function openStore(connection: StoreConnectionOptions) {
+  if (Object.keys(activeSchema).length === 0) {
+    return null as DaemonStore
+  }
+
   try {
     return createStore({ ...connection, schema: activeSchema }) as DaemonStore
   } catch (error) {
