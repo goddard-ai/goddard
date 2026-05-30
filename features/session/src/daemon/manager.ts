@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config"
+import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { UserConfig } from "@goddard-ai/schema/config"
 import type {
@@ -14,7 +15,6 @@ import type {
   GetSessionDiagnosticsResponse,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
-  GetSessionWorkforceResponse,
   InboxHeadline,
   InboxScope,
   InitialPromptOption,
@@ -61,12 +61,6 @@ import type { ConfigManager } from "../../../../core/daemon/src/config-manager.t
 import { SessionContext } from "../../../../core/daemon/src/context.ts"
 import { createLogger, createPayloadPreview } from "../../../../core/daemon/src/logging.ts"
 import {
-  type SessionConnectionMode,
-  type SessionDiagnosticEvent,
-} from "../../../../core/daemon/src/persistence/session-state.ts"
-import { db } from "../../../../core/daemon/src/persistence/store.ts"
-import type { ACPRegistryService } from "../../../../core/daemon/src/session/registry.ts"
-import {
   spawnAgentProcess,
   waitForAgentProcessExit,
   type AgentProcessHandle,
@@ -93,7 +87,9 @@ import {
   resolveLatestStoredTurnSequence,
   toConnectionState,
   type ResolvedCreateSessionRequest,
+  type SessionConnectionMode,
 } from "./session-records.ts"
+import type { sessionDbSchema } from "./store.ts"
 import { discoverSessionSubpackages } from "./subpackages.ts"
 import { loadDaemonTextModel } from "./text-model-resolver.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
@@ -144,6 +140,7 @@ function getPackageVersion(): string {
 const logger = createLogger()
 
 type SessionId = DaemonSession["id"]
+type SessionDb = DbContext<typeof sessionDbSchema>
 
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
@@ -891,6 +888,7 @@ function normalizeSessionPageSize(limit?: number): number {
 
 /** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
 export function createSessionManager(input: {
+  db: SessionDb
   getDaemonUrl: () => string
   agentBinDir: string
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
@@ -899,6 +897,7 @@ export function createSessionManager(input: {
   registryService: AcpRegistryService
   idleSessionShutdownTimeoutMs?: number
 }) {
+  const db = input.db
   const activeSessions = new Map<SessionId, ActiveSession>()
   const activeSessionsByAcpSessionId = new Map<string, ActiveSession>()
   const launchLeaseStore = createLaunchLeaseStore({ logger })
@@ -1235,7 +1234,7 @@ export function createSessionManager(input: {
     detail?: Record<string, unknown>,
     diagnosticLogger: ReturnType<typeof createLogger> = logger,
   ) {
-    const event: SessionDiagnosticEvent = {
+    const event: DaemonSessionDiagnosticEvent = {
       type,
       at: new Date().toISOString(),
       detail,
@@ -1885,7 +1884,7 @@ export function createSessionManager(input: {
       }) ?? null
     if (existingDraft) {
       persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
-      active.nextTurnSequence = resolveLatestStoredTurnSequence(active.id) + 1
+      active.nextTurnSequence = resolveLatestStoredTurnSequence(db, active.id) + 1
     }
 
     const activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> = {
@@ -2256,7 +2255,7 @@ export function createSessionManager(input: {
     const id = existingSession?.id ?? db.sessions.newId()
     let token = params.token ?? randomBytes(32).toString("hex")
     const exitAfterInitialPrompt = shouldExitAfterInitialPrompt(params)
-    const existingArtifacts = resolveExistingSessionArtifacts(id, existingSession)
+    const existingArtifacts = resolveExistingSessionArtifacts(db, id, existingSession)
     const resolvedConfig =
       params.config ??
       (input.configManager
@@ -2478,7 +2477,7 @@ export function createSessionManager(input: {
         contextUsage: latestContextUsage,
       })
 
-      persistLaunchedSession({
+      persistLaunchedSession(db, {
         id,
         existingSession,
         initialTurn,
@@ -3073,21 +3072,6 @@ export function createSessionManager(input: {
     return activeSessions.has(id)
   }
 
-  async function getWorkforce(id: SessionId): Promise<GetSessionWorkforceResponse> {
-    await ready
-    const session = await getSession(id)
-    const workforceRecord =
-      db.workforces.first({
-        where: { sessionId: id },
-      }) ?? null
-
-    return {
-      id: session.id,
-      acpSessionId: session.acpSessionId,
-      workforce: workforceRecord,
-    }
-  }
-
   async function declareInitiative(id: SessionId, title: string) {
     await ready
     requireSessionDocument(id)
@@ -3182,6 +3166,15 @@ export function createSessionManager(input: {
       headline: resolved.headline,
       turnId: resolveCurrentTurnId(id),
     }
+  }
+
+  async function recordSessionResult(id: SessionId, message: string) {
+    await ready
+    requireSessionDocument(id)
+    updateSession(id, {
+      status: "done",
+      lastAgentMessage: message,
+    })
   }
 
   async function resolveTokenScope(token: string) {
@@ -3542,11 +3535,11 @@ export function createSessionManager(input: {
     findWorktreeByDir,
     isActive,
     emitDiagnostic,
-    getWorkforce,
     declareInitiative,
     reportBlocker,
     reportTurnEnded,
     recordTurnAttentionActivity,
+    recordSessionResult,
     resolveTokenScope,
     allowPullRequest,
     completeSession,

@@ -1,11 +1,10 @@
-import { definePlugin, type Plugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DbContext, type Plugin } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
-import { db } from "../../../core/daemon/src/persistence/store.ts"
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
@@ -19,6 +18,7 @@ type PullRequestSessionRecord = {
   repo: string | null
   allowedPrNumbers: readonly number[]
 }
+type PullRequestDb = DbContext<typeof pullRequestDbSchema>
 
 function requireRepositorySession(session: PullRequestSessionRecord | null) {
   if (!session) {
@@ -35,7 +35,10 @@ function requireRepositorySession(session: PullRequestSessionRecord | null) {
   }
 }
 
-async function recordPullRequest(record: Omit<DaemonPullRequest, "id" | "updatedAt">) {
+async function recordPullRequest(
+  db: PullRequestDb,
+  record: Omit<DaemonPullRequest, "id" | "updatedAt">,
+) {
   return db.pullRequests.putByUnique(
     {
       host: record.host,
@@ -53,7 +56,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
   db: pullRequestDbSchema,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ backend, getIpcRequestContext, inbox, session }) {
+  setup({ backend, db, getIpcRequestContext, inbox, session }) {
     return {
       ipcHandlers: {
         pr: {
@@ -70,7 +73,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
               repo: sessionRecord.repo,
             })
             await session.allowPullRequest(sessionRecord.sessionId, pr.number)
-            const pullRequest = await recordPullRequest({
+            const pullRequest = await recordPullRequest(db, {
               host: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
@@ -89,12 +92,10 @@ export const pullRequestPlugin: Plugin = definePlugin({
               headline: metadata.headline,
               turnId: metadata.turnId,
             })
-            db.sessions.update(sessionRecord.sessionId, {
-              status: "done",
-              lastAgentMessage: `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${
-                resolvedInput.body ?? ""
-              }`,
-            })
+            await session.recordSessionResult(
+              sessionRecord.sessionId,
+              `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${resolvedInput.body ?? ""}`,
+            )
             return { number: pr.number, url: pr.url }
           },
           get: async ({ body: { id } }) => {
@@ -123,7 +124,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })
-            const pullRequest = await recordPullRequest({
+            const pullRequest = await recordPullRequest(db, {
               host: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
@@ -142,10 +143,10 @@ export const pullRequestPlugin: Plugin = definePlugin({
               headline: metadata.headline,
               turnId: metadata.turnId,
             })
-            db.sessions.update(sessionRecord.sessionId, {
-              status: "done",
-              lastAgentMessage: `PR Reply: ${payload.message}`,
-            })
+            await session.recordSessionResult(
+              sessionRecord.sessionId,
+              `PR Reply: ${payload.message}`,
+            )
             return response
           },
         },

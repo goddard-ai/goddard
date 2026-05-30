@@ -151,6 +151,21 @@ export const workforcePlugin = definePlugin({
         workforce.close()
       },
       ipcHandlers: {
+        session: {
+          workforce: {
+            get: async ({ body: { id } }) => {
+              const sessionRecord = await session.getSession(id)
+              return {
+                id: sessionRecord.id,
+                acpSessionId: sessionRecord.acpSessionId,
+                workforce:
+                  db.workforces.first({
+                    where: { sessionId: id },
+                  }) ?? null,
+              }
+            },
+          },
+        },
         workforce: {
           start: async ({ body: { rootDir } }) => ({
             workforce: await workforce.startWorkforce(rootDir),

@@ -45,6 +45,29 @@ describe("IPC route composition", () => {
     expect(Object.keys(composed.session.children)).toEqual(["create", "events"])
   })
 
+  test("does not mutate route fragments during composition", () => {
+    const sessionRoutes = defineIpcRoutes({
+      session: http.resource("session", {
+        create: http.post("create", {
+          response: $type<{ id: string }>(),
+        }),
+      }),
+    })
+    const workforceRoutes = defineIpcRoutes({
+      session: http.resource("session", {
+        workforce: http.resource("workforce", {
+          get: http.post("get", {
+            response: $type<{ id: string }>(),
+          }),
+        }),
+      }),
+    })
+
+    composeIpcRoutes([sessionRoutes, workforceRoutes])
+
+    expect(Object.keys(sessionRoutes.session.children)).toEqual(["create"])
+  })
+
   test("rejects duplicate action ownership", () => {
     const first = defineIpcRoutes({
       session: http.resource("session", {

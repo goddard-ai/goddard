@@ -27,7 +27,6 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
-  type GetSessionWorkforceResponse,
   type ListSessionsResponse,
   type ReleaseSessionLaunchLeaseResponse,
   type ReportSessionResponse,
@@ -112,13 +111,6 @@ export const sessionIpcRoutes = defineIpcRoutes({
       get: http.post("get", {
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
-      }),
-    }),
-    workforce: http.resource("workforce", {
-      /** Reads persisted workforce metadata attached to one daemon-managed session. */
-      get: http.post("get", {
-        body: DaemonSessionIdParams,
-        response: $type<GetSessionWorkforceResponse>(),
       }),
     }),
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */

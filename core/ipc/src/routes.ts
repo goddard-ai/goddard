@@ -31,7 +31,7 @@ function mergeRouteTree(target: HttpRouteTree, source: HttpRouteTree, path: read
   for (const [key, sourceNode] of Object.entries(source)) {
     const existingNode = target[key]
     if (!existingNode) {
-      target[key] = sourceNode
+      target[key] = cloneRouteNode(sourceNode)
       continue
     }
 
@@ -61,4 +61,25 @@ function assertSameResourcePath(
 
 function formatRoutePath(node: HttpResource | HttpAction) {
   return node.path ? String(node.path) : ""
+}
+
+function cloneRouteTree(routeTree: HttpRouteTree) {
+  const cloned: HttpRouteTree = {}
+
+  for (const [key, node] of Object.entries(routeTree)) {
+    cloned[key] = cloneRouteNode(node)
+  }
+
+  return cloned
+}
+
+function cloneRouteNode(node: HttpNode): HttpNode {
+  if (node.kind === "resource") {
+    return {
+      ...node,
+      children: cloneRouteTree(node.children),
+    }
+  }
+
+  return { ...node }
 }

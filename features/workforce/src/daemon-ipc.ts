@@ -1,4 +1,6 @@
 import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import type { GetSessionWorkforceResponse } from "@goddard-ai/schema/daemon/sessions"
+import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 
 import {
   CancelWorkforceRequest,
@@ -24,6 +26,15 @@ import {
 } from "./schema.ts"
 
 export const workforceIpcRoutes = defineIpcRoutes({
+  session: http.resource("session", {
+    workforce: http.resource("workforce", {
+      /** Reads persisted workforce metadata attached to one daemon-managed session. */
+      get: http.post("get", {
+        body: DaemonSessionIdParams,
+        response: $type<GetSessionWorkforceResponse>(),
+      }),
+    }),
+  }),
   workforce: http.resource("workforce", {
     /** Starts or reuses one daemon workforce runtime. */
     start: http.post("start", {

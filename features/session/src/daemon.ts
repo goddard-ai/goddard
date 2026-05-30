@@ -25,6 +25,7 @@ export const sessionPlugin = definePlugin({
     const events = createSessionEventEmitter()
     const messageListeners = new Set<(event: SessionMessageEvent) => void>()
     const sessionManager = createSessionManager({
+      db: context.db,
       getDaemonUrl: context.daemonRuntime.getDaemonUrl,
       agentBinDir: context.daemonRuntime.agentBinDir,
       configManager: context.configManager,
@@ -78,10 +79,10 @@ export const sessionPlugin = definePlugin({
       provides: {
         session: {
           newSession: sessionManager.newSession,
-          getWorkforce: sessionManager.getWorkforce,
           promptSession: sessionManager.promptSession,
           shutdownSession: sessionManager.shutdownSession,
           recordTurnAttentionActivity: sessionManager.recordTurnAttentionActivity,
+          recordSessionResult: sessionManager.recordSessionResult,
           resolveTokenScope: sessionManager.resolveTokenScope,
           allowPullRequest: sessionManager.allowPullRequest,
           getSession: sessionManager.getSession,
@@ -123,9 +124,6 @@ export const sessionPlugin = definePlugin({
           diagnostics: async ({ body: { id } }) => sessionManager.getDiagnostics(id),
           worktree: {
             get: async ({ body: { id } }) => sessionManager.getWorktree(id),
-          },
-          workforce: {
-            get: async ({ body: { id } }) => sessionManager.getWorkforce(id),
           },
           shutdown: async ({ body: { id } }) => ({
             id,

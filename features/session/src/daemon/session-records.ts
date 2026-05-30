@@ -1,3 +1,4 @@
+import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type {
@@ -10,12 +11,15 @@ import type {
 import type { DaemonSessionTurnDraft, DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type * as acp from "acp-client/protocol"
 
-import type { SessionConnectionMode } from "../../../../core/daemon/src/persistence/session-state.ts"
-import { db } from "../../../../core/daemon/src/persistence/store.ts"
+import type { sessionDbSchema } from "./store.ts"
 import { toCompletedTurnInput } from "./turn-history.ts"
 import type { PreparedSessionWorktree, SessionWorktreeState } from "./worktree.ts"
 
 type SessionId = DaemonSession["id"]
+
+/** Durable connectivity summary for a daemon session across daemon restarts. */
+export type SessionConnectionMode = DaemonSession["connectionMode"]
+type SessionDb = DbContext<typeof sessionDbSchema>
 type SessionDoc = DaemonSession
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree
@@ -35,7 +39,7 @@ export type ResolvedCreateSessionRequest = Omit<CreateSessionRequest, "agent" | 
 }
 
 /** Reads the highest persisted turn sequence across completed turns and any durable draft. */
-export function resolveLatestStoredTurnSequence(id: SessionId) {
+export function resolveLatestStoredTurnSequence(db: SessionDb, id: SessionId) {
   const latestTurn =
     db.sessionTurns.first({
       where: { sessionId: id },
@@ -58,6 +62,7 @@ export function resolveLatestStoredTurnSequence(id: SessionId) {
 
 /** Loads any persisted session-side artifacts that need to be reused during launch. */
 export function resolveExistingSessionArtifacts(
+  db: SessionDb,
   id: SessionId,
   existingSession: SessionDoc | null,
 ): ExistingSessionArtifacts {
@@ -80,7 +85,7 @@ export function resolveExistingSessionArtifacts(
     }) ?? null
   return {
     draftRecord,
-    nextTurnSequence: resolveLatestStoredTurnSequence(id) + 1,
+    nextTurnSequence: resolveLatestStoredTurnSequence(db, id) + 1,
     worktreeRecord,
     worktree: toSessionWorktreeState(worktreeRecord),
   }
@@ -235,14 +240,17 @@ export function createSessionRecordUpdate(params: {
 }
 
 /** Persists the records produced by one successful session launch across all daemon-owned kinds. */
-export function persistLaunchedSession(params: {
-  id: SessionId
-  existingSession: SessionDoc | null
-  initialTurn: SessionHistoryTurn | null
-  existingWorktreeRecord: SessionWorktreeDoc | null
-  worktree: PreparedSessionWorktree | null
-  sessionRecord: ReturnType<typeof createSessionRecordUpdate>
-}) {
+export function persistLaunchedSession(
+  db: SessionDb,
+  params: {
+    id: SessionId
+    existingSession: SessionDoc | null
+    initialTurn: SessionHistoryTurn | null
+    existingWorktreeRecord: SessionWorktreeDoc | null
+    worktree: PreparedSessionWorktree | null
+    sessionRecord: ReturnType<typeof createSessionRecordUpdate>
+  },
+) {
   if (params.initialTurn) {
     db.sessionTurns.create(toCompletedTurnInput(params.id, params.initialTurn))
   }

@@ -321,12 +321,15 @@ function createPluginDbContext(plugin: ComposedDaemonPlugin) {
   const contextSchema: Record<string, unknown> = {}
   const context: Record<string, unknown> = {
     schema: contextSchema,
-    batch: db.batch.bind(db),
+    batch: (...args: unknown[]) => db.batch(...(args as never[])),
   }
 
   for (const key of Object.keys(schema)) {
-    context[key] = db[key]
     contextSchema[key] = db.schema[key]
+    Object.defineProperty(context, key, {
+      enumerable: true,
+      get: () => db[key],
+    })
   }
 
   return context
