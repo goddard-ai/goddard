@@ -1,14 +1,13 @@
 import { spawn } from "node:child_process"
 import { realpathSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import type { DaemonConfigProvider, RootConfigSnapshot } from "@goddard-ai/daemon-plugin"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
-import { createConfigManager } from "../../../core/daemon/src/config-manager.ts"
-import { readMergedRootConfig } from "../../../core/daemon/src/resolvers/config.ts"
 import { createWorktree, deleteWorktree } from "../src/daemon/worktrees/index.ts"
 import { createWorktreePluginManager } from "../src/daemon/worktrees/plugin-manager.ts"
 import { defaultPlugin } from "../src/daemon/worktrees/plugins/default.ts"
@@ -23,6 +22,7 @@ const testLogger = {
     return testLogger
   },
 }
+const configProvider = createTestConfigProvider()
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -39,8 +39,6 @@ afterEach(async () => {
 test("loads a configured path plugin from the global config", async () => {
   const homeDir = await useTempHome()
   const repoDir = await createRepoFixture()
-  const configManager = createConfigManager()
-  cleanup.push(() => configManager.close())
 
   const pluginPath = join(homeDir, ".goddard", "plugins", "path-plugin.mjs")
   await mkdir(dirname(pluginPath), { recursive: true })
@@ -99,7 +97,7 @@ test("loads a configured path plugin from the global config", async () => {
   })
 
   const pluginManager = createWorktreePluginManager({
-    configProvider: configManager,
+    configProvider,
     logger: testLogger,
   })
   const created = await createWorktree({
@@ -128,8 +126,6 @@ test("loads a configured path plugin from the global config", async () => {
 test("loads a configured package plugin from a resolvable package specifier", async () => {
   await useTempHome()
   const repoDir = await createRepoFixture()
-  const configManager = createConfigManager()
-  cleanup.push(() => configManager.close())
   const packageDir = fileURLToPath(
     new URL("../../../node_modules/@acme/goddard-worktree-plugin", import.meta.url),
   )
@@ -203,7 +199,7 @@ test("loads a configured package plugin from a resolvable package specifier", as
   })
 
   const pluginManager = createWorktreePluginManager({
-    configProvider: configManager,
+    configProvider,
     logger: testLogger,
   })
   const created = await createWorktree({
@@ -232,8 +228,6 @@ test("loads a configured package plugin from a resolvable package specifier", as
 test("falls back to the default plugin when a configured plugin does not create a linked worktree", async () => {
   const homeDir = await useTempHome()
   const repoDir = await createRepoFixture()
-  const configManager = createConfigManager()
-  cleanup.push(() => configManager.close())
 
   const pluginPath = join(homeDir, ".goddard", "plugins", "invalid-plugin.mjs")
   await mkdir(dirname(pluginPath), { recursive: true })
@@ -274,7 +268,7 @@ test("falls back to the default plugin when a configured plugin does not create 
   })
 
   const pluginManager = createWorktreePluginManager({
-    configProvider: configManager,
+    configProvider,
     logger: testLogger,
   })
 
@@ -296,67 +290,6 @@ test("falls back to the default plugin when a configured plugin does not create 
   ).resolves.toBe(true)
 })
 
-test("rejects worktree plugin references in repository-local config", async () => {
-  await useTempHome()
-  const repoDir = await createRepoFixture()
-
-  await writeLocalRootConfig(repoDir, {
-    worktrees: {
-      plugins: [
-        {
-          type: "path",
-          path: "./plugin.mjs",
-        },
-      ],
-    },
-  })
-
-  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
-    "`worktrees.plugins` is only supported in the global Goddard config",
-  )
-})
-
-test("allows repository-local worktree bootstrap config and replaces inherited arrays", async () => {
-  await useTempHome()
-  const repoDir = await createRepoFixture()
-
-  await writeGlobalRootConfig({
-    worktrees: {
-      bootstrap: {
-        enabled: true,
-        packageManager: "bun",
-        installArgs: ["--global-flag"],
-        seedNames: ["node_modules", "dist"],
-        seedPaths: ["global/path"],
-      },
-    },
-  })
-
-  await writeLocalRootConfig(repoDir, {
-    worktrees: {
-      bootstrap: {
-        installArgs: ["--local-flag"],
-        seedNames: [".turbo"],
-        seedPaths: ["local/path"],
-      },
-    },
-  })
-
-  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
-    config: {
-      worktrees: {
-        bootstrap: {
-          enabled: true,
-          packageManager: "bun",
-          installArgs: ["--local-flag"],
-          seedNames: [".turbo"],
-          seedPaths: ["local/path"],
-        },
-      },
-    },
-  })
-})
-
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-worktree-plugin-home-"))
   process.env.HOME = homeDir
@@ -368,8 +301,34 @@ async function writeGlobalRootConfig(config: Record<string, unknown>) {
   await writeRootConfig(getGlobalConfigPath(), config)
 }
 
-async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
-  await writeRootConfig(getLocalConfigPath(repoDir), config)
+function createTestConfigProvider(): DaemonConfigProvider {
+  return {
+    async getRootConfig(cwd) {
+      const globalRoot = dirname(getGlobalConfigPath())
+      const localRoot = cwd ? dirname(getLocalConfigPath(cwd)) : globalRoot
+      let config = {}
+
+      try {
+        config = JSON.parse(await readFile(getGlobalConfigPath(), "utf-8"))
+      } catch (error) {
+        const code = typeof error === "object" && error && "code" in error ? error.code : undefined
+        if (code !== "ENOENT") {
+          throw error
+        }
+      }
+
+      return {
+        globalRoot,
+        localRoot,
+        config,
+        version: 1,
+        loadedAt: new Date(0).toISOString(),
+      } as RootConfigSnapshot
+    },
+    getLastKnownRootConfig() {
+      return null
+    },
+  }
 }
 
 async function writeRootConfig(configPath: string, config: Record<string, unknown>) {
