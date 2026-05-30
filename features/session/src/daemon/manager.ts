@@ -166,7 +166,7 @@ const GLOBAL_RULES_PROMPT = readTextPrompt("global-rules.md")
 
 /** Reads shared prompt text without relying on bundler-only raw import declarations. */
 function readTextPrompt(name: string) {
-  return readFileSync(new URL(`../../../../core/daemon/src/prompts/${name}`, import.meta.url), {
+  return readFileSync(new URL(`./prompts/${name}`, import.meta.url), {
     encoding: "utf-8",
   })
 }
