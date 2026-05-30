@@ -2,7 +2,6 @@
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { UserConfig } from "@goddard-ai/schema/config"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindRegistry, Kindstore } from "kindstore"
@@ -21,10 +20,15 @@ export type ConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig>
   readonly schema: z.ZodType<TRawConfig>
   readonly scopes?: readonly ConfigScope[]
   readonly resolve?: (input: {
-    readonly user?: TRawConfig | undefined
-    readonly project?: TRawConfig | undefined
+    readonly user?: TRawConfig
+    readonly project?: TRawConfig
   }) => TResolvedConfig | Promise<TResolvedConfig>
 }
+
+/** One or more root config namespaces owned by a daemon plugin. */
+export type ConfigDefinitions =
+  | ConfigDefinition<any, any>
+  | Record<string, ConfigDefinition<any, any>>
 
 /** Feature-owned kindstore schema fragment merged by the daemon composition root. */
 export type DbSchemaDefinition = KindRegistry
@@ -38,18 +42,18 @@ export type DbContext<TDb extends DbSchemaDefinition> = {
 }
 
 /** One validated merged root-config snapshot made available to daemon plugins. */
-export type RootConfigSnapshot = {
+export type RootConfigSnapshot<TConfig extends object = Record<string, unknown>> = {
   readonly globalRoot: string
   readonly localRoot: string
-  readonly config: UserConfig
+  readonly config: TConfig
   readonly version: number
   readonly loadedAt: string
 }
 
 /** Narrow config reader exposed to daemon plugins instead of the concrete config manager. */
-export type DaemonConfigProvider = {
-  readonly getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot>
-  readonly getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot | null
+export type DaemonConfigProvider<TConfig extends object = Record<string, unknown>> = {
+  readonly getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot<TConfig>>
+  readonly getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot<TConfig> | null
 }
 
 /** Shared daemon logger surface exposed to daemon plugins. */
@@ -136,19 +140,34 @@ export type InferProvides<TPlugin> =
 type InferConfigValue<TPlugin> = TPlugin extends {
   readonly config: infer TConfig extends ConfigDefinition
 }
-  ? TConfig extends { readonly resolve: (...args: never[]) => infer TResolved }
-    ? Awaited<TResolved>
-    : TConfig extends ConfigDefinition<unknown, infer TResolved>
-      ? TResolved
-      : unknown
+  ? InferConfigValueFromDefinition<TConfig>
   : never
+
+type InferConfigValueFromDefinition<TDefinition> =
+  TDefinition extends ConfigDefinition<infer TRaw, infer TResolved>
+    ? TDefinition extends { readonly resolve: (...args: any[]) => infer TResolveResult }
+      ? Awaited<TResolveResult>
+      : unknown extends TResolved
+        ? TRaw
+        : TResolved
+    : unknown
+
+type InferConfigDefinitions<TConfig> = TConfig extends ConfigDefinition
+  ? { readonly config: InferConfigValueFromDefinition<TConfig> }
+  : TConfig extends Record<string, ConfigDefinition>
+    ? {
+        readonly [TKey in keyof TConfig]: InferConfigValueFromDefinition<TConfig[TKey]>
+      }
+    : {}
 
 /** Extracts the resolved config namespace contributed by one daemon plugin. */
 export type InferConfig<TPlugin> = TPlugin extends {
   readonly name: infer TName extends string
-  readonly config: ConfigDefinition
+  readonly config: infer TConfig extends ConfigDefinitions
 }
-  ? { readonly [TKey in TName]: InferConfigValue<TPlugin> }
+  ? TConfig extends ConfigDefinition
+    ? { readonly [TKey in TName]: InferConfigValue<TPlugin> }
+    : InferConfigDefinitions<TConfig>
   : {}
 
 type InferDb<TPlugin> = TPlugin extends {
@@ -196,7 +215,6 @@ export type DaemonSetupSubstrate = {
     readonly set: (token: string) => void | Promise<void>
     readonly delete: () => void | Promise<void>
   }
-  readonly configProvider: DaemonConfigProvider
   readonly log: DaemonLogService
   readonly registryService: ACPRegistryService
   readonly sessionContext: DaemonSessionContextService
@@ -210,8 +228,9 @@ export type SetupContext<
   TConsumes extends readonly unknown[],
   TSelf = unknown,
 > = DaemonSetupSubstrate &
-  UnionToIntersection<InferProvides<TConsumes[number]>> &
-  SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>> &
+  UnionToIntersection<InferProvides<TConsumes[number]>> & {
+    readonly configProvider: DaemonConfigProvider<any>
+  } & SetupConfigContext<UnionToIntersection<InferConfig<TSelf | TConsumes[number]>>> &
   SetupDbContext<UnionToIntersection<InferDb<TSelf | TConsumes[number]>>> &
   SetupBackendContext<UnionToIntersection<InferBackendRoutes<TSelf | TConsumes[number]>>>
 
@@ -219,7 +238,7 @@ export type SetupContext<
 export type Plugin = {
   readonly name: string
   readonly consumes?: readonly Plugin[]
-  readonly config?: ConfigDefinition
+  readonly config?: ConfigDefinitions
   readonly db?: DbSchemaDefinition
   readonly backendRoutes?: BackendRouteTree
   readonly ipcRoutes?: HttpRouteTree
@@ -236,6 +255,6 @@ export type Composition = {
   readonly plugins: readonly Plugin[]
   readonly ipcRoutes: HttpRouteTree
   readonly backendRoutes: BackendRouteTree
-  readonly config: Record<string, ConfigDefinition>
+  readonly config: Record<string, ConfigDefinition<any, any>>
   readonly db: DbSchemaDefinition
 }

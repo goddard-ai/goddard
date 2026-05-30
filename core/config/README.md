@@ -1,6 +1,6 @@
 # `@goddard-ai/config`
 
-Canonical home for Goddard's persisted-config merge helpers.
+Shared helpers for Goddard config resolution.
 
 Persisted config is JSON-only:
 
@@ -11,40 +11,20 @@ Persisted config is JSON-only:
 
 ## Exports
 
-### Persisted document schemas
-
-Use these to validate JSON documents before loading them:
+Use the generic helpers to apply deterministic precedence inside config owners:
 
 ```ts
-import { ActionConfig, LoopConfig, RootConfig } from "@goddard-ai/schema/config"
+import { mergeConfigLayers, selectLast } from "@goddard-ai/config"
 
-const rootConfig = RootConfig.parse(rawRootConfig)
-const actionConfig = ActionConfig.parse(rawActionConfig)
-const loopConfig = LoopConfig.parse(rawLoopConfig)
-```
-
-### Merge helpers
-
-Use these to apply deterministic `global -> local -> entity -> runtime` precedence:
-
-```ts
-import {
-  mergeActionConfigLayers,
-  mergeLoopConfigLayers,
-  mergeRootConfigLayers,
-} from "@goddard-ai/config"
-
-const rootConfig = mergeRootConfigLayers(globalRoot, localRoot)
-const actionConfig = mergeActionConfigLayers(rootConfig.actions, entityConfig, runtimeOverrides)
-const loopConfig = mergeLoopConfigLayers(rootConfig.loops, entityConfig, runtimeOverrides)
+const merged = mergeConfigLayers([globalConfig, localConfig])
+const session = selectLast([globalConfig, localConfig], (config) => config?.session)
 ```
 
 ## Notes
 
-- JSON configuration support is daemon/core substrate, not a feature package.
-  Feature packages may contribute typed, namespaced config fragments through
-  daemon plugin metadata, but this package and the daemon config manager own
-  persisted config merging and validation.
+- Root config validation is daemon-owned because the effective schema is derived
+  from the statically composed daemon plugin list.
+- Feature packages own their feature-specific schemas and merge behavior.
 - Persisted loop config must remain JSON-safe. `nextPrompt` is not stored in JSON.
 - Runnable loop packages load `nextPrompt` from `prompt.js`.
 - Prompt frontmatter is not a supported config surface.

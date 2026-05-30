@@ -1,3 +1,4 @@
+import { mergeConfigLayers, selectLast } from "@goddard-ai/config"
 import { InlineSessionParams, StaticSessionParams } from "@goddard-ai/schema/config"
 import { z } from "zod"
 
@@ -9,6 +10,16 @@ export const ActionConfig = z.strictObject({
 })
 
 export type ActionConfig = z.infer<typeof ActionConfig>
+
+/** Merges action config layers using later layers as overrides. */
+export function mergeActionConfigLayers(...layers: Array<ActionConfig | undefined>) {
+  const merged = mergeConfigLayers<ActionConfig>(layers)
+
+  return ActionConfig.parse({
+    ...merged,
+    session: selectLast(layers, (layer) => layer?.session),
+  })
+}
 
 /** Request payload used to run one named daemon-resolved action. */
 export const RunNamedActionRequest = InlineSessionParams.extend({

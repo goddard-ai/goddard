@@ -4,7 +4,7 @@ import path from "path"
 import { buildGeneratedSchemaArtifacts } from "../src/json-schemas.ts"
 
 async function main() {
-  const jsonDir = path.resolve(process.cwd(), "json")
+  const jsonDir = path.resolve(process.cwd(), "../schema/json")
   await fs.mkdir(jsonDir, { recursive: true })
 
   for (const { name, jsonSchema } of buildGeneratedSchemaArtifacts()) {

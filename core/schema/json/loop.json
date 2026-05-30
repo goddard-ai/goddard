@@ -4,35 +4,7 @@
   "properties": {
     "session": {
       "description": "Default session settings applied to loop-backed agent runs.",
-      "type": "object",
-      "properties": {
-        "agent": {
-          "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
-          "$ref": "#/$defs/AgentSetting"
-        },
-        "mcpServers": {
-          "description": "Additional MCP server definitions to attach to the session.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/McpServer"
-          }
-        },
-        "env": {
-          "description": "Environment variables to inject into the session process.",
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "model": {
-          "description": "Model identifier to set for the session upon initialization.",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
+      "$ref": "#/$defs/SessionConfig"
     },
     "rateLimits": {
       "description": "Loop pacing limits that bound runtime throughput.",
@@ -81,7 +53,7 @@
           "maximum": 9007199254740991
         },
         "backoffFactor": {
-          "description": "Multiplier applied to the retry delay after each failed attempt.",
+          "description": "Multiplier applied to the retry delay after each failed prompt attempt.",
           "type": "number",
           "exclusiveMinimum": 0
         },
@@ -100,6 +72,37 @@
   "required": ["$schema"],
   "additionalProperties": false,
   "$defs": {
+    "SessionConfig": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
+          "$ref": "#/$defs/AgentSetting"
+        },
+        "mcpServers": {
+          "description": "Additional MCP server definitions to attach to the session.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpServer"
+          }
+        },
+        "env": {
+          "description": "Environment variables to inject into the session process.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "model": {
+          "description": "Model identifier to set for the session upon initialization.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "AgentSetting": {
       "anyOf": [
         {
@@ -433,8 +436,8 @@
           "description": "Structured agent manifest accepted anywhere a config can inline an agent distribution."
         }
       ],
-      "id": "AgentSetting",
       "examples": [
+        "agoragentic-acp",
         "amp-acp",
         "auggie",
         "autohand",
@@ -442,14 +445,18 @@
         "cline",
         "codebuddy-code",
         "codex-acp",
+        "cortex-code",
         "corust-agent",
         "crow-cli",
         "cursor",
         "deepagents",
+        "dimcode",
+        "dirac",
         "factory-droid",
         "fast-agent",
         "gemini",
         "github-copilot-cli",
+        "glm-acp-agent",
         "goose",
         "junie",
         "kilo",
@@ -459,9 +466,12 @@
         "nova",
         "opencode",
         "pi-acp",
+        "poolside",
         "qoder",
         "qwen-code",
-        "stakpak"
+        "sigit",
+        "stakpak",
+        "vtcode"
       ]
     },
     "McpServer": {

@@ -1,21 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
-import { actionPlugin } from "@goddard-ai/action/daemon"
-import { adapterPlugin } from "@goddard-ai/adapter/daemon"
-import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
-import { composePlugins, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
-import { inboxPlugin } from "@goddard-ai/inbox/daemon"
+import { type DaemonConfigProvider, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
 import { $type, composeIpcRoutes, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
-import { loopPlugin } from "@goddard-ai/loop/daemon"
-import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
-import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
-import { sessionPlugin } from "@goddard-ai/session/daemon"
-import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
@@ -29,11 +20,11 @@ import {
   createPayloadPreview,
   readSessionIdForLog,
 } from "../logging.ts"
-import { configureDbSchema, openDaemonStore, type DaemonStore } from "../persistence/store.ts"
+import { openDaemonStore, type DaemonStore } from "../persistence/store.ts"
+import { getDaemonPluginComposition } from "../plugins.ts"
 import type { DaemonServer } from "./types.ts"
 
-type DaemonPluginComposition = ReturnType<typeof composePlugins>
-type ComposedDaemonPlugin = DaemonPluginComposition["plugins"][number]
+type ComposedDaemonPlugin = ReturnType<typeof getDaemonPluginComposition>["plugins"][number]
 
 const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
@@ -43,30 +34,9 @@ const coreDaemonIpcRoutes = defineIpcRoutes({
   }),
 })
 
-let daemonPlugins: DaemonPluginComposition | null = null
-
-function getDaemonPlugins() {
-  if (!daemonPlugins) {
-    daemonPlugins = composePlugins([
-      actionPlugin,
-      adapterPlugin,
-      authPlugin,
-      sessionPlugin,
-      inboxPlugin,
-      pullRequestPlugin,
-      reviewSessionPlugin,
-      loopPlugin,
-      workforcePlugin,
-    ])
-    configureDbSchema(daemonPlugins.db)
-  }
-
-  return daemonPlugins
-}
-
 /** Ensures daemon plugin composition has contributed schemas before tests reset the store. */
 export function initializeDaemonPluginComposition() {
-  getDaemonPlugins()
+  getDaemonPluginComposition()
 }
 
 export async function startDaemonServer(
@@ -125,10 +95,6 @@ export async function startDaemonServer(
         store.metadata.delete("authToken")
       },
     },
-    configProvider: {
-      getRootConfig: configManager.getRootConfig,
-      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
-    },
     log: {
       createLogger,
       createPayloadPreview,
@@ -141,7 +107,15 @@ export async function startDaemonServer(
     getIpcRequestContext: requireIpcRequestContext,
   } satisfies DaemonSetupSubstrate
 
-  const pluginSetup = await setupDaemonPlugins(daemonSubstrate, client, store)
+  const pluginSetup = await setupDaemonPlugins(
+    daemonSubstrate,
+    {
+      getRootConfig: configManager.getRootConfig,
+      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
+    },
+    client,
+    store,
+  )
   const ipcHandlers = {
     daemon: {
       health: async () => ({ ok: true }),
@@ -151,7 +125,7 @@ export async function startDaemonServer(
 
   const ipcServer = createServer({
     port: runtime.port,
-    routes: composeIpcRoutes([coreDaemonIpcRoutes, getDaemonPlugins().ipcRoutes]),
+    routes: composeIpcRoutes([coreDaemonIpcRoutes, getDaemonPluginComposition().ipcRoutes]),
     handlers: ipcHandlers as any,
     runHandler: ({ payload }, handler) => {
       const context: IpcRequestContext = {
@@ -240,6 +214,7 @@ export async function startDaemonServer(
 
 async function setupDaemonPlugins(
   substrate: DaemonSetupSubstrate,
+  configProvider: DaemonConfigProvider,
   backendClient: BackendClient,
   store: DaemonStore,
 ) {
@@ -248,7 +223,7 @@ async function setupDaemonPlugins(
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
-  for (const plugin of getDaemonPlugins().plugins) {
+  for (const plugin of getDaemonPluginComposition().plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
       (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
     )
@@ -257,6 +232,7 @@ async function setupDaemonPlugins(
       {
         db: createPluginDbContext(plugin, store),
         backend: createPluginBackendContext(plugin, backendClient),
+        configProvider: createPluginConfigProvider(configProvider, plugin),
       },
       ...consumedExtensions,
     )
@@ -294,6 +270,67 @@ function createPluginBackendContext(plugin: ComposedDaemonPlugin, client: Backen
   ])
 
   return selectBackendClientRoutes(routes, client)
+}
+
+function createPluginConfigProvider(
+  source: DaemonConfigProvider,
+  plugin: ComposedDaemonPlugin,
+): DaemonConfigProvider {
+  const keys = new Set(["registry", "session", ...getPluginConfigKeys(plugin)])
+
+  return {
+    async getRootConfig(cwd) {
+      const snapshot = await source.getRootConfig(cwd)
+      return {
+        ...snapshot,
+        config: selectConfigKeys(snapshot.config, keys),
+      }
+    },
+    getLastKnownRootConfig(cwd) {
+      const snapshot = source.getLastKnownRootConfig(cwd)
+      if (!snapshot) {
+        return null
+      }
+
+      return {
+        ...snapshot,
+        config: selectConfigKeys(snapshot.config, keys),
+      }
+    },
+  }
+}
+
+function getPluginConfigKeys(plugin: ComposedDaemonPlugin): string[] {
+  const keys = [
+    ...readConfigKeys(plugin),
+    ...(plugin.consumes ?? []).flatMap((consumedPlugin) => readConfigKeys(consumedPlugin)),
+  ]
+
+  return keys
+}
+
+function readConfigKeys(plugin: ComposedDaemonPlugin) {
+  if (!plugin.config) {
+    return []
+  }
+
+  if ("schema" in plugin.config) {
+    return [plugin.name]
+  }
+
+  return Object.keys(plugin.config)
+}
+
+function selectConfigKeys(config: Record<string, unknown>, keys: ReadonlySet<string>) {
+  const selected: Record<string, unknown> = {}
+
+  for (const key of keys) {
+    if (key in config) {
+      selected[key] = config[key]
+    }
+  }
+
+  return selected
 }
 
 function selectBackendClientRoutes(routes: Record<string, any>, source: Record<string, any>) {

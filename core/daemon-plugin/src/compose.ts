@@ -12,14 +12,19 @@ export function composePlugins(plugins: readonly Plugin[]) {
   assertConsumedPluginsAreComposed(plugins)
   const orderedPlugins = sortPluginsByDependency(plugins)
 
-  const config: Record<string, ConfigDefinition> = {}
+  const config: Record<string, ConfigDefinition<any, any>> = {}
   const db: DbSchemaDefinition = {}
   const backendRouteTrees: BackendRouteTree[] = []
   const ipcRouteTrees: IpcRouteTree[] = []
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
-      config[plugin.name] = plugin.config
+      for (const [key, definition] of getPluginConfigEntries(plugin)) {
+        if (config[key]) {
+          throw new Error(`Duplicate daemon plugin config namespace: ${key}`)
+        }
+        config[key] = definition
+      }
     }
     if (plugin.ipcRoutes) {
       ipcRouteTrees.push(plugin.ipcRoutes)
@@ -42,6 +47,18 @@ export function composePlugins(plugins: readonly Plugin[]) {
     config,
     db,
   } satisfies Composition
+}
+
+function getPluginConfigEntries(plugin: Plugin): Array<[string, ConfigDefinition<any, any>]> {
+  if (!plugin.config) {
+    return []
+  }
+
+  if ("schema" in plugin.config) {
+    return [[plugin.name, plugin.config as ConfigDefinition<any, any>]]
+  }
+
+  return Object.entries(plugin.config) as Array<[string, ConfigDefinition<any, any>]>
 }
 
 function assertUniquePluginNames(plugins: readonly Plugin[]) {

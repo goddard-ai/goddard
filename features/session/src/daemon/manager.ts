@@ -13,7 +13,8 @@ import type {
   DbContext,
 } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { UserConfig } from "@goddard-ai/schema/config"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import type { StaticSessionParams } from "@goddard-ai/schema/config"
 import type {
   AbortedSessionPrompt,
   CancelSessionResponse,
@@ -51,7 +52,12 @@ import type {
   DaemonSessionTurnDraft,
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
-import type { GetSessionWorktreeResponse } from "@goddard-ai/session/schema"
+import type {
+  GetSessionWorktreeResponse,
+  SessionTitlesConfig,
+  SubpackagesConfig,
+  WorktreesConfig,
+} from "@goddard-ai/session/schema"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
   createAcpClient,
@@ -152,9 +158,15 @@ type SessionDoc = DaemonSession
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree
 
-type SessionTitleGeneratorConfig = NonNullable<
-  NonNullable<UserConfig["sessionTitles"]>["generator"]
->
+type SessionManagerRootConfig = {
+  session?: StaticSessionParams
+  sessionTitles?: SessionTitlesConfig
+  subpackages?: SubpackagesConfig
+  worktrees?: WorktreesConfig
+  registry?: Record<string, AgentDistribution>
+}
+
+type SessionTitleGeneratorConfig = NonNullable<SessionTitlesConfig["generator"]>
 
 const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
 const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
@@ -361,7 +373,7 @@ type ActiveSession = {
 export interface SessionLaunchParams {
   request: CreateSessionRequest
   token?: string
-  config?: UserConfig
+  config?: SessionManagerRootConfig
   worktreePlugins?: WorktreePlugin[]
 }
 
@@ -820,7 +832,7 @@ function buildSessionContext(params: {
 /** Resolves the concrete launch agent so daemon session creation never depends on client fallback logic. */
 async function resolveSessionRequestAgent(
   request: CreateSessionRequest,
-  config?: UserConfig,
+  config?: SessionManagerRootConfig,
 ): Promise<ResolvedCreateSessionRequest> {
   return {
     ...request,
@@ -897,7 +909,7 @@ export function createSessionManager(input: {
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
   events: SessionEventEmitter
-  configProvider: DaemonConfigProvider
+  configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
   registryService: ACPRegistryService
   sessionContext: DaemonSessionContextService

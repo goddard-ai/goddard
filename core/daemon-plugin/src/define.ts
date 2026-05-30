@@ -2,7 +2,7 @@ import type { HttpRouteTree as BackendRouteTree } from "@goddard-ai/backend-plug
 import type { HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 
 import type {
-  ConfigDefinition,
+  ConfigDefinitions,
   DbSchemaDefinition,
   FeatureExtensions,
   IpcHandlers,
@@ -22,7 +22,7 @@ type OptionalPluginField<TKey extends string, TValue> = undefined extends TValue
 type PluginShape<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
-  TConfig extends ConfigDefinition | undefined,
+  TConfig extends ConfigDefinitions | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
@@ -39,7 +39,7 @@ type PluginShape<
 type PluginOptions<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
-  TConfig extends ConfigDefinition | undefined,
+  TConfig extends ConfigDefinitions | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
@@ -106,7 +106,7 @@ type DefinePlugin = {
   <
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
-    const TConfig extends ConfigDefinition | undefined,
+    const TConfig extends ConfigDefinitions | undefined,
     const TDb extends DbSchemaDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree,
@@ -170,7 +170,7 @@ type DefinePlugin = {
   <
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
-    const TConfig extends ConfigDefinition | undefined,
+    const TConfig extends ConfigDefinitions | undefined,
     const TDb extends DbSchemaDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree | undefined,

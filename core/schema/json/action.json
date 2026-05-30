@@ -3,7 +3,17 @@
   "type": "object",
   "properties": {
     "session": {
-      "description": "Default session settings applied to all agent actions.",
+      "description": "Default session settings applied to named agent actions.",
+      "$ref": "#/$defs/SessionConfig"
+    },
+    "$schema": {
+      "type": "string"
+    }
+  },
+  "required": ["$schema"],
+  "additionalProperties": false,
+  "$defs": {
+    "SessionConfig": {
       "type": "object",
       "properties": {
         "agent": {
@@ -34,13 +44,6 @@
       },
       "additionalProperties": false
     },
-    "$schema": {
-      "type": "string"
-    }
-  },
-  "required": ["$schema"],
-  "additionalProperties": false,
-  "$defs": {
     "AgentSetting": {
       "anyOf": [
         {
@@ -374,8 +377,8 @@
           "description": "Structured agent manifest accepted anywhere a config can inline an agent distribution."
         }
       ],
-      "id": "AgentSetting",
       "examples": [
+        "agoragentic-acp",
         "amp-acp",
         "auggie",
         "autohand",
@@ -383,14 +386,18 @@
         "cline",
         "codebuddy-code",
         "codex-acp",
+        "cortex-code",
         "corust-agent",
         "crow-cli",
         "cursor",
         "deepagents",
+        "dimcode",
+        "dirac",
         "factory-droid",
         "fast-agent",
         "gemini",
         "github-copilot-cli",
+        "glm-acp-agent",
         "goose",
         "junie",
         "kilo",
@@ -400,9 +407,12 @@
         "nova",
         "opencode",
         "pi-acp",
+        "poolside",
         "qoder",
         "qwen-code",
-        "stakpak"
+        "sigit",
+        "stakpak",
+        "vtcode"
       ]
     },
     "McpServer": {

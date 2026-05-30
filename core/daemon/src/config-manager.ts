@@ -6,11 +6,10 @@ import {
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
-import type { UserConfig } from "@goddard-ai/schema/config"
 import { getErrorMessage } from "radashi"
 
 import { createLogger } from "./logging.ts"
-import { readMergedRootConfig } from "./resolvers/config.ts"
+import { readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
 
 const WATCH_RELOAD_SETTLE_MS = 50
 const WATCH_RELOAD_RETRY_MS = 50
@@ -22,7 +21,7 @@ const WATCH_ROOT_DISCOVERY_PROBE_MS = 250
 export type RootConfigSnapshot = {
   globalRoot: string
   localRoot: string
-  config: UserConfig
+  config: RootConfig
   version: number
   loadedAt: string
 }

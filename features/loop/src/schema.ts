@@ -1,3 +1,4 @@
+import { mergeConfigLayers, selectLast } from "@goddard-ai/config"
 import { AgentSetting, McpServer, StaticSessionParams } from "@goddard-ai/schema/config"
 import { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
 import { z } from "zod"
@@ -79,6 +80,16 @@ export const LoopConfig = z
   .describe("Persisted loop defaults loaded from JSON.")
 
 export type LoopConfig = z.infer<typeof LoopConfig>
+
+/** Merges loop config layers using later layers as overrides. */
+export function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>) {
+  const merged = mergeConfigLayers<LoopConfig>(layers)
+
+  return LoopConfig.parse({
+    ...merged,
+    session: selectLast(layers, (layer) => layer?.session),
+  })
+}
 
 const LoopSessionOverrides = CreateSessionRequest.omit({
   initialPrompt: true,

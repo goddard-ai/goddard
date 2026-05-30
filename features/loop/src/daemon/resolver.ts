@@ -4,7 +4,12 @@ import { join, resolve } from "node:path"
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
-import { LoopConfig, ResolvedLoopConfig, type StartLoopRequest } from "../schema.ts"
+import {
+  LoopConfig,
+  mergeLoopConfigLayers,
+  ResolvedLoopConfig,
+  type StartLoopRequest,
+} from "../schema.ts"
 
 type RequiredObject<T> = Required<Exclude<T, undefined>>
 
@@ -43,29 +48,6 @@ const DEFAULT_LOOP_RETRIES = {
   maxDelayMs: 5_000,
   backoffFactor: 2,
   jitterRatio: 0.2,
-}
-
-function selectLast<T, R>(
-  values: ReadonlyArray<T>,
-  predicate: (value: T, index: number) => R | undefined,
-) {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const result = predicate(values[index], index)
-    if (result !== undefined) {
-      return result
-    }
-  }
-
-  return undefined
-}
-
-/** Merges loop config layers using later layers as overrides. */
-function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>) {
-  return LoopConfig.parse({
-    session: selectLast(layers, (layer) => layer?.session),
-    rateLimits: Object.assign({}, ...layers.map((layer) => layer?.rateLimits)),
-    retries: Object.assign({}, ...layers.map((layer) => layer?.retries)),
-  })
 }
 
 /** Reads and validates one packaged loop config document. */

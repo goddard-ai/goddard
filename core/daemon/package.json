@@ -19,7 +19,9 @@
   },
   "scripts": {
     "dev": "bun --watch run src/main.ts",
-    "build": "tsdown --unused",
+    "build": "tsdown --unused && bun run generate-schemas",
+    "generate-schemas": "bun run scripts/generate-json-schemas.ts && prettier -w ../schema/json/",
+    "generate-acp-registry-fallback": "bun scripts/generate-acp-registry-fallback.ts",
     "build:standalone": "bun run ./scripts/build-standalone.ts",
     "lint": "oxlint",
     "fmt": "prettier -w .",
@@ -44,6 +46,7 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/workforce": "workspace:*",
+    "ai-sdk-json-schema": "catalog:",
     "cmd-ts": "catalog:",
     "kindstore": "catalog:",
     "kleur": "catalog:",

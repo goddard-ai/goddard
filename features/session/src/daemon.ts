@@ -1,4 +1,5 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
+import type { StaticSessionParams as StaticSessionParamsType } from "@goddard-ai/schema/config"
 import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
@@ -6,6 +7,15 @@ import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter } from "./daemon/events.ts"
 import { createSessionManager } from "./daemon/manager.ts"
 import { sessionDbSchema } from "./daemon/store.ts"
+import {
+  SessionTitlesConfig,
+  StaticSessionParams,
+  SubpackagesConfig,
+  WorktreesConfig,
+  type SessionTitlesConfig as SessionTitlesConfigType,
+  type SubpackagesConfig as SubpackagesConfigType,
+  type WorktreesConfig as WorktreesConfigType,
+} from "./schema.ts"
 
 export { sessionDbSchema } from "./daemon/store.ts"
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
@@ -17,8 +27,35 @@ export {
   type SessionWorktreeLifecycleState,
 } from "./daemon/events.ts"
 
+const sessionConfigDefinition = {
+  schema: StaticSessionParams,
+  scopes: ["user", "project"],
+  resolve: ({ project, user }) => project ?? user,
+} satisfies ConfigDefinition<StaticSessionParamsType, StaticSessionParamsType | undefined>
+
+const worktreesConfigDefinition = {
+  schema: WorktreesConfig,
+  scopes: ["user", "project"],
+} satisfies ConfigDefinition<WorktreesConfigType>
+
+const sessionTitlesConfigDefinition = {
+  schema: SessionTitlesConfig,
+  scopes: ["user", "project"],
+} satisfies ConfigDefinition<SessionTitlesConfigType>
+
+const subpackagesConfigDefinition = {
+  schema: SubpackagesConfig,
+  scopes: ["user", "project"],
+} satisfies ConfigDefinition<SubpackagesConfigType>
+
 export const sessionPlugin = definePlugin({
   name: "session",
+  config: {
+    session: sessionConfigDefinition,
+    worktrees: worktreesConfigDefinition,
+    sessionTitles: sessionTitlesConfigDefinition,
+    subpackages: subpackagesConfigDefinition,
+  },
   db: sessionDbSchema,
   ipcRoutes: sessionIpcRoutes,
   setup(context) {

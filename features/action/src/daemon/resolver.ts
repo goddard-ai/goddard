@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { mergeActionConfigLayers, resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { InlineSessionParams } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
-import { ActionConfig } from "../schema.ts"
+import { ActionConfig, mergeActionConfigLayers } from "../schema.ts"
 
 type RootConfigProvider = {
   getRootConfig: (cwd: string) => Promise<{

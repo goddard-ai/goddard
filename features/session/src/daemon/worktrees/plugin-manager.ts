@@ -3,9 +3,10 @@ import { access } from "node:fs/promises"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
 import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
-import type { WorktreePluginReference } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import hashSum from "hash-sum"
+
+import type { WorktreePluginReference, WorktreesConfig } from "../../schema.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
 type LoadedWorktreePluginSet = {
@@ -13,7 +14,10 @@ type LoadedWorktreePluginSet = {
   plugins: WorktreePlugin[]
 }
 
-type WorktreeRootConfigSnapshot = Awaited<ReturnType<DaemonConfigProvider["getRootConfig"]>>
+type WorktreeConfigProvider = DaemonConfigProvider<{
+  worktrees?: WorktreesConfig
+}>
+type WorktreeRootConfigSnapshot = Awaited<ReturnType<WorktreeConfigProvider["getRootConfig"]>>
 
 /** Session-owned contract for loading custom worktree plugins from root config. */
 export interface WorktreePluginManager {
@@ -24,7 +28,7 @@ export interface WorktreePluginManager {
  * Creates a loader that resolves configured custom worktree plugins from the global config.
  */
 export function createWorktreePluginManager(input: {
-  configProvider: DaemonConfigProvider
+  configProvider: WorktreeConfigProvider
   logger: DaemonLogger
 }) {
   const lastSuccessfulLoads = new Map<string, LoadedWorktreePluginSet>()

@@ -2,11 +2,21 @@ import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { delimiter, join } from "node:path"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { UserConfig } from "@goddard-ai/schema/config"
+import type { StaticSessionParams } from "@goddard-ai/schema/config"
+
+type AgentConfig = {
+  session?: StaticSessionParams
+  actions?: {
+    session?: StaticSessionParams
+  }
+  loops?: {
+    session?: StaticSessionParams
+  }
+}
 
 /** Resolves the user's preferred default agent by inspecting configuration and system state. */
 export async function resolveDefaultAgent(
-  config?: UserConfig,
+  config?: AgentConfig,
   feature?: "actions" | "loops",
 ): Promise<string | AgentDistribution> {
   // 1. Check if the user has explicitly configured a default agent

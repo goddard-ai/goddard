@@ -1,4 +1,3 @@
-import { ActionConfig, LoopConfig, UserConfig } from "@goddard-ai/schema/config"
 import { isPlainObject } from "radashi"
 
 function mergeValue(baseValue: unknown, overrideValue: unknown): unknown {
@@ -24,7 +23,9 @@ function mergeValue(baseValue: unknown, overrideValue: unknown): unknown {
   return merged
 }
 
-function mergeConfigLayers<T extends Record<string, unknown>>(layers: Array<T | undefined>): T {
+export function mergeConfigLayers<T extends Record<string, unknown>>(
+  layers: Array<T | undefined>,
+): T {
   let merged: Record<string, unknown> = {}
 
   for (const layer of layers) {
@@ -38,7 +39,7 @@ function mergeConfigLayers<T extends Record<string, unknown>>(layers: Array<T | 
   return merged as T
 }
 
-function selectLast<T, R>(
+export function selectLast<T, R>(
   values: ReadonlyArray<T>,
   predicate: (value: T, index: number) => R | undefined,
 ): R | undefined {
@@ -50,47 +51,6 @@ function selectLast<T, R>(
   }
 
   return undefined
-}
-
-/** Merges root config layers using later layers as overrides. */
-export function mergeRootConfigLayers(...layers: Array<UserConfig | undefined>): UserConfig {
-  const merged = mergeConfigLayers<UserConfig>(layers)
-
-  return UserConfig.parse({
-    ...merged,
-    session: selectLast(layers, (layer) => layer?.session),
-    actions: mergeActionConfigLayers(...layers.map((layer) => layer?.actions)),
-    loops: mergeLoopConfigLayers(...layers.map((layer) => layer?.loops)),
-    registry: layers.reduce(
-      (acc, layer) => {
-        if (layer?.registry) {
-          return { ...acc, ...layer.registry }
-        }
-        return acc
-      },
-      undefined as UserConfig["registry"],
-    ),
-  })
-}
-
-/** Merges action config layers using later layers as overrides. */
-export function mergeActionConfigLayers(...layers: Array<ActionConfig | undefined>): ActionConfig {
-  const merged = mergeConfigLayers<ActionConfig>(layers)
-
-  return ActionConfig.parse({
-    ...merged,
-    session: selectLast(layers, (layer) => layer?.session),
-  })
-}
-
-/** Merges loop config layers using later layers as overrides. */
-export function mergeLoopConfigLayers(...layers: Array<LoopConfig | undefined>): LoopConfig {
-  const merged = mergeConfigLayers<LoopConfig>(layers)
-
-  return LoopConfig.parse({
-    ...merged,
-    session: selectLast(layers, (layer) => layer?.session),
-  })
 }
 
 export * from "./agent-resolver.js"

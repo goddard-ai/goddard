@@ -1,21 +1,23 @@
 import { constants as fsConstants } from "node:fs"
 import { access, readFile, writeFile } from "node:fs/promises"
-import { mergeRootConfigLayers } from "@goddard-ai/config"
 import {
   getGlobalConfigPath,
   getGoddardGlobalDir,
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
-import { UserConfig } from "@goddard-ai/schema/config"
 import { getErrorMessage } from "radashi"
 import { z } from "zod"
+
+import { buildRootConfigSchema, mergeRootConfigLayers } from "../config-schema.ts"
+
+export type RootConfig = Record<string, any>
 
 /** Paths and merged root config for one daemon-side config resolution request. */
 export type ResolvedConfigRoots = {
   globalRoot: string
   localRoot: string
-  config: UserConfig
+  config: RootConfig
 }
 
 /** Minimal root-config provider contract shared by daemon resolvers and the config manager. */
@@ -108,16 +110,27 @@ export async function readMergedRootConfig(
 ): Promise<ResolvedConfigRoots> {
   const globalRoot = getGoddardGlobalDir()
   const localRoot = getGoddardLocalDir(cwd)
+  const rootConfigSchema = buildRootConfigSchema()
+  const user = await readJsonConfig(
+    getGlobalConfigPath(),
+    rootConfigSchema,
+    "Global config",
+    "goddard.json",
+  )
+  const project = await readJsonConfig(
+    getLocalConfigPath(cwd),
+    rootConfigSchema,
+    "Local config",
+    "goddard.json",
+    {
+      validateNormalized: assertLocalConfigIsWithinSupportedScope,
+    },
+  )
 
   return {
     globalRoot,
     localRoot,
-    config: mergeRootConfigLayers(
-      await readJsonConfig(getGlobalConfigPath(), UserConfig, "Global config", "goddard.json"),
-      await readJsonConfig(getLocalConfigPath(cwd), UserConfig, "Local config", "goddard.json", {
-        validateNormalized: assertLocalConfigIsWithinSupportedScope,
-      }),
-    ),
+    config: await mergeRootConfigLayers(user, project),
   }
 }
 
