@@ -168,7 +168,7 @@ function createAuthorizedRouteClient(
       continue
     }
     context[key] = async (input?: Record<string, any>, requestOptions?: RequestInit) => {
-      return source[key](input, await addAuthorizationHeader(requestOptions, options))
+      return source[key](input, await addAuthorizationHeader(requestOptions, options, route))
     }
   }
 
@@ -178,9 +178,14 @@ function createAuthorizedRouteClient(
 async function addAuthorizationHeader(
   requestOptions: RequestInit | undefined,
   options: BackendClientOptions,
+  route: Record<string, any>,
 ) {
   const authorization = await options.getAuthorizationHeader?.()
   if (!authorization) {
+    if (routeRequiresAuthorizationHeader(route)) {
+      throw new BackendUnauthenticatedError()
+    }
+
     return requestOptions
   }
 
@@ -191,6 +196,10 @@ async function addAuthorizationHeader(
       authorization,
     },
   }
+}
+
+function routeRequiresAuthorizationHeader(route: Record<string, any>) {
+  return Boolean(route.schema?.headers?.shape?.authorization)
 }
 
 function createAuthorizedFetch(options: BackendClientOptions): FetchLike {

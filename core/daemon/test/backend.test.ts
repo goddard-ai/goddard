@@ -114,6 +114,15 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   }
 })
 
+test("daemon backend client reports missing stream auth as unauthenticated errors", async () => {
+  const client = createBackendClient({
+    baseUrl: "https://goddardai.org/api",
+    getAuthorizationHeader: () => null,
+  })
+
+  await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+})
+
 test("daemon backend client reports stream auth failures as unauthenticated errors", async () => {
   const controlPlane = new InMemoryBackendControlPlane()
   const server = await startBackendServer(controlPlane, { port: 0 })
