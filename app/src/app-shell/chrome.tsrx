@@ -92,12 +92,14 @@ export function AppShellChrome() @{
 
   function openTerminalTab() {
     const terminalId = crypto.randomUUID()
+    const terminalCount = workbenchTabSet.tabList.filter((tab) => tab.kind === "terminal").length
 
     workbenchTabSet.openOrFocusTab({
       kind: "terminal",
       props: {
         tabId: `terminal:${terminalId}`,
         terminalId,
+        title: `Terminal ${terminalCount + 1}`,
         cwd: projectContext.activeProjectPath,
       },
     })

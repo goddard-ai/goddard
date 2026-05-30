@@ -283,9 +283,9 @@ function resolveTerminalArgs(options: TerminalSpawnOptions) {
 }
 
 /** Builds a PTY environment that preserves daemon process defaults unless overridden. */
-function resolveTerminalEnv(env: Record<string, string> | undefined) {
-  const entries = Object.entries(process.env).flatMap(([key, value]) =>
-    value === undefined ? [] : [[key, value] as const],
+function resolveTerminalEnv(env: Record<string, string> | undefined): Record<string, string> {
+  const entries = Object.entries(process.env as Record<string, string | undefined>).flatMap(
+    ([key, value]) => (value === undefined ? [] : [[key, value] as const]),
   )
   return {
     ...Object.fromEntries(entries),

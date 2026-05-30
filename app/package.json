@@ -44,7 +44,6 @@
     "@tsrx/preact": "catalog:",
     "@xterm/headless": "^6.0.0",
     "acp-client": "catalog:",
-    "bun-pty": "^0.4.8",
     "comark": "0.2.1",
     "culori": "^4.0.2",
     "electrobun": "^1.18.1",

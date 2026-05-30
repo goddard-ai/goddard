@@ -213,7 +213,7 @@ const workbenchTabDefinitions = {
   terminal: {
     component: lazy(() => import("~/terminal/view.tsrx")),
     getId: (props: { tabId: string }) => props.tabId,
-    getTitle: (_props: { terminalId: string }) => "Terminal",
+    getTitle: (props: { title: string }) => props.title,
     icon: "tabs/sessions",
     getRelatedFilesystemPath: (props: { cwd: string | null }) => props.cwd,
     restoreScroll: false,

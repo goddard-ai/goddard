@@ -6,10 +6,11 @@ import type {
 
 import { terminalIpcRoutes } from "./daemon-ipc.ts"
 import { DaemonTerminalConnectionRegistry } from "./daemon/connections.ts"
+import { DaemonTerminalError } from "./daemon/runtime.ts"
 
 export { runTerminalRuntimeCheck, type TerminalRuntimeCheckResult } from "./daemon/self-test.ts"
-export { DaemonTerminalError, DaemonTerminalManager } from "./daemon/runtime.ts"
-export type { DaemonTerminalManagerOptions } from "./daemon/runtime.ts"
+export { DaemonTerminalConnection, DaemonTerminalError } from "./daemon/runtime.ts"
+export type { DaemonTerminalConnectionOptions } from "./daemon/runtime.ts"
 
 export const terminalPlugin = definePlugin({
   name: "terminal",

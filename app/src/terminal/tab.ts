@@ -2,7 +2,7 @@ import type {
   TerminalDaemonEvent,
   TerminalRuntimeMetadata as TerminalMetadata,
 } from "@goddard-ai/schema/daemon"
-import type { GoddardTerminalConnection } from "@goddard-ai/sdk"
+import type { GoddardTerminalConnection, GoddardTerminalNamespace } from "@goddard-ai/sdk"
 import { listen, Sigma } from "preact-sigma"
 import { getErrorMessage } from "radashi"
 
@@ -15,6 +15,7 @@ const DEFAULT_TERMINAL_ID = "main"
 export type TerminalTabPayload = {
   tabId: string
   terminalId: string
+  title: string
   cwd: string | null
 }
 
@@ -65,7 +66,7 @@ export class TerminalTab extends Sigma<TerminalTabState> {
     super({
       terminalId: payload.terminalId,
       cwd: payload.cwd,
-      title: "Terminal",
+      title: payload.title,
       status: "idle",
       statusMessage: null,
       cols: 56,
@@ -178,7 +179,8 @@ export class TerminalTab extends Sigma<TerminalTabState> {
   }
 
   async #connect() {
-    const connection = await goddardSdk.terminal.connect()
+    const terminal = goddardSdk.terminal as GoddardTerminalNamespace
+    const connection = await terminal.connect()
 
     if (this.#isDisposed) {
       await connection.disconnect().catch(() => {})

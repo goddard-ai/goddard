@@ -300,8 +300,6 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.orderedTabIds = this.orderedTabIds.filter((id) => id !== tabId)
     this.recency = this.recency.filter((id) => id !== tabId && isFocusableWorkbenchTab(this, id))
     this.#removeDetailNavigationLocation(tabId)
-    this.#onCloseTab(tabId)
-    workbenchTabLifecycle.emit("closed", { tab })
 
     if (this.activeTabId === tabId) {
       const nextActiveTabId = this.recency[0] ?? WORKBENCH_MAIN_TAB.id
@@ -313,6 +311,10 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
         this.#recordRecentDetailTab(nextTab)
       }
     }
+
+    this.commit()
+    this.#onCloseTab(tabId)
+    workbenchTabLifecycle.emit("closed", { tab })
   }
 
   /** Closes one closable tab only when it has no unsaved or unsubmitted state. */
