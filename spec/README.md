@@ -41,4 +41,3 @@ All modes share the same backend authority model, with the SDK serving as the da
 * `spec/daemon.md`: Daemon-managed background automation runtimes and their shared constraints.
 * `spec/app.md`: Desktop application UX and features.
 * `spec/cli.md`: Narrow operational CLI role and removed broad terminal workflows.
-* `spec/adr/`: Architecture decision records.
