@@ -1,4 +1,4 @@
-import type { AcpAdapterId } from "acp-client/node"
+import type { AcpAdapterId } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { z } from "zod"
 

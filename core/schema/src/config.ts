@@ -1,4 +1,4 @@
-import { knownAcpAdapterIds, type AcpAdapterId } from "acp-client/node"
+import { knownAcpAdapterIds, type AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 import { textModelConfigSchema, type ModelConfig } from "ai-sdk-json-schema"
 import { z } from "zod"

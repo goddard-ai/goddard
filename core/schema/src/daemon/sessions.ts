@@ -1,6 +1,6 @@
 import { ReviewSessionLaunchParams } from "@goddard-ai/review-session/schema"
 import { SessionWorktreeParams } from "@goddard-ai/session/schema"
-import type { AcpAdapterId } from "acp-client/node"
+import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 import { z } from "zod"
 

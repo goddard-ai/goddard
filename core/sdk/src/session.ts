@@ -32,7 +32,7 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { SessionWorktreeParams } from "@goddard-ai/session/schema"
-import type { AcpAdapterId } from "acp-client/node"
+import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 
 export type {

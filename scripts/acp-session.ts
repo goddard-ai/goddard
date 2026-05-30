@@ -2,7 +2,7 @@
 /** ACP debugging CLI for daemon-backed sessions and raw adapters. */
 import { resolve } from "node:path"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
-import { knownAcpAdapterIds } from "acp-client/node"
+import { knownAcpAdapterIds } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
 

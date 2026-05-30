@@ -12,12 +12,11 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
-import type { AgentInputStream, AgentOutputStream } from "acp-client"
+import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
 import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
   resolveInstalledBinaryCommand,
-  type AcpAdapterId,
   type AcpRegistryService,
 } from "acp-client/node"
 import { getErrorMessage } from "radashi"
