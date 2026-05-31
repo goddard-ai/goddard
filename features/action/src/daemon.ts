@@ -1,21 +1,19 @@
-import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { actionIpcRoutes } from "./daemon-ipc.ts"
 import { buildNamedActionSessionParams, resolveNamedAction } from "./daemon/resolver.ts"
 import { ActionConfig, mergeActionConfigLayers } from "./schema.ts"
 
-const actionConfigDefinition = {
-  schema: ActionConfig,
-  scopes: ["user", "project"],
-  resolve: ({ project, user }) => mergeActionConfigLayers(user, project),
-} satisfies ConfigDefinition<ActionConfig>
-
 export const actionPlugin = definePlugin({
   name: "action",
   consumes: [sessionPlugin],
   config: {
-    actions: actionConfigDefinition,
+    actions: {
+      schema: ActionConfig,
+      scopes: ["user", "project"],
+      resolve: ({ project, user }) => mergeActionConfigLayers(user, project),
+    },
   },
   jsonSchemas: [{ name: "action.json", schema: ActionConfig }],
   ipcRoutes: actionIpcRoutes,

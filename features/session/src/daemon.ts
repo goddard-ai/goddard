@@ -1,5 +1,4 @@
-import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
-import type { StaticSessionParams as StaticSessionParamsType } from "@goddard-ai/schema/config"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
@@ -13,10 +12,6 @@ import {
   StaticSessionParams,
   SubpackagesConfig,
   WorktreesConfig,
-  type SessionsConfig as SessionsConfigType,
-  type SessionTitlesConfig as SessionTitlesConfigType,
-  type SubpackagesConfig as SubpackagesConfigType,
-  type WorktreesConfig as WorktreesConfigType,
 } from "./schema.ts"
 
 export { sessionDbSchema } from "./daemon/store.ts"
@@ -29,40 +24,30 @@ export {
   type SessionWorktreeLifecycleState,
 } from "./daemon/events.ts"
 
-const sessionConfigDefinition = {
-  schema: StaticSessionParams,
-  scopes: ["user", "project"],
-  resolve: ({ project, user }) => project ?? user,
-} satisfies ConfigDefinition<StaticSessionParamsType, StaticSessionParamsType | undefined>
-
-const worktreesConfigDefinition = {
-  schema: WorktreesConfig,
-  scopes: ["user", "project"],
-} satisfies ConfigDefinition<WorktreesConfigType>
-
-const sessionTitlesConfigDefinition = {
-  schema: SessionTitlesConfig,
-  scopes: ["user", "project"],
-} satisfies ConfigDefinition<SessionTitlesConfigType>
-
-const sessionsConfigDefinition = {
-  schema: SessionsConfig,
-  scopes: ["user", "project"],
-} satisfies ConfigDefinition<SessionsConfigType>
-
-const subpackagesConfigDefinition = {
-  schema: SubpackagesConfig,
-  scopes: ["user", "project"],
-} satisfies ConfigDefinition<SubpackagesConfigType>
-
 export const sessionPlugin = definePlugin({
   name: "session",
   config: {
-    session: sessionConfigDefinition,
-    sessions: sessionsConfigDefinition,
-    worktrees: worktreesConfigDefinition,
-    sessionTitles: sessionTitlesConfigDefinition,
-    subpackages: subpackagesConfigDefinition,
+    session: {
+      schema: StaticSessionParams,
+      scopes: ["user", "project"],
+      resolve: ({ project, user }) => project ?? user,
+    },
+    sessions: {
+      schema: SessionsConfig,
+      scopes: ["user", "project"],
+    },
+    worktrees: {
+      schema: WorktreesConfig,
+      scopes: ["user", "project"],
+    },
+    sessionTitles: {
+      schema: SessionTitlesConfig,
+      scopes: ["user", "project"],
+    },
+    subpackages: {
+      schema: SubpackagesConfig,
+      scopes: ["user", "project"],
+    },
   },
   db: sessionDbSchema,
   ipcRoutes: sessionIpcRoutes,

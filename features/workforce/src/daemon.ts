@@ -1,4 +1,4 @@
-import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
@@ -19,16 +19,14 @@ import {
 
 export { workforceDbSchema } from "./daemon/store.ts"
 
-const workforceConfigDefinition = {
-  schema: WorkforceRootConfig,
-  scopes: ["user", "project"],
-} satisfies ConfigDefinition<WorkforceRootConfigType>
-
 export const workforcePlugin = definePlugin({
   name: "workforce",
   consumes: [sessionPlugin],
   config: {
-    workforce: workforceConfigDefinition,
+    workforce: {
+      schema: WorkforceRootConfig,
+      scopes: ["user", "project"],
+    },
   },
   db: workforceDbSchema,
   ipcRoutes: workforceIpcRoutes,

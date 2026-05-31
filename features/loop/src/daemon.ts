@@ -1,4 +1,4 @@
-import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { loopIpcRoutes } from "./daemon-ipc.ts"
@@ -6,17 +6,15 @@ import { createLoopManager } from "./daemon/manager.ts"
 import { resolveNamedLoopStartRequest } from "./daemon/resolver.ts"
 import { LoopConfig, mergeLoopConfigLayers } from "./schema.ts"
 
-const loopConfigDefinition = {
-  schema: LoopConfig,
-  scopes: ["user", "project"],
-  resolve: ({ project, user }) => mergeLoopConfigLayers(user, project),
-} satisfies ConfigDefinition<LoopConfig>
-
 export const loopPlugin = definePlugin({
   name: "loop",
   consumes: [sessionPlugin],
   config: {
-    loops: loopConfigDefinition,
+    loops: {
+      schema: LoopConfig,
+      scopes: ["user", "project"],
+      resolve: ({ project, user }) => mergeLoopConfigLayers(user, project),
+    },
   },
   jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
