@@ -52,11 +52,13 @@ import type {
   DaemonSessionTurnDraft,
   DaemonWorktree,
 } from "@goddard-ai/schema/daemon/store"
-import type {
-  GetSessionWorktreeResponse,
-  SessionTitlesConfig,
-  SubpackagesConfig,
-  WorktreesConfig,
+import {
+  parseSessionIdleShutdownDurationMs,
+  type GetSessionWorktreeResponse,
+  type SessionsConfig,
+  type SessionTitlesConfig,
+  type SubpackagesConfig,
+  type WorktreesConfig,
 } from "@goddard-ai/session/schema"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
@@ -161,6 +163,7 @@ type SessionWorktreeDoc = DaemonWorktree
 type SessionManagerRootConfig = {
   agents?: AgentsConfig
   session?: StaticSessionParams
+  sessions?: SessionsConfig
   sessionTitles?: SessionTitlesConfig
   subpackages?: SubpackagesConfig
   worktrees?: WorktreesConfig
@@ -367,6 +370,7 @@ type ActiveSession = {
   promptQueue: QueuedPromptEntry[]
   blockingPromptRequestId: string | number | null
   pendingSteer: PendingSteerRequest | null
+  idleShutdownTimeoutMs: number
   idleShutdownTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -924,13 +928,28 @@ export function createSessionManager(input: {
   const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
   const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
-  const idleSessionShutdownTimeoutMs =
-    input.idleSessionShutdownTimeoutMs ?? DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS
   const worktreePluginManager = createWorktreePluginManager({
     configProvider: input.configProvider,
     logger,
   })
   const ready = reconcilePersistedSessions()
+
+  /** Resolves the idle shutdown timeout after root config has been resolved for a session cwd. */
+  function resolveIdleSessionShutdownTimeoutMs(config?: SessionManagerRootConfig): number {
+    if (input.idleSessionShutdownTimeoutMs !== undefined) {
+      return input.idleSessionShutdownTimeoutMs
+    }
+
+    const configuredDuration = config?.sessions?.idleShutdown
+    if (configuredDuration) {
+      const parsedDuration = parseSessionIdleShutdownDurationMs(configuredDuration)
+      if (parsedDuration !== null) {
+        return parsedDuration
+      }
+    }
+
+    return DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS
+  }
 
   function updateSession(
     id: SessionId,
@@ -1503,7 +1522,7 @@ export function createSessionManager(input: {
     emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_cancelled",
-      { reason, timeoutMs: idleSessionShutdownTimeoutMs },
+      { reason, timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
   }
@@ -1527,7 +1546,7 @@ export function createSessionManager(input: {
     emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_started",
-      { reason, timeoutMs: idleSessionShutdownTimeoutMs },
+      { reason, timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
     active.idleShutdownTimer = setTimeout(() => {
@@ -1537,7 +1556,7 @@ export function createSessionManager(input: {
           errorMessage: getErrorMessage(error),
         })
       })
-    }, idleSessionShutdownTimeoutMs)
+    }, active.idleShutdownTimeoutMs)
   }
 
   /** Shuts down one loadable idle session when its auto-shutdown timer expires without any reconnect. */
@@ -1555,7 +1574,7 @@ export function createSessionManager(input: {
     emitDiagnostic(
       id,
       "session_idle_shutdown_timer_expired",
-      { timeoutMs: idleSessionShutdownTimeoutMs },
+      { timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
     await shutdownSession(id)
@@ -2180,6 +2199,7 @@ export function createSessionManager(input: {
     nextTurnSequence: number
     sessionLogger: DaemonLogger
     systemPrompt: string
+    idleShutdownTimeoutMs: number
   }) {
     const activeSession: ActiveSession = {
       id: params.id,
@@ -2199,6 +2219,7 @@ export function createSessionManager(input: {
       promptQueue: [],
       blockingPromptRequestId: null,
       pendingSteer: null,
+      idleShutdownTimeoutMs: params.idleShutdownTimeoutMs,
       idleShutdownTimer: null,
     }
 
@@ -2583,6 +2604,7 @@ export function createSessionManager(input: {
         nextTurnSequence,
         sessionLogger,
         systemPrompt: resolvedRequest.systemPrompt,
+        idleShutdownTimeoutMs: resolveIdleSessionShutdownTimeoutMs(resolvedConfig),
       })
       if (worktree) {
         await input.events.emit("lifecycle.sessionActivated", {

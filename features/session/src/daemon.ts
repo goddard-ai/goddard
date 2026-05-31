@@ -8,10 +8,12 @@ import { createSessionEventEmitter } from "./daemon/events.ts"
 import { createSessionManager } from "./daemon/manager.ts"
 import { sessionDbSchema } from "./daemon/store.ts"
 import {
+  SessionsConfig,
   SessionTitlesConfig,
   StaticSessionParams,
   SubpackagesConfig,
   WorktreesConfig,
+  type SessionsConfig as SessionsConfigType,
   type SessionTitlesConfig as SessionTitlesConfigType,
   type SubpackagesConfig as SubpackagesConfigType,
   type WorktreesConfig as WorktreesConfigType,
@@ -43,6 +45,11 @@ const sessionTitlesConfigDefinition = {
   scopes: ["user", "project"],
 } satisfies ConfigDefinition<SessionTitlesConfigType>
 
+const sessionsConfigDefinition = {
+  schema: SessionsConfig,
+  scopes: ["user", "project"],
+} satisfies ConfigDefinition<SessionsConfigType>
+
 const subpackagesConfigDefinition = {
   schema: SubpackagesConfig,
   scopes: ["user", "project"],
@@ -52,6 +59,7 @@ export const sessionPlugin = definePlugin({
   name: "session",
   config: {
     session: sessionConfigDefinition,
+    sessions: sessionsConfigDefinition,
     worktrees: worktreesConfigDefinition,
     sessionTitles: sessionTitlesConfigDefinition,
     subpackages: subpackagesConfigDefinition,

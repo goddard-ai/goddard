@@ -122,6 +122,44 @@ export const SessionTitlesConfig: z.ZodType<SessionTitlesConfig> = z
   })
   .describe("Persisted session title-generation defaults loaded from JSON.")
 
+const SESSION_IDLE_SHUTDOWN_DURATION_PATTERN = /^([1-9]\d*)\s*(ms|s|m|h)$/
+const SESSION_IDLE_SHUTDOWN_DURATION_UNITS = {
+  ms: 1,
+  s: 1000,
+  m: 60 * 1000,
+  h: 60 * 60 * 1000,
+} as const
+
+/** Parses one positive session idle-shutdown duration string into milliseconds. */
+export function parseSessionIdleShutdownDurationMs(value: string): number | null {
+  const match = SESSION_IDLE_SHUTDOWN_DURATION_PATTERN.exec(value.trim())
+  if (!match) {
+    return null
+  }
+
+  const amount = Number(match[1])
+  const unit = match[2] as keyof typeof SESSION_IDLE_SHUTDOWN_DURATION_UNITS
+  const milliseconds = amount * SESSION_IDLE_SHUTDOWN_DURATION_UNITS[unit]
+  return Number.isSafeInteger(milliseconds) ? milliseconds : null
+}
+
+/** Schema for daemon-managed session runtime policy loaded from JSON. */
+export const SessionsConfig = z
+  .strictObject({
+    idleShutdown: z
+      .string()
+      .refine((value) => parseSessionIdleShutdownDurationMs(value) !== null, {
+        message: "Use a positive duration like `15m`, `1h`, `30s`, or `500ms`.",
+      })
+      .optional()
+      .describe(
+        "Positive duration after which an idle reloadable session is shut down. Examples: `15m`, `1h`, `30s`, `500ms`.",
+      ),
+  })
+  .describe("Daemon-managed session lifecycle policy loaded from JSON.")
+
+export type SessionsConfig = z.infer<typeof SessionsConfig>
+
 /** Schema for package-boundary discovery settings used by the launch-session flow. */
 export const SubpackagesConfig = z
   .strictObject({

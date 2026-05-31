@@ -346,6 +346,9 @@
     "session": {
       "$ref": "#/$defs/SessionConfig"
     },
+    "sessions": {
+      "$ref": "#/$defs/SessionsConfig"
+    },
     "worktrees": {
       "$ref": "#/$defs/WorktreesConfig"
     },
@@ -794,6 +797,16 @@
     },
     "McpServer": {
       "$ref": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json#/$defs/McpServer"
+    },
+    "SessionsConfig": {
+      "type": "object",
+      "properties": {
+        "idleShutdown": {
+          "description": "Positive duration after which an idle reloadable session is shut down. Examples: `15m`, `1h`, `30s`, `500ms`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "WorktreesConfig": {
       "type": "object",

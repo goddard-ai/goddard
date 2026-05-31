@@ -907,6 +907,34 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("session idle auto-shutdown uses configured duration", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    sessions: {
+      idleShutdown: "60ms",
+    },
+  })
+  const daemon = await startServer({ useExistingHome: true })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  expect(
+    getDiagnosticEvents(created.session.id).some(
+      (entry) =>
+        entry.type === "session_idle_shutdown_timer_started" && entry.detail?.timeoutMs === 60,
+    ),
+  ).toBe(true)
+
+  await send(client, "session.shutdown", { id: created.session.id })
+})
+
 test("session.message subscribers cancel idle auto-shutdown before expiry", async () => {
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
@@ -2587,11 +2615,13 @@ async function listSessionIds(client: DaemonIpcClient) {
 }
 
 function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {
-  return (
-    db.sessionDiagnostics.first({
-      where: { sessionId },
-    })?.events ?? []
-  ).map((event: DaemonSessionDiagnosticEvent) => event.type)
+  return getDiagnosticEvents(sessionId).map((event: DaemonSessionDiagnosticEvent) => event.type)
+}
+
+function getDiagnosticEvents(sessionId: ReturnType<typeof db.sessions.newId>) {
+  return (db.sessionDiagnostics.first({
+    where: { sessionId },
+  })?.events ?? []) as DaemonSessionDiagnosticEvent[]
 }
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000) {

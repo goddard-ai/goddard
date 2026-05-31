@@ -109,6 +109,46 @@ test("merges agents.default from repository-local config", async () => {
   })
 })
 
+test("merges session idle-shutdown duration from repository-local config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    sessions: {
+      idleShutdown: "15m",
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    sessions: {
+      idleShutdown: "30s",
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      sessions: {
+        idleShutdown: "30s",
+      },
+    },
+  })
+})
+
+test("rejects disabled session idle-shutdown config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeLocalRootConfig(repoDir, {
+    sessions: {
+      idleShutdown: "0m",
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
+    "Use a positive duration like `15m`, `1h`, `30s`, or `500ms`.",
+  )
+})
+
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-home-"))
   process.env.HOME = homeDir
