@@ -1,10 +1,9 @@
-import { ActionConfig } from "@goddard-ai/action/schema"
-import { LoopConfig } from "@goddard-ai/loop/schema"
 import { textModelConfigJsonSchema } from "ai-sdk-json-schema"
 import { toJSONSchema, z } from "zod"
 import type { ToJSONSchemaParams } from "zod/v4/core"
 
 import { buildRootConfigSchema, registerRootConfigSchemas } from "./config-schema.ts"
+import { getDaemonPluginComposition } from "./plugins.ts"
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -18,8 +17,7 @@ export function buildGeneratedSchemaArtifacts() {
 
   const schemas = [
     { name: "goddard.json", schema: rootConfigSchema },
-    { name: "action.json", schema: ActionConfig },
-    { name: "loop.json", schema: LoopConfig },
+    ...getDaemonPluginComposition().jsonSchemas,
   ].map(({ name, schema }) => ({
     name,
     schema: schema.extend({

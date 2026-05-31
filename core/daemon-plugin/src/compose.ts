@@ -4,7 +4,13 @@ import {
 } from "@goddard-ai/backend-plugin"
 import { composeIpcRoutes, type HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 
-import type { Composition, ConfigDefinition, DbSchemaDefinition, Plugin } from "./contracts.ts"
+import type {
+  Composition,
+  ConfigDefinition,
+  DbSchemaDefinition,
+  JsonSchemaArtifactDefinition,
+  Plugin,
+} from "./contracts.ts"
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
 export function composePlugins(plugins: readonly Plugin[]) {
@@ -16,6 +22,8 @@ export function composePlugins(plugins: readonly Plugin[]) {
   const db: DbSchemaDefinition = {}
   const backendRouteTrees: BackendRouteTree[] = []
   const ipcRouteTrees: IpcRouteTree[] = []
+  const jsonSchemas: JsonSchemaArtifactDefinition[] = []
+  const jsonSchemaNames = new Set<string>()
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
@@ -28,6 +36,13 @@ export function composePlugins(plugins: readonly Plugin[]) {
     }
     if (plugin.ipcRoutes) {
       ipcRouteTrees.push(plugin.ipcRoutes)
+    }
+    for (const schema of plugin.jsonSchemas ?? []) {
+      if (jsonSchemaNames.has(schema.name)) {
+        throw new Error(`Duplicate daemon plugin JSON schema artifact: ${schema.name}`)
+      }
+      jsonSchemaNames.add(schema.name)
+      jsonSchemas.push(schema)
     }
     if (plugin.backendRoutes) {
       backendRouteTrees.push(plugin.backendRoutes)
@@ -45,6 +60,7 @@ export function composePlugins(plugins: readonly Plugin[]) {
     ipcRoutes: composeIpcRoutes(ipcRouteTrees),
     backendRoutes: composeBackendRoutes(backendRouteTrees),
     config,
+    jsonSchemas,
     db,
   } satisfies Composition
 }

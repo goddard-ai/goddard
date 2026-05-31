@@ -17,6 +17,7 @@ export const actionPlugin = definePlugin({
   config: {
     actions: actionConfigDefinition,
   },
+  jsonSchemas: [{ name: "action.json", schema: ActionConfig }],
   ipcRoutes: actionIpcRoutes,
   setup({ configProvider, getIpcRequestContext, session }) {
     return {

@@ -18,6 +18,7 @@ export const loopPlugin = definePlugin({
   config: {
     loops: loopConfigDefinition,
   },
+  jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
   setup({ configProvider, session }) {
     const loop = createLoopManager({

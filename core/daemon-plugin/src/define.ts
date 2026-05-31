@@ -6,6 +6,7 @@ import type {
   DbSchemaDefinition,
   FeatureExtensions,
   IpcHandlers,
+  JsonSchemaArtifactDefinition,
   Plugin,
   SetupContext,
 } from "./contracts.ts"
@@ -23,6 +24,7 @@ type PluginShape<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinitions | undefined,
+  TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
@@ -30,6 +32,7 @@ type PluginShape<
   TRegister extends RegisterFunction | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
   OptionalPluginField<"config", TConfig> &
+  OptionalPluginField<"jsonSchemas", TJsonSchemas> &
   OptionalPluginField<"db", TDb> &
   OptionalPluginField<"backendRoutes", TBackendRoutes> &
   OptionalPluginField<"ipcRoutes", TIpcRoutes> &
@@ -40,6 +43,7 @@ type PluginOptions<
   TName extends string,
   TConsumes extends readonly Plugin[] | undefined,
   TConfig extends ConfigDefinitions | undefined,
+  TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
   TDb extends DbSchemaDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
@@ -50,6 +54,7 @@ type PluginOptions<
   readonly consumes?: TConsumes
   readonly provides?: never
   readonly config?: TConfig
+  readonly jsonSchemas?: TJsonSchemas
   readonly db?: TDb
   readonly backendRoutes?: TBackendRoutes
   readonly ipcRoutes?: TIpcRoutes
@@ -107,6 +112,7 @@ type DefinePlugin = {
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinitions | undefined,
+    const TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
     const TDb extends DbSchemaDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree,
@@ -118,6 +124,7 @@ type DefinePlugin = {
       TName,
       TConsumes,
       TConfig,
+      TJsonSchemas,
       TDb,
       TBackendRoutes,
       TIpcRoutes,
@@ -131,6 +138,7 @@ type DefinePlugin = {
           TName,
           TConsumes,
           TConfig,
+          TJsonSchemas,
           TDb,
           TBackendRoutes,
           TIpcRoutes,
@@ -145,6 +153,7 @@ type DefinePlugin = {
     TName,
     TConsumes,
     TConfig,
+    TJsonSchemas,
     TDb,
     TBackendRoutes,
     TIpcRoutes,
@@ -157,6 +166,7 @@ type DefinePlugin = {
         TName,
         TConsumes,
         TConfig,
+        TJsonSchemas,
         TDb,
         TBackendRoutes,
         TIpcRoutes,
@@ -171,6 +181,7 @@ type DefinePlugin = {
     const TName extends string,
     const TConsumes extends readonly Plugin[] | undefined,
     const TConfig extends ConfigDefinitions | undefined,
+    const TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
     const TDb extends DbSchemaDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree | undefined,
@@ -182,6 +193,7 @@ type DefinePlugin = {
       TName,
       TConsumes,
       TConfig,
+      TJsonSchemas,
       TDb,
       TBackendRoutes,
       TIpcRoutes,
@@ -194,6 +206,7 @@ type DefinePlugin = {
           TName,
           TConsumes,
           TConfig,
+          TJsonSchemas,
           TDb,
           TBackendRoutes,
           TIpcRoutes,
@@ -208,6 +221,7 @@ type DefinePlugin = {
     TName,
     TConsumes,
     TConfig,
+    TJsonSchemas,
     TDb,
     TBackendRoutes,
     TIpcRoutes,
@@ -220,6 +234,7 @@ type DefinePlugin = {
         TName,
         TConsumes,
         TConfig,
+        TJsonSchemas,
         TDb,
         TBackendRoutes,
         TIpcRoutes,

@@ -15,6 +15,14 @@ describe("daemon plugin composition", () => {
         }),
         scopes: ["user", "project"],
       },
+      jsonSchemas: [
+        {
+          name: "session.json",
+          schema: z.object({
+            enabled: z.boolean(),
+          }),
+        },
+      ],
       ipcRoutes: {
         session: http.resource("session", {
           create: http.post("create", {
@@ -47,6 +55,7 @@ describe("daemon plugin composition", () => {
     expect(composition.plugins.map((plugin) => plugin.name)).toEqual(["session", "inbox"])
     expect(Object.keys(composition.ipcRoutes.session.children)).toEqual(["create"])
     expect(composition.config.session.scopes).toEqual(["user", "project"])
+    expect(composition.jsonSchemas.map((schema) => schema.name)).toEqual(["session.json"])
   })
 
   test("composes IPC route tree fragments", () => {
@@ -110,6 +119,21 @@ describe("daemon plugin composition", () => {
     const second = definePlugin({ name: "session" })
 
     expect(() => composePlugins([first, second])).toThrow("Duplicate daemon plugin: session")
+  })
+
+  test("rejects duplicate JSON schema artifact names", () => {
+    const first = definePlugin({
+      name: "first",
+      jsonSchemas: [{ name: "config.json", schema: z.object({}) }],
+    })
+    const second = definePlugin({
+      name: "second",
+      jsonSchemas: [{ name: "config.json", schema: z.object({}) }],
+    })
+
+    expect(() => composePlugins([first, second])).toThrow(
+      "Duplicate daemon plugin JSON schema artifact: config.json",
+    )
   })
 
   test("rejects consumed plugins that are not part of the composition", () => {
