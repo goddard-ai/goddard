@@ -13,6 +13,7 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
+import type { SessionEnvPolicyConfig } from "@goddard-ai/session/schema"
 import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
 import {
   binaryInstallMarkerFileName,
@@ -55,18 +56,63 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 /** Builds the child-process environment expected by session agents. */
-function buildAgentProcessEnv(input: {
+export function buildAgentProcessEnv(input: {
   daemonUrl: string
   token: string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
-  env?: Record<string, string>
+  agentEnv?: Record<string, string>
+  sessionEnv?: Record<string, string>
+  envPolicy?: SessionEnvPolicyConfig
+  hostEnv?: NodeJS.ProcessEnv
 }): NodeJS.ProcessEnv {
+  const filteredEnv = applySessionEnvPolicy({
+    env: {
+      ...(input.envPolicy?.inherit === false ? {} : readStringEnv(input.hostEnv ?? process.env)),
+      ...input.envPolicy?.set,
+      ...input.agentEnv,
+      ...input.sessionEnv,
+    },
+    envPolicy: input.envPolicy,
+  })
+  const daemonEnv = applySessionEnvPolicy({
+    env: input.createAgentEnvironment({ env: filteredEnv }),
+    envPolicy: input.envPolicy,
+  })
+
   return {
-    ...process.env,
-    ...input.createAgentEnvironment({ env: input.env }),
+    ...daemonEnv,
     GODDARD_DAEMON_URL: input.daemonUrl,
     GODDARD_SESSION_TOKEN: input.token,
   }
+}
+
+/** Applies configured environment allow/block rules to one concrete environment map. */
+function applySessionEnvPolicy(input: {
+  env: Record<string, string>
+  envPolicy?: SessionEnvPolicyConfig
+}) {
+  const allowed = input.envPolicy?.allow ? new Set(input.envPolicy.allow) : null
+  const blocked = new Set(input.envPolicy?.block ?? [])
+  const env: Record<string, string> = {}
+
+  for (const [key, value] of Object.entries(input.env)) {
+    if (allowed && !allowed.has(key)) {
+      continue
+    }
+    if (blocked.has(key)) {
+      continue
+    }
+    env[key] = value
+  }
+
+  return env
+}
+
+/** Normalizes process env input to the string-only map accepted by child processes. */
+function readStringEnv(env: NodeJS.ProcessEnv) {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
 }
 
 /** Wraps Bun's subprocess API with the minimal process hooks used by session management. */
@@ -159,6 +205,7 @@ export async function spawnAgentProcess(params: {
   cwd: string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>
+  envPolicy?: SessionEnvPolicyConfig
   registryService: ACPRegistryService
   registry?: Record<string, AgentDistribution>
 }): Promise<AgentProcessHandle> {
@@ -186,10 +233,9 @@ export async function spawnAgentProcess(params: {
       daemonUrl: params.daemonUrl,
       token: params.token,
       createAgentEnvironment: params.createAgentEnvironment,
-      env: {
-        ...env,
-        ...params.env,
-      },
+      agentEnv: env,
+      sessionEnv: params.env,
+      envPolicy: params.envPolicy,
     }),
   })
 }

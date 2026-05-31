@@ -45,7 +45,7 @@ export function prependAgentBinToPath(
   agentBinDir: string,
   env?: Record<string, string>,
 ): Record<string, string> {
-  const existingPath = env?.PATH ?? process.env.PATH ?? ""
+  const existingPath = env ? (env.PATH ?? "") : (process.env.PATH ?? "")
 
   return {
     ...env,

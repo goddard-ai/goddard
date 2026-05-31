@@ -2487,6 +2487,7 @@ export function createSessionManager(input: {
           cwd,
           createAgentEnvironment: input.createAgentEnvironment,
           env: resolvedRequest.env,
+          envPolicy: resolvedConfig?.sessions?.envPolicy,
           registryService: input.registryService,
           registry: resolvedRegistry,
         })
@@ -2928,6 +2929,7 @@ export function createSessionManager(input: {
       agent: params.agent,
       cwd: params.cwd,
       createAgentEnvironment: input.createAgentEnvironment,
+      envPolicy: resolvedConfig?.sessions?.envPolicy,
       registryService: input.registryService,
       registry: resolvedRegistry,
     })

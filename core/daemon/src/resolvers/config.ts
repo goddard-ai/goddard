@@ -150,13 +150,30 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   }
 
   const worktrees = config.worktrees
-  if (typeof worktrees !== "object" || worktrees === null || Array.isArray(worktrees)) {
+  if (
+    typeof worktrees === "object" &&
+    worktrees !== null &&
+    !Array.isArray(worktrees) &&
+    "plugins" in worktrees
+  ) {
+    throw new Error(
+      "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
+    )
+  }
+
+  const sessions = config.sessions
+  if (typeof sessions !== "object" || sessions === null || Array.isArray(sessions)) {
     return
   }
 
-  if ("plugins" in worktrees) {
+  const envPolicy = (sessions as Record<string, unknown>).envPolicy
+  if (typeof envPolicy !== "object" || envPolicy === null || Array.isArray(envPolicy)) {
+    return
+  }
+
+  if ("set" in envPolicy) {
     throw new Error(
-      "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
+      "`sessions.envPolicy.set` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 }

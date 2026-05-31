@@ -149,6 +149,66 @@ test("rejects disabled session idle-shutdown config", async () => {
   )
 })
 
+test("merges session env policy restrictions with global fixed env", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    sessions: {
+      envPolicy: {
+        inherit: true,
+        allow: ["PATH", "GITHUB_TOKEN"],
+        set: {
+          GITHUB_TOKEN: "global-token",
+        },
+      },
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    sessions: {
+      envPolicy: {
+        inherit: false,
+        block: ["GITHUB_TOKEN"],
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      sessions: {
+        envPolicy: {
+          inherit: false,
+          allow: ["PATH", "GITHUB_TOKEN"],
+          block: ["GITHUB_TOKEN"],
+          set: {
+            GITHUB_TOKEN: "global-token",
+          },
+        },
+      },
+    },
+  })
+})
+
+test("rejects fixed session env injection in repository-local config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeLocalRootConfig(repoDir, {
+    sessions: {
+      envPolicy: {
+        set: {
+          GITHUB_TOKEN: "local-token",
+        },
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
+    "`sessions.envPolicy.set` is only supported in the global Goddard config",
+  )
+})
+
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-home-"))
   process.env.HOME = homeDir

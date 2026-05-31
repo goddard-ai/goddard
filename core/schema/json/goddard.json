@@ -804,6 +804,44 @@
         "idleShutdown": {
           "description": "Positive duration after which an idle reloadable session is shut down. Examples: `15m`, `1h`, `30s`, `500ms`.",
           "type": "string"
+        },
+        "envPolicy": {
+          "description": "Environment inheritance, filtering, and fixed global injection policy for launched session agents.",
+          "type": "object",
+          "properties": {
+            "inherit": {
+              "description": "Whether launched session agents inherit the daemon host environment.",
+              "type": "boolean"
+            },
+            "allow": {
+              "description": "Environment variable names allowed in launched session agent environments.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "block": {
+              "description": "Environment variable names removed from launched session agent environments.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "set": {
+              "description": "Fixed environment variable values injected by global user config only.",
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -143,6 +143,36 @@ export function parseSessionIdleShutdownDurationMs(value: string): number | null
   return Number.isSafeInteger(milliseconds) ? milliseconds : null
 }
 
+/** Schema for environment variables injected into daemon-managed session processes. */
+export const SessionEnvValues = z
+  .record(z.string().min(1), z.string())
+  .describe("Fixed session environment variable values keyed by environment variable name.")
+
+export type SessionEnvValues = z.infer<typeof SessionEnvValues>
+
+/** Schema for controlling environment variables available to launched session agents. */
+export const SessionEnvPolicyConfig = z
+  .strictObject({
+    inherit: z
+      .boolean()
+      .optional()
+      .describe("Whether launched session agents inherit the daemon host environment."),
+    allow: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Environment variable names allowed in launched session agent environments."),
+    block: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Environment variable names removed from launched session agent environments."),
+    set: SessionEnvValues.optional().describe(
+      "Fixed environment variable values injected by global user config only.",
+    ),
+  })
+  .describe("Environment policy applied when launching daemon-managed session agents.")
+
+export type SessionEnvPolicyConfig = z.infer<typeof SessionEnvPolicyConfig>
+
 /** Schema for daemon-managed session runtime policy loaded from JSON. */
 export const SessionsConfig = z
   .strictObject({
@@ -155,6 +185,9 @@ export const SessionsConfig = z
       .describe(
         "Positive duration after which an idle reloadable session is shut down. Examples: `15m`, `1h`, `30s`, `500ms`.",
       ),
+    envPolicy: SessionEnvPolicyConfig.optional().describe(
+      "Environment inheritance, filtering, and fixed global injection policy for launched session agents.",
+    ),
   })
   .describe("Daemon-managed session lifecycle policy loaded from JSON.")
 
