@@ -2,13 +2,13 @@ import { execFile } from "node:child_process"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { getErrorMessage } from "radashi"
 
 import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"
 import { buildWorkforcePaths, normalizeWorkforceRootDir } from "./paths.ts"
 
 const execFileAsync = promisify(execFile)
-const DEFAULT_WORKFORCE_AGENT = "pi-acp"
 
 // Common directory names skipped during workspace package discovery.
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
@@ -148,10 +148,10 @@ function sanitizeAgentId(value: string): string {
 }
 
 /** Builds the initial repo-local workforce config for the selected packages. */
-function buildInitializedWorkforceConfig(
+async function buildInitializedWorkforceConfig(
   packages: DiscoveredWorkforcePackage[],
   input: { defaultAgent?: WorkforceConfig["defaultAgent"] } = {},
-): WorkforceConfig {
+): Promise<WorkforceConfig> {
   const domainAgents = packages
     .filter((pkg) => pkg.relativeDir !== ".")
     .map((pkg) => ({
@@ -164,7 +164,7 @@ function buildInitializedWorkforceConfig(
 
   return {
     version: 1,
-    defaultAgent: input.defaultAgent ?? DEFAULT_WORKFORCE_AGENT,
+    defaultAgent: input.defaultAgent ?? (await resolveDefaultAgent()),
     rootAgentId: "root",
     agents: [
       {
@@ -259,7 +259,7 @@ export async function initializeWorkforce(
 
   await mkdir(paths.goddardDir, { recursive: true })
 
-  const config = buildInitializedWorkforceConfig(packages, {
+  const config = await buildInitializedWorkforceConfig(packages, {
     defaultAgent: options.defaultAgent,
   })
   await writeFile(paths.configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8")

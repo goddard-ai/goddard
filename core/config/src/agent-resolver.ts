@@ -15,7 +15,10 @@ type AgentConfig = {
   }
 }
 
-/** Resolves the user's preferred default agent by inspecting configuration and system state. */
+const missingDefaultAgentMessage =
+  "No default ACP agent is configured or discoverable. Configure `agents.default`, `session.agent`, or a feature-specific session agent before launching an agent."
+
+/** Resolves the user's preferred default agent from config or a detected local agent executable. */
 export async function resolveDefaultAgent(
   config?: AgentConfig,
   feature?: "actions" | "loops",
@@ -64,6 +67,5 @@ export async function resolveDefaultAgent(
     }
   }
 
-  // 3. Fallback to the first defined mapping as a safe default if no local state provides an answer
-  return "pi-acp"
+  throw new Error(missingDefaultAgentMessage)
 }

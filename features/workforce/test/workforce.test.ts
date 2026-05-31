@@ -12,6 +12,7 @@ import type { BackendClient } from "../../../core/daemon/src/backend.ts"
 import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
 import { configureLogging } from "../../../core/daemon/src/logging.ts"
 import { resetDb, type DaemonStore } from "../../../core/daemon/src/persistence/store.ts"
+import { initializeWorkforce } from "../src/daemon/config.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
 import { WorkforceRuntime } from "../src/daemon/runtime.ts"
@@ -52,8 +53,8 @@ function createTestSession() {
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
   await useTempHome()
   await writeGlobalRootConfig({
-    workforce: {
-      defaultAgent: "configured-workforce-agent",
+    agents: {
+      default: "configured-workforce-agent",
     },
   })
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
@@ -109,6 +110,22 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   expect(config.rootAgentId).toBe("root")
   expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
+})
+
+test("workforce initialization rejects when no default agent can be resolved", async () => {
+  process.env.PATH = ""
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-missing-agent-"))
+  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+
+  await writeFile(
+    join(repoDir, "package.json"),
+    JSON.stringify({ name: "@repo/root", private: true }, null, 2),
+    "utf-8",
+  )
+
+  await expect(initializeWorkforce(repoDir, [repoDir])).rejects.toThrow(
+    "No default ACP agent is configured or discoverable.",
+  )
 })
 
 test("daemon workforce event stream rejects inactive repositories", async () => {

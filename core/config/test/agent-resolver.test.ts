@@ -1,6 +1,16 @@
-import { expect, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 
 import { resolveDefaultAgent } from "../src/agent-resolver.ts"
+
+const originalPath = process.env.PATH
+
+afterEach(() => {
+  if (originalPath === undefined) {
+    delete process.env.PATH
+  } else {
+    process.env.PATH = originalPath
+  }
+})
 
 test("resolveDefaultAgent uses agents.default after narrower session config", async () => {
   await expect(
@@ -61,4 +71,12 @@ test("resolveDefaultAgent uses feature-specific session agents before agents.def
       "loops",
     ),
   ).resolves.toBe("loop-agent")
+})
+
+test("resolveDefaultAgent rejects when no configured or discoverable agent exists", async () => {
+  process.env.PATH = ""
+
+  await expect(resolveDefaultAgent()).rejects.toThrow(
+    "No default ACP agent is configured or discoverable.",
+  )
 })

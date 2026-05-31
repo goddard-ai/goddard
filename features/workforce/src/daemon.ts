@@ -1,3 +1,4 @@
+import { resolveDefaultAgent } from "@goddard-ai/config"
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -191,10 +192,12 @@ export const workforcePlugin = definePlugin({
             const repositoryRoot = await resolveRepositoryRoot(rootDir)
             const config = await configProvider
               .getRootConfig(repositoryRoot)
-              .then((root) => root.config.workforce as WorkforceRootConfigType | undefined)
+              .then((root) => root.config)
             return {
               initialized: await initializeWorkforce(repositoryRoot, packageDirs, {
-                defaultAgent: config?.defaultAgent,
+                defaultAgent:
+                  (config.workforce as WorkforceRootConfigType | undefined)?.defaultAgent ??
+                  (await resolveDefaultAgent(config)),
               }),
             }
           },
