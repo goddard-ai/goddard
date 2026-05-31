@@ -1,12 +1,14 @@
+import { knownAcpAdapterIds, type AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 import { z } from "zod"
 
 import { AgentDistribution } from "./agent-distribution.ts"
 import { DaemonSessionMetadata } from "./daemon/store.ts"
 
-const agentSettingExamples = ["claude-acp", "codex-acp"] as const
-
-export const AgentSetting = z.union([z.string().min(1), AgentDistribution])
+export const AgentSetting = z.union([
+  z.string().min(1) as z.ZodType<AcpAdapterId>,
+  AgentDistribution,
+])
 export type AgentSetting = z.infer<typeof AgentSetting>
 
 /** Schema for persisted agent runtime defaults loaded from JSON. */
@@ -145,7 +147,7 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   // Types inherited from ACP schema: https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json
   acpRegistry.add(McpServer)
 
-  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...agentSettingExamples] })
+  z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...knownAcpAdapterIds] })
   z.globalRegistry.add(AgentsConfig, { id: "AgentsConfig" })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(DaemonConfig, { id: "DaemonConfig" })

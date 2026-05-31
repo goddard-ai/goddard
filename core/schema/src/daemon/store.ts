@@ -1,3 +1,4 @@
+import type { AcpAdapterId } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { z } from "zod"
 
@@ -88,7 +89,10 @@ export const DaemonSession = z.strictObject({
   acpSessionId: z.string(),
   status: DaemonSessionStatus,
   stopReason: DaemonSessionStopReason.nullable().default(null),
-  agent: z.union([z.string(), AgentDistribution]).nullable().default(null),
+  agent: z
+    .union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution])
+    .nullable()
+    .default(null),
   agentName: z.string(),
   cwd: z.string(),
   title: z.string().default("New session"),
