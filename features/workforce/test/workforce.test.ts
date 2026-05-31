@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { createNodeClient } from "@goddard-ai/ipc/node"
 import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
@@ -18,6 +18,9 @@ import { WorkforceRuntime } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
+const originalHome = process.env.HOME
+const rootConfigSchemaUrl =
+  "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let db: DaemonStore = resetDb({ filename: ":memory:" })
 
 beforeEach(() => {
@@ -27,6 +30,12 @@ beforeEach(() => {
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
+  }
+
+  if (originalHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = originalHome
   }
 })
 
@@ -41,6 +50,12 @@ function createTestSession() {
 }
 
 test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    workforce: {
+      defaultAgent: "configured-workforce-agent",
+    },
+  })
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
   const packageDir = join(repoDir, "packages", "ui")
   cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
@@ -84,11 +99,13 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   })
 
   const config = JSON.parse(await readFile(initialized.initialized.configPath, "utf-8")) as {
+    defaultAgent: string
     rootAgentId: string
     agents: Array<{ id: string; cwd: string }>
   }
 
   expect(initialized.initialized.rootDir).toBe(normalizedRootDir)
+  expect(config.defaultAgent).toBe("configured-workforce-agent")
   expect(config.rootAgentId).toBe("root")
   expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
@@ -119,6 +136,22 @@ function createDaemonClient(daemonUrl: string) {
     readDaemonTcpAddressFromDaemonUrl(daemonUrl),
     daemonIpcRoutes as any,
   ) as any
+}
+
+async function useTempHome() {
+  const homeDir = await mkdtemp(join(tmpdir(), "goddard-workforce-home-"))
+  process.env.HOME = homeDir
+  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
+}
+
+async function writeGlobalRootConfig(config: Record<string, unknown>) {
+  const configPath = join(process.env.HOME!, ".goddard", "config.json")
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify({ $schema: rootConfigSchemaUrl, ...config }, null, 2)}\n`,
+    "utf-8",
+  )
 }
 
 function createTestBackendClient(): BackendClient {

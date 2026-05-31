@@ -1,4 +1,4 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type ConfigDefinition } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
@@ -11,16 +11,28 @@ import {
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
 import { workforceDbSchema } from "./daemon/store.ts"
-import type { WorkforceEventEnvelope } from "./schema.ts"
+import {
+  WorkforceRootConfig,
+  type WorkforceEventEnvelope,
+  type WorkforceRootConfig as WorkforceRootConfigType,
+} from "./schema.ts"
 
 export { workforceDbSchema } from "./daemon/store.ts"
+
+const workforceConfigDefinition = {
+  schema: WorkforceRootConfig,
+  scopes: ["user", "project"],
+} satisfies ConfigDefinition<WorkforceRootConfigType>
 
 export const workforcePlugin = definePlugin({
   name: "workforce",
   consumes: [sessionPlugin],
+  config: {
+    workforce: workforceConfigDefinition,
+  },
   db: workforceDbSchema,
   ipcRoutes: workforceIpcRoutes,
-  setup({ db, getIpcRequestContext, session }) {
+  setup({ configProvider, db, getIpcRequestContext, session }) {
     const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
     const workforce = createWorkforceManager({
       session,
@@ -179,8 +191,13 @@ export const workforcePlugin = definePlugin({
           },
           initialize: async ({ body: { rootDir, packageDirs } }) => {
             const repositoryRoot = await resolveRepositoryRoot(rootDir)
+            const config = await configProvider
+              .getRootConfig(repositoryRoot)
+              .then((root) => root.config.workforce as WorkforceRootConfigType | undefined)
             return {
-              initialized: await initializeWorkforce(repositoryRoot, packageDirs),
+              initialized: await initializeWorkforce(repositoryRoot, packageDirs, {
+                defaultAgent: config?.defaultAgent,
+              }),
             }
           },
           get: async ({ body: { rootDir } }) => ({

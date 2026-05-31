@@ -1,6 +1,18 @@
 import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { z } from "zod"
 
+/** Root config defaults used when initializing repository-local workforce files. */
+export const WorkforceRootConfig = z
+  .strictObject({
+    defaultAgent: z
+      .union([z.string().min(1), AgentDistribution])
+      .optional()
+      .describe("Default agent written into newly initialized repository workforce config."),
+  })
+  .describe("Workforce defaults loaded from Goddard root config.")
+
+export type WorkforceRootConfig = z.infer<typeof WorkforceRootConfig>
+
 /** Stable request intents supported by workforce mutation APIs. */
 export const WorkforceRequestIntent = z.enum(["default", "create"])
 
