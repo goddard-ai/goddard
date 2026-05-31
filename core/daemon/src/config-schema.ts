@@ -1,7 +1,12 @@
 import { mergeConfigLayers } from "@goddard-ai/config"
 import { type ConfigDefinition } from "@goddard-ai/daemon-plugin"
 import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import { AgentsConfig, DaemonConfig, registerConfigSchemas } from "@goddard-ai/schema/config"
+import {
+  AgentsConfig,
+  DaemonConfig,
+  registerConfigSchemas,
+  SecurityConfig,
+} from "@goddard-ai/schema/config"
 import { z } from "zod"
 
 import { getDaemonPluginComposition } from "./plugins.ts"
@@ -10,6 +15,7 @@ import { getDaemonPluginComposition } from "./plugins.ts"
 export const CoreRootConfig = {
   daemon: DaemonConfig.optional().describe("Default settings for the local daemon server."),
   agents: AgentsConfig.optional().describe("Default settings for agent runtime selection."),
+  security: SecurityConfig.optional().describe("Daemon trust and permissions policy."),
   registry: z
     .record(z.string(), AgentDistribution)
     .optional()
@@ -74,6 +80,11 @@ export async function mergeRootConfigLayers(
     config.registry = registry
   }
 
+  const security = mergeSecurityConfigLayers(user?.security, project?.security)
+  if (security !== undefined) {
+    config.security = security
+  }
+
   for (const [key, definition] of Object.entries(getDaemonPluginComposition().config)) {
     const value = await resolveConfigValue(definition, user?.[key], project?.[key])
     if (value !== undefined) {
@@ -82,6 +93,33 @@ export async function mergeRootConfigLayers(
   }
 
   return config
+}
+
+function mergeSecurityConfigLayers(user: unknown, project: unknown) {
+  const merged = mergeConfigLayers([
+    user as Record<string, unknown> | undefined,
+    project as Record<string, unknown> | undefined,
+  ])
+  if (Object.keys(merged).length === 0 && user === undefined && project === undefined) {
+    return undefined
+  }
+
+  const parsed = SecurityConfig.parse(merged)
+  const userConfig = SecurityConfig.parse(user ?? {})
+  const projectConfig = SecurityConfig.parse(project ?? {})
+  const pullRequests = { ...parsed.pullRequests }
+
+  if (userConfig.pullRequests?.submit === "deny" || projectConfig.pullRequests?.submit === "deny") {
+    pullRequests.submit = "deny"
+  }
+  if (userConfig.pullRequests?.reply === "deny" || projectConfig.pullRequests?.reply === "deny") {
+    pullRequests.reply = "deny"
+  }
+
+  return SecurityConfig.parse({
+    ...parsed,
+    ...(Object.keys(pullRequests).length > 0 && { pullRequests }),
+  })
 }
 
 async function resolveConfigValue(definition: ConfigDefinition, user: unknown, project: unknown) {

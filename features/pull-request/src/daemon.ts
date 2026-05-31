@@ -1,6 +1,7 @@
 import { definePlugin, type DbContext, type Plugin } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
+import type { SecurityConfig } from "@goddard-ai/schema/config"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -19,6 +20,9 @@ type PullRequestSessionRecord = {
   allowedPrNumbers: readonly number[]
 }
 type PullRequestDb = DbContext<typeof pullRequestDbSchema>
+type PullRequestRootConfig = {
+  security?: SecurityConfig
+}
 
 function requireRepositorySession(session: PullRequestSessionRecord | null) {
   if (!session) {
@@ -32,6 +36,20 @@ function requireRepositorySession(session: PullRequestSessionRecord | null) {
   return session as typeof session & {
     owner: string
     repo: string
+  }
+}
+
+/** Rejects PR operations disabled by root security policy for the request checkout. */
+async function assertPullRequestOperationAllowed(
+  configProvider: {
+    getRootConfig: (cwd: string) => Promise<{ config: PullRequestRootConfig }>
+  },
+  cwd: string,
+  operation: "submit" | "reply",
+) {
+  const config = await configProvider.getRootConfig(cwd).then((root) => root.config)
+  if (config.security?.pullRequests?.[operation] === "deny") {
+    throw new IpcClientError(`Pull request ${operation} is disabled by security policy`)
   }
 }
 
@@ -56,11 +74,12 @@ export const pullRequestPlugin: Plugin = definePlugin({
   db: pullRequestDbSchema,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ backend, db, getIpcRequestContext, inbox, session }) {
+  setup({ backend, configProvider, db, getIpcRequestContext, inbox, session }) {
     return {
       ipcHandlers: {
         pr: {
           submit: async ({ body: payload }) => {
+            await assertPullRequestOperationAllowed(configProvider, payload.cwd, "submit")
             const sessionRecord = requireRepositorySession(
               await session.resolveTokenScope(payload.token),
             )
@@ -106,6 +125,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
             return { pullRequest }
           },
           reply: async ({ body: payload }) => {
+            await assertPullRequestOperationAllowed(configProvider, payload.cwd, "reply")
             const sessionRecord = requireRepositorySession(
               await session.resolveTokenScope(payload.token),
             )

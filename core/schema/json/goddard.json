@@ -10,6 +10,10 @@
       "description": "Default settings for agent runtime selection.",
       "$ref": "#/$defs/AgentsConfig"
     },
+    "security": {
+      "description": "Daemon trust and permissions policy.",
+      "$ref": "#/$defs/SecurityConfig"
+    },
     "registry": {
       "description": "Custom registry of ACP agent distributions.",
       "type": "object",
@@ -766,6 +770,32 @@
         "stakpak",
         "vtcode"
       ]
+    },
+    "SecurityConfig": {
+      "type": "object",
+      "properties": {
+        "pullRequests": {
+          "description": "Policy for pull-request operations performed with daemon session tokens.",
+          "$ref": "#/$defs/PullRequestSecurityConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "PullRequestSecurityConfig": {
+      "type": "object",
+      "properties": {
+        "submit": {
+          "description": "Whether daemon session tokens may create pull requests.",
+          "type": "string",
+          "enum": ["allow", "deny"]
+        },
+        "reply": {
+          "description": "Whether daemon session tokens may reply to allowed pull requests.",
+          "type": "string",
+          "enum": ["allow", "deny"]
+        }
+      },
+      "additionalProperties": false
     },
     "SessionConfig": {
       "type": "object",

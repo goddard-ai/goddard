@@ -92,6 +92,36 @@ export const DaemonConfig = z
 
 export type DaemonConfig = z.infer<typeof DaemonConfig>
 
+/** Explicit allow/deny policy value for sensitive daemon operations. */
+export const SecurityPolicyDecision = z.enum(["allow", "deny"])
+
+export type SecurityPolicyDecision = z.infer<typeof SecurityPolicyDecision>
+
+/** Schema for pull-request operations gated by daemon session tokens. */
+export const PullRequestSecurityConfig = z
+  .strictObject({
+    submit: SecurityPolicyDecision.optional().describe(
+      "Whether daemon session tokens may create pull requests.",
+    ),
+    reply: SecurityPolicyDecision.optional().describe(
+      "Whether daemon session tokens may reply to allowed pull requests.",
+    ),
+  })
+  .describe("Pull-request permissions enforced at the daemon session-token boundary.")
+
+export type PullRequestSecurityConfig = z.infer<typeof PullRequestSecurityConfig>
+
+/** Schema for persisted daemon trust and permissions policy loaded from JSON. */
+export const SecurityConfig = z
+  .strictObject({
+    pullRequests: PullRequestSecurityConfig.optional().describe(
+      "Policy for pull-request operations performed with daemon session tokens.",
+    ),
+  })
+  .describe("Persisted daemon trust and permissions policy loaded from JSON.")
+
+export type SecurityConfig = z.infer<typeof SecurityConfig>
+
 /** Schema that extracts only the daemon config slice from a root config document. */
 export const RootDaemonConfig = z
   .object({
@@ -121,4 +151,6 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   z.globalRegistry.add(AgentsConfig, { id: "AgentsConfig" })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(DaemonConfig, { id: "DaemonConfig" })
+  z.globalRegistry.add(SecurityConfig, { id: "SecurityConfig" })
+  z.globalRegistry.add(PullRequestSecurityConfig, { id: "PullRequestSecurityConfig" })
 }

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
@@ -240,6 +240,56 @@ test("daemon submit request enforces trusted repo context and records created PR
   expect(receivedIpcRequest?.opId).toBe(respondedIpcRequest?.opId)
   expect(receivedIpcRequest?.sessionId).toBeNull()
   expect(respondedIpcRequest?.sessionId).toBe("ses_42")
+})
+
+test("daemon submit request honors repository-local security deny policy", async () => {
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "trusted",
+    repo: "widgets",
+    branch: "feature/secure-daemon",
+  })
+  await writeLocalRootConfig(repoDir, {
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+  })
+
+  const createCalls: Array<Record<string, unknown>> = []
+  const daemon = await startServer({
+    sdk: {
+      pr: {
+        create: async (input) => {
+          createCalls.push(input)
+          return {
+            number: 42,
+            url: "https://github.com/trusted/widgets/pull/42",
+          }
+        },
+      },
+    },
+    useExistingHome: true,
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_policy",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await expect(
+    send(client, "pr.submit", {
+      token: "tok_session",
+      cwd: repoDir,
+      title: "Ship daemon security",
+      body: "Done.",
+    }),
+  ).rejects.toThrow(/disabled by security policy/i)
+  expect(createCalls).toEqual([])
 })
 
 test("daemon reply request rejects PRs outside the session allowlist", async () => {
@@ -585,6 +635,24 @@ async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-home-"))
   process.env.HOME = sharedHomeDir
   db = resetDb()
+}
+
+async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
+  const configDir = join(repoDir, ".goddard")
+  await mkdir(configDir, { recursive: true })
+  await writeFile(
+    join(configDir, "config.json"),
+    `${JSON.stringify(
+      {
+        $schema:
+          "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json",
+        ...config,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  )
 }
 
 async function seedWorkforceSession(input: {

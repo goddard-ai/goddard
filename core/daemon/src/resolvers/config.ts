@@ -162,19 +162,34 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   }
 
   const sessions = config.sessions
-  if (typeof sessions !== "object" || sessions === null || Array.isArray(sessions)) {
-    return
-  }
-
-  const envPolicy = (sessions as Record<string, unknown>).envPolicy
-  if (typeof envPolicy !== "object" || envPolicy === null || Array.isArray(envPolicy)) {
-    return
-  }
-
-  if ("set" in envPolicy) {
+  const envPolicy =
+    typeof sessions === "object" && sessions !== null && !Array.isArray(sessions)
+      ? (sessions as Record<string, unknown>).envPolicy
+      : null
+  if (
+    typeof envPolicy === "object" &&
+    envPolicy !== null &&
+    !Array.isArray(envPolicy) &&
+    "set" in envPolicy
+  ) {
     throw new Error(
       "`sessions.envPolicy.set` is only supported in the global Goddard config, not repository-local config.",
     )
+  }
+
+  const security = config.security
+  const pullRequests =
+    typeof security === "object" && security !== null && !Array.isArray(security)
+      ? (security as Record<string, unknown>).pullRequests
+      : null
+  if (typeof pullRequests === "object" && pullRequests !== null && !Array.isArray(pullRequests)) {
+    for (const key of ["submit", "reply"]) {
+      if ((pullRequests as Record<string, unknown>)[key] === "allow") {
+        throw new Error(
+          `\`security.pullRequests.${key}\` cannot be set to "allow" in repository-local config.`,
+        )
+      }
+    }
   }
 }
 

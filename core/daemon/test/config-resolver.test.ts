@@ -209,6 +209,56 @@ test("rejects fixed session env injection in repository-local config", async () 
   )
 })
 
+test("repository-local security policy can tighten pull request operations", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    security: {
+      pullRequests: {
+        submit: "allow",
+        reply: "allow",
+      },
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      security: {
+        pullRequests: {
+          submit: "deny",
+          reply: "allow",
+        },
+      },
+    },
+  })
+})
+
+test("rejects repository-local security policy that loosens pull request operations", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeLocalRootConfig(repoDir, {
+    security: {
+      pullRequests: {
+        reply: "allow",
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
+    '`security.pullRequests.reply` cannot be set to "allow" in repository-local config',
+  )
+})
+
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-home-"))
   process.env.HOME = homeDir

@@ -276,7 +276,13 @@ function createPluginConfigProvider(
   source: DaemonConfigProvider,
   plugin: ComposedDaemonPlugin,
 ): DaemonConfigProvider {
-  const keys = new Set(["agents", "registry", "session", ...getPluginConfigKeys(plugin)])
+  const keys = new Set([
+    "agents",
+    "registry",
+    "security",
+    "session",
+    ...getPluginConfigKeys(plugin),
+  ])
 
   return {
     async getRootConfig(cwd) {
