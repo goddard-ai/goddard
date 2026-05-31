@@ -14,7 +14,7 @@ import {
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
 import type { SessionEnvPolicyConfig } from "@goddard-ai/session/schema"
-import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
+import type { AgentInputStream, AgentOutputStream } from "acp-client"
 import {
   binaryInstallMarkerFileName,
   installBinaryTargetPayload,
@@ -201,7 +201,7 @@ export function waitForAgentProcessExit(process: AgentProcessHandle) {
 export async function spawnAgentProcess(params: {
   daemonUrl: string
   token: string
-  agent: AcpAdapterId | AgentDistribution
+  agent: string | AgentDistribution
   cwd: string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>

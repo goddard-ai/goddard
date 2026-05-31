@@ -5,11 +5,6 @@ import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
-import {
-  detectBinaryTargetPayloadFormat,
-  installBinaryTargetPayload,
-  resolveInstalledBinaryCommand,
-} from "../src/daemon/archive.ts"
 import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []

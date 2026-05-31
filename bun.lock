@@ -234,8 +234,8 @@
       "name": "@goddard-ai/schema",
       "version": "0.1.0",
       "dependencies": {
-        "acp-client": "catalog:",
         "@goddard-ai/ipc": "workspace:*",
+        "acp-client": "catalog:",
         "rouzer": "catalog:",
         "zod": "catalog:",
       },

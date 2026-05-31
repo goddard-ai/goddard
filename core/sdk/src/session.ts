@@ -32,7 +32,6 @@ import type {
 } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { SessionWorktreeParams } from "@goddard-ai/session/schema"
-import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 
 export type {
@@ -107,7 +106,7 @@ export function createSessionPermissionResponseMessage(input: SessionPermissionR
 
 /** Shared session creation fields used by both new and reconnect flows. */
 interface BaseSessionParams {
-  agent?: AcpAdapterId | AgentDistribution
+  agent?: string | AgentDistribution
   cwd: string
   launchLeaseId?: string
   localCheckout?: SessionLocalCheckoutParams

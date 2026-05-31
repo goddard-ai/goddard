@@ -2,7 +2,6 @@
 /** ACP debugging CLI for daemon-backed sessions and raw adapters. */
 import { resolve } from "node:path"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
-import { knownAcpAdapterIds } from "acp-client"
 import { createAcpRegistryService } from "acp-client/node"
 import type * as acp from "acp-client/protocol"
 import { command, option, optional, positional, run, string, subcommands } from "cmd-ts"
@@ -372,9 +371,11 @@ async function resumeSession(id: string, initialPrompt?: string) {
 }
 
 /** Prints the bundled ACP adapter ids accepted by daemon-backed session creation. */
-function listAgents() {
+async function listAgents() {
+  const registry = await createAcpRegistryService().listAdapters()
+
   writeJson({
-    agents: knownAcpAdapterIds,
+    agents: registry.adapters.map((adapter) => adapter.id),
   })
 }
 

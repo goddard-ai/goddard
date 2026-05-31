@@ -16,7 +16,6 @@
     "./json/*": "./json/*"
   },
   "scripts": {
-    "prepare": "bun run scripts/generate-acp-adapters.js",
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "prettier -w .",
@@ -24,8 +23,8 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "acp-client": "catalog:",
     "@goddard-ai/ipc": "workspace:*",
+    "acp-client": "catalog:",
     "rouzer": "catalog:",
     "zod": "catalog:"
   }

@@ -1,6 +1,5 @@
 import { ReviewSessionLaunchParams } from "@goddard-ai/review-session/schema"
 import { SessionWorktreeParams } from "@goddard-ai/session/schema"
-import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 import { z } from "zod"
 
@@ -62,7 +61,7 @@ export type InitialSessionConfigOption = z.infer<typeof InitialSessionConfigOpti
 
 /** Request payload used to create one daemon-managed session. */
 export const CreateSessionRequest = z.strictObject({
-  agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]).optional(),
+  agent: z.union([z.string(), AgentDistribution]).optional(),
   cwd: z.string(),
   launchLeaseId: z.string().optional(),
   localCheckout: SessionLocalCheckoutParams.optional(),
@@ -205,7 +204,7 @@ export type SessionLaunchBranch = z.infer<typeof SessionLaunchBranch>
 
 /** Request payload used to inspect launch-time adapter and repository capabilities. */
 export const SessionLaunchPreviewRequest = z.strictObject({
-  agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]),
+  agent: z.union([z.string(), AgentDistribution]),
   cwd: z.string(),
 })
 
