@@ -1,7 +1,7 @@
 import { mergeConfigLayers } from "@goddard-ai/config"
 import { type ConfigDefinition } from "@goddard-ai/daemon-plugin"
 import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import { DaemonConfig, registerConfigSchemas } from "@goddard-ai/schema/config"
+import { AgentsConfig, DaemonConfig, registerConfigSchemas } from "@goddard-ai/schema/config"
 import { z } from "zod"
 
 import { getDaemonPluginComposition } from "./plugins.ts"
@@ -9,6 +9,7 @@ import { getDaemonPluginComposition } from "./plugins.ts"
 /** Core daemon-owned root config sections that are not owned by feature plugins. */
 export const CoreRootConfig = {
   daemon: DaemonConfig.optional().describe("Default settings for the local daemon server."),
+  agents: AgentsConfig.optional().describe("Default settings for agent runtime selection."),
   registry: z
     .record(z.string(), AgentDistribution)
     .optional()
@@ -55,6 +56,14 @@ export async function mergeRootConfigLayers(
   const daemon = user?.daemon
   if (daemon !== undefined) {
     config.daemon = daemon
+  }
+
+  const agents = mergeConfigLayers([
+    user?.agents as Record<string, unknown> | undefined,
+    project?.agents as Record<string, unknown> | undefined,
+  ])
+  if (Object.keys(agents).length > 0) {
+    config.agents = AgentsConfig.parse(agents)
   }
 
   const registry = mergeConfigLayers([

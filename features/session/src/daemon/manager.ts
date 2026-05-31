@@ -14,7 +14,7 @@ import type {
 } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { StaticSessionParams } from "@goddard-ai/schema/config"
+import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 import type {
   AbortedSessionPrompt,
   CancelSessionResponse,
@@ -159,6 +159,7 @@ type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree
 
 type SessionManagerRootConfig = {
+  agents?: AgentsConfig
   session?: StaticSessionParams
   sessionTitles?: SessionTitlesConfig
   subpackages?: SubpackagesConfig

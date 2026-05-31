@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { resolveDefaultAgent } from "@goddard-ai/config"
-import type { InlineSessionParams } from "@goddard-ai/schema/config"
+import type { AgentsConfig, InlineSessionParams } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
 import { ActionConfig, mergeActionConfigLayers } from "../schema.ts"
@@ -12,6 +12,7 @@ type RootConfigProvider = {
     globalRoot: string
     localRoot: string
     config: {
+      agents?: AgentsConfig
       session?: InlineSessionParams
       actions?: ActionConfig
     }

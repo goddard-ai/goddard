@@ -1,6 +1,6 @@
 import { resolveDefaultAgent } from "@goddard-ai/config"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { StaticSessionParams } from "@goddard-ai/schema/config"
+import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 
 import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from "./catalog.ts"
 import {
@@ -20,6 +20,7 @@ export type AdapterRegistryService = {
 export type AdapterConfigManager = {
   getRootConfig: (cwd: string) => Promise<{
     config: {
+      agents?: AgentsConfig
       session?: StaticSessionParams
       registry?: Record<string, AgentDistribution>
     }

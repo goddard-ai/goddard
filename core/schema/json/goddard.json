@@ -6,6 +6,10 @@
       "description": "Default settings for the local daemon server.",
       "$ref": "#/$defs/DaemonConfig"
     },
+    "agents": {
+      "description": "Default settings for agent runtime selection.",
+      "$ref": "#/$defs/AgentsConfig"
+    },
     "registry": {
       "description": "Custom registry of ACP agent distributions.",
       "type": "object",
@@ -376,33 +380,12 @@
       },
       "additionalProperties": false
     },
-    "SessionConfig": {
+    "AgentsConfig": {
       "type": "object",
       "properties": {
-        "agent": {
-          "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
+        "default": {
+          "description": "Global fallback agent to use when no narrower session or feature config selects an agent.",
           "$ref": "#/$defs/AgentSetting"
-        },
-        "mcpServers": {
-          "description": "Additional MCP server definitions to attach to the session.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/McpServer"
-          }
-        },
-        "env": {
-          "description": "Environment variables to inject into the session process.",
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "model": {
-          "description": "Model identifier to set for the session upon initialization.",
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -777,6 +760,37 @@
         "stakpak",
         "vtcode"
       ]
+    },
+    "SessionConfig": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent to run. Use an installed adapter id or an inline agent distribution manifest.",
+          "$ref": "#/$defs/AgentSetting"
+        },
+        "mcpServers": {
+          "description": "Additional MCP server definitions to attach to the session.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/McpServer"
+          }
+        },
+        "env": {
+          "description": "Environment variables to inject into the session process.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "model": {
+          "description": "Model identifier to set for the session upon initialization.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "McpServer": {
       "$ref": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json#/$defs/McpServer"

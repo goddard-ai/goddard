@@ -89,7 +89,7 @@ describe("adapter listing", () => {
               },
             },
           }),
-          configManager: {
+          configProvider: {
             async getRootConfig() {
               return {
                 config: {
@@ -131,6 +131,49 @@ describe("adapter listing", () => {
     } finally {
       await rm(cacheDir, { recursive: true, force: true })
     }
+  })
+
+  test("uses agents.default as the adapter default when no narrower default is configured", async () => {
+    await expect(
+      listAdapters(
+        {
+          registryService: {
+            async listAdapters() {
+              return {
+                adapters: [],
+                registrySource: "cache",
+                lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+                stale: false,
+                lastError: null,
+              }
+            },
+          },
+          configProvider: {
+            async getRootConfig() {
+              return {
+                config: {
+                  agents: {
+                    default: "local-acp",
+                  },
+                  registry: {
+                    "local-acp": {
+                      id: "local-acp",
+                      name: "Local ACP",
+                      version: "1.0.0",
+                      description: "Config-provided adapter",
+                      distribution: { npx: { package: "local-acp" } },
+                    },
+                  },
+                },
+              }
+            },
+          },
+        },
+        { cwd: "/repo" },
+      ),
+    ).resolves.toMatchObject({
+      defaultAdapterId: "local-acp",
+    })
   })
 
   test("omits default adapter when the configured agent is not in the merged catalog", async () => {

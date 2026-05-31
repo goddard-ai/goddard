@@ -2,9 +2,10 @@ import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { delimiter, join } from "node:path"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { StaticSessionParams } from "@goddard-ai/schema/config"
+import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 
 type AgentConfig = {
+  agents?: AgentsConfig
   session?: StaticSessionParams
   actions?: {
     session?: StaticSessionParams
@@ -29,6 +30,9 @@ export async function resolveDefaultAgent(
     }
     if (config.session?.agent) {
       return config.session.agent
+    }
+    if (config.agents?.default) {
+      return config.agents.default
     }
   }
 

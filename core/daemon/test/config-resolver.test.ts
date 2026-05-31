@@ -84,6 +84,31 @@ test("allows repository-local worktree bootstrap config and replaces inherited a
   })
 })
 
+test("merges agents.default from repository-local config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    agents: {
+      default: "global-agent",
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    agents: {
+      default: "local-agent",
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      agents: {
+        default: "local-agent",
+      },
+    },
+  })
+})
+
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-home-"))
   process.env.HOME = homeDir

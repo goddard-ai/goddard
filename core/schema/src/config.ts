@@ -11,6 +11,17 @@ export const AgentSetting = z.union([
 ])
 export type AgentSetting = z.infer<typeof AgentSetting>
 
+/** Schema for persisted agent runtime defaults loaded from JSON. */
+export const AgentsConfig = z
+  .strictObject({
+    default: AgentSetting.optional().describe(
+      "Global fallback agent to use when no narrower session or feature config selects an agent.",
+    ),
+  })
+  .describe("Persisted agent runtime defaults loaded from JSON.")
+
+export type AgentsConfig = z.infer<typeof AgentsConfig>
+
 export const McpServer = z.unknown() as z.ZodType<acp.McpServer>
 export type McpServer = z.infer<typeof McpServer>
 
@@ -107,6 +118,7 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
   acpRegistry.add(McpServer)
 
   z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...knownAcpAdapterIds] })
+  z.globalRegistry.add(AgentsConfig, { id: "AgentsConfig" })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(DaemonConfig, { id: "DaemonConfig" })
 }
