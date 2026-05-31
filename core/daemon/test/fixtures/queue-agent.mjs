@@ -246,6 +246,13 @@ rl.on("line", (line) => {
 
   if (message.method === "session/cancel") {
     if (!activePrompt) {
+      if ("id" in message && message.id != null) {
+        send({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: {},
+        })
+      }
       return
     }
 
@@ -265,6 +272,13 @@ rl.on("line", (line) => {
     setTimeout(() => {
       finishPrompt(cancelledPrompt, "cancelled")
     }, 20)
+    if ("id" in message && message.id != null) {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {},
+      })
+    }
     return
   }
 

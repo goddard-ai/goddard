@@ -5,7 +5,7 @@ import type {
   SessionLaunchBranch,
   SessionLaunchPreviewRequest,
 } from "@goddard-ai/schema/daemon"
-import type { AcpSession } from "acp-client"
+import type { AcpClient, AcpSession } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
@@ -16,12 +16,6 @@ import type { PreparedSessionWorktree } from "./worktree.ts"
 
 const LAUNCH_LEASE_RELEASE_TIMEOUT_MS = 10 * 1000
 
-type LaunchLeaseClient = {
-  initialize: acp.InitializeResponse
-  closeSession: (params: { sessionId: string }) => Promise<unknown>
-  close: () => Promise<unknown>
-}
-
 /** Prepared ACP session kept alive while the launch dialog gathers final user choices. */
 export type LaunchLease = {
   id: string
@@ -31,7 +25,7 @@ export type LaunchLease = {
   token: string
   acpSessionId: string
   agentProcess: AgentProcessHandle
-  client: LaunchLeaseClient
+  client: AcpClient
   session: AcpSession
   initializeResult: acp.InitializeResponse
   history: acp.AnyMessage[]

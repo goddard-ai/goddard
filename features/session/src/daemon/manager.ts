@@ -40,10 +40,9 @@ import type { GetSessionWorktreeResponse } from "@goddard-ai/session/schema"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
   createAcpClient,
-  createAgentConnection,
   getAcpMessageResult,
   isAcpRequest,
-  matchAcpRequest,
+  type AcpClient,
   type AcpSession,
   type AgentInputStream,
   type AgentOutputStream,
@@ -55,11 +54,7 @@ import { getErrorMessage, omit } from "radashi"
 
 import type { ConfigManager } from "../../../../core/daemon/src/config-manager.ts"
 import { SessionContext } from "../../../../core/daemon/src/context.ts"
-import {
-  createChunkPreview,
-  createLogger,
-  createPayloadPreview,
-} from "../../../../core/daemon/src/logging.ts"
+import { createLogger, createPayloadPreview } from "../../../../core/daemon/src/logging.ts"
 import {
   type SessionConnectionMode,
   type SessionDiagnosticEvent,
@@ -297,13 +292,11 @@ async function applyInitialSessionConfiguration(params: {
   }
 }
 
-/** Tracks in-flight client requests so agent responses can be correlated back to session state. */
-type ClientRequestMap = Map<string | number, acp.AnyMessage & { method: string }>
-
 /** Represents the most recent permission request awaiting a client decision. */
-type PermissionRequest = acp.AnyMessage & {
-  id: unknown
+type PermissionRequest = {
+  id: string
   params: acp.RequestPermissionRequest
+  resolve: (response: acp.RequestPermissionResponse) => void
 }
 
 /** Captures prompt requests so their responses can drive status transitions. */
@@ -336,24 +329,6 @@ type PendingSteerRequest = {
   reject: (error: Error) => void
 }
 
-/** Pending daemon-owned prompt request waiting for the agent response frame. */
-type PendingPromptRequest = {
-  resolve: (response: acp.PromptResponse) => void
-  reject: (error: Error) => void
-}
-
-/** Pending session config-option request waiting for the agent response frame. */
-type PendingConfigOptionRequest = {
-  resolve: (response: acp.SetSessionConfigOptionResponse) => void
-  reject: (error: Error) => void
-}
-
-/** Pending session model request waiting for the agent response frame. */
-type PendingModelRequest = {
-  resolve: (response: acp.SetSessionModelResponse) => void
-  reject: (error: Error) => void
-}
-
 /** Holds the live runtime state for a daemon-owned session process. */
 type ActiveSession = {
   id: SessionId
@@ -362,20 +337,14 @@ type ActiveSession = {
   token: string
   supportsLoadSession: boolean
   process: AgentProcessHandle
-  writer: WritableStreamDefaultWriter<acp.AnyMessage>
-  subscription: {
-    close: () => Promise<void>
-  }
+  client: AcpClient
+  session: AcpSession
   status: DaemonSessionStatus
   nextTurnSequence: number
   activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> | null
   isFirstPrompt: boolean
   systemPrompt: string
   lastPermissionRequest: PermissionRequest | null
-  clientRequests: ClientRequestMap
-  pendingPrompts: Map<string | number, PendingPromptRequest>
-  pendingConfigOptions: Map<string | number, PendingConfigOptionRequest>
-  pendingModels: Map<string | number, PendingModelRequest>
   promptQueue: QueuedPromptEntry[]
   blockingPromptRequestId: string | number | null
   pendingSteer: PendingSteerRequest | null
@@ -502,6 +471,8 @@ function supportsSessionLoad(initialized: Pick<InitializedSession, "agentCapabil
 }
 
 type InitializedSession = acp.InitializeResponse & {
+  client: AcpClient
+  session: AcpSession
   status: DaemonSessionStatus
   isFirstPrompt: boolean
   history: acp.AnyMessage[]
@@ -590,8 +561,15 @@ async function initializeSession(params: {
   request: ResolvedCreateSessionRequest
   resumeAcpId?: string
   onMessageWrite?: (message: acp.AnyMessage) => void
+  findActiveSession?: (acpSessionId: string) => ActiveSession | null
+  handleSessionUpdate?: (active: ActiveSession, params: acp.SessionNotification) => Promise<void>
+  handlePermissionRequest?: (
+    active: ActiveSession,
+    params: acp.RequestPermissionRequest,
+  ) => Promise<acp.RequestPermissionResponse>
 }): Promise<InitializedSession> {
   const history: acp.AnyMessage[] = []
+  let routeAcpSessionId: string | null = null
   const client = await createAcpClient({
     stdin: params.input,
     stdout: params.output,
@@ -600,14 +578,29 @@ async function initializeSession(params: {
       version: getPackageVersion(),
     },
     handler: {
-      async requestPermission() {
+      async requestPermission(permissionParams) {
+        const active =
+          params.findActiveSession?.(permissionParams.sessionId) ??
+          (routeAcpSessionId ? (params.findActiveSession?.(routeAcpSessionId) ?? null) : null)
+        if (active && params.handlePermissionRequest) {
+          return await params.handlePermissionRequest(active, permissionParams)
+        }
+
         return { outcome: { outcome: "cancelled" } }
       },
-      async sessionUpdate(params) {
+      async sessionUpdate(updateParams) {
+        const active =
+          params.findActiveSession?.(updateParams.sessionId) ??
+          (routeAcpSessionId ? (params.findActiveSession?.(routeAcpSessionId) ?? null) : null)
+        if (active && params.handleSessionUpdate) {
+          await params.handleSessionUpdate(active, updateParams)
+          return
+        }
+
         history.push({
           jsonrpc: "2.0",
           method: acp.CLIENT_METHODS.session_update,
-          params,
+          params: updateParams,
         })
       },
     },
@@ -635,10 +628,12 @@ async function initializeSession(params: {
         mcpServers: params.request.mcpServers,
       })
       acpSessionId = params.resumeAcpId
+      routeAcpSessionId = acpSessionId
       isFirstPrompt = false
     } else {
       session = await client.newSession(params.request)
       acpSessionId = session.sessionId
+      routeAcpSessionId = acpSessionId
       models = session.models
       configOptions = session.configOptions
 
@@ -670,13 +665,16 @@ async function initializeSession(params: {
     return {
       ...initializeResult,
       ...initialPromptResult,
+      client,
+      session,
       history,
       acpSessionId,
       models,
       configOptions,
     }
-  } finally {
+  } catch (error) {
     await client.close()
+    throw error
   }
 }
 
@@ -686,45 +684,43 @@ async function initializeSessionFromLaunchLease(params: {
   request: ResolvedCreateSessionRequest
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
-  try {
-    let models: acp.SessionModelState | null | undefined = params.lease.models
-    let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
+  let models: acp.SessionModelState | null | undefined = params.lease.models
+  let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
 
-    if (
-      params.request.initialModelId !== undefined ||
-      (params.request.initialConfigOptions?.length ?? 0) > 0
-    ) {
-      const configuredSession = await applyInitialSessionConfiguration({
-        session: params.lease.session,
-        models,
-        configOptions,
-        request: params.request,
-      })
-
-      models = configuredSession.models
-      configOptions = configuredSession.configOptions
-    }
-
-    const initialPromptResult = await runLaunchInitialPrompt({
+  if (
+    params.request.initialModelId !== undefined ||
+    (params.request.initialConfigOptions?.length ?? 0) > 0
+  ) {
+    const configuredSession = await applyInitialSessionConfiguration({
       session: params.lease.session,
-      acpSessionId: params.lease.acpSessionId,
-      request: params.request,
-      isFirstPrompt: true,
-      history: params.lease.history,
-      onMessageWrite: params.onMessageWrite,
-    })
-
-    return {
-      ...params.lease.initializeResult,
-      ...initialPromptResult,
-      history: params.lease.history,
-      acpSessionId: params.lease.acpSessionId,
       models,
       configOptions,
-    } satisfies InitializedSession
-  } finally {
-    await params.lease.client.close().catch(() => {})
+      request: params.request,
+    })
+
+    models = configuredSession.models
+    configOptions = configuredSession.configOptions
   }
+
+  const initialPromptResult = await runLaunchInitialPrompt({
+    session: params.lease.session,
+    acpSessionId: params.lease.acpSessionId,
+    request: params.request,
+    isFirstPrompt: true,
+    history: params.lease.history,
+    onMessageWrite: params.onMessageWrite,
+  })
+
+  return {
+    ...params.lease.initializeResult,
+    ...initialPromptResult,
+    client: params.lease.client,
+    session: params.lease.session,
+    history: params.lease.history,
+    acpSessionId: params.lease.acpSessionId,
+    models,
+    configOptions,
+  } satisfies InitializedSession
 }
 
 /**
@@ -856,100 +852,20 @@ function toAbortedQueuedPrompt(entry: {
   }
 }
 
-/** Resolves or rejects one pending prompt when its agent response frame arrives. */
-function settlePendingPrompt(active: ActiveSession, message: acp.AnyMessage): void {
-  if ("id" in message === false || message.id == null) {
-    return
-  }
-  const pending = active.pendingPrompts.get(message.id)
-  if (!pending) {
-    return
-  }
-  active.pendingPrompts.delete(message.id)
-  if ("error" in message) {
-    pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
-  } else if ("result" in message) {
-    pending.resolve(getAcpMessageResult<acp.PromptResponse>(message))
-  }
-}
-
-/** Resolves or rejects one pending config-option update when its agent response frame arrives. */
-function settlePendingConfigOption(active: ActiveSession, message: acp.AnyMessage): void {
-  if ("id" in message === false || message.id == null) {
-    return
-  }
-  const pending = active.pendingConfigOptions.get(message.id)
-  if (!pending) {
-    return
-  }
-  active.pendingConfigOptions.delete(message.id)
-  if ("error" in message) {
-    pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
-  } else if ("result" in message) {
-    pending.resolve(getAcpMessageResult<acp.SetSessionConfigOptionResponse>(message))
-  }
-}
-
-/** Resolves or rejects one pending model update when its agent response frame arrives. */
-function settlePendingModel(active: ActiveSession, message: acp.AnyMessage): void {
-  if ("id" in message === false || message.id == null) {
-    return
-  }
-  const pending = active.pendingModels.get(message.id)
-  if (!pending) {
-    return
-  }
-  active.pendingModels.delete(message.id)
-  if ("error" in message) {
-    pending.reject(new Error(resolveJsonRpcErrorMessage(message.error)))
-  } else if ("result" in message) {
-    pending.resolve(getAcpMessageResult<acp.SetSessionModelResponse>(message))
-  }
-}
-
 /** Rejects any in-flight prompt waits when a daemon session is torn down. */
 function rejectPendingPrompts(active: ActiveSession, error: Error): void {
-  for (const pending of active.pendingPrompts.values()) {
-    pending.reject(error)
-  }
-  active.pendingPrompts.clear()
-  for (const pending of active.pendingConfigOptions.values()) {
-    pending.reject(error)
-  }
-  active.pendingConfigOptions.clear()
-  for (const pending of active.pendingModels.values()) {
-    pending.reject(error)
-  }
-  active.pendingModels.clear()
   for (const queued of active.promptQueue) {
     queued.reject?.(error)
   }
   active.promptQueue.length = 0
+  if (active.lastPermissionRequest) {
+    active.lastPermissionRequest.resolve({ outcome: { outcome: "cancelled" } })
+    active.lastPermissionRequest = null
+  }
   if (active.pendingSteer) {
     active.pendingSteer.reject(error)
     active.pendingSteer = null
   }
-}
-
-/** Formats one JSON-RPC error payload into a stable daemon error message. */
-function resolveJsonRpcErrorMessage(error: {
-  code?: number
-  message?: string
-  data?: unknown
-}): string {
-  if (typeof error.message === "string" && error.message.length > 0) {
-    return error.message
-  }
-
-  if (typeof error.code === "number") {
-    return `Agent request failed with code ${error.code}`
-  }
-
-  if (error.data !== undefined) {
-    return `Agent request failed: ${JSON.stringify(error.data)}`
-  }
-
-  return "Agent request failed"
 }
 
 const DEFAULT_SESSION_PAGE_SIZE = 20
@@ -978,6 +894,7 @@ export function createSessionManager(input: {
   idleSessionShutdownTimeoutMs?: number
 }) {
   const activeSessions = new Map<SessionId, ActiveSession>()
+  const activeSessionsByAcpSessionId = new Map<string, ActiveSession>()
   const launchLeaseStore = createLaunchLeaseStore({ logger })
   const sessionSubscriberCounts = new Map<SessionId, number>()
   const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
@@ -1758,7 +1675,7 @@ export function createSessionManager(input: {
     input.emitMessage(active.id, message)
   }
 
-  async function writeImmediateMessage(
+  function publishClientMessage(
     active: ActiveSession,
     message: acp.AnyMessage,
     options: {
@@ -1766,16 +1683,8 @@ export function createSessionManager(input: {
       persistTurnMessage?: boolean
       onBeforePublish?: (message: acp.AnyMessage) => Promise<void> | void
     } = {},
-  ): Promise<void> {
-    let clearedPermissionRequest = false
-    if (
-      active.lastPermissionRequest &&
-      "id" in message &&
-      message.id === active.lastPermissionRequest.id
-    ) {
-      active.lastPermissionRequest = null
-      clearedPermissionRequest = true
-    } else if (options.updateStatus !== false) {
+  ): void {
+    if (options.updateStatus !== false) {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
         updateSession(
@@ -1790,22 +1699,6 @@ export function createSessionManager(input: {
       }
     }
 
-    if (
-      active.isFirstPrompt &&
-      isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)
-    ) {
-      active.isFirstPrompt = false
-      message.params = injectSystemPrompt(message.params, active.systemPrompt)
-    }
-
-    if ("id" in message && message.id != null && "method" in message) {
-      active.clientRequests.set(message.id, message as acp.AnyMessage & { method: string })
-    }
-
-    if (clearedPermissionRequest) {
-      refreshIdleShutdownState(active.id, "permission_request_resolved")
-    }
-
     logAgentMessage(active.logger, "agent.message_write", active.id, active.acpSessionId, message)
     emitDiagnostic(
       active.id,
@@ -1816,11 +1709,137 @@ export function createSessionManager(input: {
       },
       active.logger,
     )
-    await options.onBeforePublish?.(message)
+    void options.onBeforePublish?.(message)
     publishSessionMessage(active, message, {
       persistTurnMessage: options.persistTurnMessage,
     })
-    await active.writer.write(message)
+  }
+
+  async function handleSessionUpdate(
+    active: ActiveSession,
+    params: acp.SessionNotification,
+  ): Promise<void> {
+    const message = {
+      jsonrpc: "2.0",
+      method: acp.CLIENT_METHODS.session_update,
+      params,
+    } satisfies acp.AnyMessage
+
+    logAgentMessage(active.logger, "agent.message_read", active.id, active.acpSessionId, message)
+    publishSessionMessage(active, message)
+    await handleSteerBoundary(active, message)
+  }
+
+  async function handlePermissionRequest(
+    active: ActiveSession,
+    params: acp.RequestPermissionRequest,
+  ): Promise<acp.RequestPermissionResponse> {
+    const requestId =
+      active.blockingPromptRequestId === null
+        ? `permission-${randomUUID()}`
+        : `permission-${String(active.blockingPromptRequestId)}`
+
+    return await new Promise<acp.RequestPermissionResponse>((resolve) => {
+      active.lastPermissionRequest = {
+        id: requestId,
+        params,
+        resolve,
+      }
+      refreshIdleShutdownState(active.id, "permission_request_started")
+      const message = {
+        jsonrpc: "2.0",
+        id: requestId,
+        method: acp.CLIENT_METHODS.session_request_permission,
+        params,
+      } satisfies acp.AnyMessage
+
+      logAgentMessage(active.logger, "agent.message_read", active.id, active.acpSessionId, message)
+      publishSessionMessage(active, message)
+    })
+  }
+
+  function updateSessionFromPromptResponse(
+    active: ActiveSession,
+    requestId: string | number,
+    response: acp.PromptResponse,
+  ) {
+    const stopReason = response.stopReason ?? null
+    const nextStatus = stopReason === "end_turn" ? "done" : null
+
+    if (nextStatus || stopReason) {
+      updateSession(
+        active.id,
+        {
+          ...(nextStatus && { status: nextStatus }),
+          ...(stopReason && { stopReason }),
+        },
+        {
+          reason: "agent_message",
+          requestMethod: acp.AGENT_METHODS.session_prompt,
+          responseId: requestId,
+          stopReason: stopReason ?? undefined,
+        },
+      )
+    }
+  }
+
+  async function completePrompt(
+    active: ActiveSession,
+    entry: QueuedPromptEntry,
+    message: acp.AnyMessage & { params: acp.PromptRequest },
+  ) {
+    try {
+      const response = await active.session.prompt(message.params.prompt)
+      const responseMessage = {
+        jsonrpc: "2.0",
+        id: entry.requestId,
+        result: response,
+      } satisfies acp.AnyMessage
+
+      logAgentMessage(
+        active.logger,
+        "agent.message_read",
+        active.id,
+        active.acpSessionId,
+        responseMessage,
+      )
+      updateSessionFromPromptResponse(active, entry.requestId, response)
+      entry.resolve?.(response)
+
+      if (active.blockingPromptRequestId === entry.requestId) {
+        active.blockingPromptRequestId = null
+      }
+
+      publishSessionMessage(active, responseMessage)
+      finalizeActiveTurn(active, responseMessage)
+      await handleSteerBoundary(active, responseMessage)
+      await processPromptQueue(active)
+    } catch (error) {
+      const responseMessage = {
+        jsonrpc: "2.0",
+        id: entry.requestId,
+        error: {
+          code: -32603,
+          message: getErrorMessage(error),
+        },
+      } satisfies acp.AnyMessage
+
+      logAgentMessage(
+        active.logger,
+        "agent.message_read",
+        active.id,
+        active.acpSessionId,
+        responseMessage,
+      )
+      entry.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
+      if (active.blockingPromptRequestId === entry.requestId) {
+        active.blockingPromptRequestId = null
+      }
+      publishSessionMessage(active, responseMessage)
+      finalizeActiveTurn(active, responseMessage)
+      await handleSteerBoundary(active, responseMessage)
+      await processPromptQueue(active)
+    }
   }
 
   async function processPromptQueue(active: ActiveSession): Promise<void> {
@@ -1833,19 +1852,24 @@ export function createSessionManager(input: {
       return
     }
 
+    const promptRequest = {
+      sessionId: active.acpSessionId,
+      prompt: [...nextPrompt.prompt],
+    }
     const message = {
       jsonrpc: "2.0",
       id: nextPrompt.requestId,
       method: acp.AGENT_METHODS.session_prompt,
-      params: {
-        sessionId: active.acpSessionId,
-        prompt: [...nextPrompt.prompt],
-      },
+      params:
+        active.isFirstPrompt === true
+          ? injectSystemPrompt(promptRequest, active.systemPrompt)
+          : promptRequest,
     } satisfies acp.AnyMessage & {
       id: string | number
       method: string
       params: acp.PromptRequest
     }
+    active.isFirstPrompt = false
     const existingDraft =
       db.sessionTurnDrafts.first({
         where: { sessionId: active.id },
@@ -1871,13 +1895,6 @@ export function createSessionManager(input: {
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 
-    if (nextPrompt.resolve || nextPrompt.reject) {
-      active.pendingPrompts.set(nextPrompt.requestId, {
-        resolve: nextPrompt.resolve ?? (() => {}),
-        reject: nextPrompt.reject ?? (() => {}),
-      })
-    }
-
     refreshIdleShutdownState(active.id, "turn_started")
 
     try {
@@ -1891,13 +1908,14 @@ export function createSessionManager(input: {
         },
         active.logger,
       )
-      await writeImmediateMessage(active, message, {
+      publishClientMessage(active, message, {
         persistTurnMessage: false,
         onBeforePublish: async (resolvedMessage) => {
           appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
           flushActiveTurnDraft(active, "start")
         },
       })
+      void completePrompt(active, nextPrompt, message)
     } catch (error) {
       if (activeTurn.draftId) {
         db.sessionTurnDrafts.delete(activeTurn.draftId)
@@ -1907,7 +1925,6 @@ export function createSessionManager(input: {
       if (active.blockingPromptRequestId === nextPrompt.requestId) {
         active.blockingPromptRequestId = null
       }
-      active.pendingPrompts.delete(nextPrompt.requestId)
       refreshIdleShutdownState(active.id, "turn_start_failed")
       nextPrompt.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
       throw error
@@ -1968,7 +1985,7 @@ export function createSessionManager(input: {
       return false
     }
 
-    await writeImmediateMessage(
+    publishClientMessage(
       active,
       {
         jsonrpc: "2.0",
@@ -1979,6 +1996,7 @@ export function createSessionManager(input: {
       },
       { updateStatus: options.updateStatus },
     )
+    await active.session.cancel()
 
     return true
   }
@@ -2060,6 +2078,7 @@ export function createSessionManager(input: {
 
   async function completeOneShotLaunch(params: {
     id: SessionId
+    initialized: InitializedSession
     agentProcess: AgentProcessHandle
     sessionLogger: ReturnType<typeof createLogger>
     supportsLoadSession: boolean
@@ -2089,6 +2108,7 @@ export function createSessionManager(input: {
       false,
     )
     emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
+    await params.initialized.client.close().catch(() => {})
     await treeKill(params.agentProcess)
     await waitForAgentProcessExit(params.agentProcess)
 
@@ -2110,29 +2130,6 @@ export function createSessionManager(input: {
     sessionLogger: ReturnType<typeof createLogger>
     systemPrompt: string
   }) {
-    const connection = createAgentConnection(
-      params.agentProcess.stdin,
-      params.agentProcess.stdout,
-      {
-        onChunk: (chunk) => {
-          if (chunk.byteLength === 0) {
-            return
-          }
-
-          params.sessionLogger.log("agent.chunk_read", {
-            sessionId: params.id,
-            acpSessionId: params.initialized.acpSessionId,
-            preview: createChunkPreview(chunk),
-          })
-        },
-        onMessageError: (error) => {
-          params.sessionLogger.log("agent.message_handler_failed", {
-            errorMessage: getErrorMessage(error),
-          })
-        },
-      },
-    )
-    const writer = connection.getWriter()
     const activeSession: ActiveSession = {
       id: params.id,
       acpSessionId: params.initialized.acpSessionId,
@@ -2140,88 +2137,19 @@ export function createSessionManager(input: {
       token: params.token,
       supportsLoadSession: params.supportsLoadSession,
       process: params.agentProcess,
-      writer,
-      subscription: { close: async () => {} },
+      client: params.initialized.client,
+      session: params.initialized.session,
       status: params.initialized.status,
       nextTurnSequence: params.nextTurnSequence,
       activeTurn: null,
       isFirstPrompt: params.initialized.isFirstPrompt,
       systemPrompt: params.systemPrompt,
       lastPermissionRequest: null,
-      clientRequests: new Map(),
-      pendingPrompts: new Map(),
-      pendingConfigOptions: new Map(),
-      pendingModels: new Map(),
       promptQueue: [],
       blockingPromptRequestId: null,
       pendingSteer: null,
       idleShutdownTimer: null,
     }
-
-    activeSession.subscription = connection.subscribe(async (message) => {
-      logAgentMessage(
-        activeSession.logger,
-        "agent.message_read",
-        activeSession.id,
-        activeSession.acpSessionId,
-        message,
-      )
-      if (isAcpRequest<PermissionRequest>(message, acp.CLIENT_METHODS.session_request_permission)) {
-        activeSession.lastPermissionRequest = message
-        refreshIdleShutdownState(activeSession.id, "permission_request_started")
-      }
-
-      let shouldPersistMessage = true
-
-      if ("id" in message && message.id != null) {
-        const clientRequest = activeSession.clientRequests.get(message.id)
-        const promptRequest = clientRequest
-          ? matchAcpRequest<acp.PromptRequest>(clientRequest, acp.AGENT_METHODS.session_prompt)
-          : null
-        const promptResponse = promptRequest
-          ? getAcpMessageResult<acp.PromptResponse>(message)
-          : null
-        const stopReason = promptResponse?.stopReason ?? null
-        const nextStatus = stopReason === "end_turn" ? "done" : null
-
-        if (nextStatus || stopReason) {
-          updateSession(
-            activeSession.id,
-            {
-              ...(nextStatus && { status: nextStatus }),
-              ...(stopReason && { stopReason }),
-            },
-            {
-              reason: "agent_message",
-              requestMethod: clientRequest?.method,
-              responseId: message.id,
-              stopReason: stopReason ?? undefined,
-            },
-          )
-        }
-        shouldPersistMessage =
-          clientRequest?.method !== acp.AGENT_METHODS.session_set_config_option &&
-          clientRequest?.method !== acp.AGENT_METHODS.session_set_model
-
-        if (clientRequest) {
-          activeSession.clientRequests.delete(message.id)
-        }
-        settlePendingPrompt(activeSession, message)
-        settlePendingConfigOption(activeSession, message)
-        settlePendingModel(activeSession, message)
-
-        if (message.id === activeSession.blockingPromptRequestId) {
-          activeSession.blockingPromptRequestId = null
-        }
-      }
-
-      publishSessionMessage(activeSession, message, {
-        persistTurnMessage: shouldPersistMessage,
-      })
-      finalizeActiveTurn(activeSession, message)
-      await handleSteerBoundary(activeSession, message)
-      await processPromptQueue(activeSession)
-    })
 
     const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
       try {
@@ -2229,12 +2157,12 @@ export function createSessionManager(input: {
       } catch {}
       cancelIdleShutdownTimer(activeSession, "agent_process_exit")
       activeSessions.delete(activeSession.id)
+      activeSessionsByAcpSessionId.delete(activeSession.acpSessionId)
       rejectPendingPrompts(
         activeSession,
         new Error(`Session ${activeSession.id} ended before the prompt completed.`),
       )
-      await activeSession.writer.close().catch(() => {})
-      await activeSession.subscription.close().catch(() => {})
+      await activeSession.client.close().catch(() => {})
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
       await input.events
@@ -2301,6 +2229,7 @@ export function createSessionManager(input: {
     })
 
     activeSessions.set(activeSession.id, activeSession)
+    activeSessionsByAcpSessionId.set(activeSession.acpSessionId, activeSession)
     refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
@@ -2380,6 +2309,7 @@ export function createSessionManager(input: {
     let sessionLogger = logger
     sessionLogger = SessionContext.run(sessionContext, () => sessionLogger.snapshot())
     let spawnedAgentProcess: AgentProcessHandle | null = null
+    let initializedClient: AcpClient | null = null
 
     try {
       sessionLogger.log("session.launch_requested", {
@@ -2480,6 +2410,7 @@ export function createSessionManager(input: {
           },
           onMessageWrite,
         })
+        initializedClient = initialized.client
       } else {
         agentProcess = await spawnAgentProcess({
           daemonUrl: input.getDaemonUrl(),
@@ -2505,7 +2436,12 @@ export function createSessionManager(input: {
           },
           resumeAcpId: existingSession?.acpSessionId,
           onMessageWrite,
+          findActiveSession: (acpSessionId) =>
+            activeSessionsByAcpSessionId.get(acpSessionId) ?? null,
+          handleSessionUpdate,
+          handlePermissionRequest,
         })
+        initializedClient = initialized.client
       }
       sessionContext.acpSessionId = initialized.acpSessionId
 
@@ -2574,6 +2510,7 @@ export function createSessionManager(input: {
       if (exitAfterInitialPrompt) {
         const completedSession = await completeOneShotLaunch({
           id,
+          initialized,
           agentProcess,
           sessionLogger,
           supportsLoadSession: sessionSupportsLoad,
@@ -2612,6 +2549,7 @@ export function createSessionManager(input: {
         errorMessage: getErrorMessage(error),
       })
       if (spawnedAgentProcess && !activeSessions.has(id)) {
+        await initializedClient?.close().catch(() => {})
         await treeKill(spawnedAgentProcess).catch(() => {})
         await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
       }
@@ -2940,10 +2878,25 @@ export function createSessionManager(input: {
           version: getPackageVersion(),
         },
         handler: {
-          async requestPermission() {
+          async requestPermission(permissionParams) {
+            const active =
+              activeSessionsByAcpSessionId.get(permissionParams.sessionId) ??
+              (acpSessionId ? (activeSessionsByAcpSessionId.get(acpSessionId) ?? null) : null)
+            if (active) {
+              return await handlePermissionRequest(active, permissionParams)
+            }
+
             return { outcome: { outcome: "cancelled" } }
           },
           async sessionUpdate(params) {
+            const active =
+              activeSessionsByAcpSessionId.get(params.sessionId) ??
+              (acpSessionId ? (activeSessionsByAcpSessionId.get(acpSessionId) ?? null) : null)
+            if (active) {
+              await handleSessionUpdate(active, params)
+              return
+            }
+
             history.push({
               jsonrpc: "2.0",
               method: acp.CLIENT_METHODS.session_update,
@@ -3338,11 +3291,26 @@ export function createSessionManager(input: {
       await abortQueuedPrompts(active, `Queued prompts were aborted for session ${id}.`, {
         includePendingSteer: true,
       })
-      await writeImmediateMessage(active, message)
+      publishClientMessage(active, message)
+      await active.session.cancel()
       return
     }
 
-    await writeImmediateMessage(active, message)
+    if (
+      active.lastPermissionRequest &&
+      "id" in message &&
+      message.id === active.lastPermissionRequest.id &&
+      "result" in message
+    ) {
+      const permissionRequest = active.lastPermissionRequest
+      active.lastPermissionRequest = null
+      refreshIdleShutdownState(active.id, "permission_request_resolved")
+      publishClientMessage(active, message)
+      permissionRequest.resolve(message.result as acp.RequestPermissionResponse)
+      return
+    }
+
+    throw new IpcClientError(`Unsupported ACP session message for active session ${id}`)
   }
 
   async function setSessionConfigOption(params: SetSessionConfigOptionRequest) {
@@ -3352,35 +3320,11 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${params.id} is not active`)
     }
 
-    const requestId = randomUUID()
-    const response = new Promise<acp.SetSessionConfigOptionResponse>((resolve, reject) => {
-      active.pendingConfigOptions.set(requestId, { resolve, reject })
+    const result = await active.session.setConfigOption(params.configId, params.value)
+    updateSession(params.id, {
+      configOptions: result.configOptions,
     })
-
-    try {
-      await writeImmediateMessage(
-        active,
-        {
-          jsonrpc: "2.0",
-          id: requestId,
-          method: acp.AGENT_METHODS.session_set_config_option,
-          params: {
-            sessionId: active.acpSessionId,
-            configId: params.configId,
-            value: params.value,
-          },
-        } satisfies acp.AnyMessage,
-        { persistTurnMessage: false },
-      )
-      const result = await response
-      updateSession(params.id, {
-        configOptions: result.configOptions,
-      })
-      return getSession(params.id)
-    } catch (error) {
-      active.pendingConfigOptions.delete(requestId)
-      throw error
-    }
+    return getSession(params.id)
   }
 
   async function setSessionModel(params: SetSessionModelRequest) {
@@ -3390,40 +3334,17 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${params.id} is not active`)
     }
 
-    const requestId = randomUUID()
-    const response = new Promise<acp.SetSessionModelResponse>((resolve, reject) => {
-      active.pendingModels.set(requestId, { resolve, reject })
+    await active.session.setModel(params.modelId)
+    const session = requireSessionDocument(params.id)
+    updateSession(params.id, {
+      models: session.models
+        ? {
+            ...session.models,
+            currentModelId: params.modelId,
+          }
+        : null,
     })
-
-    try {
-      await writeImmediateMessage(
-        active,
-        {
-          jsonrpc: "2.0",
-          id: requestId,
-          method: acp.AGENT_METHODS.session_set_model,
-          params: {
-            sessionId: active.acpSessionId,
-            modelId: params.modelId,
-          },
-        } satisfies acp.AnyMessage,
-        { persistTurnMessage: false },
-      )
-      await response
-      const session = requireSessionDocument(params.id)
-      updateSession(params.id, {
-        models: session.models
-          ? {
-              ...session.models,
-              currentModelId: params.modelId,
-            }
-          : null,
-      })
-      return getSession(params.id)
-    } catch (error) {
-      active.pendingModels.delete(requestId)
-      throw error
-    }
+    return getSession(params.id)
   }
 
   async function promptSession(
@@ -3452,23 +3373,18 @@ export function createSessionManager(input: {
       })
     })
 
-    try {
-      refreshIdleShutdownState(active.id, "prompt_enqueued")
-      emitDiagnostic(
-        active.id,
-        "session_prompt_enqueued",
-        {
-          requestId,
-          queueLength: active.promptQueue.length,
-        },
-        active.logger,
-      )
-      await processPromptQueue(active)
-      return await response
-    } catch (error) {
-      active.pendingPrompts.delete(requestId)
-      throw error
-    }
+    refreshIdleShutdownState(active.id, "prompt_enqueued")
+    emitDiagnostic(
+      active.id,
+      "session_prompt_enqueued",
+      {
+        requestId,
+        queueLength: active.promptQueue.length,
+      },
+      active.logger,
+    )
+    await processPromptQueue(active)
+    return await response
   }
 
   async function steerSession(
@@ -3585,8 +3501,7 @@ export function createSessionManager(input: {
       emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
-      await session.writer.close().catch(() => {})
-      await session.subscription.close().catch(() => {})
+      await session.client.close().catch(() => {})
       const sessionRecord = db.sessions.get(session.id) ?? null
       if (sessionRecord?.permissions) {
         db.sessions.update(session.id, {
@@ -3596,6 +3511,7 @@ export function createSessionManager(input: {
       }
     }
     activeSessions.clear()
+    activeSessionsByAcpSessionId.clear()
   }
 
   return {
