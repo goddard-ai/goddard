@@ -9,19 +9,17 @@ import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
-import { selectDefaultFeatureContributions } from "./features.ts"
-
-const defaultDaemonPlugins = selectDefaultFeatureContributions({
-  action: actionPlugin,
-  adapter: adapterPlugin,
-  auth: authPlugin,
-  session: sessionPlugin,
-  inbox: inboxPlugin,
-  pullRequest: pullRequestPlugin,
-  reviewSession: reviewSessionPlugin,
-  loop: loopPlugin,
-  workforce: workforcePlugin,
-})
+const defaultDaemonPlugins = [
+  actionPlugin,
+  adapterPlugin,
+  authPlugin,
+  sessionPlugin,
+  inboxPlugin,
+  pullRequestPlugin,
+  reviewSessionPlugin,
+  loopPlugin,
+  workforcePlugin,
+] as const
 
 function composeDefaultDaemonPlugins() {
   return composePlugins(defaultDaemonPlugins)
