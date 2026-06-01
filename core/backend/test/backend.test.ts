@@ -195,7 +195,7 @@ test("sse stream receives webhook events for a managed PR", async () => {
       session.token,
     )
 
-    const streamResponse = await fetch(`${baseUrl}/repositories/stream`, {
+    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
       headers: {
         accept: "text/event-stream",
         authorization: `Bearer ${session.token}`,
@@ -269,13 +269,13 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       bobSession.token,
     )
 
-    const alecStream = await fetch(`${baseUrl}/repositories/stream`, {
+    const alecStream = await fetch(`${baseUrl}/remote-repo/stream`, {
       headers: {
         accept: "text/event-stream",
         authorization: `Bearer ${alecSession.token}`,
       },
     })
-    const bobStream = await fetch(`${baseUrl}/repositories/stream`, {
+    const bobStream = await fetch(`${baseUrl}/remote-repo/stream`, {
       headers: {
         accept: "text/event-stream",
         authorization: `Bearer ${bobSession.token}`,
@@ -316,7 +316,7 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       githubUsername: "alec",
     })
 
-    const streamResponse = await fetch(`${baseUrl}/repositories/stream`, {
+    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
       headers: {
         accept: "text/event-stream",
         authorization: `Bearer ${session.token}`,

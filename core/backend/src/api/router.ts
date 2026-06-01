@@ -2,6 +2,7 @@ import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import { GitHubWebhookInput } from "@goddard-ai/pull-request/schema"
+import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
@@ -12,7 +13,12 @@ import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
 
-const backendRoutes = composeBackendRoutes([authBackendRoutes, pullRequestBackendRoutes, routes])
+const backendRoutes = composeBackendRoutes([
+  authBackendRoutes,
+  pullRequestBackendRoutes,
+  remoteRepoBackendRoutes,
+  routes,
+])
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
@@ -128,7 +134,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         }
       },
     },
-    repositories: {
+    remoteRepo: {
       stream: async (ctx) => {
         try {
           const env = readEnv(ctx)

@@ -30,6 +30,7 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
+    "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
     "zod": "catalog:"
   }

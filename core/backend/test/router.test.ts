@@ -74,7 +74,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
 
   const response = await router(
     createContext(
-      new Request("https://example.test/repositories/stream", {
+      new Request("https://example.test/remote-repo/stream", {
         headers: { authorization: "Bearer tok_1" },
       }),
     ) as any,

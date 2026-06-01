@@ -421,6 +421,7 @@
       "name": "@goddard-ai/remote-repo",
       "version": "0.1.0",
       "dependencies": {
+        "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/backend-plugin": "workspace:*",
         "zod": "catalog:",
       },

@@ -5,6 +5,7 @@ import {
   type RouzerClient,
 } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
+import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
 import type { StreamMessage } from "@goddard-ai/remote-repo/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { getErrorMessage } from "radashi"
@@ -21,6 +22,7 @@ const notAuthenticatedMessage = "Not authenticated. Run login first."
 export const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
   pullRequestBackendRoutes,
+  remoteRepoBackendRoutes,
   routes,
 ])
 
@@ -117,7 +119,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     stream: {
       subscribe: async () => {
         const abortController = new AbortController()
-        const response = await authorizedClient.repositories.stream(undefined, {
+        const response = await authorizedClient.remoteRepo.stream(undefined, {
           signal: abortController.signal,
         })
 

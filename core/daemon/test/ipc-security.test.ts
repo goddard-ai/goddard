@@ -620,7 +620,7 @@ function createTestBackendClient(
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    repositories: {
+    remoteRepo: {
       stream: async () => new Response(),
     },
     stream: {
