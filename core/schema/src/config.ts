@@ -3,7 +3,14 @@ import * as acp from "acp-client/protocol"
 import { z } from "zod"
 
 import { AgentDistribution } from "./agent-distribution.ts"
-import { DaemonSessionMetadata } from "./daemon/store.ts"
+
+/** Free-form session metadata accepted by config-backed session defaults. */
+export const SessionMetadataConfig = z
+  .object({})
+  .catchall(z.unknown())
+  .describe("Free-form metadata attached to the daemon session for downstream consumers.")
+
+export type SessionMetadataConfig = z.infer<typeof SessionMetadataConfig>
 
 export const AgentSetting = z.union([
   z.string().min(1) as z.ZodType<AcpAdapterId>,
@@ -68,7 +75,7 @@ export const InlineSessionParams = StaticSessionParams.extend({
     .int()
     .optional()
     .describe("Pull request number associated with the session context."),
-  metadata: DaemonSessionMetadata.optional().describe(
+  metadata: SessionMetadataConfig.optional().describe(
     "Additional daemon session metadata shared with the runtime.",
   ),
 }).describe("Runtime session settings after ephemeral invocation overrides are applied.")
