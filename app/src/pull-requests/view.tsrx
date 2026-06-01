@@ -1,4 +1,4 @@
-import type { DaemonPullRequestId } from "@goddard-ai/schema/id"
+import type { PullRequestId } from "@goddard-ai/pull-request/schema"
 import { ExternalLink, GitPullRequest } from "lucide-react"
 import { useState } from "preact/hooks"
 import { isPromise } from "radashi"
@@ -10,7 +10,7 @@ import { getPullRequestDisplayTitle } from "./display.ts"
 import { getPullRequestUrl } from "./links.ts"
 import styles from "./view.style.ts"
 
-function retryPullRequestLoad(pullRequestId: DaemonPullRequestId) {
+function retryPullRequestLoad(pullRequestId: PullRequestId) {
   queryClient.invalidate(goddardSdk.pr.get, [{ id: pullRequestId }])
 }
 
@@ -42,7 +42,7 @@ component PullRequestLoadingState() {
 
 component PullRequestView(props: {
   projectPath: string | null;
-  pullRequestId: DaemonPullRequestId;
+  pullRequestId: PullRequestId;
   pullRequestTitle?: string;
 }) {
   const [, setRetryVersion] = useState(0)

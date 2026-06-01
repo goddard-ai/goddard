@@ -3,7 +3,6 @@ import {
   AttentionMetadataInput,
   AttentionScope,
 } from "@goddard-ai/schema/attention"
-import { DaemonPullRequestId } from "@goddard-ai/schema/id"
 import { SessionId } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
@@ -14,8 +13,12 @@ export const InboxItemId = z.custom<`inb_${string}`>(
 
 export type InboxItemId = z.infer<typeof InboxItemId>
 
+const PullRequestEntityId = z.custom<`pr_${string}`>(
+  (value): value is `pr_${string}` => typeof value === "string" && value.startsWith("pr_"),
+)
+
 /** Tagged daemon entity ids that can own one local inbox row. */
-export const InboxEntityId = z.union([SessionId, DaemonPullRequestId])
+export const InboxEntityId = z.union([SessionId, PullRequestEntityId])
 
 export type InboxEntityId = z.infer<typeof InboxEntityId>
 

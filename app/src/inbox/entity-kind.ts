@@ -1,5 +1,5 @@
 import type { InboxEntityId, InboxItem } from "@goddard-ai/inbox/schema"
-import type { DaemonPullRequestId } from "@goddard-ai/schema/id"
+import type { PullRequestId } from "@goddard-ai/pull-request/schema"
 import type { SessionId } from "@goddard-ai/sdk"
 
 /** Entity families supported by daemon-local inbox rows. */
@@ -12,7 +12,7 @@ export type SessionInboxItem = InboxItem & {
 
 /** Inbox row whose linked daemon entity is a pull request. */
 export type PullRequestInboxItem = InboxItem & {
-  entityId: DaemonPullRequestId
+  entityId: PullRequestId
 }
 
 /** Returns the daemon entity family for one inbox row id. */

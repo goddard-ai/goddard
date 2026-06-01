@@ -1,11 +1,24 @@
 import { RepoRef } from "@goddard-ai/remote-repo/schema"
 import { AttentionMetadataInput } from "@goddard-ai/schema/attention"
-import { DaemonPullRequestId, DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 const RepoPrRef = RepoRef.extend({
   prNumber: z.number(),
 })
+
+/** Tagged pull request id emitted by the pull-request store. */
+export const PullRequestId = z.custom<`pr_${string}`>(
+  (value): value is `pr_${string}` => typeof value === "string" && value.startsWith("pr_"),
+)
+
+export type PullRequestId = z.infer<typeof PullRequestId>
+
+/** Stable path and payload params used to address one pull request by id. */
+export const PullRequestIdParams = z.strictObject({
+  id: PullRequestId,
+})
+
+export type PullRequestIdParams = z.infer<typeof PullRequestIdParams>
 
 /** Request payload used to create one managed pull request. */
 export const CreatePrInput = RepoRef.extend({
@@ -58,7 +71,7 @@ export const DaemonPullRequest = z.strictObject({
 })
 
 export type DaemonPullRequest = z.output<typeof DaemonPullRequest> & {
-  id: DaemonPullRequestId
+  id: PullRequestId
   updatedAt: number
 }
 
@@ -98,7 +111,7 @@ export type ReplyPrResponse = {
 }
 
 /** Request payload used to fetch one stored daemon pull request by tagged id. */
-export const GetPullRequestRequest = DaemonPullRequestIdParams
+export const GetPullRequestRequest = PullRequestIdParams
 
 export type GetPullRequestRequest = z.infer<typeof GetPullRequestRequest>
 
