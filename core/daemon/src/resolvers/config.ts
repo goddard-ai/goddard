@@ -32,6 +32,10 @@ type JsonConfigReadOptions = {
 const SCHEMA_BASE_URL =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/"
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /** Returns true when a filesystem path exists. */
 export async function pathExists(path: string): Promise<boolean> {
   try {
@@ -64,7 +68,7 @@ export async function readJsonConfig<T>(
     })
   }
 
-  if (typeof parsed === "object" && parsed !== null && !("$schema" in parsed)) {
+  if (isRecord(parsed) && !("$schema" in parsed)) {
     try {
       await writeFile(
         path,
@@ -83,12 +87,9 @@ export async function readJsonConfig<T>(
     }
   }
 
-  const normalized =
-    typeof parsed === "object" && parsed !== null && "$schema" in parsed
-      ? Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
-        )
-      : parsed
+  const normalized = isRecord(parsed)
+    ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
+    : parsed
 
   try {
     options.validateNormalized?.(normalized)
@@ -138,11 +139,11 @@ export async function readMergedRootConfig(
  * Prevents repository-local config from declaring daemon-owned global-only settings.
  */
 function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
-  if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized)) {
+  if (!isRecord(normalized)) {
     return
   }
 
-  const config = normalized as Record<string, unknown>
+  const config = normalized
   if ("daemon" in config) {
     throw new Error(
       "`daemon` is only supported in the global Goddard config, not repository-local config.",
@@ -150,41 +151,25 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   }
 
   const worktrees = config.worktrees
-  if (
-    typeof worktrees === "object" &&
-    worktrees !== null &&
-    !Array.isArray(worktrees) &&
-    "plugins" in worktrees
-  ) {
+  if (isRecord(worktrees) && "plugins" in worktrees) {
     throw new Error(
       "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 
   const sessions = config.sessions
-  const envPolicy =
-    typeof sessions === "object" && sessions !== null && !Array.isArray(sessions)
-      ? (sessions as Record<string, unknown>).envPolicy
-      : null
-  if (
-    typeof envPolicy === "object" &&
-    envPolicy !== null &&
-    !Array.isArray(envPolicy) &&
-    "set" in envPolicy
-  ) {
+  const envPolicy = isRecord(sessions) ? sessions.envPolicy : null
+  if (isRecord(envPolicy) && "set" in envPolicy) {
     throw new Error(
       "`sessions.envPolicy.set` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 
   const security = config.security
-  const pullRequests =
-    typeof security === "object" && security !== null && !Array.isArray(security)
-      ? (security as Record<string, unknown>).pullRequests
-      : null
-  if (typeof pullRequests === "object" && pullRequests !== null && !Array.isArray(pullRequests)) {
+  const pullRequests = isRecord(security) ? security.pullRequests : null
+  if (isRecord(pullRequests)) {
     for (const key of ["submit", "reply"]) {
-      if ((pullRequests as Record<string, unknown>)[key] === "allow") {
+      if (pullRequests[key] === "allow") {
         throw new Error(
           `\`security.pullRequests.${key}\` cannot be set to "allow" in repository-local config.`,
         )

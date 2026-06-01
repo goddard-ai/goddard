@@ -26,6 +26,10 @@ type ResolvedAction = {
   path: string
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /** Validates that one parsed action config is an object when present. */
 function ensureActionConfig(value: ActionConfig | undefined, path: string) {
   if (!value) {
@@ -49,12 +53,9 @@ async function readActionConfig(path: string) {
     throw new Error(`Action config at ${path} must be valid JSON.`, { cause: error })
   }
 
-  const normalized =
-    typeof parsed === "object" && parsed !== null && "$schema" in parsed
-      ? Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
-        )
-      : parsed
+  const normalized = isRecord(parsed)
+    ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
+    : parsed
 
   return ActionConfig.parse(normalized)
 }

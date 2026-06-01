@@ -52,6 +52,10 @@ const DEFAULT_LOOP_RETRIES = {
   jitterRatio: 0.2,
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /** Reads and validates one packaged loop config document. */
 async function readLoopConfig(path: string) {
   let parsed: unknown
@@ -62,12 +66,9 @@ async function readLoopConfig(path: string) {
     throw new Error(`Loop config at ${path} must be valid JSON.`, { cause: error })
   }
 
-  const normalized =
-    typeof parsed === "object" && parsed !== null && "$schema" in parsed
-      ? Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).filter(([key]) => key !== "$schema"),
-        )
-      : parsed
+  const normalized = isRecord(parsed)
+    ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
+    : parsed
 
   return LoopConfig.parse(normalized)
 }

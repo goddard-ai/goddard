@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { buildRootConfigSchema } from "../src/config-schema.ts"
+import { buildRootConfigSchema, mergeRootConfigLayers } from "../src/config-schema.ts"
 import { buildGeneratedSchemaArtifacts } from "../src/json-schemas.ts"
 
 test("daemon root config schema accepts session title generator model config", () => {
@@ -32,4 +32,21 @@ test("generated goddard schema embeds the model schema once under local defs", (
   expect((defs.SessionTitlesConfig?.properties as Record<string, unknown>)?.generator).toEqual({
     $ref: "#/$defs/ModelConfig",
   })
+})
+
+test("root config merging rejects non-object config fragments before merging", async () => {
+  await expect(
+    mergeRootConfigLayers(
+      {
+        agents: "codex-acp",
+      },
+      undefined,
+    ),
+  ).rejects.toThrow("agents must be an object.")
+
+  await expect(
+    mergeRootConfigLayers(undefined, {
+      sessions: "15m",
+    }),
+  ).rejects.toThrow("sessions must be an object.")
 })

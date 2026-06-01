@@ -24,6 +24,21 @@ export const CoreRootConfig = {
 
 type RootConfigLayer = Record<string, unknown>
 
+function assertRecord(value: unknown, path: string): asserts value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path} must be an object.`)
+  }
+}
+
+function readOptionalRecord(value: unknown, path: string) {
+  if (value === undefined) {
+    return undefined
+  }
+
+  assertRecord(value, path)
+  return value
+}
+
 /** Builds the effective root config schema for this daemon build. */
 export function buildRootConfigSchema() {
   return z
@@ -65,16 +80,16 @@ export async function mergeRootConfigLayers(
   }
 
   const agents = mergeConfigLayers([
-    user?.agents as Record<string, unknown> | undefined,
-    project?.agents as Record<string, unknown> | undefined,
+    readOptionalRecord(user?.agents, "agents"),
+    readOptionalRecord(project?.agents, "agents"),
   ])
   if (Object.keys(agents).length > 0) {
     config.agents = AgentsConfig.parse(agents)
   }
 
   const registry = mergeConfigLayers([
-    user?.registry as Record<string, unknown> | undefined,
-    project?.registry as Record<string, unknown> | undefined,
+    readOptionalRecord(user?.registry, "registry"),
+    readOptionalRecord(project?.registry, "registry"),
   ])
   if (Object.keys(registry).length > 0) {
     config.registry = registry
@@ -86,7 +101,7 @@ export async function mergeRootConfigLayers(
   }
 
   for (const [key, definition] of Object.entries(getDaemonPluginComposition().config)) {
-    const value = await resolveConfigValue(definition, user?.[key], project?.[key])
+    const value = await resolveConfigValue(definition, key, user?.[key], project?.[key])
     if (value !== undefined) {
       config[key] = value
     }
@@ -96,17 +111,16 @@ export async function mergeRootConfigLayers(
 }
 
 function mergeSecurityConfigLayers(user: unknown, project: unknown) {
-  const merged = mergeConfigLayers([
-    user as Record<string, unknown> | undefined,
-    project as Record<string, unknown> | undefined,
-  ])
+  const userConfigLayer = readOptionalRecord(user, "security")
+  const projectConfigLayer = readOptionalRecord(project, "security")
+  const merged = mergeConfigLayers([userConfigLayer, projectConfigLayer])
   if (Object.keys(merged).length === 0 && user === undefined && project === undefined) {
     return undefined
   }
 
   const parsed = SecurityConfig.parse(merged)
-  const userConfig = SecurityConfig.parse(user ?? {})
-  const projectConfig = SecurityConfig.parse(project ?? {})
+  const userConfig = SecurityConfig.parse(userConfigLayer ?? {})
+  const projectConfig = SecurityConfig.parse(projectConfigLayer ?? {})
   const pullRequests = { ...parsed.pullRequests }
 
   if (userConfig.pullRequests?.submit === "deny" || projectConfig.pullRequests?.submit === "deny") {
@@ -122,7 +136,12 @@ function mergeSecurityConfigLayers(user: unknown, project: unknown) {
   })
 }
 
-async function resolveConfigValue(definition: ConfigDefinition, user: unknown, project: unknown) {
+async function resolveConfigValue(
+  definition: ConfigDefinition,
+  key: string,
+  user: unknown,
+  project: unknown,
+) {
   if (definition.resolve) {
     return definition.resolve({
       user,
@@ -131,8 +150,8 @@ async function resolveConfigValue(definition: ConfigDefinition, user: unknown, p
   }
 
   const merged = mergeConfigLayers([
-    user as Record<string, unknown> | undefined,
-    project as Record<string, unknown> | undefined,
+    readOptionalRecord(user, key),
+    readOptionalRecord(project, key),
   ])
 
   if (Object.keys(merged).length === 0 && user === undefined && project === undefined) {
