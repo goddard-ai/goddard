@@ -10,7 +10,6 @@ import {
   type RemoteRepoEventHandler,
 } from "@goddard-ai/remote-repo/backend"
 import { GitHubWebhookInput, type RepoEvent } from "@goddard-ai/remote-repo/schema"
-import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
 import { createRouter } from "rouzer"
@@ -23,7 +22,6 @@ const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
   pullRequestBackendRoutes,
   remoteRepoBackendRoutes,
-  routes,
 ])
 
 /** Test seams and runtime adapters injected into the backend router. */

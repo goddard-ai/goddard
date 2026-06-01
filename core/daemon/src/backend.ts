@@ -7,7 +7,6 @@ import {
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
 import type { StreamMessage } from "@goddard-ai/remote-repo/schema"
-import * as routes from "@goddard-ai/schema/backend/routes"
 import { getErrorMessage } from "radashi"
 
 /** Fetch implementation consumed by the daemon's backend client. */
@@ -23,7 +22,6 @@ export const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
   pullRequestBackendRoutes,
   remoteRepoBackendRoutes,
-  routes,
 ])
 
 /** Error thrown when a daemon backend call requires a login session that is not available. */
