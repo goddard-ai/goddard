@@ -414,6 +414,14 @@
         "zod": "catalog:",
       },
     },
+    "features/remote-repo": {
+      "name": "@goddard-ai/remote-repo",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/backend-plugin": "workspace:*",
+        "zod": "catalog:",
+      },
+    },
     "features/review-session": {
       "name": "@goddard-ai/review-session",
       "version": "0.1.0",
@@ -854,6 +862,8 @@
     "@goddard-ai/paths": ["@goddard-ai/paths@workspace:core/paths"],
 
     "@goddard-ai/pull-request": ["@goddard-ai/pull-request@workspace:features/pull-request"],
+
+    "@goddard-ai/remote-repo": ["@goddard-ai/remote-repo@workspace:features/remote-repo"],
 
     "@goddard-ai/review-session": ["@goddard-ai/review-session@workspace:features/review-session"],
 
