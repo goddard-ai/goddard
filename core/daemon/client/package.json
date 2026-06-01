@@ -19,6 +19,14 @@
       },
       "bun": "./src/node/index.ts",
       "import": "./dist/node/index.mjs"
+    },
+    "./daemon-ipc": {
+      "types": {
+        "source": "./src/daemon-ipc.ts",
+        "default": "./dist/daemon-ipc.d.mts"
+      },
+      "bun": "./src/daemon-ipc.ts",
+      "import": "./dist/daemon-ipc.mjs"
     }
   },
   "scripts": {
@@ -29,6 +37,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
+    "@goddard-ai/default-features": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",

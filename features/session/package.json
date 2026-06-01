@@ -61,7 +61,6 @@
     "@alloc/tree-kill": "^1.3.0",
     "@b9g/async-context": "catalog:",
     "@goddard-ai/config": "workspace:*",
-    "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",

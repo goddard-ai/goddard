@@ -37,6 +37,7 @@
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/default-features": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/loop": "workspace:*",

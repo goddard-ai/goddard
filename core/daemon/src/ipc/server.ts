@@ -3,9 +3,10 @@ import { once } from "node:events"
 import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import { type DaemonConfigProvider, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
-import { $type, composeIpcRoutes, defineIpcRoutes, http } from "@goddard-ai/ipc"
+import { composeIpcRoutes } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
 import { type DaemonSession } from "@goddard-ai/schema/daemon"
+import { coreDaemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
@@ -29,14 +30,6 @@ import {
 import type { DaemonServer } from "./types.ts"
 
 type ComposedDaemonPlugin = ReturnType<typeof getDaemonPluginComposition>["plugins"][number]
-
-const coreDaemonIpcRoutes = defineIpcRoutes({
-  daemon: http.resource("daemon", {
-    health: http.get("health", {
-      response: $type<{ ok: boolean }>(),
-    }),
-  }),
-})
 
 export async function startDaemonServer(
   client: BackendClient,

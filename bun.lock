@@ -158,6 +158,7 @@
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/default-features": "workspace:*",
         "@goddard-ai/inbox": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/loop": "workspace:*",
@@ -198,10 +199,29 @@
       "name": "@goddard-ai/daemon-client",
       "version": "0.1.0",
       "dependencies": {
+        "@goddard-ai/default-features": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/paths": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "radashi": "catalog:",
+      },
+    },
+    "core/default-features": {
+      "name": "@goddard-ai/default-features",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/action": "workspace:*",
+        "@goddard-ai/adapter": "workspace:*",
+        "@goddard-ai/auth": "workspace:*",
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/inbox": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/loop": "workspace:*",
+        "@goddard-ai/pull-request": "workspace:*",
+        "@goddard-ai/review-session": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/workforce": "workspace:*",
       },
     },
     "core/ipc": {
@@ -326,7 +346,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@goddard-ai/config": "workspace:*",
-        "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
@@ -420,7 +439,6 @@
         "@alloc/tree-kill": "^1.3.0",
         "@b9g/async-context": "catalog:",
         "@goddard-ai/config": "workspace:*",
-        "@goddard-ai/daemon-client": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
         "@goddard-ai/paths": "workspace:*",
@@ -824,6 +842,8 @@
     "@goddard-ai/daemon-client": ["@goddard-ai/daemon-client@workspace:core/daemon/client"],
 
     "@goddard-ai/daemon-plugin": ["@goddard-ai/daemon-plugin@workspace:core/daemon-plugin"],
+
+    "@goddard-ai/default-features": ["@goddard-ai/default-features@workspace:core/default-features"],
 
     "@goddard-ai/inbox": ["@goddard-ai/inbox@workspace:features/inbox"],
 

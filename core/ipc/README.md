@@ -12,10 +12,12 @@ Typed IPC contract helpers shared across host environments.
 ## Feature IPC Schemas
 
 Feature packages that expose daemon-backed SDK behavior should keep transport
-contracts in `src/daemon-ipc.ts` and use `defineIpcSchema()` from this package.
-Public composition roots combine feature fragments with `composeIpcSchemas()`
-so route names, stream names, request payload schemas, and response types do not
-drift between the daemon and SDK.
+contracts in `src/daemon-ipc.ts` and use `defineIpcRoutes()` from this package.
+Public composition roots combine feature fragments with `composeIpcRoutes()` so
+route names, stream names, request payload schemas, and response types do not
+drift between the daemon and SDK. The default product route tree is composed by
+`@goddard-ai/default-features/daemon-ipc` and re-exported for clients from
+`@goddard-ai/daemon-client/daemon-ipc`.
 
 `features/inbox/src/daemon-ipc.ts` is the reference feature-owned daemon IPC
 contract.

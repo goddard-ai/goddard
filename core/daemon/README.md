@@ -15,7 +15,8 @@ The Goddard Daemon is a local background process that executes autonomous coding
 The daemon remains the local runtime substrate: process lifecycle, IPC server
 mechanics, persistence setup, request context, logging, and startup policy live
 here. Product-specific daemon contributions can live in internal feature
-packages under `features/<name>/src/daemon.ts`.
+packages under `features/<name>/src/daemon.ts`. The default product feature set
+is composed by `@goddard-ai/default-features/daemon`.
 
 Feature packages should import `@goddard-ai/daemon-plugin` for static plugin
 metadata and `@goddard-ai/ipc` for daemon IPC schema fragments. They should not

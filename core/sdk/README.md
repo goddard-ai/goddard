@@ -77,7 +77,7 @@ Browser-safe explicit client:
 
 ```ts
 import { createRouteClient, ndjson } from "@goddard-ai/ipc"
-import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
+import { daemonIpcRoutes } from "@goddard-ai/daemon-client/daemon-ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const desktopHost = globalThis.desktopHost

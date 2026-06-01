@@ -8,6 +8,8 @@ Low-level daemon connection helpers shared by Node, the app, and SDK composition
   - Shared daemon IPC client types only.
 - `@goddard-ai/daemon-client/node`
   - Node env/default helpers and the default TCP transport.
+- `@goddard-ai/daemon-client/daemon-ipc`
+  - The composed default daemon IPC route contract.
 
 Use `@goddard-ai/daemon-client` when you need to:
 

@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs"
 import { createRouteClient, ndjson } from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
-import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
 import { getErrorMessage } from "radashi"
 
+import { daemonIpcRoutes } from "../daemon-ipc.ts"
 import {
   type DaemonIpcClient,
   type DaemonIpcClientFactory,
