@@ -2,18 +2,18 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
 import { afterEach, expect, test } from "bun:test"
 
 import { initializeWorkforce } from "../src/daemon/config.ts"
 import { WorkforceActorContext, WorkforceDispatchContext } from "../src/daemon/context.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
-import { WorkforceRuntime } from "../src/daemon/runtime.ts"
+import { WorkforceRuntime, type WorkforceRuntimeDeps } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
 const originalPath = process.env.PATH
+type WorkforceNewSessionInput = Parameters<WorkforceRuntimeDeps["session"]["newSession"]>[0]
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -30,7 +30,7 @@ afterEach(async () => {
 function createTestSession() {
   return {
     newSession: async () => ({
-      id: "ses_test",
+      id: "ses_test" as const,
       acpSessionId: "acp_test",
       status: "completed",
     }),
@@ -143,7 +143,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
           requestId: request.id,
           reason: "Need a root decision.",
           actor: {
-            sessionId: "session-1",
+            sessionId: "ses_1",
             rootDir: null,
             agentId: "root",
             requestId: request.id,
@@ -160,7 +160,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
         requestId: request.id,
         output: `completed:${request.input}`,
         actor: {
-          sessionId: "session-1",
+          sessionId: "ses_1",
           rootDir: null,
           agentId: "root",
           requestId: request.id,
@@ -353,12 +353,15 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
 
   let runtime!: WorkforceRuntime
   const systemPrompts: Record<string, string> = {}
+  const attachments = new Map<string, { agentId: string; requestId: string }>()
 
   runtime = await WorkforceRuntime.start(rootDir, {
     log: createTestLogService([]),
     session: {
-      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
-        const metadata = input.workforce ?? null
+      newSession: async ({ request: input, onPersisted }: WorkforceNewSessionInput) => {
+        expect(input).not.toHaveProperty("workforce")
+        await onPersisted?.({ sessionId: "ses_1" })
+        const metadata = attachments.get("ses_1") ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -370,7 +373,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
           requestId: metadata.requestId,
           output: "ok",
           actor: {
-            sessionId: "session-1",
+            sessionId: "ses_1",
             rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
@@ -380,6 +383,9 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
         return {} as never
       },
     } as never,
+    attachSession: (input) => {
+      attachments.set(input.sessionId, input)
+    },
   })
 
   await runtime.createRequest({
@@ -441,11 +447,12 @@ test("create-intent requests target the root agent and specialize the root sessi
   let createSystemPrompt = ""
   let createInitialPrompt = ""
   let capturedEnv: Record<string, string> | undefined
+  const attachments = new Map<string, { agentId: string; requestId: string }>()
 
   runtime = await WorkforceRuntime.start(rootDir, {
     log: createTestLogService([]),
     session: {
-      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
+      newSession: async ({ request: input, onPersisted }: WorkforceNewSessionInput) => {
         const initialPrompt =
           typeof input.initialPrompt === "string"
             ? input.initialPrompt
@@ -459,7 +466,8 @@ test("create-intent requests target the root agent and specialize the root sessi
           defaultSystemPrompt = input.systemPrompt ?? ""
         }
 
-        const metadata = input.workforce ?? null
+        await onPersisted?.({ sessionId: "ses_1" })
+        const metadata = attachments.get("ses_1") ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -469,7 +477,7 @@ test("create-intent requests target the root agent and specialize the root sessi
           requestId: metadata.requestId,
           output: "created",
           actor: {
-            sessionId: "session-1",
+            sessionId: "ses_1",
             rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
@@ -479,6 +487,9 @@ test("create-intent requests target the root agent and specialize the root sessi
         return {} as never
       },
     } as never,
+    attachSession: (input) => {
+      attachments.set(input.sessionId, input)
+    },
   })
 
   await runtime.createRequest({
@@ -562,14 +573,16 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
 
   let runtime!: WorkforceRuntime
   let capturedSystemPrompt = ""
+  const attachments = new Map<string, { agentId: string; requestId: string }>()
 
   runtime = await WorkforceRuntime.start(rootDir, {
     log: createTestLogService([]),
     session: {
-      newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
+      newSession: async ({ request: input, onPersisted }: WorkforceNewSessionInput) => {
         capturedSystemPrompt = input.systemPrompt ?? ""
 
-        const metadata = input.workforce ?? null
+        await onPersisted?.({ sessionId: "ses_1" })
+        const metadata = attachments.get("ses_1") ?? null
 
         if (!metadata?.agentId || !metadata.requestId) {
           throw new Error("Missing workforce metadata")
@@ -579,7 +592,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
           requestId: metadata.requestId,
           output: "done",
           actor: {
-            sessionId: "session-1",
+            sessionId: "ses_1",
             rootDir: null,
             agentId: metadata.agentId,
             requestId: metadata.requestId,
@@ -589,6 +602,9 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
         return {} as never
       },
     } as never,
+    attachSession: (input) => {
+      attachments.set(input.sessionId, input)
+    },
   })
 
   await runtime.createRequest({
@@ -637,12 +653,14 @@ test("workforce runtime logs request-to-session correlation for launched session
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   let runtime!: WorkforceRuntime
+  const attachments = new Map<string, { agentId: string; requestId: string }>()
   const { logs } = await captureLogs(async (log) => {
     runtime = await WorkforceRuntime.start(rootDir, {
       log,
       session: {
-        newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
-          const metadata = input.workforce ?? null
+        newSession: async ({ onPersisted }: WorkforceNewSessionInput) => {
+          await onPersisted?.({ sessionId: "ses_daemon_1" })
+          const metadata = attachments.get("ses_daemon_1") ?? null
 
           if (!metadata?.agentId || !metadata.requestId) {
             throw new Error("Missing workforce metadata")
@@ -652,7 +670,7 @@ test("workforce runtime logs request-to-session correlation for launched session
             requestId: metadata.requestId,
             output: "done",
             actor: {
-              sessionId: "daemon-session-1",
+              sessionId: "ses_daemon_1",
               rootDir: null,
               agentId: metadata.agentId,
               requestId: metadata.requestId,
@@ -660,12 +678,15 @@ test("workforce runtime logs request-to-session correlation for launched session
           })
 
           return {
-            id: "daemon-session-1",
+            id: "ses_daemon_1",
             acpSessionId: "acp-session-1",
             status: "done",
           } as never
         },
       } as never,
+      attachSession: (input) => {
+        attachments.set(input.sessionId, input)
+      },
     })
 
     await runtime.createRequest({
@@ -691,8 +712,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   ).toBe("string")
 
   const completedLog = logs.find(
-    (entry) =>
-      entry.event === "workforce.session_completed" && entry.sessionId === "daemon-session-1",
+    (entry) => entry.event === "workforce.session_completed" && entry.sessionId === "ses_daemon_1",
   )
   expect(completedLog).toBeTruthy()
   expect(completedLog?.acpSessionId).toBe("acp-session-1")
@@ -709,7 +729,7 @@ test("workforce runtime logs request-to-session correlation for launched session
   const respondedLog = logs.find((entry) => entry.event === "workforce.request_responded")
   expect(respondedLog).toBeTruthy()
   expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.sessionId).toBe(
-    "daemon-session-1",
+    "ses_daemon_1",
   )
   expect((respondedLog?.workforceActor as Record<string, unknown> | undefined)?.agentId).toBe(
     "root",
@@ -773,7 +793,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
       requestId,
       output: "completed",
       actor: {
-        sessionId: "session-1",
+        sessionId: "ses_1",
         rootDir: null,
         agentId: "root",
         requestId: "req-other",
@@ -786,7 +806,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
       requestId,
       reason: "Need help.",
       actor: {
-        sessionId: "session-1",
+        sessionId: "ses_1",
         rootDir: null,
         agentId: "root",
         requestId: "req-other",

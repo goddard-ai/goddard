@@ -96,6 +96,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
         runtime = await (deps.createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
           log: deps.log,
           session: deps.session,
+          attachSession: deps.attachSession,
           runSession: deps.runSession,
           publishEvent: deps.publishEvent,
         })

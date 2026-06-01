@@ -112,17 +112,9 @@ test("daemon persists repository context into durable session storage", async ()
     systemPrompt: "Keep responses short.",
     repository: "acme/widgets",
     prNumber: 12,
-    workforce: { agentId: "reviewer", requestId: "req-1" },
   })
 
   const storedRecord = db.sessions.get(created.session.id) ?? null
-  const workforceRecord =
-    db.workforces.first({
-      where: { sessionId: created.session.id },
-    }) ?? null
-  const workforce = await send(client, "session.workforce.get", {
-    id: created.session.id,
-  })
 
   expect(created.session.repository).toBe("acme/widgets")
   expect(created.session.prNumber).toBe(12)
@@ -131,17 +123,7 @@ test("daemon persists repository context into durable session storage", async ()
     prNumber: 12,
   })
   expect(storedRecord?.metadata ?? null).toBeNull()
-  expect(workforceRecord).toMatchObject({
-    sessionId: created.session.id,
-    agentId: "reviewer",
-    requestId: "req-1",
-  })
   expect(created.session.metadata ?? null).toBeNull()
-  expect(workforce.workforce).toMatchObject({
-    sessionId: created.session.id,
-    agentId: "reviewer",
-    requestId: "req-1",
-  })
 
   await send(client, "session.shutdown", { id: created.session.id })
 })
@@ -2374,13 +2356,13 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: repoDir,
-    worktree: { enabled: true, reviewSession: { enabled: true } },
+    worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
   const worktree = (await send(client, "session.worktree.get", { id: created.session.id })).worktree
-  const reviewSession = (await send(client, "reviewSession.get", { id: created.session.id }))
+  const reviewSession = (await send(client, "reviewSession.mount", { id: created.session.id }))
     .reviewSession
   expect(reviewSession?.agentBranch).toBe(worktree?.branchName)
   expect(reviewSession?.reviewBranch).toBe(`review-sync/${worktree?.branchName}`)

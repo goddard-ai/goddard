@@ -414,7 +414,6 @@ export async function runSession(
           launchLeaseId: params.launchLeaseId,
           localCheckout: params.localCheckout,
           worktree: params.worktree,
-          workforce: params.workforce,
           mcpServers: params.mcpServers,
           systemPrompt: params.systemPrompt,
           initialModelId: params.initialModelId,

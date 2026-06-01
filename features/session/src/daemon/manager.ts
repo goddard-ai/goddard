@@ -380,6 +380,7 @@ export interface SessionLaunchParams {
   token?: string
   config?: SessionManagerRootConfig
   worktreePlugins?: WorktreePlugin[]
+  onPersisted?: (input: { sessionId: SessionId }) => void | Promise<void>
 }
 
 /** Fresh daemon session input accepted by `SessionManager.newSession()`. */
@@ -481,7 +482,7 @@ function resolveSystemPrompt(request: CreateSessionRequest) {
     return request.systemPrompt
   }
 
-  if (request.oneShot === true || request.workforce !== undefined) {
+  if (request.oneShot === true) {
     return ""
   }
 
@@ -799,7 +800,6 @@ async function resolveLaunchWorktree(params: {
 function buildSessionLogContext(params: {
   request: ResolvedCreateSessionRequest
   cwd?: string
-  workforce?: CreateSessionRequest["workforce"]
   extraContext?: Record<string, unknown>
 }): Record<string, unknown> {
   return {
@@ -809,7 +809,6 @@ function buildSessionLogContext(params: {
     repository:
       typeof params.request.repository === "string" ? params.request.repository : undefined,
     prNumber: typeof params.request.prNumber === "number" ? params.request.prNumber : undefined,
-    workforce: params.workforce ?? params.request.workforce,
     ...params.extraContext,
   }
 }
@@ -2358,7 +2357,6 @@ export function createSessionManager(input: {
     const sessionLogContext = buildSessionLogContext({
       request: resolvedRequest,
       cwd,
-      workforce: resolvedRequest.workforce,
       extraContext: worktree
         ? {
             worktreeDir: worktree.state.worktreeDir,
@@ -2549,6 +2547,9 @@ export function createSessionManager(input: {
         existingWorktreeRecord: existingArtifacts.worktreeRecord,
         worktree,
         sessionRecord,
+      })
+      await params.onPersisted?.({
+        sessionId: id,
       })
       await input.events.emit("lifecycle.sessionPersisted", {
         sessionId: id,

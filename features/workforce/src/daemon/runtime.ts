@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
@@ -45,12 +46,21 @@ export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promis
 export interface WorkforceRuntimeDeps {
   log: DaemonLogService
   session: {
-    newSession: (params: { request: CreateSessionRequest }) => Promise<{
-      id: string
+    newSession: (params: {
+      request: CreateSessionRequest
+      onPersisted?: (input: { sessionId: DaemonSessionId }) => void | Promise<void>
+    }) => Promise<{
+      id: DaemonSessionId
       acpSessionId: string
       status: string
     }>
   }
+  attachSession?: (input: {
+    sessionId: DaemonSessionId
+    rootDir: string
+    agentId: string
+    requestId: string
+  }) => void | Promise<void>
   runSession?: WorkforceSessionRunner
   publishEvent?: (payload: WorkforceEventEnvelope) => void
 }
@@ -281,14 +291,16 @@ async function defaultRunWorkforceSession(
   })
 
   const session = await deps.session.newSession({
-    request: {
-      agent: agentDistribution,
-      cwd,
-      workforce: {
+    onPersisted: ({ sessionId }) =>
+      deps.attachSession?.({
+        sessionId,
         rootDir: input.rootDir,
         agentId: input.agent.id,
         requestId: input.request.id,
-      },
+      }),
+    request: {
+      agent: agentDistribution,
+      cwd,
       mcpServers: [],
       systemPrompt: buildSystemPrompt(input.rootDir, input.config, input.agent, input.request),
       oneShot: true,

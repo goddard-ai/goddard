@@ -21,7 +21,6 @@ export type * from "./daemon/store.ts"
 export type {
   GetReviewSessionRequest,
   MountReviewSessionRequest,
-  ReviewSessionLaunchParams,
   ReviewSessionResponse,
   ReviewSessionState,
   RunReviewSessionRequest,

@@ -27,7 +27,6 @@ type ReviewSessionRuntime = {
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
 function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>["session"]) {
   const runtimes = new Map<DaemonSessionId, ReviewSessionRuntime>()
-  const pendingLaunchMounts = new Set<DaemonSessionId>()
 
   async function toResponse(
     id: DaemonSessionId,
@@ -294,57 +293,6 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
       }
     },
 
-    onWorktreePrepared: async (event: {
-      sessionId: DaemonSessionId
-      request: { worktree?: { reviewSession?: { enabled?: boolean } } }
-      worktree: SessionWorktreeLifecycleState
-    }) => {
-      if (event.request.worktree?.reviewSession?.enabled !== true) {
-        return
-      }
-
-      await mountForWorktree(event.sessionId, event.worktree)
-      pendingLaunchMounts.add(event.sessionId)
-    },
-
-    onSessionActivated: async (event: {
-      sessionId: DaemonSessionId
-      worktree: SessionWorktreeLifecycleState | null
-    }) => {
-      if (!event.worktree || !pendingLaunchMounts.has(event.sessionId)) {
-        return
-      }
-
-      pendingLaunchMounts.delete(event.sessionId)
-      await startRuntime(event.sessionId, event.worktree)
-    },
-
-    onLaunchFinished: async (event: {
-      sessionId: DaemonSessionId
-      reason: string
-      worktree: SessionWorktreeLifecycleState
-    }) => {
-      if (!pendingLaunchMounts.delete(event.sessionId)) {
-        return
-      }
-
-      await cleanupMountedReviewSession(event.sessionId, event.worktree, event.reason)
-    },
-
-    onLaunchFailed: async (event: {
-      sessionId: DaemonSessionId
-      error: unknown
-      worktree: SessionWorktreeLifecycleState
-    }) => {
-      if (!pendingLaunchMounts.delete(event.sessionId)) {
-        return
-      }
-
-      await cleanupMountedReviewSession(event.sessionId, event.worktree, "launch_failed").catch(
-        () => {},
-      )
-    },
-
     onSessionStopping: async (event: {
       sessionId: DaemonSessionId
       reason: string
@@ -369,10 +317,6 @@ export const reviewSessionPlugin = definePlugin({
 
     void reviewSession.reconcilePersistedWorktrees()
 
-    session.events.on("lifecycle.worktreePrepared", reviewSession.onWorktreePrepared)
-    session.events.on("lifecycle.sessionActivated", reviewSession.onSessionActivated)
-    session.events.on("lifecycle.launchFinished", reviewSession.onLaunchFinished)
-    session.events.on("lifecycle.launchFailed", reviewSession.onLaunchFailed)
     session.events.on("lifecycle.sessionStopping", reviewSession.onSessionStopping)
 
     return {

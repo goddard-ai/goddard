@@ -73,7 +73,6 @@ function canPromoteLaunchLease(params: {
     params.request.metadata === undefined &&
     params.request.repository === undefined &&
     params.request.prNumber === undefined &&
-    params.request.workforce === undefined &&
     params.lease.cwd === params.cwd &&
     isSameLaunchAgent(params.lease.agent, params.request.agent)
   )

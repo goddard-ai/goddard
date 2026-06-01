@@ -25,7 +25,6 @@ import type {
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
-  SessionWorkforceParams,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   ShutdownSessionResponse,
@@ -56,7 +55,6 @@ export type {
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
-  SessionWorkforceParams,
   ListSessionsRequest,
   ListSessionsResponse,
   ReleaseSessionLaunchLeaseRequest,
@@ -112,7 +110,6 @@ interface BaseSessionParams {
   launchLeaseId?: string
   localCheckout?: SessionLocalCheckoutParams
   worktree?: SessionWorktreeParams
-  workforce?: SessionWorkforceParams
   mcpServers: acp.McpServer[]
   systemPrompt?: string
   initialModelId?: string

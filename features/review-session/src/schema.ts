@@ -2,13 +2,6 @@ import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import type { SessionWorktree } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
-/** Review-session options accepted by daemon session launch worktrees. */
-export const ReviewSessionLaunchParams = z.strictObject({
-  enabled: z.boolean().optional(),
-})
-
-export type ReviewSessionLaunchParams = z.infer<typeof ReviewSessionLaunchParams>
-
 /** Live review-session state returned exactly as the review session engine reports it. */
 export const ReviewSessionState = z.strictObject({
   sessionId: z.string(),

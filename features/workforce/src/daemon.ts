@@ -43,24 +43,12 @@ export const workforcePlugin = definePlugin({
     const workforce = createWorkforceManager({
       log,
       session,
-      publishEvent: (payload) => {
-        for (const listener of eventListeners) {
-          listener(payload)
-        }
-      },
-    })
-    const unsubscribeSessionPersisted = session.events.on(
-      "lifecycle.sessionPersisted",
-      ({ request, sessionId }) => {
-        if (!request.workforce) {
-          return
-        }
-
+      attachSession: ({ sessionId, rootDir, agentId, requestId }) => {
         const nextWorkforce = {
           sessionId,
-          rootDir: request.workforce.rootDir,
-          agentId: request.workforce.agentId,
-          requestId: request.workforce.requestId,
+          rootDir,
+          agentId,
+          requestId,
         }
         const existingRecord =
           db.workforces.first({
@@ -72,7 +60,12 @@ export const workforcePlugin = definePlugin({
           db.workforces.create(nextWorkforce)
         }
       },
-    )
+      publishEvent: (payload) => {
+        for (const listener of eventListeners) {
+          listener(payload)
+        }
+      },
+    })
 
     async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
       const queue: WorkforceEventEnvelope[] = []
@@ -166,7 +159,6 @@ export const workforcePlugin = definePlugin({
 
     return {
       close: () => {
-        unsubscribeSessionPersisted()
         workforce.close()
       },
       ipcHandlers: {
