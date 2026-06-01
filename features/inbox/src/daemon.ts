@@ -1,4 +1,5 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type Plugin } from "@goddard-ai/daemon-plugin"
+import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { inboxIpcRoutes } from "./daemon-ipc.ts"
@@ -8,12 +9,20 @@ import type { InboxItemEvent } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
-export const inboxPlugin = definePlugin({
+type InboxPlugin = {
+  readonly name: "inbox"
+  readonly consumes: readonly [typeof sessionPlugin, typeof pullRequestPlugin]
+  readonly db: typeof inboxDbSchema
+  readonly ipcRoutes: typeof inboxIpcRoutes
+  readonly setup: Plugin["setup"]
+}
+
+export const inboxPlugin: InboxPlugin = definePlugin({
   name: "inbox",
-  consumes: [sessionPlugin],
+  consumes: [sessionPlugin, pullRequestPlugin],
   db: inboxDbSchema,
   ipcRoutes: inboxIpcRoutes,
-  setup({ db, session }) {
+  setup({ db, pullRequest, session }) {
     const itemListeners = new Set<(event: InboxItemEvent) => void>()
     const inbox = createInboxManager({
       db,
@@ -76,13 +85,26 @@ export const inboxPlugin = definePlugin({
     session.events.on("lifecycle.replied", (event) => {
       inbox.markSessionReplied(event.sessionId)
     })
+    pullRequest.events.on("lifecycle.created", (event) => {
+      inbox.touchInboxItem({
+        entityId: event.pullRequestId,
+        reason: "pull_request.created",
+        scope: event.scope,
+        headline: event.headline,
+        turnId: event.turnId,
+      })
+    })
+    pullRequest.events.on("lifecycle.updated", (event) => {
+      inbox.touchInboxItem({
+        entityId: event.pullRequestId,
+        reason: "pull_request.updated",
+        scope: event.scope,
+        headline: event.headline,
+        turnId: event.turnId,
+      })
+    })
 
     return {
-      provides: {
-        inbox: {
-          touchInboxItem: inbox.touchInboxItem,
-        },
-      },
       ipcHandlers: {
         inbox: {
           list: async ({ body }) => inbox.listInboxItems(body),

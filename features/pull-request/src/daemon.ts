@@ -1,5 +1,4 @@
-import { definePlugin, type DbContext, type Plugin } from "@goddard-ai/daemon-plugin"
-import { inboxPlugin } from "@goddard-ai/inbox/daemon"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -7,11 +6,13 @@ import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
+import { createPullRequestEventEmitter } from "./daemon/events.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 import { pullRequestDbSchema } from "./daemon/store.ts"
 import type { DaemonPullRequest } from "./schema.ts"
 
 export { pullRequestDbSchema } from "./daemon/store.ts"
+export { type PullRequestEventEmitter, type PullRequestEvents } from "./daemon/events.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -68,111 +69,114 @@ async function recordPullRequest(
   )
 }
 
-export const pullRequestPlugin: Plugin & { readonly db: typeof pullRequestDbSchema } = definePlugin(
-  {
-    name: "pull-request",
-    consumes: [sessionPlugin, inboxPlugin],
-    db: pullRequestDbSchema,
-    backendRoutes: pullRequestBackendRoutes,
-    ipcRoutes: pullRequestIpcRoutes,
-    setup({ backend, configProvider, db, inbox, ipc, session }) {
-      return {
-        ipcHandlers: {
-          pr: {
-            submit: async ({ body: payload }) => {
-              await assertPullRequestOperationAllowed(configProvider, payload.cwd, "submit")
-              const sessionRecord = requireRepositorySession(
-                await session.resolveTokenScope(payload.token),
-              )
-              ipc.requestContext.setSessionId(sessionRecord.sessionId)
+export const pullRequestPlugin = definePlugin({
+  name: "pull-request",
+  consumes: [sessionPlugin],
+  db: pullRequestDbSchema,
+  backendRoutes: pullRequestBackendRoutes,
+  ipcRoutes: pullRequestIpcRoutes,
+  setup({ backend, configProvider, db, ipc, session }) {
+    const events = createPullRequestEventEmitter()
 
-              const resolvedInput = await resolveSubmitRequestFromGit(payload)
-              const pr = await backend.pullRequests.create({
-                ...resolvedInput,
-                owner: sessionRecord.owner,
-                repo: sessionRecord.repo,
-              })
-              await session.allowPullRequest(sessionRecord.sessionId, pr.number)
-              const pullRequest = await recordPullRequest(db, {
-                host: "github",
-                owner: sessionRecord.owner,
-                repo: sessionRecord.repo,
-                prNumber: pr.number,
-                cwd: payload.cwd,
-              })
-              const metadata = await session.recordTurnAttentionActivity(sessionRecord.sessionId, {
-                scope: payload.scope,
-                headline: payload.headline,
-                fallbackHeadline: resolvedInput.title,
-              })
-              inbox.touchInboxItem({
-                entityId: pullRequest.id,
-                reason: "pull_request.created",
-                scope: metadata.scope,
-                headline: metadata.headline,
-                turnId: metadata.turnId,
-              })
-              await session.recordSessionResult(
-                sessionRecord.sessionId,
-                `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${resolvedInput.body ?? ""}`,
-              )
-              return { number: pr.number, url: pr.url }
-            },
-            get: async ({ body: { id } }) => {
-              const pullRequest = db.pullRequests.get(id) ?? null
-              if (!pullRequest) {
-                throw new IpcClientError("Pull request not found")
-              }
-              return { pullRequest }
-            },
-            reply: async ({ body: payload }) => {
-              await assertPullRequestOperationAllowed(configProvider, payload.cwd, "reply")
-              const sessionRecord = requireRepositorySession(
-                await session.resolveTokenScope(payload.token),
-              )
-              ipc.requestContext.setSessionId(sessionRecord.sessionId)
+    return {
+      provides: {
+        pullRequest: {
+          events,
+        },
+      },
+      ipcHandlers: {
+        pr: {
+          submit: async ({ body: payload }) => {
+            await assertPullRequestOperationAllowed(configProvider, payload.cwd, "submit")
+            const sessionRecord = requireRepositorySession(
+              await session.resolveTokenScope(payload.token),
+            )
+            ipc.requestContext.setSessionId(sessionRecord.sessionId)
 
-              const resolvedInput = await resolveReplyRequestFromGit(payload)
+            const resolvedInput = await resolveSubmitRequestFromGit(payload)
+            const pr = await backend.pullRequests.create({
+              ...resolvedInput,
+              owner: sessionRecord.owner,
+              repo: sessionRecord.repo,
+            })
+            await session.allowPullRequest(sessionRecord.sessionId, pr.number)
+            const pullRequest = await recordPullRequest(db, {
+              host: "github",
+              owner: sessionRecord.owner,
+              repo: sessionRecord.repo,
+              prNumber: pr.number,
+              cwd: payload.cwd,
+            })
+            const metadata = await session.recordTurnAttentionActivity(sessionRecord.sessionId, {
+              scope: payload.scope,
+              headline: payload.headline,
+              fallbackHeadline: resolvedInput.title,
+            })
+            await events.emit("lifecycle.created", {
+              pullRequestId: pullRequest.id,
+              scope: metadata.scope,
+              headline: metadata.headline,
+              turnId: metadata.turnId,
+            })
+            await session.recordSessionResult(
+              sessionRecord.sessionId,
+              `PR Submitted: ${resolvedInput.title}\n${pr.url}\n\n${resolvedInput.body ?? ""}`,
+            )
+            return { number: pr.number, url: pr.url }
+          },
+          get: async ({ body: { id } }) => {
+            const pullRequest = db.pullRequests.get(id) ?? null
+            if (!pullRequest) {
+              throw new IpcClientError("Pull request not found")
+            }
+            return { pullRequest }
+          },
+          reply: async ({ body: payload }) => {
+            await assertPullRequestOperationAllowed(configProvider, payload.cwd, "reply")
+            const sessionRecord = requireRepositorySession(
+              await session.resolveTokenScope(payload.token),
+            )
+            ipc.requestContext.setSessionId(sessionRecord.sessionId)
 
-              if (!sessionRecord.allowedPrNumbers.includes(resolvedInput.prNumber)) {
-                throw new IpcClientError(
-                  `PR #${resolvedInput.prNumber} is not allowed for this session`,
-                )
-              }
+            const resolvedInput = await resolveReplyRequestFromGit(payload)
 
-              const response = await backend.pullRequests.comments.create({
-                ...resolvedInput,
-                owner: sessionRecord.owner,
-                repo: sessionRecord.repo,
-              })
-              const pullRequest = await recordPullRequest(db, {
-                host: "github",
-                owner: sessionRecord.owner,
-                repo: sessionRecord.repo,
-                prNumber: resolvedInput.prNumber,
-                cwd: payload.cwd,
-              })
-              const metadata = await session.recordTurnAttentionActivity(sessionRecord.sessionId, {
-                scope: payload.scope,
-                headline: payload.headline,
-                fallbackHeadline: "PR reply posted",
-              })
-              inbox.touchInboxItem({
-                entityId: pullRequest.id,
-                reason: "pull_request.updated",
-                scope: metadata.scope,
-                headline: metadata.headline,
-                turnId: metadata.turnId,
-              })
-              await session.recordSessionResult(
-                sessionRecord.sessionId,
-                `PR Reply: ${payload.message}`,
+            if (!sessionRecord.allowedPrNumbers.includes(resolvedInput.prNumber)) {
+              throw new IpcClientError(
+                `PR #${resolvedInput.prNumber} is not allowed for this session`,
               )
-              return response
-            },
+            }
+
+            const response = await backend.pullRequests.comments.create({
+              ...resolvedInput,
+              owner: sessionRecord.owner,
+              repo: sessionRecord.repo,
+            })
+            const pullRequest = await recordPullRequest(db, {
+              host: "github",
+              owner: sessionRecord.owner,
+              repo: sessionRecord.repo,
+              prNumber: resolvedInput.prNumber,
+              cwd: payload.cwd,
+            })
+            const metadata = await session.recordTurnAttentionActivity(sessionRecord.sessionId, {
+              scope: payload.scope,
+              headline: payload.headline,
+              fallbackHeadline: "PR reply posted",
+            })
+            await events.emit("lifecycle.updated", {
+              pullRequestId: pullRequest.id,
+              scope: metadata.scope,
+              headline: metadata.headline,
+              turnId: metadata.turnId,
+            })
+            await session.recordSessionResult(
+              sessionRecord.sessionId,
+              `PR Reply: ${payload.message}`,
+            )
+            return response
           },
         },
-      }
-    },
+      },
+    }
   },
-)
+})
