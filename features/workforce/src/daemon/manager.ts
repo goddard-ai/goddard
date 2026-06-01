@@ -1,9 +1,9 @@
+import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { getErrorMessage } from "radashi"
 
-import type { WorkforceActorContext } from "../../../../core/daemon/src/context.ts"
-import { createLogger } from "../../../../core/daemon/src/logging.ts"
 import type { WorkforceDescription, WorkforceStatus } from "../schema.ts"
+import type { WorkforceActorContext } from "./context.ts"
 import { normalizeWorkforceRootDir } from "./paths.ts"
 import { WorkforceRuntime, type WorkforceRuntimeDeps } from "./runtime.ts"
 
@@ -43,6 +43,7 @@ export type WorkforceManagerMutation =
 
 /** Optional lifecycle dependencies used to build new runtime instances. */
 export interface WorkforceManagerDeps extends WorkforceRuntimeDeps {
+  log: DaemonLogService
   createRuntime?: (rootDir: string, deps: WorkforceRuntimeDeps) => Promise<WorkforceRuntime>
 }
 
@@ -61,7 +62,7 @@ export interface WorkforceManager {
 }
 
 export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceManager {
-  const logger = createLogger()
+  const logger = deps.log.createLogger()
   const runtimes = new Map<string, WorkforceRuntime>()
 
   async function getRuntime(
@@ -93,6 +94,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
       let runtime: WorkforceRuntime
       try {
         runtime = await (deps.createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
+          log: deps.log,
           session: deps.session,
           runSession: deps.runSession,
           publishEvent: deps.publishEvent,

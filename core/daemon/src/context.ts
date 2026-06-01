@@ -33,30 +33,6 @@ export type SessionContext = {
   worktreePoweredBy: string | null
 }
 
-/** Authenticated workforce actor identity attached to one mutation call. */
-export type WorkforceActorContext = {
-  sessionId: string | null
-  rootDir: string | null
-  agentId: string | null
-  requestId: string | null
-}
-
-/** Active workforce dispatch metadata carried while one request attempt is running. */
-export type WorkforceDispatchContext = {
-  rootDir: string
-  agentId: string
-  requestId: string
-  attempt: number
-}
-
-/** Active loop runtime identity carried while one loop is executing work. */
-export type LoopContext = {
-  rootDir: string
-  loopName: string
-  sessionId: DaemonSession["id"]
-  acpSessionId: string
-}
-
 /** Repository feedback metadata carried while one background feedback event is handled. */
 export type FeedbackEventContext = {
   repository: string
@@ -67,7 +43,4 @@ export type FeedbackEventContext = {
 export const SetupContext = new AsyncContext.Variable<SetupContext>()
 export const IpcRequestContext = new AsyncContext.Variable<IpcRequestContext>()
 export const SessionContext = new AsyncContext.Variable<SessionContext>()
-export const WorkforceActorContext = new AsyncContext.Variable<WorkforceActorContext>()
-export const WorkforceDispatchContext = new AsyncContext.Variable<WorkforceDispatchContext>()
-export const LoopContext = new AsyncContext.Variable<LoopContext>()
 export const FeedbackEventContext = new AsyncContext.Variable<FeedbackEventContext>()

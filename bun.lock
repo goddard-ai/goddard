@@ -363,6 +363,7 @@
       "name": "@goddard-ai/loop",
       "version": "0.1.0",
       "dependencies": {
+        "@b9g/async-context": "catalog:",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",
@@ -445,6 +446,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@agentclientprotocol/sdk": "catalog:",
+        "@b9g/async-context": "catalog:",
         "@goddard-ai/config": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",
         "@goddard-ai/ipc": "workspace:*",

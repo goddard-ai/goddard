@@ -54,6 +54,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
+    "@b9g/async-context": "catalog:",
     "acp-client": "catalog:",
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",

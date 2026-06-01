@@ -9,6 +9,7 @@ import {
   initializeWorkforce,
   resolveRepositoryRoot,
 } from "./daemon/config.ts"
+import { WorkforceActorContext, WorkforceDispatchContext } from "./daemon/context.ts"
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
 import { workforceDbSchema } from "./daemon/store.ts"
@@ -31,9 +32,16 @@ export const workforcePlugin = definePlugin({
   },
   db: workforceDbSchema,
   ipcRoutes: workforceIpcRoutes,
-  setup({ configProvider, db, ipc, session }) {
+  logContext: {
+    read: () => ({
+      workforceActor: WorkforceActorContext.get(),
+      workforceDispatch: WorkforceDispatchContext.get(),
+    }),
+  },
+  setup({ configProvider, db, ipc, log, session }) {
     const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
     const workforce = createWorkforceManager({
+      log,
       session,
       publishEvent: (payload) => {
         for (const listener of eventListeners) {

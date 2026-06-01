@@ -2,6 +2,7 @@ import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { loopIpcRoutes } from "./daemon-ipc.ts"
+import { LoopContext } from "./daemon/context.ts"
 import { createLoopManager } from "./daemon/manager.ts"
 import { resolveNamedLoopStartRequest } from "./daemon/resolver.ts"
 import { LoopConfig, mergeLoopConfigLayers } from "./schema.ts"
@@ -18,8 +19,12 @@ export const loopPlugin = definePlugin({
   },
   jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
-  setup({ configProvider, session }) {
+  logContext: {
+    read: () => ({ loop: LoopContext.get() }),
+  },
+  setup({ configProvider, log, session }) {
     const loop = createLoopManager({
+      log,
       session,
       resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configProvider),
     })

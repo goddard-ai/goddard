@@ -4,14 +4,8 @@ import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import kleur from "kleur"
 import { omit } from "radashi"
 
-import {
-  FeedbackEventContext,
-  IpcRequestContext,
-  LoopContext,
-  SessionContext,
-  WorkforceActorContext,
-  WorkforceDispatchContext,
-} from "./context.ts"
+import { FeedbackEventContext, IpcRequestContext, SessionContext } from "./context.ts"
+import { getDaemonPluginComposition } from "./plugins.ts"
 
 const defaultWriteLine = (_line: string) => {}
 const stdoutWriteLine = (line: string) => {
@@ -157,19 +151,21 @@ export function readSessionIdForLog(value: unknown): DaemonSession["id"] | undef
 function readAmbientLogFields() {
   const ipcRequest = IpcRequestContext.get()
   const feedbackEvent = FeedbackEventContext.get()
-  const workforceDispatch = WorkforceDispatchContext.get()
-  const loop = LoopContext.get()
   const session = SessionContext.get()
-  const workforceActor = WorkforceActorContext.get()
 
   return {
     ipcRequest: ipcRequest && omit(ipcRequest, ["setSessionId"]),
     feedbackEvent,
-    workforceDispatch,
-    loop,
     session,
-    workforceActor,
+    ...readPluginLogContexts(),
   }
+}
+
+function readPluginLogContexts() {
+  return Object.assign(
+    {},
+    ...getDaemonPluginComposition().logContexts.map((logContext) => logContext.read()),
+  ) as Record<string, unknown>
 }
 
 function formatLogEntry(entry: LogEntry, mode: LogMode): string {

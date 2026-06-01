@@ -1,17 +1,9 @@
 import { join } from "node:path"
+import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
-import {
-  WorkforceActorContext,
-  WorkforceDispatchContext,
-} from "../../../../core/daemon/src/context.ts"
-import {
-  createLogger,
-  createPayloadPreview,
-  isVerboseLogging,
-} from "../../../../core/daemon/src/logging.ts"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,
@@ -24,6 +16,7 @@ import type {
   WorkforceStatus,
 } from "../schema.ts"
 import { ensureWorkforceFiles, readWorkforceConfig } from "./config.ts"
+import { WorkforceActorContext, WorkforceDispatchContext } from "./context.ts"
 import {
   appendWorkforceLedgerEvent,
   applyWorkforceEvent,
@@ -33,8 +26,6 @@ import {
   summarizeWorkforceProjection,
 } from "./ledger.ts"
 import { buildWorkforcePaths } from "./paths.ts"
-
-const logger = createLogger()
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never
 
@@ -52,6 +43,7 @@ export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promis
 
 /** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
+  log: DaemonLogService
   session: {
     newSession: (params: { request: CreateSessionRequest }) => Promise<{
       id: string
@@ -259,19 +251,24 @@ function buildWorkforceSummaryFields(
 }
 
 /** Includes large free-form text in logs only when verbose daemon logging is enabled. */
-function buildVerboseTextField(field: string, value: string): Record<string, unknown> {
-  if (isVerboseLogging() === false) {
+function buildVerboseTextField(
+  log: DaemonLogService,
+  field: string,
+  value: string,
+): Record<string, unknown> {
+  if (log.isVerboseLogging() === false) {
     return {}
   }
 
   return {
-    [field]: createPayloadPreview(value),
+    [field]: log.createPayloadPreview(value),
   }
 }
 
 /** Launches one daemon session for a workforce request using the runtime's ownership rules. */
 async function defaultRunWorkforceSession(
   deps: WorkforceRuntimeDeps,
+  logger: DaemonLogger,
   input: WorkforceSessionRunInput,
 ): Promise<void> {
   const agentDistribution = input.agent.agent ?? input.config.defaultAgent
@@ -373,6 +370,7 @@ export class WorkforceRuntime {
   readonly #rootDir: string
   readonly #runningAgents = new Set<string>()
   readonly #stopped = { value: false }
+  readonly #logger: DaemonLogger
 
   #projection: WorkforceProjection
 
@@ -389,6 +387,7 @@ export class WorkforceRuntime {
     this.#events = input.events
     this.#deps = input.deps
     this.#paths = buildWorkforcePaths(input.rootDir)
+    this.#logger = input.deps.log.createLogger()
   }
 
   /** Rehydrates one repository workforce and resumes draining any queued requests. */
@@ -408,7 +407,7 @@ export class WorkforceRuntime {
       deps,
     })
 
-    logger.log("workforce.runtime_started", {
+    runtime.#logger.log("workforce.runtime_started", {
       rootDir,
       configPath: runtime.#paths.configPath,
       ledgerPath: runtime.#paths.ledgerPath,
@@ -445,7 +444,7 @@ export class WorkforceRuntime {
     }
 
     this.#stopped.value = true
-    logger.log("workforce.runtime_stopped", {
+    this.#logger.log("workforce.runtime_stopped", {
       rootDir: this.#rootDir,
       runningAgentCount: this.#runningAgents.size,
       ...buildWorkforceSummaryFields(this.#projection.summary),
@@ -478,13 +477,13 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.request_enqueued", {
+      this.#logger.log("workforce.request_enqueued", {
         rootDir: this.#rootDir,
         requestId,
         targetAgentId: input.targetAgentId,
         intent: input.intent ?? "default",
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField("input", input.payload),
+        ...buildVerboseTextField(this.#deps.log, "input", input.payload),
       })
     })
 
@@ -515,13 +514,13 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.request_updated", {
+      this.#logger.log("workforce.request_updated", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
         previousStatus,
         nextStatus: assertRequestExists(this.#projection, input.requestId).status,
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField("input", input.payload),
+        ...buildVerboseTextField(this.#deps.log, "input", input.payload),
       })
     })
   }
@@ -550,7 +549,7 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.request_cancelled", {
+      this.#logger.log("workforce.request_cancelled", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
         previousStatus,
@@ -581,7 +580,7 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.queue_truncated", {
+      this.#logger.log("workforce.queue_truncated", {
         rootDir: this.#rootDir,
         agentId: input.agentId,
         reason: input.reason,
@@ -615,12 +614,12 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.request_responded", {
+      this.#logger.log("workforce.request_responded", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
         agentId: request.toAgentId,
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField("output", input.output),
+        ...buildVerboseTextField(this.#deps.log, "output", input.output),
       })
     })
   }
@@ -648,7 +647,7 @@ export class WorkforceRuntime {
     })
 
     await WorkforceActorContext.run(input.actor, async () => {
-      logger.log("workforce.request_suspended", {
+      this.#logger.log("workforce.request_suspended", {
         rootDir: this.#rootDir,
         requestId: input.requestId,
         agentId: request.toAgentId,
@@ -745,14 +744,15 @@ export class WorkforceRuntime {
           sessionId: null,
         })
 
-        logger.log("workforce.request_dispatch_started", {
+        this.#logger.log("workforce.request_dispatch_started", {
           remainingQueueDepth: Math.max(queuedBefore - 1, 0),
           ...buildWorkforceSummaryFields(this.#projection.summary),
         })
 
         try {
           const runSession =
-            this.#deps.runSession ?? ((input) => defaultRunWorkforceSession(this.#deps, input))
+            this.#deps.runSession ??
+            ((input) => defaultRunWorkforceSession(this.#deps, this.#logger, input))
           await runSession({
             rootDir: this.#rootDir,
             agent,
@@ -807,7 +807,7 @@ export class WorkforceRuntime {
         message: errorMessage,
       })
 
-      logger.log("workforce.request_failed", {
+      this.#logger.log("workforce.request_failed", {
         errorMessage,
         ...buildWorkforceSummaryFields(this.#projection.summary),
       })
@@ -823,7 +823,7 @@ export class WorkforceRuntime {
       summary: summarizeWorkforceProjection(this.#projection.requests),
     }
 
-    logger.log("workforce.request_retry_scheduled", {
+    this.#logger.log("workforce.request_retry_scheduled", {
       nextAttempt: attempt + 1,
       errorMessage,
       ...buildWorkforceSummaryFields(this.#projection.summary),

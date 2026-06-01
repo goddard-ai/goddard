@@ -1,9 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
 import { afterEach, expect, test } from "bun:test"
 
-import { configureLogging } from "../../../core/daemon/src/logging.ts"
+import { LoopContext } from "../src/daemon/context.ts"
 import { createLoopManager } from "../src/daemon/manager.ts"
 import { normalizeLoopRootDir } from "../src/daemon/paths.ts"
 import { LoopRuntime } from "../src/daemon/runtime.ts"
@@ -46,6 +47,7 @@ async function waitForExpectation(
 test("loop manager reuses one runtime per normalized repository root and loop name", async () => {
   const created: Array<{ rootDir: string; loopName: string }> = []
   const manager = createLoopManager({
+    log: createTestLogService([]),
     session: {} as never,
     resolveLoopStartRequest: async (input) => ({
       rootDir: input.rootDir,
@@ -203,53 +205,57 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
     },
   }
 
-  const { logs, result: runtime } = await captureLogs(async () => {
-    const runtime = await LoopRuntime.start(
-      {
-        rootDir,
-        loopName: "review",
-        promptModulePath: join(rootDir, "prompt.js"),
-        session: {
-          agent: "pi-acp",
-          cwd: rootDir,
-          mcpServers: [],
-          systemPrompt: "test",
+  const { logs, result: runtime } = await captureLogs(
+    async (log) => {
+      const runtime = await LoopRuntime.start(
+        {
+          rootDir,
+          loopName: "review",
+          promptModulePath: join(rootDir, "prompt.js"),
+          session: {
+            agent: "pi-acp",
+            cwd: rootDir,
+            mcpServers: [],
+            systemPrompt: "test",
+          },
+          rateLimits: {
+            cycleDelay: "0s",
+            maxOpsPerMinute: 100,
+            maxCyclesBeforePause: 200,
+          },
+          retries: {
+            maxAttempts: 1,
+            initialDelayMs: 500,
+            maxDelayMs: 5_000,
+            backoffFactor: 2,
+            jitterRatio: 0.2,
+          },
         },
-        rateLimits: {
-          cycleDelay: "0s",
-          maxOpsPerMinute: 100,
-          maxCyclesBeforePause: 200,
+        {
+          log,
+          session: session as never,
         },
-        retries: {
-          maxAttempts: 1,
-          initialDelayMs: 500,
-          maxDelayMs: 5_000,
-          backoffFactor: 2,
-          jitterRatio: 0.2,
-        },
-      },
-      {
-        session: session as never,
-      },
-    )
+      )
 
-    await waitForExpectation(() => {
-      expect(promptSessionCalls).toHaveLength(3)
-    })
-    expect(newSessionCalls[0]).toEqual(
-      expect.objectContaining({
-        request: expect.objectContaining({
-          cwd: rootDir,
-          worktree: { enabled: true },
+      await waitForExpectation(() => {
+        expect(promptSessionCalls).toHaveLength(3)
+      })
+      expect(newSessionCalls[0]).toEqual(
+        expect.objectContaining({
+          request: expect.objectContaining({
+            cwd: rootDir,
+            worktree: { enabled: true },
+          }),
         }),
-      }),
-    )
-    await waitForExpectation(() => {
-      expect(shutdownSessionCalls).toContain("ses_session_1")
-    })
+      )
+      await waitForExpectation(() => {
+        expect(shutdownSessionCalls).toContain("ses_session_1")
+      })
 
-    return runtime
-  })
+      return runtime
+    },
+    () => ({ loop: LoopContext.get() }),
+  )
 
   const startedLog = logs.find((entry) => entry.event === "loop.runtime_started")
   expect(startedLog).toBeTruthy()
@@ -289,27 +295,43 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
 })
 
 /** Captures daemon logs emitted while one loop runtime test action is running. */
-async function captureLogs<T>(
-  action: () => Promise<T>,
-): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
-  const output: string[] = []
-  const restoreLogging = configureLogging({
-    mode: "json",
-    writeLine: (line) => {
-      output.push(line)
+function createTestLogService(
+  output: Array<Record<string, unknown>>,
+  readContext: () => Record<string, unknown> = () => ({}),
+): DaemonLogService {
+  const logger = {
+    log(event: string, fields: Record<string, unknown> = {}) {
+      output.push({
+        event,
+        ...readContext(),
+        ...fields,
+      })
     },
-  })
+    snapshot() {
+      return logger
+    },
+  }
 
-  try {
-    const result = await action()
-    return {
-      logs: output
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>),
-      result,
-    }
-  } finally {
-    restoreLogging()
+  return {
+    createLogger: () => logger,
+    isVerboseLogging: () => false,
+    createPayloadPreview: (value) => value,
+    createChunkPreview: (value) => ({
+      text: new TextDecoder().decode(value),
+      byteLength: value.byteLength,
+      truncated: false,
+    }),
+  }
+}
+
+async function captureLogs<T>(
+  action: (log: DaemonLogService) => Promise<T>,
+  readContext?: () => Record<string, unknown>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const logs: Array<Record<string, unknown>> = []
+  const result = await action(createTestLogService(logs, readContext))
+  return {
+    logs,
+    result,
   }
 }

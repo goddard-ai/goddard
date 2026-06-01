@@ -18,6 +18,7 @@ import {
   createChunkPreview,
   createLogger,
   createPayloadPreview,
+  isVerboseLogging,
   readSessionIdForLog,
 } from "../logging.ts"
 import {
@@ -95,6 +96,7 @@ export async function startDaemonServer(
     },
     log: {
       createLogger,
+      isVerboseLogging,
       createPayloadPreview,
       createChunkPreview,
     },

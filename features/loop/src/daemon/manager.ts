@@ -1,15 +1,14 @@
+import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 
-import { createLogger } from "../../../../core/daemon/src/logging.ts"
 import type { DaemonLoop, DaemonLoopStatus, StartLoopRequest } from "../schema.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import type { ResolvedLoopStartRequest } from "./resolver.ts"
 import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
 
-const logger = createLogger()
-
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
+  log: DaemonLogService
   createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
   resolveLoopStartRequest: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
 }
@@ -25,6 +24,7 @@ export interface LoopManager {
 
 /** Creates the daemon loop manager that owns loop runtime lifecycle and lookup. */
 export function createLoopManager(deps: LoopManagerDeps): LoopManager {
+  const logger = deps.log.createLogger()
   const runtimes = new Map<string, LoopRuntime>()
 
   async function buildKey(rootDir: string, loopName: string): Promise<string> {
@@ -53,6 +53,7 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
           loopName: identity.loopName,
         },
         {
+          log: deps.log,
           session: deps.session,
           onStop: ({ rootDir, loopName }) => {
             void buildKey(rootDir, loopName).then((runtimeKey) => {

@@ -7,6 +7,7 @@ import { composeIpcRoutes, type HttpRouteTree as IpcRouteTree } from "@goddard-a
 import type {
   Composition,
   ConfigDefinition,
+  DaemonLogContextDefinition,
   DbSchemaDefinition,
   JsonSchemaArtifactDefinition,
   Plugin,
@@ -35,6 +36,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
   const ipcRouteTrees: IpcRouteTree[] = []
   const jsonSchemas: JsonSchemaArtifactDefinition[] = []
   const jsonSchemaNames = new Set<string>()
+  const logContexts: DaemonLogContextDefinition[] = []
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
@@ -58,6 +60,9 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     if (plugin.backendRoutes) {
       backendRouteTrees.push(plugin.backendRoutes)
     }
+    if (plugin.logContext) {
+      logContexts.push(plugin.logContext)
+    }
     for (const [key, kind] of Object.entries(plugin.db ?? {})) {
       if (db[key]) {
         throw new Error(`Duplicate daemon plugin DB collection: ${key}`)
@@ -73,6 +78,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     config,
     jsonSchemas,
     db: db as ComposedPluginDb<TPlugins>,
+    logContexts,
   } satisfies Composition
 }
 

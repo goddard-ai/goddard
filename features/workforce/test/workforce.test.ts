@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
 import { createNodeClient } from "@goddard-ai/ipc/node"
 import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
@@ -10,12 +11,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../../../core/daemon/src/backend.ts"
 import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
-import { configureLogging } from "../../../core/daemon/src/logging.ts"
 import {
   resetComposedDaemonStore,
   type ComposedDaemonStore,
 } from "../../../core/daemon/src/plugins.ts"
 import { initializeWorkforce } from "../src/daemon/config.ts"
+import { WorkforceActorContext, WorkforceDispatchContext } from "../src/daemon/context.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
 import { WorkforceRuntime } from "../src/daemon/runtime.ts"
@@ -223,6 +224,7 @@ function createTestBackendClient(): BackendClient {
 test("workforce manager reuses one runtime per normalized repository root", async () => {
   const created: string[] = []
   const manager = createWorkforceManager({
+    log: createTestLogService([]),
     session: createTestSession(),
     createRuntime: async (rootDir) => {
       created.push(rootDir)
@@ -299,6 +301,7 @@ test("workforce runtime records responses, suspensions, and poison-pill errors i
   let callCount = 0
 
   runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: createTestSession(),
     runSession: async ({ request }) => {
       callCount += 1
@@ -406,6 +409,7 @@ test("domain agents can update and cancel requests they originally sent", async 
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   const runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: createTestSession(),
     runSession: async () => {},
   })
@@ -519,6 +523,7 @@ test("buildSystemPrompt warns agents about off-limits paths owned by other agent
   const systemPrompts: Record<string, string> = {}
 
   runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: {
       newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
         const metadata = input.workforce ?? null
@@ -606,6 +611,7 @@ test("create-intent requests target the root agent and specialize the root sessi
   let capturedEnv: Record<string, string> | undefined
 
   runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: {
       newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
         const initialPrompt =
@@ -726,6 +732,7 @@ test("domain-agent sessions advertise sender-owned update and cancel commands", 
   let capturedSystemPrompt = ""
 
   runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: {
       newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
         capturedSystemPrompt = input.systemPrompt ?? ""
@@ -798,8 +805,9 @@ test("workforce runtime logs request-to-session correlation for launched session
   await writeFile(join(rootDir, ".goddard", "ledger.jsonl"), "", "utf-8")
 
   let runtime!: WorkforceRuntime
-  const { logs } = await captureLogs(async () => {
+  const { logs } = await captureLogs(async (log) => {
     runtime = await WorkforceRuntime.start(rootDir, {
+      log,
       session: {
         newSession: async ({ request: input }: { request: CreateSessionRequest }) => {
           const metadata = input.workforce ?? null
@@ -913,6 +921,7 @@ test("workforce runtime rejects responses and suspends for a different attached 
   })
 
   const runtime = await WorkforceRuntime.start(rootDir, {
+    log: createTestLogService([]),
     session: createTestSession(),
     runSession: async () => {
       await sessionBlocked
@@ -985,27 +994,47 @@ function listAdvertisedWorkforceCommands(prompt: string): string[] {
   ).sort()
 }
 
-async function captureLogs<T>(
-  action: () => Promise<T>,
-): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
-  const output: string[] = []
-  const restoreLogging = configureLogging({
-    mode: "json",
-    writeLine: (line) => {
-      output.push(line)
+function createTestLogService(
+  output: Array<Record<string, unknown>>,
+  readContext: () => Record<string, unknown> = () => ({}),
+): DaemonLogService {
+  const logger = {
+    log(event: string, fields: Record<string, unknown> = {}) {
+      output.push({
+        event,
+        ...readContext(),
+        ...fields,
+      })
     },
-  })
+    snapshot() {
+      return logger
+    },
+  }
 
-  try {
-    const result = await action()
-    return {
-      logs: output
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>),
-      result,
-    }
-  } finally {
-    restoreLogging()
+  return {
+    createLogger: () => logger,
+    isVerboseLogging: () => false,
+    createPayloadPreview: (value) => value,
+    createChunkPreview: (value) => ({
+      text: new TextDecoder().decode(value),
+      byteLength: value.byteLength,
+      truncated: false,
+    }),
+  }
+}
+
+async function captureLogs<T>(
+  action: (log: DaemonLogService) => Promise<T>,
+): Promise<{ logs: Array<Record<string, unknown>>; result: T }> {
+  const logs: Array<Record<string, unknown>> = []
+  const result = await action(
+    createTestLogService(logs, () => ({
+      workforceActor: WorkforceActorContext.get(),
+      workforceDispatch: WorkforceDispatchContext.get(),
+    })),
+  )
+  return {
+    logs,
+    result,
   }
 }

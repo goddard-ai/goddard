@@ -76,6 +76,7 @@ export type TextPreview = {
 /** Logging and preview helpers exposed to daemon plugins. */
 export type DaemonLogService = {
   readonly createLogger: () => DaemonLogger
+  readonly isVerboseLogging: () => boolean
   readonly createPayloadPreview: (
     value: unknown,
     options?: {
@@ -84,6 +85,11 @@ export type DaemonLogService = {
     },
   ) => unknown
   readonly createChunkPreview: (value: Uint8Array) => TextPreview
+}
+
+/** Feature-owned ambient log fields read by daemon logging. */
+export type DaemonLogContextDefinition = {
+  readonly read: () => Record<string, unknown>
 }
 
 /** Stable session metadata carried through live daemon session work. */
@@ -246,6 +252,8 @@ export type Plugin = {
   readonly backendRoutes?: BackendRouteTree
   /** IPC route tree fragment contributed by this plugin. */
   readonly ipcRoutes?: HttpRouteTree
+  /** Feature-owned ambient log fields contributed to daemon log entries. */
+  readonly logContext?: DaemonLogContextDefinition
   /**
    * Runtime hook for handlers, close hooks, and feature extensions.
    *
@@ -264,4 +272,5 @@ export type Composition = {
   readonly config: Record<string, ConfigDefinition<any, any>>
   readonly jsonSchemas: readonly JsonSchemaArtifactDefinition[]
   readonly db: DbSchemaDefinition
+  readonly logContexts: readonly DaemonLogContextDefinition[]
 }

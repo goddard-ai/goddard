@@ -1,14 +1,13 @@
 import { pathToFileURL } from "node:url"
+import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
 import * as acp from "acp-client/protocol"
 import { getErrorMessage, proportionalJitter } from "radashi"
 
-import { LoopContext } from "../../../../core/daemon/src/context.ts"
-import { createLogger, createPayloadPreview } from "../../../../core/daemon/src/logging.ts"
 import type { DaemonLoop, DaemonLoopStatus } from "../schema.ts"
+import { LoopContext } from "./context.ts"
 import { LoopRateLimiter } from "./rate-limiter.ts"
 import type { ResolvedLoopStartRequest } from "./resolver.ts"
 
-const logger = createLogger()
 const LOOP_PAUSE_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 /** Detects the configured cycle boundary where the loop intentionally pauses for a full day. */
@@ -18,6 +17,7 @@ function shouldPauseLoop(cycleCount: number, maxCyclesBeforePause: number): bool
 
 /** Runtime dependencies shared by one daemon-owned loop host. */
 export interface LoopRuntimeDeps {
+  log: DaemonLogService
   session: {
     newSession: (params: { request: ResolvedLoopStartRequest["session"] }) => Promise<{
       id: `ses_${string}`
@@ -41,6 +41,7 @@ export class LoopRuntime {
   readonly #sessionAcpId: string
   readonly #context: LoopContext
   readonly #rateLimiter: LoopRateLimiter
+  readonly #logger: DaemonLogger
 
   #cycleCount = 0
   #lastPromptAt: string | null = null
@@ -55,11 +56,13 @@ export class LoopRuntime {
     deps: LoopRuntimeDeps
     sessionId: `ses_${string}`
     sessionAcpId: string
+    logger: DaemonLogger
   }) {
     this.#config = input.config
     this.#deps = input.deps
     this.#sessionId = input.sessionId
     this.#sessionAcpId = input.sessionAcpId
+    this.#logger = input.logger
     this.#context = {
       rootDir: input.config.rootDir,
       loopName: input.config.loopName,
@@ -78,6 +81,7 @@ export class LoopRuntime {
     config: ResolvedLoopStartRequest,
     deps: LoopRuntimeDeps,
   ): Promise<LoopRuntime> {
+    const logger = deps.log.createLogger()
     const session = await deps.session.newSession({
       request: {
         ...config.session,
@@ -99,6 +103,7 @@ export class LoopRuntime {
       deps,
       sessionId: session.id,
       sessionAcpId: session.acpSessionId,
+      logger,
     })
 
     LoopContext.run(runtime.#context, () => {
@@ -120,7 +125,7 @@ export class LoopRuntime {
       }),
     )
     // Suppress the detached task warning here because failures are already logged and surfaced via runtime state.
-    runtime.#runTask.catch(() => {})
+    runtime.#runTask?.catch(() => {})
     return runtime
   }
 
@@ -200,10 +205,10 @@ export class LoopRuntime {
       try {
         this.#lastPromptAt = new Date().toISOString()
         const response = await this.#deps.session.promptSession(this.#sessionId, promptMessage)
-        logger.log("loop.prompt_completed", {
+        this.#logger.log("loop.prompt_completed", {
           cycleCount: this.#cycleCount,
           stopReason: response.stopReason,
-          prompt: createPayloadPreview(promptMessage),
+          prompt: this.#deps.log.createPayloadPreview(promptMessage),
         })
         return response
       } catch (error) {
@@ -251,7 +256,7 @@ export class LoopRuntime {
         this.#sleepHandle = null
       }
       await this.#deps.session.shutdownSession(this.#sessionId).catch(() => {})
-      logger.log("loop.runtime_stopped", {
+      this.#logger.log("loop.runtime_stopped", {
         cycleCount: this.#cycleCount,
       })
       this.#notifyStopped()
