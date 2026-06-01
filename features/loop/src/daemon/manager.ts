@@ -1,10 +1,10 @@
-import type { DaemonLogService, DbContext } from "@goddard-ai/daemon-plugin"
+import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 
 import type { DaemonLoop, DaemonLoopStatus, StartLoopRequest } from "../schema.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import type { ResolvedLoopStartRequest } from "./resolver.ts"
-import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
+import { LoopRuntime, type LoopRuntimeServices, type LoopRuntimeStartInput } from "./runtime.ts"
 import type { loopDbSchema } from "./store.ts"
 
 type LoopDb = DbContext<typeof loopDbSchema>
@@ -14,10 +14,9 @@ function isDaemonSessionId(value: string): value is `ses_${string}` {
 }
 
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
-export interface LoopManagerDeps extends LoopRuntimeDeps {
+export interface LoopManagerInput extends LoopRuntimeServices {
   db: LoopDb
-  log: DaemonLogService
-  createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
+  createRuntime?: (input: LoopRuntimeStartInput) => Promise<LoopRuntime>
   resolveLoopStartRequest: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
 }
 
@@ -31,8 +30,8 @@ export interface LoopManager {
 }
 
 /** Creates the daemon loop manager that owns loop runtime lifecycle and lookup. */
-export function createLoopManager(deps: LoopManagerDeps): LoopManager {
-  const logger = deps.log.createLogger()
+export function createLoopManager(input: LoopManagerInput): LoopManager {
+  const logger = input.log.createLogger()
   const runtimes = new Map<string, LoopRuntime>()
 
   async function buildKey(rootDir: string, loopName: string): Promise<string> {
@@ -41,8 +40,8 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
   }
 
   return {
-    async startLoop(input: StartLoopRequest): Promise<DaemonLoop> {
-      const resolvedInput = await deps.resolveLoopStartRequest(input)
+    async startLoop(request: StartLoopRequest): Promise<DaemonLoop> {
+      const resolvedInput = await input.resolveLoopStartRequest(request)
       const identity = await normalizeLoopIdentity(resolvedInput.rootDir, resolvedInput.loopName)
       const key = `${identity.rootDir}::${identity.loopName}`
       const existing = runtimes.get(key)
@@ -54,29 +53,27 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
         return existing.getLoop()
       }
 
-      const runtime = await (deps.createRuntime ?? LoopRuntime.start)(
-        {
+      const runtime = await (input.createRuntime ?? LoopRuntime.start)({
+        config: {
           ...resolvedInput,
           rootDir: identity.rootDir,
           loopName: identity.loopName,
         },
-        {
-          log: deps.log,
-          session: deps.session,
-          onStop: ({ rootDir, loopName }) => {
-            void buildKey(rootDir, loopName).then((runtimeKey) => {
-              runtimes.delete(runtimeKey)
-            })
-          },
+        log: input.log,
+        session: input.session,
+        onStop: ({ rootDir, loopName }) => {
+          void buildKey(rootDir, loopName).then((runtimeKey) => {
+            runtimes.delete(runtimeKey)
+          })
         },
-      )
+      })
       runtimes.set(key, runtime)
       const loop = runtime.getLoop()
       if (!isDaemonSessionId(loop.sessionId)) {
         throw new Error(`Loop runtime returned invalid daemon session id: ${loop.sessionId}`)
       }
       const existingRecord =
-        deps.db.loopSessions.first({
+        input.db.loopSessions.first({
           where: { sessionId: loop.sessionId },
         }) ?? null
       const nextRecord = {
@@ -86,9 +83,9 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
         promptModulePath: loop.promptModulePath,
       }
       if (existingRecord) {
-        deps.db.loopSessions.put(existingRecord.id, nextRecord)
+        input.db.loopSessions.put(existingRecord.id, nextRecord)
       } else {
-        deps.db.loopSessions.create(nextRecord)
+        input.db.loopSessions.create(nextRecord)
       }
       return runtime.getLoop()
     },

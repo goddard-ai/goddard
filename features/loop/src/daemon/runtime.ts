@@ -15,8 +15,8 @@ function shouldPauseLoop(cycleCount: number, maxCyclesBeforePause: number): bool
   return cycleCount % maxCyclesBeforePause === 0
 }
 
-/** Runtime dependencies shared by one daemon-owned loop host. */
-export interface LoopRuntimeDeps {
+/** Runtime services shared by one daemon-owned loop host. */
+export interface LoopRuntimeServices {
   log: DaemonLogService
   session: {
     newSession: (params: { request: ResolvedLoopStartRequest["session"] }) => Promise<{
@@ -32,10 +32,17 @@ export interface LoopRuntimeDeps {
   onStop?: (input: { rootDir: string; loopName: string }) => void
 }
 
+/** Input used to start one daemon-owned loop runtime. */
+export interface LoopRuntimeStartInput extends LoopRuntimeServices {
+  config: ResolvedLoopStartRequest
+}
+
 /** Daemon-owned loop runtime backed by one persistent daemon session. */
 export class LoopRuntime {
   readonly #config: ResolvedLoopStartRequest
-  readonly #deps: LoopRuntimeDeps
+  readonly #log: DaemonLogService
+  readonly #session: LoopRuntimeServices["session"]
+  readonly #onStop: LoopRuntimeServices["onStop"]
   readonly #startedAt: string
   readonly #sessionId: `ses_${string}`
   readonly #sessionAcpId: string
@@ -53,13 +60,17 @@ export class LoopRuntime {
 
   private constructor(input: {
     config: ResolvedLoopStartRequest
-    deps: LoopRuntimeDeps
+    log: DaemonLogService
+    session: LoopRuntimeServices["session"]
+    onStop?: LoopRuntimeServices["onStop"]
     sessionId: `ses_${string}`
     sessionAcpId: string
     logger: DaemonLogger
   }) {
     this.#config = input.config
-    this.#deps = input.deps
+    this.#log = input.log
+    this.#session = input.session
+    this.#onStop = input.onStop
     this.#sessionId = input.sessionId
     this.#sessionAcpId = input.sessionAcpId
     this.#logger = input.logger
@@ -77,22 +88,21 @@ export class LoopRuntime {
   }
 
   /** Starts one daemon-owned loop runtime and begins background cycle execution. */
-  static async start(
-    config: ResolvedLoopStartRequest,
-    deps: LoopRuntimeDeps,
-  ): Promise<LoopRuntime> {
-    const logger = deps.log.createLogger()
-    const session = await deps.session.newSession({
+  static async start(input: LoopRuntimeStartInput): Promise<LoopRuntime> {
+    const logger = input.log.createLogger()
+    const session = await input.session.newSession({
       request: {
-        ...config.session,
-        systemPrompt: config.session.systemPrompt ?? "",
-        worktree: config.session.worktree ?? { enabled: true },
+        ...input.config.session,
+        systemPrompt: input.config.session.systemPrompt ?? "",
+        worktree: input.config.session.worktree ?? { enabled: true },
       },
     })
 
     const runtime = new LoopRuntime({
-      config,
-      deps,
+      config: input.config,
+      log: input.log,
+      session: input.session,
+      onStop: input.onStop,
       sessionId: session.id,
       sessionAcpId: session.acpSessionId,
       logger,
@@ -100,7 +110,7 @@ export class LoopRuntime {
 
     LoopContext.run(runtime.#context, () => {
       logger.log("loop.runtime_started", {
-        promptModulePath: config.promptModulePath,
+        promptModulePath: input.config.promptModulePath,
       })
     })
 
@@ -196,11 +206,11 @@ export class LoopRuntime {
 
       try {
         this.#lastPromptAt = new Date().toISOString()
-        const response = await this.#deps.session.promptSession(this.#sessionId, promptMessage)
+        const response = await this.#session.promptSession(this.#sessionId, promptMessage)
         this.#logger.log("loop.prompt_completed", {
           cycleCount: this.#cycleCount,
           stopReason: response.stopReason,
-          prompt: this.#deps.log.createPayloadPreview(promptMessage),
+          prompt: this.#log.createPayloadPreview(promptMessage),
         })
         return response
       } catch (error) {
@@ -247,7 +257,7 @@ export class LoopRuntime {
         clearTimeout(this.#sleepHandle)
         this.#sleepHandle = null
       }
-      await this.#deps.session.shutdownSession(this.#sessionId).catch(() => {})
+      await this.#session.shutdownSession(this.#sessionId).catch(() => {})
       this.#logger.log("loop.runtime_stopped", {
         cycleCount: this.#cycleCount,
       })
@@ -262,7 +272,7 @@ export class LoopRuntime {
     }
 
     this.#stoppedNotified = true
-    this.#deps.onStop?.({
+    this.#onStop?.({
       rootDir: this.#config.rootDir,
       loopName: this.#config.loopName,
     })

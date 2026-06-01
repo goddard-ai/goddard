@@ -75,27 +75,27 @@ test("loop manager reuses one runtime per normalized repository root and loop na
       },
     }),
     createRuntime: async (input) => {
-      created.push({ rootDir: input.rootDir, loopName: input.loopName })
+      created.push({ rootDir: input.config.rootDir, loopName: input.config.loopName })
       return {
         getLoop: () => ({
           state: "running",
-          rootDir: input.rootDir,
-          loopName: input.loopName,
-          promptModulePath: input.promptModulePath,
+          rootDir: input.config.rootDir,
+          loopName: input.config.loopName,
+          promptModulePath: input.config.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "ses_session_1",
           acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
-          session: input.session,
-          rateLimits: input.rateLimits,
-          retries: input.retries,
+          session: input.config.session,
+          rateLimits: input.config.rateLimits,
+          retries: input.config.retries,
         }),
         getStatus: () => ({
           state: "running",
-          rootDir: input.rootDir,
-          loopName: input.loopName,
-          promptModulePath: input.promptModulePath,
+          rootDir: input.config.rootDir,
+          loopName: input.config.loopName,
+          promptModulePath: input.config.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
           sessionId: "ses_session_1",
           acpSessionId: "acp-1",
@@ -217,8 +217,8 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
 
   const { logs, result: runtime } = await captureLogs(
     async (log) => {
-      const runtime = await LoopRuntime.start(
-        {
+      const runtime = await LoopRuntime.start({
+        config: {
           rootDir,
           loopName: "review",
           promptModulePath: join(rootDir, "prompt.js"),
@@ -241,11 +241,9 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
             jitterRatio: 0.2,
           },
         },
-        {
-          log,
-          session: session as never,
-        },
-      )
+        log,
+        session: session as never,
+      })
 
       await waitForExpectation(() => {
         expect(promptSessionCalls).toHaveLength(3)
