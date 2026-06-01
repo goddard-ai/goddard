@@ -5,7 +5,7 @@ import {
   type RouzerClient,
 } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
-import type { StreamMessage } from "@goddard-ai/pull-request/schema"
+import type { StreamMessage } from "@goddard-ai/remote-repo/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { getErrorMessage } from "radashi"
 

@@ -1,13 +1,8 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
 import { $type, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
-import {
-  CreatePrInput,
-  ManagedPrQuery,
-  ReplyPrInput,
-  type PullRequestRecord,
-  type RepoEvent,
-} from "../schema.ts"
+import { CreatePrInput, ManagedPrQuery, ReplyPrInput, type PullRequestRecord } from "../schema.ts"
 
 /** Pull-request-owned backend routes grouped by PR domain action. */
 export const pullRequestBackendRoutes = defineBackendRoutes({

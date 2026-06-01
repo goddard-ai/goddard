@@ -1,4 +1,4 @@
-import type { RepoEvent } from "@goddard-ai/pull-request/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
 

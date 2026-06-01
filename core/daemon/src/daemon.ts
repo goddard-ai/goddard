@@ -1,4 +1,4 @@
-import type { RepoEvent } from "@goddard-ai/pull-request/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import {

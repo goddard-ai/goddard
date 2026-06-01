@@ -9,8 +9,8 @@ import type {
   CreatePrInput,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
 } from "@goddard-ai/pull-request/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"

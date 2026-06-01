@@ -1,5 +1,5 @@
 import type { Socket } from "node:net"
-import { type RepoEvent } from "@goddard-ai/pull-request/schema"
+import { type RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
 

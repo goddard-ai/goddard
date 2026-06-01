@@ -1,7 +1,11 @@
 import { AttentionMetadataInput } from "@goddard-ai/schema/daemon/sessions"
+import { RepoRef } from "@goddard-ai/remote-repo/schema"
 import { DaemonPullRequestId, DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
-import { RepoPrRef, RepoRef } from "@goddard-ai/schema/repository"
 import { z } from "zod"
+
+const RepoPrRef = RepoRef.extend({
+  prNumber: z.number(),
+})
 
 /** Request payload used to create one managed pull request. */
 export const CreatePrInput = RepoRef.extend({
@@ -43,55 +47,6 @@ export const PullRequestRecord = z.object({
 })
 
 export type PullRequestRecord = z.infer<typeof PullRequestRecord>
-
-const repoCommentEvent = z.object({
-  type: z.literal("comment"),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-  author: z.string(),
-  body: z.string(),
-  reactionAdded: z.literal("eyes"),
-  createdAt: z.string(),
-})
-
-const repoReviewEvent = z.object({
-  type: z.literal("review"),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-  author: z.string(),
-  state: z.enum(["approved", "changes_requested", "commented"]),
-  body: z.string(),
-  reactionAdded: z.literal("eyes"),
-  createdAt: z.string(),
-})
-
-const repoPullRequestCreatedEvent = z.object({
-  type: z.literal("pr.created"),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-  title: z.string(),
-  author: z.string(),
-  createdAt: z.string(),
-})
-
-/** Normalized repository activity event emitted by backend workflows. */
-export const RepoEvent = z.discriminatedUnion("type", [
-  repoCommentEvent,
-  repoReviewEvent,
-  repoPullRequestCreatedEvent,
-])
-
-export type RepoEvent = z.infer<typeof RepoEvent>
-
-/** SSE payload delivered over the backend feedback stream. */
-export const StreamMessage = z.object({
-  event: RepoEvent,
-})
-
-export type StreamMessage = z.infer<typeof StreamMessage>
 
 /** Persisted daemon-managed pull request record owned by the pull-request feature. */
 export const DaemonPullRequest = z.strictObject({

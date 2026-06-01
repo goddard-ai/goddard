@@ -9,8 +9,8 @@ import type {
   CreatePrInput,
   GitHubWebhookInput,
   PullRequestRecord,
-  RepoEvent,
 } from "@goddard-ai/pull-request/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
