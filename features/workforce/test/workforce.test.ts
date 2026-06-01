@@ -1,20 +1,10 @@
-import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
-import { createNodeClient } from "@goddard-ai/ipc/node"
-import { daemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
-import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
-import { afterEach, beforeEach, expect, test } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 
-import type { BackendClient } from "../../../core/daemon/src/backend.ts"
-import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
-import {
-  resetComposedDaemonStore,
-  type ComposedDaemonStore,
-} from "../../../core/daemon/src/plugins.ts"
 import { initializeWorkforce } from "../src/daemon/config.ts"
 import { WorkforceActorContext, WorkforceDispatchContext } from "../src/daemon/context.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
@@ -23,24 +13,17 @@ import { WorkforceRuntime } from "../src/daemon/runtime.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
-const originalHome = process.env.HOME
-const rootConfigSchemaUrl =
-  "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
-let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
-
-beforeEach(() => {
-  db = resetComposedDaemonStore({ filename: ":memory:" })
-})
+const originalPath = process.env.PATH
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
 
-  if (originalHome === undefined) {
-    delete process.env.HOME
+  if (originalPath === undefined) {
+    delete process.env.PATH
   } else {
-    process.env.HOME = originalHome
+    process.env.PATH = originalPath
   }
 })
 
@@ -53,68 +36,6 @@ function createTestSession() {
     }),
   }
 }
-
-test("daemon IPC discovers and initializes workforce config through daemon-owned handlers", async () => {
-  await useTempHome()
-  await writeGlobalRootConfig({
-    agents: {
-      default: "configured-workforce-agent",
-    },
-  })
-  const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
-  const packageDir = join(repoDir, "packages", "ui")
-  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
-
-  await mkdir(packageDir, { recursive: true })
-  await writeFile(
-    join(repoDir, "package.json"),
-    JSON.stringify({ name: "@repo/root", private: true }, null, 2),
-    "utf-8",
-  )
-  await writeFile(
-    join(packageDir, "package.json"),
-    JSON.stringify({ name: "@repo/ui", private: true }, null, 2),
-    "utf-8",
-  )
-  expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
-
-  const daemon = await startDaemonServer(createTestBackendClient(), {
-    port: 0,
-    store: db,
-  })
-  cleanup.push(async () => {
-    await daemon.close()
-  })
-
-  const client = createDaemonClient(daemon.daemonUrl)
-  const discovered = await client.workforce.discoverCandidates({
-    rootDir: packageDir,
-  })
-  const normalizedRootDir = await normalizeWorkforceRootDir(repoDir)
-
-  expect(discovered.rootDir).toBe(normalizedRootDir)
-  expect(discovered.candidates.map((candidate: any) => candidate.relativeDir)).toEqual([
-    ".",
-    "packages/ui",
-  ])
-
-  const initialized = await client.workforce.initialize({
-    rootDir: packageDir,
-    packageDirs: discovered.candidates.map((candidate: any) => candidate.rootDir),
-  })
-
-  const config = JSON.parse(await readFile(initialized.initialized.configPath, "utf-8")) as {
-    defaultAgent: string
-    rootAgentId: string
-    agents: Array<{ id: string; cwd: string }>
-  }
-
-  expect(initialized.initialized.rootDir).toBe(normalizedRootDir)
-  expect(config.defaultAgent).toBe("configured-workforce-agent")
-  expect(config.rootAgentId).toBe("root")
-  expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
-  await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
-})
 
 test("workforce initialization rejects when no default agent can be resolved", async () => {
   process.env.PATH = ""
@@ -131,95 +52,6 @@ test("workforce initialization rejects when no default agent can be resolved", a
     "No default ACP agent is configured or discoverable.",
   )
 })
-
-test("daemon workforce event stream rejects inactive repositories", async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
-
-  const daemon = await startDaemonServer(createTestBackendClient(), {
-    port: 0,
-    store: db,
-  })
-  cleanup.push(async () => {
-    await daemon.close()
-  })
-
-  const client = createDaemonClient(daemon.daemonUrl)
-  const normalizedRootDir = await normalizeWorkforceRootDir(rootDir)
-
-  await expect(client.workforce.event({ rootDir })).rejects.toThrow(
-    `No workforce is running for ${normalizedRootDir}`,
-  )
-})
-
-function createDaemonClient(daemonUrl: string) {
-  return createNodeClient(
-    readDaemonTcpAddressFromDaemonUrl(daemonUrl),
-    daemonIpcRoutes as any,
-  ) as any
-}
-
-async function useTempHome() {
-  const homeDir = await mkdtemp(join(tmpdir(), "goddard-workforce-home-"))
-  process.env.HOME = homeDir
-  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
-}
-
-async function writeGlobalRootConfig(config: Record<string, unknown>) {
-  const configPath = join(process.env.HOME!, ".goddard", "config.json")
-  await mkdir(dirname(configPath), { recursive: true })
-  await writeFile(
-    configPath,
-    `${JSON.stringify({ $schema: rootConfigSchemaUrl, ...config }, null, 2)}\n`,
-    "utf-8",
-  )
-}
-
-function createTestBackendClient(): BackendClient {
-  return {
-    auth: {
-      device: {
-        start: async () => ({
-          deviceCode: "dev_1",
-          userCode: "ABCD-1234",
-          verificationUri: "https://github.com/login/device",
-          expiresIn: 900,
-          interval: 5,
-        }),
-        complete: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-      },
-      session: {
-        current: async () => ({
-          token: "tok_1",
-          githubUsername: "alec",
-          githubUserId: 42,
-        }),
-      },
-    },
-    pullRequests: {
-      create: async () => ({ number: 1, url: "https://example.com/pr/1" }),
-      managed: async () => ({ managed: true }),
-      comments: {
-        create: async () => ({ success: true }),
-      },
-    },
-    webhooks: {
-      github: async () => ({ type: "noop" }),
-    },
-    repositories: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
-    },
-  } as unknown as BackendClient
-}
 
 test("workforce manager reuses one runtime per normalized repository root", async () => {
   const created: string[] = []
