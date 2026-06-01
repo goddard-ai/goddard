@@ -1,6 +1,7 @@
 import { mergeConfigLayers, selectLast } from "@goddard-ai/config"
 import { AgentSetting, McpServer, StaticSessionParams } from "@goddard-ai/schema/config"
 import { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
+import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 /** Pacing controls that bound how aggressively one loop may run. */
@@ -196,6 +197,16 @@ export type DaemonLoopStatus = {
 
 /** One daemon-managed loop runtime addressed by repository root and loop name. */
 export type DaemonLoop = DaemonLoopStatus & DaemonLoopConfig
+
+/** Persisted association between one daemon loop runtime and its backing session. */
+export const DaemonLoopSession = z.strictObject({
+  sessionId: z.custom<DaemonSessionId>(),
+  rootDir: z.string(),
+  loopName: z.string(),
+  promptModulePath: z.string(),
+})
+
+export type DaemonLoopSession = z.infer<typeof DaemonLoopSession>
 
 /** Response payload returned when one loop runtime is fetched. */
 export type GetLoopResponse = {

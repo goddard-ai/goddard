@@ -46,7 +46,9 @@ async function waitForExpectation(
 
 test("loop manager reuses one runtime per normalized repository root and loop name", async () => {
   const created: Array<{ rootDir: string; loopName: string }> = []
+  const loopSessions: unknown[] = []
   const manager = createLoopManager({
+    db: createTestLoopDb(loopSessions),
     log: createTestLogService([]),
     session: {} as never,
     resolveLoopStartRequest: async (input) => ({
@@ -81,7 +83,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
           loopName: input.loopName,
           promptModulePath: input.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
-          sessionId: "session-1",
+          sessionId: "ses_session_1",
           acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
@@ -95,7 +97,7 @@ test("loop manager reuses one runtime per normalized repository root and loop na
           loopName: input.loopName,
           promptModulePath: input.promptModulePath,
           startedAt: "2026-03-20T00:00:00.000Z",
-          sessionId: "session-1",
+          sessionId: "ses_session_1",
           acpSessionId: "acp-1",
           cycleCount: 0,
           lastPromptAt: null,
@@ -158,6 +160,14 @@ test("loop manager reuses one runtime per normalized repository root and loop na
       rootDir: await normalizeLoopRootDir(tempRoot),
       loopName: "review",
     },
+  ])
+  expect(loopSessions).toEqual([
+    expect.objectContaining({
+      sessionId: "ses_session_1",
+      rootDir: await normalizeLoopRootDir(tempRoot),
+      loopName: "review",
+      promptModulePath: `${tempRoot}/.goddard/loops/review/prompt.js`,
+    }),
   ])
 })
 
@@ -248,6 +258,9 @@ test("loop runtime keeps prompting in the daemon-owned background and reports se
           }),
         }),
       )
+      expect((newSessionCalls[0] as { request: { metadata?: unknown } }).request.metadata).toBe(
+        undefined,
+      )
       await waitForExpectation(() => {
         expect(shutdownSessionCalls).toContain("ses_session_1")
       })
@@ -334,4 +347,30 @@ async function captureLogs<T>(
     logs,
     result,
   }
+}
+
+/** Minimal kindstore collection fake for loop manager unit coverage. */
+function createTestLoopDb(records: unknown[]) {
+  return {
+    loopSessions: {
+      first({ where }: { where: { sessionId: string } }) {
+        return (
+          records.find(
+            (record) =>
+              typeof record === "object" &&
+              record !== null &&
+              (record as { sessionId?: string }).sessionId === where.sessionId,
+          ) ?? null
+        )
+      },
+      create(record: Record<string, unknown>) {
+        records.push(record)
+        return { id: "lop_1", ...record }
+      },
+      put(_id: string, record: Record<string, unknown>) {
+        records[0] = record
+        return { id: _id, ...record }
+      },
+    },
+  } as never
 }

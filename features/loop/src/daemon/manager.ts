@@ -1,13 +1,21 @@
-import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
+import type { DaemonLogService, DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 
 import type { DaemonLoop, DaemonLoopStatus, StartLoopRequest } from "../schema.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import type { ResolvedLoopStartRequest } from "./resolver.ts"
 import { LoopRuntime, type LoopRuntimeDeps } from "./runtime.ts"
+import type { loopDbSchema } from "./store.ts"
+
+type LoopDb = DbContext<typeof loopDbSchema>
+
+function isDaemonSessionId(value: string): value is `ses_${string}` {
+  return value.startsWith("ses_")
+}
 
 /** Optional lifecycle dependencies used to build new daemon-owned loop runtimes. */
 export interface LoopManagerDeps extends LoopRuntimeDeps {
+  db: LoopDb
   log: DaemonLogService
   createRuntime?: (input: ResolvedLoopStartRequest, deps: LoopRuntimeDeps) => Promise<LoopRuntime>
   resolveLoopStartRequest: (input: StartLoopRequest) => Promise<ResolvedLoopStartRequest>
@@ -63,6 +71,25 @@ export function createLoopManager(deps: LoopManagerDeps): LoopManager {
         },
       )
       runtimes.set(key, runtime)
+      const loop = runtime.getLoop()
+      if (!isDaemonSessionId(loop.sessionId)) {
+        throw new Error(`Loop runtime returned invalid daemon session id: ${loop.sessionId}`)
+      }
+      const existingRecord =
+        deps.db.loopSessions.first({
+          where: { sessionId: loop.sessionId },
+        }) ?? null
+      const nextRecord = {
+        sessionId: loop.sessionId,
+        rootDir: loop.rootDir,
+        loopName: loop.loopName,
+        promptModulePath: loop.promptModulePath,
+      }
+      if (existingRecord) {
+        deps.db.loopSessions.put(existingRecord.id, nextRecord)
+      } else {
+        deps.db.loopSessions.create(nextRecord)
+      }
       return runtime.getLoop()
     },
 

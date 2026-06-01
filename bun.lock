@@ -371,6 +371,7 @@
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
         "acp-client": "catalog:",
+        "kindstore": "catalog:",
         "radashi": "catalog:",
         "zod": "catalog:",
       },

@@ -5,7 +5,10 @@ import { loopIpcRoutes } from "./daemon-ipc.ts"
 import { LoopContext } from "./daemon/context.ts"
 import { createLoopManager } from "./daemon/manager.ts"
 import { resolveNamedLoopStartRequest } from "./daemon/resolver.ts"
+import { loopDbSchema } from "./daemon/store.ts"
 import { LoopConfig, mergeLoopConfigLayers } from "./schema.ts"
+
+export { loopDbSchema } from "./daemon/store.ts"
 
 export const loopPlugin = definePlugin({
   name: "loop",
@@ -17,13 +20,15 @@ export const loopPlugin = definePlugin({
       resolve: ({ project, user }) => mergeLoopConfigLayers(user, project),
     },
   },
+  db: loopDbSchema,
   jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
   logContext: {
     read: () => ({ loop: LoopContext.get() }),
   },
-  setup({ configProvider, log, session }) {
+  setup({ configProvider, db, log, session }) {
     const loop = createLoopManager({
+      db,
       log,
       session,
       resolveLoopStartRequest: (input) => resolveNamedLoopStartRequest(input, configProvider),

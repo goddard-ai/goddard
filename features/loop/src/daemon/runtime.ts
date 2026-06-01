@@ -86,14 +86,6 @@ export class LoopRuntime {
       request: {
         ...config.session,
         systemPrompt: config.session.systemPrompt ?? "",
-        metadata: {
-          ...config.session.metadata,
-          loop: {
-            rootDir: config.rootDir,
-            loopName: config.loopName,
-            promptModulePath: config.promptModulePath,
-          },
-        },
         worktree: config.session.worktree ?? { enabled: true },
       },
     })

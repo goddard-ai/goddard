@@ -62,6 +62,7 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
+    "kindstore": "catalog:",
     "radashi": "catalog:",
     "zod": "catalog:"
   }
