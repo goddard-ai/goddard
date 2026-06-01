@@ -10,10 +10,12 @@ describe("daemon plugin composition", () => {
     const session = definePlugin({
       name: "session",
       config: {
-        schema: z.object({
-          enabled: z.boolean(),
-        }),
-        scopes: ["user", "project"],
+        session: {
+          schema: z.object({
+            enabled: z.boolean(),
+          }),
+          scopes: ["user", "project"],
+        },
       },
       jsonSchemas: [
         {

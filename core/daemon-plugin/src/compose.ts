@@ -27,7 +27,7 @@ export function composePlugins(plugins: readonly Plugin[]) {
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
-      for (const [key, definition] of getPluginConfigEntries(plugin)) {
+      for (const [key, definition] of Object.entries(plugin.config)) {
         if (config[key]) {
           throw new Error(`Duplicate daemon plugin config namespace: ${key}`)
         }
@@ -63,18 +63,6 @@ export function composePlugins(plugins: readonly Plugin[]) {
     jsonSchemas,
     db,
   } satisfies Composition
-}
-
-function getPluginConfigEntries(plugin: Plugin): Array<[string, ConfigDefinition<any, any>]> {
-  if (!plugin.config) {
-    return []
-  }
-
-  if ("schema" in plugin.config) {
-    return [[plugin.name, plugin.config as ConfigDefinition<any, any>]]
-  }
-
-  return Object.entries(plugin.config) as Array<[string, ConfigDefinition<any, any>]>
 }
 
 function assertUniquePluginNames(plugins: readonly Plugin[]) {

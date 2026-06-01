@@ -320,10 +320,6 @@ function readConfigKeys(plugin: ComposedDaemonPlugin) {
     return []
   }
 
-  if ("schema" in plugin.config) {
-    return [plugin.name]
-  }
-
   return Object.keys(plugin.config)
 }
 
