@@ -12,7 +12,7 @@ import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
-import { openComposedDaemonStore, type DaemonStore } from "./plugins.ts"
+import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
 import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
@@ -23,7 +23,7 @@ export type RunInput = {
   enableIpc?: boolean
   enableStream?: boolean
   logMode?: LogMode
-  store?: DaemonStore
+  store?: ComposedDaemonStore
 }
 
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
@@ -207,7 +207,7 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
 /** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
 async function defaultCreateBackendClient(
   baseUrl: string,
-  store: DaemonStore,
+  store: ComposedDaemonStore,
 ): Promise<BackendClient> {
   return createBackendClient({
     baseUrl,

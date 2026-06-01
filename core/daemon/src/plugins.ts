@@ -29,25 +29,33 @@ const daemonPluginList = [
   workforcePlugin,
 ] as const
 
-type DaemonPluginComposition = ReturnType<typeof composePlugins>
+function composeDaemonPlugins() {
+  return composePlugins(daemonPluginList)
+}
 
-let daemonPlugins: DaemonPluginComposition | null = null
+type ComposedDaemonPluginComposition = ReturnType<typeof composeDaemonPlugins>
+type ComposedDaemonDbSchema = ComposedDaemonPluginComposition["db"]
+
+/** Store handle opened against this daemon build's composed plugin schema. */
+export type ComposedDaemonStore = DaemonStore<ComposedDaemonDbSchema>
+
+let daemonPlugins: ComposedDaemonPluginComposition | null = null
 
 /** Returns the statically composed daemon feature surface used by this daemon build. */
 export function getDaemonPluginComposition() {
   if (!daemonPlugins) {
-    daemonPlugins = composePlugins(daemonPluginList)
+    daemonPlugins = composeDaemonPlugins()
   }
 
   return daemonPlugins
 }
 
 /** Opens a daemon store using the schema contributed by the composed daemon plugins. */
-export function openComposedDaemonStore(connection?: StoreConnectionOptions): DaemonStore {
+export function openComposedDaemonStore(connection?: StoreConnectionOptions): ComposedDaemonStore {
   return openDaemonStore(getDaemonPluginComposition().db, connection)
 }
 
 /** Opens a fresh daemon store for tests using the composed daemon plugin schema. */
-export function resetComposedDaemonStore(connection?: StoreConnectionOptions): DaemonStore {
+export function resetComposedDaemonStore(connection?: StoreConnectionOptions): ComposedDaemonStore {
   return openDaemonStore(getDaemonPluginComposition().db, connection)
 }

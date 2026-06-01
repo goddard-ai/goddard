@@ -15,7 +15,7 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
@@ -33,7 +33,7 @@ const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let sharedHomeDir: string | null = null
-let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 function findSessionPromptRequest(history: GetSessionHistoryResponse) {
   return history.turns

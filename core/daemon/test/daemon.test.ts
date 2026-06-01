@@ -6,13 +6,12 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { afterEach, expect, test } from "bun:test"
 
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
 
@@ -24,7 +23,7 @@ const fastFixtureAgentPath = fileURLToPath(
 )
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
-let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
   db = resetComposedDaemonStore({ filename: ":memory:" })
@@ -158,14 +157,12 @@ test(
     expect(
       db.sessions
         .findMany()
-        .map(({ repository, prNumber, stopReason }: DaemonSession) => ({
+        .map(({ repository, prNumber, stopReason }) => ({
           repository,
           prNumber,
           stopReason,
         }))
-        .sort((left: DaemonSession, right: DaemonSession) =>
-          (left.repository ?? "").localeCompare(right.repository ?? ""),
-        ),
+        .sort((left, right) => (left.repository ?? "").localeCompare(right.repository ?? "")),
     ).toEqual([
       {
         repository: "other/repo",

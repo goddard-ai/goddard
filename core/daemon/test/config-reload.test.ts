@@ -14,7 +14,7 @@ import { SetupContext } from "../src/context.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
@@ -27,7 +27,7 @@ const rootConfigSchemaUrl =
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
 )
-let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {

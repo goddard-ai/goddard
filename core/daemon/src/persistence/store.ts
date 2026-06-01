@@ -5,7 +5,9 @@ import {
   kindstore,
   UnrecoverableStoreOpenError,
   type DatabaseOptions,
+  type KindBuilder,
   type KindRegistry,
+  type Kindstore,
 } from "kindstore"
 import { z } from "zod"
 
@@ -18,15 +20,26 @@ const metadata = {
   authToken: z.string(),
 }
 
-const coreDbSchema: KindRegistry = {}
+const coreDbSchema = {} satisfies KindRegistry
 
-/** Runtime daemon store handle opened against the composed plugin schema. */
-export type DaemonStore = any
+/** Daemon store handle opened against a concrete plugin-contributed schema. */
+export type DaemonStore<TSchema extends KindRegistry = KindRegistry> = Kindstore<
+  InferKinds<TSchema>,
+  typeof metadata
+>
+
+type InferKinds<TSchema extends KindRegistry> = {
+  readonly [K in keyof TSchema as TSchema[K] extends KindBuilder<any> ? K : never]: Extract<
+    TSchema[K],
+    KindBuilder<any>
+  >
+}
+type NonEmptySchema<TSchema extends KindRegistry> = keyof TSchema extends never ? never : TSchema
 
 /** Opens one kindstore handle for a concrete daemon store schema. */
 function openKindstore<const TSchema extends KindRegistry>(
-  options: StoreConnectionOptions & { schema: keyof TSchema extends never ? never : TSchema },
-) {
+  options: StoreConnectionOptions & { schema: TSchema },
+): DaemonStore<TSchema> {
   if (options.filename !== ":memory:") {
     mkdirSync(dirname(options.filename), { recursive: true })
   }
@@ -35,8 +48,8 @@ function openKindstore<const TSchema extends KindRegistry>(
     filename: options.filename,
     databaseOptions: options.databaseOptions,
     metadata,
-    schema: options.schema,
-  })
+    schema: options.schema as NonEmptySchema<TSchema>,
+  }) as unknown as DaemonStore<TSchema>
 }
 
 function removeDatabaseArtifacts(filename: string) {
@@ -46,32 +59,32 @@ function removeDatabaseArtifacts(filename: string) {
 }
 
 /** Opens one daemon store connection against a concrete plugin-contributed schema. */
-export function openDaemonStore(
-  pluginSchema: KindRegistry,
+export function openDaemonStore<const TSchema extends KindRegistry>(
+  pluginSchema: TSchema,
   connection: StoreConnectionOptions = { filename: getDatabasePath() },
-): DaemonStore {
+): DaemonStore<TSchema> {
   const schema = mergeDbSchema(pluginSchema)
 
   try {
-    return openKindstore({ ...connection, schema }) as DaemonStore
+    return openKindstore({ ...connection, schema })
   } catch (error) {
     if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
       throw error
     }
 
     removeDatabaseArtifacts(connection.filename)
-    return openKindstore({ ...connection, schema }) as DaemonStore
+    return openKindstore({ ...connection, schema })
   }
 }
 
-function mergeDbSchema(pluginSchema: KindRegistry) {
-  const schema: KindRegistry = { ...coreDbSchema }
+function mergeDbSchema<const TSchema extends KindRegistry>(pluginSchema: TSchema) {
+  const schema = { ...coreDbSchema } as typeof coreDbSchema & TSchema
 
   for (const [key, kindDefinition] of Object.entries(pluginSchema)) {
     if (Object.hasOwn(coreDbSchema, key)) {
       throw new Error(`Daemon plugin DB collection conflicts with core store schema: ${key}`)
     }
-    schema[key] = kindDefinition
+    schema[key as keyof TSchema] = kindDefinition as TSchema[keyof TSchema]
   }
 
   return schema

@@ -8,7 +8,7 @@ import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createLogger } from "./logging.ts"
-import { openComposedDaemonStore, type DaemonStore } from "./plugins.ts"
+import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
 import * as prompts from "./prompts/index.ts"
 
 /** Launch input for a daemon-managed PR feedback flow. */
@@ -19,7 +19,7 @@ export type PrFeedbackFlowInput = {
   agentBinDir: string
   env?: Record<string, string>
   configManager?: Pick<ConfigManager, "getRootConfig">
-  store?: DaemonStore
+  store?: ComposedDaemonStore
   resolveProjectDir?: (event: FeedbackEvent) => Promise<string | null> | string | null
 }
 
@@ -110,7 +110,10 @@ export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<num
   }
 }
 
-async function resolveProjectDir(store: DaemonStore, event: FeedbackEvent): Promise<string | null> {
+async function resolveProjectDir(
+  store: ComposedDaemonStore,
+  event: FeedbackEvent,
+): Promise<string | null> {
   return (
     store.pullRequests.first({
       where: {

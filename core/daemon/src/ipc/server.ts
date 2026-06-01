@@ -23,7 +23,7 @@ import {
 import {
   getDaemonPluginComposition,
   openComposedDaemonStore,
-  type DaemonStore,
+  type ComposedDaemonStore,
 } from "../plugins.ts"
 import type { DaemonServer } from "./types.ts"
 
@@ -43,7 +43,7 @@ export async function startDaemonServer(
     port?: number
     agentBinDir?: string
     idleSessionShutdownTimeoutMs?: number
-    store?: DaemonStore
+    store?: ComposedDaemonStore
   } = {},
 ): Promise<DaemonServer> {
   const logger = createLogger()
@@ -218,7 +218,7 @@ async function setupDaemonPlugins(
   substrate: DaemonSetupSubstrate,
   configProvider: DaemonConfigProvider,
   backendClient: BackendClient,
-  store: DaemonStore,
+  store: ComposedDaemonStore,
 ) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
@@ -381,7 +381,7 @@ function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string
   }
 }
 
-function createPluginDbContext(plugin: ComposedDaemonPlugin, store: DaemonStore) {
+function createPluginDbContext(plugin: ComposedDaemonPlugin, store: ComposedDaemonStore) {
   const schema: Record<string, unknown> = {}
   for (const consumedPlugin of plugin.consumes ?? []) {
     Object.assign(schema, consumedPlugin.db)
@@ -389,16 +389,19 @@ function createPluginDbContext(plugin: ComposedDaemonPlugin, store: DaemonStore)
   Object.assign(schema, plugin.db)
 
   const contextSchema: Record<string, unknown> = {}
+  const storeRecord = store as Record<string, unknown> & {
+    readonly schema: Record<string, unknown>
+  }
   const context: Record<string, unknown> = {
     schema: contextSchema,
-    batch: (...args: unknown[]) => store.batch(...(args as never[])),
+    batch: (callback: () => unknown) => store.batch(callback),
   }
 
   for (const key of Object.keys(schema)) {
-    contextSchema[key] = store.schema[key]
+    contextSchema[key] = storeRecord.schema[key]
     Object.defineProperty(context, key, {
       enumerable: true,
-      get: () => store[key],
+      get: () => storeRecord[key],
     })
   }
 

@@ -10,13 +10,13 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 let sharedHomeDir: string | null = null
-let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {

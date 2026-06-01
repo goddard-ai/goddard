@@ -11,9 +11,20 @@ import type {
   JsonSchemaArtifactDefinition,
   Plugin,
 } from "./contracts.ts"
+import type { UnionToIntersection } from "./type-utils.ts"
+
+type PluginDb<TPlugin> = TPlugin extends {
+  readonly db: infer TDb extends DbSchemaDefinition
+}
+  ? TDb
+  : {}
+type ComposedPluginDb<TPlugins extends readonly Plugin[]> = UnionToIntersection<
+  PluginDb<TPlugins[number]>
+> &
+  DbSchemaDefinition
 
 /** Composes statically imported daemon feature plugins and validates dependency ownership. */
-export function composePlugins(plugins: readonly Plugin[]) {
+export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins: TPlugins) {
   assertUniquePluginNames(plugins)
   assertConsumedPluginsAreComposed(plugins)
   const orderedPlugins = sortPluginsByDependency(plugins)
@@ -61,7 +72,7 @@ export function composePlugins(plugins: readonly Plugin[]) {
     backendRoutes: composeBackendRoutes(backendRouteTrees),
     config,
     jsonSchemas,
-    db,
+    db: db as ComposedPluginDb<TPlugins>,
   } satisfies Composition
 }
 
