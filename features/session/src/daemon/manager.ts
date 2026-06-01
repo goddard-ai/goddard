@@ -12,7 +12,6 @@ import type {
   DaemonSessionContextService,
   DbContext,
 } from "@goddard-ai/daemon-plugin"
-import type { InboxHeadline, InboxScope, SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
@@ -44,6 +43,11 @@ import type {
   SetSessionModelRequest,
   SteerSessionResponse,
 } from "@goddard-ai/schema/daemon"
+import type {
+  AttentionHeadline,
+  AttentionMetadataInput,
+  AttentionScope,
+} from "@goddard-ai/schema/daemon/sessions"
 import type {
   DaemonSessionDiagnosticEvent,
   DaemonSessionTurn,
@@ -1007,7 +1011,7 @@ export function createSessionManager(input: {
 
   function applyInboxMetadataToCurrentTurn(
     id: SessionId,
-    metadata: { scope: InboxScope; headline: InboxHeadline },
+    metadata: { scope: AttentionScope; headline: AttentionHeadline },
   ) {
     const activeTurn = activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn) {
@@ -1034,7 +1038,7 @@ export function createSessionManager(input: {
 
   function resolveAndPersistInboxMetadata(input: {
     session: SessionDoc
-    metadata?: SessionInboxMetadataInput & { fallbackHeadline?: string }
+    metadata?: AttentionMetadataInput & { fallbackHeadline?: string }
     blockedReason?: string | null
   }) {
     const resolved = resolveSessionAttentionMetadata({
@@ -3154,7 +3158,7 @@ export function createSessionManager(input: {
   async function reportBlocker(
     id: SessionId,
     reason: string,
-    metadata: SessionInboxMetadataInput = {},
+    metadata: AttentionMetadataInput = {},
   ) {
     await ready
     const session = requireSessionDocument(id)
@@ -3182,7 +3186,7 @@ export function createSessionManager(input: {
     return getSession(id)
   }
 
-  async function reportTurnEnded(id: SessionId, metadata: SessionInboxMetadataInput = {}) {
+  async function reportTurnEnded(id: SessionId, metadata: AttentionMetadataInput = {}) {
     await ready
     const session = requireSessionDocument(id)
     const resolved = resolveAndPersistInboxMetadata({
@@ -3214,7 +3218,7 @@ export function createSessionManager(input: {
 
   async function recordTurnAttentionActivity(
     id: SessionId,
-    metadata: SessionInboxMetadataInput & { fallbackHeadline?: string } = {},
+    metadata: AttentionMetadataInput & { fallbackHeadline?: string } = {},
   ) {
     await ready
     const session = requireSessionDocument(id)

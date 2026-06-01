@@ -1,5 +1,5 @@
-import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
 
 const genericScopes = new Set(["task", "update", "work", "work in progress", "progress"])
 
@@ -14,12 +14,12 @@ function normalizeScope(value: string | null | undefined) {
     return null
   }
 
-  return normalized as InboxScope
+  return normalized as AttentionScope
 }
 
 function normalizeHeadline(value: string | null | undefined) {
   const normalized = normalizeText(value, 120).replace(/^I\s+(?:am\s+)?/i, "")
-  return normalized ? (normalized as InboxHeadline) : null
+  return normalized ? (normalized as AttentionHeadline) : null
 }
 
 function fallbackScope(
@@ -31,7 +31,7 @@ function fallbackScope(
     normalizeScope(session.inboxScope) ??
     normalizeScope(session.initiative) ??
     normalizeScope(title) ??
-    ("Session" as InboxScope)
+    ("Session" as AttentionScope)
   )
 }
 
@@ -44,7 +44,7 @@ function fallbackHeadline(input: {
     normalizeHeadline(input.headline) ??
     normalizeHeadline(input.blockedReason) ??
     normalizeHeadline(input.fallback) ??
-    ("Attention needed" as InboxHeadline)
+    ("Attention needed" as AttentionHeadline)
   )
 }
 

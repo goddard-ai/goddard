@@ -1,4 +1,4 @@
-import { SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
+import { AttentionMetadataInput } from "@goddard-ai/schema/daemon/sessions"
 import { DaemonPullRequestId, DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
 import { RepoPrRef, RepoRef } from "@goddard-ai/schema/repository"
 import { z } from "zod"
@@ -141,8 +141,8 @@ export const SubmitPrRequest = z.strictObject({
   body: z.string(),
   head: z.string().optional(),
   base: z.string().optional(),
-  scope: SessionInboxMetadataInput.shape.scope,
-  headline: SessionInboxMetadataInput.shape.headline,
+  scope: AttentionMetadataInput.shape.scope,
+  headline: AttentionMetadataInput.shape.headline,
 })
 
 export type SubmitPrRequest = z.infer<typeof SubmitPrRequest>
@@ -158,8 +158,8 @@ export const ReplyPrRequest = z.strictObject({
   cwd: z.string(),
   message: z.string(),
   prNumber: z.number().optional(),
-  scope: SessionInboxMetadataInput.shape.scope,
-  headline: SessionInboxMetadataInput.shape.headline,
+  scope: AttentionMetadataInput.shape.scope,
+  headline: AttentionMetadataInput.shape.headline,
 })
 
 export type ReplyPrRequest = z.infer<typeof ReplyPrRequest>

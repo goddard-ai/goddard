@@ -1,6 +1,6 @@
 /** Typed lifecycle events emitted by the session feature for downstream daemon plugins. */
-import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import mitt, { type Handler } from "mitt"
 
@@ -38,8 +38,8 @@ export type SessionEventEmitter = {
 
 type SessionAttentionEvent = {
   sessionId: DaemonSessionId
-  scope: InboxScope
-  headline: InboxHeadline
+  scope: AttentionScope
+  headline: AttentionHeadline
   turnId: string | null
 }
 

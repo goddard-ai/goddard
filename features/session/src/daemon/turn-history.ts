@@ -1,7 +1,7 @@
 /** Turn-history helpers shared by daemon session lifecycle management. */
 import { randomUUID } from "node:crypto"
-import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
 import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/schema/daemon"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import * as acp from "acp-client/protocol"
 
@@ -15,8 +15,8 @@ export type ActiveTurnBuffer<TDraftId extends string = string> = {
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
   messages: acp.AnyMessage[]
-  inboxScope?: InboxScope | null
-  inboxHeadline?: InboxHeadline | null
+  inboxScope?: AttentionScope | null
+  inboxHeadline?: AttentionHeadline | null
   flushTimer: ReturnType<typeof setTimeout> | null
   draftId: TDraftId | null
   touchedAttentionEntity?: boolean
@@ -43,8 +43,8 @@ export type CompletedSessionTurnInput = {
   completedAt: string | null
   completionKind: "result" | "error" | null
   stopReason: DaemonSession["stopReason"]
-  inboxScope?: InboxScope | null
-  inboxHeadline?: InboxHeadline | null
+  inboxScope?: AttentionScope | null
+  inboxHeadline?: AttentionHeadline | null
   messages: acp.AnyMessage[]
 }
 
@@ -65,8 +65,8 @@ type SessionTurnDraftRecord = {
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
   messages: acp.AnyMessage[]
-  inboxScope?: InboxScope | null
-  inboxHeadline?: InboxHeadline | null
+  inboxScope?: AttentionScope | null
+  inboxHeadline?: AttentionHeadline | null
 }
 
 /** Launch-time initial prompt details needed to persist one completed turn. */

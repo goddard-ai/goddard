@@ -13,8 +13,23 @@ import {
   type DaemonSessionDiagnosticEvent,
 } from "./store.ts"
 
-const SessionAttentionScope = z.string().trim().min(1).optional()
-const SessionAttentionHeadline = z.string().trim().min(1).optional()
+/** Short semi-stable subject label for daemon attention events and projections. */
+export const AttentionScope = z.string().trim().min(1).max(80)
+
+export type AttentionScope = z.infer<typeof AttentionScope>
+
+/** Short turn-specific preview text for daemon attention events and projections. */
+export const AttentionHeadline = z.string().trim().min(1).max(120)
+
+export type AttentionHeadline = z.infer<typeof AttentionHeadline>
+
+/** Optional agent-supplied attention metadata attached to daemon workflow reporting. */
+export const AttentionMetadataInput = z.strictObject({
+  scope: AttentionScope.optional(),
+  headline: AttentionHeadline.optional(),
+})
+
+export type AttentionMetadataInput = z.infer<typeof AttentionMetadataInput>
 
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
@@ -317,16 +332,16 @@ export type DeclareSessionInitiativeRequest = z.infer<typeof DeclareSessionIniti
 /** Request payload used to report that one daemon session is blocked. */
 export const ReportSessionBlockerRequest = DaemonSessionIdParams.extend({
   reason: z.string().trim().min(1),
-  scope: SessionAttentionScope,
-  headline: SessionAttentionHeadline,
+  scope: AttentionMetadataInput.shape.scope,
+  headline: AttentionMetadataInput.shape.headline,
 })
 
 export type ReportSessionBlockerRequest = z.infer<typeof ReportSessionBlockerRequest>
 
 /** Request payload used to report the end of one daemon session turn. */
 export const ReportSessionTurnEndedRequest = DaemonSessionIdParams.extend({
-  scope: SessionAttentionScope,
-  headline: SessionAttentionHeadline,
+  scope: AttentionMetadataInput.shape.scope,
+  headline: AttentionMetadataInput.shape.headline,
 })
 
 export type ReportSessionTurnEndedRequest = z.infer<typeof ReportSessionTurnEndedRequest>

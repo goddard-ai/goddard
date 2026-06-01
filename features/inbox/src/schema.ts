@@ -1,3 +1,8 @@
+import {
+  AttentionHeadline,
+  AttentionMetadataInput,
+  AttentionScope,
+} from "@goddard-ai/schema/daemon/sessions"
 import { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
@@ -34,20 +39,17 @@ export const InboxReason = z.enum([
 export type InboxReason = z.infer<typeof InboxReason>
 
 /** Short semi-stable subject label rendered as the inbox row scope. */
-export const InboxScope = z.string().trim().min(1).max(80)
+export const InboxScope = AttentionScope
 
 export type InboxScope = z.infer<typeof InboxScope>
 
 /** Short turn-specific inbox preview rendered after the row scope. */
-export const InboxHeadline = z.string().trim().min(1).max(120)
+export const InboxHeadline = AttentionHeadline
 
 export type InboxHeadline = z.infer<typeof InboxHeadline>
 
 /** Optional agent-supplied inbox metadata attached to session turn reporting. */
-export const SessionInboxMetadataInput = z.strictObject({
-  scope: InboxScope.optional(),
-  headline: InboxHeadline.optional(),
-})
+export const SessionInboxMetadataInput = AttentionMetadataInput
 
 export type SessionInboxMetadataInput = z.infer<typeof SessionInboxMetadataInput>
 

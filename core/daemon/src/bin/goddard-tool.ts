@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
-import type { SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { AttentionMetadataInput } from "@goddard-ai/schema/daemon/sessions"
 import { DaemonSessionId } from "@goddard-ai/schema/id"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
 
@@ -26,7 +26,7 @@ export async function declareInitiative(sessionId: DaemonSession["id"], title: s
 export async function reportBlocker(
   sessionId: DaemonSession["id"],
   reason: string,
-  metadata: SessionInboxMetadataInput = {},
+  metadata: AttentionMetadataInput = {},
 ) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.session.reportBlocker({ id: sessionId, reason, ...metadata })
@@ -34,17 +34,13 @@ export async function reportBlocker(
 
 export async function reportTurnEnded(
   sessionId: DaemonSession["id"],
-  metadata: SessionInboxMetadataInput = {},
+  metadata: AttentionMetadataInput = {},
 ) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.session.reportTurnEnded({ id: sessionId, ...metadata })
 }
 
-export async function submitPr(
-  title: string,
-  body: string,
-  metadata: SessionInboxMetadataInput = {},
-) {
+export async function submitPr(title: string, body: string, metadata: AttentionMetadataInput = {}) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.pr.submit({
     token: requireSessionToken(),
@@ -55,7 +51,7 @@ export async function submitPr(
   })
 }
 
-export async function replyPr(message: string, metadata: SessionInboxMetadataInput = {}) {
+export async function replyPr(message: string, metadata: AttentionMetadataInput = {}) {
   const { client } = createDaemonIpcClientFromEnv()
   await client.pr.reply({
     token: requireSessionToken(),
@@ -89,8 +85,8 @@ function resolveMetadataInput(args: {
   scope?: string
   headline?: string
   metadataJson?: string
-}): SessionInboxMetadataInput {
-  let parsed: SessionInboxMetadataInput = {}
+}): AttentionMetadataInput {
+  let parsed: AttentionMetadataInput = {}
   if (args.metadataJson) {
     const value = JSON.parse(args.metadataJson) as unknown
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
