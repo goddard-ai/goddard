@@ -74,7 +74,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
   db: pullRequestDbSchema,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ backend, configProvider, db, getIpcRequestContext, inbox, session }) {
+  setup({ backend, configProvider, db, inbox, ipc, session }) {
     return {
       ipcHandlers: {
         pr: {
@@ -83,7 +83,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
             const sessionRecord = requireRepositorySession(
               await session.resolveTokenScope(payload.token),
             )
-            getIpcRequestContext().setSessionId(sessionRecord.sessionId)
+            ipc.requireRequestContext().setSessionId(sessionRecord.sessionId)
 
             const resolvedInput = await resolveSubmitRequestFromGit(payload)
             const pr = await backend.pullRequests.create({
@@ -129,7 +129,7 @@ export const pullRequestPlugin: Plugin = definePlugin({
             const sessionRecord = requireRepositorySession(
               await session.resolveTokenScope(payload.token),
             )
-            getIpcRequestContext().setSessionId(sessionRecord.sessionId)
+            ipc.requireRequestContext().setSessionId(sessionRecord.sessionId)
 
             const resolvedInput = await resolveReplyRequestFromGit(payload)
 

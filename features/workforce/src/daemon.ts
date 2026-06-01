@@ -31,7 +31,7 @@ export const workforcePlugin = definePlugin({
   },
   db: workforceDbSchema,
   ipcRoutes: workforceIpcRoutes,
-  setup({ configProvider, db, getIpcRequestContext, session }) {
+  setup({ configProvider, db, ipc, session }) {
     const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
     const workforce = createWorkforceManager({
       session,
@@ -115,7 +115,7 @@ export const workforcePlugin = definePlugin({
         throw new IpcClientError("Invalid session token")
       }
 
-      getIpcRequestContext().setSessionId(tokenScope.sessionId)
+      ipc.requireRequestContext().setSessionId(tokenScope.sessionId)
 
       const workforceRecord =
         db.workforces.first({

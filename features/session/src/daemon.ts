@@ -134,7 +134,7 @@ export const sessionPlugin = definePlugin({
             const response = {
               session: await sessionManager.newSession({ request: body }),
             }
-            context.getIpcRequestContext().setSessionId(response.session.id)
+            context.ipc.requireRequestContext().setSessionId(response.session.id)
             return response
           },
           list: async ({ body }) => sessionManager.listSessions(body),
@@ -191,7 +191,7 @@ export const sessionPlugin = definePlugin({
           }),
           resolveToken: async ({ body: { token } }) => {
             const id = await sessionManager.resolveSessionIdByToken(token)
-            context.getIpcRequestContext().setSessionId(id)
+            context.ipc.requireRequestContext().setSessionId(id)
             return {
               id,
             }

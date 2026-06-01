@@ -212,8 +212,10 @@ export type DaemonSetupSubstrate = {
   readonly log: DaemonLogService
   readonly registryService: ACPRegistryService
   readonly sessionContext: DaemonSessionContextService
-  readonly getIpcRequestContext: () => {
-    readonly setSessionId: (id: DaemonSessionId) => void
+  readonly ipc: {
+    readonly requireRequestContext: () => {
+      readonly setSessionId: (id: DaemonSessionId) => void
+    }
   }
 }
 
