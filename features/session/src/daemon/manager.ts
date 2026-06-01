@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
   ACPRegistryService,
   DaemonAgentEnvironmentService,

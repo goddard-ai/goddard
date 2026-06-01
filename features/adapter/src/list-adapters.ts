@@ -1,4 +1,4 @@
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 

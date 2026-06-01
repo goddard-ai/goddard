@@ -1,4 +1,4 @@
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { sessionPlugin } from "@goddard-ai/session/daemon"

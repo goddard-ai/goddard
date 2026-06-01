@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import { getErrorMessage } from "radashi"
 
 import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"

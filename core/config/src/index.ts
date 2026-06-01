@@ -52,5 +52,3 @@ export function selectLast<T, R>(
 
   return undefined
 }
-
-export * from "./agent-resolver.js"

@@ -11,6 +11,14 @@
       },
       "bun": "./src/index.ts",
       "import": "./dist/index.mjs"
+    },
+    "./node": {
+      "types": {
+        "source": "./src/node.ts",
+        "default": "./dist/node.d.mts"
+      },
+      "bun": "./src/node.ts",
+      "import": "./dist/node.mjs"
     }
   },
   "scripts": {

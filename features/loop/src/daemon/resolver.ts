@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { resolveDefaultAgent } from "@goddard-ai/config"
+import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 
