@@ -1,5 +1,4 @@
-import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
-import type { SessionWorktree } from "@goddard-ai/session/schema"
+import { SessionIdParams, type SessionWorktree } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
 /** Live review-session state returned exactly as the review session engine reports it. */
@@ -35,22 +34,22 @@ export const ReviewSessionState = z.strictObject({
 export type ReviewSessionState = z.infer<typeof ReviewSessionState>
 
 /** Request payload used to read one daemon-managed review session. */
-export const GetReviewSessionRequest = DaemonSessionIdParams
+export const GetReviewSessionRequest = SessionIdParams
 
 export type GetReviewSessionRequest = z.infer<typeof GetReviewSessionRequest>
 
 /** Request payload used to mount a review session for one daemon-managed session worktree. */
-export const MountReviewSessionRequest = DaemonSessionIdParams
+export const MountReviewSessionRequest = SessionIdParams
 
 export type MountReviewSessionRequest = z.infer<typeof MountReviewSessionRequest>
 
 /** Request payload used to run one mounted review session immediately. */
-export const RunReviewSessionRequest = DaemonSessionIdParams
+export const RunReviewSessionRequest = SessionIdParams
 
 export type RunReviewSessionRequest = z.infer<typeof RunReviewSessionRequest>
 
 /** Request payload used to unmount a review session from one daemon-managed session worktree. */
-export const UnmountReviewSessionRequest = DaemonSessionIdParams
+export const UnmountReviewSessionRequest = SessionIdParams
 
 export type UnmountReviewSessionRequest = z.infer<typeof UnmountReviewSessionRequest>
 

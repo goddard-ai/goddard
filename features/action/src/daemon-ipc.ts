@@ -1,5 +1,5 @@
 import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
-import type { CreateSessionResponse } from "@goddard-ai/schema/daemon/sessions"
+import type { CreateSessionResponse } from "@goddard-ai/session/schema"
 
 import { RunNamedActionRequest } from "./schema.ts"
 

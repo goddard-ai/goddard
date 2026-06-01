@@ -1,5 +1,5 @@
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { SessionId } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
 import type {
@@ -56,7 +56,7 @@ function normalizeInboxPageSize(limit?: number) {
   return Math.min(Math.max(Math.trunc(limit ?? DEFAULT_INBOX_PAGE_SIZE), 1), MAX_INBOX_PAGE_SIZE)
 }
 
-function isSessionEntityId(entityId: InboxEntityId): entityId is DaemonSessionId {
+function isSessionEntityId(entityId: InboxEntityId): entityId is SessionId {
   return entityId.startsWith("ses_")
 }
 
@@ -223,7 +223,7 @@ export function createInboxManager(options: InboxManagerOptions) {
     }
   }
 
-  function markSessionReplied(sessionId: DaemonSessionId) {
+  function markSessionReplied(sessionId: SessionId) {
     const existing =
       db.inboxItems.first({
         where: { entityId: sessionId },
@@ -243,7 +243,7 @@ export function createInboxManager(options: InboxManagerOptions) {
     return publishItem(item, "replied")
   }
 
-  function completeSession(sessionId: DaemonSessionId) {
+  function completeSession(sessionId: SessionId) {
     const existing =
       db.inboxItems.first({
         where: { entityId: sessionId },

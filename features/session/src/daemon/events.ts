@@ -1,8 +1,8 @@
 /** Typed lifecycle events emitted by the session feature for downstream daemon plugins. */
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
-import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import mitt, { type Handler } from "mitt"
+
+import type { CreateSessionRequest, SessionId } from "../schema.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -37,7 +37,7 @@ export type SessionEventEmitter = {
 }
 
 type SessionAttentionEvent = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   scope: AttentionScope
   headline: AttentionHeadline
   turnId: string | null
@@ -45,7 +45,7 @@ type SessionAttentionEvent = {
 
 /** Worktree lifecycle data exposed to daemon plugins without exposing session persistence. */
 export type SessionWorktreeLifecycleState = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   repoRoot: string
   requestedCwd: string
   effectiveCwd: string
@@ -56,7 +56,7 @@ export type SessionWorktreeLifecycleState = {
 
 /** Worktree lifecycle event payload shared by launch-time session hooks. */
 type SessionWorktreeLifecycleEvent = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   worktree: SessionWorktreeLifecycleState
 }
 
@@ -68,11 +68,11 @@ export type SessionEvents = {
     }
   >
   "lifecycle.sessionPersisted": EventListener<{
-    sessionId: DaemonSessionId
+    sessionId: SessionId
     request: CreateSessionRequest
   }>
   "lifecycle.sessionActivated": EventListener<{
-    sessionId: DaemonSessionId
+    sessionId: SessionId
     worktree: SessionWorktreeLifecycleState | null
   }>
   "lifecycle.launchFinished": EventListener<
@@ -86,7 +86,7 @@ export type SessionEvents = {
     }
   >
   "lifecycle.sessionStopping": EventListener<{
-    sessionId: DaemonSessionId
+    sessionId: SessionId
     reason: "agent_process_exit" | "session_shutdown" | "daemon_shutdown"
     worktree: SessionWorktreeLifecycleState | null
   }>
@@ -97,10 +97,10 @@ export type SessionEvents = {
   >
   "lifecycle.turnEnded": EventListener<SessionAttentionEvent>
   "lifecycle.replied": EventListener<{
-    sessionId: DaemonSessionId
+    sessionId: SessionId
   }>
   "lifecycle.completed": EventListener<{
-    sessionId: DaemonSessionId
+    sessionId: SessionId
   }>
 }
 

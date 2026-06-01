@@ -2,8 +2,6 @@
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import type { KindRegistry, Kindstore } from "kindstore"
 import type { z } from "zod"
 
@@ -94,7 +92,7 @@ export type DaemonLogContextDefinition = {
 
 /** Stable session metadata carried through live daemon session work. */
 export type DaemonSessionContext = {
-  sessionId: DaemonSession["id"]
+  sessionId: `ses_${string}`
   acpSessionId: string | null
   cwd: string
   repository: string | null
@@ -220,7 +218,7 @@ export type DaemonSetupSubstrate = {
   readonly sessionContext: DaemonSessionContextService
   readonly ipc: {
     readonly requestContext: {
-      readonly setSessionId: (id: DaemonSessionId) => void
+      readonly setSessionId: (id: `ses_${string}`) => void
     }
   }
 }

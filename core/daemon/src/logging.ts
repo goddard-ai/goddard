@@ -1,6 +1,6 @@
 import { inspect } from "node:util"
 import { AsyncContext } from "@b9g/async-context"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonSession } from "@goddard-ai/session/schema"
 import kleur from "kleur"
 import { omit } from "radashi"
 

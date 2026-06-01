@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import type { AttentionMetadataInput } from "@goddard-ai/schema/daemon/sessions"
-import { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
+import { SessionId, type DaemonSession } from "@goddard-ai/session/schema"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {
@@ -11,7 +10,7 @@ async function requireSessionId(): Promise<DaemonSession["id"]> {
   const result = await client.session.resolveToken({
     token: requireSessionToken(),
   })
-  return DaemonSessionId.parse(result.id)
+  return SessionId.parse(result.id)
 }
 
 function requireSessionToken(): string {

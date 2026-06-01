@@ -1,7 +1,6 @@
 import { join } from "node:path"
 import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon/sessions"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { CreateSessionRequest, SessionId } from "@goddard-ai/session/schema"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
@@ -48,15 +47,15 @@ export interface WorkforceRuntimeDeps {
   session: {
     newSession: (params: {
       request: CreateSessionRequest
-      onPersisted?: (input: { sessionId: DaemonSessionId }) => void | Promise<void>
+      onPersisted?: (input: { sessionId: SessionId }) => void | Promise<void>
     }) => Promise<{
-      id: DaemonSessionId
+      id: SessionId
       acpSessionId: string
       status: string
     }>
   }
   attachSession?: (input: {
-    sessionId: DaemonSessionId
+    sessionId: SessionId
     rootDir: string
     agentId: string
     requestId: string

@@ -8,8 +8,10 @@ import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
-import type { GetSessionHistoryResponse } from "@goddard-ai/schema/daemon"
-import type { DaemonSessionDiagnosticEvent } from "@goddard-ai/schema/daemon/store"
+import type {
+  DaemonSessionDiagnosticEvent,
+  GetSessionHistoryResponse,
+} from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"

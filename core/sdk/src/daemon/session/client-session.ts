@@ -3,7 +3,7 @@ import type {
   DaemonSession,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 /** Minimal ACP client surface used by daemon-backed SDK sessions. */

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"

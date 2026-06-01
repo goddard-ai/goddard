@@ -19,18 +19,19 @@ import type {
   SessionDraftSuggestionsRequest,
   SessionHistoryMessage,
   SessionHistoryTurn,
+  SessionId,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
   SessionLocalCheckoutParams,
+  SessionMessageEvent,
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
+  SessionWorktreeParams,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   ShutdownSessionResponse,
-} from "@goddard-ai/schema/daemon"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
-import type { SessionWorktreeParams } from "@goddard-ai/session/schema"
+} from "@goddard-ai/session/schema"
 import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 
@@ -52,6 +53,8 @@ export type {
   SessionLaunchPreviewResponse,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SessionId,
+  SessionMessageEvent,
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
@@ -67,14 +70,14 @@ export type { SessionWorktreeParams } from "@goddard-ai/session/schema"
 export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
 
 export type SessionPromptRequest = {
-  id: DaemonSessionId
+  id: SessionId
   acpId: string
   prompt: string | acp.ContentBlock[]
 }
 
 /** SDK input for answering one ACP permission request through a daemon session. */
 export type SessionPermissionResponseRequest = {
-  id: DaemonSessionId
+  id: SessionId
   requestId: string | number
   outcome: acp.RequestPermissionOutcome
 }
@@ -129,7 +132,7 @@ export interface NewSessionParams extends BaseSessionParams {
 
 /** Parameters used to reconnect to one previously created daemon-backed session. */
 export interface LoadSessionParams extends BaseSessionParams {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
 }
 
 /** Union describing both reconnect and fresh session creation entrypoints. */

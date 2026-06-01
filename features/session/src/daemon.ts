@@ -1,6 +1,4 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
-import type { SendSessionMessageRequest, SessionMessageEvent } from "@goddard-ai/schema/daemon"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionEventEmitter } from "./daemon/events.ts"
@@ -12,6 +10,9 @@ import {
   StaticSessionParams,
   SubpackagesConfig,
   WorktreesConfig,
+  type SendSessionMessageRequest,
+  type SessionId,
+  type SessionMessageEvent,
 } from "./schema.ts"
 
 export { sessionDbSchema } from "./daemon/store.ts"
@@ -71,7 +72,7 @@ export const sessionPlugin = definePlugin({
       },
     })
 
-    async function* subscribeSessionMessages(id: DaemonSessionId, signal: AbortSignal) {
+    async function* subscribeSessionMessages(id: SessionId, signal: AbortSignal) {
       const queue: SessionMessageEvent[] = []
       let wake: (() => void) | undefined
       const listener = (event: SessionMessageEvent) => {

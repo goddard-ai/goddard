@@ -82,7 +82,7 @@ Each persisted record stores one completed turn:
 
 ```ts
 type DaemonSessionTurn = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   turnId: string
   sequence: number
   promptRequestId: string | number
@@ -105,7 +105,7 @@ Draft record:
 
 ```ts
 type DaemonSessionTurnDraft = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   turnId: string
   sequence: number
   promptRequestId: string | number
@@ -156,14 +156,14 @@ This design does not yet persist other session-scoped updates such as `session_i
 Replace the current history request payload:
 
 ```ts
-type DaemonSessionIdParams = { id: DaemonSessionId }
+type SessionIdParams = { id: SessionId }
 ```
 
 with:
 
 ```ts
 type GetSessionHistoryRequest = {
-  id: DaemonSessionId
+  id: SessionId
   cursor?: string
   limit?: number
 }

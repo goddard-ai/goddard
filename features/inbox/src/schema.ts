@@ -2,8 +2,9 @@ import {
   AttentionHeadline,
   AttentionMetadataInput,
   AttentionScope,
-} from "@goddard-ai/schema/daemon/sessions"
-import { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
+} from "@goddard-ai/schema/attention"
+import { DaemonPullRequestId } from "@goddard-ai/schema/id"
+import { SessionId } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
 /** Tagged inbox item id emitted by the daemon inbox store. */
@@ -14,7 +15,7 @@ export const InboxItemId = z.custom<`inb_${string}`>(
 export type InboxItemId = z.infer<typeof InboxItemId>
 
 /** Tagged daemon entity ids that can own one local inbox row. */
-export const InboxEntityId = z.union([DaemonSessionId, DaemonPullRequestId])
+export const InboxEntityId = z.union([SessionId, DaemonPullRequestId])
 
 export type InboxEntityId = z.infer<typeof InboxEntityId>
 
@@ -135,7 +136,7 @@ export type BulkUpdateInboxItemsResponse = {
 
 /** Request payload used to complete the inbox row for one daemon-managed session. */
 export const CompleteSessionInboxItemRequest = z.strictObject({
-  id: DaemonSessionId,
+  id: SessionId,
 })
 
 export type CompleteSessionInboxItemRequest = z.infer<typeof CompleteSessionInboxItemRequest>

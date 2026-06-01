@@ -1,5 +1,5 @@
 import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
-import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
+import { SessionIdParams } from "@goddard-ai/session/schema"
 
 import {
   CancelWorkforceRequest,
@@ -30,7 +30,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     workforce: http.resource("workforce", {
       /** Reads persisted workforce metadata attached to one daemon-managed session. */
       get: http.post("get", {
-        body: DaemonSessionIdParams,
+        body: SessionIdParams,
         response: $type<GetSessionWorkforceResponse>(),
       }),
     }),

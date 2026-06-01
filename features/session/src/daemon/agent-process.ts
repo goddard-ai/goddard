@@ -13,7 +13,6 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
-import type { SessionEnvPolicyConfig } from "@goddard-ai/session/schema"
 import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
 import {
   binaryInstallMarkerFileName,
@@ -21,6 +20,8 @@ import {
   resolveInstalledBinaryCommand,
 } from "acp-client/node"
 import { getErrorMessage } from "radashi"
+
+import type { SessionEnvPolicyConfig } from "../schema.ts"
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
 type AgentProcessSpec = {

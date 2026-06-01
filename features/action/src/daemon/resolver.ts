@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type { AgentsConfig, InlineSessionParams } from "@goddard-ai/schema/config"
-import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
+import type { CreateSessionRequest } from "@goddard-ai/session/schema"
 
 import { ActionConfig, mergeActionConfigLayers } from "../schema.ts"
 

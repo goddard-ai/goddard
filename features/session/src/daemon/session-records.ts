@@ -1,16 +1,17 @@
 import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import type * as acp from "acp-client/protocol"
+
 import type {
   CreateSessionRequest,
   DaemonSession,
   DaemonSessionMetadata,
+  DaemonSessionTurnDraft,
+  DaemonWorktree,
   SessionConnection,
   SessionHistoryTurn,
-} from "@goddard-ai/schema/daemon"
-import type { DaemonSessionTurnDraft, DaemonWorktree } from "@goddard-ai/schema/daemon/store"
-import type * as acp from "acp-client/protocol"
-
+} from "../schema.ts"
 import type { sessionDbSchema } from "./store.ts"
 import { toCompletedTurnInput } from "./turn-history.ts"
 import type { PreparedSessionWorktree, SessionWorktreeState } from "./worktree.ts"

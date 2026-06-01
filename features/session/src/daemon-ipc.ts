@@ -1,4 +1,5 @@
 import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+
 import {
   CancelSessionRequest,
   CompleteSessionRequest,
@@ -6,6 +7,7 @@ import {
   DeclareSessionInitiativeRequest,
   GetSessionChangesRequest as GetSessionChangesRequestSchema,
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
+  GetSessionWorktreeRequest,
   ListSessionsRequest,
   ReleaseSessionLaunchLeaseRequest,
   ReportSessionBlockerRequest,
@@ -14,6 +16,7 @@ import {
   SendSessionMessageRequest,
   SessionComposerSuggestionsRequest,
   SessionDraftSuggestionsRequest,
+  SessionIdParams,
   SessionLaunchPreviewRequest,
   SessionMessageEvent,
   SessionSubpackagesRequest,
@@ -27,6 +30,7 @@ import {
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryResponse,
   type GetSessionResponse,
+  type GetSessionWorktreeResponse,
   type ListSessionsResponse,
   type ReleaseSessionLaunchLeaseResponse,
   type ReportSessionResponse,
@@ -37,10 +41,7 @@ import {
   type SetSessionModelResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
-} from "@goddard-ai/schema/daemon/sessions"
-import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
-
-import { GetSessionWorktreeRequest, type GetSessionWorktreeResponse } from "./schema.ts"
+} from "./schema.ts"
 
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
@@ -56,12 +57,12 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Fetches one daemon-managed session record. */
     get: http.post("get", {
-      body: DaemonSessionIdParams,
+      body: SessionIdParams,
       response: $type<GetSessionResponse>(),
     }),
     /** Reconnects to one daemon-managed session record. */
     connect: http.post("connect", {
-      body: DaemonSessionIdParams,
+      body: SessionIdParams,
       response: $type<GetSessionResponse>(),
     }),
     /** Reads one daemon-managed session history with session identity and connection state. */
@@ -103,7 +104,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads one daemon-managed session diagnostics with event history and connection state. */
     diagnostics: http.post("diagnostics", {
-      body: DaemonSessionIdParams,
+      body: SessionIdParams,
       response: $type<GetSessionDiagnosticsResponse>(),
     }),
     worktree: http.resource("worktree", {
@@ -115,7 +116,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
     shutdown: http.post("shutdown", {
-      body: DaemonSessionIdParams,
+      body: SessionIdParams,
       response: $type<ShutdownSessionResponse>(),
     }),
     /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
@@ -174,7 +175,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Emits live daemon-published ACP messages for one daemon-managed session id. */
     messageEvents: http.get("message-events", {
-      query: DaemonSessionIdParams,
+      query: SessionIdParams,
       response: ndjson.$type<SessionMessageEvent>(),
     }),
   }),

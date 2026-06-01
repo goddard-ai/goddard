@@ -1,5 +1,5 @@
 import type { DaemonIpcClient } from "@goddard-ai/daemon-client"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
+import type { DaemonSession } from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 import type { SessionParams } from "../../session.ts"

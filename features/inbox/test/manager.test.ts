@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { SessionId } from "@goddard-ai/session/schema"
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import { kindstore, type Kindstore } from "kindstore"
 
@@ -26,7 +26,7 @@ function createTestInboxManager() {
 }
 
 function newSessionId() {
-  return `ses_${randomUUID()}` as DaemonSessionId
+  return `ses_${randomUUID()}` as SessionId
 }
 
 test("daemon attention creates and refreshes one inbox row per entity", () => {

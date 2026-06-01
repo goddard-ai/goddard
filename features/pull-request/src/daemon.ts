@@ -2,8 +2,8 @@ import { definePlugin, type DbContext, type Plugin } from "@goddard-ai/daemon-pl
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
+import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"

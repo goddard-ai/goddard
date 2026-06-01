@@ -1,15 +1,15 @@
 /** Launch-lease bookkeeping for ACP sessions prepared before durable daemon session creation. */
 import treeKill from "@alloc/tree-kill"
 import type { DaemonLogger } from "@goddard-ai/daemon-plugin"
-import type {
-  CreateSessionRequest,
-  SessionLaunchBranch,
-  SessionLaunchPreviewRequest,
-} from "@goddard-ai/schema/daemon"
 import type { AcpClient, AcpSession } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
+import type {
+  CreateSessionRequest,
+  SessionLaunchBranch,
+  SessionLaunchPreviewRequest,
+} from "../schema.ts"
 import { waitForAgentProcessExit, type AgentProcessHandle } from "./agent-process.ts"
 import type { ResolvedCreateSessionRequest } from "./session-records.ts"
 import type { PreparedSessionWorktree } from "./worktree.ts"

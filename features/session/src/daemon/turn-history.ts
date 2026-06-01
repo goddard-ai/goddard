@@ -1,9 +1,9 @@
 /** Turn-history helpers shared by daemon session lifecycle management. */
 import { randomUUID } from "node:crypto"
-import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/schema/daemon"
-import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import * as acp from "acp-client/protocol"
+
+import type { DaemonSession, SessionHistoryTurn, SessionId } from "../schema.ts"
 
 /** Stable request id used to identify one persisted prompt turn. */
 export type SessionTurnPromptRequestId = string | number
@@ -24,7 +24,7 @@ export type ActiveTurnBuffer<TDraftId extends string = string> = {
 
 /** Durable draft payload written into `sessionTurnDrafts`. */
 export type SessionTurnDraftInput = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   turnId: string
   sequence: number
   promptRequestId: SessionTurnPromptRequestId
@@ -35,7 +35,7 @@ export type SessionTurnDraftInput = {
 
 /** Durable completed-turn payload written into `sessionTurns`. */
 export type CompletedSessionTurnInput = {
-  sessionId: DaemonSessionId
+  sessionId: SessionId
   turnId: string
   sequence: number
   promptRequestId: SessionTurnPromptRequestId
@@ -327,7 +327,7 @@ export function toSessionHistoryTurnFromActiveTurn<TDraftId extends string>(
 
 /** Builds the durable payload stored in the mutable turn-draft kind. */
 export function toTurnDraftInput(
-  sessionId: DaemonSessionId,
+  sessionId: SessionId,
   activeTurn: ActiveTurnBuffer,
   updatedAt = new Date().toISOString(),
 ) {
@@ -343,7 +343,7 @@ export function toTurnDraftInput(
 }
 
 /** Builds the durable payload stored in the completed-turn kind. */
-export function toCompletedTurnInput(sessionId: DaemonSessionId, turn: SessionHistoryTurn) {
+export function toCompletedTurnInput(sessionId: SessionId, turn: SessionHistoryTurn) {
   return {
     sessionId,
     turnId: turn.turnId,

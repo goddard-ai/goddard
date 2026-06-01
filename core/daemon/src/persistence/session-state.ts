@@ -1,4 +1,4 @@
-import type { DaemonSession, DaemonSessionDiagnosticEvent } from "@goddard-ai/schema/daemon/store"
+import type { DaemonSession, DaemonSessionDiagnosticEvent } from "@goddard-ai/session/schema"
 
 /** Durable connectivity summary for a daemon session across daemon restarts. */
 export type SessionConnectionMode = DaemonSession["connectionMode"]

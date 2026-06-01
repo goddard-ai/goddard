@@ -11,8 +11,8 @@ import {
   type ReviewSyncResult,
   type ReviewSyncStatusData,
 } from "@goddard-ai/review-sync"
-import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import { sessionPlugin, type SessionWorktreeLifecycleState } from "@goddard-ai/session/daemon"
+import type { SessionId } from "@goddard-ai/session/schema"
 import { getErrorMessage } from "radashi"
 
 import { reviewSessionIpcRoutes } from "./daemon-ipc.ts"
@@ -26,10 +26,10 @@ type ReviewSessionRuntime = {
 
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
 function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>["session"]) {
-  const runtimes = new Map<DaemonSessionId, ReviewSessionRuntime>()
+  const runtimes = new Map<SessionId, ReviewSessionRuntime>()
 
   async function toResponse(
-    id: DaemonSessionId,
+    id: SessionId,
     reviewSession: ReviewSyncStatusData | null,
     warnings: string[] = [],
   ) {
@@ -83,11 +83,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     return result.status === "rejected-human-patch" ? [result.message] : []
   }
 
-  function emitReviewSessionWarnings(
-    id: DaemonSessionId,
-    reason: string,
-    result: ReviewSyncResult,
-  ) {
+  function emitReviewSessionWarnings(id: SessionId, reason: string, result: ReviewSyncResult) {
     for (const warning of createReviewSessionWarnings(result)) {
       session.emitDiagnostic(id, "review_session.warning", {
         reason,
@@ -98,7 +94,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     }
   }
 
-  function emitReviewSessionResult(id: DaemonSessionId, reason: string, result: ReviewSyncResult) {
+  function emitReviewSessionResult(id: SessionId, reason: string, result: ReviewSyncResult) {
     if (result.status === "error") {
       session.emitDiagnostic(id, "review_session.warning", {
         reason,
@@ -120,7 +116,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     return await realpath(resolve(value))
   }
 
-  async function stopRuntime(id: DaemonSessionId) {
+  async function stopRuntime(id: SessionId) {
     const runtime = runtimes.get(id)
     if (!runtime) {
       return
@@ -131,7 +127,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     await runtime.running.catch(() => {})
   }
 
-  async function runCycle(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
+  async function runCycle(id: SessionId, worktree: SessionWorktreeLifecycleState) {
     session.emitDiagnostic(id, "review_session.started", { reason: "manual" })
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
@@ -147,7 +143,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     }
   }
 
-  async function startRuntime(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
+  async function startRuntime(id: SessionId, worktree: SessionWorktreeLifecycleState) {
     await stopRuntime(id)
 
     const state = await readReviewSessionState(worktree)
@@ -185,7 +181,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
   }
 
   async function replaceMountedReviewSessionIfNeeded(
-    id: DaemonSessionId,
+    id: SessionId,
     worktree: SessionWorktreeLifecycleState,
   ) {
     const mounted = await findMountedReviewSessionByPrimaryDir(worktree.repoRoot)
@@ -211,7 +207,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     })
   }
 
-  async function mountForWorktree(id: DaemonSessionId, worktree: SessionWorktreeLifecycleState) {
+  async function mountForWorktree(id: SessionId, worktree: SessionWorktreeLifecycleState) {
     await replaceMountedReviewSessionIfNeeded(id, worktree)
     const result = await startReviewSync({
       cwd: worktree.repoRoot,
@@ -228,7 +224,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
   }
 
   async function cleanupMountedReviewSession(
-    id: DaemonSessionId,
+    id: SessionId,
     worktree: SessionWorktreeLifecycleState,
     reason: string,
   ) {
@@ -259,12 +255,12 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
       }
     },
 
-    async get(id: DaemonSessionId) {
+    async get(id: SessionId) {
       const worktree = await session.requireWorktree(id)
       return toResponse(id, await readReviewSessionState(worktree))
     },
 
-    async mount(id: DaemonSessionId) {
+    async mount(id: SessionId) {
       const worktree = await session.requireWorktree(id)
       const state = await mountForWorktree(id, worktree)
       if (session.isActive(id)) {
@@ -274,14 +270,14 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
       return toResponse(id, state)
     },
 
-    async run(id: DaemonSessionId) {
+    async run(id: SessionId) {
       const worktree = await session.requireWorktree(id)
       session.emitDiagnostic(id, "review_session.requested", { reason: "manual" })
       const result = await runCycle(id, worktree)
       return toResponse(id, result.state, result.warnings)
     },
 
-    async unmount(id: DaemonSessionId) {
+    async unmount(id: SessionId) {
       const worktree = await session.requireWorktree(id)
       await cleanupMountedReviewSession(id, worktree, "manual")
       return toResponse(id, null)
@@ -294,7 +290,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
     },
 
     onSessionStopping: async (event: {
-      sessionId: DaemonSessionId
+      sessionId: SessionId
       reason: string
       worktree: SessionWorktreeLifecycleState | null
     }) => {

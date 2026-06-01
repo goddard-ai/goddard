@@ -14,54 +14,12 @@ import type {
 } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
-import type {
-  AbortedSessionPrompt,
-  CancelSessionResponse,
-  CreateSessionRequest,
-  DaemonSession,
-  DaemonSessionStatus,
-  GetSessionChangesResponse,
-  GetSessionDiagnosticsResponse,
-  GetSessionHistoryRequest,
-  GetSessionHistoryResponse,
-  InitialPromptOption,
-  ListSessionsRequest,
-  ListSessionsResponse,
-  ReleaseSessionLaunchLeaseRequest,
-  ReleaseSessionLaunchLeaseResponse,
-  SessionComposerSuggestionsRequest,
-  SessionComposerSuggestionsResponse,
-  SessionDraftSuggestionsRequest,
-  SessionHistoryTurn,
-  SessionLaunchBranch,
-  SessionLaunchPreviewRequest,
-  SessionLaunchPreviewResponse,
-  SessionSubpackagesRequest,
-  SessionSubpackagesResponse,
-  SetSessionConfigOptionRequest,
-  SetSessionModelRequest,
-  SteerSessionResponse,
-} from "@goddard-ai/schema/daemon"
 import type {
   AttentionHeadline,
   AttentionMetadataInput,
   AttentionScope,
-} from "@goddard-ai/schema/daemon/sessions"
-import type {
-  DaemonSessionDiagnosticEvent,
-  DaemonSessionTurn,
-  DaemonSessionTurnDraft,
-  DaemonWorktree,
-} from "@goddard-ai/schema/daemon/store"
-import {
-  parseSessionIdleShutdownDurationMs,
-  type GetSessionWorktreeResponse,
-  type SessionsConfig,
-  type SessionTitlesConfig,
-  type SubpackagesConfig,
-  type WorktreesConfig,
-} from "@goddard-ai/session/schema"
+} from "@goddard-ai/schema/attention"
+import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
   createAcpClient,
@@ -75,6 +33,44 @@ import {
 import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
+import {
+  parseSessionIdleShutdownDurationMs,
+  type AbortedSessionPrompt,
+  type CancelSessionResponse,
+  type CreateSessionRequest,
+  type DaemonSession,
+  type DaemonSessionDiagnosticEvent,
+  type DaemonSessionStatus,
+  type DaemonSessionTurn,
+  type DaemonSessionTurnDraft,
+  type DaemonWorktree,
+  type GetSessionChangesResponse,
+  type GetSessionDiagnosticsResponse,
+  type GetSessionHistoryRequest,
+  type GetSessionHistoryResponse,
+  type GetSessionWorktreeResponse,
+  type InitialPromptOption,
+  type ListSessionsRequest,
+  type ListSessionsResponse,
+  type ReleaseSessionLaunchLeaseRequest,
+  type ReleaseSessionLaunchLeaseResponse,
+  type SessionComposerSuggestionsRequest,
+  type SessionComposerSuggestionsResponse,
+  type SessionDraftSuggestionsRequest,
+  type SessionHistoryTurn,
+  type SessionLaunchBranch,
+  type SessionLaunchPreviewRequest,
+  type SessionLaunchPreviewResponse,
+  type SessionsConfig,
+  type SessionSubpackagesRequest,
+  type SessionSubpackagesResponse,
+  type SessionTitlesConfig,
+  type SetSessionConfigOptionRequest,
+  type SetSessionModelRequest,
+  type SteerSessionResponse,
+  type SubpackagesConfig,
+  type WorktreesConfig,
+} from "../schema.ts"
 import {
   spawnAgentProcess,
   waitForAgentProcessExit,

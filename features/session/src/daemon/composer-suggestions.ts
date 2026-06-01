@@ -3,14 +3,15 @@ import { access, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import * as acp from "acp-client/protocol"
+
 import type {
   SessionComposerFileSuggestion,
   SessionComposerSkillSuggestion,
   SessionComposerSlashCommandSuggestion,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
-} from "@goddard-ai/schema/daemon"
-import * as acp from "acp-client/protocol"
+} from "../schema.ts"
 
 const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
 export const MAX_COMPOSER_SUGGESTION_LIMIT = 50

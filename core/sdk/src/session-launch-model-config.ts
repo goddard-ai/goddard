@@ -1,5 +1,5 @@
 /** ACP launch-preview model normalization helpers shared by SDK consumers. */
-import type { InitialSessionConfigOption } from "@goddard-ai/schema/daemon"
+import type { InitialSessionConfigOption } from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 const derivedThinkingConfigId = "_goddard_derived_thinking_level"

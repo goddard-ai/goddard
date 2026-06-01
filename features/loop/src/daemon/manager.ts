@@ -9,7 +9,7 @@ import type { loopDbSchema } from "./store.ts"
 
 type LoopDb = DbContext<typeof loopDbSchema>
 
-function isDaemonSessionId(value: string): value is `ses_${string}` {
+function isSessionId(value: string): value is `ses_${string}` {
   return value.startsWith("ses_")
 }
 
@@ -69,7 +69,7 @@ export function createLoopManager(input: LoopManagerInput): LoopManager {
       })
       runtimes.set(key, runtime)
       const loop = runtime.getLoop()
-      if (!isDaemonSessionId(loop.sessionId)) {
+      if (!isSessionId(loop.sessionId)) {
         throw new Error(`Loop runtime returned invalid daemon session id: ${loop.sessionId}`)
       }
       const existingRecord =

@@ -1,5 +1,5 @@
-import { AttentionMetadataInput } from "@goddard-ai/schema/daemon/sessions"
 import { RepoRef } from "@goddard-ai/remote-repo/schema"
+import { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import { DaemonPullRequestId, DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
 import { z } from "zod"
 

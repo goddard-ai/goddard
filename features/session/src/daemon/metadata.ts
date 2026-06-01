@@ -1,5 +1,6 @@
-import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/daemon/sessions"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
+
+import type { DaemonSession } from "../schema.ts"
 
 const genericScopes = new Set(["task", "update", "work", "work in progress", "progress"])
 

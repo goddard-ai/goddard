@@ -1,8 +1,8 @@
-import type { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 import type * as acp from "acp-client/protocol"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
+import type { SessionIdParams } from "./schema.ts"
 
 export const sessionSdkPlugin = defineSdkPlugin({
   name: "session",
@@ -12,7 +12,7 @@ export const sessionSdkPlugin = defineSdkPlugin({
       session: {
         /** Subscribes to live daemon-published ACP messages for one daemon-managed session id. */
         subscribe: async (
-          input: DaemonSessionIdParams,
+          input: SessionIdParams,
           onMessage: (message: acp.AnyMessage) => void,
         ): Promise<() => void> => {
           const controller = new AbortController()

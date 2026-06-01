@@ -1,9 +1,9 @@
 /** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import type { DaemonWorktree } from "@goddard-ai/schema/daemon/store"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
+import type { DaemonWorktree } from "../../schema.ts"
 import { defaultPlugin } from "./plugins/default.ts"
 import { worktrunkPlugin } from "./plugins/worktrunk.ts"
 import { runCommand } from "./process.ts"

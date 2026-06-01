@@ -1,11 +1,12 @@
+import { kind } from "kindstore"
+
 import {
   DaemonSession,
   DaemonSessionDiagnostics,
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
   DaemonWorktree,
-} from "@goddard-ai/schema/daemon/store"
-import { kind } from "kindstore"
+} from "../schema.ts"
 
 /** Session-owned kindstore collections contributed to the daemon composition root. */
 export const sessionDbSchema = {
