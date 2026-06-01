@@ -8,6 +8,7 @@ import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin"
 import type { LexicalEditor } from "lexical"
 import {
   COMMAND_PRIORITY_HIGH,
+  $getRoot,
   $getSelection,
   $isRangeSelection,
   KEY_ARROW_DOWN_COMMAND,
@@ -152,7 +153,7 @@ export component SessionInputPlugins(props: {
       KEY_ARROW_UP_COMMAND,
       (event) => {
         if (!props.menu) {
-          if (isSelectionAtComposerStart() && props.onHistoryPrevious?.()) {
+          if (shouldHandleHistoryPrevious() && props.onHistoryPrevious?.()) {
             event?.preventDefault()
             return true
           }
@@ -221,11 +222,17 @@ export component SessionInputPlugins(props: {
   />
 }
 
-function isSelectionAtComposerStart() {
+function shouldHandleHistoryPrevious() {
   const selection = $getSelection()
 
   if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
     return false
+  }
+
+  const text = $getRoot().getTextContent()
+
+  if (text.length > 0 && !text.includes("\n")) {
+    return true
   }
 
   const anchor = selection.anchor

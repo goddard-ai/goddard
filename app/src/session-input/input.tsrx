@@ -16,6 +16,7 @@ import {
   insertSessionInputSuggestion,
   setSessionInputEditorPrompt,
 } from "./input-editor-content.ts"
+import { getSessionInputPromptHistoryIndexes, getSessionInputPromptText } from "./input-history.ts"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import { SessionInputPlugins, sessionInputInitialConfig } from "./input-lexical.tsrx"
 import { SessionInputMenu } from "./input-menu.tsrx"
@@ -76,6 +77,7 @@ export component SessionInput(props: {
   const editorRef = useRef<LexicalEditor | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
   const historyDraftRef = useRef<SessionInputPromptBlocks | null>(null)
+  const historyFilteredIndexesRef = useRef<number[]>([])
   const historyIndexRef = useRef<number | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>(
     () => props.initialPrompt ?? [],
@@ -193,6 +195,9 @@ export component SessionInput(props: {
     }
 
     dismissedMenuRef.current = null
+    historyDraftRef.current = null
+    historyFilteredIndexesRef.current = []
+    historyIndexRef.current = null
     setPromptBlocks([])
     props.onPromptChange?.([])
 
@@ -259,6 +264,7 @@ export component SessionInput(props: {
       if (!historyPrompt || !arePromptBlocksEqual(nextPromptBlocks, historyPrompt)) {
         historyIndexRef.current = null
         historyDraftRef.current = null
+        historyFilteredIndexesRef.current = []
       }
     }
 
@@ -290,28 +296,59 @@ export component SessionInput(props: {
         return false
       }
 
+      const filter = getSessionInputPromptText(promptBlocks).trim().toLowerCase()
+      const historyIndexes = getSessionInputPromptHistoryIndexes(promptHistory, filter)
+
+      if (historyIndexes.length === 0) {
+        return false
+      }
+
       historyDraftRef.current = clonePromptBlocks(promptBlocks)
-      historyIndexRef.current = promptHistory.length - 1
+      historyFilteredIndexesRef.current = historyIndexes
+      historyIndexRef.current = historyIndexes[historyIndexes.length - 1]
       setPromptFromHistory(promptHistory[historyIndexRef.current])
       return true
     }
+
+    let historyIndexes = historyFilteredIndexesRef.current
+
+    if (historyIndexes.length === 0) {
+      historyIndexes = promptHistory.map((_, index) => index)
+    }
+
+    const currentFilteredIndex = historyIndexes.indexOf(historyIndexRef.current)
 
     if (direction === "previous") {
-      historyIndexRef.current = Math.max(0, historyIndexRef.current - 1)
+      const previousFilteredIndex = Math.max(0, currentFilteredIndex - 1)
+      const previousHistoryIndex = historyIndexes[previousFilteredIndex]
+
+      if (previousHistoryIndex === undefined) {
+        return false
+      }
+
+      historyIndexRef.current = previousHistoryIndex
       setPromptFromHistory(promptHistory[historyIndexRef.current])
       return true
     }
 
-    if (historyIndexRef.current >= promptHistory.length - 1) {
+    if (currentFilteredIndex >= historyIndexes.length - 1) {
       const draft = historyDraftRef.current ?? []
 
       historyIndexRef.current = null
       historyDraftRef.current = null
+      historyFilteredIndexesRef.current = []
       setPromptFromHistory(draft)
       return true
     }
 
-    historyIndexRef.current += 1
+    const nextFilteredIndex = currentFilteredIndex + 1
+    const nextHistoryIndex = historyIndexes[nextFilteredIndex]
+
+    if (nextHistoryIndex === undefined) {
+      return false
+    }
+
+    historyIndexRef.current = nextHistoryIndex
     setPromptFromHistory(promptHistory[historyIndexRef.current])
     return true
   }
