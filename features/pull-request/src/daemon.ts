@@ -12,7 +12,6 @@ import { pullRequestDbSchema } from "./daemon/store.ts"
 import type { DaemonPullRequest } from "./schema.ts"
 
 export { pullRequestDbSchema } from "./daemon/store.ts"
-export { type PullRequestEventEmitter } from "./daemon/events.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -73,15 +72,11 @@ export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
   db: pullRequestDbSchema,
+  events: pullRequestEvents,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ backend, configProvider, db, ipc, session }) {
+  setup({ backend, configProvider, db, events, ipc, session }) {
     return {
-      provides: {
-        pullRequest: {
-          events: pullRequestEvents,
-        },
-      },
       ipcHandlers: {
         pr: {
           submit: async ({ body: payload }) => {
@@ -110,7 +105,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: resolvedInput.title,
             })
-            pullRequestEvents.emit("lifecycle.created", {
+            events.emit("pull_request.created", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,
@@ -161,7 +156,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: "PR reply posted",
             })
-            pullRequestEvents.emit("lifecycle.updated", {
+            events.emit("pull_request.updated", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,

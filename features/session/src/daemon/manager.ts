@@ -2235,7 +2235,7 @@ export function createSessionManager(input: {
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
       try {
-        input.events.emit("lifecycle.sessionStopping", {
+        input.events.emit("session.stopping", {
           sessionId: activeSession.id,
           reason: "agent_process_exit",
           worktree: worktreeRecord
@@ -2426,7 +2426,7 @@ export function createSessionManager(input: {
       }
 
       if (worktree) {
-        await input.events.emit("lifecycle.worktreePrepared", {
+        await input.events.emit("session.worktree.prepared", {
           sessionId: id,
           request: resolvedRequest,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -2549,7 +2549,7 @@ export function createSessionManager(input: {
       await params.onPersisted?.({
         sessionId: id,
       })
-      await input.events.emit("lifecycle.sessionPersisted", {
+      await input.events.emit("session.persisted", {
         sessionId: id,
         request: resolvedRequest,
       })
@@ -2586,7 +2586,7 @@ export function createSessionManager(input: {
           supportsLoadSession: sessionSupportsLoad,
         })
         if (worktree) {
-          await input.events.emit("lifecycle.launchFinished", {
+          await input.events.emit("session.launch.finished", {
             sessionId: id,
             reason: "one_shot_completed",
             worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -2607,7 +2607,7 @@ export function createSessionManager(input: {
         idleShutdownTimeoutMs: resolveIdleSessionShutdownTimeoutMs(resolvedConfig),
       })
       if (worktree) {
-        await input.events.emit("lifecycle.sessionActivated", {
+        await input.events.emit("session.activated", {
           sessionId: id,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
         })
@@ -2625,7 +2625,7 @@ export function createSessionManager(input: {
         await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
       }
       if (worktree) {
-        await input.events.emit("lifecycle.launchFailed", {
+        await input.events.emit("session.launch.failed", {
           sessionId: id,
           error,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -3171,7 +3171,7 @@ export function createSessionManager(input: {
       completedHidden: false,
       blockedReason: reason,
     })
-    await input.events.emit("lifecycle.blocked", {
+    await input.events.emit("session.blocked", {
       sessionId: id,
       reason,
       scope: resolved.scope,
@@ -3201,7 +3201,7 @@ export function createSessionManager(input: {
 
     const activeTurn = activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn?.touchedAttentionEntity !== true) {
-      await input.events.emit("lifecycle.turnEnded", {
+      await input.events.emit("session.turn.ended", {
         sessionId: id,
         scope: resolved.scope,
         headline: resolved.headline,
@@ -3311,7 +3311,7 @@ export function createSessionManager(input: {
     updateSession(id, {
       completedHidden: true,
     })
-    await input.events.emit("lifecycle.completed", {
+    await input.events.emit("session.completed", {
       sessionId: id,
     })
     return requireSessionDocument(id)
@@ -3342,7 +3342,7 @@ export function createSessionManager(input: {
       updateSession(id, {
         completedHidden: false,
       })
-      await input.events.emit("lifecycle.replied", {
+      await input.events.emit("session.replied", {
         sessionId: id,
       })
       refreshIdleShutdownState(active.id, "prompt_enqueued")
@@ -3515,7 +3515,7 @@ export function createSessionManager(input: {
     emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     try {
-      await input.events.emit("lifecycle.sessionStopping", {
+      await input.events.emit("session.stopping", {
         sessionId: id,
         reason: "session_shutdown",
         worktree: worktreeRecord ? toSessionWorktreeLifecycleState(worktreeRecord, id) : null,
@@ -3557,7 +3557,7 @@ export function createSessionManager(input: {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
       try {
-        input.events.emit("lifecycle.sessionStopping", {
+        input.events.emit("session.stopping", {
           sessionId: session.id,
           reason: "daemon_shutdown",
           worktree: worktreeRecord

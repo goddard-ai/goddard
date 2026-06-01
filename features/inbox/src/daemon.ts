@@ -9,20 +9,19 @@ import type { InboxItemEvent } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
-type InboxPlugin = {
+type InboxPlugin = Plugin & {
   readonly name: "inbox"
   readonly consumes: readonly [typeof sessionPlugin, typeof pullRequestPlugin]
   readonly db: typeof inboxDbSchema
   readonly ipcRoutes: typeof inboxIpcRoutes
-  readonly setup: Plugin["setup"]
 }
 
-export const inboxPlugin: InboxPlugin = definePlugin({
+const inboxPluginDefinition = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin, pullRequestPlugin],
   db: inboxDbSchema,
   ipcRoutes: inboxIpcRoutes,
-  setup({ db, pullRequest, session }) {
+  setup({ db, events, session }) {
     const itemListeners = new Set<(event: InboxItemEvent) => void>()
     const inbox = createInboxManager({
       db,
@@ -64,7 +63,7 @@ export const inboxPlugin: InboxPlugin = definePlugin({
       }
     }
 
-    session.events.on("lifecycle.blocked", (event) => {
+    events.on("session.blocked", (event) => {
       inbox.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.blocked",
@@ -73,7 +72,7 @@ export const inboxPlugin: InboxPlugin = definePlugin({
         turnId: event.turnId,
       })
     })
-    session.events.on("lifecycle.turnEnded", (event) => {
+    events.on("session.turn.ended", (event) => {
       inbox.touchInboxItem({
         entityId: event.sessionId,
         reason: "session.turn_ended",
@@ -82,10 +81,10 @@ export const inboxPlugin: InboxPlugin = definePlugin({
         turnId: event.turnId,
       })
     })
-    session.events.on("lifecycle.replied", (event) => {
+    events.on("session.replied", (event) => {
       inbox.markSessionReplied(event.sessionId)
     })
-    pullRequest.events.on("lifecycle.created", (event) => {
+    events.on("pull_request.created", (event) => {
       inbox.touchInboxItem({
         entityId: event.pullRequestId,
         reason: "pull_request.created",
@@ -94,7 +93,7 @@ export const inboxPlugin: InboxPlugin = definePlugin({
         turnId: event.turnId,
       })
     })
-    pullRequest.events.on("lifecycle.updated", (event) => {
+    events.on("pull_request.updated", (event) => {
       inbox.touchInboxItem({
         entityId: event.pullRequestId,
         reason: "pull_request.updated",
@@ -124,3 +123,5 @@ export const inboxPlugin: InboxPlugin = definePlugin({
     }
   },
 })
+
+export const inboxPlugin: InboxPlugin = inboxPluginDefinition

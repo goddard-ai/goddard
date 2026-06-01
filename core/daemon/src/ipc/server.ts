@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
-import { type DaemonConfigProvider, type DaemonSetupSubstrate } from "@goddard-ai/daemon-plugin"
+import {
+  createDaemonEventBus,
+  type DaemonConfigProvider,
+  type DaemonSetupSubstrate,
+} from "@goddard-ai/daemon-plugin"
 import { composeIpcRoutes } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
 import { coreDaemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
@@ -219,6 +223,7 @@ async function setupDaemonPlugins(
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
+  const events = createDaemonEventBus()
 
   for (const plugin of getDaemonPluginComposition().plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
@@ -230,6 +235,7 @@ async function setupDaemonPlugins(
         db: createPluginDbContext(plugin, store),
         backend: createPluginBackendContext(plugin, backendClient),
         configProvider: createPluginConfigProvider(configProvider, plugin),
+        events,
       },
       ...consumedExtensions,
     )

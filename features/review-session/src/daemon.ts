@@ -308,12 +308,12 @@ export const reviewSessionPlugin = definePlugin({
   name: "review-session",
   consumes: [sessionPlugin],
   ipcRoutes: reviewSessionIpcRoutes,
-  setup({ session }) {
+  setup({ events, session }) {
     const reviewSession = createReviewSessionManager(session)
 
     void reviewSession.reconcilePersistedWorktrees()
 
-    session.events.on("lifecycle.sessionStopping", reviewSession.onSessionStopping)
+    events.on("session.stopping", reviewSession.onSessionStopping)
 
     return {
       close: () => reviewSession.close(),

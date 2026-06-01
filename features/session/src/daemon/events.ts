@@ -1,5 +1,5 @@
+import { event, type EventBus } from "@goddard-ai/daemon-plugin"
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
-import mitt from "mitt"
 
 import type { CreateSessionRequest, SessionId } from "../schema.ts"
 
@@ -26,39 +26,47 @@ type SessionWorktreeLifecycleEvent = {
   worktree: SessionWorktreeLifecycleState
 }
 
-export const sessionEvents = mitt<{
-  "lifecycle.worktreePrepared": SessionWorktreeLifecycleEvent & {
-    request: CreateSessionRequest
-  }
-  "lifecycle.sessionPersisted": {
+export const sessionEvents = {
+  "session.worktree.prepared": event<
+    SessionWorktreeLifecycleEvent & {
+      request: CreateSessionRequest
+    }
+  >(),
+  "session.persisted": event<{
     sessionId: SessionId
     request: CreateSessionRequest
-  }
-  "lifecycle.sessionActivated": {
+  }>(),
+  "session.activated": event<{
     sessionId: SessionId
     worktree: SessionWorktreeLifecycleState | null
-  }
-  "lifecycle.launchFinished": SessionWorktreeLifecycleEvent & {
-    reason: "one_shot_completed"
-  }
-  "lifecycle.launchFailed": SessionWorktreeLifecycleEvent & {
-    error: unknown
-  }
-  "lifecycle.sessionStopping": {
+  }>(),
+  "session.launch.finished": event<
+    SessionWorktreeLifecycleEvent & {
+      reason: "one_shot_completed"
+    }
+  >(),
+  "session.launch.failed": event<
+    SessionWorktreeLifecycleEvent & {
+      error: unknown
+    }
+  >(),
+  "session.stopping": event<{
     sessionId: SessionId
     reason: "agent_process_exit" | "session_shutdown" | "daemon_shutdown"
     worktree: SessionWorktreeLifecycleState | null
-  }
-  "lifecycle.blocked": SessionAttentionEvent & {
-    reason: string
-  }
-  "lifecycle.turnEnded": SessionAttentionEvent
-  "lifecycle.replied": {
+  }>(),
+  "session.blocked": event<
+    SessionAttentionEvent & {
+      reason: string
+    }
+  >(),
+  "session.turn.ended": event<SessionAttentionEvent>(),
+  "session.replied": event<{
     sessionId: SessionId
-  }
-  "lifecycle.completed": {
+  }>(),
+  "session.completed": event<{
     sessionId: SessionId
-  }
-}>()
+  }>(),
+}
 
-export type SessionEventEmitter = typeof sessionEvents
+export type SessionEventEmitter = EventBus<typeof sessionEvents>

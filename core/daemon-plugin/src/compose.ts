@@ -9,6 +9,7 @@ import type {
   ConfigDefinition,
   DaemonLogContextDefinition,
   DbSchemaDefinition,
+  EventDefinitions,
   JsonSchemaArtifactDefinition,
   Plugin,
 } from "./contracts.ts"
@@ -31,6 +32,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
   const orderedPlugins = sortPluginsByDependency(plugins)
 
   const config: Record<string, ConfigDefinition<any, any>> = {}
+  const events: EventDefinitions = {}
   const db: DbSchemaDefinition = {}
   const backendRouteTrees: BackendRouteTree[] = []
   const ipcRouteTrees: IpcRouteTree[] = []
@@ -60,6 +62,12 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     if (plugin.backendRoutes) {
       backendRouteTrees.push(plugin.backendRoutes)
     }
+    for (const [name, definition] of Object.entries(plugin.events ?? {})) {
+      if (events[name]) {
+        throw new Error(`Duplicate daemon plugin event: ${name}`)
+      }
+      events[name] = definition
+    }
     if (plugin.logContext) {
       logContexts.push(plugin.logContext)
     }
@@ -77,6 +85,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     backendRoutes: composeBackendRoutes(backendRouteTrees),
     config,
     jsonSchemas,
+    events,
     db: db as ComposedPluginDb<TPlugins>,
     logContexts,
   } satisfies Composition

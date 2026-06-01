@@ -3,7 +3,7 @@ import { $type, http, ndjson } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { composePlugins, definePlugin } from "../src/index.ts"
+import { composePlugins, definePlugin, event } from "../src/index.ts"
 
 describe("daemon plugin composition", () => {
   test("orders plugins by consumed dependencies and composes route/config fragments", () => {
@@ -136,6 +136,57 @@ describe("daemon plugin composition", () => {
     expect(() => composePlugins([first, second])).toThrow(
       "Duplicate daemon plugin JSON schema artifact: config.json",
     )
+  })
+
+  test("rejects duplicate event names", () => {
+    const first = definePlugin({
+      name: "first",
+      events: {
+        "session.turn.ended": event<{ sessionId: string }>(),
+      },
+    })
+    const second = definePlugin({
+      name: "second",
+      events: {
+        "session.turn.ended": event<{ sessionId: string }>(),
+      },
+    })
+
+    expect(() => composePlugins([first, second])).toThrow(
+      "Duplicate daemon plugin event: session.turn.ended",
+    )
+  })
+
+  test("types event access by ownership and consumed dependencies", () => {
+    const session = definePlugin({
+      name: "session",
+      events: {
+        "session.turn.ended": event<{ sessionId: string }>(),
+      },
+      setup({ events }) {
+        events.emit("session.turn.ended", { sessionId: "session-1" })
+        events.on("session.turn.ended", (payload) => payload.sessionId)
+
+        // @ts-expect-error Plugins cannot emit events they do not declare.
+        events.emit("pull_request.created", { pullRequestId: "pr_1" })
+      },
+    })
+    const inbox = definePlugin({
+      name: "inbox",
+      consumes: [session],
+      setup({ events }) {
+        events.on("session.turn.ended", (payload) => payload.sessionId)
+
+        // @ts-expect-error Plugins cannot emit events declared by consumed plugins.
+        events.emit("session.turn.ended", { sessionId: "session-1" })
+        // @ts-expect-error Plugins can only listen to self or consumed plugin events.
+        events.on("pull_request.created", () => {})
+      },
+    })
+
+    const composition = composePlugins([inbox, session])
+
+    expect(composition.events["session.turn.ended"]).toBeDefined()
   })
 
   test("rejects consumed plugins that are not part of the composition", () => {

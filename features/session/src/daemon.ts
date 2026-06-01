@@ -47,6 +47,7 @@ export const sessionPlugin = definePlugin({
     },
   },
   db: sessionDbSchema,
+  events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const messageListeners = new Set<(event: SessionMessageEvent) => void>()
@@ -58,7 +59,7 @@ export const sessionPlugin = definePlugin({
       log: context.log,
       registryService: context.registryService,
       sessionContext: context.sessionContext,
-      events: sessionEvents,
+      events: context.events,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
       emitMessage(id, message) {
         for (const listener of messageListeners) {
@@ -121,7 +122,6 @@ export const sessionPlugin = definePlugin({
           findWorktreeByDir: sessionManager.findWorktreeByDir,
           isActive: sessionManager.isActive,
           emitDiagnostic: sessionManager.emitDiagnostic,
-          events: sessionEvents,
         },
       },
       close: sessionManager.close,
