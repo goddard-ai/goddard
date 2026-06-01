@@ -1,7 +1,7 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import { createSessionEventEmitter } from "./daemon/events.ts"
+import { sessionEvents } from "./daemon/events.ts"
 import { createSessionManager } from "./daemon/manager.ts"
 import { sessionDbSchema } from "./daemon/store.ts"
 import {
@@ -19,11 +19,7 @@ export { sessionDbSchema } from "./daemon/store.ts"
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type { LoadSessionParams, NewSessionParams, SessionLaunchParams } from "./daemon/manager.ts"
-export {
-  type SessionEventEmitter,
-  type SessionEvents,
-  type SessionWorktreeLifecycleState,
-} from "./daemon/events.ts"
+export { type SessionEventEmitter, type SessionWorktreeLifecycleState } from "./daemon/events.ts"
 
 export const sessionPlugin = definePlugin({
   name: "session",
@@ -53,7 +49,6 @@ export const sessionPlugin = definePlugin({
   db: sessionDbSchema,
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
-    const events = createSessionEventEmitter()
     const messageListeners = new Set<(event: SessionMessageEvent) => void>()
     const sessionManager = createSessionManager({
       db: context.db,
@@ -63,7 +58,7 @@ export const sessionPlugin = definePlugin({
       log: context.log,
       registryService: context.registryService,
       sessionContext: context.sessionContext,
-      events,
+      events: sessionEvents,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
       emitMessage(id, message) {
         for (const listener of messageListeners) {
@@ -126,7 +121,7 @@ export const sessionPlugin = definePlugin({
           findWorktreeByDir: sessionManager.findWorktreeByDir,
           isActive: sessionManager.isActive,
           emitDiagnostic: sessionManager.emitDiagnostic,
-          events,
+          events: sessionEvents,
         },
       },
       close: sessionManager.close,

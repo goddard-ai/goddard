@@ -6,13 +6,13 @@ import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
-import { createPullRequestEventEmitter } from "./daemon/events.ts"
+import { pullRequestEvents } from "./daemon/events.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 import { pullRequestDbSchema } from "./daemon/store.ts"
 import type { DaemonPullRequest } from "./schema.ts"
 
 export { pullRequestDbSchema } from "./daemon/store.ts"
-export { type PullRequestEventEmitter, type PullRequestEvents } from "./daemon/events.ts"
+export { type PullRequestEventEmitter } from "./daemon/events.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -76,12 +76,10 @@ export const pullRequestPlugin = definePlugin({
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, configProvider, db, ipc, session }) {
-    const events = createPullRequestEventEmitter()
-
     return {
       provides: {
         pullRequest: {
-          events,
+          events: pullRequestEvents,
         },
       },
       ipcHandlers: {
@@ -112,7 +110,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: resolvedInput.title,
             })
-            await events.emit("lifecycle.created", {
+            pullRequestEvents.emit("lifecycle.created", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,
@@ -163,7 +161,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: "PR reply posted",
             })
-            await events.emit("lifecycle.updated", {
+            pullRequestEvents.emit("lifecycle.updated", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,

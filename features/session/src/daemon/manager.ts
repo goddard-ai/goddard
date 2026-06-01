@@ -2234,22 +2234,22 @@ export function createSessionManager(input: {
       await activeSession.client.close().catch(() => {})
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
-      await input.events
-        .emit("lifecycle.sessionStopping", {
+      try {
+        input.events.emit("lifecycle.sessionStopping", {
           sessionId: activeSession.id,
           reason: "agent_process_exit",
           worktree: worktreeRecord
             ? toSessionWorktreeLifecycleState(worktreeRecord, activeSession.id)
             : null,
         })
-        .catch((error) => {
-          emitDiagnostic(
-            activeSession.id,
-            "session_stop_cleanup_failed",
-            { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
-            activeSession.logger,
-          )
-        })
+      } catch (error) {
+        emitDiagnostic(
+          activeSession.id,
+          "session_stop_cleanup_failed",
+          { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
+          activeSession.logger,
+        )
+      }
 
       const nextUpdate: Partial<DaemonSession> = {}
       if (code !== 0 && code !== null) {
@@ -3556,15 +3556,15 @@ export function createSessionManager(input: {
     for (const session of activeSessions.values()) {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
-      await input.events
-        .emit("lifecycle.sessionStopping", {
+      try {
+        input.events.emit("lifecycle.sessionStopping", {
           sessionId: session.id,
           reason: "daemon_shutdown",
           worktree: worktreeRecord
             ? toSessionWorktreeLifecycleState(worktreeRecord, session.id)
             : null,
         })
-        .catch(() => {})
+      } catch {}
       emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
