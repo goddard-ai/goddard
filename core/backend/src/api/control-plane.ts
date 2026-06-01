@@ -4,12 +4,8 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type {
-  CreatePrInput,
-  GitHubWebhookInput,
-  PullRequestRecord,
-} from "@goddard-ai/pull-request/schema"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
+import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"

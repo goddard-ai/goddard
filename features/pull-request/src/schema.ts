@@ -62,33 +62,6 @@ export type DaemonPullRequest = z.output<typeof DaemonPullRequest> & {
   updatedAt: number
 }
 
-const issueCommentWebhook = z.object({
-  type: z.literal("issue_comment"),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-  author: z.string(),
-  body: z.string(),
-})
-
-const pullRequestReviewWebhook = z.object({
-  type: z.literal("pull_request_review"),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number(),
-  author: z.string(),
-  state: z.enum(["approved", "changes_requested", "commented"]),
-  body: z.string(),
-})
-
-/** Normalized GitHub webhook payload accepted by backend webhook handlers. */
-export const GitHubWebhookInput = z.discriminatedUnion("type", [
-  issueCommentWebhook,
-  pullRequestReviewWebhook,
-])
-
-export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInput>
-
 /** Request payload used to create one pull request through the daemon. */
 export const SubmitPrRequest = z.strictObject({
   cwd: z.string(),

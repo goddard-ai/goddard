@@ -1,6 +1,5 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
 import { $type, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import { CreatePrInput, ManagedPrQuery, ReplyPrInput, type PullRequestRecord } from "../schema.ts"
 
@@ -23,12 +22,6 @@ export const pullRequestBackendRoutes = defineBackendRoutes({
         body: ReplyPrInput,
         response: $type<{ success: boolean }>(),
       }),
-    }),
-  }),
-  webhooks: http.resource("webhooks", {
-    github: http.post("github", {
-      body: http.rawBody(),
-      response: $type<RepoEvent>(),
     }),
   }),
 })

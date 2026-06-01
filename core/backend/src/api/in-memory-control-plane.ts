@@ -5,12 +5,9 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type {
-  CreatePrInput,
-  GitHubWebhookInput,
-  PullRequestRecord,
-} from "@goddard-ai/pull-request/schema"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
+import { normalizeGitHubWebhookEvent } from "@goddard-ai/remote-repo/backend"
+import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
@@ -185,32 +182,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
     assertRepo(event.owner, event.repo)
 
-    const createdAt = new Date().toISOString()
-    const mapped: RepoEvent =
-      event.type === "issue_comment"
-        ? {
-            type: "comment",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
-        : {
-            type: "review",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            state: event.state,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
-
-    return mapped
+    return normalizeGitHubWebhookEvent(event)
   }
 
   addStreamSocket(githubUsername: string, socket: unknown): void {

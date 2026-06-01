@@ -5,12 +5,9 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type {
-  CreatePrInput,
-  GitHubWebhookInput,
-  PullRequestRecord,
-} from "@goddard-ai/pull-request/schema"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
+import { normalizeGitHubWebhookEvent } from "@goddard-ai/remote-repo/backend"
+import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
@@ -190,32 +187,7 @@ export class TursoBackendControlPlane implements BackendControlPlane {
   async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {
     assertRepo(event.owner, event.repo)
 
-    const createdAt = new Date().toISOString()
-    const mapped: RepoEvent =
-      event.type === "issue_comment"
-        ? {
-            type: "comment",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
-        : {
-            type: "review",
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-            author: event.author,
-            state: event.state,
-            body: event.body,
-            reactionAdded: "eyes",
-            createdAt,
-          }
-
-    return mapped
+    return normalizeGitHubWebhookEvent(event)
   }
 
   async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {
