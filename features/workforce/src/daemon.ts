@@ -115,7 +115,7 @@ export const workforcePlugin = definePlugin({
         throw new IpcClientError("Invalid session token")
       }
 
-      ipc.requireRequestContext().setSessionId(tokenScope.sessionId)
+      ipc.requestContext.setSessionId(tokenScope.sessionId)
 
       const workforceRecord =
         db.workforces.first({

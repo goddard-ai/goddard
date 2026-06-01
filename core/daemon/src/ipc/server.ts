@@ -105,7 +105,9 @@ export async function startDaemonServer(
       run: (context, callback) => SessionContext.run(context, callback),
     },
     ipc: {
-      requireRequestContext: requireIpcRequestContext,
+      get requestContext() {
+        return requireIpcRequestContext()
+      },
     },
   } satisfies DaemonSetupSubstrate
 

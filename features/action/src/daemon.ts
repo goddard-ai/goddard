@@ -37,7 +37,7 @@ export const actionPlugin = definePlugin({
                 }),
               }),
             }
-            ipc.requireRequestContext().setSessionId(response.session.id)
+            ipc.requestContext.setSessionId(response.session.id)
             return response
           },
         },
