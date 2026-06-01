@@ -415,6 +415,7 @@
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
         "kindstore": "catalog:",
+        "mitt": "catalog:",
         "zod": "catalog:",
       },
     },

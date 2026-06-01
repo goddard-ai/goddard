@@ -1,10 +1,21 @@
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
+import mitt, { type Handler } from "mitt"
 
 import type { PullRequestId } from "../schema.ts"
 
 type MaybePromise<T> = T | Promise<T>
 
 type EventListener<TPayload, TResult = void> = (payload: TPayload) => MaybePromise<TResult>
+
+type EventPayload<TEvents, TName extends keyof TEvents> = TEvents[TName] extends (
+  payload: infer TPayload,
+) => unknown
+  ? TPayload
+  : never
+
+type PullRequestEventPayloads = {
+  [TName in keyof PullRequestEvents]: EventPayload<PullRequestEvents, TName>
+}
 
 type PullRequestAttentionEvent = {
   pullRequestId: PullRequestId
@@ -21,7 +32,7 @@ export type PullRequestEventEmitter = {
   ): () => void
   emit<const TName extends keyof PullRequestEvents>(
     eventName: TName,
-    payload: PullRequestAttentionEvent,
+    payload: EventPayload<PullRequestEvents, TName>,
   ): Promise<void>
 }
 
@@ -33,25 +44,23 @@ export type PullRequestEvents = {
 
 /** Creates the pull-request feature event emitter provided to consuming daemon plugins. */
 export function createPullRequestEventEmitter(): PullRequestEventEmitter {
-  const listeners: {
-    [TName in keyof PullRequestEvents]: Set<PullRequestEvents[TName]>
-  } = {
-    "lifecycle.created": new Set(),
-    "lifecycle.updated": new Set(),
-  }
+  const emitter = mitt<PullRequestEventPayloads>()
 
   return {
     on(eventName, listener) {
-      listeners[eventName].add(listener)
+      const handler = listener as Handler<PullRequestEventPayloads[typeof eventName]>
+      emitter.on(eventName, handler)
       return () => {
-        listeners[eventName].delete(listener)
+        emitter.off(eventName, handler)
       }
     },
     async emit(eventName, payload) {
-      const eventListeners = [...listeners[eventName]]
+      const eventListeners = [...(emitter.all.get(eventName) ?? [])] as Array<
+        PullRequestEvents[typeof eventName]
+      >
 
       for (const listener of eventListeners) {
-        await listener(payload)
+        await listener(payload as never)
       }
     },
   }

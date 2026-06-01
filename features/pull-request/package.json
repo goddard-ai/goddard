@@ -65,6 +65,7 @@
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "kindstore": "catalog:",
+    "mitt": "catalog:",
     "zod": "catalog:"
   }
 }
