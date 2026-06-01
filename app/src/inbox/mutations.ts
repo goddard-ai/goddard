@@ -1,9 +1,9 @@
 import type {
   BulkUpdateInboxItemsRequest,
-  CompleteSessionRequest,
+  CompleteSessionInboxItemRequest,
   InboxItem,
   UpdateInboxItemRequest,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/inbox/schema"
 
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
@@ -11,7 +11,7 @@ import { goddardSdk } from "~/sdk.ts"
 
 export const InboxPageMutations = createMutationsProvider<{
   bulkUpdateInboxItems: (input: BulkUpdateInboxItemsRequest) => Promise<unknown> | unknown
-  completeSessionInboxItem: (input: CompleteSessionRequest) => Promise<unknown> | unknown
+  completeSessionInboxItem: (input: CompleteSessionInboxItemRequest) => Promise<unknown> | unknown
   openInboxItem: (item: InboxItem) => void
   updateInboxItem: (input: UpdateInboxItemRequest) => Promise<unknown> | unknown
 }>("InboxPageMutations")
@@ -36,8 +36,8 @@ export async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
 }
 
 /** Completes one session-owned inbox row through the entity-specific daemon mutation. */
-export async function completeSessionInboxItem(input: CompleteSessionRequest) {
-  const result = await goddardSdk.session.complete(input)
+export async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
+  const result = await goddardSdk.inbox.completeSession(input)
   invalidateInboxQueries()
   return result
 }

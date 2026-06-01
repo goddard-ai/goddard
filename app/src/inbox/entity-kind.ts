@@ -1,4 +1,4 @@
-import type { InboxEntityId, InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxEntityId, InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonPullRequestId, DaemonSessionId } from "@goddard-ai/schema/id"
 
 /** Entity families supported by daemon-local inbox rows. */

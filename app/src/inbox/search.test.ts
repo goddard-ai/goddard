@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { expect, test } from "bun:test"
 
 import {

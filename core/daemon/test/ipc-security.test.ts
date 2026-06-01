@@ -426,7 +426,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     status: "read",
   })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
-  await send(client, "session.complete", { id: "ses_inbox" })
+  await send(client, "inbox.completeSession", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
   await waitFor(async () => inboxEvents.length >= 3)
   expect(inboxEvents).toEqual([

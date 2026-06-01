@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
 
 /** Stable fake inbox rows used by the inbox debug surface. */
 export const INBOX_DEBUG_ITEMS = [

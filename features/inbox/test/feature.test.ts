@@ -15,6 +15,7 @@ describe("inbox feature package", () => {
       "list",
       "update",
       "bulkUpdate",
+      "completeSession",
       "item",
     ])
     expect(Object.keys(inboxSdkPlugin.wrap!({ client: {} as never }))).toEqual(["inbox"])

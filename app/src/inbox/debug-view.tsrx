@@ -1,12 +1,12 @@
 import { useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
-  CompleteSessionRequest,
+  CompleteSessionInboxItemRequest,
   InboxEntityId,
   InboxItem,
   InboxStatus,
   UpdateInboxItemRequest,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/inbox/schema"
 
 import { getInboxEntityKind, isInboxEntityKind } from "./entity-kind.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
@@ -56,7 +56,7 @@ function applyDebugInboxUpdate(item: InboxItem, input: UpdateInboxItemRequest, t
 
 function applyDebugSessionCompletion(
   item: InboxItem,
-  input: CompleteSessionRequest,
+  input: CompleteSessionInboxItemRequest,
   timestamp: number,
 ) {
   if (!isInboxEntityKind(item, "session") || item.entityId !== input.id) {

@@ -1,4 +1,4 @@
-import type { InboxStatus } from "@goddard-ai/schema/daemon"
+import type { InboxStatus } from "@goddard-ai/inbox/schema"
 
 export const DEFAULT_INBOX_FILTER_ID = "unread"
 

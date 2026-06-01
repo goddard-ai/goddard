@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { cx } from "@goddard-ai/styled-system/css"
 import { useState } from "preact/hooks"
 import {

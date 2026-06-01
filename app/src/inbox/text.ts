@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
 
 import { getInboxEntityLabel } from "./entity-kind.ts"
 import { getInboxReasonLabel } from "./labels.ts"

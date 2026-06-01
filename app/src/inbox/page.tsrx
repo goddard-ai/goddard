@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
-  CompleteSessionRequest,
+  CompleteSessionInboxItemRequest,
   InboxEntityId,
   InboxItem,
   UpdateInboxItemRequest,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/inbox/schema"
 
 import { useInbox, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
@@ -190,7 +190,7 @@ component InboxPage() {
     return result
   }
 
-  async function completeSessionInboxItem(input: CompleteSessionRequest) {
+  async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
     const result = await runCompleteSessionInboxItem(input)
     if (result.item) {
       inbox.applyItem(result.item)

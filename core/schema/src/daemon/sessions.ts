@@ -4,7 +4,6 @@ import { z } from "zod"
 
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId, DaemonSessionIdParams } from "../id.ts"
-import { SessionInboxMetadataInput, type InboxItem } from "./inbox.ts"
 import {
   DaemonSessionMetadata,
   DaemonSessionStopReason,
@@ -13,6 +12,9 @@ import {
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
 } from "./store.ts"
+
+const SessionAttentionScope = z.string().trim().min(1).optional()
+const SessionAttentionHeadline = z.string().trim().min(1).optional()
 
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
@@ -315,16 +317,16 @@ export type DeclareSessionInitiativeRequest = z.infer<typeof DeclareSessionIniti
 /** Request payload used to report that one daemon session is blocked. */
 export const ReportSessionBlockerRequest = DaemonSessionIdParams.extend({
   reason: z.string().trim().min(1),
-  scope: SessionInboxMetadataInput.shape.scope,
-  headline: SessionInboxMetadataInput.shape.headline,
+  scope: SessionAttentionScope,
+  headline: SessionAttentionHeadline,
 })
 
 export type ReportSessionBlockerRequest = z.infer<typeof ReportSessionBlockerRequest>
 
 /** Request payload used to report the end of one daemon session turn. */
 export const ReportSessionTurnEndedRequest = DaemonSessionIdParams.extend({
-  scope: SessionInboxMetadataInput.shape.scope,
-  headline: SessionInboxMetadataInput.shape.headline,
+  scope: SessionAttentionScope,
+  headline: SessionAttentionHeadline,
 })
 
 export type ReportSessionTurnEndedRequest = z.infer<typeof ReportSessionTurnEndedRequest>
@@ -349,9 +351,9 @@ export type SetSessionModelResponse = {
   session: DaemonSession
 }
 
-/** Response payload returned after completing one session inbox row. */
+/** Response payload returned after marking one session completed. */
 export type CompleteSessionResponse = {
-  item: InboxItem | null
+  session: DaemonSession
 }
 
 /** Stream payload emitted for one daemon-managed ACP session message. */
@@ -415,8 +417,8 @@ export const SessionHistoryTurn = z.strictObject({
   completedAt: z.string().nullable(),
   completionKind: DaemonSessionTurnCompletionKind.nullable(),
   stopReason: DaemonSessionStopReason.nullable(),
-  inboxScope: SessionInboxMetadataInput.shape.scope.nullable().optional().default(null),
-  inboxHeadline: SessionInboxMetadataInput.shape.headline.nullable().optional().default(null),
+  inboxScope: z.string().nullable().optional().default(null),
+  inboxHeadline: z.string().nullable().optional().default(null),
   messages: z.custom<acp.AnyMessage[]>(),
 })
 
@@ -429,8 +431,8 @@ export interface SessionHistoryTurn {
   completedAt: string | null
   completionKind: "result" | "error" | null
   stopReason: z.output<typeof DaemonSessionStopReason> | null
-  inboxScope: z.output<typeof SessionInboxMetadataInput>["scope"] | null
-  inboxHeadline: z.output<typeof SessionInboxMetadataInput>["headline"] | null
+  inboxScope: string | null
+  inboxHeadline: string | null
   messages: acp.AnyMessage[]
 }
 

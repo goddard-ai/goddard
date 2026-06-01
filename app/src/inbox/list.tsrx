@@ -1,4 +1,4 @@
-import type { InboxEntityId, InboxItem } from "@goddard-ai/schema/daemon"
+import type { InboxEntityId, InboxItem } from "@goddard-ai/inbox/schema"
 
 import { inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxRow } from "./row.tsrx"

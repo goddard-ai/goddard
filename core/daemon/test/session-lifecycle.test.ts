@@ -242,7 +242,7 @@ test("session completion hides from the default list but stays interactive", asy
   })
   expect(await listSessionIds(client)).toContain(created.session.id)
 
-  await send(client, "session.complete", { id: created.session.id })
+  await send(client, "inbox.completeSession", { id: created.session.id })
   expect(db.sessions.get(created.session.id)?.completedHidden).toBe(true)
   expect(db.inboxItems.first({ where: { entityId: created.session.id } })?.status).toBe("completed")
   expect(await listSessionIds(client)).not.toContain(created.session.id)
@@ -1547,7 +1547,9 @@ test("session completion enforces worktree cleanliness without blocking local di
   })
   await send(client, "session.reportTurnEnded", { id: local.session.id })
   await writeFile(join(localRepoDir, "local-note.txt"), "local dirty work\n", "utf-8")
-  await expect(send(client, "session.complete", { id: local.session.id })).resolves.toMatchObject({
+  await expect(
+    send(client, "inbox.completeSession", { id: local.session.id }),
+  ).resolves.toMatchObject({
     item: { status: "completed" },
   })
   await send(client, "session.shutdown", { id: local.session.id })
@@ -1561,7 +1563,9 @@ test("session completion enforces worktree cleanliness without blocking local di
     systemPrompt: "Keep responses short.",
   })
   await send(client, "session.reportTurnEnded", { id: clean.session.id })
-  await expect(send(client, "session.complete", { id: clean.session.id })).resolves.toMatchObject({
+  await expect(
+    send(client, "inbox.completeSession", { id: clean.session.id }),
+  ).resolves.toMatchObject({
     item: { status: "completed" },
   })
   await send(client, "session.shutdown", { id: clean.session.id })

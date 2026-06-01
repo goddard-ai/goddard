@@ -1,5 +1,5 @@
 /** Typed lifecycle events emitted by the session feature for downstream daemon plugins. */
-import type { InboxHeadline, InboxItem, InboxScope } from "@goddard-ai/inbox/schema"
+import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
 import type { CreateSessionRequest } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import mitt, { type Handler } from "mitt"
@@ -99,12 +99,9 @@ export type SessionEvents = {
   "lifecycle.replied": EventListener<{
     sessionId: DaemonSessionId
   }>
-  "lifecycle.completed": EventListener<
-    {
-      sessionId: DaemonSessionId
-    },
-    InboxItem | null
-  >
+  "lifecycle.completed": EventListener<{
+    sessionId: DaemonSessionId
+  }>
 }
 
 /** Creates the session feature event emitter provided to consuming daemon plugins. */

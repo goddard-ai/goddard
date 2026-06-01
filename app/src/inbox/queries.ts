@@ -1,4 +1,4 @@
-import type { InboxStatus, ListInboxRequest } from "@goddard-ai/schema/daemon"
+import type { InboxStatus, ListInboxRequest } from "@goddard-ai/inbox/schema"
 
 import { DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 

@@ -1,4 +1,4 @@
-import type { InboxItem, InboxItemEvent } from "@goddard-ai/schema/daemon"
+import type { InboxItem, InboxItemEvent } from "@goddard-ai/inbox/schema"
 import { afterEach, expect, mock, test, vi } from "bun:test"
 
 const inboxClient = {

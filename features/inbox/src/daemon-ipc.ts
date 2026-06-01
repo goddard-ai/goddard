@@ -2,9 +2,11 @@ import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
+  CompleteSessionInboxItemRequest,
   ListInboxRequest,
   UpdateInboxItemRequest,
   type BulkUpdateInboxItemsResponse,
+  type CompleteSessionInboxItemResponse,
   type InboxItemEvent,
   type ListInboxResponse,
   type UpdateInboxItemResponse,
@@ -26,6 +28,11 @@ export const inboxIpcRoutes = defineIpcRoutes({
     bulkUpdate: http.post("bulk-update", {
       body: BulkUpdateInboxItemsRequest,
       response: $type<BulkUpdateInboxItemsResponse>(),
+    }),
+    /** Validates and completes the inbox row for one daemon-managed session. */
+    completeSession: http.post("complete-session", {
+      body: CompleteSessionInboxItemRequest,
+      response: $type<CompleteSessionInboxItemResponse>(),
     }),
     /** Emits daemon-published inbox item updates. */
     item: http.get("item-events", {

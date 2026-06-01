@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import * as fs from "node:fs/promises"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
-import type { DaemonSession, SessionInboxMetadataInput } from "@goddard-ai/schema/daemon"
+import type { SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
+import type { DaemonSession } from "@goddard-ai/schema/daemon"
 import { DaemonSessionId } from "@goddard-ai/schema/id"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
 

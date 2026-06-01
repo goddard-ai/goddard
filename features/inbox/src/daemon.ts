@@ -76,9 +76,6 @@ export const inboxPlugin = definePlugin({
     session.events.on("lifecycle.replied", (event) => {
       inbox.markSessionReplied(event.sessionId)
     })
-    session.events.on("lifecycle.completed", (event) => {
-      return inbox.completeSession(event.sessionId)
-    })
 
     return {
       provides: {
@@ -91,6 +88,12 @@ export const inboxPlugin = definePlugin({
           list: async ({ body }) => inbox.listInboxItems(body),
           update: async ({ body }) => inbox.updateInboxItem(body),
           bulkUpdate: async ({ body }) => inbox.bulkUpdateInboxItems(body),
+          completeSession: async ({ body: { id } }) => {
+            await session.completeSession(id)
+            return {
+              item: inbox.completeSession(id),
+            }
+          },
           item: async function* (ctx) {
             yield* subscribeInboxItems(ctx.request.signal)
           },

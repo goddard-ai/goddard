@@ -4,7 +4,6 @@ import { z } from "zod"
 
 import { AgentDistribution } from "../agent-distribution.ts"
 import { DaemonSessionId } from "../id.ts"
-import { InboxHeadline, InboxScope } from "./inbox.ts"
 
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
 
@@ -105,7 +104,7 @@ export const DaemonSession = z.strictObject({
   errorMessage: z.string().nullable().default(null),
   blockedReason: z.string().nullable().default(null),
   initiative: z.string().nullable().default(null),
-  inboxScope: InboxScope.nullable().optional().default(null),
+  inboxScope: z.string().nullable().optional().default(null),
   lastAgentMessage: z.string().nullable().default(null),
   repository: z.string().nullable().default(null),
   prNumber: z.number().int().nullable().default(null),
@@ -146,8 +145,8 @@ export const DaemonSessionTurn = z.strictObject({
   completedAt: z.string().nullable().default(null),
   completionKind: DaemonSessionTurnCompletionKind.nullable().default(null),
   stopReason: DaemonSessionStopReason.nullable().default(null),
-  inboxScope: InboxScope.nullable().optional().default(null),
-  inboxHeadline: InboxHeadline.nullable().optional().default(null),
+  inboxScope: z.string().nullable().optional().default(null),
+  inboxHeadline: z.string().nullable().optional().default(null),
   messages: z.custom<acp.AnyMessage[]>(),
 })
 

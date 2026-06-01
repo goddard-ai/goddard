@@ -130,3 +130,15 @@ export type BulkUpdateInboxItemsResponse = {
   items: InboxItem[]
   missingEntityIds: InboxEntityId[]
 }
+
+/** Request payload used to complete the inbox row for one daemon-managed session. */
+export const CompleteSessionInboxItemRequest = z.strictObject({
+  id: DaemonSessionId,
+})
+
+export type CompleteSessionInboxItemRequest = z.infer<typeof CompleteSessionInboxItemRequest>
+
+/** Response payload returned after completing one session-owned inbox row. */
+export type CompleteSessionInboxItemResponse = {
+  item: InboxItem | null
+}

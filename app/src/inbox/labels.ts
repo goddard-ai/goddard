@@ -1,4 +1,4 @@
-import type { InboxPriority, InboxReason, InboxStatus } from "@goddard-ai/schema/daemon"
+import type { InboxPriority, InboxReason, InboxStatus } from "@goddard-ai/inbox/schema"
 
 const statusLabels = {
   unread: "Unread",

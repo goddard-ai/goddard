@@ -1,4 +1,4 @@
-import type { InboxEntityId, InboxItem, InboxStatus } from "@goddard-ai/schema/daemon"
+import type { InboxEntityId, InboxItem, InboxStatus } from "@goddard-ai/inbox/schema"
 import { Sigma } from "preact-sigma"
 import { getErrorMessage, objectify } from "radashi"
 
@@ -52,10 +52,10 @@ export class Inbox extends Sigma<InboxState> {
 
   /** Returns all known inbox items grouped into exactly one section by current status. */
   get sections() {
-    const sections = objectify(
+    const sections: Record<InboxStatus, InboxItem[]> = objectify(
       inboxStatuses,
       (key) => key,
-      () => [] as InboxItem[],
+      () => [],
     )
 
     for (const item of this.items) {

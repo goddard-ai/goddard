@@ -117,6 +117,7 @@ export const sessionPlugin = definePlugin({
           recordSessionResult: sessionManager.recordSessionResult,
           resolveTokenScope: sessionManager.resolveTokenScope,
           allowPullRequest: sessionManager.allowPullRequest,
+          completeSession: sessionManager.completeSession,
           getSession: sessionManager.getSession,
           getWorktree: sessionManager.getWorktree,
           requireWorktree: sessionManager.requireWorktree,
@@ -178,7 +179,7 @@ export const sessionPlugin = definePlugin({
             }),
           },
           complete: async ({ body: { id } }) => ({
-            item: await sessionManager.completeSession(id),
+            session: await sessionManager.completeSession(id),
           }),
           declareInitiative: async ({ body: { id, title } }) => ({
             session: await sessionManager.declareInitiative(id, title),

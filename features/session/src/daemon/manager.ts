@@ -12,6 +12,7 @@ import type {
   DaemonSessionContextService,
   DbContext,
 } from "@goddard-ai/daemon-plugin"
+import type { InboxHeadline, InboxScope, SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
@@ -25,8 +26,6 @@ import type {
   GetSessionDiagnosticsResponse,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
-  InboxHeadline,
-  InboxScope,
   InitialPromptOption,
   ListSessionsRequest,
   ListSessionsResponse,
@@ -36,7 +35,6 @@ import type {
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
   SessionHistoryTurn,
-  SessionInboxMetadataInput,
   SessionLaunchBranch,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
@@ -3313,10 +3311,10 @@ export function createSessionManager(input: {
     updateSession(id, {
       completedHidden: true,
     })
-    const [item = null] = await input.events.emit("lifecycle.completed", {
+    await input.events.emit("lifecycle.completed", {
       sessionId: id,
     })
-    return item
+    return requireSessionDocument(id)
   }
 
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {

@@ -1,11 +1,7 @@
 /** Turn-history helpers shared by daemon session lifecycle management. */
 import { randomUUID } from "node:crypto"
-import type {
-  DaemonSession,
-  InboxHeadline,
-  InboxScope,
-  SessionHistoryTurn,
-} from "@goddard-ai/schema/daemon"
+import type { InboxHeadline, InboxScope } from "@goddard-ai/inbox/schema"
+import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/schema/daemon"
 import type { DaemonSessionId } from "@goddard-ai/schema/id"
 import * as acp from "acp-client/protocol"
 

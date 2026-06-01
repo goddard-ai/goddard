@@ -1,4 +1,4 @@
-import type { InboxItem, InboxStatus } from "@goddard-ai/schema/daemon"
+import type { InboxItem, InboxStatus } from "@goddard-ai/inbox/schema"
 import * as fuzzysort from "fuzzysort2"
 
 import { getInboxEntityLabel } from "./entity-kind.ts"
