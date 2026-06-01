@@ -404,7 +404,6 @@
       "name": "@goddard-ai/pull-request",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "catalog:",
         "@goddard-ai/auth": "workspace:*",
         "@goddard-ai/backend-plugin": "workspace:*",
         "@goddard-ai/daemon-plugin": "workspace:*",

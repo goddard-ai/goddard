@@ -1,15 +1,21 @@
-import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
+import {
+  definePlugin,
+  event,
+  type DbContext,
+  type EventDefinition,
+  type Plugin,
+} from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
+import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
-import { pullRequestEvents } from "./daemon/events.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 import { pullRequestDbSchema } from "./daemon/store.ts"
-import type { DaemonPullRequest } from "./schema.ts"
+import type { DaemonPullRequest, PullRequestId } from "./schema.ts"
 
 export { pullRequestDbSchema } from "./daemon/store.ts"
 
@@ -22,6 +28,24 @@ type PullRequestSessionRecord = {
 type PullRequestDb = DbContext<typeof pullRequestDbSchema>
 type PullRequestRootConfig = {
   security?: SecurityConfig
+}
+export type PullRequestAttentionEvent = {
+  pullRequestId: PullRequestId
+  scope: AttentionScope
+  headline: AttentionHeadline
+  turnId: string | null
+}
+type PullRequestEvents = {
+  readonly "pull_request.created": EventDefinition<PullRequestAttentionEvent>
+  readonly "pull_request.updated": EventDefinition<PullRequestAttentionEvent>
+}
+type PullRequestPlugin = Plugin & {
+  readonly name: "pull-request"
+  readonly consumes: readonly [Plugin]
+  readonly db: typeof pullRequestDbSchema
+  readonly events: PullRequestEvents
+  readonly backendRoutes: typeof pullRequestBackendRoutes
+  readonly ipcRoutes: typeof pullRequestIpcRoutes
 }
 
 function requireRepositorySession(session: PullRequestSessionRecord | null) {
@@ -68,11 +92,14 @@ async function recordPullRequest(
   )
 }
 
-export const pullRequestPlugin = definePlugin({
+const pullRequestPluginDefinition = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
   db: pullRequestDbSchema,
-  events: pullRequestEvents,
+  events: {
+    "pull_request.created": event<PullRequestAttentionEvent>(),
+    "pull_request.updated": event<PullRequestAttentionEvent>(),
+  },
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, configProvider, db, events, ipc, session }) {
@@ -173,3 +200,5 @@ export const pullRequestPlugin = definePlugin({
     }
   },
 })
+
+export const pullRequestPlugin: PullRequestPlugin = pullRequestPluginDefinition

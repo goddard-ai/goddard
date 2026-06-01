@@ -1,8 +1,18 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, event } from "@goddard-ai/daemon-plugin"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import { sessionEvents } from "./daemon/events.ts"
-import { createSessionManager } from "./daemon/manager.ts"
+import {
+  createSessionManager,
+  type SessionActivatedEvent,
+  type SessionAttentionEvent,
+  type SessionBlockedEvent,
+  type SessionIdEvent,
+  type SessionLaunchFailedEvent,
+  type SessionLaunchFinishedEvent,
+  type SessionPersistedEvent,
+  type SessionStoppingEvent,
+  type SessionWorktreePreparedEvent,
+} from "./daemon/manager.ts"
 import { sessionDbSchema } from "./daemon/store.ts"
 import {
   SessionsConfig,
@@ -18,8 +28,13 @@ import {
 export { sessionDbSchema } from "./daemon/store.ts"
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
-export type { LoadSessionParams, NewSessionParams, SessionLaunchParams } from "./daemon/manager.ts"
-export { type SessionEventEmitter, type SessionWorktreeLifecycleState } from "./daemon/events.ts"
+export type {
+  LoadSessionParams,
+  NewSessionParams,
+  SessionEventEmitter,
+  SessionLaunchParams,
+  SessionWorktreeLifecycleState,
+} from "./daemon/manager.ts"
 
 export const sessionPlugin = definePlugin({
   name: "session",
@@ -47,7 +62,18 @@ export const sessionPlugin = definePlugin({
     },
   },
   db: sessionDbSchema,
-  events: sessionEvents,
+  events: {
+    "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
+    "session.persisted": event<SessionPersistedEvent>(),
+    "session.activated": event<SessionActivatedEvent>(),
+    "session.launch.finished": event<SessionLaunchFinishedEvent>(),
+    "session.launch.failed": event<SessionLaunchFailedEvent>(),
+    "session.stopping": event<SessionStoppingEvent>(),
+    "session.blocked": event<SessionBlockedEvent>(),
+    "session.turn.ended": event<SessionAttentionEvent>(),
+    "session.replied": event<SessionIdEvent>(),
+    "session.completed": event<SessionIdEvent>(),
+  },
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const messageListeners = new Set<(event: SessionMessageEvent) => void>()

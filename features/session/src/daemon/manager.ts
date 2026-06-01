@@ -11,6 +11,8 @@ import type {
   DaemonSessionContext,
   DaemonSessionContextService,
   DbContext,
+  EventBus,
+  EventDefinition,
 } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
@@ -83,7 +85,6 @@ import {
   MAX_COMPOSER_SUGGESTION_LIMIT,
   normalizeComposerSuggestionLimit,
 } from "./composer-suggestions.ts"
-import type { SessionEventEmitter, SessionWorktreeLifecycleState } from "./events.ts"
 import { createLaunchLeaseKey, createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
 import { resolveSessionAttentionMetadata } from "./metadata.ts"
 import {
@@ -891,6 +892,80 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
 
 const DEFAULT_SESSION_PAGE_SIZE = 20
 const MAX_SESSION_PAGE_SIZE = 100
+
+export type SessionAttentionEvent = {
+  sessionId: SessionId
+  scope: AttentionScope
+  headline: AttentionHeadline
+  turnId: string | null
+}
+
+/** Worktree lifecycle data exposed to daemon plugins without exposing session persistence. */
+export type SessionWorktreeLifecycleState = {
+  sessionId: SessionId
+  repoRoot: string
+  requestedCwd: string
+  effectiveCwd: string
+  worktreeDir: string
+  branchName: string
+  poweredBy: string
+}
+
+export type SessionWorktreeLifecycleEvent = {
+  sessionId: SessionId
+  worktree: SessionWorktreeLifecycleState
+}
+
+export type SessionWorktreePreparedEvent = SessionWorktreeLifecycleEvent & {
+  request: CreateSessionRequest
+}
+
+export type SessionPersistedEvent = {
+  sessionId: SessionId
+  request: CreateSessionRequest
+}
+
+export type SessionActivatedEvent = {
+  sessionId: SessionId
+  worktree: SessionWorktreeLifecycleState | null
+}
+
+export type SessionLaunchFinishedEvent = SessionWorktreeLifecycleEvent & {
+  reason: "one_shot_completed"
+}
+
+export type SessionLaunchFailedEvent = SessionWorktreeLifecycleEvent & {
+  error: unknown
+}
+
+export type SessionStoppingEvent = {
+  sessionId: SessionId
+  reason: "agent_process_exit" | "session_shutdown" | "daemon_shutdown"
+  worktree: SessionWorktreeLifecycleState | null
+}
+
+export type SessionBlockedEvent = SessionAttentionEvent & {
+  reason: string
+}
+
+export type SessionIdEvent = {
+  sessionId: SessionId
+}
+
+type SessionEventDefinitions = {
+  "session.worktree.prepared": EventDefinition<SessionWorktreePreparedEvent>
+  "session.persisted": EventDefinition<SessionPersistedEvent>
+  "session.activated": EventDefinition<SessionActivatedEvent>
+  "session.launch.finished": EventDefinition<SessionLaunchFinishedEvent>
+  "session.launch.failed": EventDefinition<SessionLaunchFailedEvent>
+  "session.stopping": EventDefinition<SessionStoppingEvent>
+  "session.blocked": EventDefinition<SessionBlockedEvent>
+  "session.turn.ended": EventDefinition<SessionAttentionEvent>
+  "session.replied": EventDefinition<SessionIdEvent>
+  "session.completed": EventDefinition<SessionIdEvent>
+}
+
+export type SessionEventEmitter = EventBus<SessionEventDefinitions>
 
 /** Normalizes optional session page sizes to the daemon's supported bounds. */
 function normalizeSessionPageSize(limit?: number): number {

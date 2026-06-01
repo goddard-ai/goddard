@@ -54,7 +54,6 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
