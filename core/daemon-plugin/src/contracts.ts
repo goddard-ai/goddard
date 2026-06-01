@@ -232,19 +232,28 @@ export type SetupContext<
 
 /** Daemon plugin shape used to constrain feature plugin values without widening them. */
 export type Plugin = {
+  /** Stable plugin identifier used for dependency ordering, diagnostics, and owned defaults. */
   readonly name: string
+  /** Plugins whose setup contributions are available to this plugin. */
   readonly consumes?: readonly Plugin[]
+  /** Root config namespaces owned and resolved by this plugin. */
   readonly config?: ConfigDefinitions
+  /** Standalone JSON Schema artifacts generated for plugin-owned config files. */
   readonly jsonSchemas?: readonly JsonSchemaArtifactDefinition[]
+  /** Kindstore collections owned by this plugin. */
   readonly db?: DbSchemaDefinition
+  /** Backend route tree fragment contributed by this plugin. */
   readonly backendRoutes?: BackendRouteTree
+  /** IPC route tree fragment contributed by this plugin. */
   readonly ipcRoutes?: HttpRouteTree
-  readonly lifecycle?: unknown
-  // The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
+  /**
+   * Runtime hook for handlers, close hooks, and feature extensions.
+   *
+   * The erased plugin shape accepts any setup context; `definePlugin()` keeps feature authoring exact.
+   */
   readonly setup?: (
     context: any,
   ) => void | RuntimeSetupContributions | Promise<void | RuntimeSetupContributions>
-  readonly register?: (...args: never[]) => void | Promise<void>
 }
 
 /** Runtime daemon feature composition produced by static composition roots. */
