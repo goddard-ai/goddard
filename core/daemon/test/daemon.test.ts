@@ -12,7 +12,7 @@ import { afterEach, expect, test } from "bun:test"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
-import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
+import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
 
@@ -24,10 +24,10 @@ const fastFixtureAgentPath = fileURLToPath(
 )
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
-let db: DaemonStore = resetDb({ filename: ":memory:" })
+let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
-  db = resetDb({ filename: ":memory:" })
+  db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -485,7 +485,7 @@ async function useTempHome() {
     await rm(homeDir, { recursive: true, force: true })
   })
   process.env.HOME = homeDir
-  db = resetDb({ filename: ":memory:" })
+  db = resetComposedDaemonStore({ filename: ":memory:" })
   return homeDir
 }
 

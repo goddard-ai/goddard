@@ -11,7 +11,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test"
 import type { BackendClient } from "../../../core/daemon/src/backend.ts"
 import { startDaemonServer } from "../../../core/daemon/src/ipc.ts"
 import { configureLogging } from "../../../core/daemon/src/logging.ts"
-import { resetDb, type DaemonStore } from "../../../core/daemon/src/persistence/store.ts"
+import { resetComposedDaemonStore, type DaemonStore } from "../../../core/daemon/src/plugins.ts"
 import { initializeWorkforce } from "../src/daemon/config.ts"
 import { createWorkforceManager } from "../src/daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "../src/daemon/paths.ts"
@@ -22,10 +22,10 @@ const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/
 const originalHome = process.env.HOME
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
-let db: DaemonStore = resetDb({ filename: ":memory:" })
+let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 beforeEach(() => {
-  db = resetDb({ filename: ":memory:" })
+  db = resetComposedDaemonStore({ filename: ":memory:" })
 })
 
 afterEach(async () => {

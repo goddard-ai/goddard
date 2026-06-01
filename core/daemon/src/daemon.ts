@@ -12,7 +12,7 @@ import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
-import { openDaemonStore, type DaemonStore } from "./persistence/store.ts"
+import { openComposedDaemonStore, type DaemonStore } from "./plugins.ts"
 import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
@@ -40,7 +40,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
     agentBinDir: input.agentBinDir,
   })
   const configManager = createConfigManager()
-  const store = input.store ?? openDaemonStore()
+  const store = input.store ?? openComposedDaemonStore()
   const ownsStore = input.store == null
   let ipcServer: DaemonServer | undefined
 

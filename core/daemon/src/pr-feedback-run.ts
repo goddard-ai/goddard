@@ -8,7 +8,7 @@ import type { ConfigManager } from "./config-manager.ts"
 import { prependAgentBinToPath } from "./config.ts"
 import type { FeedbackEvent } from "./feedback.ts"
 import { createLogger } from "./logging.ts"
-import { openDaemonStore, type DaemonStore } from "./persistence/store.ts"
+import { openComposedDaemonStore, type DaemonStore } from "./plugins.ts"
 import * as prompts from "./prompts/index.ts"
 
 /** Launch input for a daemon-managed PR feedback flow. */
@@ -60,7 +60,7 @@ function buildBackgroundSystemPrompt(): string {
 /** Creates the daemon session that handles one managed PR feedback event within the flow. */
 export async function runPrFeedbackFlow(input: PrFeedbackFlowInput): Promise<number> {
   const logger = createLogger()
-  const store = input.store ?? openDaemonStore()
+  const store = input.store ?? openComposedDaemonStore()
   const ownsStore = input.store == null
   const projectDir =
     (await input.resolveProjectDir?.(input.event)) ?? (await resolveProjectDir(store, input.event))

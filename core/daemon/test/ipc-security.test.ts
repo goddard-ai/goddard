@@ -10,19 +10,19 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
+import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 let sharedHomeDir: string | null = null
-let db: DaemonStore = resetDb({ filename: ":memory:" })
+let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
-  db = resetDb({ filename: ":memory:" })
+  db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (sharedHomeDir) {
     await rm(sharedHomeDir, { recursive: true, force: true })
@@ -634,7 +634,7 @@ function createTestBackendClient(
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-home-"))
   process.env.HOME = sharedHomeDir
-  db = resetDb()
+  db = resetComposedDaemonStore()
 }
 
 async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {

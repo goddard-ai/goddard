@@ -14,7 +14,7 @@ import { SetupContext } from "../src/context.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetDb, type DaemonStore } from "../src/persistence/store.ts"
+import { resetComposedDaemonStore, type DaemonStore } from "../src/plugins.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
@@ -27,13 +27,13 @@ const rootConfigSchemaUrl =
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
 )
-let db: DaemonStore = resetDb({ filename: ":memory:" })
+let db: DaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
-  db = resetDb({ filename: ":memory:" })
+  db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (originalHome === undefined) {
     delete process.env.HOME
@@ -371,7 +371,7 @@ function createTestBackendClient(): BackendClient {
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-home-"))
   process.env.HOME = homeDir
-  db = resetDb()
+  db = resetComposedDaemonStore()
   cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
   return homeDir
 }

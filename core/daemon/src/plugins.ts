@@ -9,7 +9,13 @@ import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
-import { configureDbSchema } from "./persistence/store.ts"
+import {
+  openDaemonStore,
+  type DaemonStore,
+  type StoreConnectionOptions,
+} from "./persistence/store.ts"
+
+export type { DaemonStore, StoreConnectionOptions } from "./persistence/store.ts"
 
 const daemonPluginList = [
   actionPlugin,
@@ -31,8 +37,17 @@ let daemonPlugins: DaemonPluginComposition | null = null
 export function getDaemonPluginComposition() {
   if (!daemonPlugins) {
     daemonPlugins = composePlugins(daemonPluginList)
-    configureDbSchema(daemonPlugins.db)
   }
 
   return daemonPlugins
+}
+
+/** Opens a daemon store using the schema contributed by the composed daemon plugins. */
+export function openComposedDaemonStore(connection?: StoreConnectionOptions): DaemonStore {
+  return openDaemonStore(getDaemonPluginComposition().db, connection)
+}
+
+/** Opens a fresh daemon store for tests using the composed daemon plugin schema. */
+export function resetComposedDaemonStore(connection?: StoreConnectionOptions): DaemonStore {
+  return openDaemonStore(getDaemonPluginComposition().db, connection)
 }

@@ -20,8 +20,11 @@ import {
   createPayloadPreview,
   readSessionIdForLog,
 } from "../logging.ts"
-import { openDaemonStore, type DaemonStore } from "../persistence/store.ts"
-import { getDaemonPluginComposition } from "../plugins.ts"
+import {
+  getDaemonPluginComposition,
+  openComposedDaemonStore,
+  type DaemonStore,
+} from "../plugins.ts"
 import type { DaemonServer } from "./types.ts"
 
 type ComposedDaemonPlugin = ReturnType<typeof getDaemonPluginComposition>["plugins"][number]
@@ -33,11 +36,6 @@ const coreDaemonIpcRoutes = defineIpcRoutes({
     }),
   }),
 })
-
-/** Ensures daemon plugin composition has contributed schemas before tests reset the store. */
-export function initializeDaemonPluginComposition() {
-  getDaemonPluginComposition()
-}
 
 export async function startDaemonServer(
   client: BackendClient,
@@ -58,7 +56,7 @@ export async function startDaemonServer(
     })
   const configManager = setupContext?.configManager ?? createConfigManager()
   const ownsConfigManager = setupContext == null
-  const store = options.store ?? openDaemonStore()
+  const store = options.store ?? openComposedDaemonStore()
   const ownsStore = options.store == null
 
   const registryService = createAcpRegistryService()
