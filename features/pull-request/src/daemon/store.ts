@@ -1,5 +1,6 @@
-import { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { kind } from "kindstore"
+
+import { DaemonPullRequest } from "../schema.ts"
 
 /** Daemon persistence owned by the pull request feature. */
 export const pullRequestDbSchema = {

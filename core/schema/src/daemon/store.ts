@@ -3,7 +3,7 @@ import type * as acp from "acp-client/protocol"
 import { z } from "zod"
 
 import { AgentDistribution } from "../agent-distribution.ts"
-import { DaemonPullRequestId, DaemonSessionId } from "../id.ts"
+import { DaemonSessionId } from "../id.ts"
 import { InboxHeadline, InboxScope } from "./inbox.ts"
 
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
@@ -210,34 +210,4 @@ export const DaemonWorktree = z.strictObject({
 
 export type DaemonWorktree = z.output<typeof DaemonWorktree> & {
   id: `wt_${string}`
-}
-
-/**
- * Persisted daemon-managed workforce attachment stored separately from the base session.
- */
-export const DaemonWorkforce = z.strictObject({
-  sessionId: DaemonSessionId,
-  rootDir: z.string().optional(),
-  agentId: z.string().optional(),
-  requestId: z.string().optional(),
-})
-
-export type DaemonWorkforce = z.output<typeof DaemonWorkforce> & {
-  id: `wf_${string}`
-}
-
-/**
- * Persisted daemon-managed pull request record used for session authorization checks.
- */
-export const DaemonPullRequest = z.strictObject({
-  host: z.enum(["github"]),
-  owner: z.string(),
-  repo: z.string(),
-  prNumber: z.number().int(),
-  cwd: z.string(),
-})
-
-export type DaemonPullRequest = z.output<typeof DaemonPullRequest> & {
-  id: DaemonPullRequestId
-  updatedAt: number
 }

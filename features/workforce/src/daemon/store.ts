@@ -1,5 +1,6 @@
-import { DaemonWorkforce } from "@goddard-ai/schema/daemon/store"
 import { kind } from "kindstore"
+
+import { DaemonWorkforce } from "../schema.ts"
 
 /** Daemon persistence owned by the workforce feature. */
 export const workforceDbSchema = {

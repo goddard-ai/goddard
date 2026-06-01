@@ -3,13 +3,13 @@ import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import type { DaemonSession } from "@goddard-ai/schema/daemon"
-import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 import { pullRequestDbSchema } from "./daemon/store.ts"
+import type { DaemonPullRequest } from "./schema.ts"
 
 export { pullRequestDbSchema } from "./daemon/store.ts"
 

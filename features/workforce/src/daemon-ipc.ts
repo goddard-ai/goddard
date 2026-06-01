@@ -1,5 +1,4 @@
 import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
-import type { GetSessionWorkforceResponse } from "@goddard-ai/schema/daemon/sessions"
 import { DaemonSessionIdParams } from "@goddard-ai/schema/id"
 
 import {
@@ -16,6 +15,7 @@ import {
   TruncateWorkforceRequest,
   UpdateWorkforceRequest,
   type DiscoverWorkforceCandidatesResponse,
+  type GetSessionWorkforceResponse,
   type GetWorkforceResponse,
   type InitializeWorkforceResponse,
   type ListWorkforcesResponse,

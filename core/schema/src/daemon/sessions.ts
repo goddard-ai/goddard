@@ -14,7 +14,6 @@ import {
   DaemonSessionTurnPromptRequestId,
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
-  type DaemonWorkforce,
 } from "./store.ts"
 
 /** Session-start initial prompt values accepted by the daemon session API. */
@@ -468,11 +467,6 @@ export type GetSessionChangesResponse = SessionIdentity & {
 export type GetSessionDiagnosticsResponse = SessionIdentity & {
   connection: SessionConnection
   events: SessionDiagnosticEvent[]
-}
-
-/** Response payload returned after one daemon-managed session workforce fetch. */
-export type GetSessionWorkforceResponse = SessionIdentity & {
-  workforce: DaemonWorkforce | null
 }
 
 /** Response payload returned after one daemon-managed session shutdown request. */

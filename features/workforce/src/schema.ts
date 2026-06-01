@@ -1,4 +1,5 @@
 import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import { DaemonSessionId } from "@goddard-ai/schema/id"
 import { z } from "zod"
 
 /** Root config defaults used when initializing repository-local workforce files. */
@@ -186,6 +187,25 @@ export const StartWorkforceRequest = z.strictObject({
 })
 
 export type StartWorkforceRequest = z.infer<typeof StartWorkforceRequest>
+
+/** Persisted workforce attachment owned by the workforce feature. */
+export const DaemonWorkforce = z.strictObject({
+  sessionId: DaemonSessionId,
+  rootDir: z.string().optional(),
+  agentId: z.string().optional(),
+  requestId: z.string().optional(),
+})
+
+export type DaemonWorkforce = z.output<typeof DaemonWorkforce> & {
+  id: `wf_${string}`
+}
+
+/** Response payload returned after one daemon-managed session workforce fetch. */
+export type GetSessionWorkforceResponse = {
+  id: DaemonSessionId
+  acpSessionId: string
+  workforce: DaemonWorkforce | null
+}
 
 /** One package candidate that can become a workforce domain during initialization. */
 export type WorkforceInitCandidate = {

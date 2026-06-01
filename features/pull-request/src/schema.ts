@@ -1,6 +1,5 @@
 import { SessionInboxMetadataInput } from "@goddard-ai/inbox/schema"
-import type { DaemonPullRequest } from "@goddard-ai/schema/daemon/store"
-import { DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
+import { DaemonPullRequestId, DaemonPullRequestIdParams } from "@goddard-ai/schema/id"
 import { RepoPrRef, RepoRef } from "@goddard-ai/schema/repository"
 import { z } from "zod"
 
@@ -93,6 +92,20 @@ export const StreamMessage = z.object({
 })
 
 export type StreamMessage = z.infer<typeof StreamMessage>
+
+/** Persisted daemon-managed pull request record owned by the pull-request feature. */
+export const DaemonPullRequest = z.strictObject({
+  host: z.enum(["github"]),
+  owner: z.string(),
+  repo: z.string(),
+  prNumber: z.number().int(),
+  cwd: z.string(),
+})
+
+export type DaemonPullRequest = z.output<typeof DaemonPullRequest> & {
+  id: DaemonPullRequestId
+  updatedAt: number
+}
 
 const issueCommentWebhook = z.object({
   type: z.literal("issue_comment"),
