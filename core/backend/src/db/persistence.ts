@@ -6,7 +6,10 @@ import type {
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import { normalizeGitHubWebhookEvent } from "@goddard-ai/remote-repo/backend"
+import {
+  normalizeGitHubWebhookEvent,
+  type RemoteRepoStreamService,
+} from "@goddard-ai/remote-repo/backend"
 import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
@@ -24,7 +27,9 @@ import { hashToInteger } from "../utils.ts"
 import * as schema from "./schema.ts"
 
 /** Turso-backed backend control plane used by the real backend worker. */
-export class TursoBackendControlPlane implements BackendControlPlane {
+export class TursoBackendControlPlane
+  implements BackendControlPlane, Pick<RemoteRepoStreamService, "resolveEventOwner">
+{
   readonly #db: ReturnType<typeof drizzle<typeof schema>>
 
   constructor(client: Client, _env?: Env) {

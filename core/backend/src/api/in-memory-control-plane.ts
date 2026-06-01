@@ -6,7 +6,13 @@ import type {
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import { normalizeGitHubWebhookEvent } from "@goddard-ai/remote-repo/backend"
+import {
+  isRemoteRepoStreamSink,
+  normalizeGitHubWebhookEvent,
+  type RemoteRepoEventBroadcaster,
+  type RemoteRepoStreamService,
+  type RemoteRepoStreamSink,
+} from "@goddard-ai/remote-repo/backend"
 import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
@@ -28,22 +34,18 @@ export type DeviceSessionRecord = {
   expiresAt: number
 }
 
-/** Minimal sink interface used by local SSE fanout. */
-export type StreamSink = {
-  send: (payload: string) => void
-  close?: () => void
-}
-
 const DEVICE_FLOW_EXPIRES_IN_SECONDS = 900
 const DEVICE_FLOW_INTERVAL_SECONDS = 5
 const AUTH_SESSION_TTL_MS = 1000 * 60 * 60 * 24
 
 /** In-memory backend control plane used by local servers and tests. */
-export class InMemoryBackendControlPlane implements BackendControlPlane {
+export class InMemoryBackendControlPlane
+  implements BackendControlPlane, RemoteRepoStreamService, RemoteRepoEventBroadcaster
+{
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
-  #streamsByUser = new Map<string, Set<StreamSink>>()
+  #streamsByUser = new Map<string, Set<RemoteRepoStreamSink>>()
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
@@ -186,17 +188,17 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
   }
 
   addStreamSocket(githubUsername: string, socket: unknown): void {
-    if (!isStreamSink(socket)) {
+    if (!isRemoteRepoStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByUser.get(githubUsername) ?? new Set<StreamSink>()
+    const room = this.#streamsByUser.get(githubUsername) ?? new Set<RemoteRepoStreamSink>()
     room.add(socket)
     this.#streamsByUser.set(githubUsername, room)
   }
 
   removeStreamSocket(githubUsername: string, socket: unknown): void {
-    if (!isStreamSink(socket)) {
+    if (!isRemoteRepoStreamSink(socket)) {
       return
     }
 
@@ -207,7 +209,7 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
     }
   }
 
-  broadcast(event: RepoEvent): void {
+  broadcastRemoteRepoEvent(event: RepoEvent): void {
     const githubUsername = this.resolveEventOwner(event)
     if (!githubUsername) {
       return
@@ -245,14 +247,4 @@ export class InMemoryBackendControlPlane implements BackendControlPlane {
         pullRequest.number === event.prNumber,
     )?.createdBy
   }
-}
-
-/** Returns whether a value supports the minimal send/close contract used by SSE fanout. */
-export function isStreamSink(value: unknown): value is StreamSink {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "send" in value &&
-    typeof (value as StreamSink).send === "function"
-  )
 }

@@ -1,3 +1,4 @@
+import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
@@ -9,7 +10,7 @@ import { createSseSession } from "./utils.ts"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, event) => {
-    const githubUsername = await createWorkerControlPlane(env).resolveEventOwner?.(event)
+    const githubUsername = await createWorkerStreamService(env).resolveEventOwner(event)
     if (!githubUsername) {
       return
     }
@@ -83,7 +84,7 @@ export class UserStream {
   }
 }
 
-function createWorkerControlPlane(env: Env): TursoBackendControlPlane {
+function createWorkerStreamService(env: Env): Pick<RemoteRepoStreamService, "resolveEventOwner"> {
   return new TursoBackendControlPlane(
     createClient({
       url: env.TURSO_DB_URL,

@@ -16,7 +16,6 @@ const stubControlPlane: BackendControlPlane = {
   isManagedPr: notUsed,
   replyToPr: notUsed,
   handleGitHubWebhook: notUsed,
-  resolveEventOwner: notUsed,
 }
 
 test("createBackendRouter handles auth device start via rouzer route map", async () => {

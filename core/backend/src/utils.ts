@@ -1,6 +1,7 @@
 import type { AuthSession } from "@goddard-ai/auth/schema"
+import type { RemoteRepoStreamSink } from "@goddard-ai/remote-repo/backend"
 
-import type { SessionRecord, StreamSink } from "./api/in-memory-control-plane.ts"
+import type { SessionRecord } from "./api/in-memory-control-plane.ts"
 
 export function hashToInteger(value: string): number {
   let hash = 0
@@ -21,7 +22,7 @@ export function toPublicSession(session: SessionRecord): AuthSession {
 
 export function createSseSession(onClose: () => void): {
   response: Response
-  sink: StreamSink
+  sink: RemoteRepoStreamSink
 } {
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null
@@ -51,7 +52,7 @@ export function createSseSession(onClose: () => void): {
     },
   })
 
-  const sink: StreamSink = {
+  const sink: RemoteRepoStreamSink = {
     send(payload) {
       if (isClosed || !controller) {
         return

@@ -1,4 +1,8 @@
 import type { Socket } from "node:net"
+import {
+  isRemoteRepoEventBroadcaster,
+  isRemoteRepoStreamService,
+} from "@goddard-ai/remote-repo/backend"
 import { type RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
@@ -40,14 +44,20 @@ export async function startBackendServer(
     },
     handleUserStream: async (_env, githubUsername, request) => {
       const sseSession = createSseSession(() => {
-        controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
+        if (isRemoteRepoStreamService(controlPlane)) {
+          controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
+        }
       })
 
-      controlPlane.addStreamSocket?.(githubUsername, sseSession.sink)
+      if (isRemoteRepoStreamService(controlPlane)) {
+        controlPlane.addStreamSocket(githubUsername, sseSession.sink)
+      }
       request.signal.addEventListener(
         "abort",
         () => {
-          controlPlane.removeStreamSocket?.(githubUsername, sseSession.sink)
+          if (isRemoteRepoStreamService(controlPlane)) {
+            controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
+          }
           sseSession.sink.close?.()
         },
         { once: true },
@@ -109,7 +119,7 @@ export async function startBackendServer(
 }
 
 function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: RepoEvent): void {
-  if ("broadcast" in controlPlane && typeof controlPlane.broadcast === "function") {
-    controlPlane.broadcast(event)
+  if (isRemoteRepoEventBroadcaster(controlPlane)) {
+    controlPlane.broadcastRemoteRepoEvent(event)
   }
 }
