@@ -85,6 +85,58 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   expect(capturedGithubUsername).toBe("alec")
 })
 
+test("createBackendRouter dispatches normalized remote-repo webhook events", async () => {
+  const handled: string[] = []
+  const controlPlane: BackendControlPlane = {
+    ...stubControlPlane,
+    handleGitHubWebhook(input) {
+      return {
+        type: "comment",
+        owner: input.owner,
+        repo: input.repo,
+        prNumber: input.prNumber,
+        author: input.author,
+        body: input.body,
+        reactionAdded: "eyes",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }
+    },
+  }
+
+  const router = createBackendRouter({
+    createControlPlane: () => controlPlane,
+    broadcastEvent: async () => {},
+    remoteRepoEventHandlers: [
+      {
+        name: "pull-request",
+        handle: (event) => {
+          handled.push(event.type)
+        },
+      },
+    ],
+  })
+
+  const response = await router(
+    createContext(
+      new Request("https://example.test/webhooks/github", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "issue_comment",
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+          author: "alec",
+          body: "looks good",
+        }),
+      }),
+    ) as any,
+  )
+
+  expect(response.status).toBe(200)
+  expect(handled).toEqual(["comment"])
+})
+
 test("createBackendRouter serializes HttpError responses", async () => {
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,

@@ -1,7 +1,14 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
-import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
-import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
+import {
+  pullRequestBackendRoutes,
+  pullRequestRemoteRepoEventHandler,
+} from "@goddard-ai/pull-request/backend"
+import {
+  dispatchRemoteRepoEvent,
+  remoteRepoBackendRoutes,
+  type RemoteRepoEventHandler,
+} from "@goddard-ai/remote-repo/backend"
 import { GitHubWebhookInput, type RepoEvent } from "@goddard-ai/remote-repo/schema"
 import * as routes from "@goddard-ai/schema/backend/routes"
 import { createClient } from "@libsql/client/web"
@@ -24,6 +31,7 @@ type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
   broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
   handleUserStream?: (env: Env, githubUsername: string, request: Request) => Promise<Response>
+  remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
 
 /** Creates the backend HTTP router over the current control-plane implementation. */
@@ -31,6 +39,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
   const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
+  const remoteRepoEventHandlers = dependencies.remoteRepoEventHandlers ?? [
+    pullRequestRemoteRepoEventHandler,
+  ]
 
   return createRouter<Env>({ debug: false }).use(backendRoutes, {
     auth: {
@@ -126,6 +137,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const controlPlane = createControlPlane(env)
           const input = GitHubWebhookInput.parse(await ctx.request.json())
           const event = await controlPlane.handleGitHubWebhook(input)
+          await dispatchRemoteRepoEvent(event, remoteRepoEventHandlers)
           await broadcastEvent(env, event)
           return event
         } catch (error) {
