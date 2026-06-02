@@ -4,125 +4,92 @@ Status: proposed
 
 ## Overview
 
-Daemon-managed sessions can already own isolated linked Git worktrees, but archiving a session only preserves history today. It does not define what should happen to the on-disk worktree when the user wants to reclaim disk without losing tracked changes.
+Daemon-managed sessions can own isolated linked Git worktrees. Archiving a session should let the user reclaim that worktree's disk footprint without losing the user work that is expected to survive the archive.
 
 This design adds one daemon-owned archive flow for session worktrees:
 
-1. when the user archives a session, the daemon snapshots the worktree's tracked dirty state into a private Git ref,
+1. when the user archives a session, the daemon snapshots the worktree's tracked changes and untracked non-ignored files into a private Git ref,
 2. the daemon cleans and removes the linked worktree from disk, and
-3. when the user unarchives that session later, the daemon recreates the linked worktree and reapplies the snapshot.
+3. when the user unarchives that session later, the daemon recreates a linked worktree and reapplies the snapshot.
 
 The archive payload is Git-native. It uses a stash-style commit captured relative to the worktree `HEAD`, stored under a daemon-private ref namespace instead of the user's stash stack. Restore recreates the worktree in detached mode so the daemon does not create user-visible branches.
 
-This design is scoped to daemon-managed linked worktrees. It does not restore live ACP connectivity or resume agent execution.
+This design is scoped to daemon-managed linked worktrees and session archive lifecycle. It does not reconnect live ACP transports or resume agent execution.
 
-## Context
+## Current Architecture
 
-Today the daemon persists static worktree identity in `db.worktrees` and already uses Git-owned refs plus metadata files for mounted worktree sync state. The current worktree model has two relevant properties:
+The rebased repository moved session behavior into the session feature package. Archive/restore ownership should follow that boundary:
 
-- `createWorktree()` already enforces that daemon-managed worktrees are real linked Git worktrees attached to the same common Git dir as the source repository.
-- The default plugin creates a detached worktree first and then attaches a branch, so the daemon already depends on Git CLI behavior rather than custom repository metadata for the core lifecycle.
+- `features/session/src/daemon/manager.ts` owns session lifecycle mutations, persisted session/worktree records, diagnostics, and connection-state semantics.
+- `features/session/src/daemon/worktree.ts` owns reusable session worktree helpers and completion-state inspection.
+- `features/session/src/daemon/worktrees/index.ts` owns worktree creation and deletion through worktree plugins.
+- `features/session/src/daemon/worktrees/archive.ts` should own the Git-native archive host introduced by this feature.
+- `features/session/src/daemon-ipc.ts` owns session feature IPC routes.
+- `features/session/src/schema.ts` owns session feature request, response, and worktree payload schemas.
+- `features/session/src/sdk.ts` owns session feature SDK wrappers, which are composed into `core/sdk/src/sdk.ts`.
+- `core/schema/src/daemon/store.ts` owns persisted daemon session and worktree record schemas.
 
-The archive feature should follow the same boundary:
-
-- kindstore remains the source of truth for static session and worktree identity,
-- Git owns the snapshot payload and its reachability,
-- the daemon owns orchestration, cleanup, restore, and diagnostics.
+The previous pre-rebase plan referenced `core/daemon/src/session/manager.ts`, `core/daemon/src/worktrees/*`, and a daemon-managed worktree sync host. Those assumptions are obsolete. The current tree has no old worktree-sync host to coordinate with, so archive/restore should own its own sequencing and safety checks.
 
 ## Goals
 
-- Allow a user archive action to reclaim the on-disk session worktree without losing tracked modifications or staged state.
+- Allow a user archive action to reclaim the on-disk session worktree without losing tracked modifications, staged state, or untracked non-ignored files.
 - Restore the archived worktree on user unarchive without creating a visible `refs/heads/*` branch.
 - Keep the durable snapshot outside `refs/stash` so it is unaffected by user stash churn.
-- Preserve enough metadata to restore even when the archived worktree was clean and therefore has no snapshot commit.
-- Coordinate cleanly with existing daemon-managed worktree sync and session lifecycle behavior.
-- Expose the archive state through `core/schema`, `core/daemon`, and `core/sdk`.
+- Preserve enough metadata to restore clean archived worktrees that have no snapshot commit.
+- Expose archive and unarchive through the session feature IPC and SDK surfaces.
+- Expose user-facing archive and unarchive controls in both session detail/chat and the session list.
 
 ## Non-Goals
 
-- Preserving untracked or ignored files in v1.
+- Preserving ignored files in v1.
 - Reconnecting or reviving live agent execution when a session is unarchived.
-- Adding archive-specific UI behavior in `app/` beyond calling the shared daemon and SDK contract.
 - Extending third-party `WorktreePlugin` with archive or restore hooks in v1.
-- Providing indefinite post-restore snapshot retention. The archive snapshot exists only while the session is archived.
+- Creating normal branches for archived or restored worktrees.
+- Adding bulk archive behavior unless it falls out of an existing session-list pattern without extra product decisions.
 
 ## Assumptions and Constraints
 
-- The repository is pre-alpha. Small schema additions and archive-state refinements are acceptable.
 - Git CLI commands remain the integration surface. The daemon must not read `.git` internals directly.
 - Worktree snapshot and restore operate only on daemon-managed linked worktrees already recorded in `db.worktrees`.
-- Sessions without a persisted worktree may still transition between archived and unarchived status, but they skip all Git-owned archive behavior.
-- Archive is a user-driven lifecycle transition. The daemon should reject archive for a currently live `active` session instead of trying to preserve reconnectability.
+- Sessions without a persisted worktree may still transition between archived and unarchived status, but they skip Git-owned archive behavior.
+- Archive is a user-driven lifecycle transition. The daemon should reject archive for currently live sessions when the session is still active or reconnectable.
+- Unarchive must not make a stale live session appear live again. Safe terminal/non-live prior statuses may be restored; stale live or reconnectable prior states restore to a safe non-live status.
 - Restore creates a detached linked worktree intentionally. Detached restore is the mechanism that avoids new user-visible branches.
-- The daemon uses the existing per-repository worktree lock so archive, restore, sync, and cleanup do not race each other.
+- The snapshot durability boundary is the private Git ref. The daemon must not remove the worktree until the ref or clean-archive metadata is durably recorded.
 
 ## Terminology
 
 - `Archived Session`
   - A daemon session whose user-facing status is `archived`.
-  - Why: so the user can hide or defer the session while preserving its stored history and, when present, its archived worktree state.
-- `Archivable Session Status`
-  - One non-live session status that may transition into `archived`: `idle`, `blocked`, `done`, `error`, or `cancelled`.
-  - Why: so unarchive can restore a truthful status without pretending the live agent runtime still exists.
+  - Why: so the user can hide or defer the session while preserving stored history and, when present, archived worktree state.
 - `Worktree Archive Snapshot`
-  - The stash-style commit that captures tracked working tree changes and index state relative to the archived worktree `HEAD`.
-  - Why: so the daemon can remove the worktree directory and later restore the same tracked dirty state.
+  - The stash-style commit that captures tracked working tree changes, index state, and untracked non-ignored files relative to the archived worktree `HEAD`.
+  - Why: so the daemon can remove the worktree directory and later restore the same user-visible dirty state.
 - `Archive Ref`
   - The daemon-private Git ref that points at one `Worktree Archive Snapshot`.
   - Why: so the snapshot stays reachable without depending on `refs/stash`.
 - `Archive Metadata`
-  - The daemon-owned metadata file stored under the repository common Git dir while a session worktree is archived.
-  - Why: so clean worktrees and snapshot refs can both be restored deterministically.
+  - The daemon-owned persisted metadata attached to the worktree record while a session worktree is archived.
+  - Why: so clean worktrees, snapshot refs, original `HEAD`, restore paths, and user-facing state can be restored deterministically.
 - `Restored Worktree`
   - A linked worktree recreated from archive metadata and, when present, one archive snapshot.
   - Why: so unarchive returns the user to an isolated working copy without recreating a branch.
 
 ## Proposed Design
 
-### 1. Ownership
+### 1. Session Lifecycle Contract
 
-#### `core/daemon/src/session/manager.ts`
+Archive is an explicit daemon mutation instead of a pure storage flag.
 
-Owns the session lifecycle transition:
-
-- validates that archive or unarchive is allowed for the current session status,
-- unmounts worktree sync first when the worktree is still mounted,
-- updates persisted session status on success,
-- emits archive lifecycle diagnostics,
-- exposes archive and unarchive daemon IPC methods.
-
-#### `core/daemon/src/worktrees/archive.ts`
-
-Owns the Git-native archive mechanics:
-
-- capture of tracked dirty state into a stash-style commit,
-- persistence under one daemon-private ref,
-- archive metadata file reads and writes,
-- worktree cleanup and removal,
-- linked worktree recreation and snapshot apply,
-- archive-state inspection.
-
-#### `core/schema` and `core/sdk`
-
-Own the shared contract:
-
-- archive and unarchive request and response types,
-- persisted session status support for reversible archive,
-- worktree archive inspection fields surfaced to clients,
-- thin SDK methods that mirror the daemon IPC surface.
-
-### 2. Session Lifecycle Contract
-
-Archive becomes an explicit daemon mutation instead of a pure storage flag.
-
-`DaemonSession` gains:
+`DaemonSession` gains prior-status metadata:
 
 ```ts
-type ArchivableSessionStatus = "idle" | "blocked" | "done" | "error" | "cancelled"
+type SafeArchivedFromStatus = "idle" | "blocked" | "done" | "error" | "cancelled"
 
 type DaemonSession = {
   status: DaemonSessionStatus
-  archivedFromStatus: ArchivableSessionStatus | null
+  archivedFromStatus: SafeArchivedFromStatus | null
   // existing fields
 }
 ```
@@ -131,24 +98,19 @@ Invariants:
 
 - `status === "archived"` requires `archivedFromStatus !== null`
 - `status !== "archived"` requires `archivedFromStatus === null`
+- archive on an already archived session is idempotent
+- unarchive on a non-archived session fails
 
-Valid archive sources are:
+Archive source handling:
 
-- `idle`
-- `blocked`
-- `done`
-- `error`
-- `cancelled`
-
-Archive rejects:
-
-- `active`
-- any session whose connection is still live and reconnectable
+- safe non-live statuses record themselves in `archivedFromStatus`
+- active or reconnectable sessions are rejected
+- stale live statuses discovered from persisted records after reconciliation are normalized to a safe non-live restore status
 
 On successful archive:
 
 - `session.status` becomes `archived`
-- `session.archivedFromStatus` records the prior `Archivable Session Status`
+- `session.archivedFromStatus` records the safe restore status
 - session history remains readable
 - connection mode remains history-only or none
 - live reconnectability is not preserved
@@ -157,20 +119,18 @@ On successful unarchive:
 
 - `session.status` is restored from `session.archivedFromStatus`
 - `session.archivedFromStatus` becomes `null`
-- the recreated worktree remains detached
+- a worktree, when present, is recreated as detached
 - session connection mode stays non-live
-
-Archive on an already archived session is idempotent and returns the current archived state. Unarchive on a non-archived session fails.
 
 If the session has no persisted worktree record:
 
 - archive still updates `status` and `archivedFromStatus`
 - the response returns `worktree: null`
-- unarchive restores the prior non-live status without any Git worktree action
+- unarchive restores the safe prior status without any Git worktree action
 
-### 3. Worktree Model Changes
+### 2. Worktree Model Changes
 
-The existing persisted worktree shape is not enough to describe a restored detached worktree honestly. Add:
+The existing persisted worktree shape is not enough to describe archived and detached-restored state. Add:
 
 ```ts
 type SessionWorktreeHeadMode = "branch" | "detached"
@@ -180,9 +140,11 @@ type SessionWorktreeArchiveState = {
   baseOid: string
   snapshotRef: string | null
   snapshotOid: string | null
-  trackedOnly: true
   includesIndex: true
-  archivedAt: number
+  includesUntracked: true
+  includesIgnored: false
+  archivedAt: string
+  originalWorktreeDir: string
 }
 ```
 
@@ -203,11 +165,11 @@ Field semantics:
   - does not imply the worktree is currently attached to that branch when `headMode === "detached"`
 - `archive`
   - `null` when no archived worktree state exists
-  - non-null only while the session is archived and its worktree has been snapshotted for later restore
+  - non-null only while the session is archived and its worktree has been snapshotted or recorded clean for later restore
 
-### 4. IPC and SDK Surface
+### 3. IPC and SDK Surface
 
-Add two daemon IPC actions and matching SDK helpers:
+Add two session feature IPC actions and matching SDK helpers:
 
 ```ts
 type ArchiveSessionRequest = DaemonSessionIdParams
@@ -220,26 +182,26 @@ type MutateSessionArchiveResponse = SessionIdentity & {
 }
 ```
 
-Proposed method names:
+Proposed route shape:
 
-- `sessionArchive`
-- `sessionUnarchive`
+- `client.session.archive({ id })`
+- `client.session.unarchive({ id })`
 
 SDK methods:
 
-- `sdk.session.archive(...)`
-- `sdk.session.unarchive(...)`
+- `sdk.session.archive({ id })`
+- `sdk.session.unarchive({ id })`
 
-This preserves the repo rule that shared user-facing mutation surfaces live in `core/sdk` together with the daemon contract.
+The routes belong in `features/session/src/daemon-ipc.ts`, using the same resource-style route tree as `session.create`, `session.changes`, and `session.worktree.get`. The SDK wrappers belong in `features/session/src/sdk.ts` and are composed into `core/sdk/src/sdk.ts` through the existing session feature plugin.
 
-### 5. Git-Owned Persistence Model
+### 4. Git-Owned Snapshot Model
 
-Static worktree identity stays in `db.worktrees`. Archive payload and archive lifecycle state live under the repository common Git dir.
+Static worktree identity stays in `db.worktrees`. The archive payload is owned by Git through a daemon-private ref.
 
 #### Ref namespace
 
 ```text
-refs/goddard/worktree-archive/<session>/snapshot
+refs/goddard/worktree-archive/<session-id>/snapshot
 ```
 
 Rules:
@@ -247,348 +209,151 @@ Rules:
 - the ref points to one stash-style commit object
 - the ref is absent when the archived worktree was clean
 - the daemon never stores or resolves archive durability through `stash@{n}`
-- `git update-ref` is always used for writes and deletes
+- `git update-ref --create-reflog` is used to create or update refs
+- `git update-ref -d` is used when a snapshot is garbage-collected
 
-#### Metadata path
+#### Snapshot construction
 
-```text
-<common-git-dir>/goddard/worktree-archive/<session>.json
-```
+The host should use Git's stash commit shape because `git stash apply` already knows how to restore working-tree state, index state, and untracked files when the commit is shaped like a stash entry.
 
-Metadata shape:
+Important constraint: `git stash create` is useful for tracked working-tree and index state, but it does not provide a portable `--include-untracked` mode. The implementation must not assume `git stash create --include-untracked` works.
 
-```json
-{
-  "sessionId": "ses_123",
-  "repoRoot": "/repo",
-  "worktreeDir": "/repo/.worktrees/goddard-ses_123",
-  "baseOid": "abc123",
-  "snapshotRef": "refs/goddard/worktree-archive/ses_123/snapshot",
-  "archivedAt": 1770000000000,
-  "trackedOnly": true,
-  "includesIndex": true
-}
-```
+Archive should construct a stash-shaped commit without writing to `refs/stash`:
 
-Notes:
-
-- `snapshotRef` is nullable in memory even if the JSON example shows a string. Clean archived worktrees persist metadata with `snapshotRef: null`.
-- `baseOid` is stored even though the stash commit is parented to the original `HEAD`. Keeping it explicit improves restore clarity and error reporting.
-- The archive metadata file exists only while the session is archived.
-
-### 6. Snapshot Semantics
-
-Archive snapshot captures:
-
-- tracked working tree modifications
-- tracked staged state in the index
-
-Archive snapshot does not capture:
-
-- untracked files
-- ignored files
-
-That trade is intentional. The archive feature exists to reclaim disk safely for tracked work. Preserving untracked and ignored content would either require different capture machinery or silently pin large generated directories, which works against the cleanup goal.
-
-Snapshot capture uses:
+1. capture the tracked/index stash payload with `git stash create`
+2. capture untracked non-ignored files into an untracked tree using Git plumbing
+3. create or rewrite the final stash-shaped commit so its parents are:
+   - parent 1: archived worktree `HEAD`
+   - parent 2: index-state commit
+   - parent 3: untracked-files commit, when untracked non-ignored files exist
+4. store the final snapshot commit under the daemon-private ref
 
 ```bash
-stash_oid=$(git stash create "goddard archive $SESSION_ID")
+git update-ref --create-reflog "refs/goddard/worktree-archive/<session-id>/snapshot" "$stash_oid"
 ```
 
-If `stash_oid` is non-empty, the daemon persists:
+The host may use another implementation if it preserves the same externally observable semantics without touching the user's stash stack. The implementation must prove with tests that untracked non-ignored files are restored, ignored files are not restored, and `refs/stash` is unchanged.
 
-```bash
-git update-ref --create-reflog "refs/goddard/worktree-archive/$SESSION_ID/snapshot" "$stash_oid"
-```
+The host must treat an empty stash OID as a valid clean archive outcome:
 
-If `stash_oid` is empty, the worktree is considered clean for tracked state. Archive still proceeds, but metadata records `snapshotRef: null`.
+- record clean archive metadata
+- do not create a snapshot ref
+- proceed with worktree removal only after metadata is persisted
 
-### 7. Archive Flow
+### 5. Cleanup and Restore
 
-Archive order of operations:
+Archive cleanup sequence:
 
-1. Load the session and its persisted worktree record.
-2. Reject if the session is live or `active`.
-3. If worktree sync is mounted, unmount it first so the primary checkout is restored before archive cleanup begins.
-4. Resolve the worktree repository common dir and current `HEAD` OID.
-5. Capture the stash-style snapshot with `git stash create`.
-6. If a snapshot OID exists, persist it under `refs/goddard/worktree-archive/<session>/snapshot` and verify the ref resolves.
-7. Write archive metadata under `<common-git-dir>/goddard/worktree-archive/<session>.json`.
-8. Clean the worktree with:
+1. resolve and record the worktree `HEAD` OID
+2. create the snapshot if the worktree has restorable state
+3. persist the snapshot under the private ref
+4. persist archive metadata in the worktree record
+5. clean the worktree with Git commands
+6. remove the linked worktree through the existing worktree plugin cleanup path
+7. update the session status to `archived`
 
-   ```bash
-   git reset --hard HEAD
-   git clean -fd
-   ```
+Restore sequence:
 
-9. Remove the linked worktree with:
+1. verify the session is archived
+2. verify archive metadata and private ref, when present
+3. choose the restore path from the persisted worktree record or product policy
+4. create a linked worktree at the archived base OID with detached `HEAD`
+5. apply the snapshot ref with index restoration
+6. keep the snapshot ref until explicit cleanup policy removes it
+7. clear archive metadata and restore a safe non-live session status
 
-   ```bash
-   git worktree remove <worktreeDir>
-   ```
+Restore failure handling:
 
-10. Update the session to `status: "archived"` and store `archivedFromStatus`.
+- keep the snapshot ref
+- keep the partially restored worktree for inspection when creation succeeded
+- keep the session archived or mark a partial/conflicted restore state in diagnostics
+- report whether failure happened during worktree creation or snapshot application
 
-Design decisions in this flow:
+### 6. Archived Changes
 
-- `git clean -fd` is always part of archive cleanup. Because untracked files are not preserved in v1, archive explicitly discards them before worktree removal.
-- The daemon removes the worktree using Git directly after cleanup rather than depending on plugin-specific cleanup hooks. Restore uses the same Git-native assumption.
-- If any step before snapshot durability fails, the daemon leaves the worktree untouched and the session status unchanged.
-- If cleanup or worktree removal fails after the snapshot ref was written, the daemon keeps the session unarchived, emits a diagnostic, and attempts to reapply the snapshot immediately before deleting archive metadata and the private ref. If that rollback fails, the daemon preserves the private ref and reports manual recovery instructions in diagnostics.
+`features/session/src/daemon/changes.ts` currently reads changes from the live worktree path when a persisted worktree exists. Archived sessions may no longer have that directory.
 
-### 8. Restore Flow
+Changes behavior should be:
 
-Restore order of operations:
+- non-archived worktree sessions continue to read from the worktree directory
+- archived clean worktrees return empty changes
+- archived dirty worktrees produce changes from the archive snapshot relative to the archived base OID
+- missing archived worktree directories are non-fatal
 
-1. Load the archived session, its persisted worktree record, and the archive metadata file.
-2. Verify that `session.archivedFromStatus` is present.
-3. Verify that the target `worktreeDir` does not already exist as a non-empty directory or an assigned linked worktree.
-4. Recreate the linked worktree at the recorded path in detached mode:
+This keeps session history and change inspection useful after disk cleanup.
 
-   ```bash
-   git worktree add --detach <worktreeDir> <baseOid>
-   ```
+### 7. UI Surface
 
-5. If `snapshotRef` is non-null, apply the archived tracked state:
+The app should expose archive and unarchive controls in:
 
-   ```bash
-   git -C <worktreeDir> stash apply --index <snapshotRef>
-   ```
+- session detail/chat
+- session list
 
-6. Update the persisted worktree record:
-   - keep the recorded `branchName` as the pre-archive branch hint
-   - set `headMode` to `detached`
-7. Delete the archive metadata file and the archive ref.
-8. Restore `session.status` from `session.archivedFromStatus` and clear `archivedFromStatus`.
+UI expectations:
 
-Restore intentionally does not:
+- archived state is visible in both surfaces
+- archive is disabled or clearly rejected for unsafe live/reconnectable sessions
+- unarchive restores the worktree before showing it as available
+- no bulk archive behavior is required unless it naturally fits an existing session-list pattern without additional product decisions
 
-- create or attach a branch
-- rerun plugin setup hooks
-- reconnect the old ACP session
+## Failure Modes
 
-That keeps restore semantics narrow and predictable: recreate the isolated Git checkout, then reapply tracked dirty state.
+### No snapshot payload
 
-### 9. Interaction with Existing Sync Sessions
+If there are no tracked changes and no untracked non-ignored files, archive still succeeds for worktree cleanup by recording clean archive metadata. No private snapshot ref is created.
 
-Mounted sync already mutates both the session worktree and the primary checkout. Archive must not race or partially bypass that logic.
+### Private ref write failed
 
-Rules:
+If the private ref write fails:
 
-- archive first checks for mounted sync state on the session worktree
-- if sync is mounted, archive calls the normal sync unmount path before snapshotting
-- archive fails if sync unmount fails
-- restore does not automatically remount sync
+- do not clean or remove the worktree
+- leave the session unarchived
+- report archive failure
 
-This keeps archive semantics one-directional:
+The private ref or clean metadata is the durability boundary.
 
-- sync state is ephemeral and ends before archive
-- archive state is durable and survives until unarchive
+### Worktree removal failed
 
-### 10. Architecture and End-to-End Flow
+If worktree removal fails after the snapshot is durable:
 
-#### Archive
-
-```text
-user archive request
-  -> session manager validates status and sync state
-  -> worktree archive host captures tracked snapshot
-  -> archive host persists private ref + metadata
-  -> archive host cleans and removes linked worktree
-  -> session manager marks session archived
-  -> daemon returns updated session + worktree archive state
-```
-
-#### Unarchive
-
-```text
-user unarchive request
-  -> session manager validates archived session state
-  -> worktree archive host recreates detached linked worktree at baseOid
-  -> archive host reapplies archived snapshot when present
-  -> archive host deletes archive metadata + private ref
-  -> session manager restores the prior non-live session status
-  -> daemon returns updated session + restored worktree state
-```
-
-## Alternatives and Tradeoffs
-
-### Use a daemon-private ref instead of `refs/stash`
-
-Chosen because:
-
-- `stash@{n}` is reflog addressing, not a durable identifier
-- user stash activity must not rewrite daemon restore handles
-- the daemon can delete archive refs precisely when unarchive succeeds
-
-Rejected alternative:
-
-- storing only `stash@{n}`
-  - rejected because the ordinal changes as the user's stash stack changes
-
-### Restore detached instead of restoring a branch-backed worktree
-
-Chosen because:
-
-- detached restore avoids branch-list spam
-- archive restore should not synthesize long-lived `refs/heads/*` entries
-- the archive feature is about recovering tracked dirty state, not recreating branch workflow
-
-Rejected alternative:
-
-- create or recreate a session branch on restore
-  - rejected because it introduces user-visible refs for an internal persistence feature
-
-### Track only tracked changes in v1
-
-Chosen because:
-
-- `git stash create` is a clean fit for tracked dirty state and index state
-- archive cleanup exists to reclaim disk, especially large untracked directories
-- tracked-only semantics are clearer and easier to test
-
-Rejected alternative:
-
-- preserve untracked files too
-  - rejected for v1 because it complicates capture semantics and works against the cleanup goal
-
-### Delete archive refs after successful restore
-
-Chosen because:
-
-- the archive snapshot is an implementation detail of the archived state
-- once the worktree exists again, retaining the ref only adds stale Git-owned state
-- repeated archive later simply captures a fresh snapshot
-
-Rejected alternative:
-
-- keep archive refs after unarchive for later garbage collection
-  - rejected because it prolongs hidden retained state without a clear user-facing need
-
-## Failure Modes and Edge Cases
-
-### Clean worktree archive
-
-`git stash create` may return no OID. Archive still succeeds:
-
-- metadata is written with `snapshotRef: null`
-- the worktree is removed from disk
-- restore recreates a clean detached worktree at `baseOid`
-
-### Archive ref write failure
-
-If `git update-ref` fails:
-
-- archive aborts
-- metadata is not written
-- session status does not change
-- the worktree stays on disk
-
-### Archive while sync is mounted
-
-If sync unmount fails:
-
-- archive aborts
-- no snapshot is written
-- the session remains unarchived
+- keep the session unarchived unless cleanup has clearly completed
+- keep the private ref for recovery
+- report cleanup failure with the worktree path
 
 ### Restore path already exists
 
-Restore fails before `git worktree add` when:
+Fail before creating the worktree unless the path is empty and the product explicitly allows reuse.
 
-- the target path exists and is non-empty
-- the path is already assigned to another linked worktree
+### Worktree creation failed
 
-The session stays archived and the archive metadata remains intact.
+Possible reasons include stale worktree admin state, an occupied path, or plugin failure. The daemon should report diagnostics and keep archive metadata intact.
 
-### Snapshot apply conflicts during restore
+### Snapshot apply conflicts
 
-`git stash apply --index` may conflict even when restoring at the original `baseOid`, for example if the target path was partially recreated or the repository state moved unexpectedly.
+Keep the snapshot ref, keep the partially restored worktree, and surface the path plus conflict state so the user can inspect or resolve it.
 
-When apply fails:
+### Linked worktree directory was manually deleted
 
-- the session stays archived
-- the recreated worktree is left on disk for inspection
-- the archive ref and metadata remain intact
-- diagnostics report the restore path and Git failure output
+Missing archived worktree directories are non-fatal. Missing non-archived worktree directories should continue to be treated as existing lifecycle or cleanup failures.
 
-### Missing archive metadata or legacy archived sessions
+## Retention and Garbage Collection
 
-Sessions archived before this feature ships do not have archive metadata or `archivedFromStatus`.
+Private refs keep snapshots reachable until the daemon deletes them. That is intentional while a session is archived.
 
-In v1:
+Initial policy:
 
-- unarchive fails with a clear `not restorable` error
-- the daemon does not guess a replacement status or synthesize a clean worktree
+- keep the snapshot ref while the session remains archived
+- keep the snapshot ref after conflicted restore
+- delete the snapshot ref only after a successful restore and explicit cleanup policy says the archived payload is no longer needed
 
-### Manual worktree deletion outside the daemon
+## Test Plan
 
-If the archived worktree directory was already deleted manually, archive is unaffected because restore relies on the recorded path and archive metadata, not the original directory contents.
-
-If a partially restored worktree directory is deleted manually before restore completes, the next restore attempt behaves like a fresh restore if the target path is absent.
-
-## Testing and Observability
-
-Required daemon tests:
-
-- archive a dirty tracked worktree and verify the worktree directory is removed, the private ref exists during archive, and the session status becomes `archived`
-- unarchive a dirty tracked worktree and verify the restored worktree is detached and dirty state is reapplied
-- archive and unarchive a clean worktree with `snapshotRef: null`
-- verify untracked files are discarded during archive
-- verify archive first unmounts sync and restores the primary checkout
-- verify restore failure leaves archive metadata intact and the session still archived
-- verify legacy archived sessions fail unarchive with a clear error
-- verify SDK archive and unarchive helpers send the expected daemon IPC methods
-
-Recommended diagnostics:
-
-- `worktree.archive_requested`
-- `worktree.archive_snapshot_captured`
-- `worktree.archived`
-- `worktree.archive_failed`
-- `worktree.unarchive_requested`
-- `worktree.restored`
-- `worktree.restore_failed`
-- `worktree.archive_warning`
-
-Each event should include at least:
-
-- `sessionId`
-- `repoRoot`
-- `worktreeDir`
-- `baseOid`
-- `snapshotRef` when present
-
-## Rollout and Migration
-
-No config flag is required in v1. The behavior is attached to the new daemon archive and unarchive mutations.
-
-Migration notes:
-
-- existing `DaemonSession` records gain `archivedFromStatus: null`
-- existing `DaemonWorktree` records gain `headMode: "branch"` on first rewrite unless a reused worktree is already detached
-- sessions already in `status: "archived"` before rollout remain archived but are not automatically restorable
-
-Rollback:
-
-- disabling the archive and unarchive mutations stops new archive snapshots from being created
-- existing archive refs and metadata files can be cleaned with a one-off maintenance script if rollback is required
-
-## Open Questions
-
-None for the core v1 flow.
-
-## Ambiguities and Blockers
-
-- AB-1 - Non-blocking - Third-party plugin side effects are not replayed on restore
-  - Affected area: Proposed Design / Worktree Plugin boundary
-  - Issue: Restore recreates a plain linked worktree at the recorded path and does not call plugin-specific setup logic.
-  - Why it matters: a future plugin could rely on durable non-Git side effects that this feature would not recreate.
-  - Next step: keep v1 semantics Git-only and extend `WorktreePlugin` with explicit restore hooks only if a concrete plugin needs them.
-
-- AB-2 - Non-blocking - Crash recovery in the middle of archive cleanup is best-effort
-  - Affected area: Failure Modes and Operational Recovery
-  - Issue: v1 attempts immediate rollback when cleanup fails after snapshot capture, but it does not add a separate startup reconciler for archive operations interrupted by daemon crash.
-  - Why it matters: a crash at the wrong point could leave a durable archive ref without a completed archived session transition.
-  - Next step: add archive-operation reconciliation only if real-world testing shows this is more than a rare local failure mode.
+- Contract tests for archive/unarchive schema and SDK methods.
+- Host tests proving tracked changes, staged state, and untracked non-ignored files are restored.
+- Host tests proving ignored files are not restored.
+- Host tests proving no normal branches or `refs/stash` entries are created.
+- Manager tests for status-only archive/unarchive.
+- Manager tests for worktree archive cleanup after durability is established.
+- Restore tests for detached worktrees and conflict preservation.
+- Changes tests for archived dirty snapshots, archived clean worktrees, missing archived directories, and unchanged non-archived behavior.
+- App tests or type coverage for session detail/chat and session list controls.
