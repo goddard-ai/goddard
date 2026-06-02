@@ -29,7 +29,7 @@ import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { queryClient, useQueries } from "~/lib/query.ts"
+import { queryClient, useQueries, useQuery } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
@@ -384,6 +384,15 @@ export default component SessionChatView(props: {
               models: chat.session.models,
               configOptions: chat.session.configOptions,
             })
+            const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+              params: [{ cwd: chat.session.cwd }],
+            })
+            const agentIcon =
+              typeof chat.session.agent === "string"
+                ? adapterCatalog.adapters.find(
+                  (adapter) => adapter.id === chat.session.agent,
+                )?.icon ?? null
+                : chat.session.agent?.icon ?? null
             const modeOption = findSessionModeConfigOption(sessionModelConfig.configOptions)
             const thinkingOption = findSelectConfigOption(
               sessionModelConfig.configOptions,
@@ -493,7 +502,12 @@ export default component SessionChatView(props: {
                         class={styles.composerAgentControl}
                         title={`ACP agent: ${chat.session.agentName}`}
                       >
-                        <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
+                        if (agentIcon) {
+                          <img alt="" class={styles.composerAgentIcon} src={agentIcon} />
+                        } else {
+                          <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
+                        }
+
                         <span class={styles.composerAgentLabel}>"ACP agent"</span>
                         <span class={styles.composerAgentName}>{chat.session.agentName}</span>
                       </div>

@@ -222,6 +222,13 @@ export default {
       color: "muted",
     },
   }),
+  composerAgentIcon: css({
+    width: "16px",
+    height: "16px",
+    flexShrink: "0",
+    borderRadius: "4px",
+    objectFit: "cover",
+  }),
   composerAgentLabel: css({
     color: "muted",
     fontSize: "0.76rem",
