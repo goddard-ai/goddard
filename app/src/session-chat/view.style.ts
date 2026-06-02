@@ -211,7 +211,7 @@ export default {
   }),
   composerAgentControl: css({
     display: "grid",
-    gridTemplateColumns: "auto auto minmax(0, 1fr)",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
     alignItems: "center",
     gap: "6px",
     minWidth: "0",
@@ -228,13 +228,6 @@ export default {
     flexShrink: "0",
     borderRadius: "4px",
     objectFit: "cover",
-  }),
-  composerAgentLabel: css({
-    color: "muted",
-    fontSize: "0.76rem",
-    fontWeight: "620",
-    lineHeight: "1.2",
-    whiteSpace: "nowrap",
   }),
   composerAgentName: css({
     minWidth: "0",
