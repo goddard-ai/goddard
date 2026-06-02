@@ -15,62 +15,48 @@ type RequiredContext<Value> = preact.Context<Value | null> & {
     use(): Value;
   }
 
-type AppStateContextStore = {
-  Appearance?: RequiredContext<AppState["appearance"]>;
-  Inbox?: RequiredContext<AppState["inbox"]>;
-  MainTab?: RequiredContext<AppState["mainTab"]>;
-  ProjectContext?: RequiredContext<AppState["projectContext"]>;
-  ProjectRegistry?: RequiredContext<AppState["projectRegistry"]>;
-  ShortcutRegistry?: RequiredContext<AppState["shortcutRegistry"]>;
-  WorkbenchTabCache?: RequiredContext<AppState["workbenchTabCache"]>;
-  WorkbenchTabSet?: RequiredContext<AppState["workbenchTabSet"]>;
-}
+type RequiredContextStore = Record<string, RequiredContext<unknown>>
 
 type AppStateContextHotData = {
-  appStateContextStore?: AppStateContextStore;
+  requiredContextStore?: RequiredContextStore;
 }
 
 // Keep context identity stable when Vite re-evaluates this module during HMR.
 const appStateContextHotData = import.meta.hot?.data as AppStateContextHotData | undefined
-const appStateContextStore = appStateContextHotData?.appStateContextStore ?? {}
+const requiredContextStore = appStateContextHotData?.requiredContextStore ?? {}
 
 if (appStateContextHotData) {
-  appStateContextHotData.appStateContextStore = appStateContextStore
+  appStateContextHotData.requiredContextStore = requiredContextStore
 }
 
 function createRequiredContext<Value>(name: string): RequiredContext<Value> {
+  const existingContext = requiredContextStore[name] as RequiredContext<Value> | undefined
+
+  if (existingContext) {
+    return existingContext
+  }
+
   const nextContext = createContext<Value | null>(null) as RequiredContext<Value>
 
   nextContext.use = () => {
     return requireContext(useContext(nextContext), name)
   }
 
+  requiredContextStore[name] = nextContext as RequiredContext<unknown>
   return nextContext
 }
 
 const context = {
-  Appearance: appStateContextStore.Appearance ??= createRequiredContext<AppState["appearance"]>(
-    "appearanceContext",
+  Appearance: createRequiredContext<AppState["appearance"]>("appearanceContext"),
+  Inbox: createRequiredContext<AppState["inbox"]>("inboxContext"),
+  MainTab: createRequiredContext<AppState["mainTab"]>("mainTabContext"),
+  ProjectContext: createRequiredContext<AppState["projectContext"]>("projectContextContext"),
+  ProjectRegistry: createRequiredContext<AppState["projectRegistry"]>("projectRegistryContext"),
+  ShortcutRegistry: createRequiredContext<AppState["shortcutRegistry"]>("shortcutRegistryContext"),
+  WorkbenchTabCache: createRequiredContext<AppState["workbenchTabCache"]>(
+    "workbenchTabCacheContext",
   ),
-  Inbox: appStateContextStore.Inbox ??= createRequiredContext<AppState["inbox"]>("inboxContext"),
-  MainTab: appStateContextStore.MainTab ??= createRequiredContext<AppState["mainTab"]>(
-    "mainTabContext",
-  ),
-  ProjectContext: appStateContextStore.ProjectContext ??= createRequiredContext<
-    AppState["projectContext"]
-  >("projectContextContext"),
-  ProjectRegistry: appStateContextStore.ProjectRegistry ??= createRequiredContext<
-    AppState["projectRegistry"]
-  >("projectRegistryContext"),
-  ShortcutRegistry: appStateContextStore.ShortcutRegistry ??= createRequiredContext<
-    AppState["shortcutRegistry"]
-  >("shortcutRegistryContext"),
-  WorkbenchTabCache: appStateContextStore.WorkbenchTabCache ??= createRequiredContext<
-    AppState["workbenchTabCache"]
-  >("workbenchTabCacheContext"),
-  WorkbenchTabSet: appStateContextStore.WorkbenchTabSet ??= createRequiredContext<
-    AppState["workbenchTabSet"]
-  >("workbenchTabSetContext"),
+  WorkbenchTabSet: createRequiredContext<AppState["workbenchTabSet"]>("workbenchTabSetContext"),
 }
 
 export component AppStateProvider(props: {
