@@ -18,12 +18,14 @@ export function runCommand(
   args: string[],
   options: {
     cwd?: string
+    env?: NodeJS.ProcessEnv
     stdin?: "ignore" | string
   } = {},
 ) {
   return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env,
       stdio: [options.stdin === "ignore" ? "ignore" : "pipe", "pipe", "pipe"],
     })
 
