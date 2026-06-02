@@ -2,7 +2,12 @@ import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 import type * as acp from "acp-client/protocol"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import type { SessionIdParams } from "./schema.ts"
+import type {
+  ArchiveSessionRequest,
+  MutateSessionArchiveResponse,
+  SessionIdParams,
+  UnarchiveSessionRequest,
+} from "./schema.ts"
 
 export const sessionSdkPlugin = defineSdkPlugin({
   name: "session",
@@ -27,6 +32,12 @@ export const sessionSdkPlugin = defineSdkPlugin({
           })()
           return () => controller.abort()
         },
+        /** Archives one daemon-managed session and removes its worktree when supported by the daemon. */
+        archive: async (input: ArchiveSessionRequest): Promise<MutateSessionArchiveResponse> =>
+          client.session.archive(input),
+        /** Unarchives one daemon-managed session and restores its worktree when supported by the daemon. */
+        unarchive: async (input: UnarchiveSessionRequest): Promise<MutateSessionArchiveResponse> =>
+          client.session.unarchive(input),
       },
     }
   },

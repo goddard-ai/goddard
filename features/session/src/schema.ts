@@ -48,6 +48,10 @@ export const DaemonSessionStatus = z.enum([
 
 export type DaemonSessionStatus = z.output<typeof DaemonSessionStatus>
 
+export const DaemonArchivedFromStatus = z.enum(["idle", "blocked", "done", "error", "cancelled"])
+
+export type DaemonArchivedFromStatus = z.output<typeof DaemonArchivedFromStatus>
+
 export const DaemonSessionTitleState = z.enum([
   "placeholder",
   "fallback",
@@ -104,6 +108,7 @@ export type DaemonSessionContextUsage = z.output<typeof DaemonSessionContextUsag
 export const DaemonSession = z.strictObject({
   acpSessionId: z.string(),
   status: DaemonSessionStatus,
+  archivedFromStatus: DaemonArchivedFromStatus.nullable().default(null),
   stopReason: DaemonSessionStopReason.nullable().default(null),
   agent: z
     .union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution])
@@ -902,6 +907,26 @@ export const SessionWorktreeParams = z.strictObject({
 
 export type SessionWorktreeParams = z.infer<typeof SessionWorktreeParams>
 
+/** Whether a daemon-managed session worktree is attached to a branch or detached. */
+export const SessionWorktreeHeadMode = z.enum(["branch", "detached"])
+
+export type SessionWorktreeHeadMode = z.infer<typeof SessionWorktreeHeadMode>
+
+/** Archived worktree metadata surfaced while a session worktree is removed from disk. */
+export const SessionWorktreeArchiveState = z.strictObject({
+  status: z.literal("archived"),
+  baseOid: z.string(),
+  snapshotRef: z.string().nullable(),
+  snapshotOid: z.string().nullable(),
+  includesIndex: z.literal(true),
+  includesUntracked: z.literal(true),
+  includesIgnored: z.literal(false),
+  archivedAt: z.string(),
+  originalWorktreeDir: z.string(),
+})
+
+export type SessionWorktreeArchiveState = z.infer<typeof SessionWorktreeArchiveState>
+
 /** Response payload fragment returned after one daemon-managed session worktree fetch. */
 export const SessionWorktree = z.strictObject({
   repoRoot: z.string(),
@@ -909,6 +934,8 @@ export const SessionWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  headMode: SessionWorktreeHeadMode.default("branch"),
+  archive: SessionWorktreeArchiveState.nullable().default(null),
   poweredBy: z.string(),
 })
 
@@ -929,3 +956,20 @@ export type GetSessionWorktreeResponse = SessionWorktreeIdentity & {
 export const GetSessionWorktreeRequest = SessionIdParams
 
 export type GetSessionWorktreeRequest = z.infer<typeof GetSessionWorktreeRequest>
+
+/** Request payload used to archive one daemon-managed session. */
+export const ArchiveSessionRequest = SessionIdParams
+
+export type ArchiveSessionRequest = z.infer<typeof ArchiveSessionRequest>
+
+/** Request payload used to unarchive one daemon-managed session. */
+export const UnarchiveSessionRequest = SessionIdParams
+
+export type UnarchiveSessionRequest = z.infer<typeof UnarchiveSessionRequest>
+
+/** Response payload returned after archiving or unarchiving one daemon-managed session. */
+export type MutateSessionArchiveResponse = SessionWorktreeIdentity & {
+  session: DaemonSession
+  worktree: SessionWorktree | null
+  warnings: string[]
+}

@@ -63,6 +63,7 @@ import {
   type SessionLaunchBranch,
   type SessionLaunchPreviewRequest,
   type SessionLaunchPreviewResponse,
+  type MutateSessionArchiveResponse,
   type SessionsConfig,
   type SessionSubpackagesRequest,
   type SessionSubpackagesResponse,
@@ -3180,6 +3181,18 @@ export function createSessionManager(input: {
     }
   }
 
+  async function archiveSession(id: SessionId): Promise<MutateSessionArchiveResponse> {
+    await ready
+    requireSessionDocument(id)
+    throw new IpcClientError("Session archive is not implemented yet")
+  }
+
+  async function unarchiveSession(id: SessionId): Promise<MutateSessionArchiveResponse> {
+    await ready
+    requireSessionDocument(id)
+    throw new IpcClientError("Session unarchive is not implemented yet")
+  }
+
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
     await ready
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -3669,6 +3682,8 @@ export function createSessionManager(input: {
     getSubpackages,
     getDiagnostics,
     getWorktree,
+    archiveSession,
+    unarchiveSession,
     requireWorktree,
     listWorktrees,
     findWorktreeByDir,

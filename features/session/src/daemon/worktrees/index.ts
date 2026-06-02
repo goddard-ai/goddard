@@ -226,6 +226,8 @@ async function createWorktreeMetadata(params: {
         : path.join(normalizedWorktreeDir, relativeCwd),
     worktreeDir: normalizedWorktreeDir,
     branchName: params.branchName,
+    headMode: "branch",
+    archive: null,
     poweredBy: params.poweredBy,
   } satisfies CreatedWorktree
 }

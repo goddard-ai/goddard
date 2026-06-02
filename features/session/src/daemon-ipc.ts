@@ -41,6 +41,9 @@ import {
   type SetSessionModelResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
+  ArchiveSessionRequest,
+  UnarchiveSessionRequest,
+  type MutateSessionArchiveResponse,
 } from "./schema.ts"
 
 export const sessionIpcRoutes = defineIpcRoutes({
@@ -74,6 +77,16 @@ export const sessionIpcRoutes = defineIpcRoutes({
     changes: http.post("changes", {
       body: GetSessionChangesRequestSchema,
       response: $type<GetSessionChangesResponse>(),
+    }),
+    /** Archives one daemon-managed session and its worktree snapshot when present. */
+    archive: http.post("archive", {
+      body: ArchiveSessionRequest,
+      response: $type<MutateSessionArchiveResponse>(),
+    }),
+    /** Restores one archived daemon-managed session and its worktree when present. */
+    unarchive: http.post("unarchive", {
+      body: UnarchiveSessionRequest,
+      response: $type<MutateSessionArchiveResponse>(),
     }),
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: http.post("composer-suggestions", {
