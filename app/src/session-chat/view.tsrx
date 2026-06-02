@@ -540,6 +540,7 @@ export default component SessionChatView(props: {
                     }
                     if (modeOption) {
                       <SessionModeSelector
+                        compact={true}
                         modeOption={{
                           ...modeOption,
                           currentValue: draftModeValue.value ?? modeOption.currentValue,
@@ -553,6 +554,7 @@ export default component SessionChatView(props: {
                     }
                     if (modelItems.length > 0) {
                       <SessionInputSelect
+                        compact={true}
                         filterable={true}
                         items={modelItems}
                         label="Model"
@@ -567,6 +569,7 @@ export default component SessionChatView(props: {
                     }
                     if (thinkingOption) {
                       <SessionConfigOptionSelector
+                        compact={true}
                         option={{
                           ...thinkingOption,
                           currentValue: draftThinkingValue.value ?? thinkingOption.currentValue,

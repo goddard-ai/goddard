@@ -5,6 +5,7 @@ import { SessionInputSelect, type SessionInputSelectItem } from "./select-menu.t
 
 export component SessionModeSelector(props: {
   disabled?: boolean;
+  compact?: boolean;
   modeOption: SelectSessionConfigOption | null;
   open: Signal<boolean>;
   shortcut?: string | null;
@@ -12,6 +13,7 @@ export component SessionModeSelector(props: {
 }) {
   <SessionConfigOptionSelector
     disabled={props.disabled}
+    compact={props.compact}
     option={props.modeOption}
     open={props.open}
     label="Approval preset"
@@ -23,6 +25,7 @@ export component SessionModeSelector(props: {
 
 export component SessionConfigOptionSelector(props: {
   disabled?: boolean;
+  compact?: boolean;
   label?: string;
   option: SelectSessionConfigOption | null;
   open: Signal<boolean>;
@@ -43,6 +46,7 @@ export component SessionConfigOptionSelector(props: {
       : []
 
   <SessionInputSelect
+    compact={props.compact}
     disabled={props.disabled || optionItems.length === 0}
     filterable={false}
     items={optionItems}

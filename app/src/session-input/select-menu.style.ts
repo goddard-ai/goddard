@@ -4,6 +4,10 @@ import { token } from "@goddard-ai/styled-system/tokens"
 export default {
   field: css({
     minWidth: "0",
+    '&[data-compact="true"]': {
+      width: "fit-content",
+      maxWidth: "100%",
+    },
   }),
   tooltipTrigger: css({
     display: "block",
@@ -35,6 +39,10 @@ export default {
       cursor: "not-allowed",
       opacity: "0.5",
     },
+    '&[data-compact="true"]': {
+      width: "auto",
+      maxWidth: "100%",
+    },
   }),
   triggerContent: css({
     display: "inline-flex",
@@ -49,6 +57,9 @@ export default {
     whiteSpace: "nowrap",
     fontSize: "0.88rem",
     fontWeight: "600",
+    '[data-compact="true"] &': {
+      fontSize: "0.8rem",
+    },
   }),
   itemIcon: css({
     width: "16px",

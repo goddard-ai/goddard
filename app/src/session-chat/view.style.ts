@@ -201,13 +201,11 @@ export default {
     },
   }),
   composerControls: css({
-    display: "grid",
-    gridTemplateColumns: "1fr",
+    display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "start",
     gap: "12px",
-    "@media (min-width: 720px)": {
-      gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-    },
   }),
   composerAgentControl: css({
     display: "grid",
@@ -234,7 +232,7 @@ export default {
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    fontSize: "0.88rem",
+    fontSize: "0.8rem",
     fontWeight: "600",
     lineHeight: "1.2",
   }),

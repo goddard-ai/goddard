@@ -43,6 +43,7 @@ export type SessionInputSelectProps = {
   disabled?: boolean;
   filterable?: boolean;
   loading?: boolean;
+  compact?: boolean;
   onValueChange: (value: string) => void;
 }
 
@@ -56,7 +57,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const ariaLabel = `${props.label}: ${triggerLabel}`
   const SelectedIcon = selectedItem?.Icon
 
-  <div class={styles.field}>
+  <div class={styles.field} data-compact={props.compact}>
     <GoodTooltip
       ariaLabel={props.label}
       content={<tsrx>
@@ -82,6 +83,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           aria-haspopup="menu"
           aria-label={ariaLabel}
           class={styles.trigger}
+          data-compact={props.compact}
           disabled={props.disabled}
           type="button"
           onClick={() => {
