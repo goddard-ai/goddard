@@ -26,10 +26,17 @@ type AppStateContextStore = {
   WorkbenchTabSet?: RequiredContext<AppState["workbenchTabSet"]>;
 }
 
+type AppStateContextHotData = {
+  appStateContextStore?: AppStateContextStore;
+}
+
 // Keep context identity stable when Vite re-evaluates this module during HMR.
-const appStateContextStore = (globalThis as typeof globalThis & {
-  __goddardAppStateContexts?: AppStateContextStore;
-}).__goddardAppStateContexts ??= {}
+const appStateContextHotData = import.meta.hot?.data as AppStateContextHotData | undefined
+const appStateContextStore = appStateContextHotData?.appStateContextStore ?? {}
+
+if (appStateContextHotData) {
+  appStateContextHotData.appStateContextStore = appStateContextStore
+}
 
 function createRequiredContext<Value>(name: string): RequiredContext<Value> {
   const nextContext = createContext<Value | null>(null) as RequiredContext<Value>
