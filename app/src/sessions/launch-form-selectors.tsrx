@@ -5,6 +5,7 @@ import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
+import { getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { flattenConfigOptionValues } from "~/session-input/config-options.ts"
@@ -13,24 +14,6 @@ import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
 import { type SessionLaunchFormState } from "./launch-form-state.ts"
 import { releaseSessionLaunchLease } from "./mutations.ts"
-
-function getShortcutLabel(binding: unknown) {
-  if (typeof binding === "string") {
-    return binding
-  }
-
-  if (binding && typeof binding === "object") {
-    if ("combo" in binding && typeof binding.combo === "string") {
-      return binding.combo
-    }
-
-    if ("sequence" in binding && typeof binding.sequence === "string") {
-      return binding.sequence
-    }
-  }
-
-  return null
-}
 
 export component SessionLaunchLoadingSelect(props: { label: string }) {
   const open = useSignal(false)

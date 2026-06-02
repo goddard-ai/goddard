@@ -3,6 +3,7 @@ import { Folder } from "lucide-react"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
+import { getShortcutLabel } from "~/commands/shortcut-label.ts"
 import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -26,24 +27,6 @@ const launchInputClasses: SessionInputClasses = {
   footer: styles.footer,
   helperText: styles.helperText,
   submitButton: styles.submitButton,
-}
-
-function getShortcutLabel(binding: unknown) {
-  if (typeof binding === "string") {
-    return binding
-  }
-
-  if (binding && typeof binding === "object") {
-    if ("combo" in binding && typeof binding.combo === "string") {
-      return binding.combo
-    }
-
-    if ("sequence" in binding && typeof binding.sequence === "string") {
-      return binding.sequence
-    }
-  }
-
-  return null
 }
 
 export component SessionLaunchForm(props: {

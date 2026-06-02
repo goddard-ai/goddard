@@ -25,6 +25,7 @@ export component SessionConfigOptionSelector(props: {
   option: SelectSessionConfigOption | null;
   open: Signal<boolean>;
   placeholder?: string;
+  shortcut?: string | null;
   onValueChange: (value: string) => void;
 }) {
   const optionItems: SessionInputSelectItem[] =
@@ -46,6 +47,7 @@ export component SessionConfigOptionSelector(props: {
     label={props.option?.name ?? props.label ?? "Session option"}
     open={props.open}
     placeholder={props.placeholder ?? "Use the adapter default"}
+    shortcut={props.shortcut}
     value={props.option?.currentValue ?? null}
     onValueChange={props.onValueChange}
   />

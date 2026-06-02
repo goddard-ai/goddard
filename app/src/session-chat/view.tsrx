@@ -25,9 +25,10 @@ import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
-import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
+import { getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries, useQuery } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
@@ -380,6 +381,7 @@ export default component SessionChatView(props: {
             const draftModeValue = useSignal<string | null>(null)
             const draftModelId = useSignal<string | null>(null)
             const draftThinkingValue = useSignal<string | null>(null)
+            const shortcutRegistry = useShortcutRegistry()
             const sessionModelConfig = deriveSessionLaunchModelConfig({
               models: chat.session.models,
               configOptions: chat.session.configOptions,
@@ -411,6 +413,23 @@ export default component SessionChatView(props: {
               ) ??
                 []
             const currentModelId = sessionModelConfig.models?.currentModelId ?? null
+            const modelShortcut = getShortcutLabel(
+              shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
+            )
+            const thinkingShortcut = getShortcutLabel(
+              shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
+            )
+
+            useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
+              modePickerOpen.value = false
+              modelPickerOpen.value = true
+              thinkingPickerOpen.value = false
+            }, { active: modelItems.length > 0 })
+            useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
+              modePickerOpen.value = false
+              thinkingPickerOpen.value = true
+              modelPickerOpen.value = false
+            }, { active: thinkingOption !== null })
 
             async function applyDraftSessionControls() {
               const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
@@ -531,6 +550,7 @@ export default component SessionChatView(props: {
                         label="Model"
                         open={modelPickerOpen}
                         placeholder="Use the adapter default model"
+                        shortcut={modelShortcut}
                         value={draftModelId.value ?? currentModelId}
                         onValueChange={(value) => {
                           draftModelId.value = value
@@ -544,6 +564,7 @@ export default component SessionChatView(props: {
                           currentValue: draftThinkingValue.value ?? thinkingOption.currentValue,
                         }}
                         open={thinkingPickerOpen}
+                        shortcut={thinkingShortcut}
                         onValueChange={(value) => {
                           draftThinkingValue.value = value
                         }}
