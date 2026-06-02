@@ -1,0 +1,64 @@
+diff --git a/src/index.js b/src/index.js
+index 40ed29d8e0ff7700fe993315706b15504f544aaa..d24410da18348a55be099c0e37f4b7672dff905d 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -4863,6 +4863,25 @@ function getBlankLinesBetweenNodes(currentNode, nextNode) {
+ 	return 0;
+ }
+ 
++/**
++ * @param {AST.Node | AST.Comment} node
++ * @returns {boolean}
++ */
++function is_tsrx_rendered_element(node) {
++	return node.type === 'Element';
++}
++
++/**
++ * @param {AST.Node | AST.Comment} node
++ * @returns {boolean}
++ */
++function is_normal_js_statement(node) {
++	return (
++		node.type.endsWith('Statement') ||
++		(node.type.endsWith('Declaration') && node.type !== 'ImportDeclaration')
++	);
++}
++
+ /**
+  * Determine if a blank line should be added between nodes
+  * @param {AST.Node | AST.Comment} currentNode - Current node
+@@ -4901,6 +4920,13 @@ function shouldAddBlankLine(currentNode, nextNode) {
+ 		return true;
+ 	}
+ 
++	if (
++		(is_normal_js_statement(currentNode) && is_tsrx_rendered_element(nextNode)) ||
++		(is_tsrx_rendered_element(currentNode) && is_normal_js_statement(nextNode))
++	) {
++		return true;
++	}
++
+ 	// Default behavior: preserve blank line if one or more existed originally
+ 	return originalBlankLines > 0;
+ }
+@@ -6683,18 +6709,10 @@ function printElement(element, path, options, print) {
+ 					? nextChild.leadingComments[0]
+ 					: nextChild;
+ 			const whitespaceLinesCount = getBlankLinesBetweenNodes(currentChild, whitespaceTarget);
+-			const isTextOrHtmlChild =
+-				currentChild.type === 'TSRXExpression' ||
+-				currentChild.type === 'Text' ||
+-				currentChild.type === 'Html' ||
+-				nextChild.type === 'TSRXExpression' ||
+-				nextChild.type === 'Text' ||
+-				nextChild.type === 'Html';
+-
+ 			if (whitespaceLinesCount > 0) {
+ 				finalChildren.push(hardline);
+ 				finalChildren.push(hardline);
+-			} else if (!isTextOrHtmlChild && shouldAddBlankLine(currentChild, nextChild)) {
++			} else if (shouldAddBlankLine(currentChild, nextChild)) {
+ 				finalChildren.push(hardline);
+ 				finalChildren.push(hardline);
+ 			} else {
