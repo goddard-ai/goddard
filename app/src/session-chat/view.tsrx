@@ -323,6 +323,7 @@ export default component SessionChatView(props: {
               </div>
             </div>
           </header>
+
           const headerActionError = page.headerAction.error.value
 
           if (headerActionError) {
@@ -369,6 +370,7 @@ export default component SessionChatView(props: {
               stickToBottomKey={submittedPromptScrollKey ?? undefined}
             />
           }
+
           <footer class={styles.composerDock}>
             const submitError = page.submitPrompt.error.value
             const modePickerOpen = useSignal(false)
@@ -475,6 +477,7 @@ export default component SessionChatView(props: {
                 </span>
               </div>
             }
+
             <Composer
               contextUsage={chat.summary.contextUsage}
               disabled={!canSubmitPrompt}
@@ -589,6 +592,7 @@ component SessionChatStateMessage(props: {
   <div class={styles.stateMessage}>
     <h2 class={styles.stateTitle}>{props.title}</h2>
     <p class={styles.stateDescription}>{props.description}</p>
+
     if (props.actionLabel && props.onAction) {
       <button class={styles.stateAction} type="button" onClick={props.onAction}>
         {props.actionLabel}

@@ -227,6 +227,7 @@ export component InboxRow(props: {
           )
         }}
       />
+
       if (sessionItem) {
         <InboxRowActionButton
           ariaLabel={isCompleted ? "Completed" : "Complete"}
@@ -243,6 +244,7 @@ export component InboxRow(props: {
           }}
         />
       }
+
       <InboxRowActionButton
         ariaLabel={isArchived ? "Archived" : "Archive"}
         disabled={hasPendingAction || isArchived}

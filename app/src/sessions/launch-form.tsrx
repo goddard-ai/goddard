@@ -101,6 +101,7 @@ export component SessionLaunchForm(props: {
           form.setOpenPicker(null)
         }}
       />
+
       try {
         <SessionSubpackageSelector {form} />
       } pending {
@@ -112,6 +113,7 @@ export component SessionLaunchForm(props: {
         <SessionLaunchLoadingSelect label="Adapter" />
       }
     </div>
+
     try {
       <SessionLaunchPreviewSelectors {form} />
     } pending {
@@ -129,6 +131,7 @@ export component SessionLaunchForm(props: {
         </div>
       </div>
     }
+
     <SessionInput
       autoFocus={true}
       classes={launchInputClasses}

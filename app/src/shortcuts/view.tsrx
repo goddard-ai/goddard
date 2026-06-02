@@ -267,6 +267,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
         <Command size={15} strokeWidth={2.2} />
       </button>
     </label>
+
     if (persistenceErrors.loadError) {
       <div class={styles.warning}>
         "The saved shortcut keymap could not be loaded, so the built-in profile is active."
@@ -279,6 +280,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
         {persistenceErrors.writeError}
       </div>
     }
+
     <div class={styles.tableFrame}>
       <table class={styles.table}>
         <thead>
@@ -490,6 +492,7 @@ component KeyboardShortcutsView(props: { class?: string }) {
         </tbody>
       </table>
     </div>
+
     if (captureState) {
       <KeyboardShortcutCaptureDialog
         currentExpression={captureState.currentExpression}

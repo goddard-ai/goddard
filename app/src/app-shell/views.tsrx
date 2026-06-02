@@ -70,6 +70,7 @@ export component MainWorkbenchView() {
     <ActiveMainTabComponent />
   } catch (error, retry) {
     console.error("Main workbench view render failed.", error)
+
     <WorkbenchTabFailure
       description="This primary view failed to render. The rest of the app is still available."
       onRetry={retry}
@@ -93,6 +94,7 @@ export component WorkbenchTabPanel() {
     <ActiveTabComponent {...activeTab.payload} />
   } catch (error, retry) {
     console.error("Workbench tab render failed.", error)
+
     <WorkbenchTabFailure
       description="This tab failed to render. You can retry it or close the tab from the tab strip."
       onRetry={retry}

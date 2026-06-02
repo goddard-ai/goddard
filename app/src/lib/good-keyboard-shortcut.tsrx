@@ -63,8 +63,8 @@ function formatCharacterKey(key: string) {
 
 function isMacOsPlatform() {
   return (globalThis.navigator as Navigator & {
-    userAgentData: { platform: string };
-  }).userAgentData.platform === "macOS"
+      userAgentData: { platform: string };
+    }).userAgentData.platform === "macOS"
 }
 
 function getShortcutPart(key: string): ShortcutPart {

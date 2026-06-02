@@ -136,6 +136,7 @@ export component KeyboardShortcutCaptureDialog(props: {
     <section class={styles.captureSection}>
       <div class={styles.captureHeading}>
         <span class={styles.captureLabel}>"Press the shortcut you want to use"</span>
+
         if (isRecording) {
           <span class={styles.captureStatus}>"Listening…"</span>
         }
@@ -158,6 +159,7 @@ export component KeyboardShortcutCaptureDialog(props: {
       >
         "Cancel"
       </button>
+
       if (props.onRemove) {
         <button
           class={`${styles.actionButton} ${styles.actionButtonDanger}`}
@@ -169,6 +171,7 @@ export component KeyboardShortcutCaptureDialog(props: {
           "Remove shortcut"
         </button>
       }
+
       <button
         class={`${styles.actionButton} ${styles.actionButtonPrimary}`}
         disabled={draftExpression.trim().length === 0}

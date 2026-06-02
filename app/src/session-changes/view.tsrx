@@ -20,12 +20,14 @@ component SessionChangesView(props: {
         {props.sessionTitle}
       </h1>
       <p class={styles.description}>"Current git diff for this session workspace."</p>
+
       if (changes.workspaceRoot) {
         <p class={styles.workspaceRoot}>
           {changes.workspaceRoot}
         </p>
       }
     </header>
+
     if (changes.workspaceRoot === null) {
       <div class={styles.empty}>
         <h2 class={styles.emptyTitle}>"Git diff unavailable"</h2>

@@ -12,14 +12,16 @@ import { orderProjectsByRecentActivity } from "./project-context.ts"
 import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./switch-project-dropdown.style.ts"
 
-type SwitchProjectItem = {
-    id: "open-folder";
-    kind: "open-folder";
-  } | {
-    id: string;
-    kind: "project";
-    project: ProjectRecord;
-  }
+type SwitchProjectItem =
+  | {
+      id: "open-folder";
+      kind: "open-folder";
+    }
+  | {
+      id: string;
+      kind: "project";
+      project: ProjectRecord;
+    }
 
 /** Renders the header-anchored searchable project switcher dropdown. */
 export component SwitchProjectDropdown() {
@@ -233,6 +235,7 @@ export component SwitchProjectDropdown() {
                   </span>
                 }
               </span>
+
               if (item.kind === "project" && activeProject?.path === item.project.path) {
                 <span class={styles.activeBadge}>"Active"</span>
               }

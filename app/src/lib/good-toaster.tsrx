@@ -126,6 +126,7 @@ export component GoodToaster() {
             <span class={styles.title}>
               {toast.title}
             </span>
+
             if (toast.description != null) {
               <span class={styles.description}>
                 {toast.description}

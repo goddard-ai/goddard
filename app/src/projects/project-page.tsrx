@@ -19,6 +19,7 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
         </p>
       </section>
     </div>
+
     return
   }
 

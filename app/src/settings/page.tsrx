@@ -46,6 +46,7 @@ export component SettingsPage() {
         }
       }
     </div>
+
     if (visibleSections.length > 0) {
       <aside class={styles.sidebar} aria-label="Settings sections">
         <h2 class={styles.sidebarTitle}>"Settings"</h2>

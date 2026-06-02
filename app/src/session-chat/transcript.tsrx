@@ -72,7 +72,12 @@ type CoalescedToolTranscriptRow = {
 }
 
 type RenderTranscriptItem =
-  SessionTranscriptTextMessage | CoalescedToolTranscriptRow | SessionTranscriptTurnStop | SessionTranscriptPermissionRequest | SessionTranscriptPlanUpdate | SessionTranscriptWorkDrawer
+  | SessionTranscriptTextMessage
+  | CoalescedToolTranscriptRow
+  | SessionTranscriptTurnStop
+  | SessionTranscriptPermissionRequest
+  | SessionTranscriptPlanUpdate
+  | SessionTranscriptWorkDrawer
 
 type TranscriptRowContext = {
   item: RenderTranscriptItem;
@@ -270,16 +275,18 @@ component TranscriptRow(props: {
       return
     case "turnStop":
       <TurnStopTranscriptRow
-        row={props.row as TranscriptRowContext & {
-          item: SessionTranscriptTurnStop;
-        }}
+        row={props.row as
+          TranscriptRowContext & {
+            item: SessionTranscriptTurnStop;
+          }}
       />
       return
     case "message":
       <TextTranscriptRow
-        row={props.row as TranscriptRowContext & {
-          item: SessionTranscriptTextMessage;
-        }}
+        row={props.row as
+          TranscriptRowContext & {
+            item: SessionTranscriptTextMessage;
+          }}
       />
       return
     default:
@@ -660,6 +667,7 @@ export component Transcript(props: TranscriptProps) {
         if (props.olderHistory) {
           <OlderHistoryPager olderHistory={props.olderHistory} />
         }
+
         <div
           ref={spacerRef}
           class={styles.virtualSpacer}
@@ -698,6 +706,7 @@ export component Transcript(props: TranscriptProps) {
         </div>
       }
     </div>
+
     if (props.showThinkingLabel) {
       <ThinkingLabel />
     }

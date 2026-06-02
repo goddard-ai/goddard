@@ -11,6 +11,7 @@ export component SessionsList(props: {
 }) {
   if (props.listStatus === "loading" && props.sessions.length === 0) {
     <div class={styles.loading}>"Loading sessions..."</div>
+
     return
   }
 
@@ -23,6 +24,7 @@ export component SessionsList(props: {
         </p>
       </div>
     </div>
+
     return
   }
 
@@ -39,6 +41,7 @@ export component SessionsList(props: {
         </p>
       </div>
     </div>
+
     return
   }
 

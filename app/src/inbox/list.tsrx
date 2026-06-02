@@ -18,6 +18,7 @@ export component InboxList(props: {
 
   if (props.listStatus === "loading" && props.items.length === 0) {
     <div class={styles.loading}>{"Loading inbox..."}</div>
+
     return
   }
 
@@ -30,6 +31,7 @@ export component InboxList(props: {
         </p>
       </div>
     </div>
+
     return
   }
 
@@ -46,6 +48,7 @@ export component InboxList(props: {
         </p>
       </div>
     </div>
+
     return
   }
 

@@ -111,6 +111,7 @@ export component Popover(props: PopoverProps) {
         }}
       />
     }
+
     <div
       ref={contentRef}
       aria-label={props.ariaLabel}

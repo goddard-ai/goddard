@@ -15,6 +15,7 @@ export component TurnStopTranscriptRow(props: {
     <div class={styles.rowInner}>
       <p class={styles.turnStopMessage} data-status={message.status}>
         <span class={styles.turnStopTitle}>{message.title}</span>
+
         if (message.reason) {
           " "
           <span>{message.reason}</span>

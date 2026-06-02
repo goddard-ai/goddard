@@ -391,6 +391,7 @@ export component SessionInput(props: {
           onEscape={props.onEscape}
           onSubmit={submitFromEditor}
         />
+
         if (props.footerInsideFrame) {
           <SessionInputFooter
             {canSubmit}
@@ -416,6 +417,7 @@ export component SessionInput(props: {
       onAcceptSuggestion={acceptSuggestion}
       onHighlight={highlightSuggestion}
     />
+
     if (!props.footerInsideFrame) {
       <SessionInputFooter
         {canSubmit}
@@ -471,6 +473,7 @@ component SessionInputFooter(props: {
         <span>{`${props.contextUsagePercent}%`}</span>
       </div>
     }
+
     <button
       aria-label={props.submitLabel}
       class={props.classes.submitButton}
@@ -480,6 +483,7 @@ component SessionInputFooter(props: {
       if (!props.iconOnlySubmit) {
         {props.submitLabel}
       }
+
       <SendHorizontal size={15} strokeWidth={2.2} />
     </button>
   </div>

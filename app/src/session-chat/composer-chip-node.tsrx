@@ -54,7 +54,10 @@ export type ComposerWebLinkChipData = {
 
 /** One atomic chip payload stored inside the Lexical session composer. */
 export type ComposerChipData =
-  ComposerFilesystemChipData | ComposerSkillChipData | ComposerSlashCommandChipData | ComposerWebLinkChipData
+  | ComposerFilesystemChipData
+  | ComposerSkillChipData
+  | ComposerSlashCommandChipData
+  | ComposerWebLinkChipData
 
 /** Serialized JSON shape used when Lexical copies or persists one chip node. */
 export type SerializedComposerChipNode = SerializedLexicalNode & {
@@ -159,6 +162,7 @@ component ComposerChipView(props: { chip: ComposerChipData }) {
     <span class={cx(styles.muted)} aria-hidden="true">
       <ChipIcon chip={props.chip} />
     </span>
+
     if (props.chip.kind === "link") {
       <a
         class={cx(styles.label, styles.link)}

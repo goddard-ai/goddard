@@ -48,6 +48,7 @@ export component CommandDialog(props: CommandDialogProps) {
         <></>
       } catch (error, retry) {
         console.error("Command dialog render failed.", error)
+
         <CommandDialogFailure {open} {retry} />
       }
     }

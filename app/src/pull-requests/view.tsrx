@@ -23,6 +23,7 @@ component PullRequestStateMessage(props: {
   <div class={styles.stateMessage}>
     <h2 class={styles.stateTitle}>{props.title}</h2>
     <p class={styles.stateDescription}>{props.description}</p>
+
     if (props.actionLabel && props.onAction) {
       <button class={styles.stateAction} type="button" onClick={props.onAction}>
         {props.actionLabel}

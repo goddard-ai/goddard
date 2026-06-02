@@ -10,7 +10,6 @@ AVAILABLE COMMANDS:
 
    This is hidden inbox metadata, not part of the user-facing reply. Write it so it reads as:
    `[scope] — [headline]`
-
    - `headline` is required every turn. Make it short, specific, and about what changed this turn, what matters now, or why the user may need attention.
    - Start with the subject, not “I”, “I’m”, “Done”, or “Finished”.
    - `scope` should be a short noun phrase naming the current work area, like `Checkout flow` or `Schema migration`.

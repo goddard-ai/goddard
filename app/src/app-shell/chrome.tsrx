@@ -201,6 +201,7 @@ export component AppShellChrome() {
             <SwitchProjectDropdown />
           } catch (error, retry) {
             console.error("Project switcher render failed.", error)
+
             <button class={styles.switcherFallback} type="button" onClick={retry}>
               "Project switcher unavailable"
             </button>
@@ -426,6 +427,7 @@ component SidebarItem(props: {
       }}
     >
       <InlineSvgIcon icon={props.icon} size="22px 21px" />
+
       if (hasDot) {
         <span aria-hidden="true" class={styles.sidebarUnreadDot} />
       }
@@ -545,6 +547,7 @@ component TabButton(props: {
             }}
           />
         }
+
         <button
           aria-label={`Close ${props.title}`}
           class={styles.tabClose}

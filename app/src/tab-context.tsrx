@@ -9,8 +9,8 @@ export type TabContextSnapshot = {
 
 // Keep context identity stable when Vite re-evaluates this module during HMR.
 const tabContext = (globalThis as typeof globalThis & {
-  __goddardTabContext?: preact.Context<TabContextSnapshot | null>;
-}).__goddardTabContext ??= createContext<TabContextSnapshot | null>(null)
+    __goddardTabContext?: preact.Context<TabContextSnapshot | null>;
+  }).__goddardTabContext ??= createContext<TabContextSnapshot | null>(null)
 
 export component TabContextProvider(props: {
   children: preact.ComponentChildren;

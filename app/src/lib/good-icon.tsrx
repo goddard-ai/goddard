@@ -6,10 +6,12 @@ export type SvgIconName = keyof typeof svgIconSymbolIds
 /** SVG data type for inline SVG strings. */
 export type SvgIconData = string & { _brand: "svg" }
 
-type SvgIconSource = { name: SvgIconName; data?: never } | {
-    data: SvgIconData;
-    name?: never;
-  }
+type SvgIconSource =
+  | { name: SvgIconName; data?: never }
+  | {
+      data: SvgIconData;
+      name?: never;
+    }
 
 type ParsedInlineSvg = {
   innerMarkup: string;

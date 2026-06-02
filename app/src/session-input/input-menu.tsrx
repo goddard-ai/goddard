@@ -52,16 +52,19 @@ function suggestionKey(suggestion: SessionInputSuggestion) {
 component SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
   if (props.suggestion.type === "folder") {
     <Folder size={14} strokeWidth={2.2} />
+
     return
   }
 
   if (props.suggestion.type === "file") {
     <File size={14} strokeWidth={2.2} />
+
     return
   }
 
   if (props.suggestion.type === "skill") {
     <BookOpen size={14} strokeWidth={2.2} />
+
     return
   }
 

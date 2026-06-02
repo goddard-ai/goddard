@@ -73,6 +73,7 @@ export component MarkdownMessage(props: {
     <div class={cx(renderClass, styles.fallback)}>
       {props.markdown}
     </div>
+
     return
   }
 

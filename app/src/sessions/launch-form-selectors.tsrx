@@ -295,9 +295,11 @@ export component SessionLaunchPreviewSelectors(props: {
       }}
     />
   </div>
+
   if (localCheckoutDirty) {
     <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
   }
+
   <div class={styles.grid}>
     <SessionModeSelector
       disabled={form.modeOption.value === null}

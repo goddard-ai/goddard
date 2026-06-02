@@ -74,6 +74,7 @@ export component ProjectsPage() {
             " Add project"
           </button>
         </header>
+
         if (projects.length === 0) {
           <div class={styles.empty}>
             <div class={styles.emptyCopy}>
@@ -109,6 +110,7 @@ export component ProjectsPage() {
                 : "Select a project to inspect its configured path and display name."}
             </p>
           </div>
+
           if (selectedProject) {
             <h3 class={styles.selectedTitle}>
               {selectedProject.name}
@@ -166,6 +168,7 @@ component ProjectListRow(props: {
         <h3 class={styles.rowTitle}>
           {props.project.name}
         </h3>
+
         if (props.isSelected) {
           <span class={styles.selectedBadge}>"Selected"</span>
         }

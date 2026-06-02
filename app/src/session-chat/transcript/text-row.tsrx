@@ -174,6 +174,7 @@ component UserPromptContent(props: {
       />
     }
   </div>
+
   if (clamped && !expanded) {
     <button
       class={styles.seeFullMessageButton}
@@ -242,12 +243,14 @@ export component TextTranscriptRow(props: {
               }
             }
           </div>
+
           if (!isUserMessage && rawMarkdown.length > 0) {
             <div class={cx(styles.messageActions, styles.messageActionsLeft)}>
               <CopyMessageMarkdownButton markdown={rawMarkdown} />
             </div>
           }
         </div>
+
         if (isUserMessage && rawMarkdown.length > 0) {
           <div class={cx(styles.messageActions, styles.messageActionsRight)}>
             <CopyMessageMarkdownButton markdown={rawMarkdown} />
