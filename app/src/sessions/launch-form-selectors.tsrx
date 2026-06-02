@@ -301,14 +301,16 @@ export component SessionLaunchPreviewSelectors(props: {
   }
 
   <div class={styles.grid}>
-    <SessionModeSelector
-      disabled={form.modeOption.value === null}
-      modeOption={form.modeOption.value}
-      open={form.getPickerOpen("mode")}
-      onValueChange={(value) => {
-        form.draftModeValue.value = value
-      }}
-    />
+    if (form.modeOption.value) {
+      <SessionModeSelector
+        modeOption={form.modeOption.value}
+        open={form.getPickerOpen("mode")}
+        onValueChange={(value) => {
+          form.draftModeValue.value = value
+        }}
+      />
+    }
+
     <SessionInputSelect
       disabled={modelItems.length === 0}
       filterable={true}
@@ -323,23 +325,26 @@ export component SessionLaunchPreviewSelectors(props: {
       }}
     />
   </div>
-  <div class={styles.grid}>
-    <SessionInputSelect
-      disabled={thinkingItems.length === 0}
-      filterable={false}
-      items={thinkingItems}
-      label="Thinking level"
-      open={form.getPickerOpen("thinking")}
-      placeholder="Use the adapter default"
-      shortcut={thinkingShortcut}
-      value={typeof form.draftThinkingValue.value === "boolean"
-        ? String(form.draftThinkingValue.value)
-        : form.draftThinkingValue.value ?? null}
-      onValueChange={(value) => {
-        form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
-          ? value === "true"
-          : value
-      }}
-    />
-  </div>
+
+  if (form.thinkingOption.value) {
+    <div class={styles.grid}>
+      <SessionInputSelect
+        disabled={thinkingItems.length === 0}
+        filterable={false}
+        items={thinkingItems}
+        label="Thinking level"
+        open={form.getPickerOpen("thinking")}
+        placeholder="Use the adapter default"
+        shortcut={thinkingShortcut}
+        value={typeof form.draftThinkingValue.value === "boolean"
+          ? String(form.draftThinkingValue.value)
+          : form.draftThinkingValue.value ?? null}
+        onValueChange={(value) => {
+          form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
+            ? value === "true"
+            : value
+        }}
+      />
+    </div>
+  }
 }
