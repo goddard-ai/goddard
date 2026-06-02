@@ -713,6 +713,97 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   )
 })
 
+test("session archive and unarchive update status-only session records", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const sessionId = putStoredSession({ status: "done", connectionMode: "history" })
+
+  const archived = await send(client, "session.archive", { id: sessionId })
+
+  expect(archived.worktree).toBeNull()
+  expect(archived.warnings).toEqual([])
+  expect(archived.session.status).toBe("archived")
+  expect(archived.session.archivedFromStatus).toBe("done")
+  expect(archived.session.connectionMode).toBe("none")
+  expect(db.sessions.get(sessionId)).toMatchObject({
+    status: "archived",
+    archivedFromStatus: "done",
+    activeDaemonSession: false,
+    token: null,
+    permissions: null,
+  })
+
+  const unarchived = await send(client, "session.unarchive", { id: sessionId })
+
+  expect(unarchived.worktree).toBeNull()
+  expect(unarchived.session.status).toBe("done")
+  expect(unarchived.session.archivedFromStatus).toBeNull()
+  expect(unarchived.session.connectionMode).toBe("none")
+})
+
+test("session archive routes are idempotent for already archived and unarchived sessions", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const archivedSessionId = putStoredSession({
+    status: "archived",
+    archivedFromStatus: "blocked",
+    connectionMode: "none",
+  })
+  const unarchivedSessionId = putStoredSession({ status: "idle", connectionMode: "none" })
+
+  const archived = await send(client, "session.archive", { id: archivedSessionId })
+  const unarchived = await send(client, "session.unarchive", { id: unarchivedSessionId })
+
+  expect(archived.session.status).toBe("archived")
+  expect(archived.session.archivedFromStatus).toBe("blocked")
+  expect(unarchived.session.status).toBe("idle")
+  expect(unarchived.session.archivedFromStatus).toBeNull()
+})
+
+test("session unarchive normalizes stale live metadata to non-live state", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const sessionId = putStoredSession({
+    status: "archived",
+    archivedFromStatus: "idle",
+    connectionMode: "live",
+    activeDaemonSession: true,
+    supportsLoadSession: true,
+    agent: "pi-acp",
+    token: "tok-stale-live",
+  })
+
+  const unarchived = await send(client, "session.unarchive", { id: sessionId })
+
+  expect(unarchived.session.status).toBe("idle")
+  expect(unarchived.session.archivedFromStatus).toBeNull()
+  expect(unarchived.session.connectionMode).toBe("none")
+  expect(unarchived.session.activeDaemonSession).toBe(false)
+  expect(unarchived.session.token).toBeNull()
+})
+
+test("session archive rejects live status-only sessions", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const sessionId = putStoredSession({
+    status: "active",
+    connectionMode: "live",
+    activeDaemonSession: true,
+    token: "tok-active",
+  })
+
+  await expect(send(client, "session.archive", { id: sessionId })).rejects.toThrow(
+    /still live and cannot be archived/,
+  )
+
+  expect(db.sessions.get(sessionId)).toMatchObject({
+    status: "active",
+    connectionMode: "live",
+    activeDaemonSession: true,
+    token: "tok-active",
+  })
+})
+
 test("daemon promotes interrupted turn drafts into incomplete turn history on restart", async () => {
   await useTempHome()
 
@@ -2600,6 +2691,41 @@ function buildPromptMessage(sessionId: string, id: string, text: string) {
 async function listSessionIds(client: DaemonIpcClient) {
   const { sessions } = await send(client, "session.list", { limit: 50 })
   return sessions.map((session: any) => session.id)
+}
+
+function putStoredSession(overrides: Partial<Parameters<typeof db.sessions.put>[1]> = {}) {
+  const sessionId = db.sessions.newId()
+  db.sessions.put(sessionId, {
+    acpSessionId: `acp-stored-${randomUUID()}`,
+    status: "done",
+    stopReason: null,
+    agent: "pi-acp",
+    agentName: "node",
+    cwd: process.cwd(),
+    title: "New session",
+    titleState: "placeholder",
+    mcpServers: [],
+    connectionMode: "history",
+    supportsLoadSession: false,
+    activeDaemonSession: false,
+    completedHidden: false,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    inboxScope: null,
+    lastAgentMessage: null,
+    repository: null,
+    prNumber: null,
+    token: null,
+    permissions: null,
+    metadata: null,
+    models: null,
+    configOptions: [],
+    availableCommands: [],
+    contextUsage: null,
+    ...overrides,
+  } as Parameters<typeof db.sessions.put>[1])
+  return sessionId
 }
 
 function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {

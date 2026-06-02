@@ -90,6 +90,7 @@ import { createLaunchLeaseKey, createLaunchLeaseStore, type LaunchLease } from "
 import { resolveSessionAttentionMetadata } from "./metadata.ts"
 import {
   agentNameFromInput,
+  archivedConnectionMode,
   createReconnectRequest,
   createSessionRecordUpdate,
   disconnectedConnectionMode,
@@ -3183,14 +3184,91 @@ export function createSessionManager(input: {
 
   async function archiveSession(id: SessionId): Promise<MutateSessionArchiveResponse> {
     await ready
-    requireSessionDocument(id)
-    throw new IpcClientError("Session archive is not implemented yet")
+    const session = requireSessionDocument(id)
+    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+
+    if (session.status === "archived") {
+      return toSessionArchiveResponse(id)
+    }
+    if (
+      activeSessions.has(id) ||
+      session.activeDaemonSession ||
+      session.connectionMode === "live"
+    ) {
+      throw new IpcClientError(`Session ${id} is still live and cannot be archived`)
+    }
+    if (worktreeRecord) {
+      throw new IpcClientError("Worktree session archive is not implemented yet")
+    }
+
+    updateSession(
+      id,
+      {
+        status: "archived",
+        archivedFromStatus: toSafeArchivedFromStatus(session.status),
+        connectionMode: archivedConnectionMode(hasPersistedSessionHistory(id)),
+        activeDaemonSession: false,
+        token: null,
+        permissions: null,
+      },
+      { reason: "session_archive" },
+    )
+
+    return toSessionArchiveResponse(id)
   }
 
   async function unarchiveSession(id: SessionId): Promise<MutateSessionArchiveResponse> {
     await ready
-    requireSessionDocument(id)
-    throw new IpcClientError("Session unarchive is not implemented yet")
+    const session = requireSessionDocument(id)
+    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+
+    if (session.status !== "archived") {
+      return toSessionArchiveResponse(id)
+    }
+    if (worktreeRecord?.archive) {
+      throw new IpcClientError("Worktree session unarchive is not implemented yet")
+    }
+
+    updateSession(
+      id,
+      {
+        status: session.archivedFromStatus ?? "idle",
+        archivedFromStatus: null,
+        connectionMode: archivedConnectionMode(hasPersistedSessionHistory(id)),
+        activeDaemonSession: false,
+        token: null,
+        permissions: null,
+      },
+      { reason: "session_unarchive" },
+    )
+
+    return toSessionArchiveResponse(id)
+  }
+
+  function toSessionArchiveResponse(id: SessionId): MutateSessionArchiveResponse {
+    const session = requireSessionDocument(id)
+    const worktreeRecord = db.worktrees.first({
+      where: { sessionId: id },
+    })
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      session,
+      worktree: worktreeRecord ? toSessionWorktreeValue(worktreeRecord) : null,
+      warnings: [],
+    }
+  }
+
+  function hasPersistedSessionHistory(id: SessionId): boolean {
+    return (
+      db.sessionTurns.first({
+        where: { sessionId: id },
+      }) != null
+    )
+  }
+
+  function toSafeArchivedFromStatus(status: DaemonSessionStatus) {
+    return status === "active" || status === "archived" ? "idle" : status
   }
 
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
