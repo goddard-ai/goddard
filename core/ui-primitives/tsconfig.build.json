@@ -4,7 +4,6 @@
     "declarationMap": false,
     "emitDeclarationOnly": true,
     "noEmit": false,
-    "rewriteRelativeImportExtensions": true,
     "outDir": "dist",
     "rootDir": "src"
   },
