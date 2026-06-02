@@ -15,6 +15,9 @@ type RequiredContext<Value> = preact.Context<Value | null> & {
     use(): Value;
   }
 
+type AppStateContextName = `${Extract<keyof AppState, string>}Context`
+type AppStateContextKey<Name extends AppStateContextName> =
+  Name extends `${infer Key}Context` ? Key & keyof AppState : never
 type RequiredContextStore = Record<string, RequiredContext<unknown>>
 
 type AppStateContextHotData = {
@@ -29,7 +32,9 @@ if (appStateContextHotData) {
   appStateContextHotData.requiredContextStore = requiredContextStore
 }
 
-function createRequiredContext<Value>(name: string): RequiredContext<Value> {
+function defineAppStateContext<Name extends AppStateContextName>(name: Name): RequiredContext<AppState[AppStateContextKey<Name>]> {
+  type Value = AppState[AppStateContextKey<Name>]
+
   const existingContext = requiredContextStore[name] as RequiredContext<Value> | undefined
 
   if (existingContext) {
@@ -47,16 +52,14 @@ function createRequiredContext<Value>(name: string): RequiredContext<Value> {
 }
 
 const context = {
-  Appearance: createRequiredContext<AppState["appearance"]>("appearanceContext"),
-  Inbox: createRequiredContext<AppState["inbox"]>("inboxContext"),
-  MainTab: createRequiredContext<AppState["mainTab"]>("mainTabContext"),
-  ProjectContext: createRequiredContext<AppState["projectContext"]>("projectContextContext"),
-  ProjectRegistry: createRequiredContext<AppState["projectRegistry"]>("projectRegistryContext"),
-  ShortcutRegistry: createRequiredContext<AppState["shortcutRegistry"]>("shortcutRegistryContext"),
-  WorkbenchTabCache: createRequiredContext<AppState["workbenchTabCache"]>(
-    "workbenchTabCacheContext",
-  ),
-  WorkbenchTabSet: createRequiredContext<AppState["workbenchTabSet"]>("workbenchTabSetContext"),
+  Appearance: defineAppStateContext("appearanceContext"),
+  Inbox: defineAppStateContext("inboxContext"),
+  MainTab: defineAppStateContext("mainTabContext"),
+  ProjectContext: defineAppStateContext("projectContextContext"),
+  ProjectRegistry: defineAppStateContext("projectRegistryContext"),
+  ShortcutRegistry: defineAppStateContext("shortcutRegistryContext"),
+  WorkbenchTabCache: defineAppStateContext("workbenchTabCacheContext"),
+  WorkbenchTabSet: defineAppStateContext("workbenchTabSetContext"),
 }
 
 export component AppStateProvider(props: {
