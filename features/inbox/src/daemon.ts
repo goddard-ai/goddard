@@ -1,4 +1,4 @@
-import { definePlugin, type Plugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 
@@ -9,14 +9,7 @@ import type { InboxItemEvent } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
-type InboxPlugin = Plugin & {
-  readonly name: "inbox"
-  readonly consumes: readonly [typeof sessionPlugin, typeof pullRequestPlugin]
-  readonly db: typeof inboxDbSchema
-  readonly ipcRoutes: typeof inboxIpcRoutes
-}
-
-const inboxPluginDefinition = definePlugin({
+export const inboxPlugin = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin, pullRequestPlugin],
   db: inboxDbSchema,
@@ -123,5 +116,3 @@ const inboxPluginDefinition = definePlugin({
     }
   },
 })
-
-export const inboxPlugin: InboxPlugin = inboxPluginDefinition

@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import { definePlugin, type InferProvides, type Plugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type InferProvides } from "@goddard-ai/daemon-plugin"
 import {
   listReviewSessions,
   startReviewSync,
@@ -304,13 +304,7 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
   }
 }
 
-type ReviewSessionPlugin = Plugin & {
-  readonly name: "review-session"
-  readonly consumes: readonly [Plugin]
-  readonly ipcRoutes: typeof reviewSessionIpcRoutes
-}
-
-const reviewSessionPluginDefinition = definePlugin({
+export const reviewSessionPlugin = definePlugin({
   name: "review-session",
   consumes: [sessionPlugin],
   ipcRoutes: reviewSessionIpcRoutes,
@@ -334,5 +328,3 @@ const reviewSessionPluginDefinition = definePlugin({
     }
   },
 })
-
-export const reviewSessionPlugin: ReviewSessionPlugin = reviewSessionPluginDefinition

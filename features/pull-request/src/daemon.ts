@@ -1,10 +1,4 @@
-import {
-  definePlugin,
-  event,
-  type DbContext,
-  type EventDefinition,
-  type Plugin,
-} from "@goddard-ai/daemon-plugin"
+import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
@@ -35,19 +29,6 @@ export type PullRequestAttentionEvent = {
   headline: AttentionHeadline
   turnId: string | null
 }
-type PullRequestEvents = {
-  readonly "pull_request.created": EventDefinition<PullRequestAttentionEvent>
-  readonly "pull_request.updated": EventDefinition<PullRequestAttentionEvent>
-}
-type PullRequestPlugin = Plugin & {
-  readonly name: "pull-request"
-  readonly consumes: readonly [Plugin]
-  readonly db: typeof pullRequestDbSchema
-  readonly events: PullRequestEvents
-  readonly backendRoutes: typeof pullRequestBackendRoutes
-  readonly ipcRoutes: typeof pullRequestIpcRoutes
-}
-
 function requireRepositorySession(session: PullRequestSessionRecord | null) {
   if (!session) {
     throw new IpcClientError("Invalid session token")
@@ -92,7 +73,7 @@ async function recordPullRequest(
   )
 }
 
-const pullRequestPluginDefinition = definePlugin({
+export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
   db: pullRequestDbSchema,
@@ -200,5 +181,3 @@ const pullRequestPluginDefinition = definePlugin({
     }
   },
 })
-
-export const pullRequestPlugin: PullRequestPlugin = pullRequestPluginDefinition
