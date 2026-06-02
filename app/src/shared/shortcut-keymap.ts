@@ -39,6 +39,7 @@ export const shortcutKeymapProfiles = {
       "sessionInput.openAdapterSelector": ["Mod+Shift+a"],
       "sessionInput.openLocationSelector": ["Mod+Shift+l"],
       "sessionInput.openBranchSelector": ["Mod+Shift+b"],
+      "sessionInput.openApprovalPresetSelector": ["Shift+Tab"],
       "sessionInput.openModelSelector": ["Mod+Shift+m"],
       "sessionInput.openThinkingLevelSelector": ["Mod+t"],
       "sessionInput.submit": ["Mod+Enter"],

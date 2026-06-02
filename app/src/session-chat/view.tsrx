@@ -413,6 +413,9 @@ export default component SessionChatView(props: {
               ) ??
                 []
             const currentModelId = sessionModelConfig.models?.currentModelId ?? null
+            const approvalPresetShortcut = getShortcutLabel(
+              shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openApprovalPresetSelector.id]?.[0],
+            )
             const modelShortcut = getShortcutLabel(
               shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
             )
@@ -420,6 +423,11 @@ export default component SessionChatView(props: {
               shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
             )
 
+            useAppCommand(AppCommand.sessionInput.openApprovalPresetSelector, () => {
+              modePickerOpen.value = true
+              modelPickerOpen.value = false
+              thinkingPickerOpen.value = false
+            }, { active: modeOption !== null })
             useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
               modePickerOpen.value = false
               modelPickerOpen.value = true
@@ -538,6 +546,7 @@ export default component SessionChatView(props: {
                           currentValue: draftModeValue.value ?? modeOption.currentValue,
                         }}
                         open={modePickerOpen}
+                        shortcut={approvalPresetShortcut}
                         onValueChange={(value) => {
                           draftModeValue.value = value
                         }}

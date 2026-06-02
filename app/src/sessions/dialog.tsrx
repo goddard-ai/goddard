@@ -91,6 +91,9 @@ component SessionLaunchDialog(props: {
   useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
     form.setOpenPicker("branch")
   }, { active: hasBranchSelector })
+  useAppCommand(AppCommand.sessionInput.openApprovalPresetSelector, () => {
+    form.setOpenPicker("mode")
+  }, { active: form.modeOption.value !== null })
   useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
     form.setOpenPicker("model")
   }, { active: hasModelSelector })

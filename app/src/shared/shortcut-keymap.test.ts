@@ -18,6 +18,7 @@ const openProjectSelector = "sessionInput.openProjectSelector" as const
 const openAdapterSelector = "sessionInput.openAdapterSelector" as const
 const openLocationSelector = "sessionInput.openLocationSelector" as const
 const openBranchSelector = "sessionInput.openBranchSelector" as const
+const openApprovalPresetSelector = "sessionInput.openApprovalPresetSelector" as const
 const openModelSelector = "sessionInput.openModelSelector" as const
 const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
 const submitSessionInput = "sessionInput.submit" as const
@@ -79,6 +80,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openAdapterSelector]: ["Mod+Shift+a"],
     [openLocationSelector]: ["Mod+Shift+l"],
     [openBranchSelector]: ["Mod+Shift+b"],
+    [openApprovalPresetSelector]: ["Shift+Tab"],
     [openModelSelector]: ["Mod+Shift+m"],
     [openThinkingLevelSelector]: ["Mod+t"],
     [submitSessionInput]: ["Mod+Enter"],
@@ -97,6 +99,7 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     [closeActiveTab]: ["Mod+w"],
     [openInbox]: ["Alt+1"],
     [openKeyboardShortcuts]: ["Mod+/"],
+    [openApprovalPresetSelector]: ["Shift+Tab"],
     [openThinkingLevelSelector]: ["Mod+t"],
     [skipToPreviousPrompt]: ["Mod+ArrowUp"],
     [skipToNextPrompt]: ["Mod+ArrowDown"],

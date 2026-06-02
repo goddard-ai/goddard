@@ -239,6 +239,9 @@ export component SessionLaunchPreviewSelectors(props: {
   const branchShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
   )
+  const approvalPresetShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openApprovalPresetSelector.id]?.[0],
+  )
   const modelShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
   )
@@ -288,6 +291,7 @@ export component SessionLaunchPreviewSelectors(props: {
       <SessionModeSelector
         modeOption={form.modeOption.value}
         open={form.getPickerOpen("mode")}
+        shortcut={approvalPresetShortcut}
         onValueChange={(value) => {
           form.draftModeValue.value = value
         }}

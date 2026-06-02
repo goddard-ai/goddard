@@ -7,6 +7,7 @@ export component SessionModeSelector(props: {
   disabled?: boolean;
   modeOption: SelectSessionConfigOption | null;
   open: Signal<boolean>;
+  shortcut?: string | null;
   onValueChange: (value: string) => void;
 }) {
   <SessionConfigOptionSelector
@@ -15,6 +16,7 @@ export component SessionModeSelector(props: {
     open={props.open}
     label="Approval preset"
     placeholder="Use the adapter default"
+    shortcut={props.shortcut}
     onValueChange={props.onValueChange}
   />
 }

@@ -105,6 +105,10 @@ export const AppCommand = defineAppCommands({
       label: "Session Input: Open Branch Selector",
       icon: GitBranch,
     },
+    openApprovalPresetSelector: {
+      label: "Session Input: Open Approval Preset Selector",
+      icon: Brain,
+    },
     openModelSelector: {
       label: "Session Input: Open Model Selector",
       icon: Brain,
