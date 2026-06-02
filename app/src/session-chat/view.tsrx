@@ -2,6 +2,7 @@ import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/
 import { useSignal } from "@preact/signals"
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -482,8 +483,21 @@ export default component SessionChatView(props: {
               contextUsage={chat.summary.contextUsage}
               disabled={!canSubmitPrompt}
               footerControls={<tsrx>
-                if (modeOption || modelItems.length > 0 || thinkingOption) {
+                if (
+                  chat.session.agentName || modeOption || modelItems.length > 0 || thinkingOption
+                ) {
                   <div class={styles.composerControls}>
+                    if (chat.session.agentName) {
+                      <div
+                        aria-label={`ACP agent: ${chat.session.agentName}`}
+                        class={styles.composerAgentControl}
+                        title={`ACP agent: ${chat.session.agentName}`}
+                      >
+                        <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
+                        <span class={styles.composerAgentLabel}>"ACP agent"</span>
+                        <span class={styles.composerAgentName}>{chat.session.agentName}</span>
+                      </div>
+                    }
                     if (modeOption) {
                       <SessionModeSelector
                         modeOption={{

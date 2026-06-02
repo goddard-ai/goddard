@@ -206,8 +206,37 @@ export default {
     alignItems: "center",
     gap: "12px",
     "@media (min-width: 720px)": {
-      gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+      gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     },
+  }),
+  composerAgentControl: css({
+    display: "grid",
+    gridTemplateColumns: "auto auto minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "6px",
+    minWidth: "0",
+    minHeight: "28px",
+    color: "text",
+    "& svg": {
+      flexShrink: "0",
+      color: "muted",
+    },
+  }),
+  composerAgentLabel: css({
+    color: "muted",
+    fontSize: "0.76rem",
+    fontWeight: "620",
+    lineHeight: "1.2",
+    whiteSpace: "nowrap",
+  }),
+  composerAgentName: css({
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: "0.88rem",
+    fontWeight: "600",
+    lineHeight: "1.2",
   }),
   composerError: css({
     display: "grid",
