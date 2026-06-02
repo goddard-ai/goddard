@@ -2,6 +2,7 @@ import { IpcClientError } from "@goddard-ai/ipc"
 import type { SessionId } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
+import type { InboxStore } from "../daemon.ts"
 import type {
   BulkUpdateInboxItemsRequest,
   InboxEntityId,
@@ -15,7 +16,6 @@ import type {
   ListInboxRequest,
   UpdateInboxItemRequest,
 } from "../schema.ts"
-import type { InboxStore } from "./store.ts"
 
 const DEFAULT_INBOX_PAGE_SIZE = 50
 const MAX_INBOX_PAGE_SIZE = 100

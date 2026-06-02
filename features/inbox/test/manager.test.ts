@@ -3,15 +3,14 @@ import type { SessionId } from "@goddard-ai/session/schema"
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import { kindstore, type Kindstore } from "kindstore"
 
-import { createInboxManager } from "../src/daemon/manager.ts"
-import { inboxDbSchema } from "../src/daemon/store.ts"
+import { createInboxManager, inboxPlugin } from "../src/daemon.ts"
 
-let store: Kindstore<typeof inboxDbSchema, {}>
+let store: Kindstore<(typeof inboxPlugin)["db"], {}>
 
 beforeEach(() => {
   store = kindstore({
     filename: ":memory:",
-    schema: inboxDbSchema,
+    schema: inboxPlugin.db,
   })
 })
 

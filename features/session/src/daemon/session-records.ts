@@ -1,8 +1,8 @@
-import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type * as acp from "acp-client/protocol"
 
+import type { SessionDb } from "../daemon.ts"
 import type {
   CreateSessionRequest,
   DaemonSession,
@@ -12,7 +12,6 @@ import type {
   SessionConnection,
   SessionHistoryTurn,
 } from "../schema.ts"
-import type { sessionDbSchema } from "./store.ts"
 import { toCompletedTurnInput } from "./turn-history.ts"
 import type { PreparedSessionWorktree, SessionWorktreeState } from "./worktree.ts"
 
@@ -20,7 +19,6 @@ type SessionId = DaemonSession["id"]
 
 /** Durable connectivity summary for a daemon session across daemon restarts. */
 export type SessionConnectionMode = DaemonSession["connectionMode"]
-type SessionDb = DbContext<typeof sessionDbSchema>
 type SessionDoc = DaemonSession
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree

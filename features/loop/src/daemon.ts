@@ -1,14 +1,21 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { kind } from "kindstore"
 
 import { loopIpcRoutes } from "./daemon-ipc.ts"
 import { LoopContext } from "./daemon/context.ts"
 import { createLoopManager } from "./daemon/manager.ts"
 import { resolveNamedLoopStartRequest } from "./daemon/resolver.ts"
-import { loopDbSchema } from "./daemon/store.ts"
-import { LoopConfig, mergeLoopConfigLayers } from "./schema.ts"
+import { DaemonLoopSession, LoopConfig, mergeLoopConfigLayers } from "./schema.ts"
 
-export { loopDbSchema } from "./daemon/store.ts"
+const loopDb = {
+  loopSessions: kind("lop", DaemonLoopSession)
+    .index("sessionId", { type: "text" })
+    .multi("rootDir_loopName", {
+      rootDir: "asc",
+      loopName: "asc",
+    }),
+}
 
 export const loopPlugin = definePlugin({
   name: "loop",
@@ -20,7 +27,7 @@ export const loopPlugin = definePlugin({
       resolve: ({ project, user }) => mergeLoopConfigLayers(user, project),
     },
   },
-  db: loopDbSchema,
+  db: loopDb,
   jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
   logContext: {
@@ -57,3 +64,5 @@ export const loopPlugin = definePlugin({
     }
   },
 })
+
+export type LoopDb = DbContext<typeof loopDb>

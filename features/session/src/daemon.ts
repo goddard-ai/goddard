@@ -1,4 +1,5 @@
-import { definePlugin, event } from "@goddard-ai/daemon-plugin"
+import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
+import { kind } from "kindstore"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import {
@@ -13,8 +14,12 @@ import {
   type SessionStoppingEvent,
   type SessionWorktreePreparedEvent,
 } from "./daemon/manager.ts"
-import { sessionDbSchema } from "./daemon/store.ts"
 import {
+  DaemonSession,
+  DaemonSessionDiagnostics,
+  DaemonSessionTurn,
+  DaemonSessionTurnDraft,
+  DaemonWorktree,
   SessionsConfig,
   SessionTitlesConfig,
   StaticSessionParams,
@@ -25,7 +30,6 @@ import {
   type SessionMessageEvent,
 } from "./schema.ts"
 
-export { sessionDbSchema } from "./daemon/store.ts"
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type {
@@ -35,6 +39,50 @@ export type {
   SessionLaunchParams,
   SessionWorktreeLifecycleState,
 } from "./daemon/manager.ts"
+
+const sessionDb = {
+  sessions: kind("ses", DaemonSession)
+    .createdAt()
+    .updatedAt()
+    .index("acpSessionId")
+    .index("repository")
+    .index("token")
+    .multi("repository_prNumber", {
+      repository: "asc",
+      prNumber: "asc",
+    })
+    .multi("updatedAt_id", {
+      updatedAt: "desc",
+      id: "desc",
+    })
+    .multi("completedHidden_updatedAt_id", {
+      completedHidden: "asc",
+      updatedAt: "desc",
+      id: "desc",
+    }),
+
+  sessionTurns: kind("trn", DaemonSessionTurn)
+    .index("sessionId", { type: "text" })
+    .index("sequence", { type: "integer" })
+    .multi("sessionId_sequence", {
+      sessionId: "asc",
+      sequence: "desc",
+    }),
+
+  sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
+    .index("sessionId", { type: "text" })
+    .index("sequence", { type: "integer" })
+    .multi("sessionId_sequence", {
+      sessionId: "asc",
+      sequence: "desc",
+    }),
+
+  sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", {
+    type: "text",
+  }),
+
+  worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
+}
 
 export const sessionPlugin = definePlugin({
   name: "session",
@@ -61,7 +109,7 @@ export const sessionPlugin = definePlugin({
       scopes: ["user", "project"],
     },
   },
-  db: sessionDbSchema,
+  db: sessionDb,
   events: {
     "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
     "session.persisted": event<SessionPersistedEvent>(),
@@ -228,3 +276,5 @@ export const sessionPlugin = definePlugin({
     }
   },
 })
+
+export type SessionDb = DbContext<typeof sessionDb>

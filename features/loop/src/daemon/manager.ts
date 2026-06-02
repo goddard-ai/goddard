@@ -1,13 +1,10 @@
-import type { DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 
+import type { LoopDb } from "../daemon.ts"
 import type { DaemonLoop, DaemonLoopStatus, StartLoopRequest } from "../schema.ts"
 import { normalizeLoopIdentity } from "./paths.ts"
 import type { ResolvedLoopStartRequest } from "./resolver.ts"
 import { LoopRuntime, type LoopRuntimeServices, type LoopRuntimeStartInput } from "./runtime.ts"
-import type { loopDbSchema } from "./store.ts"
-
-type LoopDb = DbContext<typeof loopDbSchema>
 
 function isSessionId(value: string): value is `ses_${string}` {
   return value.startsWith("ses_")

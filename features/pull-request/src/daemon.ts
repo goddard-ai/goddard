@@ -1,17 +1,15 @@
-import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin, event } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import type { DaemonSession } from "@goddard-ai/session/schema"
+import { kind } from "kindstore"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
-import { pullRequestDbSchema } from "./daemon/store.ts"
-import type { DaemonPullRequest, PullRequestId } from "./schema.ts"
-
-export { pullRequestDbSchema } from "./daemon/store.ts"
+import { DaemonPullRequest, type PullRequestId } from "./schema.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -19,7 +17,6 @@ type PullRequestSessionRecord = {
   repo: string | null
   allowedPrNumbers: readonly number[]
 }
-type PullRequestDb = DbContext<typeof pullRequestDbSchema>
 type PullRequestRootConfig = {
   security?: SecurityConfig
 }
@@ -58,25 +55,21 @@ async function assertPullRequestOperationAllowed(
   }
 }
 
-async function recordPullRequest(
-  db: PullRequestDb,
-  record: Omit<DaemonPullRequest, "id" | "updatedAt">,
-) {
-  return db.pullRequests.putByUnique(
-    {
-      host: record.host,
-      owner: record.owner,
-      repo: record.repo,
-      prNumber: record.prNumber,
-    },
-    record,
-  )
-}
-
 export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
-  db: pullRequestDbSchema,
+  db: {
+    pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
+      "host_owner_repo_prNumber",
+      {
+        host: "asc",
+        owner: "asc",
+        repo: "asc",
+        prNumber: "asc",
+      },
+      { unique: true },
+    ),
+  },
   events: {
     "pull_request.created": event<PullRequestAttentionEvent>(),
     "pull_request.updated": event<PullRequestAttentionEvent>(),
@@ -84,6 +77,18 @@ export const pullRequestPlugin = definePlugin({
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, configProvider, db, events, ipc, session }) {
+    async function recordPullRequest(record: Omit<DaemonPullRequest, "id" | "updatedAt">) {
+      return db.pullRequests.putByUnique(
+        {
+          host: record.host,
+          owner: record.owner,
+          repo: record.repo,
+          prNumber: record.prNumber,
+        },
+        record,
+      )
+    }
+
     return {
       ipcHandlers: {
         pr: {
@@ -101,7 +106,7 @@ export const pullRequestPlugin = definePlugin({
               repo: sessionRecord.repo,
             })
             await session.allowPullRequest(sessionRecord.sessionId, pr.number)
-            const pullRequest = await recordPullRequest(db, {
+            const pullRequest = await recordPullRequest({
               host: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
@@ -152,7 +157,7 @@ export const pullRequestPlugin = definePlugin({
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })
-            const pullRequest = await recordPullRequest(db, {
+            const pullRequest = await recordPullRequest({
               host: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,

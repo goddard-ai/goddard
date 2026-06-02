@@ -10,7 +10,6 @@ import type {
   DaemonLogService,
   DaemonSessionContext,
   DaemonSessionContextService,
-  DbContext,
   EventBus,
   EventDefinition,
 } from "@goddard-ai/daemon-plugin"
@@ -35,6 +34,7 @@ import {
 import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
+import type { SessionDb } from "../daemon.ts"
 import {
   parseSessionIdleShutdownDurationMs,
   type AbortedSessionPrompt,
@@ -101,7 +101,6 @@ import {
   type ResolvedCreateSessionRequest,
   type SessionConnectionMode,
 } from "./session-records.ts"
-import type { sessionDbSchema } from "./store.ts"
 import { discoverSessionSubpackages } from "./subpackages.ts"
 import { loadDaemonTextModel } from "./text-model-resolver.ts"
 import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
@@ -150,7 +149,6 @@ function getPackageVersion(): string {
 }
 
 type SessionId = DaemonSession["id"]
-type SessionDb = DbContext<typeof sessionDbSchema>
 
 const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 

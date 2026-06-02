@@ -2,6 +2,7 @@ import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { kind } from "kindstore"
 
 import { workforceIpcRoutes } from "./daemon-ipc.ts"
 import {
@@ -12,14 +13,12 @@ import {
 import { WorkforceActorContext, WorkforceDispatchContext } from "./daemon/context.ts"
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
-import { workforceDbSchema } from "./daemon/store.ts"
 import {
+  DaemonWorkforce,
   WorkforceRootConfig,
   type WorkforceEventEnvelope,
   type WorkforceRootConfig as WorkforceRootConfigType,
 } from "./schema.ts"
-
-export { workforceDbSchema } from "./daemon/store.ts"
 
 export const workforcePlugin = definePlugin({
   name: "workforce",
@@ -30,7 +29,9 @@ export const workforcePlugin = definePlugin({
       scopes: ["user", "project"],
     },
   },
-  db: workforceDbSchema,
+  db: {
+    workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
+  },
   ipcRoutes: workforceIpcRoutes,
   logContext: {
     read: () => ({
