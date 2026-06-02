@@ -3,21 +3,10 @@ import { useContext } from "preact/hooks"
 
 import { type AppState, useAppState } from "./app-state-persistence.ts"
 
-function requireContext<Value>(value: Value | null, name: string) {
-  if (!value) {
-    throw new Error(`${name} is missing.`)
-  }
-
-  return value
-}
-
 type RequiredContext<Value> = preact.Context<Value | null> & {
     use(): Value;
   }
 
-type AppStateContextName = `${Extract<keyof AppState, string>}Context`
-type AppStateContextKey<Name extends AppStateContextName> =
-  Name extends `${infer Key}Context` ? Key & keyof AppState : never
 type RequiredContextStore = Record<string, RequiredContext<unknown>>
 
 type AppStateContextHotData = {
@@ -32,8 +21,8 @@ if (appStateContextHotData) {
   appStateContextHotData.requiredContextStore = requiredContextStore
 }
 
-function defineAppStateContext<Name extends AppStateContextName>(name: Name): RequiredContext<AppState[AppStateContextKey<Name>]> {
-  type Value = AppState[AppStateContextKey<Name>]
+function defineAppStateContext<Key extends Extract<keyof AppState, string>>(name: Key): RequiredContext<AppState[Key]> {
+  type Value = AppState[Key]
 
   const existingContext = requiredContextStore[name] as RequiredContext<Value> | undefined
 
@@ -44,7 +33,13 @@ function defineAppStateContext<Name extends AppStateContextName>(name: Name): Re
   const nextContext = createContext<Value | null>(null) as RequiredContext<Value>
 
   nextContext.use = () => {
-    return requireContext(useContext(nextContext), name)
+    const value = useContext(nextContext)
+
+    if (!value) {
+      throw new Error(`Context "${name}" is missing.`)
+    }
+
+    return value
   }
 
   requiredContextStore[name] = nextContext as RequiredContext<unknown>
@@ -52,14 +47,14 @@ function defineAppStateContext<Name extends AppStateContextName>(name: Name): Re
 }
 
 const context = {
-  Appearance: defineAppStateContext("appearanceContext"),
-  Inbox: defineAppStateContext("inboxContext"),
-  MainTab: defineAppStateContext("mainTabContext"),
-  ProjectContext: defineAppStateContext("projectContextContext"),
-  ProjectRegistry: defineAppStateContext("projectRegistryContext"),
-  ShortcutRegistry: defineAppStateContext("shortcutRegistryContext"),
-  WorkbenchTabCache: defineAppStateContext("workbenchTabCacheContext"),
-  WorkbenchTabSet: defineAppStateContext("workbenchTabSetContext"),
+  Appearance: defineAppStateContext("appearance"),
+  Inbox: defineAppStateContext("inbox"),
+  MainTab: defineAppStateContext("mainTab"),
+  ProjectContext: defineAppStateContext("projectContext"),
+  ProjectRegistry: defineAppStateContext("projectRegistry"),
+  ShortcutRegistry: defineAppStateContext("shortcutRegistry"),
+  WorkbenchTabCache: defineAppStateContext("workbenchTabCache"),
+  WorkbenchTabSet: defineAppStateContext("workbenchTabSet"),
 }
 
 export component AppStateProvider(props: {
