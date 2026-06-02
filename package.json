@@ -42,7 +42,6 @@
     "prepare": "husky",
     "precommit:staged-fix": "bun run ./scripts/pre-commit-staged-fix.mjs",
     "postcommit:restore-stash": "bun run ./scripts/post-commit-restore-stash.mjs",
-    "prepush:check": "bun run ./scripts/pre-push.ts",
     "dev": "bun run ./scripts/dev.ts",
     "scaffold:feature": "bun run ./scripts/scaffold-feature-package.ts",
     "build": "turbo run build",
