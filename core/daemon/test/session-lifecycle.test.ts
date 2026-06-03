@@ -1675,6 +1675,12 @@ test("session archive snapshots and restores dirty daemon worktrees", async () =
   expect(archived.worktree?.archive?.includesIgnored).toBe(false)
   expect(existsSync(worktree!.worktreeDir)).toBe(false)
 
+  const archivedChanges = await send(client, "session.changes", { id: created.session.id })
+  expect(archivedChanges.workspaceRoot).toBe(worktree!.worktreeDir)
+  expect(archivedChanges.hasChanges).toBe(true)
+  expect(archivedChanges.diff).toContain("diff --git a/package.json b/package.json")
+  expect(archivedChanges.diff).toContain("diff --git a/README.md b/README.md")
+
   const unarchived = await send(client, "session.unarchive", { id: created.session.id })
 
   expect(unarchived.session.status).toBe("done")
@@ -1695,6 +1701,39 @@ test("session archive snapshots and restores dirty daemon worktrees", async () =
   )
   expect(getDiagnosticEventTypes(created.session.id)).toContain("worktree.archived")
   expect(getDiagnosticEventTypes(created.session.id)).toContain("worktree.restored")
+})
+
+test("session changes return empty diff for clean archived worktrees", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  const worktree = (await send(client, "session.worktree.get", { id: created.session.id })).worktree
+  expect(worktree).toBeTruthy()
+
+  await send(client, "session.shutdown", { id: created.session.id })
+  db.sessions.update(created.session.id, {
+    status: "done",
+    connectionMode: "history",
+    activeDaemonSession: false,
+  })
+
+  await send(client, "session.archive", { id: created.session.id })
+  const changes = await send(client, "session.changes", { id: created.session.id })
+
+  expect(existsSync(worktree!.worktreeDir)).toBe(false)
+  expect(changes.workspaceRoot).toBe(worktree!.worktreeDir)
+  expect(changes.hasChanges).toBe(false)
+  expect(changes.diff).toBe("")
 })
 
 test("session completion enforces worktree cleanliness without blocking local dirty repos", async () => {

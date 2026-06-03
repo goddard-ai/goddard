@@ -7,6 +7,15 @@ export async function readSessionChanges(params: {
   cwd: string
   worktree: SessionWorktreeState | null
 }) {
+  if (params.worktree?.archive) {
+    const diff = await buildArchivedSnapshotDiff(params.worktree)
+    return {
+      workspaceRoot: params.worktree.worktreeDir,
+      diff,
+      hasChanges: diff.length > 0,
+    }
+  }
+
   const workspaceRoot = params.worktree?.worktreeDir ?? (await resolveGitRepoRoot(params.cwd))
 
   if (!workspaceRoot) {
@@ -33,6 +42,46 @@ export async function readSessionChanges(params: {
     diff,
     hasChanges: diff.length > 0,
   }
+}
+
+async function buildArchivedSnapshotDiff(worktree: SessionWorktreeState) {
+  const archive = worktree.archive
+  if (!archive?.snapshotRef) {
+    return ""
+  }
+
+  const trackedDiff = await readGitText(worktree.repoRoot, [
+    "diff",
+    "--no-ext-diff",
+    "--binary",
+    "--full-index",
+    archive.baseOid,
+    archive.snapshotRef,
+    "--",
+  ])
+  const hasUntrackedParent =
+    (
+      await runGit(
+        worktree.repoRoot,
+        ["rev-parse", "--verify", "--quiet", `${archive.snapshotRef}^3`],
+        {
+          allowedExitCodes: new Set([0, 1]),
+        },
+      )
+    ).exitCode === 0
+  const untrackedDiff = hasUntrackedParent
+    ? await readGitText(worktree.repoRoot, [
+        "diff",
+        "--no-ext-diff",
+        "--binary",
+        "--full-index",
+        "--root",
+        `${archive.snapshotRef}^3`,
+        "--",
+      ])
+    : ""
+
+  return joinDiffSections([trackedDiff, untrackedDiff])
 }
 
 async function buildTrackedAndUntrackedDiff(workspaceRoot: string) {
