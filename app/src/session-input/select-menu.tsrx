@@ -184,23 +184,46 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
       const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
 
-      function moveHighlightedIndex(step: 1 | -1) {
+      function getNextFocusableIndex(startIndex: number, step: 1 | -1) {
         if (filteredItems.length === 0) {
-          setSelectedIndex(0)
-          return
+          return null
         }
 
+        for (let offset = 1; offset <= filteredItems.length; offset += 1) {
+          const index = (startIndex + step * offset + filteredItems.length) % filteredItems.length
+
+          if (!filteredItems[index]?.disabled) {
+            return index
+          }
+        }
+
+        return null
+      }
+
+      function getFocusedItemIndex() {
+        return filteredItems.findIndex(
+          (item) => itemElements[item.value] === document.activeElement,
+        )
+      }
+
+      function moveFocusedItem(step: 1 | -1) {
         setSelectedIndex((currentIndex) => {
-          const nextIndex = currentIndex + step
+          const focusedIndex = getFocusedItemIndex()
+          const nextIndex = getNextFocusableIndex(
+            focusedIndex >= 0 ? focusedIndex : currentIndex,
+            step,
+          )
 
-          if (nextIndex < 0) {
-            return filteredItems.length - 1
+          if (nextIndex === null) {
+            return filteredItems.length === 0 ? 0 : currentIndex
           }
 
-          if (nextIndex >= filteredItems.length) {
-            return 0
-          }
-
+          queueMicrotask(() => {
+            const item = filteredItems[nextIndex]
+            if (item) {
+              itemElements[item.value]?.focus()
+            }
+          })
           return nextIndex
         })
       }
@@ -244,18 +267,18 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       <div
         class={styles.menuBody}
         onKeyDown={(event) => {
-          if (props.filterable) {
+          if (props.filterable && event.target === filterInputRef.current) {
             return
           }
 
           switch (event.key) {
             case "ArrowDown":
               event.preventDefault()
-              moveHighlightedIndex(1)
+              moveFocusedItem(1)
               return
             case "ArrowUp":
               event.preventDefault()
-              moveHighlightedIndex(-1)
+              moveFocusedItem(-1)
               return
             case "Enter":
               event.preventDefault()
@@ -282,11 +305,11 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               switch (event.key) {
                 case "ArrowDown":
                   event.preventDefault()
-                  moveHighlightedIndex(1)
+                  moveFocusedItem(1)
                   return
                 case "ArrowUp":
                   event.preventDefault()
-                  moveHighlightedIndex(-1)
+                  moveFocusedItem(-1)
                   return
                 case "Enter":
                   event.preventDefault()
@@ -329,6 +352,9 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   disabled={item.disabled}
                   type="button"
                   onMouseEnter={() => {
+                    setSelectedIndex(index)
+                  }}
+                  onFocus={() => {
                     setSelectedIndex(index)
                   }}
                   onClick={() => {
