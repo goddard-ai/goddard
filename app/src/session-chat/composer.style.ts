@@ -86,8 +86,8 @@ export default {
     position: "relative",
     display: "inline-grid",
     placeItems: "center",
-    width: "28px",
-    height: "28px",
+    width: "16px",
+    height: "16px",
     flex: "0 0 auto",
     color: "muted",
     "& svg": {
@@ -99,7 +99,7 @@ export default {
     },
     "& circle": {
       fill: "none",
-      strokeWidth: "3.25",
+      strokeWidth: "5",
     },
     "& circle:first-of-type": {
       stroke: "border",
