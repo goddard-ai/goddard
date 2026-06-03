@@ -524,17 +524,21 @@ export default component SessionChatView(props: {
                 ) {
                   <div class={styles.composerControls}>
                     if (chat.session.agentName) {
-                      <div
-                        aria-label={`ACP agent: ${chat.session.agentName}`}
-                        class={styles.composerAgentControl}
-                        title={`ACP agent: ${chat.session.agentName}`}
+                      <GoodTooltip
+                        ariaLabel={`ACP agent: ${chat.session.agentName}`}
+                        content={`ACP agent: ${chat.session.agentName}`}
                       >
-                        if (agentIcon) {
-                          <img alt="" class={styles.composerAgentIcon} src={agentIcon} />
-                        } else {
-                          <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
-                        }
-                      </div>
+                        <div
+                          aria-label={`ACP agent: ${chat.session.agentName}`}
+                          class={styles.composerAgentControl}
+                        >
+                          if (agentIcon) {
+                            <img alt="" class={styles.composerAgentIcon} src={agentIcon} />
+                          } else {
+                            <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
+                          }
+                        </div>
+                      </GoodTooltip>
                     }
                     if (modeOption) {
                       <SessionModeSelector
