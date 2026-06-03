@@ -6,7 +6,7 @@ export default {
     minWidth: "0",
     '&[data-compact="true"]': {
       width: "fit-content",
-      maxWidth: "100%",
+      maxWidth: "min(12rem, 100%)",
     },
   }),
   tooltipTrigger: css({
