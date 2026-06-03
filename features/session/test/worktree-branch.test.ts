@@ -5,10 +5,8 @@ import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import {
-  createWorktreeBranchReadableId,
   resolveAvailableWorktreeBranchName,
-  resolveWorktreeBranchName,
-  resolveWorktreeBranchPrefix,
+  resolvePullRequestWorktreeBranchName,
 } from "../src/daemon/worktree-branch.ts"
 
 const cleanupDirs: string[] = []
@@ -26,35 +24,29 @@ afterEach(async () => {
   }
 })
 
-test("resolveWorktreeBranchPrefix defaults to a local-user branch prefix", () => {
-  expect(resolveWorktreeBranchPrefix()).toMatch(/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)*$/)
+test("resolveAvailableWorktreeBranchName creates a generated branch under the configured prefix", async () => {
+  const repoDir = await createRepoFixture()
+
+  await expect(
+    resolveAvailableWorktreeBranchName({
+      cwd: repoDir,
+      branchPrefix: "agent",
+    }),
+  ).resolves.toMatch(/^agent\/[a-z]+-[a-z]+-[a-z]+$/)
 })
 
-test("createWorktreeBranchReadableId creates an easy-to-type word id", () => {
-  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/)
-})
-
-test("resolveWorktreeBranchName joins the configured branch prefix with a readable id", () => {
-  expect(resolveWorktreeBranchName({ readableId: "Cape Town", branchPrefix: "agent" })).toBe(
-    "agent/cape-town",
-  )
-})
-
-test("resolveWorktreeBranchName uses host-scoped pull request branch names", () => {
+test("resolvePullRequestWorktreeBranchName uses host-scoped pull request branch names", () => {
   expect(
-    resolveWorktreeBranchName({
-      readableId: "quito",
+    resolvePullRequestWorktreeBranchName({
       repository: "github.com/acme/widgets",
       prNumber: 123,
-      branchPrefix: "agent",
     }),
   ).toBe("github.com/pr/123")
 })
 
-test("resolveWorktreeBranchName defaults pull request branches to GitHub host", () => {
+test("resolvePullRequestWorktreeBranchName defaults pull request branches to GitHub host", () => {
   expect(
-    resolveWorktreeBranchName({
-      readableId: "quito",
+    resolvePullRequestWorktreeBranchName({
       repository: "acme/widgets",
       prNumber: 123,
     }),

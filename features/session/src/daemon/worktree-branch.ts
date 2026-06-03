@@ -80,10 +80,7 @@ export async function resolveAvailableWorktreeBranchName(params: {
   branchPrefix?: string
 }) {
   for (let attempt = 0; attempt < WORKTREE_BRANCH_GENERATION_ATTEMPTS; attempt += 1) {
-    const branchName = resolveWorktreeBranchName({
-      readableId: createWorktreeBranchReadableId(),
-      branchPrefix: params.branchPrefix,
-    })
+    const branchName = resolveGeneratedWorktreeBranchName(params.branchPrefix)
 
     if (!(await gitBranchExists(params.cwd, branchName))) {
       return branchName
@@ -93,22 +90,19 @@ export async function resolveAvailableWorktreeBranchName(params: {
   throw new Error("Unable to generate an unused worktree branch name for this repository.")
 }
 
-/** Resolves the branch name used when creating a daemon-managed session worktree. */
-export function resolveWorktreeBranchName(params: {
-  readableId: string
+/** Resolves the branch name used for pull request session worktrees. */
+export function resolvePullRequestWorktreeBranchName(params: {
   repository?: string
-  prNumber?: number
-  branchPrefix?: string
+  prNumber: number
 }) {
-  if (typeof params.prNumber === "number") {
-    return `${resolvePullRequestBranchHost(params.repository)}/pr/${params.prNumber}`
-  }
-
-  return `${resolveWorktreeBranchPrefix(params.branchPrefix)}/${sanitizeBranchPathComponent(params.readableId) || "worktree"}`
+  return `${resolvePullRequestBranchHost(params.repository)}/pr/${params.prNumber}`
 }
 
-/** Creates a human-readable branch id from easy-to-type words instead of internal session ids. */
-export function createWorktreeBranchReadableId() {
+function resolveGeneratedWorktreeBranchName(branchPrefix?: string) {
+  return `${resolveWorktreeBranchPrefix(branchPrefix)}/${sanitizeBranchPathComponent(createWorktreeBranchReadableId()) || "worktree"}`
+}
+
+function createWorktreeBranchReadableId() {
   return [
     randomReadableWord(WORKTREE_BRANCH_ADJECTIVES),
     randomReadableWord(WORKTREE_BRANCH_NOUNS),
@@ -116,8 +110,7 @@ export function createWorktreeBranchReadableId() {
   ].join("-")
 }
 
-/** Resolves the configured worktree branch prefix, defaulting to the local user name. */
-export function resolveWorktreeBranchPrefix(configuredPrefix?: string) {
+function resolveWorktreeBranchPrefix(configuredPrefix?: string) {
   const prefix =
     configuredPrefix ??
     readLocalUsername() ??

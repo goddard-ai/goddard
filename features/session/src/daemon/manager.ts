@@ -121,7 +121,10 @@ import {
   type ActiveTurnBuffer,
   type SessionTurnPromptRequestId,
 } from "./turn-history.ts"
-import { resolveAvailableWorktreeBranchName, resolveWorktreeBranchName } from "./worktree-branch.ts"
+import {
+  resolveAvailableWorktreeBranchName,
+  resolvePullRequestWorktreeBranchName,
+} from "./worktree-branch.ts"
 import {
   inspectWorktreeCompletionState,
   resolveGitRepoRoot,
@@ -785,11 +788,9 @@ async function resolveLaunchWorktree(params: {
       requestedCwd: params.request.cwd,
       branchName:
         typeof params.request.prNumber === "number"
-          ? resolveWorktreeBranchName({
-              readableId: "pull-request",
-              prNumber: params.request.prNumber,
+          ? resolvePullRequestWorktreeBranchName({
               repository: params.request.repository,
-              branchPrefix: params.branchPrefix,
+              prNumber: params.request.prNumber,
             })
           : await resolveAvailableWorktreeBranchName({
               cwd: repoRoot,
