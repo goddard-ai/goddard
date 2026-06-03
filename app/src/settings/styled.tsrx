@@ -86,16 +86,25 @@ export const SettingsChoiceLabel = styled("label", {
     alignItems: "start",
     gap: "12px",
     paddingBlock: "12px",
+    paddingInline: "8px",
+    borderRadius: "6px",
     cursor: "pointer",
   },
 })
 
 export const SettingsChoiceInput = styled("input", {
   base: {
+    appearance: "auto",
     width: "16px",
     height: "16px",
     margin: "0",
     marginTop: "2px",
+    accentColor: "accentStrong",
+    cursor: "pointer",
+    _focusVisible: {
+      outline: "2px solid {colors.accentStrong}",
+      outlineOffset: "2px",
+    },
   },
 })
 
@@ -131,8 +140,10 @@ export const SettingsControlRowLabel = styled("label", {
     alignItems: "start",
     gap: "12px",
     paddingBlock: "12px",
+    paddingInline: "8px",
     borderTop: "1px solid {colors.border}",
     borderBottom: "1px solid {colors.border}",
+    borderRadius: "6px",
     cursor: "pointer",
   },
 })

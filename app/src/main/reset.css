@@ -126,11 +126,16 @@
   }
 
   button,
-  input,
   textarea,
-  select {
+  select,
+  input:not([type="checkbox"]):not([type="radio"]) {
     appearance: none;
     border-radius: 0;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--theme-color-accent-strong);
   }
 
   input[type="search"]::-webkit-search-cancel-button,

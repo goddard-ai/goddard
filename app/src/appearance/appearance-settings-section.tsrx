@@ -70,7 +70,12 @@ export component AppearanceSettingsSection() {
       <SettingsChoiceList>
         for (const option of themeModeOptions) {
           <SettingsChoiceItem key={option.mode}>
-            <SettingsChoiceLabel>
+            <SettingsChoiceLabel
+              data-selected={appearance.mode === option.mode ? "true" : undefined}
+              style={appearance.mode === option.mode
+                ? { backgroundColor: "var(--theme-color-surface)" }
+                : undefined}
+            >
               <SettingsChoiceInput
                 checked={appearance.mode === option.mode}
                 name="appearance-mode"
@@ -98,7 +103,12 @@ export component AppearanceSettingsSection() {
       <SettingsHelperText>
         "Tightens muted text and border separation across the app."
       </SettingsHelperText>
-      <SettingsControlRowLabel>
+      <SettingsControlRowLabel
+        data-selected={appearance.highContrast ? "true" : undefined}
+        style={appearance.highContrast
+          ? { backgroundColor: "var(--theme-color-surface)" }
+          : undefined}
+      >
         <SettingsChoiceBody>
           <SettingsChoiceTitle>"High contrast"</SettingsChoiceTitle>
           <SettingsChoiceDescription>
