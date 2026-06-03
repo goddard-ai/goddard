@@ -75,6 +75,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           </span>
         </span>
       </tsrx>}
+      group="session-input-selectors"
     >
       <span class={styles.tooltipTrigger}>
         <button
