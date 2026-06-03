@@ -90,7 +90,7 @@ export default {
   menu: css({
     display: "grid",
     gridTemplateRows: "auto minmax(0, 1fr)",
-    width: "var(--reference-width)",
+    width: "min(360px, var(--available-width))",
     minWidth: "min(280px, var(--available-width))",
     maxWidth: "min(calc(100vw - 32px), var(--available-width))",
     maxHeight: "min(360px, var(--available-height))",

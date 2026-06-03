@@ -146,7 +146,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       offset={8}
       open={props.open}
       placement="bottom-start"
-      sameWidth={true}
       strategy="fixed"
     >
       const [query, setQuery] = useState("")
