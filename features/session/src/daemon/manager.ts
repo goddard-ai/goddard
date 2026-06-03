@@ -135,31 +135,78 @@ import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
-const WORKTREE_BRANCH_CITY_SLUGS = [
-  "accra",
-  "amsterdam",
-  "bangkok",
-  "bogota",
-  "cairo",
-  "cape-town",
-  "helsinki",
-  "istanbul",
-  "jakarta",
-  "kyoto",
-  "lagos",
-  "lisbon",
-  "melbourne",
-  "montreal",
-  "nairobi",
-  "oslo",
-  "quito",
-  "seoul",
-  "tunis",
-  "vancouver",
+const WORKTREE_BRANCH_ADJECTIVES = [
+  "brave",
+  "bright",
+  "calm",
+  "clear",
+  "clever",
+  "easy",
+  "fresh",
+  "gentle",
+  "happy",
+  "kind",
+  "light",
+  "lucky",
+  "neat",
+  "quick",
+  "ready",
+  "sharp",
+  "smooth",
+  "steady",
+  "swift",
+  "tidy",
+]
+
+const WORKTREE_BRANCH_NOUNS = [
+  "book",
+  "bridge",
+  "button",
+  "cloud",
+  "desk",
+  "field",
+  "file",
+  "garden",
+  "glass",
+  "key",
+  "lamp",
+  "map",
+  "paper",
+  "path",
+  "river",
+  "stone",
+  "table",
+  "tool",
+  "trail",
+  "window",
+]
+
+const WORKTREE_BRANCH_VERBS = [
+  "build",
+  "check",
+  "create",
+  "draw",
+  "fetch",
+  "find",
+  "fix",
+  "grow",
+  "help",
+  "join",
+  "learn",
+  "make",
+  "move",
+  "open",
+  "read",
+  "repair",
+  "send",
+  "shape",
+  "test",
+  "write",
 ]
 
 const DEFAULT_WORKTREE_BRANCH_PREFIX = "goddard"
 const DEFAULT_PULL_REQUEST_BRANCH_HOST = "github.com"
+const WORKTREE_BRANCH_GENERATION_ATTEMPTS = 100
 
 export { resolveAgentProcessSpec } from "./agent-process.ts"
 
@@ -833,12 +880,9 @@ export async function resolveAvailableWorktreeBranchName(params: {
   cwd: string
   branchPrefix?: string
 }) {
-  const startIndex = randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)
-  for (let offset = 0; offset < WORKTREE_BRANCH_CITY_SLUGS.length; offset += 1) {
-    const readableId =
-      WORKTREE_BRANCH_CITY_SLUGS[(startIndex + offset) % WORKTREE_BRANCH_CITY_SLUGS.length]
+  for (let attempt = 0; attempt < WORKTREE_BRANCH_GENERATION_ATTEMPTS; attempt += 1) {
     const branchName = resolveWorktreeBranchName({
-      readableId,
+      readableId: createWorktreeBranchReadableId(),
       branchPrefix: params.branchPrefix,
     })
 
@@ -847,7 +891,7 @@ export async function resolveAvailableWorktreeBranchName(params: {
     }
   }
 
-  throw new Error("No available generated worktree branch names remain for this repository.")
+  throw new Error("Unable to generate an unused worktree branch name for this repository.")
 }
 
 /** Resolves the branch name used when creating a daemon-managed session worktree. */
@@ -864,9 +908,17 @@ export function resolveWorktreeBranchName(params: {
   return `${resolveWorktreeBranchPrefix(params.branchPrefix)}/${sanitizeBranchPathComponent(params.readableId) || "worktree"}`
 }
 
-/** Creates a human-readable branch id from city names instead of internal session ids. */
+/** Creates a human-readable branch id from easy-to-type words instead of internal session ids. */
 export function createWorktreeBranchReadableId() {
-  return WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)]
+  return [
+    randomReadableWord(WORKTREE_BRANCH_ADJECTIVES),
+    randomReadableWord(WORKTREE_BRANCH_NOUNS),
+    randomReadableWord(WORKTREE_BRANCH_VERBS),
+  ].join("-")
+}
+
+function randomReadableWord(words: readonly string[]) {
+  return words[randomInt(words.length)]
 }
 
 /** Resolves the configured worktree branch prefix, defaulting to the local user name. */

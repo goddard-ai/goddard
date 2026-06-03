@@ -106,8 +106,8 @@ test("resolveWorktreeBranchPrefix defaults to a local-user branch prefix", () =>
   expect(resolveWorktreeBranchPrefix()).toMatch(/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)*$/)
 })
 
-test("createWorktreeBranchReadableId creates a city-based id", () => {
-  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+(?:-[a-z]+)*$/)
+test("createWorktreeBranchReadableId creates an easy-to-type word id", () => {
+  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+-[a-z]+-[a-z]+$/)
 })
 
 test("resolveWorktreeBranchName joins the configured branch prefix with a readable id", () => {
@@ -137,38 +137,22 @@ test("resolveWorktreeBranchName defaults pull request branches to GitHub host", 
   ).toBe("github.com/pr/123")
 })
 
-test("resolveAvailableWorktreeBranchName skips existing generated city branches", async () => {
+test("resolveAvailableWorktreeBranchName skips existing generated branches", async () => {
   const repoDir = await createRepoFixture()
-  for (const city of [
-    "accra",
-    "amsterdam",
-    "bangkok",
-    "bogota",
-    "cairo",
-    "cape-town",
-    "helsinki",
-    "istanbul",
-    "jakarta",
-    "kyoto",
-    "lagos",
-    "lisbon",
-    "melbourne",
-    "montreal",
-    "nairobi",
-    "oslo",
-    "quito",
-    "seoul",
-    "tunis",
-  ]) {
-    runGit(repoDir, ["branch", `agent/${city}`])
-  }
 
-  await expect(
-    resolveAvailableWorktreeBranchName({
-      cwd: repoDir,
-      branchPrefix: "agent",
-    }),
-  ).resolves.toBe("agent/vancouver")
+  const firstBranch = await resolveAvailableWorktreeBranchName({
+    cwd: repoDir,
+    branchPrefix: "agent",
+  })
+  runGit(repoDir, ["branch", firstBranch])
+
+  const secondBranch = await resolveAvailableWorktreeBranchName({
+    cwd: repoDir,
+    branchPrefix: "agent",
+  })
+
+  expect(secondBranch).toMatch(/^agent\/[a-z]+-[a-z]+-[a-z]+$/)
+  expect(secondBranch).not.toBe(firstBranch)
 })
 
 async function createRepoFixture() {
