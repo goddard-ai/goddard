@@ -1736,6 +1736,48 @@ test("session changes return empty diff for clean archived worktrees", async () 
   expect(changes.diff).toBe("")
 })
 
+test("daemon restart keeps archived worktree sessions non-live and change-readable", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  const worktree = (await send(client, "session.worktree.get", { id: created.session.id })).worktree
+  expect(worktree).toBeTruthy()
+
+  await send(client, "session.shutdown", { id: created.session.id })
+  db.sessions.update(created.session.id, {
+    status: "done",
+    connectionMode: "history",
+    activeDaemonSession: false,
+  })
+  await writeFile(join(worktree!.worktreeDir, "restart-note.txt"), "survives restart\n", "utf-8")
+
+  await send(client, "session.archive", { id: created.session.id })
+  await daemon.close()
+
+  const restartedDaemon = await startServer({ useExistingHome: true })
+  const restartedClient = createDaemonIpcClient({ daemonUrl: restartedDaemon.daemonUrl })
+  const session = await send(restartedClient, "session.get", { id: created.session.id })
+  const changes = await send(restartedClient, "session.changes", { id: created.session.id })
+
+  expect(session.session.status).toBe("archived")
+  expect(session.session.connectionMode).toBe("none")
+  expect(session.session.activeDaemonSession).toBe(false)
+  expect(existsSync(worktree!.worktreeDir)).toBe(false)
+  expect(changes.workspaceRoot).toBe(worktree!.worktreeDir)
+  expect(changes.hasChanges).toBe(true)
+  expect(changes.diff).toContain("diff --git a/restart-note.txt b/restart-note.txt")
+})
+
 test("session completion enforces worktree cleanliness without blocking local dirty repos", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

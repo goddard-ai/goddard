@@ -198,6 +198,42 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session archive routes forward to session.archive and session.unarchive", async () => {
+    const { sdk, send } = createSdkWithClient()
+    const response = {
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      session: {
+        id: "ses_1",
+        acpSessionId: "acp-session-1",
+        status: "archived",
+      },
+      worktree: null,
+      warnings: [],
+    }
+
+    send.mockResolvedValueOnce(response)
+    send.mockResolvedValueOnce({
+      ...response,
+      session: {
+        ...response.session,
+        status: "done",
+      },
+    })
+
+    await expect(sdk.session.archive({ id: "ses_1" })).resolves.toEqual(response)
+    await expect(sdk.session.unarchive({ id: "ses_1" })).resolves.toEqual({
+      ...response,
+      session: {
+        ...response.session,
+        status: "done",
+      },
+    })
+
+    expect(send).toHaveBeenNthCalledWith(1, "session.archive", { id: "ses_1" })
+    expect(send).toHaveBeenNthCalledWith(2, "session.unarchive", { id: "ses_1" })
+  })
+
   test("session.send forwards ACP messages to session.send", async () => {
     const { sdk, send } = createSdkWithClient()
     const message: acp.AnyMessage = {
