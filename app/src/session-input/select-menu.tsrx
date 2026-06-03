@@ -21,6 +21,8 @@ type SelectItemIconProps = {
 
 type SelectItemIcon = preact.FunctionComponent<SelectItemIconProps>
 
+const selectorMenuMinimumFuzzyScore = 0.12
+
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
   value: string;
@@ -45,6 +47,21 @@ export type SessionInputSelectProps = {
   loading?: boolean;
   compact?: boolean;
   onValueChange: (value: string) => void;
+}
+
+function normalizeSelectorQuery(query: string) {
+  return query.trim().toLocaleLowerCase()
+}
+
+function hasDirectSelectorMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
+  const normalizedQuery = normalizeSelectorQuery(query)
+
+  return normalizedQuery.length > 0 &&
+    match.fields.some((field) => field.target.toLocaleLowerCase().includes(normalizedQuery))
+}
+
+function isStrongSelectorMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
+  return match.score >= selectorMenuMinimumFuzzyScore || hasDirectSelectorMatch(query, match)
 }
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
@@ -179,7 +196,9 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             { key: "searchText", extract: (entry) => entry.preparedSearchText },
           ],
           { threshold: 0 },
-        ).items.map((entry) => entry.value.item)
+        ).items.filter((entry) => isStrongSelectorMatch(query, entry)).map(
+          (entry) => entry.value.item,
+        )
       }, [props.filterable, props.items, query, searchableItems])
 
       const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
