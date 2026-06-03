@@ -22,6 +22,8 @@ const openApprovalPresetSelector = "sessionInput.openApprovalPresetSelector" as 
 const openModelSelector = "sessionInput.openModelSelector" as const
 const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
 const submitSessionInput = "sessionInput.submit" as const
+const viewSessionChanges = "sessionChat.viewChanges" as const
+const completeSession = "sessionChat.completeSession" as const
 const skipToPreviousPrompt = "sessionChat.skipToPreviousPrompt" as const
 const skipToNextPrompt = "sessionChat.skipToNextPrompt" as const
 
@@ -84,6 +86,8 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openModelSelector]: ["Mod+Shift+m", "Mod+/"],
     [openThinkingLevelSelector]: ["Mod+t"],
     [submitSessionInput]: ["Mod+Enter"],
+    [viewSessionChanges]: ["Mod+Shift+d"],
+    [completeSession]: ["Mod+Shift+Enter"],
     [skipToPreviousPrompt]: ["Mod+ArrowUp"],
     [skipToNextPrompt]: ["Mod+ArrowDown"],
   })
@@ -101,6 +105,8 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     [openKeyboardShortcuts]: ["Mod+/"],
     [openApprovalPresetSelector]: ["Mod+."],
     [openThinkingLevelSelector]: ["Mod+t"],
+    [viewSessionChanges]: ["Mod+Shift+d"],
+    [completeSession]: ["Mod+Shift+Enter"],
     [skipToPreviousPrompt]: ["Mod+ArrowUp"],
     [skipToNextPrompt]: ["Mod+ArrowDown"],
     unknown: ["Alt+/"],

@@ -43,6 +43,8 @@ export const shortcutKeymapProfiles = {
       "sessionInput.openModelSelector": ["Mod+Shift+m", "Mod+/"],
       "sessionInput.openThinkingLevelSelector": ["Mod+t"],
       "sessionInput.submit": ["Mod+Enter"],
+      "sessionChat.viewChanges": ["Mod+Shift+d"],
+      "sessionChat.completeSession": ["Mod+Shift+Enter"],
       "sessionChat.skipToPreviousPrompt": ["Mod+ArrowUp"],
       "sessionChat.skipToNextPrompt": ["Mod+ArrowDown"],
       "workbench.closeActiveTab": ["Mod+w"],

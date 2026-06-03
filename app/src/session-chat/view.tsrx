@@ -196,16 +196,20 @@ export default component SessionChatView(props: {
                   })
                 }
 
-                <GoodTooltip ariaLabel="View changes" content="View changes">
+                useAppCommand(AppCommand.sessionChat.viewChanges, openSessionChanges)
+
+                <AppCommandTooltip command={AppCommand.sessionChat.viewChanges}>
                   <button
                     aria-label="View session changes"
                     class={styles.headerActionButton}
                     type="button"
-                    onClick={openSessionChanges}
+                    onClick={() => {
+                      AppCommand.sessionChat.viewChanges()
+                    }}
                   >
                     <FileDiff size={15} strokeWidth={2.1} />
                   </button>
-                </GoodTooltip>
+                </AppCommandTooltip>
 
                 const completeActionDisabled =
                   activeHeaderAction !== null || chat.session.activeDaemonSession ||
@@ -243,18 +247,27 @@ export default component SessionChatView(props: {
                   }).catch(() => {})
                 }
 
-                <GoodTooltip ariaLabel={completeActionLabel} content={completeActionLabel}>
+                useAppCommand(AppCommand.sessionChat.completeSession, completeCurrentSession, {
+                  active: !completeActionDisabled,
+                })
+
+                <AppCommandTooltip
+                  command={AppCommand.sessionChat.completeSession}
+                  label={completeActionLabel}
+                >
                   <button
                     aria-label={completeActionLabel}
                     class={styles.headerActionButton}
                     data-active={chat.session.completedHidden ? "true" : undefined}
                     disabled={completeActionDisabled}
                     type="button"
-                    onClick={completeCurrentSession}
+                    onClick={() => {
+                      AppCommand.sessionChat.completeSession()
+                    }}
                   >
                     <CheckCircle2 size={15} strokeWidth={2.1} />
                   </button>
-                </GoodTooltip>
+                </AppCommandTooltip>
 
                 const activeTurnId = chat.summary.activeTurnId
                 const cancelRequestedTurnId = page.cancelRequestedTurnId.value

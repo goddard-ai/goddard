@@ -313,6 +313,78 @@ test("default keymap dispatches session chat prompt navigation from Mod+ArrowUp 
   }
 })
 
+test("default keymap dispatches session chat actions from Mod+Shift+D and Mod+Shift+Enter", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const changeMatches: unknown[] = []
+  const completeMatches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(
+      Fragment,
+      {},
+      h(TestCommandHandler, {
+        command: AppCommand.sessionChat.viewChanges,
+        onMatch(match) {
+          changeMatches.push(match)
+        },
+      }),
+      h(TestCommandHandler, {
+        command: AppCommand.sessionChat.completeSession,
+        onMatch(match) {
+          completeMatches.push(match)
+        },
+      }),
+    ),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: "D",
+      code: "KeyD",
+      ctrlKey: true,
+      shiftKey: true,
+    })
+    dispatchKeydown(runtimeDocument, {
+      key: "Enter",
+      code: "Enter",
+      ctrlKey: true,
+      shiftKey: true,
+    })
+
+    expect(changeMatches).toHaveLength(1)
+    expect(changeMatches[0]).toMatchObject({
+      combo: "Ctrl+Shift+d",
+      event: {
+        key: "d",
+        modifiers: {
+          ctrl: true,
+          shift: true,
+        },
+      },
+    })
+    expect(completeMatches).toHaveLength(1)
+    expect(completeMatches[0]).toMatchObject({
+      combo: "Ctrl+Shift+Enter",
+      event: {
+        key: "Enter",
+        modifiers: {
+          ctrl: true,
+          shift: true,
+        },
+      },
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
 test("applyKeymapSnapshot replaces previous bindings instead of accumulating them", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []

@@ -1,9 +1,11 @@
 import {
   Bot,
   Brain,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Command,
+  FileDiff,
   Folder,
   FolderOpen,
   GitBranch,
@@ -123,6 +125,14 @@ export const AppCommand = defineAppCommands({
     },
   },
   sessionChat: {
+    viewChanges: {
+      label: "View Changes",
+      icon: FileDiff,
+    },
+    completeSession: {
+      label: "Complete Session",
+      icon: CheckCircle2,
+    },
     skipToPreviousPrompt: {
       label: "Skip to Previous Prompt",
       icon: ChevronUp,
