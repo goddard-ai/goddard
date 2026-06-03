@@ -24,33 +24,6 @@ export default {
       backgroundColor: `color-mix(in srgb, ${accentColor} 16%, ${backgroundColor})`,
     },
   }),
-  choiceInput: css({
-    position: "absolute",
-    width: "1px",
-    height: "1px",
-    overflow: "hidden",
-    clip: "rect(0 0 0 0)",
-    clipPath: "inset(50%)",
-    whiteSpace: "nowrap",
-  }),
-  choiceIndicator: css({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "22px",
-    height: "22px",
-    border: "1px solid {colors.border}",
-    borderRadius: "999px",
-    color: "transparent",
-    backgroundColor: "panel",
-    transition:
-      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
-    '[data-selected="true"] &': {
-      borderColor: "accentStrong",
-      backgroundColor: "accentStrong",
-      color: "accentFg",
-    },
-  }),
   controlRow: css({
     transition:
       "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",

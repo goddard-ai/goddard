@@ -6,9 +6,6 @@ export const SettingsSection = styled("section", {
     gap: "0",
     maxWidth: "760px",
     overflow: "hidden",
-    border: "1px solid {colors.border}",
-    borderRadius: "8px",
-    backgroundColor: "panel",
   },
 })
 
@@ -89,11 +86,11 @@ export const SettingsChoiceItem = styled("li", {
 export const SettingsChoiceLabel = styled("label", {
   base: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
     alignItems: "center",
     gap: "12px",
     minHeight: "64px",
-    padding: "12px 12px 12px 14px",
+    padding: "12px 14px",
     border: "1px solid {colors.border}",
     borderRadius: "8px",
     backgroundColor: "background",

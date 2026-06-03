@@ -1,5 +1,3 @@
-import { Check } from "lucide-react"
-
 import { useAppearance } from "~/app-state-context.tsrx"
 import {
   SettingsChoiceBody,
@@ -77,16 +75,6 @@ export component AppearanceSettingsSection() {
               class={styles.choiceLabel}
               data-selected={appearance.mode === option.mode ? "true" : undefined}
             >
-              <SettingsChoiceInput
-                checked={appearance.mode === option.mode}
-                class={styles.choiceInput}
-                name="appearance-mode"
-                type="radio"
-                value={option.mode}
-                onInput={() => {
-                  appearance.setMode(option.mode)
-                }}
-              />
               <SettingsChoiceBody>
                 <SettingsChoiceTitle>
                   {option.label}
@@ -95,9 +83,15 @@ export component AppearanceSettingsSection() {
                   {option.description}
                 </SettingsChoiceDescription>
               </SettingsChoiceBody>
-              <span class={styles.choiceIndicator} aria-hidden={true}>
-                <Check size={13} strokeWidth={2.4} />
-              </span>
+              <SettingsChoiceInput
+                checked={appearance.mode === option.mode}
+                name="appearance-mode"
+                type="radio"
+                value={option.mode}
+                onInput={() => {
+                  appearance.setMode(option.mode)
+                }}
+              />
             </SettingsChoiceLabel>
           </SettingsChoiceItem>
         }

@@ -45,14 +45,14 @@ export component SettingsPage() {
           <AppearanceSettingsSection key={section.id} />
         }
       }
-    </div>
 
-    if (visibleSections.length === 0) {
-      <section class={styles.emptyState} aria-live="polite">
-        <h2 class={styles.emptyTitle}>"No settings found"</h2>
-        <p class={styles.emptyText}>"Try a different search term."</p>
-      </section>
-    }
+      if (visibleSections.length === 0) {
+        <section class={styles.emptyState} aria-live="polite">
+          <h2 class={styles.emptyTitle}>"No settings found"</h2>
+          <p class={styles.emptyText}>"Try a different search term."</p>
+        </section>
+      }
+    </div>
 
     if (visibleSections.length > 1) {
       <aside class={styles.sidebar} aria-label="Settings sections">
