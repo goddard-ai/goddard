@@ -54,35 +54,6 @@ export default {
     flexShrink: "0",
     minWidth: "0",
   }),
-  headerStatus: css({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: "0",
-    width: "28px",
-    minHeight: "28px",
-    border: "1px solid {colors.border}",
-    borderRadius: "6px",
-    backgroundColor: "surface",
-    color: "muted",
-    fontSize: "0.78rem",
-    fontWeight: "700",
-    '&[data-tone="running"]': {
-      borderColor: "accent",
-      color: "accentStrong",
-    },
-    '&[data-tone="blocked"]': {
-      borderColor: "border",
-      color: "text",
-    },
-    '&[data-tone="failed"]': {
-      borderColor: "danger",
-      color: "danger",
-    },
-    '&[data-tone="completed"]': {
-      color: "text",
-    },
-  }),
   headerActions: css({
     display: "inline-flex",
     alignItems: "center",

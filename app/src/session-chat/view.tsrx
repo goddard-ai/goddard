@@ -1,17 +1,13 @@
 import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
 import {
-  AlertCircle,
   Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  CircleDot,
   FileDiff,
   GitFork,
   Laptop,
-  LoaderCircle,
-  PauseCircle,
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "preact/hooks"
@@ -22,7 +18,6 @@ import { SessionChat } from "./model.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
 import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
-import type { SessionChatStatus } from "./model.ts"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useInbox, useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -151,17 +146,6 @@ export default component SessionChatView(props: {
               </p>
             </div>
             <div class={styles.headerControls}>
-              const status = getSessionChatStatusPresentation(chat.summary.status)
-              const StatusIcon = status.icon
-
-              <div
-                aria-label={`${status.label}: ${status.description}`}
-                class={styles.headerStatus}
-                data-tone={status.tone}
-                title={status.description}
-              >
-                <StatusIcon size={15} strokeWidth={2.2} />
-              </div>
               <div class={styles.headerActions}>
                 const workbenchTabSet = useWorkbenchTabSet()
                 const activeHeaderAction = page.headerAction.activeKey.value
@@ -679,53 +663,6 @@ component SessionChatStateMessage(props: {
       </button>
     }
   </div>
-}
-
-function getSessionChatStatusPresentation(status: SessionChatStatus) {
-  switch (status) {
-    case "running":
-      return {
-        description: "Agent is working",
-        icon: LoaderCircle,
-        label: "Running",
-        tone: "running",
-      }
-    case "blocked":
-      return {
-        description: "Waiting for attention",
-        icon: PauseCircle,
-        label: "Blocked",
-        tone: "blocked",
-      }
-    case "completed":
-      return {
-        description: "Session finished",
-        icon: CheckCircle2,
-        label: "Completed",
-        tone: "completed",
-      }
-    case "failed":
-      return {
-        description: "Session failed",
-        icon: AlertCircle,
-        label: "Failed",
-        tone: "failed",
-      }
-    case "cancelled":
-      return {
-        description: "Session cancelled",
-        icon: XCircle,
-        label: "Cancelled",
-        tone: "cancelled",
-      }
-    default:
-      return {
-        description: "Ready for a prompt",
-        icon: CircleDot,
-        label: "Ready",
-        tone: "ready",
-      }
-  }
 }
 
 function formatSessionRequestError(error: unknown) {
