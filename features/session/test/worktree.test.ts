@@ -66,6 +66,34 @@ test("default worktree setup creates and cleans up a workspace inside an explici
   expect(existsSync(created.worktreeDir)).toBe(false)
 })
 
+test("default worktree setup supports branch path prefixes", async () => {
+  const repoDir = await createRepoFixture()
+  const normalizedRepoDir = realpathSync.native(repoDir)
+
+  const created = await createWorktree({
+    cwd: repoDir,
+    defaultPluginDirName: ".custom-dir",
+    branchName: "agent/lisbon-oslo",
+  })
+
+  expect(created.repoRoot).toBe(normalizedRepoDir)
+  expect(created.branchName).toBe("agent/lisbon-oslo")
+  expect(created.worktreeDir).toMatch(/\.custom-dir[\\/]agent[\\/]lisbon-oslo-\d+$/)
+  expect(existsSync(created.worktreeDir)).toBe(true)
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
+
+  expect(
+    await deleteWorktree({
+      cwd: created.repoRoot,
+      worktreeDir: created.worktreeDir,
+      branchName: created.branchName,
+      poweredBy: created.poweredBy,
+    }),
+  ).toBe(true)
+})
+
 test("default plugin uses the global worktree directory when the repository has no local folder", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-worktree-home-"))
   cleanup.push(homeDir)

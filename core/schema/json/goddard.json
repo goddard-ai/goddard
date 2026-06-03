@@ -890,7 +890,7 @@
           "minLength": 1
         },
         "branchPrefix": {
-          "description": "Prefix token used before the session id in generated worktree branch names.",
+          "description": "Branch path prefix joined before generated worktree branch ids.",
           "type": "string",
           "minLength": 1
         },

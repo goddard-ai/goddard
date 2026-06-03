@@ -1,5 +1,6 @@
-import { randomBytes, randomUUID } from "node:crypto"
+import { randomBytes, randomInt, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
+import { userInfo } from "node:os"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
@@ -134,7 +135,31 @@ import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
+const WORKTREE_BRANCH_CITY_SLUGS = [
+  "accra",
+  "amsterdam",
+  "bangkok",
+  "bogota",
+  "cairo",
+  "cape-town",
+  "helsinki",
+  "istanbul",
+  "jakarta",
+  "kyoto",
+  "lagos",
+  "lisbon",
+  "melbourne",
+  "montreal",
+  "nairobi",
+  "oslo",
+  "quito",
+  "seoul",
+  "tunis",
+  "vancouver",
+]
+
 const DEFAULT_WORKTREE_BRANCH_PREFIX = "goddard"
+const DEFAULT_PULL_REQUEST_BRANCH_HOST = "github.com"
 
 export { resolveAgentProcessSpec } from "./agent-process.ts"
 
@@ -758,7 +783,6 @@ function shouldResolveConfiguredWorktreePlugins(
 
 /** Resolves the effective worktree used by one session launch, either by reuse or fresh creation. */
 async function resolveLaunchWorktree(params: {
-  sessionId: SessionId
   request: CreateSessionRequest
   existingWorktree: SessionWorktreeState | null
   worktreePlugins?: WorktreePlugin[]
@@ -786,8 +810,9 @@ async function resolveLaunchWorktree(params: {
       cwd: repoRoot,
       requestedCwd: params.request.cwd,
       branchName: resolveWorktreeBranchName({
-        sessionId: params.sessionId,
+        readableId: createWorktreeBranchReadableId(),
         prNumber: params.request.prNumber,
+        repository: params.request.repository,
         branchPrefix: params.branchPrefix,
       }),
       baseBranchName: params.request.worktree?.baseBranchName,
@@ -799,15 +824,100 @@ async function resolveLaunchWorktree(params: {
 
 /** Resolves the branch name used when creating a daemon-managed session worktree. */
 export function resolveWorktreeBranchName(params: {
-  sessionId: SessionId
+  readableId: string
+  repository?: string
   prNumber?: number
   branchPrefix?: string
 }) {
   if (typeof params.prNumber === "number") {
-    return `pr-${params.prNumber}`
+    return `${resolvePullRequestBranchHost(params.repository)}/pr/${params.prNumber}`
   }
 
-  return `${params.branchPrefix ?? DEFAULT_WORKTREE_BRANCH_PREFIX}-${params.sessionId}`
+  return `${resolveWorktreeBranchPrefix(params.branchPrefix)}/${sanitizeBranchPathComponent(params.readableId) || "worktree"}`
+}
+
+/** Creates a human-readable branch id from city names instead of internal session ids. */
+export function createWorktreeBranchReadableId() {
+  const firstCity = WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)]
+  let secondCity = WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length - 1)]
+  if (secondCity === firstCity) {
+    secondCity = WORKTREE_BRANCH_CITY_SLUGS[WORKTREE_BRANCH_CITY_SLUGS.length - 1]
+  }
+
+  return `${firstCity}-${secondCity}`
+}
+
+/** Resolves the configured worktree branch prefix, defaulting to the local user name. */
+export function resolveWorktreeBranchPrefix(configuredPrefix?: string) {
+  const prefix =
+    configuredPrefix ??
+    readLocalUsername() ??
+    process.env.USER ??
+    process.env.USERNAME ??
+    DEFAULT_WORKTREE_BRANCH_PREFIX
+
+  return sanitizeBranchPath(prefix, DEFAULT_WORKTREE_BRANCH_PREFIX)
+}
+
+function resolvePullRequestBranchHost(repository?: string) {
+  return (
+    sanitizeBranchPathComponent(
+      readRepositoryHost(repository) ?? DEFAULT_PULL_REQUEST_BRANCH_HOST,
+    ) || DEFAULT_PULL_REQUEST_BRANCH_HOST
+  )
+}
+
+function readRepositoryHost(repository?: string) {
+  const value = repository?.trim()
+  if (!value) {
+    return null
+  }
+
+  try {
+    const url = new URL(value)
+    return url.hostname || null
+  } catch {}
+
+  const sshMatch = /^git@([^:]+):/.exec(value)
+  if (sshMatch) {
+    return sshMatch[1]
+  }
+
+  const [firstSegment] = value.split("/")
+  if (firstSegment?.includes(".")) {
+    return firstSegment
+  }
+
+  return null
+}
+
+function readLocalUsername() {
+  try {
+    return userInfo().username || null
+  } catch {
+    return null
+  }
+}
+
+function sanitizeBranchPath(value: string, fallback: string) {
+  const path = value
+    .split("/")
+    .map((segment) => sanitizeBranchPathComponent(segment))
+    .filter((segment) => segment.length > 0)
+    .join("/")
+
+  return path || fallback
+}
+
+function sanitizeBranchPathComponent(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/\.+/g, ".")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\.lock$/g, "")
 }
 
 /** Builds the structured logging context shared across session lifecycle events. */
@@ -2424,7 +2534,6 @@ export function createSessionManager(input: {
     )
     const resolvedRegistry = resolvedConfig?.registry
     const worktree = await resolveLaunchWorktree({
-      sessionId: id,
       request: resolvedRequest,
       existingWorktree: existingArtifacts.worktree,
       worktreePlugins: resolvedWorktreePlugins,

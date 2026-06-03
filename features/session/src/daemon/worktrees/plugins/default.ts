@@ -39,6 +39,7 @@ export const defaultPlugin: WorktreePlugin = {
     if (!fs.existsSync(agentsDirPath)) {
       await mkdir(agentsDirPath, { recursive: true })
     }
+    await mkdir(path.dirname(worktreeDir), { recursive: true })
 
     const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
       cwd: options.cwd,
@@ -52,7 +53,7 @@ export const defaultPlugin: WorktreePlugin = {
     }
 
     try {
-      const prNumberMatch = options.branchName.match(/^pr-(\d+)$/)
+      const prNumberMatch = options.branchName.match(/(?:^pr-|\/pr\/)(\d+)$/)
       if (prNumberMatch) {
         await runCommand(
           "git",

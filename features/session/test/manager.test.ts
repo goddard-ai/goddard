@@ -6,9 +6,11 @@ import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
 import {
+  createWorktreeBranchReadableId,
   injectSystemPrompt,
   resolveAgentProcessSpec,
   resolveWorktreeBranchName,
+  resolveWorktreeBranchPrefix,
 } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
@@ -98,22 +100,37 @@ test("injectSystemPrompt prepends the daemon system prompt with the goddard tag 
   } satisfies acp.PromptRequest)
 })
 
-test("resolveWorktreeBranchName uses the default Goddard prefix", () => {
-  expect(resolveWorktreeBranchName({ sessionId: "ses_default" })).toBe("goddard-ses_default")
+test("resolveWorktreeBranchPrefix defaults to a local-user branch prefix", () => {
+  expect(resolveWorktreeBranchPrefix()).toMatch(/^[a-z0-9._-]+(?:\/[a-z0-9._-]+)*$/)
 })
 
-test("resolveWorktreeBranchName uses the configured branch prefix", () => {
-  expect(resolveWorktreeBranchName({ sessionId: "ses_custom", branchPrefix: "agent" })).toBe(
-    "agent-ses_custom",
+test("createWorktreeBranchReadableId creates a city-based id", () => {
+  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+(?:-[a-z]+){1,3}$/)
+})
+
+test("resolveWorktreeBranchName joins the configured branch prefix with a readable id", () => {
+  expect(resolveWorktreeBranchName({ readableId: "Cape Town", branchPrefix: "agent" })).toBe(
+    "agent/cape-town",
   )
 })
 
-test("resolveWorktreeBranchName preserves pull request branch names", () => {
+test("resolveWorktreeBranchName uses host-scoped pull request branch names", () => {
   expect(
     resolveWorktreeBranchName({
-      sessionId: "ses_pull_request",
+      readableId: "quito-lisbon",
+      repository: "github.com/acme/widgets",
       prNumber: 123,
       branchPrefix: "agent",
     }),
-  ).toBe("pr-123")
+  ).toBe("github.com/pr/123")
+})
+
+test("resolveWorktreeBranchName defaults pull request branches to GitHub host", () => {
+  expect(
+    resolveWorktreeBranchName({
+      readableId: "quito-lisbon",
+      repository: "acme/widgets",
+      prNumber: 123,
+    }),
+  ).toBe("github.com/pr/123")
 })

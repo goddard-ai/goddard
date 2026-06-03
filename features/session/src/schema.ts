@@ -787,7 +787,7 @@ export const WorktreesConfig = z
       .string()
       .min(1)
       .optional()
-      .describe("Prefix token used before the session id in generated worktree branch names."),
+      .describe("Branch path prefix joined before generated worktree branch ids."),
     bootstrap: WorktreeBootstrapConfig.optional().describe(
       "Daemon-managed preparation defaults applied to fresh worktrees.",
     ),
