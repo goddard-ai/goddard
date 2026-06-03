@@ -14,13 +14,14 @@
   - Saves a conflicting human patch as rejected without applying it to the agent worktree.
   - Captures the latest agent content after any accepted patch.
   - Renders the review worktree index and working tree to that latest agent content.
-  - Keeps an accepted clean review commit visible when that commit already has
-    the same content as the latest agent snapshot.
+  - Promotes a clean review commit onto the agent branch when that commit
+    already has the same content as the latest agent snapshot.
   - Advances the disposable review branch to the latest real agent commit when
     synchronized agent content includes committed work.
 
 - **What it changes**
   - The agent worktree when a human patch is accepted.
+  - The agent branch when a clean review commit records the synchronized agent content.
   - The review worktree index and working tree after every completed sync.
   - The disposable review branch when sync can align it with real agent commits.
   - The saved accepted or rejected patch inventory when a human patch exists.
@@ -30,7 +31,8 @@
   - It does not mutate a paused session.
   - It does not apply a rejected human patch to the agent worktree.
   - It does not move the visible review branch to synthetic snapshot commits.
-  - It does not preserve review branch commit history as the durable record.
+  - It does not preserve review branch commit history that cannot be promoted
+    onto the agent branch.
   - It does not synchronize ignored files.
 
 - **Guardrails**

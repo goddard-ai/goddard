@@ -16,10 +16,10 @@
 - **What it does**
   - Watches the agent worktree, review worktree, and relevant branch movement.
   - Runs `sync` after meaningful changes settle.
-  - Leaves review-side commits alone when they only record file content that is
-    already rendered in the review worktree.
-  - Keeps accepted clean review commits, such as cherry-picks, visible when
-    their content matches the synchronized agent content.
+  - Syncs review-side commits when they record file content that is already
+    rendered in the review worktree.
+  - Promotes accepted clean review commits, such as cherry-picks, onto the
+    agent branch when their content matches the synchronized agent content.
   - Reactivates a paused session before watching.
   - Emits command results while it runs so wrappers can surface starts, syncs,
     warnings, and final stop status.

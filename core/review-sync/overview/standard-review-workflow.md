@@ -22,6 +22,8 @@
 
 - **Human-to-agent flow**
   - When the human edits the review worktree, the next sync treats those changes as a human patch.
+  - When the human commits already-synchronized review content, the next sync
+    can promote that clean commit onto the agent branch.
   - If the patch applies cleanly:
     - The patch is saved as accepted.
     - The same file changes appear in the agent worktree.

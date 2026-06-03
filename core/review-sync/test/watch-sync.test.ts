@@ -58,7 +58,7 @@ test("watch syncs review commits when the agent branch is already checked out", 
   )
 })
 
-test("watch preserves a review commit that records already-rendered content", async () => {
+test("watch syncs a review commit that records already-rendered content", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
   })
@@ -69,9 +69,10 @@ test("watch preserves a review commit that records already-rendered content", as
   const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
   const started = createDeferred<void>()
   const firstSync = createDeferred<ReviewSyncResult>()
+  const secondSync = createDeferred<ReviewSyncResult>()
   let startedResolved = false
   let firstSyncResolved = false
-  let unexpectedSecondSync: ReviewSyncResult | null = null
+  let secondSyncResolved = false
   let syncCount = 0
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
@@ -87,8 +88,9 @@ test("watch preserves a review commit that records already-rendered content", as
           firstSyncResolved = true
           firstSync.resolve(result)
         }
-        if (syncCount > 1) {
-          unexpectedSecondSync = result
+        if (syncCount === 2) {
+          secondSyncResolved = true
+          secondSync.resolve(result)
         }
       }
     },
@@ -132,12 +134,25 @@ test("watch preserves a review commit that records already-rendered content", as
     const afterCommitHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
 
     expect(afterCommitHead).not.toBe(beforeCommitHead)
-    await sleep(500)
-    expect(unexpectedSecondSync).toBeNull()
+    await Promise.race([
+      secondSync.promise,
+      watch.then((result) => {
+        if (!secondSyncResolved) {
+          throw new Error(`watch stopped before second sync: ${result.message}`)
+        }
+        return secondSync.promise
+      }),
+    ])
     expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
       afterCommitHead,
     )
     expect((await runGit(fixture.reviewDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+      "human review commit after sync",
+    )
+    expect((await runGit(fixture.agentDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+      afterCommitHead,
+    )
+    expect((await runGit(fixture.agentDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
       "human review commit after sync",
     )
 
@@ -150,6 +165,7 @@ test("watch preserves a review commit that records already-rendered content", as
       "human edit before commit\n",
     )
     expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+    expect((await runGit(fixture.agentDir, ["status", "--porcelain=v1"])).stdout).toBe("")
   } finally {
     if (!controller.signal.aborted) {
       controller.abort()

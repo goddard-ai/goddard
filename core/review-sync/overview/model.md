@@ -19,7 +19,8 @@
     - The human-facing branch named by adding `review-sync/` before the full agent branch name.
     - For example, `codex/example` reviews through `review-sync/codex/example`.
     - It is disposable: its content matters, but humans should not rely on its
-      commit history as the durable review record.
+      commit history as the durable review record except for clean commits that
+      sync can promote onto the agent branch.
   - `Review Worktree`
     - The separate local worktree a human opens in an editor.
     - It is where the review branch is checked out and synchronized content is rendered.
@@ -58,9 +59,10 @@
   - Ignored files are not synchronized.
   - Human commits on the review branch are treated as review content:
     - The resulting file changes can be accepted.
-    - Clean review commits can stay visible after their changes are accepted
-      when their content matches the synchronized agent content.
-    - The review branch history itself is not preserved as the durable record.
+    - Clean review commits can be promoted onto the agent branch when their
+      content matches the synchronized agent content.
+    - Review branch history that cannot be promoted is not preserved as the
+      durable record.
 
 - **Patch outcomes**
   - `ok`

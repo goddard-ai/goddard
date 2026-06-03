@@ -1112,12 +1112,13 @@ async function createAgentWorktreeFingerprint(cwd: string, context: RuntimeConte
   }
 }
 
-/** Captures review content without treating content-equivalent review commits as sync work. */
+/** Captures review content and HEAD so review commits can be synchronized. */
 async function createReviewWorktreeFingerprint(cwd: string, context: RuntimeContext) {
-  const [branch, tree] = await Promise.all([
+  const [branch, head, tree] = await Promise.all([
     git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
       allowFailure: true,
     }),
+    git(cwd, ["rev-parse", "HEAD"], context),
     createSnapshotTree({
       cwd,
       context,
@@ -1126,6 +1127,7 @@ async function createReviewWorktreeFingerprint(cwd: string, context: RuntimeCont
 
   return {
     branch: branch.status === 0 ? branch.stdout.trim() : null,
+    head: head.stdout.trim(),
     tree,
   }
 }

@@ -30,12 +30,12 @@ export async function syncSession(session: SessionState, context: RuntimeContext
 
     await validateSessionWorktrees(latest, context)
     const patchResult = await handleHumanPatch(latest, context)
-    const agentSnapshot = await createSnapshotCommit({
+    let agentSnapshot = await createSnapshotCommit({
       cwd: latest.agentWorktree,
       label: `${latest.sessionId}:agent`,
       context,
     })
-    const agentBranchHead = await resolveRef(
+    let agentBranchHead = await resolveRef(
       latest.agentWorktree,
       `refs/heads/${latest.agentBranch}`,
       context,
@@ -43,12 +43,16 @@ export async function syncSession(session: SessionState, context: RuntimeContext
     if (!agentBranchHead) {
       throw new UserError(`Agent branch ${latest.agentBranch} no longer exists.`)
     }
-    const acceptedReviewHead = await resolveAcceptedCleanReviewHead({
+    const acceptedReviewHead = await resolveCleanReviewHeadMatchingAgentSnapshot({
       session: latest,
-      patchAccepted: patchResult.acceptedPatchPath !== null,
       agentSnapshot,
       context,
     })
+    if (acceptedReviewHead && acceptedReviewHead !== agentBranchHead) {
+      await promoteReviewHeadToAgentBranch(latest, acceptedReviewHead, context)
+      agentBranchHead = acceptedReviewHead
+      agentSnapshot = acceptedReviewHead
+    }
     const renderTarget = acceptedReviewHead
       ? {
           branchHead: acceptedReviewHead,
@@ -93,17 +97,13 @@ export async function syncSession(session: SessionState, context: RuntimeContext
   })
 }
 
-/** Keeps clean review commits visible when their accepted patch now matches the agent tree. */
-async function resolveAcceptedCleanReviewHead(input: {
+/** Finds a clean review commit whose tree exactly matches the synchronized agent tree. */
+async function resolveCleanReviewHeadMatchingAgentSnapshot(input: {
   session: SessionState
-  patchAccepted: boolean
   agentSnapshot: string
   context: RuntimeContext
 }) {
-  if (
-    !input.patchAccepted ||
-    !(await isWorktreeClean(input.session.reviewWorktree, input.context))
-  ) {
+  if (!(await isWorktreeClean(input.session.reviewWorktree, input.context))) {
     return null
   }
 
@@ -132,6 +132,22 @@ async function resolveAcceptedCleanReviewHead(input: {
       diff.stderr.trim() || diff.stdout.trim() || "unknown Git error"
     }`,
   )
+}
+
+/** Moves the checked-out agent branch to a content-equivalent review commit. */
+async function promoteReviewHeadToAgentBranch(
+  session: SessionState,
+  reviewHead: string,
+  context: RuntimeContext,
+) {
+  const agentBranch = await resolveCurrentBranch(session.agentWorktree, context)
+  if (agentBranch !== session.agentBranch) {
+    throw new UserError(
+      `Agent worktree must be on ${session.agentBranch}; currently ${agentBranch ?? "detached HEAD"}.`,
+    )
+  }
+
+  await git(session.agentWorktree, ["reset", "--mixed", reviewHead], context)
 }
 
 /**
