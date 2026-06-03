@@ -73,12 +73,12 @@ test("default worktree setup supports branch path prefixes", async () => {
   const created = await createWorktree({
     cwd: repoDir,
     defaultPluginDirName: ".custom-dir",
-    branchName: "agent/lisbon-oslo",
+    branchName: "agent/lisbon",
   })
 
   expect(created.repoRoot).toBe(normalizedRepoDir)
-  expect(created.branchName).toBe("agent/lisbon-oslo")
-  expect(created.worktreeDir).toMatch(/\.custom-dir[\\/]agent[\\/]lisbon-oslo-\d+$/)
+  expect(created.branchName).toBe("agent/lisbon")
+  expect(created.worktreeDir).toMatch(/\.custom-dir[\\/]agent[\\/]lisbon-\d+$/)
   expect(existsSync(created.worktreeDir)).toBe(true)
   expect(await resolveGitCommonDir(created.repoRoot)).toBe(
     await resolveGitCommonDir(created.worktreeDir),

@@ -809,17 +809,45 @@ async function resolveLaunchWorktree(params: {
     await createWorktree({
       cwd: repoRoot,
       requestedCwd: params.request.cwd,
-      branchName: resolveWorktreeBranchName({
-        readableId: createWorktreeBranchReadableId(),
-        prNumber: params.request.prNumber,
-        repository: params.request.repository,
-        branchPrefix: params.branchPrefix,
-      }),
+      branchName:
+        typeof params.request.prNumber === "number"
+          ? resolveWorktreeBranchName({
+              readableId: createWorktreeBranchReadableId(),
+              prNumber: params.request.prNumber,
+              repository: params.request.repository,
+              branchPrefix: params.branchPrefix,
+            })
+          : await resolveAvailableWorktreeBranchName({
+              cwd: repoRoot,
+              branchPrefix: params.branchPrefix,
+            }),
       baseBranchName: params.request.worktree?.baseBranchName,
       plugins: params.worktreePlugins,
       defaultPluginDirName: params.defaultWorktreesFolder,
     }),
   )
+}
+
+/** Resolves an unused generated branch name for a new daemon-managed session worktree. */
+export async function resolveAvailableWorktreeBranchName(params: {
+  cwd: string
+  branchPrefix?: string
+}) {
+  const startIndex = randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)
+  for (let offset = 0; offset < WORKTREE_BRANCH_CITY_SLUGS.length; offset += 1) {
+    const readableId =
+      WORKTREE_BRANCH_CITY_SLUGS[(startIndex + offset) % WORKTREE_BRANCH_CITY_SLUGS.length]
+    const branchName = resolveWorktreeBranchName({
+      readableId,
+      branchPrefix: params.branchPrefix,
+    })
+
+    if (!(await gitBranchExists(params.cwd, branchName))) {
+      return branchName
+    }
+  }
+
+  throw new Error("No available generated worktree branch names remain for this repository.")
 }
 
 /** Resolves the branch name used when creating a daemon-managed session worktree. */
@@ -838,13 +866,7 @@ export function resolveWorktreeBranchName(params: {
 
 /** Creates a human-readable branch id from city names instead of internal session ids. */
 export function createWorktreeBranchReadableId() {
-  const firstCity = WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)]
-  let secondCity = WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length - 1)]
-  if (secondCity === firstCity) {
-    secondCity = WORKTREE_BRANCH_CITY_SLUGS[WORKTREE_BRANCH_CITY_SLUGS.length - 1]
-  }
-
-  return `${firstCity}-${secondCity}`
+  return WORKTREE_BRANCH_CITY_SLUGS[randomInt(WORKTREE_BRANCH_CITY_SLUGS.length)]
 }
 
 /** Resolves the configured worktree branch prefix, defaulting to the local user name. */
@@ -897,6 +919,18 @@ function readLocalUsername() {
   } catch {
     return null
   }
+}
+
+async function gitBranchExists(cwd: string, branchName: string) {
+  const result = Bun.spawn(["git", "show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], {
+    cwd,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+
+  await result.exited
+  return result.exitCode === 0
 }
 
 function sanitizeBranchPath(value: string, fallback: string) {

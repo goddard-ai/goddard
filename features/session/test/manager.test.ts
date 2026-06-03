@@ -1,4 +1,5 @@
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
@@ -9,6 +10,7 @@ import {
   createWorktreeBranchReadableId,
   injectSystemPrompt,
   resolveAgentProcessSpec,
+  resolveAvailableWorktreeBranchName,
   resolveWorktreeBranchName,
   resolveWorktreeBranchPrefix,
 } from "../src/daemon/manager.ts"
@@ -105,7 +107,7 @@ test("resolveWorktreeBranchPrefix defaults to a local-user branch prefix", () =>
 })
 
 test("createWorktreeBranchReadableId creates a city-based id", () => {
-  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+(?:-[a-z]+){1,3}$/)
+  expect(createWorktreeBranchReadableId()).toMatch(/^[a-z]+(?:-[a-z]+)*$/)
 })
 
 test("resolveWorktreeBranchName joins the configured branch prefix with a readable id", () => {
@@ -117,7 +119,7 @@ test("resolveWorktreeBranchName joins the configured branch prefix with a readab
 test("resolveWorktreeBranchName uses host-scoped pull request branch names", () => {
   expect(
     resolveWorktreeBranchName({
-      readableId: "quito-lisbon",
+      readableId: "quito",
       repository: "github.com/acme/widgets",
       prNumber: 123,
       branchPrefix: "agent",
@@ -128,9 +130,67 @@ test("resolveWorktreeBranchName uses host-scoped pull request branch names", () 
 test("resolveWorktreeBranchName defaults pull request branches to GitHub host", () => {
   expect(
     resolveWorktreeBranchName({
-      readableId: "quito-lisbon",
+      readableId: "quito",
       repository: "acme/widgets",
       prNumber: 123,
     }),
   ).toBe("github.com/pr/123")
 })
+
+test("resolveAvailableWorktreeBranchName skips existing generated city branches", async () => {
+  const repoDir = await createRepoFixture()
+  for (const city of [
+    "accra",
+    "amsterdam",
+    "bangkok",
+    "bogota",
+    "cairo",
+    "cape-town",
+    "helsinki",
+    "istanbul",
+    "jakarta",
+    "kyoto",
+    "lagos",
+    "lisbon",
+    "melbourne",
+    "montreal",
+    "nairobi",
+    "oslo",
+    "quito",
+    "seoul",
+    "tunis",
+  ]) {
+    runGit(repoDir, ["branch", `agent/${city}`])
+  }
+
+  await expect(
+    resolveAvailableWorktreeBranchName({
+      cwd: repoDir,
+      branchPrefix: "agent",
+    }),
+  ).resolves.toBe("agent/vancouver")
+})
+
+async function createRepoFixture() {
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-manager-repo-"))
+  cleanupDirs.push(repoDir)
+
+  await writeFile(join(repoDir, "package.json"), JSON.stringify({ name: "repo" }), "utf-8")
+
+  runGit(repoDir, ["init"])
+  runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  runGit(repoDir, ["config", "user.name", "Bot"])
+  runGit(repoDir, ["add", "."])
+  runGit(repoDir, ["commit", "-m", "init"])
+
+  return repoDir
+}
+
+function runGit(cwd: string, args: string[]) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+  })
+
+  expect(result.status).toBe(0)
+}
