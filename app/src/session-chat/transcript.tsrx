@@ -251,6 +251,45 @@ function estimateToolGroupRowHeight(
   return lineCount * BODY_LINE_HEIGHT + ROW_GAP
 }
 
+function estimateRenderItemSize(item: RenderTranscriptItem | undefined, viewportWidth: number) {
+  if (!item) {
+    return DEFAULT_ROW_HEIGHT
+  }
+
+  return Math.max(
+    1,
+    Math.round(
+      item.kind === "toolGroup"
+        ? estimateToolGroupRowHeight(item.toolCalls, viewportWidth)
+        : item.kind === "workDrawer"
+          ? estimateTranscriptRowHeight(item, viewportWidth)
+          : item.kind === "turnStop"
+            ? TURN_STOP_ROW_HEIGHT
+            : estimateTranscriptRowHeight(item, viewportWidth),
+    ),
+  )
+}
+
+function getEstimatedBottomOffset(input: {
+  items: readonly RenderTranscriptItem[];
+  scrollElement: HTMLDivElement | null;
+  viewport: TranscriptViewport;
+}) {
+  if (!input.scrollElement || input.items.length === 0 || input.viewport.width <= 0) {
+    return 0
+  }
+
+  const estimatedHeight = input.items.reduce(
+    (height, item) => height + estimateRenderItemSize(item, input.viewport.width),
+    0,
+  )
+
+  return Math.max(
+    0,
+    input.viewport.scrollMargin + estimatedHeight - input.scrollElement.clientHeight,
+  )
+}
+
 /** Renders one transcript row using the row-specific presentation path. */
 component TranscriptRow(props: {
   row: TranscriptRowContext;
@@ -424,32 +463,21 @@ export component Transcript(props: TranscriptProps) {
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: renderItems.length,
     enabled: viewport.width > 0,
-    estimateSize: (index) => {
-      const item = renderItems[index]
-
-      if (!item) {
-        return DEFAULT_ROW_HEIGHT
-      }
-
-      return Math.max(
-        1,
-        Math.round(
-          item.kind === "toolGroup"
-            ? estimateToolGroupRowHeight(item.toolCalls, viewport.width)
-            : item.kind === "workDrawer"
-              ? estimateTranscriptRowHeight(item, viewport.width)
-              : item.kind === "turnStop"
-                ? TURN_STOP_ROW_HEIGHT
-                : estimateTranscriptRowHeight(item, viewport.width),
-        ),
-      )
-    },
+    estimateSize: (index) => estimateRenderItemSize(renderItems[index], viewport.width),
     getItemKey: (index) => itemKeys[index] ?? index,
     getScrollElement: () => tabContext.scrollParentRef.current,
     initialMeasurementsCache: restoredScrollSnapshot
       ? [...restoredScrollSnapshot.measurements]
       : undefined,
-    initialOffset: restoredScrollSnapshot?.scrollTop,
+    initialOffset: restoredScrollSnapshot
+      ? restoredScrollSnapshot.scrollTop
+      : effectiveInitialScroll === "bottom"
+        ? () => getEstimatedBottomOffset({
+            items: renderItems,
+            scrollElement: tabContext.scrollParentRef.current,
+            viewport,
+          })
+        : undefined,
     overscan: Math.max(1, Math.ceil(VIRTUAL_OVERSCAN_PX / DEFAULT_ROW_HEIGHT)),
     scrollMargin: viewport.scrollMargin,
     useFlushSync: false,
@@ -645,18 +673,15 @@ export component Transcript(props: TranscriptProps) {
     }
 
     initializedBottomScrollKeys.add(effectiveScrollCacheKey)
-    requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(renderItems.length - 1, {
-        align: "end",
-      })
-    })
+    scrollToBottom()
+    requestAnimationFrame(scrollToBottom)
   }, [
     effectiveInitialScroll,
     effectiveScrollCacheKey,
     renderItems.length,
+    totalSize,
     viewport.scrollMarginMeasured,
     viewport.width,
-    virtualizer,
   ])
 
   <div class={cx(styles.transcriptViewport, props.class)}>

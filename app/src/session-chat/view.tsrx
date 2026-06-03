@@ -351,7 +351,6 @@ export default component SessionChatView(props: {
                   },
                 })
               }}
-              scrollCacheKey={`detail:session:${chat.session.id}:transcript`}
               showThinkingLabel={chat.summary.showThinkingLabel}
               stickToBottomKey={submittedPromptScrollKey ?? undefined}
             />
