@@ -534,8 +534,6 @@ export default component SessionChatView(props: {
                         } else {
                           <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
                         }
-
-                        <span class={styles.composerAgentName}>{chat.session.agentName}</span>
                       </div>
                     }
                     if (modeOption) {

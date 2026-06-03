@@ -208,11 +208,11 @@ export default {
     gap: "12px",
   }),
   composerAgentControl: css({
-    display: "grid",
-    gridTemplateColumns: "auto minmax(0, 1fr)",
+    display: "inline-grid",
     alignItems: "center",
+    justifyContent: "center",
     gap: "6px",
-    minWidth: "0",
+    width: "16px",
     minHeight: "28px",
     color: "text",
     "& svg": {
@@ -226,15 +226,6 @@ export default {
     flexShrink: "0",
     borderRadius: "4px",
     objectFit: "cover",
-  }),
-  composerAgentName: css({
-    minWidth: "0",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontSize: "0.8rem",
-    fontWeight: "600",
-    lineHeight: "1.2",
   }),
   composerError: css({
     display: "grid",
