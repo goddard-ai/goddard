@@ -19,6 +19,16 @@ test("daemon root config schema accepts session title generator model config", (
   })
 })
 
+test("daemon root config schema accepts worktree branch prefix config", () => {
+  const config = buildRootConfigSchema().parse({
+    worktrees: {
+      branchPrefix: "agent",
+    },
+  }) as { worktrees?: { branchPrefix?: string } }
+
+  expect(config.worktrees?.branchPrefix).toBe("agent")
+})
+
 test("generated goddard schema embeds the model schema once under local defs", () => {
   const goddardSchema = buildGeneratedSchemaArtifacts().find(
     (artifact: { name: string }) => artifact.name === "goddard.json",

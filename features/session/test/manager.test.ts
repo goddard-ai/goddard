@@ -5,7 +5,11 @@ import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
-import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/daemon/manager.ts"
+import {
+  injectSystemPrompt,
+  resolveAgentProcessSpec,
+  resolveWorktreeBranchName,
+} from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME
@@ -92,4 +96,24 @@ test("injectSystemPrompt prepends the daemon system prompt with the goddard tag 
       { type: "text", text: "Say hello." },
     ],
   } satisfies acp.PromptRequest)
+})
+
+test("resolveWorktreeBranchName uses the default Goddard prefix", () => {
+  expect(resolveWorktreeBranchName({ sessionId: "ses_default" })).toBe("goddard-ses_default")
+})
+
+test("resolveWorktreeBranchName uses the configured branch prefix", () => {
+  expect(resolveWorktreeBranchName({ sessionId: "ses_custom", branchPrefix: "agent" })).toBe(
+    "agent-ses_custom",
+  )
+})
+
+test("resolveWorktreeBranchName preserves pull request branch names", () => {
+  expect(
+    resolveWorktreeBranchName({
+      sessionId: "ses_pull_request",
+      prNumber: 123,
+      branchPrefix: "agent",
+    }),
+  ).toBe("pr-123")
 })

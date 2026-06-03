@@ -134,6 +134,8 @@ import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
+const DEFAULT_WORKTREE_BRANCH_PREFIX = "goddard"
+
 export { resolveAgentProcessSpec } from "./agent-process.ts"
 
 /** The current version of `@goddard-ai/daemon` */
@@ -761,6 +763,7 @@ async function resolveLaunchWorktree(params: {
   existingWorktree: SessionWorktreeState | null
   worktreePlugins?: WorktreePlugin[]
   defaultWorktreesFolder?: string
+  branchPrefix?: string
 }) {
   if (params.existingWorktree) {
     await reuseExistingWorktree(params.existingWorktree, {
@@ -782,15 +785,29 @@ async function resolveLaunchWorktree(params: {
     await createWorktree({
       cwd: repoRoot,
       requestedCwd: params.request.cwd,
-      branchName:
-        typeof params.request.prNumber === "number"
-          ? `pr-${params.request.prNumber}`
-          : `goddard-${params.sessionId}`,
+      branchName: resolveWorktreeBranchName({
+        sessionId: params.sessionId,
+        prNumber: params.request.prNumber,
+        branchPrefix: params.branchPrefix,
+      }),
       baseBranchName: params.request.worktree?.baseBranchName,
       plugins: params.worktreePlugins,
       defaultPluginDirName: params.defaultWorktreesFolder,
     }),
   )
+}
+
+/** Resolves the branch name used when creating a daemon-managed session worktree. */
+export function resolveWorktreeBranchName(params: {
+  sessionId: SessionId
+  prNumber?: number
+  branchPrefix?: string
+}) {
+  if (typeof params.prNumber === "number") {
+    return `pr-${params.prNumber}`
+  }
+
+  return `${params.branchPrefix ?? DEFAULT_WORKTREE_BRANCH_PREFIX}-${params.sessionId}`
 }
 
 /** Builds the structured logging context shared across session lifecycle events. */
@@ -2412,6 +2429,7 @@ export function createSessionManager(input: {
       existingWorktree: existingArtifacts.worktree,
       worktreePlugins: resolvedWorktreePlugins,
       defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
+      branchPrefix: resolvedConfig?.worktrees?.branchPrefix,
     })
     const cwd = worktree?.state.effectiveCwd ?? resolvedRequest.cwd
     const sessionMetadata = mergeSessionMetadata(

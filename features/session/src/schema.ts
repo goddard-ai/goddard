@@ -783,6 +783,11 @@ export const WorktreesConfig = z
       .min(1)
       .optional()
       .describe("Default repository-local folder name used for daemon-managed worktrees."),
+    branchPrefix: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Prefix token used before the session id in generated worktree branch names."),
     bootstrap: WorktreeBootstrapConfig.optional().describe(
       "Daemon-managed preparation defaults applied to fresh worktrees.",
     ),

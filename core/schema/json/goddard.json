@@ -889,6 +889,11 @@
           "type": "string",
           "minLength": 1
         },
+        "branchPrefix": {
+          "description": "Prefix token used before the session id in generated worktree branch names.",
+          "type": "string",
+          "minLength": 1
+        },
         "bootstrap": {
           "description": "Daemon-managed preparation defaults applied to fresh worktrees.",
           "type": "object",
