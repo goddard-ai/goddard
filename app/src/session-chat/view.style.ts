@@ -227,6 +227,17 @@ export default {
     borderRadius: "4px",
     objectFit: "cover",
   }),
+  composerAgentTooltip: css({
+    display: "grid",
+    gap: "4px",
+    alignItems: "center",
+    lineHeight: "1.1",
+  }),
+  composerAgentTooltipVersion: css({
+    color: "muted",
+    fontSize: "0.72rem",
+    fontWeight: "520",
+  }),
   composerError: css({
     display: "grid",
     gap: "3px",

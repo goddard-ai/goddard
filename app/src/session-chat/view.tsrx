@@ -389,12 +389,20 @@ export default component SessionChatView(props: {
             const adapterCatalog = useQuery(goddardSdk.adapter.list, {
               params: [{ cwd: chat.session.cwd }],
             })
-            const agentIcon =
+            const agentAdapter =
               typeof chat.session.agent === "string"
                 ? adapterCatalog.adapters.find(
                   (adapter) => adapter.id === chat.session.agent,
-                )?.icon ?? null
+                ) ?? null
+                : null
+            const agentIcon =
+              typeof chat.session.agent === "string"
+                ? agentAdapter?.icon ?? null
                 : chat.session.agent?.icon ?? null
+            const agentVersion =
+              typeof chat.session.agent === "string"
+                ? agentAdapter?.version ?? null
+                : chat.session.agent?.version ?? null
             const modeOption = findSessionModeConfigOption(sessionModelConfig.configOptions)
             const thinkingOption = findSelectConfigOption(
               sessionModelConfig.configOptions,
@@ -526,7 +534,17 @@ export default component SessionChatView(props: {
                     if (chat.session.agentName) {
                       <GoodTooltip
                         ariaLabel={`ACP agent: ${chat.session.agentName}`}
-                        content={`ACP agent: ${chat.session.agentName}`}
+                        content={<tsrx>
+                          <span class={styles.composerAgentTooltip}>
+                            <span>{chat.session.agentName}</span>
+
+                            if (agentVersion) {
+                              <span class={styles.composerAgentTooltipVersion}>
+                                {agentVersion}
+                              </span>
+                            }
+                          </span>
+                        </tsrx>}
                       >
                         <div
                           aria-label={`ACP agent: ${chat.session.agentName}`}
