@@ -61,11 +61,9 @@ export function startFloatingPosition(
             const boundedAvailableHeight = Math.max(0, availableHeight)
             const boundedAvailableWidth = Math.max(0, availableWidth)
 
-            Object.assign(floatingElement.style, {
-              "--available-height": `${boundedAvailableHeight}px`,
-              "--available-width": `${boundedAvailableWidth}px`,
-              "--reference-width": `${rects.reference.width}px`,
-            })
+            floatingElement.style.setProperty("--available-height", `${boundedAvailableHeight}px`)
+            floatingElement.style.setProperty("--available-width", `${boundedAvailableWidth}px`)
+            floatingElement.style.setProperty("--reference-width", `${rects.reference.width}px`)
 
             const floatingStyle = getComputedStyle(floatingElement)
             const cssMaxHeight = parseCssPixelSize(floatingStyle.maxHeight)
