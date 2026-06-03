@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "preact/hooks"
 
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import {
   clearSessionInputEditor,
   insertSessionInputSuggestion,
@@ -455,23 +456,23 @@ component SessionInputFooter(props: {
       </p>
     }
     if (props.contextUsage) {
-      <div
-        aria-label={`Context usage ${props.contextUsagePercent}%`}
-        class={props.classes.contextUsage}
-        title={`${props.contextUsage.used.toLocaleString()} of ${props.contextUsage.size.toLocaleString()} context tokens used`}
+      <GoodTooltip
+        ariaLabel={`Context usage ${props.contextUsagePercent}%`}
+        content={`${props.contextUsagePercent}%`}
       >
-        <svg aria-hidden="true" viewBox="0 0 36 36">
-          <circle cx="18" cy="18" r="15.5" />
-          <circle
-            cx="18"
-            cy="18"
-            r="15.5"
-            pathLength="100"
-            strokeDasharray={`${props.contextUsagePercent} 100`}
-          />
-        </svg>
-        <span>{`${props.contextUsagePercent}%`}</span>
-      </div>
+        <div class={props.classes.contextUsage}>
+          <svg aria-hidden="true" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="15.5" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15.5"
+              pathLength="100"
+              strokeDasharray={`${props.contextUsagePercent} 100`}
+            />
+          </svg>
+        </div>
+      </GoodTooltip>
     }
 
     <button

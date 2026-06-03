@@ -86,13 +86,10 @@ export default {
     position: "relative",
     display: "inline-grid",
     placeItems: "center",
-    width: "40px",
-    height: "40px",
+    width: "28px",
+    height: "28px",
     flex: "0 0 auto",
     color: "muted",
-    fontSize: "0.64rem",
-    fontWeight: "700",
-    lineHeight: "1",
     "& svg": {
       position: "absolute",
       inset: "0",
@@ -111,9 +108,6 @@ export default {
       stroke: "accentStrong",
       strokeLinecap: "round",
       transition: "stroke-dasharray 180ms cubic-bezier(0.23, 1, 0.32, 1)",
-    },
-    "& span": {
-      position: "relative",
     },
   }),
   submitButton: css({
