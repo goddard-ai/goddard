@@ -3,15 +3,20 @@ import { styled } from "@goddard-ai/styled-system/jsx"
 export const SettingsSection = styled("section", {
   base: {
     display: "grid",
-    gap: "20px",
-    maxWidth: "720px",
+    gap: "0",
+    maxWidth: "760px",
+    overflow: "hidden",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "panel",
   },
 })
 
 export const SettingsSectionHeader = styled("div", {
   base: {
     display: "grid",
-    gap: "4px",
+    gap: "5px",
+    padding: "18px 20px 16px",
   },
 })
 
@@ -19,8 +24,8 @@ export const SettingsSectionTitle = styled("h2", {
   base: {
     margin: "0",
     color: "text",
-    fontSize: "1rem",
-    fontWeight: "680",
+    fontSize: "1.05rem",
+    fontWeight: "720",
     lineHeight: "1.4",
   },
 })
@@ -29,7 +34,7 @@ export const SettingsSectionDescription = styled("p", {
   base: {
     margin: "0",
     color: "muted",
-    fontSize: "0.88rem",
+    fontSize: "0.86rem",
     lineHeight: "1.6",
   },
 })
@@ -40,8 +45,9 @@ export const SettingsFieldset = styled("fieldset", {
     gap: "10px",
     minWidth: "0",
     margin: "0",
-    padding: "0",
+    padding: "18px 20px",
     border: "0",
+    borderTop: "1px solid {colors.border}",
   },
 })
 
@@ -49,8 +55,8 @@ export const SettingsLegend = styled("legend", {
   base: {
     padding: "0",
     color: "text",
-    fontSize: "0.92rem",
-    fontWeight: "620",
+    fontSize: "0.9rem",
+    fontWeight: "680",
     lineHeight: "1.4",
   },
 })
@@ -59,7 +65,7 @@ export const SettingsHelperText = styled("p", {
   base: {
     margin: "0",
     color: "muted",
-    fontSize: "0.84rem",
+    fontSize: "0.82rem",
     lineHeight: "1.55",
   },
 })
@@ -69,25 +75,28 @@ export const SettingsChoiceList = styled("ul", {
     listStyle: "none",
     margin: "0",
     padding: "0",
-    borderTop: "1px solid {colors.border}",
+    display: "grid",
+    gap: "8px",
   },
 })
 
 export const SettingsChoiceItem = styled("li", {
   base: {
-    borderBottom: "1px solid {colors.border}",
+    minWidth: "0",
   },
 })
 
 export const SettingsChoiceLabel = styled("label", {
   base: {
     display: "grid",
-    gridTemplateColumns: "16px minmax(0, 1fr)",
-    alignItems: "start",
+    gridTemplateColumns: "minmax(0, 1fr) 22px",
+    alignItems: "center",
     gap: "12px",
-    paddingBlock: "12px",
-    paddingInline: "8px",
-    borderRadius: "6px",
+    minHeight: "64px",
+    padding: "12px 12px 12px 14px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "background",
     cursor: "pointer",
   },
 })
@@ -98,7 +107,6 @@ export const SettingsChoiceInput = styled("input", {
     width: "16px",
     height: "16px",
     margin: "0",
-    marginTop: "2px",
     accentColor: "accentStrong",
     cursor: "pointer",
     _focusVisible: {
@@ -111,7 +119,7 @@ export const SettingsChoiceInput = styled("input", {
 export const SettingsChoiceBody = styled("span", {
   base: {
     display: "grid",
-    gap: "2px",
+    gap: "3px",
     minWidth: "0",
   },
 })
@@ -120,7 +128,7 @@ export const SettingsChoiceTitle = styled("span", {
   base: {
     color: "text",
     fontSize: "0.9rem",
-    fontWeight: "620",
+    fontWeight: "660",
     lineHeight: "1.45",
   },
 })
@@ -128,7 +136,7 @@ export const SettingsChoiceTitle = styled("span", {
 export const SettingsChoiceDescription = styled("span", {
   base: {
     color: "muted",
-    fontSize: "0.84rem",
+    fontSize: "0.82rem",
     lineHeight: "1.55",
   },
 })
@@ -137,13 +145,13 @@ export const SettingsControlRowLabel = styled("label", {
   base: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) auto",
-    alignItems: "start",
+    alignItems: "center",
     gap: "12px",
-    paddingBlock: "12px",
-    paddingInline: "8px",
-    borderTop: "1px solid {colors.border}",
-    borderBottom: "1px solid {colors.border}",
-    borderRadius: "6px",
+    minHeight: "64px",
+    padding: "12px 14px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "background",
     cursor: "pointer",
   },
 })

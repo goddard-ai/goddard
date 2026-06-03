@@ -1,3 +1,5 @@
+import { Check } from "lucide-react"
+
 import { useAppearance } from "~/app-state-context.tsrx"
 import {
   SettingsChoiceBody,
@@ -16,6 +18,7 @@ import {
   SettingsSectionHeader,
   SettingsSectionTitle,
 } from "~/settings/styled.tsrx"
+import styles from "./appearance-settings-section.style.ts"
 import type { AppearanceMode } from "./theme.ts"
 
 export const appearanceSettingsSectionMetadata = {
@@ -71,13 +74,12 @@ export component AppearanceSettingsSection() {
         for (const option of themeModeOptions) {
           <SettingsChoiceItem key={option.mode}>
             <SettingsChoiceLabel
+              class={styles.choiceLabel}
               data-selected={appearance.mode === option.mode ? "true" : undefined}
-              style={appearance.mode === option.mode
-                ? { backgroundColor: "var(--theme-color-surface)" }
-                : undefined}
             >
               <SettingsChoiceInput
                 checked={appearance.mode === option.mode}
+                class={styles.choiceInput}
                 name="appearance-mode"
                 type="radio"
                 value={option.mode}
@@ -93,6 +95,9 @@ export component AppearanceSettingsSection() {
                   {option.description}
                 </SettingsChoiceDescription>
               </SettingsChoiceBody>
+              <span class={styles.choiceIndicator} aria-hidden={true}>
+                <Check size={13} strokeWidth={2.4} />
+              </span>
             </SettingsChoiceLabel>
           </SettingsChoiceItem>
         }
@@ -104,10 +109,8 @@ export component AppearanceSettingsSection() {
         "Tightens muted text and border separation across the app."
       </SettingsHelperText>
       <SettingsControlRowLabel
+        class={styles.controlRow}
         data-selected={appearance.highContrast ? "true" : undefined}
-        style={appearance.highContrast
-          ? { backgroundColor: "var(--theme-color-surface)" }
-          : undefined}
       >
         <SettingsChoiceBody>
           <SettingsChoiceTitle>"High contrast"</SettingsChoiceTitle>
@@ -117,11 +120,15 @@ export component AppearanceSettingsSection() {
         </SettingsChoiceBody>
         <SettingsChoiceInput
           checked={appearance.highContrast}
+          class={styles.switchInput}
           type="checkbox"
           onInput={(event) => {
             appearance.setHighContrast(event.currentTarget.checked)
           }}
         />
+        <span class={styles.switchTrack} aria-hidden={true}>
+          <span class={styles.switchThumb} />
+        </span>
       </SettingsControlRowLabel>
     </SettingsFieldset>
   </SettingsSection>
