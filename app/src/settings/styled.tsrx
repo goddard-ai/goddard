@@ -41,7 +41,7 @@ export const SettingsFieldset = styled("fieldset", {
     display: "grid",
     gap: "10px",
     minWidth: "0",
-    margin: "0",
+    margin: "12px 0 0",
     padding: "18px 20px",
     border: "0",
     borderTop: "1px solid {colors.border}",
