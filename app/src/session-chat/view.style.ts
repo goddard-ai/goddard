@@ -162,6 +162,7 @@ export default {
     position: "sticky",
     bottom: "0",
     zIndex: "1",
+    marginTop: "-42px",
     paddingTop: "42px",
     paddingInline: "20px",
     paddingBottom: "20px",

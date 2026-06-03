@@ -104,9 +104,7 @@ export default {
     lineHeight: "1.45",
   }),
 
-  row: css({
-    paddingBottom: "16px",
-  }),
+  row: css({}),
 
   rowInner: css({
     display: "flex",
