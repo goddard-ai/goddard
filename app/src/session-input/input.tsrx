@@ -364,14 +364,9 @@ export component SessionInput(props: {
           contentEditable={<tsrx>
             <ContentEditable
               aria-disabled={disabled}
-              aria-placeholder={placeholder}
+              aria-label={placeholder}
               class={classes.contentEditable}
               contentEditable={!disabled}
-              placeholder={<tsrx>
-                <div class={classes.placeholder}>
-                  {placeholder}
-                </div>
-              </tsrx>}
             />
           </tsrx>}
           placeholder={<tsrx>
