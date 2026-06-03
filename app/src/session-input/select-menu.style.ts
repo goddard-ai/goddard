@@ -130,6 +130,7 @@ export default {
     listStyle: "none",
   }),
   menuButton: css({
+    position: "relative",
     display: "flex",
     alignItems: "flex-start",
     gap: "8px",
@@ -143,10 +144,21 @@ export default {
     cursor: "pointer",
     fontSize: "0.86rem",
     fontWeight: "560",
+    outline: "none",
     textAlign: "left",
     transition: "background-color 120ms ease",
     _hover: {
       backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
+    },
+    _focusVisible: {
+      _after: {
+        content: '""',
+        position: "absolute",
+        inset: "2px",
+        borderRadius: "8px",
+        border: "2px solid {colors.accentStrong}",
+        pointerEvents: "none",
+      },
     },
     _disabled: {
       cursor: "not-allowed",
