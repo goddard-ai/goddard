@@ -23,7 +23,7 @@ import styles from "./view.style.ts"
 import { useInbox, useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
-import { getShortcutLabel } from "~/commands/shortcut-label.ts"
+import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries, useQuery } from "~/lib/query.ts"
 import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
@@ -408,8 +408,9 @@ export default component SessionChatView(props: {
             const approvalPresetShortcut = getShortcutLabel(
               shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openApprovalPresetSelector.id]?.[0],
             )
-            const modelShortcut = getShortcutLabel(
-              shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
+            const modelShortcut = getPreferredShortcutLabel(
+              shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id],
+              "Mod+/",
             )
             const thinkingShortcut = getShortcutLabel(
               shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],

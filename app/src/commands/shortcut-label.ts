@@ -15,3 +15,12 @@ export function getShortcutLabel(binding: unknown) {
 
   return null
 }
+
+export function getPreferredShortcutLabel(
+  bindings: readonly unknown[] | undefined,
+  preferred: string,
+) {
+  const labels = bindings?.map(getShortcutLabel).filter((label) => label !== null) ?? []
+
+  return labels.find((label) => label === preferred) ?? labels[0] ?? null
+}

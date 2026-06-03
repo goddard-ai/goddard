@@ -5,7 +5,7 @@ import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
-import { getShortcutLabel } from "~/commands/shortcut-label.ts"
+import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { flattenConfigOptionValues } from "~/session-input/config-options.ts"
@@ -242,8 +242,9 @@ export component SessionLaunchPreviewSelectors(props: {
   const approvalPresetShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openApprovalPresetSelector.id]?.[0],
   )
-  const modelShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id]?.[0],
+  const modelShortcut = getPreferredShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openModelSelector.id],
+    "Mod+/",
   )
   const thinkingShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
