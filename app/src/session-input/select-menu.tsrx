@@ -303,14 +303,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             }}
             onKeyDown={(event) => {
               switch (event.key) {
-                case "ArrowDown":
-                  event.preventDefault()
-                  moveFocusedItem(1)
-                  return
-                case "ArrowUp":
-                  event.preventDefault()
-                  moveFocusedItem(-1)
-                  return
                 case "Enter":
                   event.preventDefault()
                   commitSelection(highlightedItem)
