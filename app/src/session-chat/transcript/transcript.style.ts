@@ -118,6 +118,13 @@ export default {
     gap: "0",
   }),
 
+  messageContainer: css({
+    "&:hover [data-message-actions], &:focus-within [data-message-actions]": {
+      opacity: "1",
+      pointerEvents: "auto",
+    },
+  }),
+
   bubbleFrame: css({
     display: "inline-flex",
     flexDirection: "column",
@@ -181,6 +188,9 @@ export default {
   messageActions: css({
     display: "flex",
     paddingTop: "8px",
+    opacity: "0",
+    pointerEvents: "none",
+    transition: "opacity 140ms ease",
   }),
 
   messageActionsLeft: css({

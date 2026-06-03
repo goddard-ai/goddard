@@ -216,7 +216,7 @@ export component TextTranscriptRow(props: {
   <article class={styles.row}>
     <div class={styles.rowInner} style={alignmentStyle}>
       <div
-        class={styles.rowColumn}
+        class={cx(styles.rowColumn, styles.messageContainer)}
         style={{
           width: isUserMessage
             ? `${getBubbleMaxWidth(props.row.viewportWidth, message)}px`
@@ -245,14 +245,14 @@ export component TextTranscriptRow(props: {
           </div>
 
           if (!isUserMessage && rawMarkdown.length > 0) {
-            <div class={cx(styles.messageActions, styles.messageActionsLeft)}>
+            <div data-message-actions class={cx(styles.messageActions, styles.messageActionsLeft)}>
               <CopyMessageMarkdownButton markdown={rawMarkdown} />
             </div>
           }
         </div>
 
         if (isUserMessage && rawMarkdown.length > 0) {
-          <div class={cx(styles.messageActions, styles.messageActionsRight)}>
+          <div data-message-actions class={cx(styles.messageActions, styles.messageActionsRight)}>
             <CopyMessageMarkdownButton markdown={rawMarkdown} />
           </div>
         }
