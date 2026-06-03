@@ -228,6 +228,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         })
       }
 
+      function moveHighlightedItem(step: 1 | -1) {
+        setSelectedIndex((currentIndex) => {
+          const nextIndex = getNextFocusableIndex(currentIndex, step)
+
+          return nextIndex === null ? currentIndex : nextIndex
+        })
+      }
+
       function commitSelection(item: SessionInputSelectItem | null) {
         if (!item || item.disabled) {
           return
@@ -303,6 +311,14 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             }}
             onKeyDown={(event) => {
               switch (event.key) {
+                case "ArrowDown":
+                  event.preventDefault()
+                  moveHighlightedItem(1)
+                  return
+                case "ArrowUp":
+                  event.preventDefault()
+                  moveHighlightedItem(-1)
+                  return
                 case "Enter":
                   event.preventDefault()
                   commitSelection(highlightedItem)
