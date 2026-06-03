@@ -131,6 +131,11 @@ import {
   type PreparedSessionWorktree,
   type SessionWorktreeState,
 } from "./worktree.ts"
+import {
+  archiveWorktree,
+  restoreWorktreeArchive,
+  WorktreeArchiveError,
+} from "./worktrees/archive.ts"
 import { prepareFreshWorktree } from "./worktrees/bootstrap.ts"
 import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
@@ -954,6 +959,8 @@ export type SessionIdEvent = {
 
 type SessionEventDefinitions = {
   "session.worktree.prepared": EventDefinition<SessionWorktreePreparedEvent>
+  "session.worktree.archived": EventDefinition<SessionWorktreeLifecycleEvent>
+  "session.worktree.restored": EventDefinition<SessionWorktreeLifecycleEvent>
   "session.persisted": EventDefinition<SessionPersistedEvent>
   "session.activated": EventDefinition<SessionActivatedEvent>
   "session.launch.finished": EventDefinition<SessionLaunchFinishedEvent>
@@ -3198,7 +3205,46 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${id} is still live and cannot be archived`)
     }
     if (worktreeRecord) {
-      throw new IpcClientError("Worktree session archive is not implemented yet")
+      emitDiagnostic(id, "worktree.archive_requested", {
+        repoRoot: worktreeRecord.repoRoot,
+        worktreeDir: worktreeRecord.worktreeDir,
+      })
+      try {
+        const archive = await archiveWorktree({
+          sessionId: id,
+          repoRoot: worktreeRecord.repoRoot,
+          worktreeDir: worktreeRecord.worktreeDir,
+        })
+        db.worktrees.update(worktreeRecord.id, {
+          archive,
+          headMode: "detached",
+        })
+        await input.events.emit("session.worktree.archived", {
+          sessionId: id,
+          worktree: toSessionWorktreeLifecycleState(
+            {
+              ...worktreeRecord,
+              archive,
+              headMode: "detached",
+            },
+            id,
+          ),
+        })
+        emitDiagnostic(id, "worktree.archived", {
+          repoRoot: worktreeRecord.repoRoot,
+          worktreeDir: worktreeRecord.worktreeDir,
+          snapshotRef: archive.snapshotRef,
+          snapshotOid: archive.snapshotOid,
+          baseOid: archive.baseOid,
+        })
+      } catch (error) {
+        emitDiagnostic(id, "worktree.archive_failed", {
+          repoRoot: worktreeRecord.repoRoot,
+          worktreeDir: worktreeRecord.worktreeDir,
+          errorMessage: getErrorMessage(error),
+        })
+        throw toArchiveIpcError(error, "archive")
+      }
     }
 
     updateSession(
@@ -3226,7 +3272,44 @@ export function createSessionManager(input: {
       return toSessionArchiveResponse(id)
     }
     if (worktreeRecord?.archive) {
-      throw new IpcClientError("Worktree session unarchive is not implemented yet")
+      emitDiagnostic(id, "worktree.unarchive_requested", {
+        repoRoot: worktreeRecord.repoRoot,
+        worktreeDir: worktreeRecord.worktreeDir,
+        snapshotRef: worktreeRecord.archive.snapshotRef,
+      })
+      try {
+        await restoreWorktreeArchive({
+          repoRoot: worktreeRecord.repoRoot,
+          restorePath: worktreeRecord.worktreeDir,
+          archive: worktreeRecord.archive,
+        })
+        db.worktrees.update(worktreeRecord.id, {
+          archive: null,
+          headMode: "detached",
+        })
+        await input.events.emit("session.worktree.restored", {
+          sessionId: id,
+          worktree: toSessionWorktreeLifecycleState(
+            {
+              ...worktreeRecord,
+              archive: null,
+              headMode: "detached",
+            },
+            id,
+          ),
+        })
+        emitDiagnostic(id, "worktree.restored", {
+          repoRoot: worktreeRecord.repoRoot,
+          worktreeDir: worktreeRecord.worktreeDir,
+        })
+      } catch (error) {
+        emitDiagnostic(id, "worktree.restore_failed", {
+          repoRoot: worktreeRecord.repoRoot,
+          worktreeDir: worktreeRecord.worktreeDir,
+          errorMessage: getErrorMessage(error),
+        })
+        throw toArchiveIpcError(error, "restore")
+      }
     }
 
     updateSession(
@@ -3269,6 +3352,13 @@ export function createSessionManager(input: {
 
   function toSafeArchivedFromStatus(status: DaemonSessionStatus) {
     return status === "active" || status === "archived" ? "idle" : status
+  }
+
+  function toArchiveIpcError(error: unknown, action: "archive" | "restore") {
+    if (error instanceof WorktreeArchiveError) {
+      return new IpcClientError(`Worktree ${action} failed (${error.code}): ${error.message}`)
+    }
+    return new IpcClientError(`Worktree ${action} failed: ${getErrorMessage(error)}`)
   }
 
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {

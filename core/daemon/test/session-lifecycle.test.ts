@@ -1625,6 +1625,78 @@ test("session.changes reads tracked and untracked diff content from the session 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("session archive snapshots and restores dirty daemon worktrees", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture()
+  await writeFile(join(repoDir, ".gitignore"), "*.log\n", "utf-8")
+  runGit(repoDir, ["add", ".gitignore"])
+  runGit(repoDir, ["commit", "-m", "ignore logs"])
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+  const fetchedWorktree = await send(client, "session.worktree.get", {
+    id: created.session.id,
+  })
+  const worktree = fetchedWorktree.worktree
+  expect(worktree).toBeTruthy()
+
+  await send(client, "session.shutdown", { id: created.session.id })
+  db.sessions.update(created.session.id, {
+    status: "done",
+    connectionMode: "history",
+    activeDaemonSession: false,
+  })
+
+  await writeFile(
+    join(worktree!.worktreeDir, "package.json"),
+    JSON.stringify({ name: "repo", private: false }, null, 2) + "\n",
+    "utf-8",
+  )
+  runGit(worktree!.worktreeDir, ["add", "package.json"])
+  await writeFile(join(worktree!.worktreeDir, "README.md"), "# Archived worktree\n", "utf-8")
+  await writeFile(join(worktree!.worktreeDir, "ignored.log"), "ignored\n", "utf-8")
+
+  const archived = await send(client, "session.archive", { id: created.session.id })
+
+  expect(archived.session.status).toBe("archived")
+  expect(archived.session.archivedFromStatus).toBe("done")
+  expect(archived.worktree?.archive?.snapshotRef).toContain(
+    `refs/goddard/worktree-archive/${created.session.id}/snapshot`,
+  )
+  expect(archived.worktree?.archive?.includesUntracked).toBe(true)
+  expect(archived.worktree?.archive?.includesIgnored).toBe(false)
+  expect(existsSync(worktree!.worktreeDir)).toBe(false)
+
+  const unarchived = await send(client, "session.unarchive", { id: created.session.id })
+
+  expect(unarchived.session.status).toBe("done")
+  expect(unarchived.session.archivedFromStatus).toBeNull()
+  expect(unarchived.worktree?.headMode).toBe("detached")
+  expect(unarchived.worktree?.archive).toBeNull()
+  expect(existsSync(worktree!.worktreeDir)).toBe(true)
+  expect(await readFile(join(worktree!.worktreeDir, "package.json"), "utf-8")).toContain(
+    '"private": false',
+  )
+  expect(await readFile(join(worktree!.worktreeDir, "README.md"), "utf-8")).toBe(
+    "# Archived worktree\n",
+  )
+  expect(existsSync(join(worktree!.worktreeDir, "ignored.log"))).toBe(false)
+  expect(readGitStatus(worktree!.worktreeDir, ["symbolic-ref", "-q", "HEAD"])).toBe(1)
+  expect(readGitOutput(worktree!.worktreeDir, ["diff", "--cached", "--name-only"])).toBe(
+    "package.json",
+  )
+  expect(getDiagnosticEventTypes(created.session.id)).toContain("worktree.archived")
+  expect(getDiagnosticEventTypes(created.session.id)).toContain("worktree.restored")
+})
+
 test("session completion enforces worktree cleanliness without blocking local dirty repos", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -2626,6 +2698,15 @@ function readGitOutput(cwd: string, args: string[]) {
 
   expect(result.status).toBe(0)
   return result.stdout.trim()
+}
+
+function readGitStatus(cwd: string, args: string[]) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf-8",
+  })
+
+  return result.status
 }
 
 async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {

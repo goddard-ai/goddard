@@ -112,6 +112,8 @@ export const sessionPlugin = definePlugin({
   db: sessionDb,
   events: {
     "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
+    "session.worktree.archived": event<SessionWorktreeLifecycleEvent>(),
+    "session.worktree.restored": event<SessionWorktreeLifecycleEvent>(),
     "session.persisted": event<SessionPersistedEvent>(),
     "session.activated": event<SessionActivatedEvent>(),
     "session.launch.finished": event<SessionLaunchFinishedEvent>(),
