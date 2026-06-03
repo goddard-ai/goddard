@@ -81,11 +81,19 @@ export default {
     justifyItems: "end",
     flexShrink: "0",
   }),
-  actionButton: css({
+  actionGroup: css({
     position: "absolute",
     insetInlineEnd: "0",
     top: "50%",
     transform: "translateY(-50%)",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    opacity: 0,
+    pointerEvents: "none",
+    transition: "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
+  }),
+  actionButton: css({
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -96,10 +104,8 @@ export default {
     border: "1px solid {colors.border}",
     backgroundColor: "background",
     color: "text",
-    opacity: 0,
-    pointerEvents: "none",
     transition:
-      "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",
@@ -110,6 +116,19 @@ export default {
         borderColor: "accent",
         backgroundColor: "surface",
       },
+    },
+    _disabled: {
+      cursor: "default",
+      opacity: 0.45,
+    },
+    '&[data-active="true"]': {
+      borderColor: "accent",
+      backgroundColor: "surface",
+      color: "accentStrong",
+    },
+    '&[data-tone="danger"]': {
+      borderColor: "danger",
+      color: "danger",
     },
   }),
 }

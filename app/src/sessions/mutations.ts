@@ -16,6 +16,8 @@ function refreshSessionViews(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
   queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
   queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.worktree.get, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.changes, [{ id: sessionId }])
 }
 
 /**
@@ -97,6 +99,24 @@ export async function completeSession(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.inbox.completeSession({ id: sessionId })
   refreshSessionViews(sessionId)
   queryClient.invalidate(goddardSdk.inbox.list)
+  return result
+}
+
+/**
+ * Archives one inactive session and refreshes surfaces that display its status or worktree.
+ */
+export async function archiveSession(sessionId: DaemonSession["id"]) {
+  const result = await goddardSdk.session.archive({ id: sessionId })
+  refreshSessionViews(sessionId)
+  return result
+}
+
+/**
+ * Restores one archived session and refreshes surfaces that display its status or worktree.
+ */
+export async function unarchiveSession(sessionId: DaemonSession["id"]) {
+  const result = await goddardSdk.session.unarchive({ id: sessionId })
+  refreshSessionViews(sessionId)
   return result
 }
 

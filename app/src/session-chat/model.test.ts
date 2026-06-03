@@ -9,6 +9,7 @@ function createSession(overrides: Partial<DaemonSession> = {}) {
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "acp-session-1",
     status: "active",
+    archivedFromStatus: null,
     stopReason: null,
     agent: "pi-acp",
     agentName: "pi",

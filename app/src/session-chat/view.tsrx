@@ -1,6 +1,8 @@
 import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
 import {
+  Archive,
+  ArchiveRestore,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -38,6 +40,7 @@ import {
   SessionModeSelector,
 } from "~/session-input/session-mode-selector.tsrx"
 import {
+  archiveSession,
   cancelSessionTurn,
   completeSession,
   reconnectSession,
@@ -45,6 +48,7 @@ import {
   setSessionConfigOption,
   setSessionModel,
   submitSessionPrompt,
+  unarchiveSession,
 } from "~/sessions/mutations.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
@@ -207,17 +211,77 @@ export default component SessionChatView(props: {
                   </button>
                 </GoodTooltip>
 
+                const isArchivedSession = chat.session.status === "archived"
+                const archiveActionKey = isArchivedSession ? "unarchive" : "archive"
+                const archiveActionInFlight = activeHeaderAction === archiveActionKey
+                const archiveActionBlocked =
+                  !isArchivedSession &&
+                    (chat.session.activeDaemonSession || chat.session.connectionMode === "live")
+                const archiveActionDisabled = activeHeaderAction !== null || archiveActionBlocked
+                const archiveActionLabel =
+                  isArchivedSession
+                    ? archiveActionInFlight
+                      ? "Restoring session"
+                      : "Unarchive session"
+                    : archiveActionBlocked
+                      ? "Archive unavailable while session is live"
+                      : archiveActionInFlight
+                        ? "Archiving session"
+                        : "Archive session"
+
+                const toggleSessionArchive = async () => {
+                  if (archiveActionBlocked) {
+                    return
+                  }
+
+                  await page.headerAction.run(archiveActionKey, async () => {
+                    try {
+                      const result = isArchivedSession
+                        ? await unarchiveSession(chat.session.id)
+                        : await archiveSession(chat.session.id)
+
+                      chat.syncSession(result.session)
+                    } catch (error) {
+                      console.error("Failed to update session archive state.", error)
+                      throw {
+                        title: isArchivedSession ? "Unarchive failed" : "Archive failed",
+                        description: formatSessionRequestError(error),
+                      }
+                    }
+                  }).catch(() => {})
+                }
+
+                <GoodTooltip ariaLabel={archiveActionLabel} content={archiveActionLabel}>
+                  <button
+                    aria-label={archiveActionLabel}
+                    class={styles.headerActionButton}
+                    data-active={isArchivedSession ? "true" : undefined}
+                    disabled={archiveActionDisabled}
+                    type="button"
+                    onClick={toggleSessionArchive}
+                  >
+                    if (isArchivedSession) {
+                      <ArchiveRestore size={15} strokeWidth={2.1} />
+                    } else {
+                      <Archive size={15} strokeWidth={2.1} />
+                    }
+                  </button>
+                </GoodTooltip>
+
                 const completeActionDisabled =
                   activeHeaderAction !== null || chat.session.activeDaemonSession ||
-                    chat.session.completedHidden
+                    chat.session.completedHidden ||
+                    isArchivedSession
                 const completeActionLabel =
                   chat.session.completedHidden
                     ? "Session completed"
-                    : chat.session.activeDaemonSession
-                      ? "Complete unavailable while agent is active"
-                      : activeHeaderAction === "complete"
-                        ? "Completing session"
-                        : "Complete session"
+                    : isArchivedSession
+                      ? "Complete unavailable while session is archived"
+                      : chat.session.activeDaemonSession
+                        ? "Complete unavailable while agent is active"
+                        : activeHeaderAction === "complete"
+                          ? "Completing session"
+                          : "Complete session"
 
                 const completeCurrentSession = async () => {
                   if (chat.session.activeDaemonSession || chat.session.completedHidden) {

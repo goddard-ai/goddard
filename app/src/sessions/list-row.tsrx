@@ -2,6 +2,8 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { token } from "@goddard-ai/styled-system/tokens"
 import {
   AlertCircle,
+  Archive,
+  ArchiveRestore,
   CheckCircle2,
   CircleDot,
   FileDiff,
@@ -9,11 +11,12 @@ import {
   PauseCircle,
   XCircle,
 } from "lucide-react"
+import { useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
-import { SessionsPageMutations } from "./mutations.ts"
+import { archiveSession, SessionsPageMutations, unarchiveSession } from "./mutations.ts"
 import styles from "./list-row.style.ts"
 
 function handleButtonLikeKeyDown(
@@ -107,6 +110,8 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
 export component ListRow(props: {
   session: DaemonSession;
 }) {
+  const [archiveActionPending, setArchiveActionPending] = useState(false)
+  const [archiveActionError, setArchiveActionError] = useState<string | null>(null)
   const status = getSessionStatusPresentation(props.session.status)
   const StatusIcon = status.icon
   const sessionTitle = getSessionDisplayTitle(props.session)
@@ -153,23 +158,91 @@ export component ListRow(props: {
       >
         {formatTimeLabel(props.session.updatedAt)}
       </time>
-      <GoodTooltip ariaLabel="View changes" content="View changes">
-        <button
-          class={styles.actionButton}
-          aria-label={`View changes for ${sessionTitle}`}
-          data-row-action="true"
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            openSessionChanges(props.session.id)
-          }}
-          onKeyDown={(event) => {
-            event.stopPropagation()
-          }}
-        >
-          <FileDiff size={15} strokeWidth={2.1} />
-        </button>
-      </GoodTooltip>
+      const isArchivedSession = props.session.status === "archived"
+      const archiveActionBlocked =
+        !isArchivedSession &&
+          (props.session.activeDaemonSession || props.session.connectionMode === "live")
+      const archiveActionLabel =
+        archiveActionError
+          ? archiveActionError
+          : isArchivedSession
+            ? archiveActionPending
+              ? "Restoring session"
+              : "Unarchive session"
+            : archiveActionBlocked
+              ? "Archive unavailable while session is live"
+              : archiveActionPending
+                ? "Archiving session"
+                : "Archive session"
+      async function toggleSessionArchive(event: preact.TargetedMouseEvent<HTMLButtonElement>) {
+        event.stopPropagation()
+
+        if (archiveActionPending || archiveActionBlocked) {
+          return
+        }
+
+        setArchiveActionPending(true)
+        setArchiveActionError(null)
+
+        try {
+          if (isArchivedSession) {
+            await unarchiveSession(props.session.id)
+          } else {
+            await archiveSession(props.session.id)
+          }
+        } catch (error) {
+          setArchiveActionError(formatSessionArchiveActionError(error))
+        } finally {
+          setArchiveActionPending(false)
+        }
+      }
+
+      <div class={styles.actionGroup} data-row-action="true">
+        <GoodTooltip ariaLabel={archiveActionLabel} content={archiveActionLabel}>
+          <button
+            class={styles.actionButton}
+            aria-label={`${archiveActionLabel} for ${sessionTitle}`}
+            data-active={isArchivedSession ? "true" : undefined}
+            data-tone={archiveActionError ? "danger" : undefined}
+            disabled={archiveActionPending || archiveActionBlocked}
+            type="button"
+            onClick={toggleSessionArchive}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            if (isArchivedSession) {
+              <ArchiveRestore size={15} strokeWidth={2.1} />
+            } else {
+              <Archive size={15} strokeWidth={2.1} />
+            }
+          </button>
+        </GoodTooltip>
+        <GoodTooltip ariaLabel="View changes" content="View changes">
+          <button
+            class={styles.actionButton}
+            aria-label={`View changes for ${sessionTitle}`}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              openSessionChanges(props.session.id)
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+            }}
+          >
+            <FileDiff size={15} strokeWidth={2.1} />
+          </button>
+        </GoodTooltip>
+      </div>
     </div>
   </div>
+}
+
+function formatSessionArchiveActionError(error: unknown) {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message
+  }
+
+  return "Archive action failed"
 }

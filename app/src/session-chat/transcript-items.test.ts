@@ -8,6 +8,7 @@ function createSession(lastAgentMessage: string | null) {
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "ses_session-1-acp",
     status: "active",
+    archivedFromStatus: null,
     stopReason: null,
     agent: "pi-acp",
     agentName: "pi",

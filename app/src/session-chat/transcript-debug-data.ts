@@ -39,6 +39,7 @@ function createDebugSession(overrides: Partial<DaemonSession> = {}) {
     id: DEBUG_SESSION_ID,
     acpSessionId: DEBUG_ACP_SESSION_ID,
     status: "blocked",
+    archivedFromStatus: null,
     stopReason: null,
     agent: "qa-acp",
     agentName: DEBUG_AGENT_NAME,
