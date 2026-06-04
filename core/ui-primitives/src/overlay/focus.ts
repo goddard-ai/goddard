@@ -1,5 +1,7 @@
 import { tabbable } from "tabbable"
 
+// One-shot marker for focus events caused by restoreFocus(). Entries remain until
+// consumed for that element or the element is garbage-collected.
 const restoredFocusTargets = new WeakSet<HTMLElement>()
 
 /** Moves focus to the first reachable control inside a newly opened overlay. */
