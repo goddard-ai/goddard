@@ -177,6 +177,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
       const typeaheadQueryRef = useRef("")
       const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+      const ignorePointerHoverRef = useRef(false)
+      const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
 
       const searchableItems = useMemo(
         () => props.items.map(
@@ -251,6 +253,27 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         typeaheadTimerRef.current = setTimeout(clearTypeaheadQuery, selectorMenuTypeaheadTimeoutMs)
       }
 
+      function ignorePointerHoverUntilPointerMoves() {
+        ignorePointerHoverRef.current = true
+      }
+
+      function updatePointerPosition(event: PointerEvent) {
+        const previousPosition = lastPointerPositionRef.current
+        const nextPosition = {
+          x: event.clientX,
+          y: event.clientY,
+        }
+
+        if (
+          !previousPosition || previousPosition.x !== nextPosition.x ||
+            previousPosition.y !== nextPosition.y
+        ) {
+          ignorePointerHoverRef.current = false
+        }
+
+        lastPointerPositionRef.current = nextPosition
+      }
+
       function moveFocusedItem(step: 1 | -1) {
         setSelectedIndex((currentIndex) => {
           const focusedIndex = getFocusedItemIndex()
@@ -263,6 +286,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             return filteredItems.length === 0 ? 0 : currentIndex
           }
 
+          ignorePointerHoverUntilPointerMoves()
           queueMicrotask(() => {
             const item = filteredItems[nextIndex]
             if (item) {
@@ -276,6 +300,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       function moveHighlightedItem(step: 1 | -1) {
         setSelectedIndex((currentIndex) => {
           const nextIndex = getNextFocusableIndex(currentIndex, step)
+
+          if (nextIndex !== null) {
+            ignorePointerHoverUntilPointerMoves()
+          }
 
           return nextIndex === null ? currentIndex : nextIndex
         })
@@ -347,6 +375,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           return
         }
 
+        ignorePointerHoverUntilPointerMoves()
         setSelectedIndex(nextIndex)
         queueMicrotask(() => {
           const item = filteredItems[nextIndex]
@@ -370,9 +399,11 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           setQuery("")
           setSelectedIndex(0)
           clearTypeaheadQuery()
+          ignorePointerHoverRef.current = false
           return
         }
 
+        ignorePointerHoverUntilPointerMoves()
         const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
         setSelectedIndex(
           props.filterable && !isEmptyQuery(query)
@@ -397,6 +428,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
 
       <div
         class={styles.menuBody}
+        onPointerMove={updatePointerPosition}
         onKeyDown={(event) => {
           if (props.filterable && event.target === filterInputRef.current) {
             return
@@ -489,6 +521,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                   disabled={item.disabled}
                   type="button"
                   onMouseEnter={() => {
+                    if (ignorePointerHoverRef.current) {
+                      return
+                    }
+
                     setSelectedIndex(index)
                   }}
                   onFocus={() => {
