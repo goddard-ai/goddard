@@ -6,12 +6,13 @@ export default {
     minWidth: "0",
     '&[data-compact="true"]': {
       width: "fit-content",
-      maxWidth: "min(12rem, 100%)",
+      maxWidth: "100%",
     },
   }),
   tooltipTrigger: css({
     display: "block",
     minWidth: "0",
+    maxWidth: "100%",
   }),
   trigger: css({
     display: "grid",
@@ -49,9 +50,11 @@ export default {
     alignItems: "center",
     gap: "7px",
     minWidth: "0",
+    maxWidth: "100%",
   }),
   triggerLabel: css({
     minWidth: "0",
+    maxWidth: "100%",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
