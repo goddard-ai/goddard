@@ -184,9 +184,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         () => props.items.map(
           (item) => ({
             item,
-            preparedDetail: item.detail ? fuzzysort.prepare(item.detail) : null,
             preparedLabel: fuzzysort.prepare(item.label),
-            preparedSearchText: item.searchText ? fuzzysort.prepare(item.searchText) : null,
           }),
         ),
         [props.items],
@@ -202,8 +200,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           searchableItems,
           [
             { key: "label", extract: (entry) => entry.preparedLabel },
-            { key: "detail", extract: (entry) => entry.preparedDetail },
-            { key: "searchText", extract: (entry) => entry.preparedSearchText },
           ],
           { threshold: 0 },
         ).items.filter((entry) => isStrongSelectorMatch(query, entry)).map(
@@ -321,8 +317,6 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           [searchableItem],
           [
             { key: "label", extract: (entry) => entry.preparedLabel },
-            { key: "detail", extract: (entry) => entry.preparedDetail },
-            { key: "searchText", extract: (entry) => entry.preparedSearchText },
           ],
           { threshold: 0 },
         ).items[0] ??
