@@ -115,6 +115,56 @@ test("explicit seed paths can copy nested untracked files from an untracked dire
   await cleanupWorktree(repoDir, created)
 })
 
+test(".worktreeinclude copies matching gitignored files only", async () => {
+  const repoDir = await createRepoFixture({
+    trackedFiles: {
+      ".gitignore": ".env\n.env.local\nconfig/secrets.json\nsecrets/\ntracked-secret.txt\n",
+      ".worktreeinclude":
+        ".env\n.env.local\nconfig/secrets.json\nsecrets/\nnot-ignored.txt\ntracked-secret.txt\n",
+    },
+  })
+  await writeFile(join(repoDir, "tracked-secret.txt"), "tracked\n", "utf-8")
+  await runGit(repoDir, ["add", "-f", "tracked-secret.txt"])
+  await runGit(repoDir, ["commit", "-m", "track ignored file"])
+  await writeFile(join(repoDir, ".env"), "ENV=1\n", "utf-8")
+  await writeFile(join(repoDir, ".env.local"), "LOCAL=1\n", "utf-8")
+  await mkdir(join(repoDir, "config"), { recursive: true })
+  await writeFile(join(repoDir, "config", "secrets.json"), '{"secret":true}\n', "utf-8")
+  await mkdir(join(repoDir, "secrets"), { recursive: true })
+  await writeFile(join(repoDir, "secrets", "token.txt"), "token\n", "utf-8")
+  await writeFile(join(repoDir, "not-ignored.txt"), "skip\n", "utf-8")
+  await writeFile(join(repoDir, "tracked-secret.txt"), "changed\n", "utf-8")
+  const created = await createWorktree({
+    cwd: repoDir,
+    branchName: "feature-worktreeinclude",
+  })
+
+  const prepared = await prepareFreshWorktree({
+    repoRoot: repoDir,
+    worktreeDir: created.worktreeDir,
+    config: {
+      seedNames: [],
+      seedPaths: [],
+    },
+  })
+
+  expect(prepared.seededPaths).toEqual([".env", ".env.local", "config/secrets.json", "secrets"])
+  expect(await readFile(join(created.worktreeDir, ".env"), "utf-8")).toBe("ENV=1\n")
+  expect(await readFile(join(created.worktreeDir, ".env.local"), "utf-8")).toBe("LOCAL=1\n")
+  expect(await readFile(join(created.worktreeDir, "config", "secrets.json"), "utf-8")).toBe(
+    '{"secret":true}\n',
+  )
+  expect(await readFile(join(created.worktreeDir, "secrets", "token.txt"), "utf-8")).toBe(
+    "token\n",
+  )
+  expect(existsSync(join(created.worktreeDir, "not-ignored.txt"))).toBe(false)
+  expect(await readFile(join(created.worktreeDir, "tracked-secret.txt"), "utf-8")).toBe(
+    "tracked\n",
+  )
+
+  await cleanupWorktree(repoDir, created)
+})
+
 test("tracked and ignored paths are not seeded into the fresh worktree", async () => {
   const repoDir = await createRepoFixture({
     trackedFiles: {
