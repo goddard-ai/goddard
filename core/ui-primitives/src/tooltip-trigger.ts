@@ -2,6 +2,8 @@ import { type Signal } from "@preact/signals"
 import { cloneElement, type VNode } from "preact"
 import { useEffect, useRef } from "preact/hooks"
 
+import { consumeRestoredFocus } from "./overlay/focus.ts"
+
 type TooltipGroupState = {
   pendingCloseCallbacks: Set<() => void>
 }
@@ -86,8 +88,8 @@ export function TooltipTrigger(props: {
       closeTooltipImmediately()
     }, props.closeDelay ?? 80)
   }
-  const openTooltipOnFocus = () => {
-    if (suppressFocusOpenRef.current) {
+  const openTooltipOnFocus = (event: FocusEvent) => {
+    if (suppressFocusOpenRef.current || consumeRestoredFocus(event.currentTarget)) {
       return
     }
 

@@ -1,5 +1,7 @@
 import { tabbable } from "tabbable"
 
+const restoredFocusTargets = new WeakSet<HTMLElement>()
+
 /** Moves focus to the first reachable control inside a newly opened overlay. */
 export function focusFirstElement(container: HTMLElement) {
   const firstElement = tabbable(container)[0]
@@ -15,8 +17,19 @@ export function focusFirstElement(container: HTMLElement) {
 /** Returns focus to a trigger when the trigger is still mounted. */
 export function restoreFocus(target: Element | null) {
   if (target instanceof HTMLElement && document.contains(target)) {
+    restoredFocusTargets.add(target)
     target.focus()
   }
+}
+
+/** Returns true once for an element focused by overlay restoration. */
+export function consumeRestoredFocus(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement) || !restoredFocusTargets.has(target)) {
+    return false
+  }
+
+  restoredFocusTargets.delete(target)
+  return true
 }
 
 /** Loops tab navigation inside an overlay that owns modal focus. */

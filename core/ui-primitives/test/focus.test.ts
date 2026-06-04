@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { keepFocusInside, restoreFocus } from "../src/overlay/focus.ts"
+import { consumeRestoredFocus, keepFocusInside, restoreFocus } from "../src/overlay/focus.ts"
 
 test("restoreFocus focuses an attached element", () => {
   const button = document.createElement("button")
@@ -9,6 +9,18 @@ test("restoreFocus focuses an attached element", () => {
   restoreFocus(button)
 
   expect(document.activeElement).toBe(button)
+})
+
+test("consumeRestoredFocus returns true once for restored focus targets", () => {
+  const button = document.createElement("button")
+  document.body.append(button)
+
+  expect(consumeRestoredFocus(button)).toBe(false)
+
+  restoreFocus(button)
+
+  expect(consumeRestoredFocus(button)).toBe(true)
+  expect(consumeRestoredFocus(button)).toBe(false)
 })
 
 test("keepFocusInside loops tab focus from the last element to the first", () => {
