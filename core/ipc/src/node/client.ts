@@ -2,6 +2,7 @@ import { createClient } from "rouzer"
 import type { HttpRouteTree } from "rouzer/http"
 import * as ndjson from "rouzer/ndjson"
 
+import { createHookedIpcClient, type IpcClientHook } from "../client-hooks.ts"
 import { IpcClientError } from "../errors.ts"
 
 /** TCP address used by the Node IPC transport. */
@@ -41,8 +42,9 @@ function toTcpConnectionError(error: unknown, address: NodeTcpAddress) {
 export function createNodeClient<const TRoutes extends HttpRouteTree>(
   address: NodeTcpAddress,
   routes: TRoutes,
+  options: { ipcHook?: IpcClientHook } = {},
 ) {
-  return createClient({
+  const client = createClient({
     baseURL: formatAddress(address),
     routes,
     plugins: [ndjson.clientPlugin],
@@ -66,6 +68,8 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
       throw new Error(message)
     },
   })
+
+  return createHookedIpcClient(client, options.ipcHook)
 }
 
 function formatAddress(address: NodeTcpAddress) {

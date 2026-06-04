@@ -1,4 +1,5 @@
 import type { DaemonIpcClient, DaemonIpcClientFactory } from "@goddard-ai/daemon-client"
+import type { IpcClientHook } from "@goddard-ai/ipc"
 
 /** Minimal daemon client contract accepted by the SDK. */
 export type GoddardClient = DaemonIpcClient
@@ -10,6 +11,7 @@ export type IpcClientOptions =
     }
   | {
       daemonUrl: string
+      ipcHook?: IpcClientHook
       createClient: DaemonIpcClientFactory<GoddardClient>
     }
 
@@ -18,8 +20,9 @@ export function resolveIpcClient(options: IpcClientOptions): GoddardClient {
   if ("client" in options) {
     return options.client
   }
-  const { createClient, daemonUrl } = options
+  const { createClient, daemonUrl, ipcHook } = options
   return createClient({
     daemonUrl,
+    ipcHook,
   })
 }

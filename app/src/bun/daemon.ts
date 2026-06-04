@@ -12,6 +12,7 @@ import type {
 } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
+import { createClientIpcLogHook } from "./ipc-client-logging.ts"
 
 let daemonClient: DaemonIpcClient | undefined
 const daemonStreamSubscriptions = new Map<
@@ -29,7 +30,10 @@ async function getDaemonClient() {
     return daemonClient
   }
 
-  const client = createDaemonIpcClient(await ensureDaemonRuntime())
+  const client = createDaemonIpcClient({
+    ...(await ensureDaemonRuntime()),
+    ipcHook: createClientIpcLogHook(),
+  })
   daemonClient = client
   return client
 }

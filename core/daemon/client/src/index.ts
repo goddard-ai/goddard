@@ -1,11 +1,12 @@
 /** Shared daemon IPC client types used by runtime-specific daemon client modules. */
-import type { RouzerClient } from "@goddard-ai/ipc"
+import type { IpcClientHook, RouzerClient } from "@goddard-ai/ipc"
 
 import type { daemonIpcRoutes } from "./daemon-ipc.ts"
 
 /** Daemon connection metadata passed to environment-specific IPC client factories. */
 export type DaemonIpcClientFactoryInput = {
   daemonUrl: string
+  ipcHook?: IpcClientHook
 }
 
 /** IPC client type shared by all daemon transport implementations. */

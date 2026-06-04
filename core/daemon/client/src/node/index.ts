@@ -1,6 +1,11 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
 import { readFileSync } from "node:fs"
-import { createRouteClient, ndjson } from "@goddard-ai/ipc"
+import {
+  createHookedIpcClient,
+  createRouteClient,
+  ndjson,
+  type IpcClientHook,
+} from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
@@ -24,27 +29,35 @@ export type {
 /** Creates one daemon IPC client for a Node host using either the default or injected transport. */
 export function createDaemonIpcClient<TClient = DaemonIpcClient>(options: {
   daemonUrl: string
+  ipcHook?: IpcClientHook
   createClient?: DaemonIpcClientFactory<TClient>
 }): TClient
 export function createDaemonIpcClient(options: {
   daemonUrl: string
+  ipcHook?: IpcClientHook
   createClient?: DaemonIpcClientFactory
 }): DaemonIpcClient {
   return (options.createClient ?? createDefaultClient)({
     daemonUrl: options.daemonUrl,
+    ipcHook: options.ipcHook,
   })
 }
 
 /** Creates one daemon IPC client from Node environment variables or injected env values. */
 export function createDaemonIpcClientFromEnv<TClient = DaemonIpcClient>(options?: {
   env?: DaemonClientEnv
+  ipcHook?: IpcClientHook
   createClient?: DaemonIpcClientFactory<TClient>
 }): {
   daemonUrl: string
   client: TClient
 }
 export function createDaemonIpcClientFromEnv(
-  options: { env?: DaemonClientEnv; createClient?: DaemonIpcClientFactory } = {},
+  options: {
+    env?: DaemonClientEnv
+    ipcHook?: IpcClientHook
+    createClient?: DaemonIpcClientFactory
+  } = {},
 ): {
   daemonUrl: string
   client: DaemonIpcClient
@@ -55,6 +68,7 @@ export function createDaemonIpcClientFromEnv(
     daemonUrl,
     client: createDaemonIpcClient({
       daemonUrl,
+      ipcHook: options.ipcHook,
       createClient: options.createClient,
     }),
   }
@@ -71,7 +85,7 @@ export function resolveDaemonUrl(env: DaemonClientEnv = process.env) {
 
 /** Creates the default Node daemon IPC transport from one daemon URL. */
 function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
-  return createRouteClient({
+  const client = createRouteClient({
     baseURL: input.daemonUrl,
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
@@ -88,6 +102,8 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
       throw new Error(message)
     },
   }) as DaemonIpcClient
+
+  return createHookedIpcClient(client, input.ipcHook)
 }
 
 function resolveDaemonPort(env: DaemonClientEnv) {

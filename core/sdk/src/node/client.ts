@@ -5,6 +5,7 @@ import {
   type DaemonIpcClient,
   type DaemonIpcClientFactory,
 } from "@goddard-ai/daemon-client/node"
+import type { IpcClientHook } from "@goddard-ai/ipc"
 
 import { resolveIpcClient, type GoddardClient } from "../ipc-client.ts"
 
@@ -12,6 +13,7 @@ import { resolveIpcClient, type GoddardClient } from "../ipc-client.ts"
 export type NodeDaemonClientOptions = {
   client?: GoddardClient
   daemonUrl?: string
+  ipcHook?: IpcClientHook
   createClient?: DaemonIpcClientFactory
   env?: DaemonClientEnv
 }
@@ -27,12 +29,14 @@ export function resolveNodeDaemonClient(options: NodeDaemonClientOptions = {}): 
   if (options.daemonUrl) {
     return createDaemonIpcClient({
       daemonUrl: options.daemonUrl,
+      ipcHook: options.ipcHook,
       createClient: options.createClient,
     })
   }
 
   return createDaemonIpcClientFromEnv({
     env: options.env,
+    ipcHook: options.ipcHook,
     createClient: options.createClient,
   }).client
 }

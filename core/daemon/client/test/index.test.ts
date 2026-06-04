@@ -25,11 +25,13 @@ afterEach(async () => {
 })
 
 test("createDaemonIpcClient passes the explicit daemon URL to the injected factory", () => {
-  const calls: Array<{ daemonUrl: string }> = []
+  const ipcHook = () => {}
+  const calls: Array<{ daemonUrl: string; ipcHook: unknown }> = []
   const client = createDaemonIpcClient({
     daemonUrl: "http://127.0.0.1:49827/",
-    createClient: ({ daemonUrl }) => {
-      calls.push({ daemonUrl })
+    ipcHook,
+    createClient: ({ daemonUrl, ipcHook }) => {
+      calls.push({ daemonUrl, ipcHook })
       return { kind: "custom" as const, daemonUrl }
     },
   })
@@ -38,17 +40,19 @@ test("createDaemonIpcClient passes the explicit daemon URL to the injected facto
     kind: "custom",
     daemonUrl: "http://127.0.0.1:49827/",
   })
-  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49827/" }])
+  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49827/", ipcHook }])
 })
 
 test("createDaemonIpcClientFromEnv passes the resolved daemon URL to the injected factory", () => {
-  const calls: Array<{ daemonUrl: string }> = []
+  const ipcHook = () => {}
+  const calls: Array<{ daemonUrl: string; ipcHook: unknown }> = []
   const result = createDaemonIpcClientFromEnv({
     env: {
       GODDARD_DAEMON_URL: "http://127.0.0.1:49829/",
     },
-    createClient: ({ daemonUrl }) => {
-      calls.push({ daemonUrl })
+    ipcHook,
+    createClient: ({ daemonUrl, ipcHook }) => {
+      calls.push({ daemonUrl, ipcHook })
       return { kind: "custom" as const, daemonUrl }
     },
   })
@@ -58,7 +62,7 @@ test("createDaemonIpcClientFromEnv passes the resolved daemon URL to the injecte
     kind: "custom",
     daemonUrl: "http://127.0.0.1:49829/",
   })
-  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49829/" }])
+  expect(calls).toEqual([{ daemonUrl: "http://127.0.0.1:49829/", ipcHook }])
 })
 
 test("resolveDaemonUrl can derive the daemon URL from an explicit daemon port", () => {
