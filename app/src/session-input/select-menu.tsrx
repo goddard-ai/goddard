@@ -22,6 +22,7 @@ type SelectItemIconProps = {
 type SelectItemIcon = preact.FunctionComponent<SelectItemIconProps>
 
 const selectorMenuMinimumFuzzyScore = 0.12
+const selectorMenuTypeaheadTimeoutMs = 700
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
@@ -62,6 +63,11 @@ function hasDirectSelectorMatch<T>(query: string, match: fuzzysort.RecordMatch<T
 
 function isStrongSelectorMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
   return match.score >= selectorMenuMinimumFuzzyScore || hasDirectSelectorMatch(query, match)
+}
+
+function isSelectorTypeaheadKey(event: KeyboardEvent) {
+  return event.key.length === 1 && event.key.trim().length > 0 && !event.altKey && !event.ctrlKey &&
+    !event.metaKey
 }
 
 /** Shared dropdown control used for project, adapter, branch, model, and thinking selectors. */
@@ -169,6 +175,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       const [query, setQuery] = useState("")
       const [selectedIndex, setSelectedIndex] = useState(0)
       const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
+      const typeaheadQueryRef = useRef("")
+      const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
       const searchableItems = useMemo(
         () => props.items.map(
@@ -226,6 +234,23 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         )
       }
 
+      function clearTypeaheadQuery() {
+        typeaheadQueryRef.current = ""
+
+        if (typeaheadTimerRef.current) {
+          clearTimeout(typeaheadTimerRef.current)
+          typeaheadTimerRef.current = null
+        }
+      }
+
+      function scheduleTypeaheadReset() {
+        if (typeaheadTimerRef.current) {
+          clearTimeout(typeaheadTimerRef.current)
+        }
+
+        typeaheadTimerRef.current = setTimeout(clearTypeaheadQuery, selectorMenuTypeaheadTimeoutMs)
+      }
+
       function moveFocusedItem(step: 1 | -1) {
         setSelectedIndex((currentIndex) => {
           const focusedIndex = getFocusedItemIndex()
@@ -256,6 +281,81 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         })
       }
 
+      function getSearchableItemMatch(query: string, item: SessionInputSelectItem) {
+        const searchableItem = searchableItems.find((entry) => entry.item.value === item.value)
+
+        if (!searchableItem) {
+          return null
+        }
+
+        return fuzzysort.searchFields(
+          query,
+          [searchableItem],
+          [
+            { key: "label", extract: (entry) => entry.preparedLabel },
+            { key: "detail", extract: (entry) => entry.preparedDetail },
+            { key: "searchText", extract: (entry) => entry.preparedSearchText },
+          ],
+          { threshold: 0 },
+        ).items[0] ??
+          null
+      }
+
+      function findNearestTypeaheadIndex(query: string) {
+        if (isEmptyQuery(query) || filteredItems.length === 0) {
+          return null
+        }
+
+        const focusedIndex = getFocusedItemIndex()
+        const currentIndex =
+          focusedIndex >= 0 ? focusedIndex : selectedIndex
+        const firstOffset =
+          query.length > 1 ? 0 : 1
+
+        for (let offset = firstOffset; offset < filteredItems.length + firstOffset; offset += 1) {
+          const index = (currentIndex + offset) % filteredItems.length
+          const item = filteredItems[index]
+
+          if (!item || item.disabled) {
+            continue
+          }
+
+          const match = getSearchableItemMatch(query, item)
+
+          if (match && isStrongSelectorMatch(query, match)) {
+            return index
+          }
+        }
+
+        return null
+      }
+
+      function focusTypeaheadItem(key: string) {
+        const combinedQuery = `${typeaheadQueryRef.current}${key}`
+        let nextQuery = combinedQuery
+        let nextIndex = findNearestTypeaheadIndex(nextQuery)
+
+        if (nextIndex === null && typeaheadQueryRef.current) {
+          nextQuery = key
+          nextIndex = findNearestTypeaheadIndex(nextQuery)
+        }
+
+        typeaheadQueryRef.current = nextQuery
+        scheduleTypeaheadReset()
+
+        if (nextIndex === null) {
+          return
+        }
+
+        setSelectedIndex(nextIndex)
+        queueMicrotask(() => {
+          const item = filteredItems[nextIndex]
+          if (item) {
+            itemElements[item.value]?.focus()
+          }
+        })
+      }
+
       function commitSelection(item: SessionInputSelectItem | null) {
         if (!item || item.disabled) {
           return
@@ -269,6 +369,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         if (!props.open.value) {
           setQuery("")
           setSelectedIndex(0)
+          clearTypeaheadQuery()
           return
         }
 
@@ -281,6 +382,8 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               : 0,
         )
       }, [filteredItemSignature, props.filterable, props.open.value, props.value, query])
+
+      useEffect(() => clearTypeaheadQuery, [])
 
       useEffect(() => {
         if (!props.open.value || !highlightedItem) {
@@ -296,6 +399,12 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         class={styles.menuBody}
         onKeyDown={(event) => {
           if (props.filterable && event.target === filterInputRef.current) {
+            return
+          }
+
+          if (!props.filterable && isSelectorTypeaheadKey(event)) {
+            event.preventDefault()
+            focusTypeaheadItem(event.key)
             return
           }
 
