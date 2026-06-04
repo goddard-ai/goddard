@@ -114,6 +114,7 @@ export default {
   rowColumn: css({
     display: "grid",
     gap: "0",
+    minWidth: 0,
   }),
 
   messageContainer: css({
@@ -126,6 +127,8 @@ export default {
   bubbleFrame: css({
     display: "inline-flex",
     flexDirection: "column",
+    width: "fit-content",
+    maxWidth: "100%",
     borderRadius: "22px",
     border: "1px solid",
     padding: "14px 16px",

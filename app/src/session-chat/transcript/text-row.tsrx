@@ -218,9 +218,10 @@ export component TextTranscriptRow(props: {
       <div
         class={cx(styles.rowColumn, styles.messageContainer)}
         style={{
-          width: isUserMessage
+          maxWidth: isUserMessage
             ? `${getBubbleMaxWidth(props.row.viewportWidth, message)}px`
-            : "100%",
+            : undefined,
+          width: isUserMessage ? "fit-content" : "100%",
         }}
       >
         <div
