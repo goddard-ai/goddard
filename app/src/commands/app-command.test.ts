@@ -320,7 +320,7 @@ test("default keymap dispatches session chat prompt navigation from Mod+ArrowUp 
   }
 })
 
-test("default keymap dispatches session chat actions from Mod+Shift+D and Mod+Shift+Enter", async () => {
+test("default keymap dispatches session chat actions from Alt+Shift+G and Mod+Shift+Enter", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const changeMatches: unknown[] = []
   const completeMatches: unknown[] = []
@@ -352,9 +352,9 @@ test("default keymap dispatches session chat actions from Mod+Shift+D and Mod+Sh
     registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
-      key: "D",
-      code: "KeyD",
-      ctrlKey: true,
+      key: "G",
+      code: "KeyG",
+      altKey: true,
       shiftKey: true,
     })
     dispatchKeydown(runtimeDocument, {
@@ -366,11 +366,11 @@ test("default keymap dispatches session chat actions from Mod+Shift+D and Mod+Sh
 
     expect(changeMatches).toHaveLength(1)
     expect(changeMatches[0]).toMatchObject({
-      combo: "Ctrl+Shift+d",
+      combo: "Alt+Shift+g",
       event: {
-        key: "d",
+        key: "g",
         modifiers: {
-          ctrl: true,
+          alt: true,
           shift: true,
         },
       },
