@@ -37,6 +37,10 @@ import {
   SessionModeSelector,
 } from "~/session-input/session-mode-selector.tsrx"
 import {
+  listCustomSlashCommandSuggestions,
+  resolveLeadingCustomSlashCommand,
+} from "~/session-input/slash-command.ts"
+import {
   cancelSessionTurn,
   completeSession,
   reconnectSession,
@@ -599,6 +603,22 @@ export default component SessionChatView(props: {
               </tsrx>}
               helperText={null}
               loadSuggestions={async (input) => {
+                if (input.trigger === "slash") {
+                  const [customSuggestions, response] = await Promise.all([
+                    listCustomSlashCommandSuggestions({
+                      cwd: chat.session.cwd,
+                      query: input.query,
+                    }),
+                    goddardSdk.session.composerSuggestions({
+                      id: chat.session.id,
+                      trigger: input.trigger,
+                      query: input.query,
+                    }),
+                  ])
+
+                  return [...customSuggestions, ...response.suggestions]
+                }
+
                 const response = await goddardSdk.session.composerSuggestions({
                   id: chat.session.id,
                   trigger: input.trigger,
@@ -624,7 +644,10 @@ export default component SessionChatView(props: {
                   await submitSessionPrompt({
                     id: chat.session.id,
                     acpId: chat.session.acpSessionId,
-                    prompt,
+                    prompt: await resolveLeadingCustomSlashCommand({
+                      cwd: chat.session.cwd,
+                      prompt,
+                    }),
                   })
                   chat.toggleCompletedHidden(false)
                 }).catch((error) => {

@@ -223,6 +223,7 @@
         "@goddard-ai/review-session": "workspace:*",
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/slash-command": "workspace:*",
         "@goddard-ai/workforce": "workspace:*",
       },
     },
@@ -279,6 +280,7 @@
         "@goddard-ai/schema": "workspace:*",
         "@goddard-ai/sdk-plugin": "workspace:*",
         "@goddard-ai/session": "workspace:*",
+        "@goddard-ai/slash-command": "workspace:*",
         "@goddard-ai/workforce": "workspace:*",
         "acp-client": "catalog:",
       },
@@ -469,6 +471,17 @@
       },
       "devDependencies": {
         "@types/hash-sum": "catalog:",
+      },
+    },
+    "features/slash-command": {
+      "name": "@goddard-ai/slash-command",
+      "version": "0.1.0",
+      "dependencies": {
+        "@goddard-ai/daemon-plugin": "workspace:*",
+        "@goddard-ai/ipc": "workspace:*",
+        "@goddard-ai/schema": "workspace:*",
+        "@goddard-ai/sdk-plugin": "workspace:*",
+        "zod": "catalog:",
       },
     },
     "features/workforce": {
@@ -886,6 +899,8 @@
     "@goddard-ai/sdk-plugin": ["@goddard-ai/sdk-plugin@workspace:core/sdk-plugin"],
 
     "@goddard-ai/session": ["@goddard-ai/session@workspace:features/session"],
+
+    "@goddard-ai/slash-command": ["@goddard-ai/slash-command@workspace:features/slash-command"],
 
     "@goddard-ai/sprint-branch": ["@goddard-ai/sprint-branch@workspace:core/sprint-branch"],
 

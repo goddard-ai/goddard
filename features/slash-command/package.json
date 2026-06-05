@@ -1,8 +1,8 @@
 {
-  "name": "@goddard-ai/default-features",
+  "name": "@goddard-ai/slash-command",
   "version": "0.1.0",
   "private": true,
-  "license": "FSL-1.1-ALv2",
+  "license": "MIT",
   "type": "module",
   "exports": {
     "./daemon": {
@@ -20,28 +20,36 @@
       },
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
+    },
+    "./schema": {
+      "types": {
+        "source": "./src/schema.ts",
+        "default": "./dist/schema.d.mts"
+      },
+      "bun": "./src/schema.ts",
+      "import": "./dist/schema.mjs"
+    },
+    "./sdk": {
+      "types": {
+        "source": "./src/sdk.ts",
+        "default": "./dist/sdk.d.mts"
+      },
+      "bun": "./src/sdk.ts",
+      "import": "./dist/sdk.mjs"
     }
   },
   "scripts": {
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "prettier -w .",
-    "typecheck": "tsgo --noEmit",
-    "test": "bun test --pass-with-no-tests --dots"
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
+    "test": "bun test --dots"
   },
   "dependencies": {
-    "@goddard-ai/action": "workspace:*",
-    "@goddard-ai/adapter": "workspace:*",
-    "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
-    "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
-    "@goddard-ai/loop": "workspace:*",
-    "@goddard-ai/pull-request": "workspace:*",
-    "@goddard-ai/review-session": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
-    "@goddard-ai/session": "workspace:*",
-    "@goddard-ai/slash-command": "workspace:*",
-    "@goddard-ai/workforce": "workspace:*"
+    "@goddard-ai/sdk-plugin": "workspace:*",
+    "zod": "catalog:"
   }
 }

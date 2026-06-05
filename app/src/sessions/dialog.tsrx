@@ -7,6 +7,7 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
+import { resolveLeadingCustomSlashCommand } from "~/session-input/slash-command.ts"
 import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
@@ -46,8 +47,18 @@ component SessionLaunchDialog(props: {
     try {
       const projectPath = form.draftProjectPath.value
       const launchLeaseId = form.launchPreview.value?.launchLeaseId
+      const initialPrompt =
+        Array.isArray(sessionInput.initialPrompt)
+          ? await resolveLeadingCustomSlashCommand({
+              cwd: sessionInput.cwd,
+              prompt: sessionInput.initialPrompt,
+            })
+          : sessionInput.initialPrompt
       recordSessionLaunchAgentUse(form.draftAdapterId.value)
-      const { session } = await createSession(sessionInput)
+      const { session } = await createSession({
+        ...sessionInput,
+        initialPrompt,
+      })
       const sessionTitle = getSessionDisplayTitle(session)
 
       if (!isKeptSessionLaunchLease(launchLeaseId)) {
