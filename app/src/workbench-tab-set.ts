@@ -101,7 +101,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     }
   }
 
-  /** Closes one closable tab and falls back to the primary tab when needed. */
+  /** Closes one closable tab and falls back to the most recently used remaining tab when needed. */
   closeTab(tabId: string) {
     const tab = this.tabs[tabId]
 
@@ -115,7 +115,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.#onCloseTab(tabId)
 
     if (this.activeTabId === tabId) {
-      this.activeTabId = this.orderedTabIds[this.orderedTabIds.length - 1] ?? WORKBENCH_MAIN_TAB.id
+      this.activeTabId = this.recency[0] ?? WORKBENCH_MAIN_TAB.id
     }
   }
 
