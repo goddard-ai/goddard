@@ -9,7 +9,7 @@ type WorkbenchTabDefinition<TPayload extends object = any> = {
   getId: (payload: TPayload) => string
   getTitle: (payload: TPayload) => string
   icon: SvgIconName
-  getProjectPath?: (payload: TPayload) => string | null | undefined
+  getRelatedFilesystemPath?: (payload: TPayload) => string | null | undefined
   restoreScroll?: boolean
 }
 
@@ -84,14 +84,15 @@ export const workbenchTabKinds = {
     getTitle: (payload: { projectName?: string; projectPath: string }) =>
       payload.projectName ?? payload.projectPath,
     icon: "tabs/projects",
-    getProjectPath: (payload: { projectPath: string }) => payload.projectPath,
+    getRelatedFilesystemPath: (payload: { projectPath: string }) => payload.projectPath,
   },
   sessionChat: {
     component: lazy(() => import("~/session-chat/view.tsrx")),
     getId: (payload: { sessionId: string }) => `session:${payload.sessionId}`,
     getTitle: (payload: { sessionTitle?: string }) => payload.sessionTitle ?? "Session",
     icon: "tabs/sessions",
-    getProjectPath: (payload: { projectPath?: string | null }) => payload.projectPath,
+    getRelatedFilesystemPath: (payload: { relatedFilesystemPath?: string | null }) =>
+      payload.relatedFilesystemPath,
     restoreScroll: false,
   },
   sessionChanges: {
@@ -106,7 +107,8 @@ export const workbenchTabKinds = {
     getTitle: (payload: { pullRequestTitle?: string }) =>
       payload.pullRequestTitle ?? "Pull Request",
     icon: "tabs/pull-request",
-    getProjectPath: (payload: { projectPath?: string | null }) => payload.projectPath,
+    getRelatedFilesystemPath: (payload: { relatedFilesystemPath?: string | null }) =>
+      payload.relatedFilesystemPath,
   },
   inboxDebug: {
     component: lazy(() => import("~/inbox/debug-view.tsrx")),
@@ -195,9 +197,9 @@ export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
 }
 
 /** Resolves the filesystem path one workbench tab is associated with, when the tab kind declares one. */
-export function getWorkbenchTabProjectPath(tab: WorkbenchTab) {
+export function getWorkbenchTabRelatedFilesystemPath(tab: WorkbenchTab) {
   const definition = workbenchTabKinds[tab.kind] as WorkbenchTabDefinition<typeof tab.payload>
-  return definition.getProjectPath?.(tab.payload) ?? null
+  return definition.getRelatedFilesystemPath?.(tab.payload) ?? null
 }
 
 /** Derives the full stored tab record from the minimal caller-owned tab input. */

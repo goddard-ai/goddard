@@ -26,7 +26,6 @@ import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { queryClient, useQueries, useQuery } from "~/lib/query.ts"
-import { useNearestProjectPath, useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
   findSelectConfigOption,
@@ -49,7 +48,7 @@ import {
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
 export default component SessionChatView(props: {
-  projectPath: string | null;
+  relatedFilesystemPath: string | null;
   sessionId: DaemonSession["id"];
   sessionTitle?: string;
 }) {
@@ -94,9 +93,6 @@ export default component SessionChatView(props: {
         const userPromptCount = transcriptMessages.filter(
           (message) => message.kind === "message" && message.role === "user",
         ).length
-
-        const resolvedProjectPath = useNearestProjectPath(chat.session.cwd)
-        useReportTabProject(resolvedProjectPath)
 
         const inbox = useInbox()
         useEffect(() => {

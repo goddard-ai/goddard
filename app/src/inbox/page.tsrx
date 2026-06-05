@@ -7,11 +7,10 @@ import type {
   UpdateInboxItemRequest,
 } from "@goddard-ai/inbox/schema"
 
-import { useInbox, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
-import { findNearestProjectPath } from "~/projects/project-context.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
@@ -82,7 +81,6 @@ component InboxQueryContent(props: {
 
 component InboxPage() {
   const inbox = useInbox()
-  const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
@@ -208,7 +206,7 @@ component InboxPage() {
         workbenchTabSet.openOrFocusTab({
           kind: "sessionChat",
           payload: {
-            projectPath: findNearestProjectPath(projectRegistry.projectList, session.cwd),
+            relatedFilesystemPath: session.cwd,
             sessionId: session.id,
             sessionTitle: getSessionDisplayTitle(session),
           },
@@ -227,7 +225,7 @@ component InboxPage() {
       workbenchTabSet.openOrFocusTab({
         kind: "pullRequest",
         payload: {
-          projectPath: findNearestProjectPath(projectRegistry.projectList, pullRequest.cwd),
+          relatedFilesystemPath: pullRequest.cwd,
           pullRequestId: pullRequest.id,
           pullRequestTitle: getPullRequestDisplayTitle(pullRequest),
         },

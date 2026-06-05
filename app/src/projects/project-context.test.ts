@@ -77,7 +77,7 @@ test("contextless focused tabs keep the current active project", async () => {
   }
 })
 
-test("late async tab reports do not override the active project after focus has moved", async () => {
+test("tabs without related filesystem paths keep the current active project", async () => {
   const { context, projectRegistry, workbenchTabSet } = createProjectContext()
   const cleanup = context.setup()
 
@@ -88,9 +88,7 @@ test("late async tab reports do not override the active project after focus has 
       kind: "inbox",
       payload: {},
     })
-    workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
     await Promise.resolve()
-    context.reportTabProject("surface:inbox", "/repo")
 
     expect(context.activeProjectPath).toBe("/docs")
   } finally {

@@ -4,7 +4,6 @@ import { useState } from "preact/hooks"
 import { isPromise } from "radashi"
 
 import { queryClient, useQuery } from "~/lib/query.ts"
-import { useReportTabProject } from "~/projects/use-tab-project.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getPullRequestDisplayTitle } from "./display.ts"
 import { getPullRequestUrl } from "./links.ts"
@@ -42,12 +41,11 @@ component PullRequestLoadingState() {
 }
 
 component PullRequestView(props: {
-  projectPath: string | null;
+  relatedFilesystemPath: string | null;
   pullRequestId: PullRequestId;
   pullRequestTitle?: string;
 }) {
   const [, setRetryVersion] = useState(0)
-  useReportTabProject(props.projectPath)
 
   try {
     const { pullRequest } = useQuery(goddardSdk.pr.get, { params: [{ id: props.pullRequestId }] })
