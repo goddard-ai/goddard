@@ -40,6 +40,7 @@ function useAppShellTabStrip(
 ) {
   const tabStripRef = useRef<HTMLDivElement | null>(null)
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null)
   const dragSourceTabId = useRef<string | null>(null)
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
 
@@ -63,8 +64,34 @@ function useAppShellTabStrip(
     })
   }
 
+  function scrollActiveTabIntoView() {
+    const activeTabElement = tabRefs.current[activeTabId]
+    const tabStripElement = tabStripRef.current
+
+    if (!activeTabElement || !tabStripElement) {
+      return
+    }
+
+    const scrollElement = scrollbarRef.current?.elements().viewport ?? tabStripElement
+    const activeTabRect = activeTabElement.getBoundingClientRect()
+    const scrollRect = scrollElement.getBoundingClientRect()
+
+    if (activeTabRect.left < scrollRect.left) {
+      scrollElement.scrollTo({
+        left: scrollElement.scrollLeft + activeTabRect.left - scrollRect.left,
+        behavior: "smooth",
+      })
+    } else if (activeTabRect.right > scrollRect.right) {
+      scrollElement.scrollTo({
+        left: scrollElement.scrollLeft + activeTabRect.right - scrollRect.right,
+        behavior: "smooth",
+      })
+    }
+  }
+
   useLayoutEffect(() => {
     syncIndicator()
+    scrollActiveTabIntoView()
   }, [activeTabId, selectedMainTabId, tabs])
 
   useEffect(() => {
@@ -110,7 +137,11 @@ function useAppShellTabStrip(
       },
     })
 
+    scrollbarRef.current = scrollbar
+    scrollActiveTabIntoView()
+
     return () => {
+      scrollbarRef.current = null
       scrollbar.destroy()
     }
   }, [])
