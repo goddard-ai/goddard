@@ -5,7 +5,7 @@ import {
   type SessionInputPromptBlocks,
   type SessionInputSuggestionLoader,
 } from "~/session-input/input.tsrx"
-import styles from "./composer.style.ts"
+import styles from "~/session-input/composer-layout.style.ts"
 
 const composerClasses: SessionInputClasses = {
   form: styles.form,

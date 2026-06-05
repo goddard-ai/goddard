@@ -7,26 +7,29 @@ import { getShortcutLabel } from "~/commands/shortcut-label.ts"
 import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
+import composerInputStyles from "~/session-input/composer-layout.style.ts"
 import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsrx"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import selectorStyles from "./launch-form-selectors.style.ts"
 import {
   AgentHarnessSelector,
   SessionLaunchLoadingSelect,
+  SessionLaunchPreviewLoadingSelectors,
   SessionLaunchPreviewSelectors,
   SessionSubpackageSelector,
 } from "./launch-form-selectors.tsrx"
 import { filterSlashCommandSuggestions, type SessionLaunchFormState } from "./launch-form-state.ts"
-import styles from "./launch-form.style.ts"
 
 const launchInputClasses: SessionInputClasses = {
-  form: styles.form,
-  editorFrame: styles.editorFrame,
-  contentEditable: styles.contentEditable,
-  placeholder: styles.placeholder,
-  footer: styles.footer,
-  helperText: styles.helperText,
-  submitButton: styles.submitButton,
+  form: composerInputStyles.form,
+  editorFrame: composerInputStyles.editorFrame,
+  contentEditable: composerInputStyles.contentEditable,
+  placeholder: composerInputStyles.placeholder,
+  footer: composerInputStyles.footer,
+  footerControls: composerInputStyles.footerControls,
+  helperText: composerInputStyles.helperText,
+  contextUsage: composerInputStyles.contextUsage,
+  submitButton: composerInputStyles.submitButton,
 }
 
 export component SessionLaunchForm(props: {
@@ -101,27 +104,17 @@ export component SessionLaunchForm(props: {
       }
     </div>
 
-    try {
-      <SessionLaunchPreviewSelectors {form} />
-    } pending {
-      <div class={selectorStyles.section}>
-        <div class={selectorStyles.grid}>
-          <SessionLaunchLoadingSelect label="Launch location" />
-          <SessionLaunchLoadingSelect label="Git branch" />
-        </div>
-        <div class={selectorStyles.grid}>
-          <SessionLaunchLoadingSelect label="Approval preset" />
-          <SessionLaunchLoadingSelect label="Model" />
-        </div>
-        <div class={selectorStyles.grid}>
-          <SessionLaunchLoadingSelect label="Thinking level" />
-        </div>
-      </div>
-    }
-
     <SessionInput
       autoFocus={true}
       classes={launchInputClasses}
+      footerInsideFrame={true}
+      footerControls={<tsrx>
+        try {
+          <SessionLaunchPreviewSelectors compact={true} {form} />
+        } pending {
+          <SessionLaunchPreviewLoadingSelectors compact={true} />
+        }
+      </tsrx>}
       helperText={<tsrx>
         <GoodKeyboardShortcut expression="Enter" />
         " launches at the end, "
@@ -159,6 +152,7 @@ export component SessionLaunchForm(props: {
         form.draftPromptBlocks.value = prompt
       }}
       onEscape={props.onEscape}
+      iconOnlySubmit={true}
       placeholder="Describe the first thing this session should do."
       submitLabel="Launch session"
       onSubmit={async () => {

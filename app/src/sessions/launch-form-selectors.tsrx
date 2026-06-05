@@ -21,10 +21,11 @@ import {
 import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
 import { releaseSessionLaunchLease } from "./mutations.ts"
 
-export component SessionLaunchLoadingSelect(props: { label: string }) {
+export component SessionLaunchLoadingSelect(props: { label: string; compact?: boolean }) {
   const open = useSignal(false)
 
   <SessionInputSelect
+    compact={props.compact}
     disabled={true}
     filterable={false}
     items={[]}
@@ -35,6 +36,16 @@ export component SessionLaunchLoadingSelect(props: { label: string }) {
     value={null}
     onValueChange={() => {}}
   />
+}
+
+export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
+  <div class={styles.composerControls}>
+    <SessionLaunchLoadingSelect compact={props.compact} label="Launch location" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Git branch" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
+  </div>
 }
 
 export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
@@ -152,6 +163,7 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
 }
 
 export component SessionLaunchPreviewSelectors(props: {
+  compact?: boolean;
   form: SessionLaunchFormState;
 }) {
   const { form } = props
@@ -264,7 +276,7 @@ export component SessionLaunchPreviewSelectors(props: {
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
 
-  <div class={styles.grid}>
+  <div class={props.compact ? styles.composerControls : styles.grid}>
     if (preview?.repoRoot) {
       <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
         <legend class={styles.radioLegend}>
@@ -298,6 +310,7 @@ export component SessionLaunchPreviewSelectors(props: {
     }
 
     <SessionInputSelect
+      compact={props.compact}
       disabled={branchItems.length === 0 || localCheckoutDirty}
       filterable={true}
       items={branchItems}
@@ -313,12 +326,15 @@ export component SessionLaunchPreviewSelectors(props: {
   </div>
 
   if (localCheckoutDirty) {
-    <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
+    <p class={props.compact ? styles.composerWarning : styles.warning}>
+      "Commit or stash local changes to launch from another branch."
+    </p>
   }
 
-  <div class={styles.grid}>
+  <div class={props.compact ? styles.composerControls : styles.grid}>
     if (form.modeOption.value) {
       <SessionModeSelector
+        compact={props.compact}
         modeOption={form.modeOption.value}
         open={form.getPickerOpen("mode")}
         shortcut={approvalPresetShortcut}
@@ -329,6 +345,7 @@ export component SessionLaunchPreviewSelectors(props: {
     }
 
     <SessionInputSelect
+      compact={props.compact}
       disabled={modelItems.length === 0}
       filterable={true}
       items={modelItems}
@@ -344,8 +361,9 @@ export component SessionLaunchPreviewSelectors(props: {
   </div>
 
   if (form.thinkingOption.value) {
-    <div class={styles.grid}>
+    <div class={props.compact ? styles.composerControls : styles.grid}>
       <SessionInputSelect
+        compact={props.compact}
         disabled={thinkingItems.length === 0}
         filterable={false}
         items={thinkingItems}

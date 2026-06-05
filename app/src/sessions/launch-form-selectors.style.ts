@@ -70,4 +70,18 @@ export default {
     fontSize: "0.82rem",
     lineHeight: "1.45",
   }),
+  composerControls: css({
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "start",
+    gap: "12px",
+    minWidth: "0",
+  }),
+  composerWarning: css({
+    margin: "2px 0 0",
+    color: "muted",
+    fontSize: "0.78rem",
+    lineHeight: "1.35",
+  }),
 }
