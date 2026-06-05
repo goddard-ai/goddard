@@ -105,6 +105,19 @@ export default {
       backgroundColor: "surface",
     },
   }),
+  groupRow: css({
+    backgroundColor: "surface",
+  }),
+  groupCell: css({
+    padding: "8px 14px",
+    borderBottom: "1px solid {colors.border}",
+    color: "muted",
+    fontSize: "0.72rem",
+    fontWeight: "720",
+    letterSpacing: "0.08em",
+    textAlign: "left",
+    textTransform: "uppercase",
+  }),
   cell: css({
     padding: "10px 14px",
     borderBottom: "1px solid {colors.border}",

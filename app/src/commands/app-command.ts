@@ -14,6 +14,30 @@ type AppCommandEvents = Record<string, ShortcutMatch | undefined>
 const appCommandBus = new SigmaTarget<AppCommandEvents>()
 const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandId, number>>>>({})
 
+/** User-facing command groups used by shortcut and command discovery surfaces. */
+export const appCommandGroups = {
+  navigation: {
+    id: "navigation",
+    label: "Navigation",
+  },
+  workbench: {
+    id: "workbench",
+    label: "Workbench",
+  },
+  projects: {
+    id: "projects",
+    label: "Projects",
+  },
+  session: {
+    id: "session",
+    label: "Session",
+  },
+} as const
+
+export type AppCommandGroupId = keyof typeof appCommandGroups
+
+export const appCommandGroupList = Object.values(appCommandGroups)
+
 export type AppCommandDefinition = RunnableInput & {
   /** The label for the command menu. */
   label: string
@@ -29,21 +53,28 @@ export type AppCommandDefinition = RunnableInput & {
   keywords?: readonly string[]
   /** Optional autocomplete description for JSON keymap files. */
   description?: string
+  /** Optional user-facing group override for shortcut and command discovery surfaces. */
+  group?: AppCommandGroupId
 }
 
 /** Nested command definitions keyed by namespace and command name. */
 export type AppCommandTable = {
-  [namespace: string]: { [commandId: string]: AppCommandDefinition }
+  [namespace: string]: {
+    group: AppCommandGroupId
+    commands: { [commandId: string]: AppCommandDefinition }
+  }
 }
 
-export interface AppCommandFunction<Id extends string> extends AppCommandDefinition {
+export type AppCommandFunction<Id extends string> = Omit<AppCommandDefinition, "group"> & {
   (match?: ShortcutMatch): void
   id: Id
+  group: AppCommandGroupId
 }
 
 type AppCommands<T extends AppCommandTable> = {
   [TNamespace in keyof T & string]: {
-    [TName in keyof T[TNamespace] & string]: AppCommandFunction<`${TNamespace}.${TName}`>
+    [TName in keyof T[TNamespace]["commands"] &
+      string]: AppCommandFunction<`${TNamespace}.${TName}`>
   }
 }
 
@@ -51,9 +82,10 @@ type AppCommands<T extends AppCommandTable> = {
 export function defineAppCommands<const TCommands extends AppCommandTable>(
   table: TCommands,
 ): AppCommands<TCommands> {
-  return mapValues(table, (namespace, namespaceKey) => {
-    return mapValues(namespace, (command, commandKey) => {
+  return mapValues(table, (namespaceDefinition, namespaceKey) => {
+    return mapValues(namespaceDefinition.commands, (command, commandKey) => {
       const id = `${namespaceKey as string}.${commandKey as string}`
+      const group = command.group ?? namespaceDefinition.group
       return Object.assign(
         function (match?: ShortcutMatch) {
           if (
@@ -66,7 +98,7 @@ export function defineAppCommands<const TCommands extends AppCommandTable>(
           appCommandBus.emit(id, match)
         },
         command,
-        { id },
+        { group, id },
       )
     })
   }) as any

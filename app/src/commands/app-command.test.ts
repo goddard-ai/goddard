@@ -79,6 +79,13 @@ function TestLayeredCommands(props: {
   )
 }
 
+test("app commands expose stable ids and shortcut groups", () => {
+  expect(AppCommand.sessionChat.completeSession.id).toBe("sessionChat.completeSession")
+  expect(AppCommand.sessionChat.completeSession.group).toBe("session")
+  expect(AppCommand.sessionInput.openModelSelector.group).toBe("session")
+  expect(AppCommand.workbench.closeActiveTab.group).toBe("workbench")
+})
+
 test("keydown dispatches one typed app command event", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []

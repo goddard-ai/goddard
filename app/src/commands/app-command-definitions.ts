@@ -27,119 +27,134 @@ import { defineAppCommands } from "./app-command.ts"
 /** App command definitions surfaced to shortcut bindings and the command menu. */
 export const AppCommand = defineAppCommands({
   workbench: {
-    closeActiveTab: {
-      label: "Close Active Tab",
-      icon: PanelTopClose,
-      when: "workbench.hasClosableActiveTab",
+    group: "workbench",
+    commands: {
+      closeActiveTab: {
+        label: "Close Active Tab",
+        icon: PanelTopClose,
+        when: "workbench.hasClosableActiveTab",
+      },
     },
   },
   navigation: {
-    openProposeTaskDialog: {
-      label: "Open Propose Task Dialog",
-      icon: Lightbulb,
-    },
-    openNewSessionDialog: {
-      label: "Open New Session Dialog",
-      icon: MessageSquarePlus,
-    },
-    openSwitchProject: {
-      label: "Switch Project",
-      icon: FolderOpen,
-    },
-    openCommandPalette: {
-      label: "Open Command Menu",
-      icon: Command,
-    },
-    openKeyboardShortcuts: {
-      label: "Open Keyboard Shortcuts",
-      icon: Keyboard,
-    },
-    openInbox: {
-      label: "Open Inbox",
-      icon: Inbox,
-    },
-    openSessions: {
-      label: "Open Sessions",
-      icon: MessageSquarePlus,
-    },
-    openSearch: {
-      label: "Open Search",
-      icon: Search,
-    },
-    openSpecs: {
-      label: "Open Specs",
-      icon: Folder,
-    },
-    openTasks: {
-      label: "Open Tasks",
-      icon: ListTodo,
-    },
-    openRoadmap: {
-      label: "Open Roadmap",
-      icon: Map,
-    },
-    openSettings: {
-      label: "Open Settings",
-      icon: Settings,
+    group: "navigation",
+    commands: {
+      openProposeTaskDialog: {
+        label: "Open Propose Task Dialog",
+        icon: Lightbulb,
+      },
+      openNewSessionDialog: {
+        label: "Open New Session Dialog",
+        icon: MessageSquarePlus,
+      },
+      openSwitchProject: {
+        label: "Switch Project",
+        icon: FolderOpen,
+      },
+      openCommandPalette: {
+        label: "Open Command Menu",
+        icon: Command,
+      },
+      openKeyboardShortcuts: {
+        label: "Open Keyboard Shortcuts",
+        icon: Keyboard,
+      },
+      openInbox: {
+        label: "Open Inbox",
+        icon: Inbox,
+      },
+      openSessions: {
+        label: "Open Sessions",
+        icon: MessageSquarePlus,
+      },
+      openSearch: {
+        label: "Open Search",
+        icon: Search,
+      },
+      openSpecs: {
+        label: "Open Specs",
+        icon: Folder,
+      },
+      openTasks: {
+        label: "Open Tasks",
+        icon: ListTodo,
+      },
+      openRoadmap: {
+        label: "Open Roadmap",
+        icon: Map,
+      },
+      openSettings: {
+        label: "Open Settings",
+        icon: Settings,
+      },
     },
   },
   projects: {
-    openFolder: {
-      label: "Projects: Open Folder",
-      icon: FolderOpen,
-      description: "Open a project from your filesystem.",
+    group: "projects",
+    commands: {
+      openFolder: {
+        label: "Open Folder",
+        icon: FolderOpen,
+        description: "Open a project from your filesystem.",
+      },
     },
   },
   sessionInput: {
-    openProjectSelector: {
-      label: "Session Input: Open Project Selector",
-      icon: FolderOpen,
-    },
-    openAdapterSelector: {
-      label: "Session Input: Open Adapter Selector",
-      icon: Bot,
-    },
-    openLocationSelector: {
-      label: "Session Input: Open Launch Location Selector",
-      icon: MapPin,
-    },
-    openBranchSelector: {
-      label: "Session Input: Open Branch Selector",
-      icon: GitBranch,
-    },
-    openApprovalPresetSelector: {
-      label: "Session Input: Open Approval Preset Selector",
-      icon: Brain,
-    },
-    openModelSelector: {
-      label: "Session Input: Open Model Selector",
-      icon: Brain,
-    },
-    openThinkingLevelSelector: {
-      label: "Session Input: Open Thinking Level Selector",
-      icon: Brain,
-    },
-    submit: {
-      label: "Session Input: Submit",
-      icon: SendHorizontal,
+    group: "session",
+    commands: {
+      openProjectSelector: {
+        label: "Open Project Selector",
+        icon: FolderOpen,
+      },
+      openAdapterSelector: {
+        label: "Open Adapter Selector",
+        icon: Bot,
+      },
+      openLocationSelector: {
+        label: "Open Launch Location Selector",
+        icon: MapPin,
+      },
+      openBranchSelector: {
+        label: "Open Branch Selector",
+        icon: GitBranch,
+      },
+      openApprovalPresetSelector: {
+        label: "Open Approval Preset Selector",
+        icon: Brain,
+      },
+      openModelSelector: {
+        label: "Open Model Selector",
+        icon: Brain,
+      },
+      openThinkingLevelSelector: {
+        label: "Open Thinking Level Selector",
+        icon: Brain,
+      },
+      submit: {
+        label: "Submit",
+        icon: SendHorizontal,
+      },
     },
   },
   sessionChat: {
-    viewChanges: {
-      label: "View Changes",
-      icon: FileDiff,
-    },
-    completeSession: {
-      label: "Complete Session",
-      icon: CheckCircle2,
-    },
-    skipToPreviousPrompt: {
-      label: "Skip to Previous Prompt",
-      icon: ChevronUp,
-    },
-    skipToNextPrompt: {
-      label: "Skip to Next Prompt",
-      icon: ChevronDown,
+    group: "session",
+    commands: {
+      viewChanges: {
+        label: "View Changes",
+        icon: FileDiff,
+      },
+      completeSession: {
+        label: "Complete Session",
+        icon: CheckCircle2,
+      },
+      skipToPreviousPrompt: {
+        label: "Skip to Previous Prompt",
+        icon: ChevronUp,
+      },
+      skipToNextPrompt: {
+        label: "Skip to Next Prompt",
+        icon: ChevronDown,
+      },
     },
   },
 })
