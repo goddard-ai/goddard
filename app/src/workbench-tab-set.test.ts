@@ -12,7 +12,7 @@ test("WorkbenchTabSet reports directly closed tabs", () => {
 
   tabSet.openOrFocusTab({
     kind: "sessionChat",
-    payload: {
+    props: {
       relatedFilesystemPath: null,
       sessionId: "session-1",
     },
@@ -28,7 +28,7 @@ test("WorkbenchTabSet focuses the most recently used open tab after closing the 
   for (let index = 1; index <= 3; index += 1) {
     tabSet.openOrFocusTab({
       kind: "sessionChat",
-      payload: {
+      props: {
         relatedFilesystemPath: null,
         sessionId: `session-${index}`,
       },
@@ -53,7 +53,7 @@ test("WorkbenchTabSet reports least-recently-used tabs closed by the tab limit",
   for (let index = 0; index <= WORKBENCH_TAB_LIMIT; index += 1) {
     tabSet.openOrFocusTab({
       kind: "sessionChat",
-      payload: {
+      props: {
         relatedFilesystemPath: null,
         sessionId: `session-${index}`,
       },

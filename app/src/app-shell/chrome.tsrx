@@ -173,7 +173,7 @@ export component AppShellChrome() {
   useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
     workbenchTabSet.openOrFocusTab({
       kind: "keyboardShortcuts",
-      payload: {},
+      props: {},
     })
   })
 
@@ -204,7 +204,7 @@ export component AppShellChrome() {
   useAppCommand(AppCommand.navigation.openSettings, () => {
     workbenchTabSet.openOrFocusTab({
       kind: "settings",
-      payload: {},
+      props: {},
     })
   })
 

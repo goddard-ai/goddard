@@ -28,7 +28,7 @@ component SessionsPage() {
 
     workbenchTabSet.openOrFocusTab({
       kind: "sessionChat",
-      payload: {
+      props: {
         relatedFilesystemPath: session.cwd,
         sessionId: session.id,
         sessionTitle: getSessionDisplayTitle(session),
@@ -46,7 +46,7 @@ component SessionsPage() {
     queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
     workbenchTabSet.openOrFocusTab({
       kind: "sessionChanges",
-      payload: {
+      props: {
         sessionId: session.id,
         sessionTitle: getSessionDisplayTitle(session),
         repositoryLabel: getSessionRepositoryLabel(session),

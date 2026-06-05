@@ -4,12 +4,12 @@ import { lazy } from "preact/compat"
 import type { SvgIconName } from "./lib/good-icon.tsrx"
 
 /** One registered non-primary workbench tab definition. */
-type WorkbenchTabDefinition<TPayload extends object = any> = {
+type WorkbenchTabDefinition<TProps extends object = any> = {
   component: preact.FunctionComponent<any>
-  getId: (payload: TPayload) => string
-  getTitle: (payload: TPayload) => string
+  getId: (props: TProps) => string
+  getTitle: (props: TProps) => string
   icon: SvgIconName
-  getRelatedFilesystemPath?: (payload: TPayload) => string | null | undefined
+  getRelatedFilesystemPath?: (props: TProps) => string | null | undefined
   restoreScroll?: boolean
 }
 
@@ -79,36 +79,34 @@ export const workbenchTabKinds = {
   },
   project: {
     component: lazy(() => import("~/projects/project-page.tsrx")),
-    getId: (payload: { projectPath: string }) =>
-      `project:${encodeURIComponent(payload.projectPath)}`,
-    getTitle: (payload: { projectName?: string; projectPath: string }) =>
-      payload.projectName ?? payload.projectPath,
+    getId: (props: { projectPath: string }) => `project:${encodeURIComponent(props.projectPath)}`,
+    getTitle: (props: { projectName?: string; projectPath: string }) =>
+      props.projectName ?? props.projectPath,
     icon: "tabs/projects",
-    getRelatedFilesystemPath: (payload: { projectPath: string }) => payload.projectPath,
+    getRelatedFilesystemPath: (props: { projectPath: string }) => props.projectPath,
   },
   sessionChat: {
     component: lazy(() => import("~/session-chat/view.tsrx")),
-    getId: (payload: { sessionId: string }) => `session:${payload.sessionId}`,
-    getTitle: (payload: { sessionTitle?: string }) => payload.sessionTitle ?? "Session",
+    getId: (props: { sessionId: string }) => `session:${props.sessionId}`,
+    getTitle: (props: { sessionTitle?: string }) => props.sessionTitle ?? "Session",
     icon: "tabs/sessions",
-    getRelatedFilesystemPath: (payload: { relatedFilesystemPath?: string | null }) =>
-      payload.relatedFilesystemPath,
+    getRelatedFilesystemPath: (props: { relatedFilesystemPath?: string | null }) =>
+      props.relatedFilesystemPath,
     restoreScroll: false,
   },
   sessionChanges: {
     component: lazy(() => import("~/session-changes/view.tsrx")),
-    getId: (payload: { sessionId: string }) => `session-changes:${payload.sessionId}`,
-    getTitle: (payload: { sessionTitle: string }) => `Changes · ${payload.sessionTitle}`,
+    getId: (props: { sessionId: string }) => `session-changes:${props.sessionId}`,
+    getTitle: (props: { sessionTitle: string }) => `Changes · ${props.sessionTitle}`,
     icon: "tabs/changes",
   },
   pullRequest: {
     component: lazy(() => import("~/pull-requests/view.tsrx")),
-    getId: (payload: { pullRequestId: string }) => `pull-request:${payload.pullRequestId}`,
-    getTitle: (payload: { pullRequestTitle?: string }) =>
-      payload.pullRequestTitle ?? "Pull Request",
+    getId: (props: { pullRequestId: string }) => `pull-request:${props.pullRequestId}`,
+    getTitle: (props: { pullRequestTitle?: string }) => props.pullRequestTitle ?? "Pull Request",
     icon: "tabs/pull-request",
-    getRelatedFilesystemPath: (payload: { relatedFilesystemPath?: string | null }) =>
-      payload.relatedFilesystemPath,
+    getRelatedFilesystemPath: (props: { relatedFilesystemPath?: string | null }) =>
+      props.relatedFilesystemPath,
   },
   inboxDebug: {
     component: lazy(() => import("~/inbox/debug-view.tsrx")),
@@ -134,16 +132,16 @@ export const workbenchTabKinds = {
 /** The supported non-primary workbench tab kinds available in the shell. */
 type WorkbenchRegisteredTabKind = keyof typeof workbenchTabKinds
 
-/** Payload inferred from one registered non-primary workbench tab component. */
-type WorkbenchTabPayload<TKind extends WorkbenchRegisteredTabKind> = NormalizeWorkbenchTabPayload<
+/** Props inferred from one registered non-primary workbench tab component. */
+type WorkbenchTabProps<TKind extends WorkbenchRegisteredTabKind> = NormalizeWorkbenchTabProps<
   preact.ComponentProps<(typeof workbenchTabKinds)[TKind]["component"]>
 >
 
-/** Spreadable payload shape for tab components that infer no props. */
-type NormalizeWorkbenchTabPayload<TPayload> = [TPayload] extends [never]
+/** Spreadable props shape for tab components that infer no props. */
+type NormalizeWorkbenchTabProps<TProps> = [TProps] extends [never]
   ? Record<string, never>
-  : TPayload extends object
-    ? TPayload
+  : TProps extends object
+    ? TProps
     : Record<string, never>
 
 /** One closable workbench tab tracked by the shell. */
@@ -153,7 +151,7 @@ type WorkbenchTabByKind = {
     kind: TKind
     title: string
     dirty: boolean
-    payload: WorkbenchTabPayload<TKind>
+    props: WorkbenchTabProps<TKind>
   }
 }
 
@@ -168,7 +166,7 @@ export type WorkbenchTab<TKind extends WorkbenchTabKind = WorkbenchTabKind> =
 export type WorkbenchOpenTabInput<TKind extends WorkbenchTabKind = WorkbenchTabKind> = {
   [TRegisteredKind in WorkbenchTabKind]: {
     kind: TRegisteredKind
-    payload: WorkbenchTabPayload<TRegisteredKind>
+    props: WorkbenchTabProps<TRegisteredKind>
   }
 }[TKind]
 
@@ -198,19 +196,19 @@ export function getWorkbenchTabIcon(kind: WorkbenchTabKind): SvgIconName {
 
 /** Resolves the filesystem path one workbench tab is associated with, when the tab kind declares one. */
 export function getWorkbenchTabRelatedFilesystemPath(tab: WorkbenchTab) {
-  const definition = workbenchTabKinds[tab.kind] as WorkbenchTabDefinition<typeof tab.payload>
-  return definition.getRelatedFilesystemPath?.(tab.payload) ?? null
+  const definition = workbenchTabKinds[tab.kind] as WorkbenchTabDefinition<typeof tab.props>
+  return definition.getRelatedFilesystemPath?.(tab.props) ?? null
 }
 
 /** Derives the full stored tab record from the minimal caller-owned tab input. */
 export function createWorkbenchTab(input: WorkbenchOpenTabInput): WorkbenchTab {
-  const definition = workbenchTabKinds[input.kind] as WorkbenchTabDefinition<typeof input.payload>
+  const definition = workbenchTabKinds[input.kind] as WorkbenchTabDefinition<typeof input.props>
 
   return {
-    id: definition.getId(input.payload),
+    id: definition.getId(input.props),
     kind: input.kind,
-    title: definition.getTitle(input.payload),
-    payload: input.payload,
+    title: definition.getTitle(input.props),
+    props: input.props,
     dirty: false,
   } as WorkbenchTab
 }

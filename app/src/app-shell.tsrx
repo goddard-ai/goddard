@@ -23,19 +23,19 @@ export component AppShell() {
       case "Inbox":
         workbenchTabSet.openOrFocusTab({
           kind: "inboxDebug",
-          payload: {},
+          props: {},
         })
         return
       case "SessionChatTranscript":
         workbenchTabSet.openOrFocusTab({
           kind: "sessionChatTranscriptDebug",
-          payload: {},
+          props: {},
         })
         return
       case "Terminal":
         workbenchTabSet.openOrFocusTab({
           kind: "terminalDebug",
-          payload: {},
+          props: {},
         })
         return
     }

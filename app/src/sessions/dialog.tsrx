@@ -53,7 +53,7 @@ component SessionLaunchDialog(props: {
       form.reset(projectPath)
       workbenchTabSet.openOrFocusTab({
         kind: "sessionChat",
-        payload: {
+        props: {
           relatedFilesystemPath: projectPath,
           sessionId: session.id,
           sessionTitle,

@@ -29,7 +29,7 @@ export function openProjectTab(props: {
   props.projectContext.activateProject(project.path)
   props.workbenchTabSet.openOrFocusTab({
     kind: "project",
-    payload: { projectName: project.name, projectPath: project.path },
+    props: { projectName: project.name, projectPath: project.path },
   })
   return project
 }

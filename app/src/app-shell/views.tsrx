@@ -91,7 +91,7 @@ export component WorkbenchTabPanel() {
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
   try {
-    <ActiveTabComponent {...activeTab.payload} />
+    <ActiveTabComponent {...activeTab.props} />
   } catch (error, retry) {
     console.error("Workbench tab render failed.", error)
 

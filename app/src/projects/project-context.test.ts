@@ -62,7 +62,7 @@ test("contextless focused tabs keep the current active project", async () => {
     replaceProjects(projectRegistry, [projects[0]])
     workbenchTabSet.openOrFocusTab({
       kind: "project",
-      payload: {
+      props: {
         projectPath: "/repo",
       },
     })
@@ -86,7 +86,7 @@ test("tabs without related filesystem paths keep the current active project", as
     context.activateProject("/docs")
     workbenchTabSet.openOrFocusTab({
       kind: "inbox",
-      payload: {},
+      props: {},
     })
     await Promise.resolve()
 

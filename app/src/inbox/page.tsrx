@@ -205,7 +205,7 @@ component InboxPage() {
 
         workbenchTabSet.openOrFocusTab({
           kind: "sessionChat",
-          payload: {
+          props: {
             relatedFilesystemPath: session.cwd,
             sessionId: session.id,
             sessionTitle: getSessionDisplayTitle(session),
@@ -224,7 +224,7 @@ component InboxPage() {
 
       workbenchTabSet.openOrFocusTab({
         kind: "pullRequest",
-        payload: {
+        props: {
           relatedFilesystemPath: pullRequest.cwd,
           pullRequestId: pullRequest.id,
           pullRequestTitle: getPullRequestDisplayTitle(pullRequest),

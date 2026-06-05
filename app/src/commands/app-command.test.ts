@@ -487,7 +487,7 @@ test("command-owned when clauses gate both dispatch and palette availability", a
 
     workbenchTabSet.openOrFocusTab({
       kind: "projects",
-      payload: {},
+      props: {},
     })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
@@ -533,7 +533,7 @@ test("closable tab drives runtime availability for closeActiveTab", async () => 
 
     workbenchTabSet.openOrFocusTab({
       kind: "projects",
-      payload: {},
+      props: {},
     })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)

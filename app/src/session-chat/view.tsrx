@@ -184,7 +184,7 @@ export default component SessionChatView(props: {
                   queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
                   workbenchTabSet.openOrFocusTab({
                     kind: "sessionChanges",
-                    payload: {
+                    props: {
                       sessionId: chat.session.id,
                       sessionTitle: chat.title,
                       repositoryLabel: chat.repositoryLabel,
