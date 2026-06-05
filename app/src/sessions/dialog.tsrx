@@ -10,6 +10,7 @@ import { Modal } from "@goddard-ai/ui-primitives"
 import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
+import { isKeptSessionLaunchLease, recordSessionLaunchAgentUse } from "./launch-lease-keeper.tsrx"
 import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./display.ts"
 
@@ -44,12 +45,16 @@ component SessionLaunchDialog(props: {
 
     try {
       const projectPath = form.draftProjectPath.value
+      const launchLeaseId = form.launchPreview.value?.launchLeaseId
+      recordSessionLaunchAgentUse(form.draftAdapterId.value)
       const { session } = await createSession(sessionInput)
       const sessionTitle = getSessionDisplayTitle(session)
 
-      void releaseSessionLaunchLease(form.launchPreview.value?.launchLeaseId).catch((error) => {
-        console.error("Failed to release launch lease.", error)
-      })
+      if (!isKeptSessionLaunchLease(launchLeaseId)) {
+        void releaseSessionLaunchLease(launchLeaseId).catch((error) => {
+          console.error("Failed to release launch lease.", error)
+        })
+      }
       form.reset(projectPath)
       workbenchTabSet.openOrFocusTab({
         kind: "sessionChat",

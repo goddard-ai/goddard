@@ -13,6 +13,7 @@ import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input
 import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
 import { type SessionLaunchFormState } from "./launch-form-state.ts"
+import { isKeptSessionLaunchLease, recordSessionLaunchAgentUse } from "./launch-lease-keeper.tsrx"
 import { releaseSessionLaunchLease } from "./mutations.ts"
 
 export component SessionLaunchLoadingSelect(props: { label: string }) {
@@ -65,6 +66,7 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
       form.draftAdapterId.value = value
+      recordSessionLaunchAgentUse(value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
     }}
@@ -163,7 +165,10 @@ export component SessionLaunchPreviewSelectors(props: {
       }
 
       queueMicrotask(() => {
-        if (!launchLeaseId || form.launchPreview.value?.launchLeaseId === launchLeaseId) {
+        if (
+          !launchLeaseId || form.launchPreview.value?.launchLeaseId === launchLeaseId ||
+            isKeptSessionLaunchLease(launchLeaseId)
+        ) {
           return
         }
 

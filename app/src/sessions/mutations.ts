@@ -24,6 +24,7 @@ function refreshSessionViews(sessionId: DaemonSession["id"]) {
 export async function createSession(input: CreateSessionRequest) {
   const result = await goddardSdk.session.create(input)
   queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
+  queryClient.invalidate(goddardSdk.session.launchPreview)
   return result
 }
 

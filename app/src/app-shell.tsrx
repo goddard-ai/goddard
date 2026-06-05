@@ -7,6 +7,7 @@ import { AppShellChrome } from "./app-shell/chrome.tsrx"
 import { AppShellOnboarding } from "./app-shell/onboarding.tsrx"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "./app-state-context.tsrx"
 import { CommandDialog } from "./commands/command-dialog.tsrx"
+import { SessionLaunchLeaseKeeper } from "./sessions/launch-lease-keeper.tsrx"
 
 export component AppShell() {
   const projectContext = useProjectContext()
@@ -52,6 +53,12 @@ export component AppShell() {
   if (projects.length === 0) {
     <AppShellOnboarding />
   } else {
+    try {
+      <SessionLaunchLeaseKeeper
+        currentProjectPath={projectContext.activeProjectPath ?? projects[0]?.path ?? null}
+      />
+    } pending {}
+
     <CommandDialog
       command={AppCommand.navigation.openCommandPalette}
       content={() => import("~/command-palette.tsrx")}
