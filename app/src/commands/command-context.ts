@@ -19,11 +19,16 @@ export class CommandContext extends Sigma<CommandContextState> {
   #mainTab: MainTab
   #workbenchTabSet: WorkbenchTabSet
 
+  readonly #activeTabKind = computed(() => {
+    return this.#workbenchTabSet.activeClosableTab?.kind ?? this.#mainTab.selectedKind
+  })
+  readonly #hasClosableActiveTab = computed(() => {
+    return this.#workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id
+  })
   readonly whenContext = computed(() => {
     return {
-      "workbench.activeTabKind":
-        this.#workbenchTabSet.activeClosableTab?.kind ?? this.#mainTab.selectedKind,
-      "workbench.hasClosableActiveTab": this.#workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id,
+      "workbench.activeTabKind": this.#activeTabKind.value,
+      "workbench.hasClosableActiveTab": this.#hasClosableActiveTab.value,
       "mainTab.selectedKind": this.#mainTab.selectedKind,
     }
   })
