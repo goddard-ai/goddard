@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
+import { sigma } from "preact-sigma"
 
-import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
+import { WORKBENCH_MAIN_TAB, WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import {
   findNearestProjectPath,
   orderProjectsByRecentActivity,
@@ -14,11 +15,29 @@ const projects = [
   { name: "Docs", path: "/docs" },
 ] as const
 
-function createProjectContext() {
-  return new ProjectContext({
-    projectRegistry: new ProjectRegistry(),
-    workbenchTabSet: new WorkbenchTabSet(),
+function replaceProjects(
+  projectRegistry: ProjectRegistry,
+  projectList: readonly (typeof projects)[number][],
+) {
+  sigma.replaceState(projectRegistry, {
+    orderedProjectPaths: projectList.map((project) => project.path),
+    projectsByPath: Object.fromEntries(projectList.map((project) => [project.path, project])),
   })
+}
+
+function createProjectContext() {
+  const projectRegistry = new ProjectRegistry()
+  const workbenchTabSet = new WorkbenchTabSet()
+  const context = new ProjectContext({
+    projectRegistry,
+    workbenchTabSet,
+  })
+
+  return {
+    context,
+    projectRegistry,
+    workbenchTabSet,
+  }
 }
 
 test("findNearestProjectPath prefers the nearest containing opened project", () => {
@@ -35,23 +54,46 @@ test("orderProjectsByRecentActivity prioritizes recent projects and preserves re
   ])
 })
 
-test("contextless focused tabs keep the current active project", () => {
-  const context = createProjectContext()
+test("contextless focused tabs keep the current active project", async () => {
+  const { context, projectRegistry, workbenchTabSet } = createProjectContext()
+  const cleanup = context.setup()
 
-  context.activateProject("/repo")
-  context.applyFocusedTabProject("main", null)
+  try {
+    replaceProjects(projectRegistry, [projects[0]])
+    workbenchTabSet.openOrFocusTab({
+      kind: "project",
+      payload: {
+        projectPath: "/repo",
+      },
+    })
+    await Promise.resolve()
+    workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
+    await Promise.resolve()
 
-  expect(context.activeProjectPath).toBe("/repo")
-  expect(context.recentProjectPaths).toEqual(["/repo"])
+    expect(context.activeProjectPath).toBe("/repo")
+    expect(context.recentProjectPaths).toEqual(["/repo"])
+  } finally {
+    cleanup()
+  }
 })
 
-test("late async tab reports do not override the active project after focus has moved", () => {
-  const context = createProjectContext()
+test("late async tab reports do not override the active project after focus has moved", async () => {
+  const { context, projectRegistry, workbenchTabSet } = createProjectContext()
+  const cleanup = context.setup()
 
-  context.activateProject("/docs")
-  context.applyFocusedTabProject("session:1", null)
-  context.applyFocusedTabProject("main", null)
-  context.reportTabProject("session:1", "/repo")
+  try {
+    replaceProjects(projectRegistry, [projects[2], projects[0]])
+    context.activateProject("/docs")
+    workbenchTabSet.openOrFocusTab({
+      kind: "inbox",
+      payload: {},
+    })
+    workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
+    await Promise.resolve()
+    context.reportTabProject("surface:inbox", "/repo")
 
-  expect(context.activeProjectPath).toBe("/docs")
+    expect(context.activeProjectPath).toBe("/docs")
+  } finally {
+    cleanup()
+  }
 })

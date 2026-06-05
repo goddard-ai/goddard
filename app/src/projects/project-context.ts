@@ -129,25 +129,59 @@ export class ProjectContext extends Sigma<ProjectContextState> {
   }
 
   onSetup() {
+    let isDisposed = false
+    let syncProjectsVersion = 0
+    let focusedTabVersion = 0
+
+    // Signal effects can run while the observed Sigma model is still committing its draft.
+    // Deferring ProjectContext writes keeps cross-model updates out of that action boundary.
     return [
+      () => {
+        isDisposed = true
+      },
       effect(() => {
-        this.syncProjects(this.#projectRegistry.projectList.map((project) => project.path))
+        const version = ++syncProjectsVersion
+        const validProjectPaths = this.#projectRegistry.projectList.map((project) => project.path)
+
+        queueMicrotask(() => {
+          if (isDisposed || version !== syncProjectsVersion) {
+            return
+          }
+
+          this.syncProjects(validProjectPaths)
+        })
       }),
       effect(() => {
+        const version = ++focusedTabVersion
         const activeTab = this.#workbenchTabSet.activeClosableTab
+        const tabId = activeTab?.id ?? WORKBENCH_MAIN_TAB.id
+        const path = activeTab
+          ? findNearestProjectPath(
+              this.#projectRegistry.projectList,
+              getWorkbenchTabProjectPath(activeTab),
+            )
+          : null
 
-        if (!activeTab) {
-          this.applyFocusedTabProject(WORKBENCH_MAIN_TAB.id, null)
-          return
-        }
+        queueMicrotask(() => {
+          if (isDisposed || version !== focusedTabVersion) {
+            return
+          }
 
-        this.applyFocusedTabProject(
-          activeTab.id,
-          findNearestProjectPath(
-            this.#projectRegistry.projectList,
-            getWorkbenchTabProjectPath(activeTab),
-          ),
-        )
+          if (
+            this.#focusedTabId === tabId &&
+            this.#reportedTabProjectsByTabId[tabId] === path &&
+            (path === null || this.activeProjectPath === path)
+          ) {
+            return
+          }
+
+          this.#focusedTabId = tabId
+          this.#reportedTabProjectsByTabId[tabId] = path
+
+          if (path) {
+            this.activateProject(path)
+          }
+        })
       }),
     ]
   }
@@ -197,24 +231,6 @@ export class ProjectContext extends Sigma<ProjectContextState> {
 
     if (path) {
       this.recentProjectPaths = [path, ...this.recentProjectPaths.filter((item) => item !== path)]
-    }
-  }
-
-  /** Applies the currently focused tab and any synchronous project resolution it already knows. */
-  applyFocusedTabProject(tabId: string, path: string | null) {
-    if (
-      this.#focusedTabId === tabId &&
-      this.#reportedTabProjectsByTabId[tabId] === path &&
-      (path === null || this.activeProjectPath === path)
-    ) {
-      return
-    }
-
-    this.#focusedTabId = tabId
-    this.#reportedTabProjectsByTabId[tabId] = path
-
-    if (path) {
-      this.activateProject(path)
     }
   }
 
