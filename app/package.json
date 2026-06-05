@@ -48,7 +48,7 @@
     "lexical": "^0.42.0",
     "lucide-react": "^1.11.0",
     "overlayscrollbars": "^2.16.0",
-    "powerkeys": "0.2.0",
+    "powerkeys": "0.2.1",
     "preact": "catalog:",
     "preact-comark": "0.2.4",
     "preact-in-motion": "^0.2.9",

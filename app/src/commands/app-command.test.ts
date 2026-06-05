@@ -223,6 +223,48 @@ test("default keymap dispatches switch-project from Mod+o", async () => {
   }
 })
 
+test("default keymap dispatches main navigation from physical Alt number keys", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.navigation.openInbox,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: "¡",
+      code: "Digit1",
+      altKey: true,
+    })
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      combo: "Alt+Digit1",
+      event: {
+        code: "Digit1",
+        modifiers: {
+          alt: true,
+        },
+      },
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
 test("default keymap dispatches settings from Mod+,", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
   const matches: unknown[] = []
