@@ -1,16 +1,25 @@
 import { expect, test } from "bun:test"
 
+import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import {
   findNearestProjectPath,
   orderProjectsByRecentActivity,
   ProjectContext,
 } from "./project-context.ts"
+import { ProjectRegistry } from "./project-registry.ts"
 
 const projects = [
   { name: "Repo", path: "/repo" },
   { name: "UI", path: "/repo/packages/ui" },
   { name: "Docs", path: "/docs" },
 ] as const
+
+function createProjectContext() {
+  return new ProjectContext({
+    projectRegistry: new ProjectRegistry(),
+    workbenchTabSet: new WorkbenchTabSet(),
+  })
+}
 
 test("findNearestProjectPath prefers the nearest containing opened project", () => {
   expect(findNearestProjectPath(projects, "/repo/packages/ui/src")).toBe("/repo/packages/ui")
@@ -27,7 +36,7 @@ test("orderProjectsByRecentActivity prioritizes recent projects and preserves re
 })
 
 test("contextless focused tabs keep the current active project", () => {
-  const context = new ProjectContext()
+  const context = createProjectContext()
 
   context.activateProject("/repo")
   context.applyFocusedTabProject("main", null)
@@ -37,7 +46,7 @@ test("contextless focused tabs keep the current active project", () => {
 })
 
 test("late async tab reports do not override the active project after focus has moved", () => {
-  const context = new ProjectContext()
+  const context = createProjectContext()
 
   context.activateProject("/docs")
   context.applyFocusedTabProject("session:1", null)

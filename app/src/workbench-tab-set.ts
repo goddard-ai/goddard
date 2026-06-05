@@ -2,6 +2,7 @@ import { Sigma } from "preact-sigma"
 
 import {
   createWorkbenchTab,
+  getWorkbenchTabProjectPath,
   type WorkbenchAnyTab,
   type WorkbenchContentKind,
   type WorkbenchMainTab,
@@ -9,6 +10,8 @@ import {
   type WorkbenchTab,
   type WorkbenchTabKind,
 } from "./workbench-tab-registry.ts"
+
+export { getWorkbenchTabProjectPath }
 
 export type {
   WorkbenchAnyTab,

@@ -1,6 +1,12 @@
+import { effect } from "@preact/signals"
 import { Sigma } from "preact-sigma"
 
-import type { ProjectRecord } from "./project-registry.ts"
+import {
+  getWorkbenchTabProjectPath,
+  WORKBENCH_MAIN_TAB,
+  type WorkbenchTabSet,
+} from "~/workbench-tab-set.ts"
+import type { ProjectRecord, ProjectRegistry } from "./project-registry.ts"
 
 /** Public state for the active project context and recent-project order. */
 export type ProjectContextState = {
@@ -105,16 +111,45 @@ export function orderProjectsByRecentActivity(
 
 /** Sigma state for the app-wide active project context and recent-project order. */
 export class ProjectContext extends Sigma<ProjectContextState> {
+  #projectRegistry: ProjectRegistry
+  #workbenchTabSet: WorkbenchTabSet
   /** Focus bookkeeping used to decide whether tab-reported projects may drive the active project. */
   #focusedTabId: string | null = null
   /** Last project reported by each tab; this transient resolution cache is not recent-project state. */
   #reportedTabProjectsByTabId: Record<string, string | null> = {}
 
-  constructor() {
+  constructor(input: { projectRegistry: ProjectRegistry; workbenchTabSet: WorkbenchTabSet }) {
     super({
       activeProjectPath: null,
       recentProjectPaths: [],
     })
+
+    this.#projectRegistry = input.projectRegistry
+    this.#workbenchTabSet = input.workbenchTabSet
+  }
+
+  onSetup() {
+    return [
+      effect(() => {
+        this.syncProjects(this.#projectRegistry.projectList.map((project) => project.path))
+      }),
+      effect(() => {
+        const activeTab = this.#workbenchTabSet.activeClosableTab
+
+        if (!activeTab) {
+          this.applyFocusedTabProject(WORKBENCH_MAIN_TAB.id, null)
+          return
+        }
+
+        this.applyFocusedTabProject(
+          activeTab.id,
+          findNearestProjectPath(
+            this.#projectRegistry.projectList,
+            getWorkbenchTabProjectPath(activeTab),
+          ),
+        )
+      }),
+    ]
   }
 
   /** Removes active, recent, and reported paths that no longer exist in the registry. */

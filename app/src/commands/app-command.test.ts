@@ -1,25 +1,38 @@
 import { expect, test } from "bun:test"
 import { Fragment, h, render } from "preact"
 
+import { MainTab } from "~/main-tab.ts"
 import { ShortcutRegistry } from "~/shortcuts/shortcut-registry.ts"
+import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import { AppCommand, useAppCommand } from "./app-command.ts"
-import { commandContext, isCommandAvailable, isCommandPaletteVisible } from "./command-context.ts"
+import { CommandContext, isCommandAvailable, isCommandPaletteVisible } from "./command-context.ts"
 import { CommandLayerProvider } from "./command-layer.tsrx"
 
 /** Creates one registry instance with an isolated document-like event boundary. */
 function createTestRegistry() {
   const runtimeDocument = document.implementation.createHTMLDocument("app-command-test")
-  const registry = new ShortcutRegistry(runtimeDocument)
-  const cleanup = registry.setup()
-  commandContext.activeScopes.value = []
-  commandContext.activeTabKind.value = "inbox"
-  commandContext.hasClosableActiveTab.value = false
-  commandContext.selectedKind.value = "inbox"
+  const mainTab = new MainTab()
+  const workbenchTabSet = new WorkbenchTabSet()
+  const commandContext = new CommandContext({
+    mainTab,
+    target: runtimeDocument,
+    workbenchTabSet,
+  })
+  const registry = new ShortcutRegistry({
+    runtime: commandContext.runtime,
+  })
+  const cleanupCommandContext = commandContext.setup()
+  const cleanupRegistry = registry.setup()
 
   return {
+    commandContext,
     registry,
     runtimeDocument,
-    cleanup,
+    workbenchTabSet,
+    cleanup() {
+      cleanupRegistry()
+      cleanupCommandContext()
+    },
   }
 }
 
@@ -445,7 +458,7 @@ test("applyKeymapSnapshot replaces previous bindings instead of accumulating the
 })
 
 test("command-owned when clauses gate both dispatch and palette availability", async () => {
-  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const { registry, runtimeDocument, workbenchTabSet, cleanup } = createTestRegistry()
   const matches: unknown[] = []
   const container = runtimeDocument.createElement("div")
   runtimeDocument.body.append(container)
@@ -472,7 +485,10 @@ test("command-owned when clauses gate both dispatch and palette availability", a
 
     expect(matches).toEqual([])
 
-    commandContext.hasClosableActiveTab.value = true
+    workbenchTabSet.openOrFocusTab({
+      kind: "projects",
+      payload: {},
+    })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
 
@@ -499,7 +515,7 @@ test("command-owned when clauses gate both dispatch and palette availability", a
 })
 
 test("closable tab drives runtime availability for closeActiveTab", async () => {
-  const { registry, cleanup } = createTestRegistry()
+  const { registry, workbenchTabSet, cleanup } = createTestRegistry()
   const container = document.createElement("div")
   document.body.append(container)
 
@@ -515,7 +531,10 @@ test("closable tab drives runtime availability for closeActiveTab", async () => 
     await flushRenderEffects()
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(false)
 
-    commandContext.hasClosableActiveTab.value = true
+    workbenchTabSet.openOrFocusTab({
+      kind: "projects",
+      payload: {},
+    })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
   } finally {

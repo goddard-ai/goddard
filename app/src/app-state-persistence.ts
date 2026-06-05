@@ -4,6 +4,7 @@ import { useEffect, useState } from "preact/hooks"
 import { getErrorMessage } from "radashi"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
+import { CommandContext } from "./commands/command-context.ts"
 import { desktopHost } from "./desktop-host.ts"
 import { Inbox } from "./inbox/model.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
@@ -167,35 +168,42 @@ function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>
 export function useAppState() {
   const [appState] = useState(() => {
     const workbenchTabCache = new WorkbenchTabCache()
+    const mainTab = new MainTab()
+    const projectRegistry = new ProjectRegistry()
+    const workbenchTabSet = new WorkbenchTabSet({
+      onCloseTab: (tabId) => {
+        workbenchTabCache.disposeTab(tabId)
+      },
+    })
+    const commandContext = new CommandContext({
+      mainTab,
+      workbenchTabSet,
+    })
 
     return {
       appearance: new Appearance({
         mode: "system",
         highContrast: false,
       }),
+      commandContext,
       inbox: new Inbox(),
-      mainTab: new MainTab(),
-      projectContext: new ProjectContext(),
-      projectRegistry: new ProjectRegistry(),
-      shortcutRegistry: new ShortcutRegistry(),
-      workbenchTabCache,
-      workbenchTabSet: new WorkbenchTabSet({
-        onCloseTab: (tabId) => {
-          workbenchTabCache.disposeTab(tabId)
-        },
+      mainTab,
+      projectContext: new ProjectContext({
+        projectRegistry,
+        workbenchTabSet,
       }),
+      projectRegistry,
+      shortcutRegistry: new ShortcutRegistry({
+        runtime: commandContext.runtime,
+      }),
+      workbenchTabCache,
+      workbenchTabSet,
     }
   })
 
   useEffect(() => {
     let isDisposed = false
     let appStateObserver: SnapshotObserver | null = null
-
-    function syncProjectContext() {
-      appState.projectContext.syncProjects(
-        appState.projectRegistry.projectList.map((project) => project.path),
-      )
-    }
 
     function startAppStateObserver() {
       if (isDisposed || appStateObserver) {
@@ -243,7 +251,6 @@ export function useAppState() {
         }
 
         startAppStateObserver()
-        syncProjectContext()
       },
       (error) => {
         if (isDisposed) {
@@ -251,7 +258,6 @@ export function useAppState() {
         }
 
         startAppStateObserver()
-        syncProjectContext()
         console.error("Failed to load app state.", error)
       },
     )
@@ -265,6 +271,8 @@ export function useAppState() {
   useSetup(() => {
     return [
       appState.appearance.setup(),
+      appState.commandContext.setup(),
+      appState.projectContext.setup(),
       appState.shortcutRegistry.setup(),
       () => {
         appState.workbenchTabCache.disposeAll()

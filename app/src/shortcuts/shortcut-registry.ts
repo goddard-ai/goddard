@@ -1,9 +1,7 @@
-import { effect } from "@preact/signals"
-import { createShortcuts, type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
+import { type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
 import { Sigma } from "preact-sigma"
 
-import { appCommandList, isAppCommandHandled, resolveAppCommand } from "~/commands/app-command.ts"
-import { commandContext } from "~/commands/command-context.ts"
+import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import {
   createShortcutBinding,
@@ -36,33 +34,18 @@ function normalizeWhenClause(whenClause: string | null | undefined) {
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
 export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
-  /** Imperative powerkeys runtime that owns document listeners outside persisted shortcut state. */
+  /** Imperative powerkeys runtime that receives keymap bindings from persisted shortcut state. */
   #runtime: ShortcutRuntime
   /** Mutable binding set installed in the runtime as the projection of the current keymap state. */
   #bindingSet: BindingSet
 
-  constructor(target: Document | HTMLElement = document) {
+  constructor(input: { runtime: ShortcutRuntime }) {
     super({
       selectedProfileId: "goddard",
       overrides: {},
     })
 
-    this.#runtime = createShortcuts({
-      target,
-      editablePolicy: "allow-if-meta",
-      getActiveScopes: () => commandContext.activeScopes.peek(),
-      canDispatch: (candidate) => {
-        const commandId =
-          "id" in candidate.handler && typeof candidate.handler.id === "string"
-            ? (candidate.handler.id as AppCommandId)
-            : null
-
-        return commandId === null || isAppCommandHandled(commandId)
-      },
-      onError: (error, info) => {
-        console.error("Shortcut runtime error.", error, info)
-      },
-    })
+    this.#runtime = input.runtime
     this.#bindingSet = this.#runtime.createBindingSet()
   }
 
@@ -271,18 +254,12 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
   }
 
   onSetup() {
-    const disposeContextSync = effect(() => {
-      this.#runtime.batchContext(commandContext.whenContext.value)
-    })
-
     this.rebindRuntime()
 
     return [
       () => {
-        disposeContextSync()
         this.#bindingSet.dispose()
       },
-      this.#runtime,
     ]
   }
 }

@@ -1,22 +1,32 @@
 import { expect, test } from "bun:test"
 
 import { AppCommand } from "~/commands/app-command.ts"
-import { commandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { CommandContext, isCommandAvailable } from "~/commands/command-context.ts"
+import { MainTab } from "~/main-tab.ts"
+import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import { ShortcutRegistry } from "./shortcut-registry.ts"
 
 /** Creates one registry instance with isolated command context state. */
 function createTestRegistry() {
   const runtimeDocument = document.implementation.createHTMLDocument("shortcut-registry-test")
-  const registry = new ShortcutRegistry(runtimeDocument)
-  const cleanup = registry.setup()
-  commandContext.activeScopes.value = []
-  commandContext.activeTabKind.value = "inbox"
-  commandContext.hasClosableActiveTab.value = false
-  commandContext.selectedKind.value = "inbox"
+  const commandContext = new CommandContext({
+    mainTab: new MainTab(),
+    target: runtimeDocument,
+    workbenchTabSet: new WorkbenchTabSet(),
+  })
+  const registry = new ShortcutRegistry({
+    runtime: commandContext.runtime,
+  })
+  const cleanupCommandContext = commandContext.setup()
+  const cleanupRegistry = registry.setup()
 
   return {
+    commandContext,
     registry,
-    cleanup,
+    cleanup() {
+      cleanupRegistry()
+      cleanupCommandContext()
+    },
   }
 }
 
@@ -37,12 +47,12 @@ test("applyKeymapSnapshot resolves overrides into the live keymap snapshot", () 
 })
 
 test("active shortcut scopes drive availability checks", () => {
-  const { registry, cleanup } = createTestRegistry()
+  const { commandContext, registry, cleanup } = createTestRegistry()
 
   try {
     expect(isCommandAvailable(registry.runtime, { scope: "editor" })).toBe(false)
 
-    commandContext.activeScopes.value = ["editor"]
+    commandContext.setActiveScopes(["editor"])
 
     expect(isCommandAvailable(registry.runtime, { scope: "editor" })).toBe(true)
   } finally {
