@@ -11,9 +11,9 @@
   --os-track-bg-hover: transparent;
   --os-track-bg-active: transparent;
   --os-handle-border-radius: 999px;
-  --os-handle-bg: color-mix(in srgb, var(--theme-color-accent-strong) 38%, transparent);
-  --os-handle-bg-hover: color-mix(in srgb, var(--theme-color-accent-strong) 52%, transparent);
-  --os-handle-bg-active: color-mix(in srgb, var(--theme-color-accent-strong) 68%, transparent);
+  --os-handle-bg: color-mix(in srgb, var(--theme-color-border) 72%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--theme-color-border) 84%, transparent);
+  --os-handle-bg-active: color-mix(in srgb, var(--theme-color-border) 92%, transparent);
   --os-handle-min-size: 40px;
   --os-handle-perpendicular-size: 3px;
   --os-handle-perpendicular-size-hover: 5px;
