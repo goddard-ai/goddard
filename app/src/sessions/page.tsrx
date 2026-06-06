@@ -2,7 +2,7 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
-import { SessionsPageMutations } from "./mutations.ts"
+import { evictSessionHistory, SessionsPageMutations } from "./mutations.ts"
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -26,6 +26,7 @@ component SessionsPage() {
       return
     }
 
+    evictSessionHistory(session.id)
     workbenchTabSet.openOrFocusTab({
       kind: "sessionChat",
       props: {

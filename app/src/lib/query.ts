@@ -198,6 +198,26 @@ export class QueryClient {
   }
 
   /**
+   * Drops one inactive cached query so the next read waits for a fresh first result.
+   */
+  evict<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
+    const queryKey = this.getQueryKey(queryFn, args)
+    const entry = this.entries.get(queryKey)
+
+    if (!entry) {
+      return
+    }
+
+    if (entry.subscribers.size > 0) {
+      this.invalidateEntry(entry)
+      return
+    }
+
+    this.entries.delete(queryKey)
+    this.entryKeysByFunction.get(queryFn)?.delete(queryKey)
+  }
+
+  /**
    * Refreshes every query that is currently observed by mounted UI.
    */
   refetchActiveQueries() {

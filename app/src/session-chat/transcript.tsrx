@@ -54,7 +54,6 @@ export type TranscriptProps = {
   stickToBottomKey?: number | string;
 }
 
-const initializedBottomScrollKeys = new Set<string>()
 const PROMPT_NAVIGATION_TOP_GAP = 8
 const transcriptScrollCache = new Map<
   string,
@@ -386,6 +385,7 @@ export component Transcript(props: TranscriptProps) {
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const userScrollIntentRef = useRef(false)
+  const initialBottomScrollCompleteRef = useRef(false)
   const [isStickingToBottom, setIsStickingToBottom] = useState(false)
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<TranscriptViewport>({
@@ -398,7 +398,7 @@ export component Transcript(props: TranscriptProps) {
   const itemKeys = useMemo(() => renderItems.map((item) => item.id), [renderItems])
   const cachedScrollSnapshot = transcriptScrollCache.get(effectiveScrollCacheKey)
   const restoredScrollSnapshot =
-    cachedScrollSnapshot &&
+    cachedScrollSnapshot && cachedScrollSnapshot.itemKeys.length === itemKeys.length &&
     cachedScrollSnapshot.itemKeys.every((itemKey, index) => itemKeys[index] === itemKey)
       ? cachedScrollSnapshot
       : undefined
@@ -665,20 +665,18 @@ export component Transcript(props: TranscriptProps) {
       return
     }
 
-    if (
-      initializedBottomScrollKeys.has(effectiveScrollCacheKey) ||
-        transcriptScrollCache.has(effectiveScrollCacheKey)
-    ) {
+    if (initialBottomScrollCompleteRef.current || restoredScrollSnapshot) {
       return
     }
 
-    initializedBottomScrollKeys.add(effectiveScrollCacheKey)
+    initialBottomScrollCompleteRef.current = true
     scrollToBottom()
     requestAnimationFrame(scrollToBottom)
   }, [
     effectiveInitialScroll,
     effectiveScrollCacheKey,
     renderItems.length,
+    restoredScrollSnapshot,
     totalSize,
     viewport.scrollMarginMeasured,
     viewport.width,

@@ -77,6 +77,31 @@ test("QueryClient.invalidate keeps stale data visible until the refetch resolves
   expect(notifications).toEqual(["update"])
 })
 
+test("QueryClient.evict drops inactive cached data before the next read", async () => {
+  let deferred = createDeferred<string>()
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn((_sessionId: string) => deferred.promise)
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+
+  const firstLoad = waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  await Promise.resolve()
+  deferred.resolve("first")
+  await firstLoad
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("first")
+
+  queryClient.evict(loadSession, ["ses_1"])
+  deferred = createDeferred<string>()
+  loadSession.mockReturnValueOnce(deferred.promise)
+
+  const secondLoad = waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  await Promise.resolve()
+  deferred.resolve("second")
+  await secondLoad
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("second")
+})
+
 test("QueryClient.subscribe refetches cached data when a query becomes active again", async () => {
   let deferred = createDeferred<string>()
   const notifications: string[] = []

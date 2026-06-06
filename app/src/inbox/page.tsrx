@@ -13,6 +13,7 @@ import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
+import { evictSessionHistory } from "~/sessions/mutations.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import {
@@ -203,6 +204,7 @@ component InboxPage() {
           id: item.entityId,
         })
 
+        evictSessionHistory(session.id)
         workbenchTabSet.openOrFocusTab({
           kind: "sessionChat",
           props: {

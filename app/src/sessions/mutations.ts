@@ -18,6 +18,10 @@ function refreshSessionViews(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
 }
 
+export function evictSessionHistory(sessionId: DaemonSession["id"]) {
+  queryClient.evict(goddardSdk.session.history, [{ id: sessionId }])
+}
+
 /**
  * Creates one session and refreshes the visible session list afterwards.
  */
