@@ -10,7 +10,7 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 
 const cleanup: Array<() => Promise<void>> = []

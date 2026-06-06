@@ -11,7 +11,7 @@ import { afterEach, expect, test } from "bun:test"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
 

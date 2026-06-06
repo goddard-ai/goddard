@@ -9,7 +9,7 @@ import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME

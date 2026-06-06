@@ -17,7 +17,7 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "../src/plugins.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
 

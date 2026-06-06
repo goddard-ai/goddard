@@ -23,8 +23,3 @@ export function getDaemonPluginComposition() {
 export function openComposedDaemonStore(connection?: StoreConnectionOptions): ComposedDaemonStore {
   return openDaemonStore(getDaemonPluginComposition().db, connection)
 }
-
-/** Opens a fresh daemon store for tests using the composed daemon plugin schema. */
-export function resetComposedDaemonStore(connection?: StoreConnectionOptions): ComposedDaemonStore {
-  return openDaemonStore(getDaemonPluginComposition().db, connection)
-}
