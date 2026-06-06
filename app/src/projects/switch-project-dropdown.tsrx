@@ -2,7 +2,7 @@ import { cx } from "@goddard-ai/styled-system/css"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
 import { useComputed, useSignal } from "@preact/signals"
-import { useRef } from "preact/hooks"
+import { useLayoutEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -32,6 +32,7 @@ export function SwitchProjectDropdown() @{
   const projectRegistry = useProjectRegistry()
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const inputElementRef = useRef<HTMLInputElement>(null)
+  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   const isOpen = useSignal(false)
   const workbenchTabSet = useWorkbenchTabSet()
@@ -94,6 +95,14 @@ export function SwitchProjectDropdown() @{
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
     isOpen.value = true
   })
+
+  useLayoutEffect(() => {
+    if (!isOpen.value || !highlightedItem) {
+      return
+    }
+
+    itemRefs.current[highlightedItem.id]?.scrollIntoView({ block: "nearest" })
+  }, [highlightedItem?.id, isOpen.value])
 
   const openFolderFromSwitcher = async () => {
     isOpen.value = false
@@ -209,6 +218,9 @@ export function SwitchProjectDropdown() @{
           @for (const item of items.value; index index) {
             <li key={item.id}>
               <button
+                ref={(element) => {
+                  itemRefs.current[item.id] = element
+                }}
                 class={styles.item}
                 data-highlighted={highlightedItemIndex === index ? "true" : "false"}
                 type="button"
