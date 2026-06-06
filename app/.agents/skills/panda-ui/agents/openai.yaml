@@ -1,0 +1,4 @@
+interface:
+  display_name: "Panda UI"
+  short_description: "Compact UI guidance for Panda CSS"
+  default_prompt: "Use $panda-ui to build a compact, accessible Panda CSS product surface with the app's existing components and recipes."

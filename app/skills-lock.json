@@ -31,6 +31,11 @@
       "sourceType": "local",
       "computedHash": "7fd528d24e9f7f3117dbe692d238902e969a6ced7382a2d3c41a72b5febc4d43"
     },
+    "panda-ui": {
+      "source": "/Users/alec/dev/skills",
+      "sourceType": "local",
+      "computedHash": "f2c1689a4b40928633f9d00cf0a0a5efcac1863e9f83b3c7dbcf34a095e9ca31"
+    },
     "pandark-ui": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
