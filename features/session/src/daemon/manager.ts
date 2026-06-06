@@ -62,6 +62,8 @@ import {
   type SessionHistoryTurn,
   type SessionLaunchPreviewRequest,
   type SessionLaunchPreviewResponse,
+  type SessionLifecycleEvent,
+  type SessionLifecycleField,
   type SessionsConfig,
   type SessionSubpackagesRequest,
   type SessionSubpackagesResponse,
@@ -997,6 +999,7 @@ export function createSessionManager(input: {
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   emitMessage: (id: SessionId, message: acp.AnyMessage) => void
+  emitLifecycleEvent: (event: SessionLifecycleEvent) => void
   events: SessionEventEmitter
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
@@ -1017,6 +1020,44 @@ export function createSessionManager(input: {
     logger,
   })
   const ready = reconcilePersistedSessions()
+
+  function publishSessionUpdated(id: SessionId, changed: readonly SessionLifecycleField[]) {
+    const session = db.sessions.get(id) ?? null
+    if (!session || changed.length === 0) {
+      return
+    }
+
+    input.emitLifecycleEvent({
+      kind: "sessionUpdated",
+      session,
+      changed: [...new Set(changed)],
+    })
+  }
+
+  function lifecycleFieldsFromSessionUpdate(update: Partial<DaemonSession>) {
+    const fields: SessionLifecycleField[] = []
+
+    if (update.status !== undefined) {
+      fields.push("status")
+    }
+    if (update.connectionMode !== undefined || update.activeDaemonSession !== undefined) {
+      fields.push("connection")
+    }
+    if (update.title !== undefined || update.titleState !== undefined) {
+      fields.push("title")
+    }
+    if (update.contextUsage !== undefined) {
+      fields.push("contextUsage")
+    }
+    if (update.lastAgentMessage !== undefined) {
+      fields.push("lastAgentMessage")
+    }
+    if (update.completedHidden !== undefined) {
+      fields.push("completedHidden")
+    }
+
+    return fields
+  }
 
   /** Resolves the idle shutdown timeout after root config has been resolved for a session cwd. */
   function resolveIdleSessionShutdownTimeoutMs(config?: SessionManagerRootConfig): number {
@@ -1051,6 +1092,7 @@ export function createSessionManager(input: {
 
     if (previousRecord) {
       db.sessions.update(previousRecord.id, update)
+      publishSessionUpdated(id, lifecycleFieldsFromSessionUpdate(update))
     }
     if (update.status && previousStatus && previousStatus !== update.status) {
       emitDiagnostic(
@@ -1170,6 +1212,7 @@ export function createSessionManager(input: {
     db.sessions.update(sessionId, {
       contextUsage,
     })
+    publishSessionUpdated(sessionId, ["contextUsage"])
     return true
   }
 
@@ -1325,6 +1368,7 @@ export function createSessionManager(input: {
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
     active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
+    publishSessionUpdated(active.id, ["activeTurn"])
     refreshIdleShutdownState(active.id, "turn_completed")
     emitDiagnostic(
       active.id,
@@ -1547,6 +1591,7 @@ export function createSessionManager(input: {
       connectionMode: mode,
       activeDaemonSession,
     })
+    publishSessionUpdated(sessionId, ["connection"])
   }
 
   function toSessionWorktreeValue(record: SessionWorktreeDoc) {
@@ -1890,6 +1935,7 @@ export function createSessionManager(input: {
         params,
         resolve,
       }
+      publishSessionUpdated(active.id, ["permission"])
       refreshIdleShutdownState(active.id, "permission_request_started")
       const message = {
         jsonrpc: "2.0",
@@ -2005,6 +2051,7 @@ export function createSessionManager(input: {
     if (!nextPrompt) {
       return
     }
+    publishSessionUpdated(active.id, ["queue"])
 
     const promptRequest = {
       sessionId: active.acpSessionId,
@@ -2049,6 +2096,7 @@ export function createSessionManager(input: {
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 
+    publishSessionUpdated(active.id, ["activeTurn"])
     refreshIdleShutdownState(active.id, "turn_started")
 
     try {
@@ -2079,6 +2127,7 @@ export function createSessionManager(input: {
       if (active.blockingPromptRequestId === nextPrompt.requestId) {
         active.blockingPromptRequestId = null
       }
+      publishSessionUpdated(active.id, ["activeTurn"])
       refreshIdleShutdownState(active.id, "turn_start_failed")
       nextPrompt.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
       throw error
@@ -2125,6 +2174,7 @@ export function createSessionManager(input: {
       queuedPrompt.reject?.(new IpcClientError(reason))
     }
 
+    publishSessionUpdated(active.id, ["queue"])
     refreshIdleShutdownState(active.id, "queued_prompts_aborted")
     return abortedQueue
   }
@@ -2648,6 +2698,7 @@ export function createSessionManager(input: {
         sessionId: id,
         request: resolvedRequest,
       })
+      publishSessionUpdated(id, ["status", "connection", "title", "contextUsage"])
       emitDiagnostic(
         id,
         "session_created",
@@ -3439,6 +3490,7 @@ export function createSessionManager(input: {
         prompt: [...message.params.prompt],
         source: "client",
       })
+      publishSessionUpdated(active.id, ["queue"])
       updateSession(id, {
         completedHidden: false,
       })
@@ -3471,6 +3523,7 @@ export function createSessionManager(input: {
     ) {
       const permissionRequest = active.lastPermissionRequest
       active.lastPermissionRequest = null
+      publishSessionUpdated(active.id, ["permission"])
       refreshIdleShutdownState(active.id, "permission_request_resolved")
       publishClientMessage(active, message)
       permissionRequest.resolve(message.result as acp.RequestPermissionResponse)
@@ -3540,6 +3593,7 @@ export function createSessionManager(input: {
       })
     })
 
+    publishSessionUpdated(active.id, ["queue"])
     refreshIdleShutdownState(active.id, "prompt_enqueued")
     emitDiagnostic(
       active.id,

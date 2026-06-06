@@ -950,6 +950,52 @@ test("session.message subscribers cancel idle auto-shutdown before expiry", asyn
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("session lifecycle subscribers do not cancel idle auto-shutdown", async () => {
+  const idleSessionShutdownTimeoutMs = 70
+  const daemon = await startServer({ idleSessionShutdownTimeoutMs })
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const lifecycleEvents: Array<{
+    kind: string
+    session?: { id?: string; activeDaemonSession?: boolean }
+    changed?: string[]
+  }> = []
+  const unsubscribe = await subscribe(client, "session.lifecycleEvents", (event) => {
+    lifecycleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribe()).catch(() => {})
+  })
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(queueAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  await waitFor(async () =>
+    lifecycleEvents.some(
+      (event) =>
+        event.kind === "sessionUpdated" &&
+        event.session?.id === created.session.id &&
+        event.changed?.includes("connection"),
+    ),
+  )
+  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+
+  expect(getDiagnosticEventTypes(created.session.id)).toContain(
+    "session_idle_shutdown_timer_expired",
+  )
+  expect(
+    lifecycleEvents.some(
+      (event) =>
+        event.kind === "sessionUpdated" &&
+        event.session?.id === created.session.id &&
+        event.session?.activeDaemonSession === false,
+    ),
+  ).toBe(true)
+})
+
 test("idle auto-shutdown waits for the last session.message subscriber to disconnect", async () => {
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })

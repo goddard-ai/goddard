@@ -18,6 +18,7 @@ import {
   SessionDraftSuggestionsRequest,
   SessionIdParams,
   SessionLaunchPreviewRequest,
+  SessionLifecycleEvent,
   SessionMessageEvent,
   SessionSubpackagesRequest,
   SetSessionConfigOptionRequest,
@@ -177,6 +178,10 @@ export const sessionIpcRoutes = defineIpcRoutes({
     messageEvents: http.get("message-events", {
       query: SessionIdParams,
       response: ndjson.$type<SessionMessageEvent>(),
+    }),
+    /** Emits app-wide daemon session lifecycle updates without observing transcript messages. */
+    lifecycleEvents: http.get("lifecycle-events", {
+      response: ndjson.$type<SessionLifecycleEvent>(),
     }),
   }),
 })

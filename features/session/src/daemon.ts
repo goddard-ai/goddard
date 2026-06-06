@@ -27,6 +27,7 @@ import {
   WorktreesConfig,
   type SendSessionMessageRequest,
   type SessionId,
+  type SessionLifecycleEvent,
   type SessionMessageEvent,
 } from "./schema.ts"
 
@@ -125,6 +126,7 @@ export const sessionPlugin = definePlugin({
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const messageListeners = new Set<(event: SessionMessageEvent) => void>()
+    const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>()
     const sessionManager = createSessionManager({
       db: context.db,
       getDaemonUrl: context.daemonRuntime.getDaemonUrl,
@@ -138,6 +140,11 @@ export const sessionPlugin = definePlugin({
       emitMessage(id, message) {
         for (const listener of messageListeners) {
           listener({ id, message })
+        }
+      },
+      emitLifecycleEvent(event) {
+        for (const listener of lifecycleListeners) {
+          listener(event)
         }
       },
     })
@@ -175,6 +182,37 @@ export const sessionPlugin = definePlugin({
         signal.removeEventListener("abort", abort)
         messageListeners.delete(listener)
         await sessionManager.sessionSubscriberDisconnected(id)
+      }
+    }
+
+    async function* subscribeSessionLifecycle(signal: AbortSignal) {
+      const queue: SessionLifecycleEvent[] = []
+      let wake: (() => void) | undefined
+      const listener = (event: SessionLifecycleEvent) => {
+        queue.push(event)
+        wake?.()
+      }
+      const abort = () => {
+        wake?.()
+      }
+
+      lifecycleListeners.add(listener)
+      signal.addEventListener("abort", abort)
+      try {
+        while (!signal.aborted) {
+          const event = queue.shift()
+          if (event) {
+            yield event
+            continue
+          }
+          await new Promise<void>((resolve) => {
+            wake = resolve
+          })
+          wake = undefined
+        }
+      } finally {
+        signal.removeEventListener("abort", abort)
+        lifecycleListeners.delete(listener)
       }
     }
 
@@ -270,6 +308,9 @@ export const sessionPlugin = definePlugin({
           messageEvents: async function* (ctx) {
             const { query } = ctx
             yield* subscribeSessionMessages(query.id, ctx.request.signal)
+          },
+          lifecycleEvents: async function* (ctx) {
+            yield* subscribeSessionLifecycle(ctx.request.signal)
           },
         },
       },

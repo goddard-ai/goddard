@@ -10,6 +10,7 @@ import { Inbox } from "./inbox/model.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
+import { startSessionLifecycleSubscription } from "./sessions/lifecycle.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION } from "./shared/shortcut-keymap.ts"
 import { ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabCache } from "./workbench-tab-cache.ts"
@@ -273,6 +274,7 @@ export function useAppState() {
       appState.appearance.setup(),
       appState.commandContext.setup(),
       appState.projectContext.setup(),
+      startSessionLifecycleSubscription(),
       appState.shortcutRegistry.setup(),
       () => {
         appState.workbenchTabCache.disposeAll()

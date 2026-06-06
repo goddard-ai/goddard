@@ -573,6 +573,49 @@ export interface SessionMessageEvent {
   message: acp.AnyMessage
 }
 
+/** Session record or runtime area affected by one app-wide lifecycle event. */
+export const SessionLifecycleField = z.enum([
+  "status",
+  "connection",
+  "activeTurn",
+  "queue",
+  "permission",
+  "title",
+  "contextUsage",
+  "lastAgentMessage",
+  "completedHidden",
+])
+
+export type SessionLifecycleField = z.infer<typeof SessionLifecycleField>
+
+/** Stream payload emitted for app-wide daemon session lifecycle updates. */
+export const SessionLifecycleEvent = z.union([
+  z.strictObject({
+    kind: z.literal("sessionUpdated"),
+    session: DaemonSession.extend({
+      id: SessionId,
+      createdAt: z.number(),
+      updatedAt: z.number(),
+    }),
+    changed: z.array(SessionLifecycleField),
+  }),
+  z.strictObject({
+    kind: z.literal("sessionDeleted"),
+    id: SessionId,
+  }),
+])
+
+export type SessionLifecycleEvent =
+  | {
+      kind: "sessionUpdated"
+      session: DaemonSession
+      changed: SessionLifecycleField[]
+    }
+  | {
+      kind: "sessionDeleted"
+      id: SessionId
+    }
+
 /** Runtime environment variables injected into one daemon-managed session. */
 export type SessionRuntimeEnv = {
   GODDARD_SESSION_TOKEN: string

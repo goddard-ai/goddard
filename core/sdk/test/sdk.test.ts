@@ -409,6 +409,69 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
+  test("session.lifecycle.subscribe passes daemon session lifecycle events through", async () => {
+    const { sdk, subscribe } = createSdkWithClient()
+    const onEvent = vi.fn()
+    const unsubscribe = vi.fn()
+
+    subscribe.mockImplementationOnce(
+      async (target: unknown, handler: (payload: unknown) => void) => {
+        expect(target).toBe("session.lifecycleEvents")
+        handler({
+          kind: "sessionUpdated",
+          session: {
+            id: "ses_1",
+            createdAt: 1,
+            updatedAt: 2,
+            acpSessionId: "acp_1",
+            status: "done",
+            stopReason: "end_turn",
+            agent: null,
+            agentName: "Agent",
+            cwd: "/repo",
+            title: "Session",
+            titleState: "generated",
+            mcpServers: [],
+            connectionMode: "history",
+            supportsLoadSession: true,
+            activeDaemonSession: false,
+            completedHidden: false,
+            errorMessage: null,
+            blockedReason: null,
+            initiative: null,
+            inboxScope: null,
+            lastAgentMessage: "Finished",
+            repository: null,
+            prNumber: null,
+            token: null,
+            permissions: null,
+            metadata: null,
+            models: null,
+            configOptions: [],
+            availableCommands: [],
+            contextUsage: null,
+          },
+          changed: ["status", "connection"],
+        })
+        return unsubscribe
+      },
+    )
+
+    const result = await sdk.session.lifecycle.subscribe(onEvent)
+    await flushAsyncStream()
+
+    expect(subscribe).toHaveBeenCalledWith("session.lifecycleEvents", expect.any(Function))
+    expect(onEvent).toHaveBeenCalledTimes(1)
+    expect(onEvent.mock.calls[0]?.[0]).toMatchObject({
+      kind: "sessionUpdated",
+      session: { id: "ses_1", status: "done" },
+      changed: ["status", "connection"],
+    })
+    result()
+    await flushAsyncStream()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
     const { sdk, send } = createSdkWithClient()
 
