@@ -61,6 +61,12 @@ function formatCharacterKey(key: string) {
   return key.length === 1 && key.toLowerCase() !== key.toUpperCase() ? key.toUpperCase() : key
 }
 
+function getDigitKeyLabel(key: string) {
+  const digitMatch = /^Digit([0-9])$/i.exec(key)
+
+  return digitMatch?.[1]
+}
+
 function isMacOsPlatform() {
   return (globalThis.navigator as Navigator & {
       userAgentData: { platform: string };
@@ -98,6 +104,16 @@ function getShortcutPart(key: string): ShortcutPart {
       key,
       label: namedLabel,
       kind: "named",
+    }
+  }
+
+  const digitLabel = getDigitKeyLabel(key)
+
+  if (digitLabel) {
+    return {
+      key,
+      label: digitLabel,
+      kind: "character",
     }
   }
 

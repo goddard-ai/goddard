@@ -60,6 +60,19 @@ test("GoodKeyboardShortcut renders character keys in monospace spans", () => {
   })
 })
 
+test("GoodKeyboardShortcut renders physical digit codes as numerals", () => {
+  const container = document.createElement("div")
+
+  withPlatform("macOS", () => {
+    render(<GoodKeyboardShortcut expression="Alt+Digit1" />, container)
+
+    expect(container.textContent).toBe("⌥1")
+    expect(container.querySelector("[data-key-kind='character']")?.textContent).toBe("1")
+
+    render(null, container)
+  })
+})
+
 test("GoodKeyboardShortcut renders space-separated sequences", () => {
   const container = document.createElement("div")
 
