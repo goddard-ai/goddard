@@ -198,13 +198,13 @@ export component SessionLaunchPreviewSelectors(props: {
   const branchItems: SessionInputSelectItem[] =
     preview?.branches.map(
       (branch) => ({
-        value: branch.name,
-        label: branch.name,
-        detail: branch.current ? "Current branch" : null,
+        value: branch,
+        label: branch,
+        detail: branch === preview.currentBranch ? "Current branch" : null,
       }),
     ) ??
       []
-  const currentBranchName = preview?.branches.find((branch) => branch.current)?.name ?? null
+  const currentBranchName = preview?.currentBranch ?? null
   const localCheckoutDirty = form.draftLocation.value === "local" && preview?.dirty === true
   const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =

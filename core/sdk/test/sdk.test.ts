@@ -497,10 +497,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     send.mockResolvedValueOnce({
       launchLeaseId: "lease_1",
       repoRoot: "/repo",
-      branches: [
-        { name: "main", current: true },
-        { name: "feature-a", current: false },
-      ],
+      branches: ["main", "feature-a"],
+      currentBranch: "main",
       dirty: false,
       models: {
         currentModelId: "gpt-5.4",
@@ -531,10 +529,8 @@ describe("@goddard-ai/sdk session namespace", () => {
     ).resolves.toEqual({
       launchLeaseId: "lease_1",
       repoRoot: "/repo",
-      branches: [
-        { name: "main", current: true },
-        { name: "feature-a", current: false },
-      ],
+      branches: ["main", "feature-a"],
+      currentBranch: "main",
       dirty: false,
       models: {
         currentModelId: "gpt-5.4",

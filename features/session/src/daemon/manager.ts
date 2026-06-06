@@ -60,7 +60,6 @@ import {
   type SessionComposerSuggestionsResponse,
   type SessionDraftSuggestionsRequest,
   type SessionHistoryTurn,
-  type SessionLaunchBranch,
   type SessionLaunchPreviewRequest,
   type SessionLaunchPreviewResponse,
   type SessionsConfig,
@@ -188,12 +187,12 @@ function readTextPrompt(name: string) {
   })
 }
 
-/** Lists local git branches for one launch dialog and keeps the current branch first. */
-async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
+/** Lists local git branches for one launch dialog in git's refname order. */
+async function listLaunchBranches(cwd: string) {
   const repoRoot = await resolveGitRepoRoot(cwd)
 
   if (!repoRoot) {
-    return []
+    return { branches: [], currentBranch: null }
   }
 
   const result = Bun.spawn(
@@ -209,27 +208,31 @@ async function listLaunchBranches(cwd: string): Promise<SessionLaunchBranch[]> {
   await result.exited
 
   if (result.exitCode !== 0) {
-    return []
+    return { branches: [], currentBranch: null }
   }
 
-  const branches = stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => ({
-      current: line.startsWith("*"),
-      name: line.startsWith("*") ? line.slice(1) : line,
-    }))
+  const branches: string[] = []
+  let currentBranch: string | null = null
 
-  branches.sort((left, right) => {
-    if (left.current !== right.current) {
-      return left.current ? -1 : 1
+  for (const rawLine of stdout.split("\n")) {
+    const line = rawLine.trim()
+    if (!line) {
+      continue
     }
 
-    return left.name.localeCompare(right.name)
-  })
+    const current = line.startsWith("*")
+    const name = current ? line.slice(1) : line
+    if (current) {
+      currentBranch = name
+    }
 
-  return branches
+    branches.push(name)
+  }
+
+  return {
+    branches,
+    currentBranch,
+  }
 }
 
 /** Returns true when branch switching in the requested local checkout would risk user work. */
@@ -2973,21 +2976,24 @@ export function createSessionManager(input: {
     await ready
 
     const key = createLaunchLeaseKey(params)
-    const [repoRoot, branches, dirty] = await Promise.all([
+    const [repoRoot, launchBranches, dirty] = await Promise.all([
       resolveGitRepoRoot(params.cwd),
       listLaunchBranches(params.cwd),
       inspectLaunchCheckoutDirty(params.cwd),
     ])
+    const { branches, currentBranch } = launchBranches
     const existingLease = launchLeaseStore.findByKey(key)
     if (existingLease) {
       launchLeaseStore.reactivate(existingLease)
       existingLease.repoRoot = repoRoot
       existingLease.branches = branches
+      existingLease.currentBranch = currentBranch
       existingLease.dirty = dirty
       return {
         launchLeaseId: existingLease.id,
         repoRoot,
         branches,
+        currentBranch,
         dirty,
         models: existingLease.models,
         configOptions: existingLease.configOptions,
@@ -3095,6 +3101,7 @@ export function createSessionManager(input: {
         configOptions: session.configOptions ?? [],
         repoRoot,
         branches,
+        currentBranch,
         dirty,
         releaseTimer: null,
         closing: null,
@@ -3105,6 +3112,7 @@ export function createSessionManager(input: {
         launchLeaseId: lease.id,
         repoRoot: lease.repoRoot,
         branches: lease.branches,
+        currentBranch: lease.currentBranch,
         dirty: lease.dirty,
         models: lease.models,
         configOptions: lease.configOptions,

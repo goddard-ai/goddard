@@ -160,8 +160,7 @@ export const SessionLaunchFormState = createModel(function () {
       modelId: draftModelId.value,
       configOptions: initialConfigOptions,
     })
-    const currentBranchName =
-      launchPreview.value?.branches.find((branch) => branch.current)?.name ?? null
+    const currentBranchName = launchPreview.value?.currentBranch ?? null
     const selectedLocalBranchName =
       draftLocation.value === "local" &&
       launchPreview.value?.dirty !== true &&
@@ -230,11 +229,9 @@ export const SessionLaunchFormState = createModel(function () {
       models: nextLaunchPreview.models ?? null,
       configOptions: nextLaunchPreview.configOptions,
     })
-    const availableBranchNames = new Set(nextLaunchPreview.branches.map((branch) => branch.name))
+    const availableBranchNames = new Set(nextLaunchPreview.branches)
     const currentBranchName =
-      nextLaunchPreview.branches.find((branch) => branch.current)?.name ??
-      nextLaunchPreview.branches[0]?.name ??
-      null
+      nextLaunchPreview.currentBranch ?? nextLaunchPreview.branches[0] ?? null
 
     if (
       draftBaseBranchName.value === null ||

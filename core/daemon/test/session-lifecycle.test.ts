@@ -1880,14 +1880,9 @@ test("session.launchPreview loads adapter capabilities and repository branches f
 
   expect(typeof preview.launchLeaseId).toBe("string")
   expect(preview.repoRoot).toBe(await realpath(repoDir))
-  expect(preview.branches).toContainEqual({
-    name: currentBranch,
-    current: true,
-  })
-  expect(preview.branches).toContainEqual({
-    name: "feature-a",
-    current: false,
-  })
+  expect(preview.branches).toContain(currentBranch)
+  expect(preview.branches).toContain("feature-a")
+  expect(preview.currentBranch).toBe(currentBranch)
   expect(preview.dirty).toBe(false)
   expect(preview.models?.currentModelId).toBe("gpt-5.4")
   expect(preview.configOptions).toContainEqual(

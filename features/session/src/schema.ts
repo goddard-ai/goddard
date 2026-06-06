@@ -397,14 +397,6 @@ export const SessionComposerSuggestionsResponse = z.strictObject({
 
 export type SessionComposerSuggestionsResponse = z.infer<typeof SessionComposerSuggestionsResponse>
 
-/** One selectable git branch returned for the launch-session flow. */
-export const SessionLaunchBranch = z.strictObject({
-  name: z.string(),
-  current: z.boolean(),
-})
-
-export type SessionLaunchBranch = z.infer<typeof SessionLaunchBranch>
-
 /** Request payload used to inspect launch-time adapter and repository capabilities. */
 export const SessionLaunchPreviewRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]),
@@ -450,7 +442,8 @@ export type SessionSubpackagesResponse = {
 export type SessionLaunchPreviewResponse = {
   launchLeaseId: string
   repoRoot: string | null
-  branches: SessionLaunchBranch[]
+  branches: string[]
+  currentBranch: string | null
   dirty: boolean
   models: acp.SessionModelState | null
   configOptions: acp.SessionConfigOption[]
