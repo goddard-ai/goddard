@@ -118,7 +118,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: resolvedInput.title,
             })
-            events.emit("pull_request.created", {
+            await events.emit("pull_request.created", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,
@@ -169,7 +169,7 @@ export const pullRequestPlugin = definePlugin({
               headline: payload.headline,
               fallbackHeadline: "PR reply posted",
             })
-            events.emit("pull_request.updated", {
+            await events.emit("pull_request.updated", {
               pullRequestId: pullRequest.id,
               scope: metadata.scope,
               headline: metadata.headline,

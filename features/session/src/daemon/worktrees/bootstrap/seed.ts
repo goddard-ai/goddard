@@ -247,7 +247,7 @@ function normalizeSeedPath(repoRoot: string, configuredPath: string) {
     return null
   }
 
-  return relativePath
+  return toGitRelativePath(relativePath)
 }
 
 /**
@@ -262,7 +262,7 @@ function isCoveredByUntrackedEntries(
       return true
     }
 
-    return entry.isDir && relativePath.startsWith(`${entry.relativePath}${path.sep}`)
+    return entry.isDir && relativePath.startsWith(`${entry.relativePath}/`)
   })
 }
 
@@ -280,7 +280,16 @@ function parseGitPathOutput(stdout: string) {
  * Normalizes Git directory output to the repo-relative path used by copy targets.
  */
 function trimTrailingPathSeparator(relativePath: string) {
-  return relativePath.endsWith("/") ? relativePath.slice(0, -1) : relativePath
+  return relativePath.endsWith("/") || relativePath.endsWith("\\")
+    ? relativePath.slice(0, -1)
+    : relativePath
+}
+
+/**
+ * Normalizes repo-relative paths to Git's slash-separated path format.
+ */
+function toGitRelativePath(relativePath: string) {
+  return relativePath.split(path.sep).join("/")
 }
 
 /**

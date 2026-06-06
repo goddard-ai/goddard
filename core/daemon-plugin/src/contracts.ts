@@ -44,10 +44,10 @@ export type EventBus<
   readonly emit: <TName extends keyof TEmitEvents & string>(
     eventName: TName,
     payload: InferEventPayload<TEmitEvents[TName]>,
-  ) => void
+  ) => Promise<void>
   readonly on: <TName extends keyof TListenEvents & string>(
     eventName: TName,
-    listener: (payload: InferEventPayload<TListenEvents[TName]>) => void,
+    listener: (payload: InferEventPayload<TListenEvents[TName]>) => void | Promise<void>,
   ) => () => void
 }
 

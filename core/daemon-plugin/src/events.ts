@@ -1,6 +1,6 @@
 import type { EventBus, EventDefinition } from "./contracts.ts"
 
-type Listener = (payload: unknown) => void
+type Listener = (payload: unknown) => void | Promise<void>
 
 /** Declares one daemon plugin event payload type without adding runtime behavior. */
 export function event<TPayload>(): EventDefinition<TPayload> {
@@ -24,9 +24,9 @@ export function createDaemonEventBus(): EventBus<Record<string, EventDefinition<
         }
       }
     },
-    emit(eventName, payload) {
+    async emit(eventName, payload) {
       for (const listener of [...(listeners.get(eventName) ?? [])]) {
-        listener(payload)
+        await listener(payload)
       }
     },
   }

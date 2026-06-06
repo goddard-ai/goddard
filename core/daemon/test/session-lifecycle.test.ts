@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
@@ -2342,7 +2342,7 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
     outputFile: ".bootstrap-marker",
   })
 
-  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`
   await writeLocalRootConfig(repoDir, {
     worktrees: {
       bootstrap: {
@@ -2367,10 +2367,12 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
     .reviewSession
   expect(reviewSession?.agentBranch).toBe(worktree?.branchName)
   expect(reviewSession?.reviewBranch).toBe(`review-sync/${worktree?.branchName}`)
-  expect(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
+  expect(
+    normalizeLineEndings(await readFile(join(worktree!.worktreeDir, ".bootstrap-marker"), "utf-8")),
+  ).toBe("install\n")
+  expect(normalizeLineEndings(await readFile(join(repoDir, ".bootstrap-marker"), "utf-8"))).toBe(
     "install\n",
   )
-  expect(await readFile(join(repoDir, ".bootstrap-marker"), "utf-8")).toBe("install\n")
 
   await send(client, "session.shutdown", { id: created.session.id })
 })
@@ -2386,7 +2388,7 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
     outputFile: ".bootstrap-marker",
   })
 
-  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`
   await writeLocalRootConfig(repoDir, {
     worktrees: {
       bootstrap: {
@@ -2489,7 +2491,9 @@ async function useTempHome(): Promise<void> {
 
 async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promise<string> {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-repo-"))
-  cleanup.push(async () => {
+  // Daemon shutdown may inspect persisted worktrees, whose Git metadata lives under the
+  // source repo. Keep fixture repos until after daemon cleanup has run.
+  cleanup.unshift(async () => {
     await rm(repoDir, { recursive: true, force: true })
   })
 
@@ -2505,6 +2509,7 @@ async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promis
   }
 
   runGit(repoDir, ["init"])
+  runGit(repoDir, ["config", "core.autocrlf", "false"])
   runGit(repoDir, ["config", "user.email", "bot@example.com"])
   runGit(repoDir, ["config", "user.name", "Bot"])
   runGit(repoDir, ["add", "."])
@@ -2530,6 +2535,10 @@ function readGitOutput(cwd: string, args: string[]) {
 
   expect(result.status).toBe(0)
   return result.stdout.trim()
+}
+
+function normalizeLineEndings(value: string) {
+  return value.replace(/\r\n/g, "\n")
 }
 
 async function writeLocalRootConfig(repoDir: string, config: Record<string, unknown>) {
@@ -2564,20 +2573,31 @@ async function createFakePackageManager(
     await rm(binDir, { recursive: true, force: true })
   })
 
-  const scriptPath = join(binDir, name)
-  await writeFile(
-    scriptPath,
-    [
-      "#!/bin/sh",
-      `printf '%s\\n' "$@" > "${options.outputFile}"`,
-      `exit ${options.exitCode}`,
-      "",
-    ].join("\n"),
-    "utf-8",
-  )
+  const scriptPath = join(binDir, process.platform === "win32" ? `${name}.cmd` : name)
+  await writeFile(scriptPath, createFakePackageManagerScript(options), "utf-8")
   await chmod(scriptPath, 0o755)
 
   return binDir
+}
+
+function createFakePackageManagerScript(options: { exitCode: number; outputFile: string }) {
+  if (process.platform === "win32") {
+    return [
+      "@echo off",
+      "(",
+      "for %%A in (%*) do echo %%~A",
+      `) > "${options.outputFile}"`,
+      `exit /b ${options.exitCode}`,
+      "",
+    ].join("\r\n")
+  }
+
+  return [
+    "#!/bin/sh",
+    `printf '%s\\n' "$@" > "${options.outputFile}"`,
+    `exit ${options.exitCode}`,
+    "",
+  ].join("\n")
 }
 
 function buildPromptMessage(sessionId: string, id: string, text: string) {

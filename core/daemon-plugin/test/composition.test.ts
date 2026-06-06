@@ -3,7 +3,7 @@ import { $type, http, ndjson } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { composePlugins, definePlugin, event } from "../src/index.ts"
+import { composePlugins, createDaemonEventBus, definePlugin, event } from "../src/index.ts"
 
 describe("daemon plugin composition", () => {
   test("orders plugins by consumed dependencies and composes route/config fragments", () => {
@@ -187,6 +187,22 @@ describe("daemon plugin composition", () => {
     const composition = composePlugins([inbox, session])
 
     expect(composition.events["session.turn.ended"]).toBeDefined()
+  })
+
+  test("event bus waits for async listeners", async () => {
+    const events = createDaemonEventBus()
+    const calls: string[] = []
+
+    events.on("session.stopping", async (payload) => {
+      await Promise.resolve()
+      calls.push(`listener:${(payload as { id: string }).id}`)
+    })
+
+    calls.push("before")
+    await events.emit("session.stopping", { id: "session-1" })
+    calls.push("after")
+
+    expect(calls).toEqual(["before", "listener:session-1", "after"])
   })
 
   test("rejects consumed plugins that are not part of the composition", () => {

@@ -366,6 +366,7 @@ type ActiveSession = {
   client: AcpClient
   session: AcpSession
   status: DaemonSessionStatus
+  exitCleanup: Promise<void> | null
   nextTurnSequence: number
   activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> | null
   isFirstPrompt: boolean
@@ -2294,6 +2295,7 @@ export function createSessionManager(input: {
       client: params.initialized.client,
       session: params.initialized.session,
       status: params.initialized.status,
+      exitCleanup: null,
       nextTurnSequence: params.nextTurnSequence,
       activeTurn: null,
       isFirstPrompt: params.initialized.isFirstPrompt,
@@ -2321,7 +2323,7 @@ export function createSessionManager(input: {
 
       const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
       try {
-        input.events.emit("session.stopping", {
+        await input.events.emit("session.stopping", {
           sessionId: activeSession.id,
           reason: "agent_process_exit",
           worktree: worktreeRecord
@@ -2380,7 +2382,14 @@ export function createSessionManager(input: {
     }
 
     params.agentProcess.onceExit((code, signal) => {
-      void handleExit(code, signal)
+      activeSession.exitCleanup = handleExit(code, signal).catch((error) => {
+        emitDiagnostic(
+          activeSession.id,
+          "session_stop_cleanup_failed",
+          { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
+          activeSession.logger,
+        )
+      })
     })
 
     activeSessions.set(activeSession.id, activeSession)
@@ -3624,6 +3633,7 @@ export function createSessionManager(input: {
     }
     await treeKill(active.process)
     await waitForAgentProcessExit(active.process)
+    await active.exitCleanup
     return true
   }
 
@@ -3648,7 +3658,7 @@ export function createSessionManager(input: {
       cancelIdleShutdownTimer(session, "daemon_shutdown")
       const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
       try {
-        input.events.emit("session.stopping", {
+        await input.events.emit("session.stopping", {
           sessionId: session.id,
           reason: "daemon_shutdown",
           worktree: worktreeRecord
@@ -3659,6 +3669,7 @@ export function createSessionManager(input: {
       emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
+      await session.exitCleanup
       await session.client.close().catch(() => {})
       const sessionRecord = db.sessions.get(session.id) ?? null
       if (sessionRecord?.permissions) {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import { prepareFreshWorktree } from "../src/daemon/worktrees/bootstrap.ts"
@@ -154,13 +154,9 @@ test(".worktreeinclude copies matching gitignored files only", async () => {
   expect(await readFile(join(created.worktreeDir, "config", "secrets.json"), "utf-8")).toBe(
     '{"secret":true}\n',
   )
-  expect(await readFile(join(created.worktreeDir, "secrets", "token.txt"), "utf-8")).toBe(
-    "token\n",
-  )
+  expect(await readFile(join(created.worktreeDir, "secrets", "token.txt"), "utf-8")).toBe("token\n")
   expect(existsSync(join(created.worktreeDir, "not-ignored.txt"))).toBe(false)
-  expect(await readFile(join(created.worktreeDir, "tracked-secret.txt"), "utf-8")).toBe(
-    "tracked\n",
-  )
+  expect(await readFile(join(created.worktreeDir, "tracked-secret.txt"), "utf-8")).toBe("tracked\n")
 
   await cleanupWorktree(repoDir, created)
 })
@@ -216,7 +212,7 @@ test("preparation infers the package manager from package.json and runs install 
     branchName: "feature-bootstrap-bun",
   })
 
-  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`
 
   const prepared = await prepareFreshWorktree({
     repoRoot: repoDir,
@@ -229,9 +225,9 @@ test("preparation infers the package manager from package.json and runs install 
 
   expect(prepared.packageManager).toBe("bun")
   expect(prepared.bootstrapRan).toBe(true)
-  expect(await readFile(join(created.worktreeDir, ".bootstrap-marker"), "utf-8")).toBe(
-    "install\n--frozen-lockfile\n",
-  )
+  expect(
+    normalizeLineEndings(await readFile(join(created.worktreeDir, ".bootstrap-marker"), "utf-8")),
+  ).toBe("install\n--frozen-lockfile\n")
 
   await cleanupWorktree(repoDir, created)
 })
@@ -249,7 +245,7 @@ test("ambiguous lockfiles skip inferred bootstrap", async () => {
     branchName: "feature-ambiguous-lockfiles",
   })
 
-  process.env.PATH = `${binDir}:${originalPath ?? ""}`
+  process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`
 
   const prepared = await prepareFreshWorktree({
     repoRoot: repoDir,
@@ -287,6 +283,7 @@ async function createRepoFixture(
   }
 
   await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "core.autocrlf", "false"])
   await runGit(repoDir, ["config", "user.email", "bot@example.com"])
   await runGit(repoDir, ["config", "user.name", "Bot"])
   await runGit(repoDir, ["add", "."])
@@ -317,17 +314,8 @@ async function createFakePackageManager(
   const binDir = await mkdtemp(join(tmpdir(), `goddard-${name}-bin-`))
   cleanup.push(binDir)
 
-  const scriptPath = join(binDir, name)
-  await writeFile(
-    scriptPath,
-    [
-      "#!/bin/sh",
-      `printf '%s\\n' "$@" > "${options.outputFile}"`,
-      `exit ${options.exitCode}`,
-      "",
-    ].join("\n"),
-    "utf-8",
-  )
+  const scriptPath = join(binDir, process.platform === "win32" ? `${name}.cmd` : name)
+  await writeFile(scriptPath, createFakePackageManagerScript(options), "utf-8")
   await chmod(scriptPath, 0o755)
 
   return binDir
@@ -352,4 +340,28 @@ async function runGit(cwd: string, args: string[]) {
 function pathDir(relativePath: string) {
   const parentDir = dirname(relativePath)
   return parentDir.length > 0 ? parentDir : "."
+}
+
+function normalizeLineEndings(value: string) {
+  return value.replace(/\r\n/g, "\n")
+}
+
+function createFakePackageManagerScript(options: { exitCode: number; outputFile: string }) {
+  if (process.platform === "win32") {
+    return [
+      "@echo off",
+      "(",
+      "for %%A in (%*) do echo %%~A",
+      `) > "${options.outputFile}"`,
+      `exit /b ${options.exitCode}`,
+      "",
+    ].join("\r\n")
+  }
+
+  return [
+    "#!/bin/sh",
+    `printf '%s\\n' "$@" > "${options.outputFile}"`,
+    `exit ${options.exitCode}`,
+    "",
+  ].join("\n")
 }
