@@ -1,5 +1,8 @@
 /** Async subprocess helpers shared by session-owned worktree integrations. */
 import { spawn } from "node:child_process"
+import { constants as fsConstants } from "node:fs"
+import { access } from "node:fs/promises"
+import { delimiter, extname, isAbsolute, join } from "node:path"
 
 /**
  * Minimal result shape returned by async subprocess helpers in this package.
@@ -13,7 +16,7 @@ export interface CommandResult {
 /**
  * Spawns one subprocess without blocking the event loop and captures text output.
  */
-export function runCommand(
+export async function runCommand(
   command: string,
   args: string[],
   options: {
@@ -21,8 +24,10 @@ export function runCommand(
     stdin?: "ignore" | string
   } = {},
 ) {
+  const spawnSpec = await resolveSpawnSpec(command, args)
+
   return new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: options.cwd,
       stdio: [options.stdin === "ignore" ? "ignore" : "pipe", "pipe", "pipe"],
     })
@@ -53,4 +58,82 @@ export function runCommand(
       resolve({ status, stdout, stderr })
     })
   })
+}
+
+type SpawnSpec = {
+  command: string
+  args: string[]
+}
+
+async function resolveSpawnSpec(command: string, args: string[]): Promise<SpawnSpec> {
+  if (process.platform !== "win32") {
+    return { command, args }
+  }
+
+  const resolvedCommand = await resolveWindowsCommand(command)
+  if (!resolvedCommand || !isWindowsBatchCommand(resolvedCommand)) {
+    return { command: resolvedCommand ?? command, args }
+  }
+
+  return {
+    command: process.env.ComSpec || "cmd.exe",
+    args: ["/d", "/s", "/c", quoteCmdCommand([resolvedCommand, ...args])],
+  }
+}
+
+async function resolveWindowsCommand(command: string) {
+  for (const candidate of getWindowsCommandCandidates(command)) {
+    try {
+      await access(candidate, fsConstants.X_OK)
+      return candidate
+    } catch {
+      // Keep searching PATH/PATHEXT candidates.
+    }
+  }
+
+  return null
+}
+
+function getWindowsCommandCandidates(command: string) {
+  if (hasPathSeparator(command) || isAbsolute(command)) {
+    return getWindowsExtensionCandidates(command)
+  }
+
+  const pathDirs = (process.env.PATH || "").split(delimiter).filter((entry) => entry.length > 0)
+  return pathDirs.flatMap((dir) => getWindowsExtensionCandidates(join(dir, command)))
+}
+
+function getWindowsExtensionCandidates(commandPath: string) {
+  if (extname(commandPath)) {
+    return [commandPath]
+  }
+
+  return getWindowsPathExtensions().map((extension) => `${commandPath}${extension}`)
+}
+
+function getWindowsPathExtensions() {
+  return (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter((extension) => extension.length > 0)
+}
+
+function hasPathSeparator(value: string) {
+  return value.includes("/") || value.includes("\\")
+}
+
+function isWindowsBatchCommand(command: string) {
+  const extension = extname(command).toLowerCase()
+  return extension === ".bat" || extension === ".cmd"
+}
+
+function quoteCmdCommand(commandAndArgs: string[]) {
+  return commandAndArgs.map(quoteCmdArg).join(" ")
+}
+
+function quoteCmdArg(value: string) {
+  if (!/[()\s"&^<>|]/.test(value)) {
+    return value
+  }
+
+  return `"${value.replace(/"/g, '\\"')}"`
 }
