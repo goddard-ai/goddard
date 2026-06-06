@@ -196,6 +196,9 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
       if (!(await waitForWatchQuietPeriod(events, input.signal))) {
         break
       }
+      if (isAbortSignalAborted(input.signal)) {
+        break
+      }
       await emitQueuedWatchEvents(emitVerbose, events, session)
 
       const latest = await readSessionState(session)
