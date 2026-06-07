@@ -26,6 +26,7 @@ import { MainWorkbenchView, WorkbenchScrollPanel, WorkbenchTabPanel } from "./vi
 
 const accentStrongColor = token.var("colors.accentStrong")
 const textColor = token.var("colors.text")
+const noDragClass = "electrobun-webkit-app-region-no-drag"
 
 const mainTabCommands: Record<MainTabItemId, AppCommand> = {
   inbox: AppCommand.navigation.openInbox,
@@ -231,7 +232,7 @@ export component AppShellChrome() {
           } pending {
             <button
               aria-label="Loading ACP agent selector"
-              class={styles.switcherSideFallback}
+              class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
             />
@@ -240,7 +241,7 @@ export component AppShellChrome() {
 
             <button
               aria-label="Retry ACP agent selector"
-              class={styles.switcherSideFallback}
+              class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
             />
@@ -257,7 +258,7 @@ export component AppShellChrome() {
           } catch (error, retry) {
             console.error("Project switcher render failed.", error)
 
-            <button class={styles.switcherFallback} type="button" onClick={retry}>
+            <button class={cx(styles.switcherFallback, noDragClass)} type="button" onClick={retry}>
               "Project switcher unavailable"
             </button>
           }
@@ -268,7 +269,7 @@ export component AppShellChrome() {
           } pending {
             <button
               aria-label="Loading project subfolder selector"
-              class={styles.switcherSideFallback}
+              class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
             >
@@ -279,7 +280,7 @@ export component AppShellChrome() {
 
             <button
               aria-label="Retry project subfolder selector"
-              class={styles.switcherSideFallback}
+              class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
             >
@@ -308,7 +309,7 @@ export component AppShellChrome() {
         </div>
         <button
           aria-label="Settings"
-          class={cx(styles.actionButton, styles.settingsButton)}
+          class={cx(styles.actionButton, styles.settingsButton, noDragClass)}
           type="button"
           onClick={() => {
             AppCommand.navigation.openSettings()
@@ -465,7 +466,7 @@ component ActionButton(props: {
 }) {
   <button
     aria-label={props.ariaLabel}
-    class={cx(styles.actionButton, styles.actionItem)}
+    class={cx(styles.actionButton, styles.actionItem, noDragClass)}
     type="button"
     onClick={() => {
       props.onAction()

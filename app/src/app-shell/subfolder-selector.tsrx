@@ -1,4 +1,5 @@
 import { Popover } from "@goddard-ai/ui-primitives"
+import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
 import { Folder } from "lucide-react"
 import { useRef } from "preact/hooks"
@@ -11,6 +12,8 @@ import {
   resolvePreferredLaunchCwd,
 } from "~/sessions/launch-preferences.ts"
 import styles from "./subfolder-selector.style.ts"
+
+const noDragClass = "electrobun-webkit-app-region-no-drag"
 
 type AppShellSubfolderItem = {
   label: string;
@@ -59,7 +62,7 @@ export component AppShellSubfolderSelector() {
     aria-label={selectedSubfolderLabel
       ? `Working directory: ${selectedSubfolderLabel}`
       : "Project root"}
-    class={styles.trigger}
+    class={cx(styles.trigger, noDragClass)}
     data-icon-only={selectedSubfolderLabel ? undefined : "true"}
     type="button"
     onClick={() => {

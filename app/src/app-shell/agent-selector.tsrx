@@ -1,4 +1,5 @@
 import { Popover } from "@goddard-ai/ui-primitives"
+import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
 import { useRef } from "preact/hooks"
 
@@ -12,6 +13,8 @@ import {
 } from "~/sessions/launch-preferences.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import styles from "./agent-selector.style.ts"
+
+const noDragClass = "electrobun-webkit-app-region-no-drag"
 
 export component AppShellAgentSelector() {
   const projectContext = useProjectContext()
@@ -41,7 +44,7 @@ export component AppShellAgentSelector() {
     aria-expanded={open.value}
     aria-haspopup="menu"
     aria-label={selectedAgent ? `ACP agent: ${selectedAgent.name}` : "Select ACP agent"}
-    class={styles.trigger}
+    class={cx(styles.trigger, noDragClass)}
     type="button"
     onClick={() => {
       open.value = !open.value

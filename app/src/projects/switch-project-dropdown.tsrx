@@ -1,3 +1,4 @@
+import { cx } from "@goddard-ai/styled-system/css"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
 import { useComputed, useSignal } from "@preact/signals"
@@ -11,6 +12,8 @@ import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
 import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./switch-project-dropdown.style.ts"
+
+const noDragClass = "electrobun-webkit-app-region-no-drag"
 
 type SwitchProjectItem =
   | {
@@ -44,7 +47,7 @@ export component SwitchProjectDropdown() {
     aria-expanded={isOpen.value ? "true" : "false"}
     aria-haspopup="dialog"
     aria-label="Switch project"
-    class={styles.trigger}
+    class={cx(styles.trigger, noDragClass)}
     type="button"
     onClick={() => {
       isOpen.value = !isOpen.value
