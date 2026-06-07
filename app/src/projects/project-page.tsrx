@@ -43,6 +43,7 @@ type SessionWithWorktree = {
 
 type ProjectSessionWorktree = {
   repoRoot: string;
+  worktreeDir: string;
 }
 
 function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
@@ -477,7 +478,18 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
           <CheckoutRow kind="primary" summary={gitStatus.primary} />
 
           for (const worktree of gitStatus.worktrees) {
-            <CheckoutRow key={worktree.path} kind="worktree" summary={worktree} showArchive />
+            const worktreeSession =
+              projectSessions.find(
+                (item) => item.worktree?.worktreeDir === worktree.path,
+              )?.session ?? null
+
+            <CheckoutRow
+              key={worktree.path}
+              kind="worktree"
+              summary={worktree}
+              showArchive
+              onViewChanges={worktreeSession ? () => openSessionChanges(worktreeSession) : null}
+            />
           }
         </div>
       </section>
@@ -521,6 +533,7 @@ component EmptyState(props: { text: string }) {
 
 component CheckoutRow(props: {
   kind: "primary" | "worktree";
+  onViewChanges?: (() => void) | null;
   summary: ProjectGitCheckoutSummary;
   showArchive?: boolean;
 }) {
@@ -550,20 +563,37 @@ component CheckoutRow(props: {
       <p class={styles.rowDescription}>
         {getCheckoutDetail(props.summary)}
       </p>
-      <p class={styles.path}>
-        {props.summary.path}
-      </p>
     </div>
 
-    if (props.showArchive) {
-      <button
-        aria-label={`Archive ${props.summary.path}`}
-        class={styles.iconButton}
-        type="button"
-        onClick={() => {}}
-      >
-        <Archive size={15} strokeWidth={2.1} />
-      </button>
+    if (props.kind === "worktree") {
+      <div class={styles.checkoutActions} data-checkout-actions="true">
+        <GoodTooltip content={props.onViewChanges ? "View changes" : "No linked session changes"}>
+          <button
+            aria-label={`View changes for ${props.summary.path}`}
+            class={styles.iconButton}
+            disabled={!props.onViewChanges}
+            type="button"
+            onClick={() => {
+              props.onViewChanges?.()
+            }}
+          >
+            <FileDiff size={15} strokeWidth={2.1} />
+          </button>
+        </GoodTooltip>
+
+        if (props.showArchive) {
+          <GoodTooltip content="Archive">
+            <button
+              aria-label={`Archive ${props.summary.path}`}
+              class={styles.iconButton}
+              type="button"
+              onClick={() => {}}
+            >
+              <Archive size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
+        }
+      </div>
     }
   </article>
 }

@@ -123,6 +123,10 @@ export default {
     border: "1px solid {colors.border}",
     borderRadius: "8px",
     backgroundColor: "background",
+    "&:hover [data-checkout-actions], &:focus-within [data-checkout-actions]": {
+      opacity: "1",
+      pointerEvents: "auto",
+    },
   }),
   checkoutIcon: css({
     display: "inline-flex",
@@ -141,6 +145,15 @@ export default {
     alignItems: "center",
     gap: "8px",
     minWidth: 0,
+  }),
+  checkoutActions: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    flex: "0 0 auto",
+    opacity: "0",
+    pointerEvents: "none",
+    transition: "opacity 120ms ease",
   }),
   sessionList: css({
     display: "grid",
@@ -245,6 +258,10 @@ export default {
     cursor: "pointer",
     _hover: {
       color: "text",
+    },
+    _disabled: {
+      cursor: "not-allowed",
+      opacity: "0.46",
     },
   }),
   secondaryButton: css({
