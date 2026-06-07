@@ -1,6 +1,5 @@
 import { Popover } from "@goddard-ai/ui-primitives"
 import { useSignal } from "@preact/signals"
-import { Bot } from "lucide-react"
 import { useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
@@ -11,6 +10,7 @@ import {
   resolvePreferredLaunchAgentId,
   resolvePreferredLaunchCwd,
 } from "~/sessions/launch-preferences.ts"
+import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import styles from "./agent-selector.style.ts"
 
 export component AppShellAgentSelector() {
@@ -53,11 +53,7 @@ export component AppShellAgentSelector() {
       }
     }}
   >
-    if (selectedAgent?.icon) {
-      <img alt="" class={styles.icon} src={selectedAgent.icon} />
-    } else {
-      <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
-    }
+    <AcpAgentIcon class={styles.icon} icon={selectedAgent?.icon} />
   </button>
 
   <Popover
@@ -86,11 +82,7 @@ export component AppShellAgentSelector() {
               open.value = false
             }}
           >
-            if (adapter.icon) {
-              <img alt="" class={styles.icon} src={adapter.icon} />
-            } else {
-              <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
-            }
+            <AcpAgentIcon class={styles.icon} icon={adapter.icon} />
 
             <span class={styles.itemBody}>
               <span class={styles.itemLabel}>{adapter.name}</span>

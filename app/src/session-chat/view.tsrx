@@ -1,7 +1,6 @@
 import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
 import {
-  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -32,6 +31,7 @@ import {
   findSessionModeConfigOption,
 } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
+import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import {
   SessionConfigOptionSelector,
   SessionModeSelector,
@@ -544,11 +544,7 @@ export default component SessionChatView(props: {
                           aria-label={`ACP agent: ${chat.session.agentName}`}
                           class={styles.composerAgentControl}
                         >
-                          if (agentIcon) {
-                            <img alt="" class={styles.composerAgentIcon} src={agentIcon} />
-                          } else {
-                            <Bot aria-hidden={true} size={16} strokeWidth={2.2} />
-                          }
+                          <AcpAgentIcon class={styles.composerAgentIcon} icon={agentIcon} />
                         </div>
                       </GoodTooltip>
                     }

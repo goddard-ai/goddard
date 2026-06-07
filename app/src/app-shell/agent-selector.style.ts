@@ -28,8 +28,8 @@ export default {
   icon: css({
     width: "16px",
     height: "16px",
+    color: "inherit",
     borderRadius: "4px",
-    objectFit: "cover",
   }),
   menu: css({
     display: "grid",

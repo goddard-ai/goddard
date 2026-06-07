@@ -86,7 +86,6 @@ export default {
     flexShrink: "0",
     borderRadius: "4px",
     color: "inherit",
-    objectFit: "cover",
     "[data-theme=dark] &": {
       color: "white",
     },

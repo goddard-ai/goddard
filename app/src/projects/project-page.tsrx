@@ -15,10 +15,8 @@ import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
 import { SessionLaunchForm } from "~/sessions/launch-form.tsrx"
 import { SessionLaunchFormState } from "~/sessions/launch-form-state.ts"
-import {
-  isKeptSessionLaunchLease,
-  recordSessionLaunchAgentUse,
-} from "~/sessions/launch-lease-keeper.tsrx"
+import { isKeptSessionLaunchLease } from "~/sessions/launch-lease-keeper.tsrx"
+import { recordSessionLaunchAgentUse } from "~/sessions/launch-preferences.ts"
 import { evictSessionHistory } from "~/sessions/mutations.ts"
 import { createSession, releaseSessionLaunchLease } from "~/sessions/mutations.ts"
 import { findNearestProjectPath } from "./project-context.ts"

@@ -10,6 +10,7 @@ import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import { Popover } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
+import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import styles from "./select-menu.style.ts"
 
 type SelectItemIconProps = {
@@ -146,7 +147,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                 strokeWidth={2.2}
               />
             } else if (selectedItem?.icon) {
-              <img alt="" class={styles.itemIcon} src={selectedItem.icon} />
+              <AcpAgentIcon class={styles.itemIcon} icon={selectedItem.icon} />
             }
 
             <span class={styles.triggerLabel}>
@@ -542,7 +543,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                       strokeWidth={2.2}
                     />
                   } else if (item.icon) {
-                    <img alt="" class={styles.itemIcon} src={item.icon} />
+                    <AcpAgentIcon class={styles.itemIcon} icon={item.icon} />
                   }
 
                   <span class={styles.menuButtonText}>
