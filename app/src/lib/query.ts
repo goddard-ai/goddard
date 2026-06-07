@@ -43,6 +43,8 @@ type QueryResults<TQueries extends readonly QueryDescriptor[]> = {
   [TKey in keyof TQueries]: QueryResult<TQueries[TKey]["queryFn"]>
 }
 
+type QueryDataUpdater<TData, TArgs extends QueryArgs> = (data: TData, args: TArgs) => TData
+
 type QueryBuilder = {
   <TQueryFn extends AnyQueryFunction>(
     queryFn: TQueryFn,
@@ -198,6 +200,43 @@ export class QueryClient {
   }
 
   /**
+   * Updates one existing resolved cache entry without starting a fetch.
+   */
+  write<TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+    updateData: QueryDataUpdater<Awaited<ReturnType<TQueryFn>>, Parameters<TQueryFn>>,
+  ) {
+    const entry = this.entries.get(this.getQueryKey(queryFn, args))
+
+    if (!entry?.hasData) {
+      return false
+    }
+
+    return this.writeEntry(entry, updateData)
+  }
+
+  /**
+   * Updates every existing resolved cache entry for one query function without starting a fetch.
+   */
+  writeAll<TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    updateData: QueryDataUpdater<Awaited<ReturnType<TQueryFn>>, Parameters<TQueryFn>>,
+  ) {
+    let updatedCount = 0
+
+    for (const key of this.entryKeysByFunction.get(queryFn) ?? []) {
+      const entry = this.entries.get(key)
+
+      if (entry?.hasData && this.writeEntry(entry, updateData)) {
+        updatedCount += 1
+      }
+    }
+
+    return updatedCount
+  }
+
+  /**
    * Drops one inactive cached query so the next read waits for a fresh first result.
    */
   evict<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
@@ -346,6 +385,21 @@ export class QueryClient {
     if (entry.subscribers.size > 0 && !entry.promise) {
       void this.fetchEntry(entry, entry.hasData)
     }
+  }
+
+  private writeEntry<TData, TArgs extends QueryArgs>(
+    entry: QueryEntry,
+    updateData: QueryDataUpdater<TData, TArgs>,
+  ) {
+    const nextData = updateData(entry.data as TData, entry.args as TArgs)
+
+    if (Object.is(nextData, entry.data)) {
+      return false
+    }
+
+    entry.data = nextData
+    this.notify(entry)
+    return true
   }
 
   private notify(entry: QueryEntry) {

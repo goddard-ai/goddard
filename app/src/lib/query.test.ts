@@ -77,6 +77,90 @@ test("QueryClient.invalidate keeps stale data visible until the refetch resolves
   expect(notifications).toEqual(["update"])
 })
 
+test("QueryClient.write updates one resolved cache entry without creating missing entries", async () => {
+  let deferred = createDeferred<number>()
+  const notifications: string[] = []
+  const queryClient = new QueryClient()
+  const loadSessionCount = vi.fn((_sessionId: string) => deferred.promise)
+  const queryKey = queryClient.getQueryKey(loadSessionCount, ["ses_1"])
+
+  const firstLoad = waitForSuspendedRead(() =>
+    queryClient.read(queryKey, loadSessionCount, ["ses_1"]),
+  )
+  await Promise.resolve()
+  deferred.resolve(1)
+  await firstLoad
+
+  deferred = createDeferred<number>()
+  loadSessionCount.mockReturnValueOnce(deferred.promise)
+  queryClient.subscribe(queryKey, () => {
+    notifications.push("update")
+  })
+
+  expect(queryClient.write(loadSessionCount, ["ses_missing"], (count) => count + 1)).toBe(false)
+  expect(queryClient.write(loadSessionCount, ["ses_1"], (count) => count + 1)).toBe(true)
+  expect(queryClient.read(queryKey, loadSessionCount, ["ses_1"])).toBe(2)
+  expect(notifications).toEqual(["update"])
+})
+
+test("QueryClient.writeAll updates every resolved cache entry for one query function", async () => {
+  const notifications: string[] = []
+  const queryClient = new QueryClient()
+  const loadSessionCount = vi.fn(
+    async (sessionId: string): Promise<number> => (sessionId === "ses_1" ? 1 : 10),
+  )
+  const loadProjectCount = vi.fn(async (_projectPath: string): Promise<number> => 100)
+  const firstQueryKey = queryClient.getQueryKey(loadSessionCount, ["ses_1"])
+  const secondQueryKey = queryClient.getQueryKey(loadSessionCount, ["ses_2"])
+  const otherQueryKey = queryClient.getQueryKey(loadProjectCount, ["/repo"])
+
+  await waitForSuspendedRead(() => queryClient.read(firstQueryKey, loadSessionCount, ["ses_1"]))
+  await waitForSuspendedRead(() => queryClient.read(secondQueryKey, loadSessionCount, ["ses_2"]))
+  await waitForSuspendedRead(() => queryClient.read(otherQueryKey, loadProjectCount, ["/repo"]))
+
+  loadSessionCount.mockImplementation(() => new Promise(() => {}))
+  loadProjectCount.mockImplementation(() => new Promise(() => {}))
+  queryClient.subscribe(firstQueryKey, () => {
+    notifications.push("first")
+  })
+  queryClient.subscribe(secondQueryKey, () => {
+    notifications.push("second")
+  })
+  queryClient.subscribe(otherQueryKey, () => {
+    notifications.push("other")
+  })
+
+  expect(queryClient.writeAll(loadSessionCount, (count) => count + 1)).toBe(2)
+
+  expect(queryClient.read(firstQueryKey, loadSessionCount, ["ses_1"])).toBe(2)
+  expect(queryClient.read(secondQueryKey, loadSessionCount, ["ses_2"])).toBe(11)
+  expect(queryClient.read(otherQueryKey, loadProjectCount, ["/repo"])).toBe(100)
+  expect(notifications).toEqual(["first", "second"])
+})
+
+test("QueryClient.writeAll does not notify when updater returns existing data", async () => {
+  const notifications: string[] = []
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(
+    async (_sessionId: string): Promise<{ id: string }> => ({
+      id: "ses_1",
+    }),
+  )
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+
+  await waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+
+  loadSession.mockImplementation(() => new Promise(() => {}))
+  queryClient.subscribe(queryKey, () => {
+    notifications.push("update")
+  })
+  const currentSession = queryClient.read(queryKey, loadSession, ["ses_1"])
+
+  expect(queryClient.writeAll(loadSession, (session) => session)).toBe(0)
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe(currentSession)
+  expect(notifications).toEqual([])
+})
+
 test("QueryClient.evict drops inactive cached data before the next read", async () => {
   let deferred = createDeferred<string>()
   const queryClient = new QueryClient()
