@@ -160,14 +160,6 @@ function getCheckoutMainLabel(summary: ProjectGitCheckoutSummary) {
     details.push(summary.head)
   }
 
-  if (summary.ahead > 0) {
-    details.push(`ahead ${summary.ahead}`)
-  }
-
-  if (summary.behind > 0) {
-    details.push(`behind ${summary.behind}`)
-  }
-
   return details.join(" · ")
 }
 
