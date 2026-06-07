@@ -13,7 +13,12 @@ import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input
 import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
 import { type SessionLaunchFormState } from "./launch-form-state.ts"
-import { isKeptSessionLaunchLease, recordSessionLaunchAgentUse } from "./launch-lease-keeper.tsrx"
+import {
+  recordSessionLaunchAgentUse,
+  recordSessionLaunchCwdUse,
+  resolvePreferredLaunchCwd,
+} from "./launch-preferences.ts"
+import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
 import { releaseSessionLaunchLease } from "./mutations.ts"
 
 export component SessionLaunchLoadingSelect(props: { label: string }) {
@@ -105,7 +110,18 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
   const selectedValue = form.draftSubpackagePath.value ?? projectPath
 
   useEffect(() => {
-    if (!projectPath || form.draftSubpackagePath.value === null) {
+    if (!projectPath) {
+      return
+    }
+
+    if (form.draftSubpackagePath.value === null) {
+      const preferredCwd = resolvePreferredLaunchCwd(projectPath, subpackages)
+
+      if (preferredCwd !== projectPath) {
+        form.draftSubpackagePath.value = preferredCwd
+        form.launchPreview.value = null
+      }
+
       return
     }
 
@@ -129,6 +145,7 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
     value={selectedValue}
     onValueChange={(value) => {
       form.draftSubpackagePath.value = value === projectPath ? null : value
+      recordSessionLaunchCwdUse(projectPath, value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
     }}

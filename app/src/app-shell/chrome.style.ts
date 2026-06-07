@@ -61,6 +61,31 @@ export default {
     minWidth: "140px",
     transform: "translateX(-50%)",
   }),
+  switcherLeftControl: css({
+    position: "absolute",
+    top: "0",
+    right: "calc(100% + 8px)",
+    height: "28px",
+  }),
+  switcherRightControl: css({
+    position: "absolute",
+    top: "0",
+    left: "calc(100% + 8px)",
+    height: "28px",
+  }),
+  switcherSideFallback: css({
+    width: "28px",
+    height: "28px",
+    border: "none",
+    borderRadius: "8px",
+    backgroundColor: "panel",
+    cursor: "pointer",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+  }),
   switcherFallback: css({
     width: "100%",
     height: "28px",

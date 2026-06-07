@@ -7,10 +7,11 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
-import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
+import { recordSessionLaunchAgentUse } from "./launch-preferences.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
-import { isKeptSessionLaunchLease, recordSessionLaunchAgentUse } from "./launch-lease-keeper.tsrx"
+import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
+import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./display.ts"
 

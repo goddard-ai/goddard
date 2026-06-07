@@ -12,6 +12,7 @@ import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
+import { AppShellAgentSelector } from "./agent-selector.tsrx"
 import styles from "./chrome.style.ts"
 import {
   appShellDefaultSidebarDot,
@@ -19,6 +20,7 @@ import {
   type AppShellSidebarDot,
   type AppShellSidebarState,
 } from "./config.ts"
+import { AppShellSubfolderSelector } from "./subfolder-selector.tsrx"
 import { MainWorkbenchView, WorkbenchScrollPanel, WorkbenchTabPanel } from "./views.tsrx"
 
 const accentStrongColor = token.var("colors.accentStrong")
@@ -222,6 +224,27 @@ export component AppShellChrome() {
       }}
     >
       <div class={cx(styles.switcher, "electrobun-webkit-app-region-no-drag")}>
+        <div class={styles.switcherLeftControl}>
+          try {
+            <AppShellAgentSelector />
+          } pending {
+            <button
+              aria-label="Loading ACP agent selector"
+              class={styles.switcherSideFallback}
+              disabled={true}
+              type="button"
+            />
+          } catch (error, retry) {
+            console.error("ACP agent selector render failed.", error)
+
+            <button
+              aria-label="Retry ACP agent selector"
+              class={styles.switcherSideFallback}
+              type="button"
+              onClick={retry}
+            />
+          }
+        </div>
         <div
           class={css({
             position: "relative",
@@ -236,6 +259,27 @@ export component AppShellChrome() {
             <button class={styles.switcherFallback} type="button" onClick={retry}>
               "Project switcher unavailable"
             </button>
+          }
+        </div>
+        <div class={styles.switcherRightControl}>
+          try {
+            <AppShellSubfolderSelector />
+          } pending {
+            <button
+              aria-label="Loading project subfolder selector"
+              class={styles.switcherSideFallback}
+              disabled={true}
+              type="button"
+            />
+          } catch (error, retry) {
+            console.error("Project subfolder selector render failed.", error)
+
+            <button
+              aria-label="Retry project subfolder selector"
+              class={styles.switcherSideFallback}
+              type="button"
+              onClick={retry}
+            />
           }
         </div>
       </div>
