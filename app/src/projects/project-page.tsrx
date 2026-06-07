@@ -2,7 +2,16 @@ import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import type { ProjectGitCheckoutSummary } from "~/shared/desktop-rpc.ts"
 import { useModel } from "@preact/signals"
-import { Archive, CircleDot, FileDiff, GitBranch, Inbox, MessageSquare } from "lucide-react"
+import {
+  Archive,
+  CircleDot,
+  FileDiff,
+  GitBranch,
+  GitFork,
+  Inbox,
+  Laptop,
+  MessageSquare,
+} from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -10,6 +19,7 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getProjectGitStatus } from "~/desktop-host.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "~/inbox/text.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useQueries } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
@@ -89,11 +99,7 @@ function getCheckoutDetail(summary: ProjectGitCheckoutSummary) {
     return summary.errorMessage
   }
 
-  const details: string[] = [summary.branch ? summary.branch : "Detached HEAD"]
-
-  if (summary.head) {
-    details.push(summary.head)
-  }
+  const details: string[] = []
 
   if (summary.changedCount > 0) {
     details.push(formatCountLabel(summary.changedCount, "changed file"))
@@ -101,6 +107,24 @@ function getCheckoutDetail(summary: ProjectGitCheckoutSummary) {
 
   if (summary.untrackedCount > 0) {
     details.push(formatCountLabel(summary.untrackedCount, "untracked file"))
+  }
+
+  if (details.length === 0) {
+    return summary.path
+  }
+
+  return `${details.join(" • ")} • ${summary.path}`
+}
+
+function getCheckoutMainLabel(summary: ProjectGitCheckoutSummary) {
+  if (summary.errorMessage) {
+    return "Git status unavailable"
+  }
+
+  const details: string[] = [summary.branch ? summary.branch : "Detached HEAD"]
+
+  if (summary.head) {
+    details.push(summary.head)
   }
 
   if (summary.ahead > 0) {
@@ -445,10 +469,10 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
           count={gitStatus.worktrees.length + 1}
         />
         <div class={styles.list}>
-          <CheckoutRow label="Primary checkout" summary={gitStatus.primary} />
+          <CheckoutRow kind="primary" summary={gitStatus.primary} />
 
           for (const worktree of gitStatus.worktrees) {
-            <CheckoutRow key={worktree.path} label="Worktree" summary={worktree} showArchive />
+            <CheckoutRow key={worktree.path} kind="worktree" summary={worktree} showArchive />
           }
         </div>
       </section>
@@ -491,15 +515,25 @@ component EmptyState(props: { text: string }) {
 }
 
 component CheckoutRow(props: {
-  label: string;
+  kind: "primary" | "worktree";
   summary: ProjectGitCheckoutSummary;
   showArchive?: boolean;
 }) {
+  const KindIcon =
+    props.kind === "primary" ? Laptop : GitFork
+  const kindLabel =
+    props.kind === "primary" ? "Primary checkout" : "Worktree"
+
   <article class={styles.checkoutRow}>
+    <GoodTooltip content={kindLabel}>
+      <span class={styles.checkoutIcon} aria-label={kindLabel}>
+        <KindIcon aria-hidden={true} size={16} strokeWidth={2.2} />
+      </span>
+    </GoodTooltip>
     <div class={styles.rowMain}>
       <div class={styles.checkoutHeader}>
         <h3 class={styles.rowTitle}>
-          {props.label}
+          {getCheckoutMainLabel(props.summary)}
         </h3>
         <span
           class={styles.statusBadge}

@@ -124,6 +124,18 @@ export default {
     borderRadius: "8px",
     backgroundColor: "background",
   }),
+  checkoutIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "30px",
+    height: "30px",
+    flex: "0 0 auto",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "surface",
+    color: "muted",
+  }),
   checkoutHeader: css({
     display: "flex",
     alignItems: "center",
