@@ -6,6 +6,7 @@ import { act } from "preact/test-utils"
 import { appToaster, createToaster, GoodToaster } from "./good-toaster.tsrx"
 
 mock.module("lucide-react", () => ({
+  LoaderCircle: () => <svg aria-hidden="true" data-icon="loader" />,
   X: () => <svg aria-hidden="true" />,
 }))
 
@@ -42,6 +43,41 @@ test("toaster keeps error toasts visible by default", () => {
   vi.advanceTimersByTime(4000)
 
   expect(toaster.toasts.value.map((toast) => toast.title)).toEqual(["Failed"])
+})
+
+test("toaster keeps loading toasts visible by default", () => {
+  vi.useFakeTimers()
+  const toaster = createToaster({ max: 4 })
+
+  toaster.create({
+    title: "Loading",
+    type: "loading",
+  })
+
+  vi.advanceTimersByTime(4000)
+
+  expect(toaster.toasts.value.map((toast) => toast.title)).toEqual(["Loading"])
+})
+
+test("toaster updates an existing toast and reschedules dismissal", () => {
+  vi.useFakeTimers()
+  const toaster = createToaster({ max: 4 })
+
+  const id = toaster.create({
+    title: "Loading",
+    type: "loading",
+  })
+
+  toaster.update(id, {
+    title: "Saved",
+    type: "success",
+  })
+
+  expect(toaster.toasts.value.map((toast) => toast.title)).toEqual(["Saved"])
+
+  vi.advanceTimersByTime(4000)
+
+  expect(toaster.toasts.value).toHaveLength(0)
 })
 
 test("toaster honors explicit durations for any toast type", () => {

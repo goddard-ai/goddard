@@ -1,10 +1,10 @@
 import { signal } from "@preact/signals"
 import { OverlayPortal } from "@goddard-ai/ui-primitives"
-import { X } from "lucide-react"
+import { LoaderCircle, X } from "lucide-react"
 
 import styles from "./good-toaster.style.ts"
 
-type ToastType = "success" | "info" | "error"
+type ToastType = "success" | "info" | "error" | "loading"
 
 type ToastInput = {
   id?: string;
@@ -28,12 +28,12 @@ type ToasterOptions = {
 
 let nextToastId = 0
 
-function resolveToastDuration(input: ToastInput) {
+function resolveToastDuration(input: Pick<ToastInput, "duration" | "type">) {
   if (input.duration !== undefined) {
     return input.duration
   }
 
-  return input.type === "error" ? null : 4000
+  return input.type === "error" || input.type === "loading" ? null : 4000
 }
 
 function createToastRecord(input: ToastInput): ToastRecord {
@@ -81,23 +81,45 @@ export function createToaster(options: ToasterOptions) {
     )
   }
 
+  function applyToastLimit(nextToasts: ToastRecord[]) {
+    while (nextToasts.length > options.max) {
+      const toastToDismiss = findToastToDismiss(nextToasts)
+      if (!toastToDismiss) {
+        break
+      }
+
+      clearToastTimer(toastToDismiss.id)
+      nextToasts.splice(nextToasts.indexOf(toastToDismiss), 1)
+    }
+
+    return nextToasts
+  }
+
   return {
     toasts,
     create(input: ToastInput) {
       const toast = createToastRecord(input)
-      const nextToasts = [...toasts.value, toast]
+      toasts.value = applyToastLimit([...toasts.value, toast])
+      scheduleDismiss(toast)
+      return toast.id
+    },
+    update(id: string, input: Omit<ToastInput, "id">) {
+      const toast = createToastRecord({
+        ...input,
+        id,
+      })
+      const toastIndex = toasts.value.findIndex((candidate) => candidate.id === id)
 
-      while (nextToasts.length > options.max) {
-        const toastToDismiss = findToastToDismiss(nextToasts)
-        if (!toastToDismiss) {
-          break
-        }
+      clearToastTimer(id)
 
-        clearToastTimer(toastToDismiss.id)
-        nextToasts.splice(nextToasts.indexOf(toastToDismiss), 1)
+      if (toastIndex === -1) {
+        toasts.value = applyToastLimit([...toasts.value, toast])
+      } else {
+        toasts.value = toasts.value.map(
+          (candidate, index) => index === toastIndex ? toast : candidate,
+        )
       }
 
-      toasts.value = nextToasts
       scheduleDismiss(toast)
       return toast.id
     },
@@ -121,7 +143,12 @@ export component GoodToaster() {
     <div aria-live="polite" aria-relevant="additions text" class={styles.group}>
       for (const toast of appToaster.toasts.value) {
         <div key={toast.id} class={styles.root} data-state="open" data-type={toast.type}>
-          <span aria-hidden="true" class={styles.accent} />
+          if (toast.type === "loading") {
+            <LoaderCircle aria-hidden="true" class={styles.loadingIcon} size={16} />
+          } else {
+            <span aria-hidden="true" class={styles.accent} />
+          }
+
           <div class={styles.body}>
             <span class={styles.title}>
               {toast.title}

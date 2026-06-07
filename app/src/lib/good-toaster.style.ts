@@ -25,7 +25,7 @@ export default {
   root: css({
     "--toast-accent": accentStrongColor,
     display: "grid",
-    gridTemplateColumns: "10px minmax(0, 1fr) auto",
+    gridTemplateColumns: "18px minmax(0, 1fr) auto",
     alignItems: "start",
     gap: "12px",
     width: "min(360px, calc(100vw - 24px))",
@@ -57,6 +57,9 @@ export default {
       borderColor: "danger",
       boxShadow: `0 24px 48px color-mix(in srgb, ${dangerColor} 18%, transparent)`,
     },
+    "&[data-type='loading']": {
+      "--toast-accent": accentStrongColor,
+    },
     "@media (max-width: 640px)": {
       width: "calc(100vw - 24px)",
     },
@@ -67,6 +70,12 @@ export default {
     borderRadius: "999px",
     backgroundColor: "var(--toast-accent)",
     opacity: "0.92",
+    justifySelf: "center",
+  }),
+  loadingIcon: css({
+    marginTop: "2px",
+    color: "var(--toast-accent)",
+    animation: "spin 1s linear infinite",
   }),
   body: css({
     display: "grid",

@@ -51,6 +51,11 @@ component SessionLaunchDialog(props: {
     }
 
     isLaunching.value = true
+    const toastId = appToaster.create({
+      description: form.effectiveCwd.value,
+      title: "Launching session",
+      type: "loading",
+    })
 
     try {
       const projectPath = form.draftProjectPath.value
@@ -73,17 +78,19 @@ component SessionLaunchDialog(props: {
           sessionTitle,
         },
       })
-      // Defer the toast until the submit control finishes clearing its editor after onSubmit.
-      window.setTimeout(() => {
-        appToaster.create({
-          description: sessionTitle,
-          duration: 2800,
-          title: "Session launched",
-          type: "success",
-        })
-      }, 0)
+      appToaster.update(toastId, {
+        description: sessionTitle,
+        duration: 2800,
+        title: "Session launched",
+        type: "success",
+      })
     } catch (error) {
       console.error("Failed to create session.", error)
+      appToaster.update(toastId, {
+        description: "The session could not be created.",
+        title: "Session launch failed",
+        type: "error",
+      })
     } finally {
       isLaunching.value = false
     }
@@ -150,9 +157,7 @@ component SessionLaunchDialog(props: {
       {form}
       disabled={isLaunching.value}
       onEscape={() => {
-        if (!isLaunching.value) {
-          props.open.value = false
-        }
+        props.open.value = false
       }}
       onSubmit={launchSession}
       {projects}

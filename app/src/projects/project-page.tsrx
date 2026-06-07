@@ -1,7 +1,7 @@
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import type { ProjectGitCheckoutSummary } from "~/shared/desktop-rpc.ts"
-import { useModel } from "@preact/signals"
+import { useModel, useSignal } from "@preact/signals"
 import {
   AlertCircle,
   Archive,
@@ -253,6 +253,7 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
 
 component ProjectLaunchSection(props: { project: ProjectRecord }) {
   const form = useModel(SessionLaunchFormState)
+  const isLaunching = useSignal(false)
   const workbenchTabSet = useWorkbenchTabSet()
   const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
@@ -262,7 +263,7 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
   const hasSubpackageSelector = form.draftProjectPath.value !== null
   const hasThinkingLevel = form.thinkingOption.value !== null
-  const canSubmit = form.canSubmit.value
+  const canSubmit = form.canSubmit.value && !isLaunching.value
 
   useEffect(() => {
     if (form.draftProjectPath.value !== props.project.path) {
@@ -271,11 +272,22 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   }, [form, form.draftProjectPath.value, props.project.path])
 
   async function launchSession() {
+    if (isLaunching.value) {
+      return
+    }
+
     const sessionInput = form.sessionInput.value
 
     if (!sessionInput) {
       return
     }
+
+    isLaunching.value = true
+    const toastId = appToaster.create({
+      description: form.effectiveCwd.value,
+      title: "Launching session",
+      type: "loading",
+    })
 
     try {
       const launchLeaseId = form.launchPreview.value?.launchLeaseId
@@ -298,16 +310,21 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
           sessionTitle,
         },
       })
-      window.setTimeout(() => {
-        appToaster.create({
-          description: sessionTitle,
-          duration: 2800,
-          title: "Session launched",
-          type: "success",
-        })
-      }, 0)
+      appToaster.update(toastId, {
+        description: sessionTitle,
+        duration: 2800,
+        title: "Session launched",
+        type: "success",
+      })
     } catch (error) {
       console.error("Failed to create session.", error)
+      appToaster.update(toastId, {
+        description: "The session could not be created.",
+        title: "Session launch failed",
+        type: "error",
+      })
+    } finally {
+      isLaunching.value = false
     }
   }
 
@@ -316,25 +333,25 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   }, { active: false })
   useAppCommand(AppCommand.sessionInput.openSubpackageSelector, () => {
     form.setOpenPicker("subpackage")
-  }, { active: hasSubpackageSelector })
+  }, { active: hasSubpackageSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
     form.setOpenPicker("adapter")
-  }, { active: hasAdapterSelector })
+  }, { active: hasAdapterSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.cycleLaunchLocation()
-  }, { active: hasLocationSelector })
+  }, { active: hasLocationSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
     form.setOpenPicker("branch")
-  }, { active: hasBranchSelector })
+  }, { active: hasBranchSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openApprovalPresetSelector, () => {
     form.setOpenPicker("mode")
-  }, { active: form.modeOption.value !== null })
+  }, { active: form.modeOption.value !== null && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
     form.setOpenPicker("model")
-  }, { active: hasModelSelector })
+  }, { active: hasModelSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
     form.setOpenPicker("thinking")
-  }, { active: hasThinkingLevel })
+  }, { active: hasThinkingLevel && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.submit, () => {
     void launchSession()
   }, { active: canSubmit })
@@ -342,6 +359,7 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   <section class={styles.launchPanel}>
     <SessionLaunchForm
       {form}
+      disabled={isLaunching.value}
       showProjectSelector={false}
       onSubmit={launchSession}
       projects={[props.project]}
