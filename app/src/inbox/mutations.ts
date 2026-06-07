@@ -8,7 +8,6 @@ import type {
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { applyInboxItemsToCache } from "./cache.ts"
 
 export const InboxPageMutations = createMutationsProvider<{
   bulkUpdateInboxItems: (input: BulkUpdateInboxItemsRequest) => Promise<unknown> | unknown
@@ -25,7 +24,6 @@ export function invalidateInboxQueries() {
 /** Updates one daemon inbox row and refreshes any mounted inbox lists. */
 export async function updateInboxItem(input: UpdateInboxItemRequest) {
   const result = await goddardSdk.inbox.update(input)
-  applyInboxItemsToCache([result.item])
   invalidateInboxQueries()
   return result
 }
@@ -33,7 +31,6 @@ export async function updateInboxItem(input: UpdateInboxItemRequest) {
 /** Updates multiple daemon inbox rows and refreshes any mounted inbox lists. */
 export async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
   const result = await goddardSdk.inbox.bulkUpdate(input)
-  applyInboxItemsToCache(result.items)
   invalidateInboxQueries()
   return result
 }
@@ -41,9 +38,6 @@ export async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
 /** Completes one session-owned inbox row through the entity-specific daemon mutation. */
 export async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
   const result = await goddardSdk.inbox.completeSession(input)
-  if (result.item) {
-    applyInboxItemsToCache([result.item])
-  }
   invalidateInboxQueries()
   return result
 }

@@ -13,7 +13,6 @@ import { appToaster } from "~/lib/good-toaster.tsrx"
 import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
-import { applyInboxItemsToCache } from "./cache.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import {
   allInboxStatuses,
@@ -133,7 +132,6 @@ component InboxPage() {
       }
 
       setRealtimeErrorMessage(null)
-      applyInboxItemsToCache([event.item])
       handleInboxItemsLoaded([event.item])
       invalidateInboxQueries()
     }).then(

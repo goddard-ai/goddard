@@ -20,7 +20,6 @@ import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
 import { useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
-import { applyInboxItemsToCache } from "~/inbox/cache.ts"
 import { markInboxSessionVisited } from "~/inbox/session-visit.ts"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
@@ -228,12 +227,7 @@ export default component SessionChatView(props: {
 
                   await page.headerAction.run("complete", async () => {
                     try {
-                      const result = await completeSession(chat.session.id)
-
-                      if (result.item) {
-                        applyInboxItemsToCache([result.item])
-                      }
-
+                      await completeSession(chat.session.id)
                       chat.toggleCompletedHidden(true)
                     } catch (error) {
                       console.error("Failed to complete session.", error)

@@ -2,7 +2,6 @@ import type { InboxEntityId, InboxItem } from "@goddard-ai/inbox/schema"
 
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { applyInboxItemsToCache } from "./cache.ts"
 import { getInboxEntityKind } from "./entity-kind.ts"
 
 const knownInboxItemsByEntityId = new Map<InboxEntityId, InboxItem>()
@@ -33,7 +32,6 @@ async function markVisitedInboxItemRead(item: InboxItem) {
       status: "read",
     })
     knownInboxItemsByEntityId.set(result.item.entityId, result.item)
-    applyInboxItemsToCache([result.item])
     queryClient.invalidate(goddardSdk.inbox.list)
   } catch (error) {
     console.error("Failed to mark visited inbox session read.", error)
