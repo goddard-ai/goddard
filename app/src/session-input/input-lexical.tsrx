@@ -12,6 +12,7 @@ import {
   KEY_ARROW_UP_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
+  KEY_TAB_COMMAND,
   PASTE_COMMAND,
 } from "lexical"
 import { useEffect } from "preact/hooks"
@@ -152,6 +153,19 @@ export component SessionInputPlugins(props: {
       },
       COMMAND_PRIORITY_HIGH,
     )
+    const unregisterTab = editor.registerCommand(
+      KEY_TAB_COMMAND,
+      (event) => {
+        if (!props.menu) {
+          return false
+        }
+
+        event?.preventDefault()
+        props.onAcceptMenu()
+        return true
+      },
+      COMMAND_PRIORITY_HIGH,
+    )
     const unregisterEscape = editor.registerCommand(
       KEY_ESCAPE_COMMAND,
       (event) => {
@@ -191,6 +205,7 @@ export component SessionInputPlugins(props: {
       unregisterEnter()
       unregisterArrowDown()
       unregisterArrowUp()
+      unregisterTab()
       unregisterEscape()
       unregisterPaste()
     }
