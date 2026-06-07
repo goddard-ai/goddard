@@ -78,7 +78,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openTasks]: ["Alt+Digit5"],
     [openRoadmap]: ["Alt+Digit6"],
     [openSettings]: ["Mod+,"],
-    [openProjectSelector]: ["Mod+p"],
+    [openProjectSelector]: ["Mod+o"],
     [openAdapterSelector]: ["Mod+Shift+a"],
     [openLocationSelector]: ["Mod+Shift+l"],
     [openBranchSelector]: ["Mod+Shift+b"],

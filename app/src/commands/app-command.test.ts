@@ -69,7 +69,7 @@ function TestCommandHandler(props: {
 
 function TestLayeredCommands(props: {
   dialogActive: boolean
-  onPalette: (match?: unknown) => void
+  onSwitchProject: (match?: unknown) => void
   onProject: (match?: unknown) => void
   projectActive: boolean
 }) {
@@ -77,8 +77,8 @@ function TestLayeredCommands(props: {
     Fragment,
     {},
     h(TestCommandHandler, {
-      command: AppCommand.navigation.openCommandPalette,
-      onMatch: props.onPalette,
+      command: AppCommand.navigation.openSwitchProject,
+      onMatch: props.onSwitchProject,
     }),
     h(
       CommandLayerProvider,
@@ -585,9 +585,9 @@ test("closable tab drives runtime availability for closeActiveTab", async () => 
   }
 })
 
-test("active dialog layer lets launch-dialog selectors override the global palette binding", async () => {
+test("active dialog layer lets launch-dialog selectors override the global project switcher binding", async () => {
   const { registry, runtimeDocument, cleanup } = createTestRegistry()
-  const paletteMatches: unknown[] = []
+  const switchProjectMatches: unknown[] = []
   const projectMatches: unknown[] = []
   const container = runtimeDocument.createElement("div")
   runtimeDocument.body.append(container)
@@ -596,8 +596,8 @@ test("active dialog layer lets launch-dialog selectors override the global palet
     render(
       h(TestLayeredCommands, {
         dialogActive: false,
-        onPalette(match) {
-          paletteMatches.push(match)
+        onSwitchProject(match) {
+          switchProjectMatches.push(match)
         },
         onProject(match) {
           projectMatches.push(match)
@@ -610,19 +610,19 @@ test("active dialog layer lets launch-dialog selectors override the global palet
     registry.applyKeymapSnapshot("goddard", {})
 
     dispatchKeydown(runtimeDocument, {
-      key: "p",
-      code: "KeyP",
+      key: "o",
+      code: "KeyO",
       ctrlKey: true,
     })
 
-    expect(paletteMatches).toHaveLength(1)
+    expect(switchProjectMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(0)
 
     render(
       h(TestLayeredCommands, {
         dialogActive: true,
-        onPalette(match) {
-          paletteMatches.push(match)
+        onSwitchProject(match) {
+          switchProjectMatches.push(match)
         },
         onProject(match) {
           projectMatches.push(match)
@@ -638,12 +638,12 @@ test("active dialog layer lets launch-dialog selectors override the global palet
     )
 
     dispatchKeydown(runtimeDocument, {
-      key: "p",
-      code: "KeyP",
+      key: "o",
+      code: "KeyO",
       ctrlKey: true,
     })
 
-    expect(paletteMatches).toHaveLength(1)
+    expect(switchProjectMatches).toHaveLength(1)
     expect(projectMatches).toHaveLength(1)
   } finally {
     render(null, container)
