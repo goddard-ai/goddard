@@ -3,7 +3,11 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import type { ProjectGitCheckoutSummary } from "~/shared/desktop-rpc.ts"
 import { useModel } from "@preact/signals"
 import {
+  AlertCircle,
   Archive,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   CircleDot,
   FileDiff,
   GitBranch,
@@ -79,20 +83,48 @@ function formatRelativeTime(value: number) {
   }).format(new Date(value))
 }
 
-function getCheckoutStateLabel(summary: ProjectGitCheckoutSummary) {
+function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.errorMessage) {
-    return "Unavailable"
+    return {
+      icon: AlertCircle,
+      label: "Git status unavailable",
+      tone: "danger",
+    }
+  }
+
+  if (summary.ahead > 0 && summary.behind > 0) {
+    return {
+      icon: ArrowUpDown,
+      label: `Ahead ${summary.ahead}, behind ${summary.behind}`,
+      tone: "attention",
+    }
+  }
+
+  if (summary.ahead > 0) {
+    return {
+      icon: ArrowUp,
+      label: `Ahead ${summary.ahead}`,
+      tone: "attention",
+    }
+  }
+
+  if (summary.behind > 0) {
+    return {
+      icon: ArrowDown,
+      label: `Behind ${summary.behind}`,
+      tone: "attention",
+    }
   }
 
   if (summary.hasChanges) {
-    return "Changed"
+    return {
+      icon: FileDiff,
+      label: "Working tree has changes",
+      tone: "attention",
+    }
   }
 
-  if (summary.ahead > 0 || summary.behind > 0) {
-    return "Diverged"
-  }
-
-  return "Clean"
+  return null
 }
 
 function getCheckoutDetail(summary: ProjectGitCheckoutSummary) {
@@ -558,6 +590,8 @@ component CheckoutRow(props: {
     props.kind === "primary" ? Laptop : GitFork
   const kindLabel =
     props.kind === "primary" ? "Primary checkout" : "Worktree"
+  const checkoutState = getCheckoutStatePresentation(props.summary)
+  const CheckoutStateIcon = checkoutState?.icon
 
   <article class={styles.checkoutRow}>
     <GoodTooltip content={kindLabel}>
@@ -570,12 +604,18 @@ component CheckoutRow(props: {
         <h3 class={styles.rowTitle}>
           {getCheckoutMainLabel(props.summary)}
         </h3>
-        <span
-          class={styles.statusBadge}
-          data-status={getCheckoutStateLabel(props.summary).toLowerCase()}
-        >
-          {getCheckoutStateLabel(props.summary)}
-        </span>
+
+        if (checkoutState && CheckoutStateIcon) {
+          <GoodTooltip content={checkoutState.label}>
+            <span
+              class={styles.checkoutStateIcon}
+              data-tone={checkoutState.tone}
+              aria-label={checkoutState.label}
+            >
+              <CheckoutStateIcon aria-hidden={true} size={14} strokeWidth={2.2} />
+            </span>
+          </GoodTooltip>
+        }
       </div>
       <p class={styles.rowDescription}>
         {getCheckoutDetail(props.summary)}

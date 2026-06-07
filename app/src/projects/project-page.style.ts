@@ -146,6 +146,21 @@ export default {
     gap: "8px",
     minWidth: 0,
   }),
+  checkoutStateIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "20px",
+    height: "20px",
+    flex: "0 0 auto",
+    color: "muted",
+    "&[data-tone='attention']": {
+      color: "accentStrong",
+    },
+    "&[data-tone='danger']": {
+      color: "danger",
+    },
+  }),
   checkoutActions: css({
     display: "inline-flex",
     alignItems: "center",
