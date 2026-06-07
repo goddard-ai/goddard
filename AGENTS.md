@@ -75,6 +75,12 @@
 - Do not use `bun test` at the repository root; it bypasses the workspace package test scripts and monorepo orchestration.
 - Do not test feature-package plugin seams directly. If feature logic is complex or critical enough to test, put it in a clearly named module outside the plugin entrypoint and test that module directly.
 
+## Runtime Logs
+
+- Use `bun run goddard logs <surface>` to inspect recent process logs when debugging app, daemon, or agent process behavior.
+- Supported surfaces are `app`, `daemon`, and `agent-process`.
+- The command prints the last 200 lines by default. Use `--lines 0` only when you need the full log.
+
 ## Documentation Routing
 
 - Read the nearest `glossary.md` before changing domain behavior, naming, states, roles, identifiers, or ownership rules in a package that has one.
