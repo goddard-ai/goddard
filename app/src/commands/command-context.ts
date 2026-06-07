@@ -12,6 +12,39 @@ export type CommandContextState = {
   activeScopes: readonly string[]
 }
 
+function findEditableElement(target: EventTarget | null) {
+  const element =
+    target && "closest" in target
+      ? (target as HTMLElement)
+      : target && "parentElement" in target
+        ? (target.parentElement as HTMLElement | null)
+        : null
+
+  if (!element) {
+    return null
+  }
+
+  const contentEditable = element.closest<HTMLElement>(
+    '[contenteditable="true"], [contenteditable="plaintext-only"]',
+  )
+  if (contentEditable) {
+    return contentEditable
+  }
+
+  const tagName = element.tagName.toLowerCase()
+  return tagName === "input" || tagName === "textarea" || tagName === "select" ? element : null
+}
+
+function isEditableElementEmpty(element: HTMLElement) {
+  const tagName = element.tagName.toLowerCase()
+
+  if (tagName === "input" || tagName === "textarea") {
+    return (element as HTMLInputElement | HTMLTextAreaElement).value.length === 0
+  }
+
+  return element.textContent?.length === 0
+}
+
 /** App-scoped command context and Powerkeys runtime owner. */
 export class CommandContext extends Sigma<CommandContextState> {
   /** Imperative powerkeys runtime that owns document listeners outside persisted shortcut state. */
@@ -49,6 +82,13 @@ export class CommandContext extends Sigma<CommandContextState> {
       editablePolicy: "allow-if-meta",
       getActiveScopes: () => this.activeScopes,
       canDispatch: (candidate) => {
+        const editableElement = candidate.event.modifiers.alt
+          ? findEditableElement(candidate.event.target)
+          : null
+        if (editableElement && !isEditableElementEmpty(editableElement)) {
+          return false
+        }
+
         const commandId =
           "id" in candidate.handler && typeof candidate.handler.id === "string"
             ? (candidate.handler.id as AppCommandId)

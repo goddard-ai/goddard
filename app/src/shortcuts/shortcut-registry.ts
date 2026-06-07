@@ -1,4 +1,9 @@
-import { type BindingSet, type BindingSpec, type ShortcutRuntime } from "powerkeys"
+import {
+  type BindingSet,
+  type BindingSpec,
+  type EditablePolicy,
+  type ShortcutRuntime,
+} from "powerkeys"
 import { Sigma } from "preact-sigma"
 
 import { appCommandList, resolveAppCommand } from "~/commands/app-command.ts"
@@ -30,6 +35,17 @@ function areBindingsEqual(
 function normalizeWhenClause(whenClause: string | null | undefined) {
   const trimmedWhenClause = whenClause?.trim()
   return trimmedWhenClause ? trimmedWhenClause : undefined
+}
+
+function resolveEditablePolicy(
+  expression: string | null | undefined,
+  currentPolicy?: EditablePolicy | "inherit",
+) {
+  const hasAltModifier = expression
+    ?.split(/\s+/)
+    .some((step) => step.split("+").some((part) => part.toLowerCase() === "alt"))
+
+  return hasAltModifier ? "allow-in-editable" : currentPolicy
 }
 
 /** Shared keyboard shortcut registry instance backed by one document-scoped powerkeys runtime. */
@@ -227,6 +243,10 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
             scope: command.scope,
             preventDefault: true,
             ...expression,
+            editablePolicy: resolveEditablePolicy(
+              getShortcutBindingExpression(expression),
+              expression.editablePolicy,
+            ),
             when: expression.when ?? command.when,
             handler: command,
           })
@@ -234,6 +254,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
           nextBindings.push({
             sequence: expression,
             scope: command.scope,
+            editablePolicy: resolveEditablePolicy(expression),
             when: command.when,
             handler: command,
             preventDefault: true,
@@ -242,6 +263,7 @@ export class ShortcutRegistry extends Sigma<ShortcutRegistryState> {
           nextBindings.push({
             combo: expression,
             scope: command.scope,
+            editablePolicy: resolveEditablePolicy(expression),
             when: command.when,
             handler: command,
             preventDefault: true,
