@@ -11,6 +11,7 @@ import {
 } from "./daemon.ts"
 import { writeAppLog } from "./logging.ts"
 import { getMainWindow } from "./main-window.ts"
+import { getProjectGitStatus } from "./project-git-status.ts"
 import { browseForProject } from "./projects.ts"
 import { loadShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"
 
@@ -22,6 +23,7 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
     requests: {
       runtimeInfo: async () => ({ runtime: "electrobun" }),
       browseForProject: async () => ({ path: await browseForProject() }),
+      getProjectGitStatus: async ({ path }) => await getProjectGitStatus(path),
       loadAppStateSnapshot: async () => ({ snapshot: await loadAppStateSnapshot() }),
       writeAppStateSnapshot: async ({ snapshot }) => {
         await writeAppStateSnapshot(snapshot)

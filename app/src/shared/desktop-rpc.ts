@@ -54,6 +54,25 @@ export type AppLogInput = {
   message: string
 }
 
+/** Compact git checkout summary shown on project-scoped dashboard surfaces. */
+export type ProjectGitCheckoutSummary = {
+  path: string
+  branch: string | null
+  head: string | null
+  hasChanges: boolean
+  changedCount: number
+  untrackedCount: number
+  ahead: number
+  behind: number
+  errorMessage: string | null
+}
+
+/** Git status payload for one user-added project root and its linked worktrees. */
+export type ProjectGitStatus = {
+  primary: ProjectGitCheckoutSummary
+  worktrees: ProjectGitCheckoutSummary[]
+}
+
 /** Shared Electrobun RPC contract between the Bun host and the browser view. */
 export type AppDesktopRpc = {
   bun: RPCSchema<{
@@ -65,6 +84,10 @@ export type AppDesktopRpc = {
       browseForProject: {
         params: {}
         response: { path: string | null }
+      }
+      getProjectGitStatus: {
+        params: { path: string }
+        response: ProjectGitStatus
       }
       loadAppStateSnapshot: {
         params: {}

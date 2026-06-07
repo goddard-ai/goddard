@@ -12,6 +12,7 @@ import type {
   DaemonRequestResponse,
   DaemonSendInput,
   DaemonStreamTargetInput,
+  ProjectGitStatus,
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
@@ -46,6 +47,9 @@ export interface DesktopHostBridge {
 
   /** Opens one native directory picker and returns the chosen project root when present. */
   browseForProject(): Promise<string | null>
+
+  /** Reads git status summaries for one project root through the Bun host bridge. */
+  getProjectGitStatus(path: string): Promise<ProjectGitStatus>
 
   /** Reads the app-state snapshot through the Bun host bridge. */
   loadAppStateSnapshot<T extends AppStateSnapshot>(): Promise<T | null>
@@ -198,6 +202,11 @@ export async function browseForProject(): Promise<string | null> {
   return response.path
 }
 
+/** Reads git status summaries for one project root through the Bun host. */
+export async function getProjectGitStatus(path: string): Promise<ProjectGitStatus> {
+  return await rpc.request.getProjectGitStatus({ path })
+}
+
 /** Reads the app-state snapshot through the Bun host bridge. */
 export async function loadAppStateSnapshot<T extends AppStateSnapshot>() {
   const response = await rpc.request.loadAppStateSnapshot({})
@@ -265,6 +274,7 @@ export async function daemonSubscribe<Name extends DaemonStreamName>(
 export const desktopHost: DesktopHostBridge = {
   getRuntimeInfo,
   browseForProject,
+  getProjectGitStatus,
   loadAppStateSnapshot,
   writeAppStateSnapshot,
   loadShortcutKeymap,
