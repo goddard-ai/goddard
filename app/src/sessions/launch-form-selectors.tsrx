@@ -41,7 +41,7 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {
-    params: [{ cwd: form.draftProjectPath.value ?? undefined }],
+    params: [{ cwd: form.effectiveCwd.value ?? undefined }],
   })
   const items: SessionInputSelectItem[] = adapterCatalog.adapters.map(
     (adapter) => ({
@@ -107,29 +107,23 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
   const subpackages = projectPath ? response.subpackages : []
   const items =
     projectPath ? buildSubpackageItems(projectPath, subpackages) : []
-  const selectedValue = form.draftSubpackagePath.value ?? projectPath
+  const preferredCwd =
+    projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages) : null
+  const selectedValue = preferredCwd ?? projectPath
 
   useEffect(() => {
     if (!projectPath) {
       return
     }
 
-    if (form.draftSubpackagePath.value === null) {
-      const preferredCwd = resolvePreferredLaunchCwd(projectPath, subpackages)
+    const nextSubpackagePath =
+      preferredCwd === projectPath ? null : preferredCwd
 
-      if (preferredCwd !== projectPath) {
-        form.draftSubpackagePath.value = preferredCwd
-        form.launchPreview.value = null
-      }
-
-      return
-    }
-
-    if (!subpackages.some((subpackage) => subpackage.path === form.draftSubpackagePath.value)) {
-      form.draftSubpackagePath.value = null
+    if (form.draftSubpackagePath.value !== nextSubpackagePath) {
+      form.draftSubpackagePath.value = nextSubpackagePath
       form.launchPreview.value = null
     }
-  }, [form, projectPath, subpackages])
+  }, [form, preferredCwd, projectPath])
 
   if (subpackages.length === 0) {
     return

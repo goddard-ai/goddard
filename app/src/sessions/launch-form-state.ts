@@ -16,7 +16,7 @@ import {
   findSessionModeConfigOption,
   flattenConfigOptionValues,
 } from "~/session-input/config-options.ts"
-import { resolvePreferredLaunchAgentId } from "./launch-preferences.ts"
+import { preferredLaunchAgentId, resolvePreferredLaunchAgentId } from "./launch-preferences.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type SessionLaunchPickerId =
@@ -198,11 +198,7 @@ export const SessionLaunchFormState = createModel(function () {
       return
     }
 
-    const nextAdapterId =
-      draftAdapterId.value &&
-      nextAdapterCatalog.adapters.some((adapter) => adapter.id === draftAdapterId.value)
-        ? draftAdapterId.value
-        : resolvePreferredLaunchAgentId(nextAdapterCatalog)
+    const nextAdapterId = resolvePreferredLaunchAgentId(nextAdapterCatalog)
 
     if (draftAdapterId.value !== nextAdapterId) {
       draftAdapterId.value = nextAdapterId
@@ -296,6 +292,9 @@ export const SessionLaunchFormState = createModel(function () {
   }
 
   adapterCatalog.subscribe(syncAdapterSelection)
+  preferredLaunchAgentId.subscribe(() => {
+    syncAdapterSelection(adapterCatalog.value)
+  })
   launchPreview.subscribe(syncLaunchPreview)
 
   return {

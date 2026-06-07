@@ -1,12 +1,12 @@
 import type { ListAdaptersResponse } from "@goddard-ai/sdk"
 import { signal } from "@preact/signals"
 
-const lastUsedLaunchAgentId = signal<string | null>(null)
-const preferredLaunchCwdByProject = signal<Record<string, string | null>>({})
+export const preferredLaunchAgentId = signal<string | null>(null)
+export const preferredLaunchCwdByProject = signal<Record<string, string | null>>({})
 
 export function recordSessionLaunchAgentUse(agentId: string | null | undefined) {
   if (agentId) {
-    lastUsedLaunchAgentId.value = agentId
+    preferredLaunchAgentId.value = agentId
   }
 }
 
@@ -40,8 +40,8 @@ export function resolvePreferredLaunchCwd(
 export function resolvePreferredLaunchAgentId(adapterCatalog: ListAdaptersResponse) {
   const availableAdapterIds = new Set(adapterCatalog.adapters.map((adapter) => adapter.id))
 
-  if (lastUsedLaunchAgentId.value && availableAdapterIds.has(lastUsedLaunchAgentId.value)) {
-    return lastUsedLaunchAgentId.value
+  if (preferredLaunchAgentId.value && availableAdapterIds.has(preferredLaunchAgentId.value)) {
+    return preferredLaunchAgentId.value
   }
 
   if (adapterCatalog.defaultAdapterId && availableAdapterIds.has(adapterCatalog.defaultAdapterId)) {
