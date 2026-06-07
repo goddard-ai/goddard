@@ -54,8 +54,11 @@ export default {
     borderRadius: "8px",
     backgroundColor: "panel",
   }),
-  widePanel: css({
-    gridColumn: "1 / -1",
+  column: css({
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    minWidth: 0,
   }),
   sectionHeader: css({
     display: "flex",
@@ -122,11 +125,7 @@ export default {
   }),
   sessionList: css({
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: "8px",
-    "@media (max-width: 1040px)": {
-      gridTemplateColumns: "1fr",
-    },
   }),
   sessionRow: css({
     display: "flex",

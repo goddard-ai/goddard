@@ -1,7 +1,6 @@
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import type { ProjectGitCheckoutSummary } from "~/shared/desktop-rpc.ts"
-import { cx } from "@goddard-ai/styled-system/css"
 import { Archive, CircleDot, FileDiff, GitBranch, Inbox, MessageSquare } from "lucide-react"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
@@ -233,31 +232,89 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
       </header>
 
       <div class={styles.grid}>
-        <section class={styles.panel}>
-          <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
+        <div class={styles.column}>
+          <section class={styles.panel}>
+            <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
 
-          if (relatedInboxItems.length === 0) {
-            <EmptyState text="No unread or read inbox messages are linked to this project." />
-          } else {
-            <div class={styles.list}>
-              for (const item of relatedInboxItems) {
-                <article class={styles.inboxRow} key={item.id}>
-                  <div class={styles.rowMain}>
-                    <h2 class={styles.rowTitle}>
-                      {getInboxItemPrimaryText(item)}
-                    </h2>
-                    <p class={styles.rowDescription}>
-                      {getInboxItemSecondaryText(item)}
-                    </p>
-                  </div>
-                  <span class={styles.statusBadge} data-status={item.status}>
-                    {item.status}
-                  </span>
-                </article>
-              }
-            </div>
-          }
-        </section>
+            if (relatedInboxItems.length === 0) {
+              <EmptyState text="No unread or read inbox messages are linked to this project." />
+            } else {
+              <div class={styles.list}>
+                for (const item of relatedInboxItems) {
+                  <article class={styles.inboxRow} key={item.id}>
+                    <div class={styles.rowMain}>
+                      <h2 class={styles.rowTitle}>
+                        {getInboxItemPrimaryText(item)}
+                      </h2>
+                      <p class={styles.rowDescription}>
+                        {getInboxItemSecondaryText(item)}
+                      </p>
+                    </div>
+                    <span class={styles.statusBadge} data-status={item.status}>
+                      {item.status}
+                    </span>
+                  </article>
+                }
+              </div>
+            }
+          </section>
+
+          <section class={styles.panel}>
+            <SectionHeading
+              icon={MessageSquare}
+              title="Recent sessions"
+              count={recentSessions.length}
+            />
+
+            if (recentSessions.length === 0) {
+              <EmptyState text="No recent sessions are linked to this project." />
+            } else {
+              <div class={styles.sessionList}>
+                for (const item of recentSessions) {
+                  <article class={styles.sessionRow} key={item.session.id}>
+                    <button
+                      class={styles.sessionButton}
+                      type="button"
+                      onClick={() => {
+                        openSession(item.session)
+                      }}
+                    >
+                      <span class={styles.statusDot} data-status={item.session.status} />
+                      <span class={styles.rowMain}>
+                        <span class={styles.rowTitle}>
+                          {item.title}
+                        </span>
+                        <span class={styles.rowDescription}>
+                          {getSessionRepositoryLabel(item.session)}
+                        </span>
+                      </span>
+                      <time
+                        class={styles.updated}
+                        dateTime={new Date(item.session.updatedAt).toISOString()}
+                        title={new Intl.DateTimeFormat(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(item.session.updatedAt))}
+                      >
+                        {formatRelativeTime(item.session.updatedAt)}
+                      </time>
+                    </button>
+                    <button
+                      aria-label={`View changes for ${item.title}`}
+                      class={styles.iconButton}
+                      type="button"
+                      onClick={() => {
+                        openSessionChanges(item.session)
+                      }}
+                    >
+                      <FileDiff size={15} strokeWidth={2.1} />
+                    </button>
+                  </article>
+                }
+              </div>
+            }
+          </section>
+        </div>
 
         <section class={styles.panel}>
           <SectionHeading
@@ -272,62 +329,6 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
               <CheckoutRow key={worktree.path} label="Worktree" summary={worktree} showArchive />
             }
           </div>
-        </section>
-
-        <section class={cx(styles.panel, styles.widePanel)}>
-          <SectionHeading
-            icon={MessageSquare}
-            title="Recent sessions"
-            count={recentSessions.length}
-          />
-
-          if (recentSessions.length === 0) {
-            <EmptyState text="No recent sessions are linked to this project." />
-          } else {
-            <div class={styles.sessionList}>
-              for (const item of recentSessions) {
-                <article class={styles.sessionRow} key={item.session.id}>
-                  <button
-                    class={styles.sessionButton}
-                    type="button"
-                    onClick={() => {
-                      openSession(item.session)
-                    }}
-                  >
-                    <span class={styles.statusDot} data-status={item.session.status} />
-                    <span class={styles.rowMain}>
-                      <span class={styles.rowTitle}>
-                        {item.title}
-                      </span>
-                      <span class={styles.rowDescription}>
-                        {getSessionRepositoryLabel(item.session)}
-                      </span>
-                    </span>
-                    <time
-                      class={styles.updated}
-                      dateTime={new Date(item.session.updatedAt).toISOString()}
-                      title={new Intl.DateTimeFormat(undefined, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(new Date(item.session.updatedAt))}
-                    >
-                      {formatRelativeTime(item.session.updatedAt)}
-                    </time>
-                  </button>
-                  <button
-                    aria-label={`View changes for ${item.title}`}
-                    class={styles.iconButton}
-                    type="button"
-                    onClick={() => {
-                      openSessionChanges(item.session)
-                    }}
-                  >
-                    <FileDiff size={15} strokeWidth={2.1} />
-                  </button>
-                </article>
-              }
-            </div>
-          }
         </section>
       </div>
     </div>
