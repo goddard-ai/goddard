@@ -14,6 +14,11 @@ const openTasks = "navigation.openTasks" as const
 const openRoadmap = "navigation.openRoadmap" as const
 const openSettings = "navigation.openSettings" as const
 const openCommandPalette = "navigation.openCommandPalette" as const
+const selectUnreadInboxFilter = "inbox.selectUnreadFilter" as const
+const selectSavedInboxFilter = "inbox.selectSavedFilter" as const
+const selectRepliedInboxFilter = "inbox.selectRepliedFilter" as const
+const selectCompletedInboxFilter = "inbox.selectCompletedFilter" as const
+const selectArchivedInboxFilter = "inbox.selectArchivedFilter" as const
 const openProjectSelector = "sessionInput.openProjectSelector" as const
 const openSubpackageSelector = "sessionInput.openSubpackageSelector" as const
 const openAdapterSelector = "sessionInput.openAdapterSelector" as const
@@ -79,6 +84,11 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openTasks]: ["Alt+Digit5"],
     [openRoadmap]: ["Alt+Digit6"],
     [openSettings]: ["Mod+,"],
+    [selectUnreadInboxFilter]: ["Mod+Digit1"],
+    [selectSavedInboxFilter]: ["Mod+Digit2"],
+    [selectRepliedInboxFilter]: ["Mod+Digit3"],
+    [selectCompletedInboxFilter]: ["Mod+Digit4"],
+    [selectArchivedInboxFilter]: ["Mod+Digit5"],
     [openProjectSelector]: ["Mod+o"],
     [openSubpackageSelector]: ["Mod+Shift+d"],
     [openAdapterSelector]: ["Mod+Shift+a"],
@@ -106,6 +116,8 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     [openInbox]: ["Alt+Digit1"],
     [openKeyboardShortcuts]: ["Mod+/"],
     [openApprovalPresetSelector]: ["Mod+."],
+    [selectUnreadInboxFilter]: ["Mod+Digit1"],
+    [selectArchivedInboxFilter]: ["Mod+Digit5"],
     [openThinkingLevelSelector]: ["Mod+t"],
     [viewSessionChanges]: ["Alt+Shift+g"],
     [completeSession]: ["Mod+Shift+Enter"],

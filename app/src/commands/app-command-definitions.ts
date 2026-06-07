@@ -89,6 +89,31 @@ export const AppCommand = defineAppCommands({
       },
     },
   },
+  inbox: {
+    group: "navigation",
+    commands: {
+      selectUnreadFilter: {
+        label: "Select Unread Inbox Filter",
+        icon: Inbox,
+      },
+      selectSavedFilter: {
+        label: "Select Saved Inbox Filter",
+        icon: Inbox,
+      },
+      selectRepliedFilter: {
+        label: "Select Replied Inbox Filter",
+        icon: Inbox,
+      },
+      selectCompletedFilter: {
+        label: "Select Completed Inbox Filter",
+        icon: Inbox,
+      },
+      selectArchivedFilter: {
+        label: "Select Archived Inbox Filter",
+        icon: Inbox,
+      },
+    },
+  },
   projects: {
     group: "projects",
     commands: {

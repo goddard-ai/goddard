@@ -8,6 +8,7 @@ import type {
 } from "@goddard-ai/inbox/schema"
 
 import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -97,6 +98,33 @@ component InboxPage() {
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
     () => new Set(),
   )
+
+  function selectInboxFilter(id: InboxFilterId) {
+    clearSelectedInboxItems()
+    if (searchQuery.trim().length > 0) {
+      setSearchQuery(
+        replaceInboxSearchStatusFilters(searchQuery, inboxFilterDefinitions[id].statuses),
+      )
+    } else {
+      setFilterId(id)
+    }
+  }
+
+  useAppCommand(AppCommand.inbox.selectUnreadFilter, () => {
+    selectInboxFilter("unread")
+  })
+  useAppCommand(AppCommand.inbox.selectSavedFilter, () => {
+    selectInboxFilter("saved")
+  })
+  useAppCommand(AppCommand.inbox.selectRepliedFilter, () => {
+    selectInboxFilter("replied")
+  })
+  useAppCommand(AppCommand.inbox.selectCompletedFilter, () => {
+    selectInboxFilter("completed")
+  })
+  useAppCommand(AppCommand.inbox.selectArchivedFilter, () => {
+    selectInboxFilter("archived")
+  })
 
   useEffect(() => {
     let active = true
@@ -280,14 +308,7 @@ component InboxPage() {
         {filterId}
         {searchQuery}
         onFilterSelect={(id) => {
-          clearSelectedInboxItems()
-          if (searchQuery.trim().length > 0) {
-            setSearchQuery(
-              replaceInboxSearchStatusFilters(searchQuery, inboxFilterDefinitions[id].statuses),
-            )
-          } else {
-            setFilterId(id)
-          }
+          selectInboxFilter(id)
         }}
         onRefresh={() => {
           clearSelectedInboxItems()

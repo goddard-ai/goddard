@@ -95,6 +95,8 @@ function TestLayeredCommands(props: {
 test("app commands expose stable ids and shortcut groups", () => {
   expect(AppCommand.sessionChat.completeSession.id).toBe("sessionChat.completeSession")
   expect(AppCommand.sessionChat.completeSession.group).toBe("session")
+  expect(AppCommand.inbox.selectUnreadFilter.id).toBe("inbox.selectUnreadFilter")
+  expect(AppCommand.inbox.selectUnreadFilter.group).toBe("navigation")
   expect(AppCommand.sessionInput.openModelSelector.group).toBe("session")
   expect(AppCommand.workbench.closeActiveTab.group).toBe("workbench")
 })
@@ -309,6 +311,48 @@ test("default keymap dispatches main navigation from physical Alt number keys", 
         code: "Digit1",
         modifiers: {
           alt: true,
+        },
+      },
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("default keymap dispatches inbox filter presets from Mod number keys", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const matches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(TestCommandHandler, {
+      command: AppCommand.inbox.selectUnreadFilter,
+      onMatch(match) {
+        matches.push(match)
+      },
+    }),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: "1",
+      code: "Digit1",
+      ctrlKey: true,
+    })
+
+    expect(matches).toHaveLength(1)
+    expect(matches[0]).toMatchObject({
+      combo: "Ctrl+Digit1",
+      event: {
+        code: "Digit1",
+        modifiers: {
+          ctrl: true,
         },
       },
     })
