@@ -1,12 +1,10 @@
 import { inboxAppPlugin } from "@goddard-ai/inbox/app"
-import type { Protected } from "preact-sigma"
 
-import type { Inbox } from "~/inbox/model.ts"
 import type { MainTabItemId } from "~/main-tab-items.ts"
 
 /** App-shell state available to sidebar indicator rules without hiding hook calls in config. */
 export type AppShellSidebarState = {
-  inbox: Protected<Inbox>
+  hasUnreadInboxItems: boolean
 }
 
 /** Reactive predicate and accessibility copy for one optional sidebar dot. */
@@ -25,6 +23,6 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
 export const appShellSidebarDots: Partial<Record<MainTabItemId, AppShellSidebarDot>> = {
   [inboxAppPlugin.navigation.id]: {
     getAriaLabel: (label) => `${label}, unread items`,
-    isVisible: (state) => state.inbox.hasUnreadItems,
+    isVisible: (state) => state.hasUnreadInboxItems,
   },
 }

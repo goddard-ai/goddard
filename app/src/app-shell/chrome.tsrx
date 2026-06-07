@@ -2,13 +2,16 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Folder } from "lucide-react"
 
-import { useInbox, useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
+import { hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
+import { useQuery } from "~/lib/query.ts"
 import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
+import { goddardSdk } from "~/sdk.ts"
 import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
 import { AppShellAgentSelector } from "./agent-selector.tsrx"
@@ -198,26 +201,26 @@ export component AppShellChrome() {
       </div>
     </header>
     <nav aria-label="Primary" class={styles.nav}>
-      const inbox = useInbox()
-      const sidebarState: AppShellSidebarState = { inbox }
-      const mainTabItems = mainTab.items.map(
-        (item) => ({
-          ...item,
-          icon: getWorkbenchTabIcon(item.id),
-        }),
-      )
+      try {
+        <AppShellSidebarQueryContent
+          items={mainTab.items}
+          selectedMainTabId={mainTab.selectedKind}
+        />
+      } pending {
+        <AppShellSidebarContent
+          hasUnreadInboxItems={false}
+          items={mainTab.items}
+          selectedMainTabId={mainTab.selectedKind}
+        />
+      } catch (error) {
+        console.error("Inbox unread indicator render failed.", error)
 
-      <AppShellSidebarSection
-        items={mainTabItems.filter((item) => item.group === "primary")}
-        {sidebarState}
-        selectedMainTabId={mainTab.selectedKind}
-      />
-      <div aria-hidden="true" class={styles.navDivider} />
-      <AppShellSidebarSection
-        items={mainTabItems.filter((item) => item.group === "secondary")}
-        {sidebarState}
-        selectedMainTabId={mainTab.selectedKind}
-      />
+        <AppShellSidebarContent
+          hasUnreadInboxItems={false}
+          items={mainTab.items}
+          selectedMainTabId={mainTab.selectedKind}
+        />
+      }
     </nav>
 
     const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
@@ -264,6 +267,51 @@ export component AppShellChrome() {
       </div>
     </div>
   </div>
+}
+
+component AppShellSidebarQueryContent(props: {
+  items: readonly MainTabItem[];
+  selectedMainTabId: MainTabItemId;
+}) {
+  const { items } = useQuery(goddardSdk.inbox.list, {
+    params: [
+      { statuses: ["unread"], limit: 100 },
+    ],
+  })
+
+  <AppShellSidebarContent
+    hasUnreadInboxItems={hasUnreadSessionInboxItems(items)}
+    items={props.items}
+    selectedMainTabId={props.selectedMainTabId}
+  />
+}
+
+component AppShellSidebarContent(props: {
+  hasUnreadInboxItems: boolean;
+  items: readonly MainTabItem[];
+  selectedMainTabId: MainTabItemId;
+}) {
+  const sidebarState: AppShellSidebarState = {
+    hasUnreadInboxItems: props.hasUnreadInboxItems,
+  }
+  const mainTabItems = props.items.map(
+    (item) => ({
+      ...item,
+      icon: getWorkbenchTabIcon(item.id),
+    }),
+  )
+
+  <AppShellSidebarSection
+    items={mainTabItems.filter((item) => item.group === "primary")}
+    {sidebarState}
+    selectedMainTabId={props.selectedMainTabId}
+  />
+  <div aria-hidden="true" class={styles.navDivider} />
+  <AppShellSidebarSection
+    items={mainTabItems.filter((item) => item.group === "secondary")}
+    {sidebarState}
+    selectedMainTabId={props.selectedMainTabId}
+  />
 }
 
 /** Renders one grouped section of the left sidebar. */

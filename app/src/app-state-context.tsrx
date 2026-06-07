@@ -48,7 +48,6 @@ function defineAppStateContext<Key extends Extract<keyof AppState, string>>(name
 
 const context = {
   Appearance: defineAppStateContext("appearance"),
-  Inbox: defineAppStateContext("inbox"),
   MainTab: defineAppStateContext("mainTab"),
   ProjectContext: defineAppStateContext("projectContext"),
   ProjectRegistry: defineAppStateContext("projectRegistry"),
@@ -63,26 +62,23 @@ export component AppStateProvider(props: {
   const appState = useAppState()
 
   <context.Appearance value={appState.appearance}>
-    <context.Inbox value={appState.inbox}>
-      <context.MainTab value={appState.mainTab}>
-        <context.ProjectContext value={appState.projectContext}>
-          <context.ProjectRegistry value={appState.projectRegistry}>
-            <context.ShortcutRegistry value={appState.shortcutRegistry}>
-              <context.WorkbenchTabCache value={appState.workbenchTabCache}>
-                <context.WorkbenchTabSet value={appState.workbenchTabSet}>
-                  {props.children}
-                </context.WorkbenchTabSet>
-              </context.WorkbenchTabCache>
-            </context.ShortcutRegistry>
-          </context.ProjectRegistry>
-        </context.ProjectContext>
-      </context.MainTab>
-    </context.Inbox>
+    <context.MainTab value={appState.mainTab}>
+      <context.ProjectContext value={appState.projectContext}>
+        <context.ProjectRegistry value={appState.projectRegistry}>
+          <context.ShortcutRegistry value={appState.shortcutRegistry}>
+            <context.WorkbenchTabCache value={appState.workbenchTabCache}>
+              <context.WorkbenchTabSet value={appState.workbenchTabSet}>
+                {props.children}
+              </context.WorkbenchTabSet>
+            </context.WorkbenchTabCache>
+          </context.ShortcutRegistry>
+        </context.ProjectRegistry>
+      </context.ProjectContext>
+    </context.MainTab>
   </context.Appearance>
 }
 
 export const useAppearance = context.Appearance.use
-export const useInbox = context.Inbox.use
 export const useMainTab = context.MainTab.use
 export const useProjectContext = context.ProjectContext.use
 export const useProjectRegistry = context.ProjectRegistry.use

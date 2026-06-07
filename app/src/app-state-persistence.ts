@@ -6,7 +6,6 @@ import { getErrorMessage } from "radashi"
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
 import { CommandContext } from "./commands/command-context.ts"
 import { desktopHost } from "./desktop-host.ts"
-import { Inbox } from "./inbox/model.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
@@ -187,7 +186,6 @@ export function useAppState() {
         highContrast: false,
       }),
       commandContext,
-      inbox: new Inbox(),
       mainTab,
       projectContext: new ProjectContext({
         projectRegistry,
@@ -363,7 +361,6 @@ export function useAppState() {
 
   return {
     appearance: castProtected(appState.appearance),
-    inbox: castProtected(appState.inbox),
     mainTab: castProtected(appState.mainTab),
     projectContext: castProtected(appState.projectContext),
     projectRegistry: castProtected(appState.projectRegistry),
