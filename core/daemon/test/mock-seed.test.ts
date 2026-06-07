@@ -70,10 +70,15 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
     statuses: ["unread", "read", "saved", "archived", "replied", "completed"],
     limit: 10,
   })
-  expect(inbox.items).toHaveLength(8)
+  expect(inbox.items).toHaveLength(10)
   expect(new Set(inbox.items.map((item: any) => item.status))).toEqual(
     new Set(["unread", "read", "saved", "archived", "replied", "completed"]),
   )
+  expect(
+    inbox.items
+      .filter((item: any) => item.entityId.startsWith("pr_"))
+      .map((item: any) => item.reason),
+  ).toEqual(expect.arrayContaining(["pull_request.created", "pull_request.updated"]))
 
   const pullRequest = await send(client, "pr.get", { id: "pr_mock_123" })
   expect(pullRequest.pullRequest).toMatchObject({
@@ -81,6 +86,13 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
     owner: "goddard-ai",
     repo: "goddard-ai",
     prNumber: 123,
+  })
+  const docsPullRequest = await send(client, "pr.get", { id: "pr_mock_docs_7" })
+  expect(docsPullRequest.pullRequest).toMatchObject({
+    host: "github",
+    owner: "goddard-ai",
+    repo: "docs",
+    prNumber: 7,
   })
 })
 
@@ -99,8 +111,12 @@ test("seed mock reset is mock-profile only and repeated seeding does not duplica
   try {
     expect(store.sessions.findMany()).toHaveLength(8)
     expect(store.sessionTurns.findMany()).toHaveLength(7)
-    expect(store.inboxItems.findMany()).toHaveLength(8)
-    expect(store.pullRequests.findMany()).toHaveLength(3)
+    expect(store.inboxItems.findMany()).toHaveLength(10)
+    const pullRequests = store.pullRequests.findMany()
+    expect(pullRequests).toHaveLength(5)
+    expect(new Set(pullRequests.map((pullRequest) => pullRequest.repo))).toEqual(
+      new Set(["developer-tools", "docs", "goddard-ai"]),
+    )
   } finally {
     store.close()
   }

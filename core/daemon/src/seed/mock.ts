@@ -663,6 +663,64 @@ const scenarios: MockSeedScenario[] = [
       },
     ],
   },
+  {
+    id: "docs-repo-pr-created",
+    label: "Created pull request record in a second repository",
+    pullRequests: [
+      {
+        id: "pr_mock_docs_7",
+        timestamp: MOCK_NOW - 9_000,
+        host: "github",
+        owner: "goddard-ai",
+        repo: "docs",
+        prNumber: 7,
+        cwd: "/mock/goddard-docs",
+      },
+    ],
+    inboxItems: [
+      {
+        id: "inb_mock_docs_pr_created",
+        entityId: "pr_mock_docs_7",
+        reason: "pull_request.created",
+        status: "unread",
+        priority: "normal",
+        updatedAt: MOCK_NOW - 9_000,
+        readAt: null,
+        scope: "goddard-ai/docs#7",
+        headline: "Documentation navigation PR created",
+        turnId: null,
+      },
+    ],
+  },
+  {
+    id: "tools-repo-pr-updated",
+    label: "Updated pull request record in a third repository",
+    pullRequests: [
+      {
+        id: "pr_mock_tools_42",
+        timestamp: MOCK_NOW - 10_000,
+        host: "github",
+        owner: "acme",
+        repo: "developer-tools",
+        prNumber: 42,
+        cwd: "/mock/developer-tools",
+      },
+    ],
+    inboxItems: [
+      {
+        id: "inb_mock_tools_pr_updated",
+        entityId: "pr_mock_tools_42",
+        reason: "pull_request.updated",
+        status: "saved",
+        priority: "low",
+        updatedAt: MOCK_NOW - 10_000,
+        readAt: MOCK_NOW - 9_500,
+        scope: "acme/developer-tools#42",
+        headline: "Tooling PR received a follow-up review",
+        turnId: null,
+      },
+    ],
+  },
 ]
 
 /** Seeds deterministic local-only daemon records for the isolated mock data profile. */
