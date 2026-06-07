@@ -54,6 +54,13 @@ export default {
     borderRadius: "8px",
     backgroundColor: "panel",
   }),
+  launchPanel: css({
+    minWidth: 0,
+    padding: "16px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "panel",
+  }),
   column: css({
     display: "flex",
     flexDirection: "column",

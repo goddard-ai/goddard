@@ -1,16 +1,28 @@
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import type { ProjectGitCheckoutSummary } from "~/shared/desktop-rpc.ts"
+import { useModel } from "@preact/signals"
 import { Archive, CircleDot, FileDiff, GitBranch, Inbox, MessageSquare } from "lucide-react"
+import { useEffect } from "preact/hooks"
 
 import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getProjectGitStatus } from "~/desktop-host.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "~/inbox/text.ts"
+import { appToaster } from "~/lib/good-toaster.tsrx"
 import { useQueries } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
+import { SessionLaunchForm } from "~/sessions/launch-form.tsrx"
+import { SessionLaunchFormState } from "~/sessions/launch-form-state.ts"
+import {
+  isKeptSessionLaunchLease,
+  recordSessionLaunchAgentUse,
+} from "~/sessions/launch-lease-keeper.tsrx"
 import { evictSessionHistory } from "~/sessions/mutations.ts"
+import { createSession, releaseSessionLaunchLease } from "~/sessions/mutations.ts"
 import { findNearestProjectPath } from "./project-context.ts"
+import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./project-page.style.ts"
 
 const PROJECT_DASHBOARD_SESSION_LIMIT = 50
@@ -159,6 +171,131 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
     return
   }
 
+  <div class={styles.page}>
+    <header class={styles.header}>
+      <div>
+        <span class={styles.eyebrow}>"Project dashboard"</span>
+        <h1 class={styles.title}>
+          {project.name}
+        </h1>
+        <p class={styles.path}>
+          {project.path}
+        </p>
+      </div>
+    </header>
+
+    <ProjectLaunchSection {project} />
+
+    try {
+      <ProjectDashboardSections {project} />
+    } pending {
+      <section class={styles.panel}>
+        <p class={styles.body}>"Loading project dashboard."</p>
+      </section>
+    } catch (error, retry) {
+      <section class={styles.panel}>
+        <h2 class={styles.sectionTitle}>"Couldn't load project dashboard"</h2>
+        <p class={styles.body}>
+          {error instanceof Error ? error.message : "The project dashboard data request failed."}
+        </p>
+        <button class={styles.secondaryButton} type="button" onClick={retry}>"Retry"</button>
+      </section>
+    }
+  </div>
+}
+
+component ProjectLaunchSection(props: { project: ProjectRecord }) {
+  const form = useModel(SessionLaunchFormState)
+  const workbenchTabSet = useWorkbenchTabSet()
+  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
+  const hasBranchSelector =
+    (form.launchPreview.value?.branches.length ?? 0) > 0 &&
+      !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true)
+  const hasLocationSelector = form.launchPreview.value !== null
+  const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
+  const hasThinkingLevel = form.thinkingOption.value !== null
+  const canSubmit = form.canSubmit.value
+
+  useEffect(() => {
+    if (form.draftProjectPath.value !== props.project.path) {
+      form.reset(props.project.path)
+    }
+  }, [form, form.draftProjectPath.value, props.project.path])
+
+  async function launchSession() {
+    const sessionInput = form.sessionInput.value
+
+    if (!sessionInput) {
+      return
+    }
+
+    try {
+      const launchLeaseId = form.launchPreview.value?.launchLeaseId
+      recordSessionLaunchAgentUse(form.draftAdapterId.value)
+      const { session } = await createSession(sessionInput)
+      const sessionTitle = getSessionDisplayTitle(session)
+
+      if (!isKeptSessionLaunchLease(launchLeaseId)) {
+        void releaseSessionLaunchLease(launchLeaseId).catch((error) => {
+          console.error("Failed to release launch lease.", error)
+        })
+      }
+
+      form.reset(props.project.path)
+      workbenchTabSet.openOrFocusTab({
+        kind: "sessionChat",
+        props: {
+          relatedFilesystemPath: props.project.path,
+          sessionId: session.id,
+          sessionTitle,
+        },
+      })
+      window.setTimeout(() => {
+        appToaster.create({
+          description: sessionTitle,
+          duration: 2800,
+          title: "Session launched",
+          type: "success",
+        })
+      }, 0)
+    } catch (error) {
+      console.error("Failed to create session.", error)
+    }
+  }
+
+  useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
+    form.setOpenPicker("project")
+  }, { active: true })
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
+    form.setOpenPicker("adapter")
+  }, { active: hasAdapterSelector })
+  useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
+    form.setOpenPicker("location")
+  }, { active: hasLocationSelector })
+  useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
+    form.setOpenPicker("branch")
+  }, { active: hasBranchSelector })
+  useAppCommand(AppCommand.sessionInput.openApprovalPresetSelector, () => {
+    form.setOpenPicker("mode")
+  }, { active: form.modeOption.value !== null })
+  useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
+    form.setOpenPicker("model")
+  }, { active: hasModelSelector })
+  useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
+    form.setOpenPicker("thinking")
+  }, { active: hasThinkingLevel })
+  useAppCommand(AppCommand.sessionInput.submit, () => {
+    void launchSession()
+  }, { active: canSubmit })
+
+  <section class={styles.launchPanel}>
+    <SessionLaunchForm {form} onSubmit={launchSession} projects={[props.project]} />
+  </section>
+}
+
+component ProjectDashboardSections(props: { project: ProjectRecord }) {
+  const workbenchTabSet = useWorkbenchTabSet()
+
   try {
     const [{ sessions }, { items }, gitStatus] = useQueries(
       (query) => [
@@ -171,7 +308,7 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
           ],
         }),
         query(getProjectGitStatus, {
-          params: [project.path],
+          params: [props.project.path],
         }),
       ],
     )
@@ -183,7 +320,7 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
       ),
     )
     const projectSessions = getProjectSessions({
-      projectPath: project.path,
+      projectPath: props.project.path,
       sessions,
       sessionWorktrees,
     })
@@ -218,139 +355,118 @@ export component ProjectPage(props: { projectName?: string; projectPath: string 
       })
     }
 
-    <div class={styles.page}>
-      <header class={styles.header}>
-        <div>
-          <span class={styles.eyebrow}>"Project dashboard"</span>
-          <h1 class={styles.title}>
-            {project.name}
-          </h1>
-          <p class={styles.path}>
-            {project.path}
-          </p>
-        </div>
-      </header>
+    <div class={styles.grid}>
+      <div class={styles.column}>
+        <section class={styles.panel}>
+          <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
 
-      <div class={styles.grid}>
-        <div class={styles.column}>
-          <section class={styles.panel}>
-            <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
-
-            if (relatedInboxItems.length === 0) {
-              <EmptyState text="No unread or read inbox messages are linked to this project." />
-            } else {
-              <div class={styles.list}>
-                for (const item of relatedInboxItems) {
-                  <article class={styles.inboxRow} key={item.id}>
-                    <div class={styles.rowMain}>
-                      <h2 class={styles.rowTitle}>
-                        {getInboxItemPrimaryText(item)}
-                      </h2>
-                      <p class={styles.rowDescription}>
-                        {getInboxItemSecondaryText(item)}
-                      </p>
-                    </div>
-                    <span class={styles.statusBadge} data-status={item.status}>
-                      {item.status}
-                    </span>
-                  </article>
-                }
-              </div>
-            }
-          </section>
-
-          <section class={styles.panel}>
-            <SectionHeading
-              icon={MessageSquare}
-              title="Recent sessions"
-              count={recentSessions.length}
-            />
-
-            if (recentSessions.length === 0) {
-              <EmptyState text="No recent sessions are linked to this project." />
-            } else {
-              <div class={styles.sessionList}>
-                for (const item of recentSessions) {
-                  <article class={styles.sessionRow} key={item.session.id}>
-                    <button
-                      class={styles.sessionButton}
-                      type="button"
-                      onClick={() => {
-                        openSession(item.session)
-                      }}
-                    >
-                      <span class={styles.statusDot} data-status={item.session.status} />
-                      <span class={styles.rowMain}>
-                        <span class={styles.rowTitle}>
-                          {item.title}
-                        </span>
-                        <span class={styles.rowDescription}>
-                          {getSessionRepositoryLabel(item.session)}
-                        </span>
-                      </span>
-                      <time
-                        class={styles.updated}
-                        dateTime={new Date(item.session.updatedAt).toISOString()}
-                        title={new Intl.DateTimeFormat(undefined, {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        }).format(new Date(item.session.updatedAt))}
-                      >
-                        {formatRelativeTime(item.session.updatedAt)}
-                      </time>
-                    </button>
-                    <button
-                      aria-label={`View changes for ${item.title}`}
-                      class={styles.iconButton}
-                      type="button"
-                      onClick={() => {
-                        openSessionChanges(item.session)
-                      }}
-                    >
-                      <FileDiff size={15} strokeWidth={2.1} />
-                    </button>
-                  </article>
-                }
-              </div>
-            }
-          </section>
-        </div>
+          if (relatedInboxItems.length === 0) {
+            <EmptyState text="No unread or read inbox messages are linked to this project." />
+          } else {
+            <div class={styles.list}>
+              for (const item of relatedInboxItems) {
+                <article class={styles.inboxRow} key={item.id}>
+                  <div class={styles.rowMain}>
+                    <h2 class={styles.rowTitle}>
+                      {getInboxItemPrimaryText(item)}
+                    </h2>
+                    <p class={styles.rowDescription}>
+                      {getInboxItemSecondaryText(item)}
+                    </p>
+                  </div>
+                  <span class={styles.statusBadge} data-status={item.status}>
+                    {item.status}
+                  </span>
+                </article>
+              }
+            </div>
+          }
+        </section>
 
         <section class={styles.panel}>
           <SectionHeading
-            icon={GitBranch}
-            title="Git checkouts"
-            count={gitStatus.worktrees.length + 1}
+            icon={MessageSquare}
+            title="Recent sessions"
+            count={recentSessions.length}
           />
-          <div class={styles.list}>
-            <CheckoutRow label="Primary checkout" summary={gitStatus.primary} />
 
-            for (const worktree of gitStatus.worktrees) {
-              <CheckoutRow key={worktree.path} label="Worktree" summary={worktree} showArchive />
-            }
-          </div>
+          if (recentSessions.length === 0) {
+            <EmptyState text="No recent sessions are linked to this project." />
+          } else {
+            <div class={styles.sessionList}>
+              for (const item of recentSessions) {
+                <article class={styles.sessionRow} key={item.session.id}>
+                  <button
+                    class={styles.sessionButton}
+                    type="button"
+                    onClick={() => {
+                      openSession(item.session)
+                    }}
+                  >
+                    <span class={styles.statusDot} data-status={item.session.status} />
+                    <span class={styles.rowMain}>
+                      <span class={styles.rowTitle}>
+                        {item.title}
+                      </span>
+                      <span class={styles.rowDescription}>
+                        {getSessionRepositoryLabel(item.session)}
+                      </span>
+                    </span>
+                    <time
+                      class={styles.updated}
+                      dateTime={new Date(item.session.updatedAt).toISOString()}
+                      title={new Intl.DateTimeFormat(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(item.session.updatedAt))}
+                    >
+                      {formatRelativeTime(item.session.updatedAt)}
+                    </time>
+                  </button>
+                  <button
+                    aria-label={`View changes for ${item.title}`}
+                    class={styles.iconButton}
+                    type="button"
+                    onClick={() => {
+                      openSessionChanges(item.session)
+                    }}
+                  >
+                    <FileDiff size={15} strokeWidth={2.1} />
+                  </button>
+                </article>
+              }
+            </div>
+          }
         </section>
       </div>
+
+      <section class={styles.panel}>
+        <SectionHeading
+          icon={GitBranch}
+          title="Git checkouts"
+          count={gitStatus.worktrees.length + 1}
+        />
+        <div class={styles.list}>
+          <CheckoutRow label="Primary checkout" summary={gitStatus.primary} />
+
+          for (const worktree of gitStatus.worktrees) {
+            <CheckoutRow key={worktree.path} label="Worktree" summary={worktree} showArchive />
+          }
+        </div>
+      </section>
     </div>
   } pending {
-    <div class={styles.page}>
-      <section class={styles.panel}>
-        <h1 class={styles.title}>
-          {project.name}
-        </h1>
-        <p class={styles.body}>"Loading project dashboard."</p>
-      </section>
-    </div>
+    <section class={styles.panel}>
+      <p class={styles.body}>"Loading project dashboard."</p>
+    </section>
   } catch (error, retry) {
-    <div class={styles.page}>
-      <section class={styles.panel}>
-        <h1 class={styles.title}>"Couldn't load project dashboard"</h1>
-        <p class={styles.body}>
-          {error instanceof Error ? error.message : "The project dashboard data request failed."}
-        </p>
-        <button class={styles.secondaryButton} type="button" onClick={retry}>"Retry"</button>
-      </section>
-    </div>
+    <section class={styles.panel}>
+      <h2 class={styles.sectionTitle}>"Couldn't load project dashboard"</h2>
+      <p class={styles.body}>
+        {error instanceof Error ? error.message : "The project dashboard data request failed."}
+      </p>
+      <button class={styles.secondaryButton} type="button" onClick={retry}>"Retry"</button>
+    </section>
   }
 }
 
