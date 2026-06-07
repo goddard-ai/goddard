@@ -7,7 +7,7 @@ import type {
   UpdateInboxItemRequest,
 } from "@goddard-ai/inbox/schema"
 
-import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
@@ -16,6 +16,7 @@ import { useQuery } from "~/lib/query.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
 import { evictSessionHistory } from "~/sessions/mutations.ts"
+import { applyInboxItemsToCache } from "./cache.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import {
@@ -57,7 +58,6 @@ component InboxQueryContent(props: {
   selectedEntityIds: ReadonlySet<InboxEntityId>;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
 }) {
-  const inbox = useInbox()
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
@@ -73,10 +73,6 @@ component InboxQueryContent(props: {
     ? props.activeItemId
     : visibleItems[0]?.id ?? null
 
-  useEffect(() => {
-    inbox.applyItems(items)
-  }, [inbox, items])
-
   <InboxList
     filterId={props.filterId}
     activeItemId={resolvedActiveItemId}
@@ -88,7 +84,6 @@ component InboxQueryContent(props: {
 }
 
 component InboxPage() {
-  const inbox = useInbox()
   const workbenchTabSet = useWorkbenchTabSet()
   const pageRef = useRef<HTMLDivElement | null>(null)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
@@ -136,7 +131,7 @@ component InboxPage() {
       }
 
       setRealtimeErrorMessage(null)
-      inbox.applyItem(event.item)
+      applyInboxItemsToCache([event.item])
       invalidateInboxQueries()
     }).then(
       (nextUnsubscribe) => {
@@ -161,7 +156,7 @@ component InboxPage() {
       unsubscribe?.()
       unsubscribe = null
     }
-  }, [inbox])
+  }, [])
 
   function clearSelectedInboxItems() {
     setSelectedEntityIds(new Set())
@@ -230,23 +225,15 @@ component InboxPage() {
   }
 
   async function updateInboxItem(input: UpdateInboxItemRequest) {
-    const result = await runUpdateInboxItem(input)
-    inbox.applyItem(result.item)
-    return result
+    return await runUpdateInboxItem(input)
   }
 
   async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
-    const result = await runBulkUpdateInboxItems(input)
-    inbox.applyItems(result.items)
-    return result
+    return await runBulkUpdateInboxItems(input)
   }
 
   async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
-    const result = await runCompleteSessionInboxItem(input)
-    if (result.item) {
-      inbox.applyItem(result.item)
-    }
-    return result
+    return await runCompleteSessionInboxItem(input)
   }
 
   async function openInboxItem(item: InboxItem) {
