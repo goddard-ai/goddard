@@ -32,11 +32,13 @@ const launchInputClasses: SessionInputClasses = {
 export component SessionLaunchForm(props: {
   form: SessionLaunchFormState;
   onEscape?: () => void;
+  showProjectSelector?: boolean;
   onSubmit: () => Promise<void> | void;
   projects: readonly ProjectRecord[];
 }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
+  const showProjectSelector = props.showProjectSelector ?? true
   const projectItems: SessionInputSelectItem[] = props.projects.map(
     (project) => ({
       value: project.path,
@@ -68,22 +70,24 @@ export component SessionLaunchForm(props: {
 
   <div class={selectorStyles.section}>
     <div class={selectorStyles.grid}>
-      <SessionInputSelect
-        disabled={props.projects.length === 0}
-        filterable={true}
-        items={projectItems}
-        label="Project"
-        open={form.getPickerOpen("project")}
-        placeholder="Select a project"
-        shortcut={projectShortcut}
-        value={form.draftProjectPath.value}
-        onValueChange={(value) => {
-          form.draftProjectPath.value = value
-          form.draftSubpackagePath.value = null
-          form.launchPreview.value = null
-          form.setOpenPicker(null)
-        }}
-      />
+      if (showProjectSelector) {
+        <SessionInputSelect
+          disabled={props.projects.length === 0}
+          filterable={true}
+          items={projectItems}
+          label="Project"
+          open={form.getPickerOpen("project")}
+          placeholder="Select a project"
+          shortcut={projectShortcut}
+          value={form.draftProjectPath.value}
+          onValueChange={(value) => {
+            form.draftProjectPath.value = value
+            form.draftSubpackagePath.value = null
+            form.launchPreview.value = null
+            form.setOpenPicker(null)
+          }}
+        />
+      }
 
       try {
         <SessionSubpackageSelector {form} />

@@ -287,7 +287,7 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
-  }, { active: true })
+  }, { active: false })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
     form.setOpenPicker("adapter")
   }, { active: hasAdapterSelector })
@@ -311,7 +311,12 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   }, { active: canSubmit })
 
   <section class={styles.launchPanel}>
-    <SessionLaunchForm {form} onSubmit={launchSession} projects={[props.project]} />
+    <SessionLaunchForm
+      {form}
+      showProjectSelector={false}
+      onSubmit={launchSession}
+      projects={[props.project]}
+    />
   </section>
 }
 
