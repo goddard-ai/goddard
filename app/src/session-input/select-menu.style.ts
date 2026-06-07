@@ -95,7 +95,7 @@ export default {
     gridTemplateRows: "auto minmax(0, 1fr)",
     width: "min(360px, var(--available-width))",
     minWidth: "min(280px, var(--available-width))",
-    maxWidth: "min(calc(100vw - 32px), var(--available-width))",
+    maxWidth: "var(--available-width)",
     maxHeight: "min(360px, var(--available-height))",
     overflow: "hidden",
     border: "none",

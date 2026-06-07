@@ -72,6 +72,7 @@ export function startFloatingPosition(
             const cssMinWidth = parseCssPixelSize(floatingStyle.minWidth)
 
             Object.assign(floatingElement.style, {
+              boxSizing: "border-box",
               maxHeight: `${Math.min(boundedAvailableHeight, cssMaxHeight ?? boundedAvailableHeight)}px`,
               maxWidth: `${Math.min(boundedAvailableWidth, cssMaxWidth ?? boundedAvailableWidth)}px`,
               minHeight:
