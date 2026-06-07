@@ -147,7 +147,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                 strokeWidth={2.2}
               />
             } else if (selectedItem?.icon) {
-              <AcpAgentIcon class={styles.itemIcon} icon={selectedItem.icon} />
+              <AcpAgentIcon class={styles.agentItemIcon} icon={selectedItem.icon} />
             }
 
             <span class={styles.triggerLabel}>
@@ -543,7 +543,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                       strokeWidth={2.2}
                     />
                   } else if (item.icon) {
-                    <AcpAgentIcon class={styles.itemIcon} icon={item.icon} />
+                    <AcpAgentIcon class={styles.agentItemIcon} icon={item.icon} />
                   }
 
                   <span class={styles.menuButtonText}>

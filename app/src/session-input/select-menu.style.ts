@@ -90,6 +90,16 @@ export default {
       color: "white",
     },
   }),
+  agentItemIcon: css({
+    width: "14px",
+    height: "14px",
+    flexShrink: "0",
+    borderRadius: "4px",
+    color: "inherit",
+    "[data-theme=dark] &": {
+      color: "white",
+    },
+  }),
   triggerPlaceholder: css({
     color: "muted",
     fontWeight: "500",

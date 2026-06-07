@@ -199,8 +199,8 @@ export default {
     },
   }),
   composerAgentIcon: css({
-    width: "16px",
-    height: "16px",
+    width: "14px",
+    height: "14px",
     flexShrink: "0",
     borderRadius: "4px",
     color: "inherit",

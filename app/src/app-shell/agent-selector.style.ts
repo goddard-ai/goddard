@@ -26,8 +26,8 @@ export default {
     },
   }),
   icon: css({
-    width: "16px",
-    height: "16px",
+    width: "14px",
+    height: "14px",
     color: "inherit",
     borderRadius: "4px",
   }),

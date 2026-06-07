@@ -1,5 +1,6 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { Folder } from "lucide-react"
 import { OverlayScrollbars } from "overlayscrollbars"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
@@ -270,7 +271,9 @@ export component AppShellChrome() {
               class={styles.switcherSideFallback}
               disabled={true}
               type="button"
-            />
+            >
+              <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
+            </button>
           } catch (error, retry) {
             console.error("Project subfolder selector render failed.", error)
 
@@ -279,7 +282,9 @@ export component AppShellChrome() {
               class={styles.switcherSideFallback}
               type="button"
               onClick={retry}
-            />
+            >
+              <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
+            </button>
           }
         </div>
       </div>

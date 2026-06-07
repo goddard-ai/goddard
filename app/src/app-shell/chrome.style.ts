@@ -74,11 +74,15 @@ export default {
     height: "28px",
   }),
   switcherSideFallback: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
     width: "28px",
     height: "28px",
     border: "none",
     borderRadius: "8px",
     backgroundColor: "panel",
+    color: "muted",
     cursor: "pointer",
     _focusVisible: {
       outline: "2px solid",
