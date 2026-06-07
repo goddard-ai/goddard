@@ -59,6 +59,7 @@ export default {
   }),
   menu: css({
     display: "grid",
+    gridTemplateRows: "auto minmax(0, 1fr)",
     width: "min(340px, var(--available-width))",
     minWidth: "min(260px, var(--available-width))",
     maxWidth: "var(--available-width)",
@@ -70,12 +71,39 @@ export default {
     outline: "none",
     boxShadow: "0 16px 32px rgba(0, 0, 0, 0.18)",
   }),
+  filter: css({
+    width: "100%",
+    padding: "10px 12px 8px",
+    border: "none",
+    borderBottom: "1px solid {colors.border}",
+    backgroundColor: "transparent",
+    color: "text",
+    fontSize: "0.84rem",
+    outline: "none",
+    _placeholder: {
+      color: "muted",
+    },
+    _focusVisible: {
+      borderBottomColor: "accentStrong",
+    },
+  }),
   list: css({
     display: "grid",
+    minHeight: "0",
+    maxHeight: "inherit",
     margin: "0",
     padding: "0",
     overflowY: "auto",
+    overscrollBehavior: "contain",
     listStyle: "none",
+  }),
+  empty: css({
+    display: "grid",
+    placeItems: "center",
+    minHeight: "64px",
+    color: "muted",
+    fontSize: "0.82rem",
+    textAlign: "center",
   }),
   item: css({
     position: "relative",
