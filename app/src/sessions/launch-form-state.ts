@@ -23,7 +23,6 @@ type SessionLaunchPickerId =
   | "project"
   | "subpackage"
   | "adapter"
-  | "location"
   | "branch"
   | "model"
   | "mode"
@@ -291,6 +290,26 @@ export const SessionLaunchFormState = createModel(function () {
     }
   }
 
+  function setLaunchLocation(nextLocation: SessionLaunchLocation) {
+    const resolvedLocation =
+      nextLocation === "worktree" && !launchPreview.value?.repoRoot ? "local" : nextLocation
+
+    draftLocation.value = resolvedLocation
+
+    if (resolvedLocation === "local" && launchPreview.value?.dirty) {
+      draftBaseBranchName.value = launchPreview.value.currentBranch ?? null
+    }
+  }
+
+  function cycleLaunchLocation() {
+    if (!launchPreview.value?.repoRoot) {
+      setLaunchLocation("local")
+      return
+    }
+
+    setLaunchLocation(draftLocation.value === "local" ? "worktree" : "local")
+  }
+
   adapterCatalog.subscribe(syncAdapterSelection)
   preferredLaunchAgentId.subscribe(() => {
     syncAdapterSelection(adapterCatalog.value)
@@ -300,6 +319,7 @@ export const SessionLaunchFormState = createModel(function () {
   return {
     adapterCatalog,
     canSubmit: computed(() => sessionInput.value !== null),
+    cycleLaunchLocation,
     draftAdapterId,
     draftBaseBranchName,
     draftLocation,
@@ -333,6 +353,7 @@ export const SessionLaunchFormState = createModel(function () {
       }
     },
     sessionInput,
+    setLaunchLocation,
     getPickerOpen(picker: SessionLaunchPickerId) {
       return lens(
         () => openPicker.value === picker,

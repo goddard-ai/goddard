@@ -1,11 +1,11 @@
 import type { SessionSubpackage } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
-import { GitFork, Laptop } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
+import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { flattenConfigOptionValues } from "~/session-input/config-options.ts"
@@ -190,22 +190,18 @@ export component SessionLaunchPreviewSelectors(props: {
     }
   }, [form, preview])
 
-  const locationItems: SessionInputSelectItem[] = [
+  const locationOptions = [
     {
       value: "local",
       label: "Work locally",
-      Icon: Laptop,
+      disabled: false,
     },
-    ...(preview?.repoRoot
-      ? [
-          {
-            value: "worktree",
-            label: "New worktree",
-            Icon: GitFork,
-          },
-        ]
-      : []),
-  ]
+    {
+      value: "worktree",
+      label: "New worktree",
+      disabled: !preview?.repoRoot,
+    },
+  ] as const
   const branchItems: SessionInputSelectItem[] =
     preview?.branches.map(
       (branch) => ({
@@ -215,7 +211,6 @@ export component SessionLaunchPreviewSelectors(props: {
       }),
     ) ??
       []
-  const currentBranchName = preview?.currentBranch ?? null
   const localCheckoutDirty = form.draftLocation.value === "local" && preview?.dirty === true
   const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =
@@ -267,23 +262,37 @@ export component SessionLaunchPreviewSelectors(props: {
   )
 
   <div class={styles.grid}>
-    <SessionInputSelect
-      disabled={!form.draftProjectPath.value}
-      filterable={false}
-      items={locationItems}
-      label="Launch location"
-      open={form.getPickerOpen("location")}
-      placeholder="Choose where to launch"
-      shortcut={locationShortcut}
-      value={form.draftLocation.value}
-      onValueChange={(value) => {
-        form.draftLocation.value = value as "local" | "worktree"
+    <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
+      <legend class={styles.radioLegend}>
+        <span>"Launch location"</span>
 
-        if (value === "local" && preview?.dirty) {
-          form.draftBaseBranchName.value = currentBranchName
+        if (locationShortcut) {
+          <GoodKeyboardShortcut expression={locationShortcut} />
         }
-      }}
-    />
+      </legend>
+      <div class={styles.radioGroup}>
+        for (const option of locationOptions) {
+          <label
+            class={styles.radioOption}
+            data-disabled={option.disabled ? "true" : undefined}
+            data-selected={form.draftLocation.value === option.value ? "true" : undefined}
+            key={option.value}
+          >
+            <span>{option.label}</span>
+            <input
+              checked={form.draftLocation.value === option.value}
+              disabled={option.disabled}
+              name="session-launch-location"
+              type="radio"
+              value={option.value}
+              onInput={() => {
+                form.setLaunchLocation(option.value)
+              }}
+            />
+          </label>
+        }
+      </div>
+    </fieldset>
     <SessionInputSelect
       disabled={branchItems.length === 0 || localCheckoutDirty}
       filterable={true}

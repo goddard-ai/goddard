@@ -317,7 +317,7 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
     form.setOpenPicker("adapter")
   }, { active: hasAdapterSelector })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
-    form.setOpenPicker("location")
+    form.cycleLaunchLocation()
   }, { active: hasLocationSelector })
   useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
     form.setOpenPicker("branch")

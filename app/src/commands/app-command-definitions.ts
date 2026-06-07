@@ -111,7 +111,7 @@ export const AppCommand = defineAppCommands({
         icon: Bot,
       },
       openLocationSelector: {
-        label: "Open Launch Location Selector",
+        label: "Cycle Launch Location",
         icon: MapPin,
       },
       openBranchSelector: {
