@@ -53,6 +53,7 @@ export type TranscriptProps = {
   stickToBottomKey?: number | string;
 }
 
+const OLDER_HISTORY_AUTO_LOAD_THRESHOLD = 320
 const PROMPT_NAVIGATION_TOP_GAP = 8
 
 type CoalescedToolTranscriptRow = {
@@ -373,6 +374,8 @@ export function Transcript(props: TranscriptProps) @{
   const lastPromptNavigationItemIdRef = useRef<string | null>(null)
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
+  const olderHistoryLoadInFlightRef = useRef(false)
+  const olderHistoryRef = useRef(props.olderHistory)
   const userScrollIntentRef = useRef(false)
   const initialBottomScrollStartedRef = useRef(false)
   const [isStickingToBottom, setIsStickingToBottom] = useState(false)
@@ -384,6 +387,7 @@ export function Transcript(props: TranscriptProps) @{
   })
 
   const itemKeys = useMemo(() => renderItems.map((item) => item.id), [renderItems])
+  olderHistoryRef.current = props.olderHistory
 
   useLayoutEffect(() => {
     if (props.stickToBottomKey === undefined) {
@@ -566,6 +570,37 @@ export function Transcript(props: TranscriptProps) @{
       scrollElement.removeEventListener("scroll", stopStickingAfterUserScroll)
     }
   }, [isStickingToBottom, tabContext.scrollParentRef])
+
+  useLayoutEffect(() => {
+    const scrollElement = tabContext.scrollParentRef.current
+
+    if (!scrollElement) {
+      return
+    }
+
+    const maybeLoadOlderHistory = () => {
+      const olderHistory = olderHistoryRef.current
+
+      if (
+        !olderHistory || !olderHistory.canLoad || olderHistory.loading ||
+          olderHistoryLoadInFlightRef.current ||
+          scrollElement.scrollTop > OLDER_HISTORY_AUTO_LOAD_THRESHOLD
+      ) {
+        return
+      }
+
+      olderHistoryLoadInFlightRef.current = true
+      Promise.resolve(olderHistory.onLoad()).finally(() => {
+        olderHistoryLoadInFlightRef.current = false
+      })
+    }
+
+    scrollElement.addEventListener("scroll", maybeLoadOlderHistory, { passive: true })
+
+    return () => {
+      scrollElement.removeEventListener("scroll", maybeLoadOlderHistory)
+    }
+  }, [tabContext.scrollParentRef])
 
   useLayoutEffect(() => {
     const scrollElement = tabContext.scrollParentRef.current
