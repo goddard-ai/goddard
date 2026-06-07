@@ -22,6 +22,9 @@ export const GODDARD_DATABASE_FILENAME = "goddard.db"
 /** Directory name used for development-only daemon persistence. */
 export const GODDARD_DEVELOPMENT_DATA_DIRECTORY = "development"
 
+/** Directory name used for mock daemon persistence. */
+export const GODDARD_MOCK_DATA_DIRECTORY = "mock"
+
 /** Directory name used for daemon session-state JSON payloads. */
 export const GODDARD_SESSION_STATE_DIRECTORY = "session-state"
 

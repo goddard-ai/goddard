@@ -86,7 +86,27 @@ Custom worktree plugins are loaded from the global Goddard config only. The daem
 }
 ```
 
-If no values are provided, the daemon falls back to the standard local backend URL and listens on `http://127.0.0.1:49827/`. The default data profile keeps kindstore data in `~/.goddard/goddard.db`; the `development` data profile isolates it under `~/.goddard/development/goddard.db`.
+If no values are provided, the daemon falls back to the standard local backend URL and listens on `http://127.0.0.1:49827/`. The default data profile keeps kindstore data in `~/.goddard/goddard.db`; the `development` data profile isolates it under `~/.goddard/development/goddard.db`; the `mock` data profile isolates seeded local-only fixture data under `~/.goddard/mock/goddard.db`.
+
+## Mock Data
+
+The daemon can seed deterministic local-only fixture data into the isolated
+`mock` data profile:
+
+```sh
+goddard-daemon seed mock --reset
+goddard-daemon run --data-profile mock
+```
+
+`--reset` deletes only the mock database artifacts:
+
+- `~/.goddard/mock/goddard.db`
+- `~/.goddard/mock/goddard.db-shm`
+- `~/.goddard/mock/goddard.db-wal`
+
+Mock seeding does not contact external services, does not seed production or
+development data, and does not create reconnectable live sessions. The app and
+SDK should consume the mock profile through the normal daemon IPC surface.
 
 ## Standalone Build
 

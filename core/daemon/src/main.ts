@@ -5,6 +5,7 @@ import {
   oneOf,
   option,
   optional,
+  positional,
   restPositionals,
   run,
   string,
@@ -14,7 +15,8 @@ import {
 declare const __VERSION__: string
 
 const daemonRunFeatures = ["ipc", "stream"] as const
-const daemonDataProfiles = ["development", "production"] as const
+const daemonDataProfiles = ["development", "mock", "production"] as const
+const daemonSeedProfiles = ["mock"] as const
 
 /** Falls back to a placeholder version when the build-time constant is unavailable. */
 function getPackageVersion(): string {
@@ -139,6 +141,28 @@ export async function main(argv = process.argv.slice(2)) {
             logMode: resolveLogMode(args),
           })
           process.exit(exitCode)
+        },
+      }),
+      seed: command({
+        name: "seed",
+        description: "Seed isolated daemon data profiles with deterministic local data",
+        args: {
+          profile: positional({
+            type: oneOf(daemonSeedProfiles),
+            displayName: "profile",
+            description: "Data profile to seed. Supported value: mock",
+          }),
+          reset: flag({
+            long: "reset",
+            description: "Delete existing mock database artifacts before seeding",
+          }),
+        },
+        handler: async ({ profile, reset }) => {
+          if (profile === "mock") {
+            const { seedMockData } = await import("./seed/mock.ts")
+            const result = await seedMockData({ reset })
+            console.log(`Seeded mock daemon data at ${result.databasePath}`)
+          }
         },
       }),
     },

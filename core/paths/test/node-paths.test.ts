@@ -29,6 +29,13 @@ test("getDatabasePath isolates development data when the daemon data profile is 
   expect(getDatabasePath()).toBe(join("/tmp/goddard-home", ".goddard", "development", "goddard.db"))
 })
 
+test("getDatabasePath isolates mock data when the daemon data profile is set", () => {
+  process.env.HOME = "/tmp/goddard-home"
+  process.env.GODDARD_DATA_PROFILE = "mock"
+
+  expect(getDatabasePath()).toBe(join("/tmp/goddard-home", ".goddard", "mock", "goddard.db"))
+})
+
 test("getDatabasePath isolates development data for direct development runs", () => {
   process.env.HOME = "/tmp/goddard-home"
   process.env.NODE_ENV = "development"

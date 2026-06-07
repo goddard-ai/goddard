@@ -10,6 +10,7 @@ import {
   GODDARD_DEVELOPMENT_DATA_DIRECTORY,
   GODDARD_DIRECTORY_NAME,
   GODDARD_MANAGED_PR_LOCATIONS_FILENAME,
+  GODDARD_MOCK_DATA_DIRECTORY,
   GODDARD_SESSION_PERMISSIONS_FILENAME,
   GODDARD_SESSION_STATE_DIRECTORY,
   GODDARD_SHORTCUT_KEYMAP_FILENAME,
@@ -28,6 +29,10 @@ function usesDevelopmentDataProfile(): boolean {
   return (
     process.env.GODDARD_DATA_PROFILE === "development" || process.env.NODE_ENV === "development"
   )
+}
+
+function usesMockDataProfile(): boolean {
+  return process.env.GODDARD_DATA_PROFILE === "mock"
 }
 
 /** Returns the user-scoped global `.goddard` directory. */
@@ -82,6 +87,10 @@ export function getAuthTokenPath(): string {
 
 /** Returns the daemon SQLite database path. */
 export function getDatabasePath(): string {
+  if (usesMockDataProfile()) {
+    return join(getGoddardGlobalDir(), GODDARD_MOCK_DATA_DIRECTORY, GODDARD_DATABASE_FILENAME)
+  }
+
   if (usesDevelopmentDataProfile()) {
     return join(
       getGoddardGlobalDir(),
