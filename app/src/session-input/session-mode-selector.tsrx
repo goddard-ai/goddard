@@ -8,6 +8,7 @@ export function SessionModeSelector(props: {
   compact?: boolean;
   modeOption: SelectSessionConfigOption | null;
   open: Signal<boolean>;
+  recentUsedValues?: readonly string[] | null;
   shortcut?: string | null;
   onValueChange: (value: string) => void;
 }) @{
@@ -16,6 +17,7 @@ export function SessionModeSelector(props: {
     compact={props.compact}
     option={props.modeOption}
     open={props.open}
+    recentUsedValues={props.recentUsedValues}
     label="Approval preset"
     placeholder="Use the agent harness default"
     shortcut={props.shortcut}
@@ -30,6 +32,7 @@ export function SessionConfigOptionSelector(props: {
   option: SelectSessionConfigOption | null;
   open: Signal<boolean>;
   placeholder?: string;
+  recentUsedValues?: readonly string[] | null;
   shortcut?: string | null;
   onValueChange: (value: string) => void;
 }) @{
@@ -53,6 +56,7 @@ export function SessionConfigOptionSelector(props: {
     label={props.option?.name ?? props.label ?? "Session option"}
     open={props.open}
     placeholder={props.placeholder ?? "Use the agent harness default"}
+    recentUsedValues={props.recentUsedValues}
     shortcut={props.shortcut}
     value={props.option?.currentValue ?? null}
     onValueChange={props.onValueChange}

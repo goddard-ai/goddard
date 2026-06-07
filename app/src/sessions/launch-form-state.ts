@@ -11,12 +11,13 @@ import * as fuzzysort from "fuzzysort2"
 
 import { lens } from "~/lib/lens.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
+import { SelectorUsageKey, type SelectorUsageStore } from "~/selector-usage.ts"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import {
   findSessionModeConfigOption,
   flattenConfigOptionValues,
 } from "~/session-input/config-options.ts"
-import { preferredLaunchAgentId, resolvePreferredLaunchAgentId } from "./launch-preferences.ts"
+import { resolvePreferredLaunchAgentId } from "./launch-preferences.ts"
 
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type SessionLaunchPickerId =
@@ -101,6 +102,7 @@ export const SessionLaunchFormState = createModel(function () {
   const draftThinkingValue = signal<string | boolean | null>(null)
   const launchPreview = signal<SessionLaunchPreviewResponse | null>(null)
   const openPicker = signal<LaunchPickerId>(null)
+  const selectorUsage = signal<SelectorUsageStore | null>(null)
 
   const launchModelConfig = computed(() =>
     deriveSessionLaunchModelConfig({
@@ -202,11 +204,40 @@ export const SessionLaunchFormState = createModel(function () {
       return
     }
 
-    const nextAdapterId = resolvePreferredLaunchAgentId(nextAdapterCatalog)
+    const nextSelectorUsage = selectorUsage.value
+    const nextAdapterId = nextSelectorUsage
+      ? resolvePreferredLaunchAgentId(nextSelectorUsage, nextAdapterCatalog)
+      : (nextAdapterCatalog.defaultAdapterId ?? nextAdapterCatalog.adapters[0]?.id ?? null)
 
     if (draftAdapterId.value !== nextAdapterId) {
       draftAdapterId.value = nextAdapterId
     }
+  }
+
+  function resolvePreferredValue(
+    key: string,
+    availableValues: ReadonlySet<string>,
+    fallbackValue: string | null,
+  ) {
+    const nextSelectorUsage = selectorUsage.value
+
+    if (!nextSelectorUsage) {
+      return fallbackValue
+    }
+
+    const candidates = [
+      nextSelectorUsage.getCurrentValue(key),
+      ...nextSelectorUsage.getRecentUsedValues(key),
+      fallbackValue,
+    ]
+
+    for (const candidate of candidates) {
+      if (candidate && availableValues.has(candidate)) {
+        return candidate
+      }
+    }
+
+    return fallbackValue
   }
 
   function syncLaunchPreview(nextLaunchPreview: SessionLaunchPreviewResponse | null) {
@@ -223,6 +254,16 @@ export const SessionLaunchFormState = createModel(function () {
       draftLocation.value = "worktree"
     } else if (!nextLaunchPreview.repoRoot && draftLocation.value === "worktree") {
       draftLocation.value = "local"
+    } else if (nextLaunchPreview.repoRoot) {
+      const nextLocation = resolvePreferredValue(
+        SelectorUsageKey.sessionLaunchLocation,
+        new Set(["local", "worktree"]),
+        "local",
+      ) as SessionLaunchLocation
+
+      if (draftLocation.value !== nextLocation) {
+        draftLocation.value = nextLocation
+      }
     }
 
     const resolvedLaunchModelConfig = deriveSessionLaunchModelConfig({
@@ -238,7 +279,16 @@ export const SessionLaunchFormState = createModel(function () {
       !availableBranchNames.has(draftBaseBranchName.value) ||
       (nextLaunchPreview.dirty && draftLocation.value === "local")
     ) {
-      draftBaseBranchName.value = currentBranchName
+      draftBaseBranchName.value =
+        nextLaunchPreview.dirty && draftLocation.value === "local"
+          ? currentBranchName
+          : nextLaunchPreview.repoRoot
+            ? resolvePreferredValue(
+                SelectorUsageKey.sessionLaunchBranch(nextLaunchPreview.repoRoot),
+                availableBranchNames,
+                currentBranchName,
+              )
+            : currentBranchName
     }
 
     const availableModelIds = new Set(
@@ -250,7 +300,13 @@ export const SessionLaunchFormState = createModel(function () {
       draftModelId.value === null ||
       (draftModelId.value && !availableModelIds.has(draftModelId.value))
     ) {
-      draftModelId.value = currentModelId
+      draftModelId.value = draftAdapterId.value
+        ? resolvePreferredValue(
+            SelectorUsageKey.sessionControlModel(draftAdapterId.value),
+            availableModelIds,
+            currentModelId,
+          )
+        : currentModelId
     }
 
     const resolvedModeOption = findSessionModeConfigOption(resolvedLaunchModelConfig.configOptions)
@@ -263,7 +319,13 @@ export const SessionLaunchFormState = createModel(function () {
       )
 
       if (draftModeValue.value === null || !availableModeValues.has(draftModeValue.value)) {
-        draftModeValue.value = resolvedModeOption.currentValue
+        draftModeValue.value = draftAdapterId.value
+          ? resolvePreferredValue(
+              SelectorUsageKey.sessionControlMode(draftAdapterId.value),
+              availableModeValues,
+              resolvedModeOption.currentValue,
+            )
+          : resolvedModeOption.currentValue
       }
     }
 
@@ -279,7 +341,14 @@ export const SessionLaunchFormState = createModel(function () {
 
     if (resolvedThinkingOption.type === "boolean") {
       if (typeof draftThinkingValue.value !== "boolean") {
-        draftThinkingValue.value = resolvedThinkingOption.currentValue
+        const preferredThinkingValue = draftAdapterId.value
+          ? resolvePreferredValue(
+              SelectorUsageKey.sessionControlThinking(draftAdapterId.value),
+              new Set(["true", "false"]),
+              String(resolvedThinkingOption.currentValue),
+            )
+          : String(resolvedThinkingOption.currentValue)
+        draftThinkingValue.value = preferredThinkingValue === "true"
       }
 
       return
@@ -293,7 +362,13 @@ export const SessionLaunchFormState = createModel(function () {
       typeof draftThinkingValue.value !== "string" ||
       !availableThinkingValues.has(draftThinkingValue.value)
     ) {
-      draftThinkingValue.value = resolvedThinkingOption.currentValue
+      draftThinkingValue.value = draftAdapterId.value
+        ? resolvePreferredValue(
+            SelectorUsageKey.sessionControlThinking(draftAdapterId.value),
+            availableThinkingValues,
+            resolvedThinkingOption.currentValue,
+          )
+        : resolvedThinkingOption.currentValue
     }
   }
 
@@ -306,6 +381,7 @@ export const SessionLaunchFormState = createModel(function () {
           : nextLocation
 
     draftLocation.value = resolvedLocation
+    selectorUsage.value?.setCurrentValue(SelectorUsageKey.sessionLaunchLocation, resolvedLocation)
 
     if (resolvedLocation === "local" && launchPreview.value?.dirty) {
       draftBaseBranchName.value = launchPreview.value.currentBranch ?? null
@@ -327,8 +403,9 @@ export const SessionLaunchFormState = createModel(function () {
   }
 
   adapterCatalog.subscribe(syncAdapterSelection)
-  preferredLaunchAgentId.subscribe(() => {
+  selectorUsage.subscribe(() => {
     syncAdapterSelection(adapterCatalog.value)
+    syncLaunchPreview(launchPreview.value)
   })
   launchPreview.subscribe(syncLaunchPreview)
 
@@ -350,6 +427,7 @@ export const SessionLaunchFormState = createModel(function () {
     launchPreview,
     modeOption,
     openPicker,
+    selectorUsage,
     reset(preferredProjectPath: string | null = null) {
       const previousProjectPath = draftProjectPath.value
       draftAdapterId.value = null

@@ -10,6 +10,7 @@ import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
+import { orderSelectorItemsByUsage } from "~/selector-usage.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import { captureFocusedSessionInputPrompt } from "./prompt-focus.ts"
 import styles from "./select-menu.style.ts"
@@ -45,6 +46,7 @@ export type SessionInputSelectProps = {
   value: string | null;
   items: readonly SessionInputSelectItem[];
   open: Signal<boolean>;
+  recentUsedValues?: readonly string[] | null;
   disabled?: boolean;
   filterable?: boolean;
   iconOnlyTrigger?: boolean;
@@ -80,6 +82,10 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const menuBodyRef = useRef<HTMLDivElement>(null)
 
   const selectedItem = props.items.find((item) => item.value === props.value) ?? null
+  const orderedItems = orderSelectorItemsByUsage(props.items, {
+    recentUsedValues: props.recentUsedValues,
+    selectedValue: props.value,
+  })
   const triggerLabel = selectedItem?.label ?? props.placeholder
   const ariaLabel = `${props.label}: ${triggerLabel}`
   const SelectedIcon = selectedItem?.Icon
@@ -109,19 +115,25 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   )
 
   const filteredItems = useMemo(() => {
-    if (!props.filterable || isEmptyQuery(query)) {
-      return props.items
-    }
+    const matchedItems =
+      !props.filterable || isEmptyQuery(query)
+        ? orderedItems
+        : fuzzysort.searchFields(
+            query,
+            searchableItems,
+            [
+              { key: "label", extract: (entry) => entry.preparedLabel },
+            ],
+            { threshold: 0 },
+          ).items.filter((entry) => isStrongSelectorMatch(query, entry)).map(
+            (entry) => entry.value.item,
+          )
 
-    return fuzzysort.searchFields(
-      query,
-      searchableItems,
-      [
-        { key: "label", extract: (entry) => entry.preparedLabel },
-      ],
-      { threshold: 0 },
-    ).items.filter((entry) => isStrongSelectorMatch(query, entry)).map((entry) => entry.value.item)
-  }, [props.filterable, props.items, query, searchableItems])
+    return orderSelectorItemsByUsage(matchedItems, {
+      recentUsedValues: props.recentUsedValues,
+      selectedValue: props.value,
+    })
+  }, [orderedItems, props.filterable, props.recentUsedValues, props.value, query, searchableItems])
 
   const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
 

@@ -21,7 +21,11 @@ import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-mo
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
-import { useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import {
+  useSelectorUsage,
+  useShortcutRegistry,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsrx"
 import { markInboxSessionVisited } from "~/inbox/session-visit.ts"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
@@ -40,6 +44,7 @@ import {
   SessionConfigOptionSelector,
   SessionModeSelector,
 } from "~/session-input/session-mode-selector.tsrx"
+import { SelectorUsageKey } from "~/selector-usage.ts"
 import {
   cancelSessionTurn,
   completeSession,
@@ -421,6 +426,7 @@ function SessionChatComposerDock(props: {
   const draftModeValue = useSignal<string | null>(null)
   const draftModelId = useSignal<string | null>(null)
   const draftThinkingValue = useSignal<string | null>(null)
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   const sessionModelConfig = deriveSessionLaunchModelConfig({
     models: props.chat.session.models,
@@ -443,6 +449,10 @@ function SessionChatComposerDock(props: {
     typeof props.chat.session.agent === "string"
       ? agentAdapter?.version ?? null
       : props.chat.session.agent?.version ?? null
+  const sessionControlAgentId =
+    typeof props.chat.session.agent === "string"
+      ? props.chat.session.agent
+      : props.chat.session.agentName
   const modeOption = findSessionModeConfigOption(sessionModelConfig.configOptions)
   const thinkingOption = findSelectConfigOption(sessionModelConfig.configOptions, "thought_level")
   const modelItems: SessionInputSelectItem[] =
@@ -497,10 +507,17 @@ function SessionChatComposerDock(props: {
                 label="Model"
                 open={modelPickerOpen}
                 placeholder="Use the agent harness default model"
+                recentUsedValues={selectorUsage.getRecentUsedValues(
+                  SelectorUsageKey.sessionControlModel(sessionControlAgentId),
+                )}
                 shortcut={modelShortcut}
                 value={draftModelId.value ?? currentModelId}
                 onValueChange={(value) => {
                   draftModelId.value = value
+                  selectorUsage.setCurrentValue(
+                    SelectorUsageKey.sessionControlModel(sessionControlAgentId),
+                    value,
+                  )
                 }}
               />
             : null}
@@ -512,9 +529,16 @@ function SessionChatComposerDock(props: {
                   currentValue: draftThinkingValue.value ?? thinkingOption.currentValue,
                 }}
                 open={thinkingPickerOpen}
+                recentUsedValues={selectorUsage.getRecentUsedValues(
+                  SelectorUsageKey.sessionControlThinking(sessionControlAgentId),
+                )}
                 shortcut={thinkingShortcut}
                 onValueChange={(value) => {
                   draftThinkingValue.value = value
+                  selectorUsage.setCurrentValue(
+                    SelectorUsageKey.sessionControlThinking(sessionControlAgentId),
+                    value,
+                  )
                 }}
               />
             : null}
@@ -527,9 +551,16 @@ function SessionChatComposerDock(props: {
                     currentValue: draftModeValue.value ?? modeOption.currentValue,
                   }}
                   open={modePickerOpen}
+                  recentUsedValues={selectorUsage.getRecentUsedValues(
+                    SelectorUsageKey.sessionControlMode(sessionControlAgentId),
+                  )}
                   shortcut={approvalPresetShortcut}
                   onValueChange={(value) => {
                     draftModeValue.value = value
+                    selectorUsage.setCurrentValue(
+                      SelectorUsageKey.sessionControlMode(sessionControlAgentId),
+                      value,
+                    )
                   }}
                 />
               </div>
@@ -557,10 +588,15 @@ function SessionChatComposerDock(props: {
       return
     }
 
-    draftThinkingValue.value = stepConfigOptionValue(
+    const nextValue = stepConfigOptionValue(
       thinkingOption,
       draftThinkingValue.value ?? thinkingOption.currentValue,
       -1,
+    )
+    draftThinkingValue.value = nextValue
+    selectorUsage.setCurrentValue(
+      SelectorUsageKey.sessionControlThinking(sessionControlAgentId),
+      nextValue,
     )
   }, { active: thinkingOption !== null })
   useAppCommand(AppCommand.sessionInput.increaseThinkingLevel, () => {
@@ -568,12 +604,36 @@ function SessionChatComposerDock(props: {
       return
     }
 
-    draftThinkingValue.value = stepConfigOptionValue(
+    const nextValue = stepConfigOptionValue(
       thinkingOption,
       draftThinkingValue.value ?? thinkingOption.currentValue,
       1,
     )
+    draftThinkingValue.value = nextValue
+    selectorUsage.setCurrentValue(
+      SelectorUsageKey.sessionControlThinking(sessionControlAgentId),
+      nextValue,
+    )
   }, { active: thinkingOption !== null })
+
+  function recordSessionControlsUse(input: {
+    modeValue: string | null | undefined
+    modelId: string | null | undefined
+    thinkingValue: string | null | undefined
+  }) {
+    selectorUsage.recordUsedValue(
+      SelectorUsageKey.sessionControlMode(sessionControlAgentId),
+      input.modeValue,
+    )
+    selectorUsage.recordUsedValue(
+      SelectorUsageKey.sessionControlModel(sessionControlAgentId),
+      input.modelId,
+    )
+    selectorUsage.recordUsedValue(
+      SelectorUsageKey.sessionControlThinking(sessionControlAgentId),
+      input.thinkingValue,
+    )
+  }
 
   async function applyDraftSessionControls() {
     const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
@@ -659,6 +719,11 @@ function SessionChatComposerDock(props: {
       }}
       onSubmit={async (prompt) => {
         props.onSubmittedPrompt()
+        const controlUse = {
+          modeValue: draftModeValue.value ?? modeOption?.currentValue ?? null,
+          modelId: draftModelId.value ?? currentModelId,
+          thinkingValue: draftThinkingValue.value ?? thinkingOption?.currentValue ?? null,
+        }
         await props.page.submitPrompt.run(async () => {
           if (props.canReconnectSession) {
             const { session } = await reconnectSession(props.chat.session.id)
@@ -671,6 +736,7 @@ function SessionChatComposerDock(props: {
             acpId: props.chat.session.acpSessionId,
             prompt,
           })
+          recordSessionControlsUse(controlUse)
           props.chat.toggleCompletedHidden(false)
         }).catch((error) => {
           console.error("Failed to submit session prompt.", error)

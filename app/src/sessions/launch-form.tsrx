@@ -1,11 +1,12 @@
 import { useEffect } from "preact/hooks"
 import { Folder } from "lucide-react"
 
-import { useShortcutRegistry } from "~/app-state-context.tsrx"
+import { useSelectorUsage, useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
 import { getShortcutLabel } from "~/commands/shortcut-label.ts"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { orderSelectorItemsByUsage } from "~/selector-usage.ts"
 import composerInputStyles from "~/session-input/composer-layout.style.ts"
 import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsrx"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
@@ -41,21 +42,37 @@ export function SessionLaunchForm(props: {
   projects: readonly ProjectRecord[];
 }) @{
   const { form } = props
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   const disabled = props.disabled ?? false
   const showProjectSelector = props.showProjectSelector ?? true
-  const projectItems: SessionInputSelectItem[] = props.projects.map(
-    (project) => ({
-      value: project.path,
-      label: project.name,
-      detail: project.path,
-      Icon: Folder,
-      searchText: project.path,
-    }),
+  const projectItems: SessionInputSelectItem[] = orderSelectorItemsByUsage(
+    props.projects.map(
+      (project) => ({
+        value: project.path,
+        label: project.name,
+        detail: project.path,
+        Icon: Folder,
+        searchText: project.path,
+      }),
+    ),
+    {
+      selectedValue: form.draftProjectPath.value,
+    },
   )
   const projectShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openProjectSelector.id]?.[0],
   )
+
+  useEffect(() => {
+    form.selectorUsage.value = selectorUsage
+
+    return () => {
+      if (form.selectorUsage.value === selectorUsage) {
+        form.selectorUsage.value = null
+      }
+    }
+  }, [form, selectorUsage])
 
   useEffect(() => {
     const nextProjectPath = props.projects.some(

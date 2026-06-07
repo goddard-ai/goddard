@@ -9,6 +9,7 @@ import { desktopHost } from "./desktop-host.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
 import { ProjectContext, type ProjectContextState } from "./projects/project-context.ts"
 import { ProjectRegistry, type ProjectRegistryState } from "./projects/project-registry.ts"
+import { SelectorUsage, type SelectorUsageState } from "./selector-usage.ts"
 import { startSessionLifecycleSubscription } from "./sessions/lifecycle.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION } from "./shared/shortcut-keymap.ts"
 import { ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
@@ -26,6 +27,7 @@ export type AppStateSnapshot = {
   mainTab: Immutable<MainTabState>
   projectContext: Immutable<ProjectContextState>
   projectRegistry: Immutable<ProjectRegistryState>
+  selectorUsage?: Immutable<SelectorUsageState>
   workbenchTabSet: Immutable<WorkbenchTabSetState>
 }
 
@@ -192,6 +194,7 @@ export function useAppState() {
         workbenchTabSet,
       }),
       projectRegistry,
+      selectorUsage: new SelectorUsage(),
       shortcutRegistry: new ShortcutRegistry({
         runtime: commandContext.runtime,
       }),
@@ -215,6 +218,7 @@ export function useAppState() {
           mainTab: sigma.captureState(appState.mainTab),
           projectContext: sigma.captureState(appState.projectContext),
           projectRegistry: sigma.captureState(appState.projectRegistry),
+          selectorUsage: sigma.captureState(appState.selectorUsage),
           workbenchTabSet: sigma.captureState(appState.workbenchTabSet),
         }),
         writeSnapshot: (snapshot) => {
@@ -225,6 +229,7 @@ export function useAppState() {
           sigma.subscribe(appState.mainTab, queueSnapshotWrite),
           sigma.subscribe(appState.projectContext, queueSnapshotWrite),
           sigma.subscribe(appState.projectRegistry, queueSnapshotWrite),
+          sigma.subscribe(appState.selectorUsage, queueSnapshotWrite),
           sigma.subscribe(appState.workbenchTabSet, queueSnapshotWrite),
         ],
         options: {
@@ -246,6 +251,13 @@ export function useAppState() {
           sigma.replaceState(appState.mainTab, snapshot.mainTab)
           sigma.replaceState(appState.projectContext, snapshot.projectContext)
           sigma.replaceState(appState.projectRegistry, snapshot.projectRegistry)
+          sigma.replaceState(
+            appState.selectorUsage,
+            snapshot.selectorUsage ?? {
+              currentValuesByKey: {},
+              recentUsedValuesByKey: {},
+            },
+          )
           sigma.replaceState(appState.workbenchTabSet, snapshot.workbenchTabSet)
         }
 
@@ -364,6 +376,7 @@ export function useAppState() {
     mainTab: castProtected(appState.mainTab),
     projectContext: castProtected(appState.projectContext),
     projectRegistry: castProtected(appState.projectRegistry),
+    selectorUsage: castProtected(appState.selectorUsage),
     shortcutRegistry: castProtected(appState.shortcutRegistry),
     workbenchTabCache: appState.workbenchTabCache,
     workbenchTabSet: castProtected(appState.workbenchTabSet),

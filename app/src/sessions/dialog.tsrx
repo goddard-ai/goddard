@@ -3,11 +3,16 @@ import { useModel, useSignal } from "@preact/signals"
 import { X } from "lucide-react"
 import { useEffect, useId } from "preact/hooks"
 
-import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useSelectorUsage,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
-import { recordSessionLaunchAgentUse } from "./launch-preferences.ts"
+import { recordSessionLaunchUse } from "./launch-preferences.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
@@ -20,6 +25,7 @@ export default function SessionLaunchDialog(props: {
 }) @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
+  const selectorUsage = useSelectorUsage()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
   const isLaunching = useSignal(false)
@@ -61,9 +67,22 @@ export default function SessionLaunchDialog(props: {
     try {
       const projectPath = form.draftProjectPath.value
       const launchLeaseId = form.launchPreview.value?.launchLeaseId
-      recordSessionLaunchAgentUse(form.draftAdapterId.value)
+      const launchUse = {
+        agentId: form.draftAdapterId.value,
+        branchName: form.draftBaseBranchName.value,
+        cwd: sessionInput.cwd,
+        location: form.draftLocation.value,
+        modeValue: form.draftModeValue.value,
+        modelId: form.draftModelId.value,
+        projectPath,
+        repoRoot: form.launchPreview.value?.repoRoot,
+        thinkingValue: typeof form.draftThinkingValue.value === "boolean"
+          ? String(form.draftThinkingValue.value)
+          : form.draftThinkingValue.value,
+      }
       const { session } = await createSession(sessionInput)
       const sessionTitle = getSessionDisplayTitle(session)
+      recordSessionLaunchUse(selectorUsage, launchUse)
 
       if (!isKeptSessionLaunchLease(launchLeaseId)) {
         void releaseSessionLaunchLease(launchLeaseId).catch((error) => {

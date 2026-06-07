@@ -5,13 +5,18 @@ import * as fuzzysort from "fuzzysort2"
 import { Folder } from "lucide-react"
 import { useEffect, useRef } from "preact/hooks"
 
-import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useSelectorUsage,
+} from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { orderSelectorItemsByUsage, SelectorUsageKey } from "~/selector-usage.ts"
 import {
-  recordSessionLaunchCwdUse,
+  setCurrentSessionLaunchCwd,
   resolvePreferredLaunchCwd,
 } from "~/sessions/launch-preferences.ts"
 import styles from "./subfolder-selector.style.ts"
@@ -52,6 +57,7 @@ export function AppShellSubfolderSelector(props: {
 }) @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
+  const selectorUsage = useSelectorUsage()
   const projectPath =
     projectContext.activeProjectPath ?? projectRegistry.projectList[0]?.path ?? null
   const open = useSignal(false)
@@ -89,7 +95,7 @@ export function AppShellSubfolderSelector(props: {
       }),
     ),
   ]
-  const selectedCwd = resolvePreferredLaunchCwd(projectPath, response.subpackages)
+  const selectedCwd = resolvePreferredLaunchCwd(selectorUsage, projectPath, response.subpackages)
   const selectedItem = items.find((item) => item.path === selectedCwd) ?? items[0]
   const selectedSubfolderLabel =
     selectedCwd === projectPath ? null : selectedItem.label
@@ -101,7 +107,7 @@ export function AppShellSubfolderSelector(props: {
       preparedPath: fuzzysort.prepare(item.path),
     }),
   )
-  const filteredItems =
+  const matchedItems =
     isEmptyQuery(search.value)
       ? items
       : fuzzysort.searchFields(
@@ -114,6 +120,13 @@ export function AppShellSubfolderSelector(props: {
           ],
           { threshold: 0 },
         ).items.filter((item) => isStrongMatch(search.value, item)).map((item) => item.value.item)
+  const filteredItems = orderSelectorItemsByUsage(matchedItems, {
+    getValue: (item) => item.path,
+    recentUsedValues: selectorUsage.getRecentUsedValues(
+      SelectorUsageKey.sessionLaunchCwd(projectPath),
+    ),
+    selectedValue: selectedCwd,
+  })
   const highlightedItemIndex =
     filteredItems.length === 0 ? 0 : Math.min(highlightedIndex.value, filteredItems.length - 1)
   const highlightedItem = filteredItems[highlightedItemIndex] ?? null
@@ -133,7 +146,7 @@ export function AppShellSubfolderSelector(props: {
       return
     }
 
-    recordSessionLaunchCwdUse(projectPath, item.path)
+    setCurrentSessionLaunchCwd(selectorUsage, projectPath, item.path)
     open.value = false
   }
 

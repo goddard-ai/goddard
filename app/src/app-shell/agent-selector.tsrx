@@ -4,13 +4,18 @@ import { useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { useEffect, useRef } from "preact/hooks"
 
-import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
+import {
+  useProjectContext,
+  useProjectRegistry,
+  useSelectorUsage,
+} from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { orderSelectorItemsByUsage, SelectorUsageKey } from "~/selector-usage.ts"
 import {
-  recordSessionLaunchAgentUse,
+  setCurrentSessionLaunchAgent,
   resolvePreferredLaunchAgentId,
   resolvePreferredLaunchCwd,
 } from "~/sessions/launch-preferences.ts"
@@ -56,6 +61,7 @@ export function AppShellAgentSelector(props: {
 }) @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
+  const selectorUsage = useSelectorUsage()
   const projectPath =
     projectContext.activeProjectPath ?? projectRegistry.projectList[0]?.path ?? null
   const open = useSignal(false)
@@ -68,7 +74,7 @@ export function AppShellAgentSelector(props: {
     params: projectPath ? [{ cwd: projectPath }] : null,
   })
   const cwd =
-    projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages.subpackages) : null
+    projectPath ? resolvePreferredLaunchCwd(selectorUsage, projectPath, subpackages.subpackages) : null
   const adapterCatalog = useQuery(cwd ? goddardSdk.adapter.list : null, {
     params: cwd ? [{ cwd }] : null,
   })
@@ -84,7 +90,7 @@ export function AppShellAgentSelector(props: {
     return null
   }
 
-  const agentId = resolvePreferredLaunchAgentId(adapterCatalog)
+  const agentId = resolvePreferredLaunchAgentId(selectorUsage, adapterCatalog)
   const selectedAgent = adapterCatalog.adapters.find((adapter) => adapter.id === agentId) ?? null
   const searchableAdapters: AgentSelectorItem[] = adapterCatalog.adapters.map(
     (adapter) => ({
@@ -96,7 +102,7 @@ export function AppShellAgentSelector(props: {
       preparedUnofficial: fuzzysort.prepare(adapter.unofficial ? "unofficial" : ""),
     }),
   )
-  const filteredAdapters =
+  const matchedAdapters =
     isEmptyQuery(search.value)
       ? adapterCatalog.adapters
       : fuzzysort.searchFields(
@@ -113,6 +119,11 @@ export function AppShellAgentSelector(props: {
         ).items.filter((item) => isStrongMatch(search.value, item)).map(
           (item) => item.value.adapter,
         )
+  const filteredAdapters = orderSelectorItemsByUsage(matchedAdapters, {
+    getValue: (adapter) => adapter.id,
+    recentUsedValues: selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionLaunchAgent),
+    selectedValue: agentId,
+  })
   const highlightedAdapterIndex =
     filteredAdapters.length === 0
       ? 0
@@ -135,7 +146,7 @@ export function AppShellAgentSelector(props: {
       return
     }
 
-    recordSessionLaunchAgentUse(adapter.id)
+    setCurrentSessionLaunchAgent(selectorUsage, adapter.id)
     open.value = false
   }
 

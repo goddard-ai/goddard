@@ -41,10 +41,19 @@ export function SwitchProjectDropdown() @{
       ? null
       : projectRegistry.projectsByPath[projectContext.activeProjectPath] ?? null
   const projects = useComputed(() => {
-    return orderProjectsByRecentActivity(
+    const orderedProjects = orderProjectsByRecentActivity(
       projectRegistry.projectList,
       projectContext.recentProjectPaths,
     )
+
+    if (!activeProject) {
+      return orderedProjects
+    }
+
+    return [
+      activeProject,
+      ...orderedProjects.filter((project) => project.path !== activeProject.path),
+    ]
   })
   const searchableProjects = useComputed(() => {
     return projects.value.map(
@@ -84,6 +93,11 @@ export function SwitchProjectDropdown() @{
     }
 
     const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
+
+    if (activeProject && projectItems[0]?.id === activeProject.path) {
+      return [projectItems[0], openFolderItem, ...projectItems.slice(1)]
+    }
+
     return [openFolderItem, ...projectItems]
   })
 

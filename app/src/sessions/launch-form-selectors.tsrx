@@ -3,21 +3,22 @@ import { useSignal } from "@preact/signals"
 import { GitFork, Laptop } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
-import { useShortcutRegistry } from "~/app-state-context.tsrx"
+import { useSelectorUsage, useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { SelectorUsageKey } from "~/selector-usage.ts"
 import { flattenConfigOptionValues, stepConfigOptionValue } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
 import { type SessionLaunchFormState } from "./launch-form-state.ts"
 import {
-  recordSessionLaunchAgentUse,
-  recordSessionLaunchCwdUse,
   resolvePreferredLaunchCwd,
+  setCurrentSessionLaunchAgent,
+  setCurrentSessionLaunchCwd,
 } from "./launch-preferences.ts"
 import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
 import { releaseSessionLaunchLease } from "./mutations.ts"
@@ -56,6 +57,7 @@ export function AgentHarnessSelector(props: {
   form: SessionLaunchFormState;
 }) @{
   const { form } = props
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {
     params: [{ cwd: form.effectiveCwd.value ?? undefined }],
@@ -86,11 +88,12 @@ export function AgentHarnessSelector(props: {
     label="Agent harness"
     open={form.getPickerOpen("adapter")}
     placeholder="Select an agent harness"
+    recentUsedValues={selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionLaunchAgent)}
     shortcut={adapterShortcut}
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
       form.draftAdapterId.value = value
-      recordSessionLaunchAgentUse(value)
+      setCurrentSessionLaunchAgent(selectorUsage, value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
     }}
@@ -102,6 +105,7 @@ export function SessionLaunchBranchSelector(props: {
   form: SessionLaunchFormState;
 }) @{
   const { form } = props
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
     form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
@@ -130,6 +134,8 @@ export function SessionLaunchBranchSelector(props: {
   const branchShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
   )
+  const launchBranchKey =
+    preview?.repoRoot ? SelectorUsageKey.sessionLaunchBranch(preview.repoRoot) : null
 
   <div class={styles.branchSelector}>
     <SessionInputSelect
@@ -139,10 +145,14 @@ export function SessionLaunchBranchSelector(props: {
       label="Git branch"
       open={form.getPickerOpen("branch")}
       placeholder="Choose a branch"
+      recentUsedValues={launchBranchKey ? selectorUsage.getRecentUsedValues(launchBranchKey) : null}
       shortcut={branchShortcut}
       value={form.draftBaseBranchName.value}
       onValueChange={(value) => {
         form.draftBaseBranchName.value = value
+        if (launchBranchKey) {
+          selectorUsage.setCurrentValue(launchBranchKey, value)
+        }
       }}
     />
 
@@ -284,6 +294,7 @@ export function SessionSubpackageSelector(props: {
   form: SessionLaunchFormState;
 }) @{
   const { form } = props
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   const projectPath = form.draftProjectPath.value
   const response = useQuery(projectPath ? goddardSdk.session.subpackages : null, {
@@ -293,7 +304,7 @@ export function SessionSubpackageSelector(props: {
   const items =
     projectPath ? buildSubpackageItems(projectPath, subpackages) : []
   const preferredCwd =
-    projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages) : null
+    projectPath ? resolvePreferredLaunchCwd(selectorUsage, projectPath, subpackages) : null
   const selectedValue = preferredCwd ?? projectPath
   const subpackageShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openSubpackageSelector.id]?.[0],
@@ -324,11 +335,14 @@ export function SessionSubpackageSelector(props: {
     label="Working directory"
     open={form.getPickerOpen("subpackage")}
     placeholder="Project root"
+    recentUsedValues={projectPath
+      ? selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionLaunchCwd(projectPath))
+      : null}
     shortcut={subpackageShortcut}
     value={selectedValue}
     onValueChange={(value) => {
       form.draftSubpackagePath.value = value === projectPath ? null : value
-      recordSessionLaunchCwdUse(projectPath, value)
+      setCurrentSessionLaunchCwd(selectorUsage, projectPath, value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
     }}
@@ -341,6 +355,7 @@ export function SessionLaunchPreviewSelectors(props: {
   form: SessionLaunchFormState;
 }) @{
   const { form } = props
+  const selectorUsage = useSelectorUsage()
   const shortcutRegistry = useShortcutRegistry()
   useQuery(
     form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
@@ -398,6 +413,7 @@ export function SessionLaunchPreviewSelectors(props: {
   const thinkingShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
+  const agentId = form.draftAdapterId.value
 
   useAppCommand(AppCommand.sessionInput.decreaseThinkingLevel, () => {
     const thinkingOption = form.thinkingOption.value
@@ -405,11 +421,15 @@ export function SessionLaunchPreviewSelectors(props: {
       return
     }
 
-    form.draftThinkingValue.value = stepConfigOptionValue(
+    const nextValue = stepConfigOptionValue(
       thinkingOption,
       typeof form.draftThinkingValue.value === "string" ? form.draftThinkingValue.value : null,
       -1,
     )
+    form.draftThinkingValue.value = nextValue
+    if (agentId) {
+      selectorUsage.setCurrentValue(SelectorUsageKey.sessionControlThinking(agentId), nextValue)
+    }
   }, { active: !props.disabled && thinkingItems.length > 0 })
   useAppCommand(AppCommand.sessionInput.increaseThinkingLevel, () => {
     const thinkingOption = form.thinkingOption.value
@@ -417,11 +437,15 @@ export function SessionLaunchPreviewSelectors(props: {
       return
     }
 
-    form.draftThinkingValue.value = stepConfigOptionValue(
+    const nextValue = stepConfigOptionValue(
       thinkingOption,
       typeof form.draftThinkingValue.value === "string" ? form.draftThinkingValue.value : null,
       1,
     )
+    form.draftThinkingValue.value = nextValue
+    if (agentId) {
+      selectorUsage.setCurrentValue(SelectorUsageKey.sessionControlThinking(agentId), nextValue)
+    }
   }, { active: !props.disabled && thinkingItems.length > 0 })
 
   <div class={props.compact ? styles.composerControls : styles.grid}>
@@ -435,10 +459,16 @@ export function SessionLaunchPreviewSelectors(props: {
       label="Model"
       open={form.getPickerOpen("model")}
       placeholder="Use the agent harness default model"
+      recentUsedValues={agentId
+        ? selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionControlModel(agentId))
+        : null}
       shortcut={modelShortcut}
       value={form.draftModelId.value}
       onValueChange={(value) => {
         form.draftModelId.value = value
+        if (agentId) {
+          selectorUsage.setCurrentValue(SelectorUsageKey.sessionControlModel(agentId), value)
+        }
       }}
     />
 
@@ -451,6 +481,9 @@ export function SessionLaunchPreviewSelectors(props: {
         label="Thinking level"
         open={form.getPickerOpen("thinking")}
         placeholder="Use the agent harness default"
+        recentUsedValues={agentId
+          ? selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionControlThinking(agentId))
+          : null}
         shortcut={thinkingShortcut}
         value={typeof form.draftThinkingValue.value === "boolean"
           ? String(form.draftThinkingValue.value)
@@ -459,6 +492,9 @@ export function SessionLaunchPreviewSelectors(props: {
           form.draftThinkingValue.value = form.thinkingOption.value?.type === "boolean"
             ? value === "true"
             : value
+          if (agentId) {
+            selectorUsage.setCurrentValue(SelectorUsageKey.sessionControlThinking(agentId), value)
+          }
         }}
       />
     }
@@ -470,9 +506,15 @@ export function SessionLaunchPreviewSelectors(props: {
           disabled={props.disabled}
           modeOption={form.modeOption.value}
           open={form.getPickerOpen("mode")}
+          recentUsedValues={agentId
+            ? selectorUsage.getRecentUsedValues(SelectorUsageKey.sessionControlMode(agentId))
+            : null}
           shortcut={approvalPresetShortcut}
           onValueChange={(value) => {
             form.draftModeValue.value = value
+            if (agentId) {
+              selectorUsage.setCurrentValue(SelectorUsageKey.sessionControlMode(agentId), value)
+            }
           }}
         />
       </div>
