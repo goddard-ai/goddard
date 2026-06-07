@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -14,10 +14,11 @@ import { SetupContext } from "../src/context.ts"
 import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -45,7 +46,7 @@ afterEach(async () => {
 test("config manager promotes valid root config edits and preserves the last good snapshot after invalid edits", async () => {
   await useTempHome()
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-manager-repo-"))
-  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(repoDir))
 
   const output: string[] = []
   const restoreLogging = configureLogging({
@@ -155,7 +156,7 @@ test(
   async () => {
     await useTempHome()
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-action-reload-repo-"))
-    cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+    cleanup.push(() => removeTemporaryPath(repoDir))
 
     const agentA = createFixtureAgent("Node Agent A")
     const agentB = createFixtureAgent("Node Agent B")
@@ -215,7 +216,7 @@ test(
   async () => {
     await useTempHome()
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-pr-feedback-reload-repo-"))
-    cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+    cleanup.push(() => removeTemporaryPath(repoDir))
 
     const agentA = createFixtureAgent("Node Agent A")
     const agentB = createFixtureAgent("Node Agent B")
@@ -372,7 +373,7 @@ async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-reload-home-"))
   process.env.HOME = homeDir
   db = resetComposedDaemonStore()
-  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(homeDir))
   return homeDir
 }
 

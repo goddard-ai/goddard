@@ -131,9 +131,11 @@ async function toDiscoveredPackage(
   rootDir: string,
   packageDir: string,
 ): Promise<DiscoveredWorkforcePackage> {
+  const relativeDir = relative(rootDir, packageDir).replaceAll("\\", "/") || "."
+
   return {
     rootDir: packageDir,
-    relativeDir: relative(rootDir, packageDir) || ".",
+    relativeDir,
     manifestPath: join(packageDir, "package.json"),
     name: await resolvePackageName(join(packageDir, "package.json"), packageDir),
   }

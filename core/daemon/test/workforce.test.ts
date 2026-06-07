@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { daemonIpcRoutes } from "@goddard-ai/daemon-client/daemon-ipc"
@@ -10,6 +10,7 @@ import { afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -40,7 +41,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   })
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-workforce-init-"))
   const packageDir = join(repoDir, "packages", "ui")
-  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(repoDir))
 
   await mkdir(packageDir, { recursive: true })
   await writeFile(
@@ -95,7 +96,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
 
 test("daemon workforce event stream rejects inactive repositories", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(rootDir))
 
   const daemon = await startDaemonServer(createTestBackendClient(), {
     port: 0,
@@ -123,7 +124,7 @@ function createDaemonClient(daemonUrl: string) {
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-workforce-home-"))
   process.env.HOME = homeDir
-  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(homeDir))
 }
 
 async function writeGlobalRootConfig(config: Record<string, unknown>) {

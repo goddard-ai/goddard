@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
@@ -17,9 +17,10 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
 const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
@@ -70,7 +71,7 @@ afterAll(async () => {
   }
 
   if (sharedHomeDir) {
-    await rm(sharedHomeDir, { recursive: true, force: true })
+    await removeTemporaryPath(sharedHomeDir)
   }
 })
 
@@ -2494,7 +2495,7 @@ async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promis
   // Daemon shutdown may inspect persisted worktrees, whose Git metadata lives under the
   // source repo. Keep fixture repos until after daemon cleanup has run.
   cleanup.unshift(async () => {
-    await rm(repoDir, { recursive: true, force: true })
+    await removeTemporaryPath(repoDir)
   })
 
   await writeFile(
@@ -2570,7 +2571,7 @@ async function createFakePackageManager(
 ) {
   const binDir = await mkdtemp(join(tmpdir(), `goddard-${name}-bin-`))
   cleanup.push(async () => {
-    await rm(binDir, { recursive: true, force: true })
+    await removeTemporaryPath(binDir)
   })
 
   const scriptPath = join(binDir, process.platform === "win32" ? `${name}.cmd` : name)
@@ -2646,7 +2647,7 @@ async function createLaunchPreviewAgentLog() {
 
   process.env.LAUNCH_PREVIEW_AGENT_LOG = logPath
   cleanup.push(async () => {
-    await rm(logDir, { recursive: true, force: true })
+    await removeTemporaryPath(logDir)
   })
   cleanup.push(async () => {
     if (previousLogPath === undefined) {

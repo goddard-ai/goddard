@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
@@ -10,8 +10,9 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { send, subscribe } from "./ipc-client-helpers.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -25,7 +26,7 @@ afterEach(async () => {
   db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (sharedHomeDir) {
-    await rm(sharedHomeDir, { recursive: true, force: true })
+    await removeTemporaryPath(sharedHomeDir)
     sharedHomeDir = null
   }
 
@@ -442,8 +443,8 @@ test("daemon workforce request rejects mismatched roots for token-backed session
   const token = "workforce-token-mismatch"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-a-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-b-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
-  cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(rootDir))
+  cleanup.push(() => removeTemporaryPath(otherRootDir))
 
   const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
@@ -470,8 +471,8 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
   const token = "workforce-token-respond"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-c-"))
   const otherRootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-d-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
-  cleanup.push(() => rm(otherRootDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(rootDir))
+  cleanup.push(() => removeTemporaryPath(otherRootDir))
 
   const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
@@ -496,7 +497,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
   const sessionId = db.sessions.newId()
   const token = "workforce-token-no-root"
   const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-root-e-"))
-  cleanup.push(() => rm(rootDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(rootDir))
 
   const daemon = await startServer({ useExistingHome: true })
   await seedWorkforceSession({
@@ -752,7 +753,7 @@ async function createGitRepoFixture(input: {
   branch: string
 }): Promise<string> {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-repo-"))
-  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(repoDir))
   await writeFile(join(repoDir, "README.md"), "# fixture\n", "utf8")
   runGit(repoDir, ["init"])
   runGit(repoDir, ["config", "user.email", "bot@example.com"])

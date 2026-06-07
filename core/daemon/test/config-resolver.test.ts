@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
 import { readMergedRootConfig } from "../src/resolvers/config.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -262,7 +263,7 @@ test("rejects repository-local security policy that loosens pull request operati
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-home-"))
   process.env.HOME = homeDir
-  cleanup.push(() => rm(homeDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(homeDir))
 }
 
 async function writeGlobalRootConfig(config: Record<string, unknown>) {
@@ -284,7 +285,7 @@ async function writeRootConfig(configPath: string, config: Record<string, unknow
 
 async function createRepoFixture() {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-resolver-repo-"))
-  cleanup.push(() => rm(repoDir, { recursive: true, force: true }))
+  cleanup.push(() => removeTemporaryPath(repoDir))
 
   return repoDir
 }

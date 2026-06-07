@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -11,9 +11,10 @@ import { afterEach, expect, test } from "bun:test"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
-import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
+import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
+import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
@@ -479,7 +480,7 @@ function parseJsonLogs(output: string[]): Array<Record<string, unknown>> {
 async function useTempHome() {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-daemon-home-"))
   cleanup.push(async () => {
-    await rm(homeDir, { recursive: true, force: true })
+    await removeTemporaryPath(homeDir)
   })
   process.env.HOME = homeDir
   db = resetComposedDaemonStore({ filename: ":memory:" })
@@ -499,7 +500,7 @@ async function writeGlobalRootConfig(config: Record<string, unknown>) {
 async function createRepoFixture(): Promise<string> {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-run-repo-"))
   cleanup.push(async () => {
-    await rm(repoDir, { recursive: true, force: true })
+    await removeTemporaryPath(repoDir)
   })
 
   await writeFile(
