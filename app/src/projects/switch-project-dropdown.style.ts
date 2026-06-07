@@ -4,6 +4,7 @@ export default {
   trigger: css({
     display: "inline-flex",
     alignItems: "center",
+    justifyContent: "center",
     width: "100%",
     height: "28px",
     paddingInline: "12px",
@@ -12,7 +13,7 @@ export default {
     backgroundColor: "panel",
     color: "muted",
     cursor: "pointer",
-    textAlign: "left",
+    textAlign: "center",
     transition:
       "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
     _hover: {
@@ -26,6 +27,7 @@ export default {
     },
   }),
   triggerLabel: css({
+    minWidth: "0",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
