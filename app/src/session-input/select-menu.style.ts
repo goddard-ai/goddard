@@ -85,7 +85,11 @@ export default {
     height: "16px",
     flexShrink: "0",
     borderRadius: "4px",
+    color: "inherit",
     objectFit: "cover",
+    "[data-theme=dark] &": {
+      color: "white",
+    },
   }),
   triggerPlaceholder: css({
     color: "muted",

@@ -187,6 +187,12 @@ export default {
     width: "16px",
     minHeight: "28px",
     color: "text",
+    "[data-theme=dark] &": {
+      color: "white",
+      "& svg": {
+        color: "white",
+      },
+    },
     "& svg": {
       flexShrink: "0",
       color: "muted",
@@ -197,6 +203,7 @@ export default {
     height: "16px",
     flexShrink: "0",
     borderRadius: "4px",
+    color: "inherit",
     objectFit: "cover",
   }),
   composerAgentTooltip: css({
