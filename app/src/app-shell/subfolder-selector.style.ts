@@ -35,6 +35,15 @@ export default {
     fontWeight: "560",
     lineHeight: "1.21",
   }),
+  icon: css({
+    width: "16px",
+    height: "16px",
+    minWidth: "16px",
+    minHeight: "16px",
+    inlineSize: "16px",
+    blockSize: "16px",
+    flexShrink: "0",
+  }),
   menu: css({
     display: "grid",
     width: "min(340px, var(--available-width))",

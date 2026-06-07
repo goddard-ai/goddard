@@ -71,7 +71,7 @@ export component AppShellSubfolderSelector() {
       }
     }}
   >
-    <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
+    <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
 
     if (selectedSubfolderLabel) {
       <span class={styles.label}>{selectedSubfolderLabel}</span>
@@ -104,7 +104,7 @@ export component AppShellSubfolderSelector() {
               open.value = false
             }}
           >
-            <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
+            <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
 
             <span class={styles.itemBody}>
               <span class={styles.itemLabel}>{item.label}</span>

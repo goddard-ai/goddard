@@ -89,6 +89,15 @@ export default {
       outlineColor: "accentStrong",
       outlineOffset: "2px",
     },
+    "& svg": {
+      width: "16px",
+      height: "16px",
+      minWidth: "16px",
+      minHeight: "16px",
+      inlineSize: "16px",
+      blockSize: "16px",
+      flexShrink: "0",
+    },
   }),
   switcherFallback: css({
     width: "100%",
