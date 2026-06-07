@@ -81,6 +81,12 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const ariaLabel = `${props.label}: ${triggerLabel}`
   const SelectedIcon = selectedItem?.Icon
 
+  useEffect(() => {
+    if (props.disabled) {
+      props.open.value = false
+    }
+  }, [props.disabled, props.open])
+
   <div class={styles.field} data-compact={props.compact}>
     if (!props.compact) {
       <span class={styles.label}>
@@ -387,7 +393,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
       }
 
       function commitSelection(item: SessionInputSelectItem | null) {
-        if (!item || item.disabled) {
+        if (props.disabled || !item || item.disabled) {
           return
         }
 
@@ -431,6 +437,10 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
         class={styles.menuBody}
         onPointerMove={updatePointerPosition}
         onKeyDown={(event) => {
+          if (props.disabled) {
+            return
+          }
+
           if (props.filterable && event.target === filterInputRef.current) {
             return
           }
@@ -465,6 +475,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           <input
             {ref filterInputRef}
             class={styles.menuFilter}
+            disabled={props.disabled}
             placeholder="Type to filter"
             value={query}
             onInput={(event) => {
@@ -519,7 +530,7 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
                     itemElements[item.value] = element
                   }}
                   class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
-                  disabled={item.disabled}
+                  disabled={props.disabled || item.disabled}
                   type="button"
                   onMouseEnter={() => {
                     if (ignorePointerHoverRef.current) {

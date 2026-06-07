@@ -1,5 +1,5 @@
 import { type Signal } from "@preact/signals"
-import { useModel } from "@preact/signals"
+import { useModel, useSignal } from "@preact/signals"
 import { X } from "lucide-react"
 import { useEffect, useId } from "preact/hooks"
 
@@ -22,6 +22,7 @@ component SessionLaunchDialog(props: {
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
   const form = useModel(SessionLaunchFormState)
+  const isLaunching = useSignal(false)
   const activeProjectPath = projectContext.activeProjectPath
   const isDialogOpen = props.open.value
   const titleId = useId()
@@ -36,14 +37,20 @@ component SessionLaunchDialog(props: {
   const hasProjectSelector = projects.length > 0
   const hasSubpackageSelector = form.draftProjectPath.value !== null
   const hasThinkingLevel = form.thinkingOption.value !== null
-  const canSubmit = form.canSubmit.value
+  const canSubmit = form.canSubmit.value && !isLaunching.value
 
   async function launchSession() {
+    if (isLaunching.value) {
+      return
+    }
+
     const sessionInput = form.sessionInput.value
 
     if (!sessionInput) {
       return
     }
+
+    isLaunching.value = true
 
     try {
       const projectPath = form.draftProjectPath.value
@@ -77,6 +84,8 @@ component SessionLaunchDialog(props: {
       }, 0)
     } catch (error) {
       console.error("Failed to create session.", error)
+    } finally {
+      isLaunching.value = false
     }
   }
 
@@ -88,28 +97,28 @@ component SessionLaunchDialog(props: {
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
-  }, { active: hasProjectSelector })
+  }, { active: hasProjectSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openSubpackageSelector, () => {
     form.setOpenPicker("subpackage")
-  }, { active: hasSubpackageSelector })
+  }, { active: hasSubpackageSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
     form.setOpenPicker("adapter")
-  }, { active: hasAdapterSelector })
+  }, { active: hasAdapterSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.cycleLaunchLocation()
-  }, { active: hasLocationSelector })
+  }, { active: hasLocationSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openBranchSelector, () => {
     form.setOpenPicker("branch")
-  }, { active: hasBranchSelector })
+  }, { active: hasBranchSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openApprovalPresetSelector, () => {
     form.setOpenPicker("mode")
-  }, { active: form.modeOption.value !== null })
+  }, { active: form.modeOption.value !== null && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openModelSelector, () => {
     form.setOpenPicker("model")
-  }, { active: hasModelSelector })
+  }, { active: hasModelSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openThinkingLevelSelector, () => {
     form.setOpenPicker("thinking")
-  }, { active: hasThinkingLevel })
+  }, { active: hasThinkingLevel && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.submit, () => {
     void launchSession()
   }, { active: canSubmit })
@@ -139,8 +148,11 @@ component SessionLaunchDialog(props: {
     </button>
     <SessionLaunchForm
       {form}
+      disabled={isLaunching.value}
       onEscape={() => {
-        props.open.value = false
+        if (!isLaunching.value) {
+          props.open.value = false
+        }
       }}
       onSubmit={launchSession}
       {projects}

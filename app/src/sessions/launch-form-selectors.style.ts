@@ -5,6 +5,10 @@ export default {
   section: css({
     display: "grid",
     gap: "12px",
+    transition: "opacity 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    '&[data-disabled="true"]': {
+      opacity: "0.62",
+    },
   }),
   grid: css({
     display: "grid",

@@ -47,7 +47,10 @@ export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean
   </div>
 }
 
-export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
+export component AgentHarnessSelector(props: {
+  disabled?: boolean;
+  form: SessionLaunchFormState;
+}) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {
@@ -71,7 +74,7 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   }, [adapterCatalog, form])
 
   <SessionInputSelect
-    disabled={!form.draftProjectPath.value}
+    disabled={props.disabled || !form.draftProjectPath.value}
     filterable={true}
     {items}
     label="Adapter"
@@ -88,7 +91,10 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
   />
 }
 
-export component SessionLaunchLocationSelector(props: { form: SessionLaunchFormState }) {
+export component SessionLaunchLocationSelector(props: {
+  disabled?: boolean;
+  form: SessionLaunchFormState;
+}) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
@@ -148,7 +154,7 @@ export component SessionLaunchLocationSelector(props: { form: SessionLaunchFormS
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openLocationSelector.id]?.[0],
   )
 
-  <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
+  <fieldset class={styles.radioField} disabled={props.disabled || !form.draftProjectPath.value}>
     <legend class={styles.radioLegend}>
       <span>"Launch location"</span>
 
@@ -199,7 +205,10 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
   ]
 }
 
-export component SessionSubpackageSelector(props: { form: SessionLaunchFormState }) {
+export component SessionSubpackageSelector(props: {
+  disabled?: boolean;
+  form: SessionLaunchFormState;
+}) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const projectPath = form.draftProjectPath.value
@@ -235,7 +244,7 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
   }
 
   <SessionInputSelect
-    disabled={!projectPath}
+    disabled={props.disabled || !projectPath}
     filterable={true}
     {items}
     label="Working directory"
@@ -254,6 +263,7 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
 
 export component SessionLaunchPreviewSelectors(props: {
   compact?: boolean;
+  disabled?: boolean;
   form: SessionLaunchFormState;
 }) {
   const { form } = props
@@ -331,7 +341,7 @@ export component SessionLaunchPreviewSelectors(props: {
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <SessionInputSelect
       compact={props.compact}
-      disabled={branchItems.length === 0 || localCheckoutDirty}
+      disabled={props.disabled || branchItems.length === 0 || localCheckoutDirty}
       filterable={true}
       items={branchItems}
       label="Git branch"
@@ -355,6 +365,7 @@ export component SessionLaunchPreviewSelectors(props: {
     if (form.modeOption.value) {
       <SessionModeSelector
         compact={props.compact}
+        disabled={props.disabled}
         modeOption={form.modeOption.value}
         open={form.getPickerOpen("mode")}
         shortcut={approvalPresetShortcut}
@@ -366,7 +377,7 @@ export component SessionLaunchPreviewSelectors(props: {
 
     <SessionInputSelect
       compact={props.compact}
-      disabled={modelItems.length === 0}
+      disabled={props.disabled || modelItems.length === 0}
       filterable={true}
       items={modelItems}
       label="Model"
@@ -384,7 +395,7 @@ export component SessionLaunchPreviewSelectors(props: {
     <div class={props.compact ? styles.composerControls : styles.grid}>
       <SessionInputSelect
         compact={props.compact}
-        disabled={thinkingItems.length === 0}
+        disabled={props.disabled || thinkingItems.length === 0}
         filterable={false}
         items={thinkingItems}
         label="Thinking level"

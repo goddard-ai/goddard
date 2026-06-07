@@ -33,6 +33,7 @@ const launchInputClasses: SessionInputClasses = {
 }
 
 export component SessionLaunchForm(props: {
+  disabled?: boolean;
   form: SessionLaunchFormState;
   onEscape?: () => void;
   showProjectSelector?: boolean;
@@ -41,6 +42,7 @@ export component SessionLaunchForm(props: {
 }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
+  const disabled = props.disabled ?? false
   const showProjectSelector = props.showProjectSelector ?? true
   const projectItems: SessionInputSelectItem[] = props.projects.map(
     (project) => ({
@@ -71,11 +73,16 @@ export component SessionLaunchForm(props: {
     form.launchPreview.value = null
   }, [form, props.projects])
 
-  <div class={selectorStyles.section}>
+  <div
+    aria-busy={disabled ? "true" : undefined}
+    aria-disabled={disabled ? "true" : undefined}
+    class={selectorStyles.section}
+    data-disabled={disabled ? "true" : undefined}
+  >
     <div class={selectorStyles.grid}>
       if (showProjectSelector) {
         <SessionInputSelect
-          disabled={props.projects.length === 0}
+          disabled={disabled || props.projects.length === 0}
           filterable={true}
           items={projectItems}
           label="Project"
@@ -93,17 +100,17 @@ export component SessionLaunchForm(props: {
       }
 
       try {
-        <SessionSubpackageSelector {form} />
+        <SessionSubpackageSelector {disabled} {form} />
       } pending {
         <SessionLaunchLoadingSelect label="Working directory" />
       }
       try {
-        <AgentHarnessSelector {form} />
+        <AgentHarnessSelector {disabled} {form} />
       } pending {
         <SessionLaunchLoadingSelect label="Adapter" />
       }
       try {
-        <SessionLaunchLocationSelector {form} />
+        <SessionLaunchLocationSelector {disabled} {form} />
       } pending {
         <SessionLaunchLoadingSelect label="Launch location" />
       }
@@ -112,10 +119,11 @@ export component SessionLaunchForm(props: {
     <SessionInput
       autoFocus={true}
       classes={launchInputClasses}
+      {disabled}
       footerInsideFrame={true}
       footerControls={<tsrx>
         try {
-          <SessionLaunchPreviewSelectors compact={true} {form} />
+          <SessionLaunchPreviewSelectors compact={true} {disabled} {form} />
         } pending {
           <SessionLaunchPreviewLoadingSelectors compact={true} />
         }

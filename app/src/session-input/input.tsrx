@@ -307,6 +307,7 @@ export component SessionInput(props: {
       }
     })
   }, [
+    disabled,
     menu?.nodeKey,
     menu?.query,
     menu?.startOffset,
