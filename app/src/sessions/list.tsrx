@@ -4,6 +4,7 @@ import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 
 export component SessionsList(props: {
+  activeSessionId?: DaemonSession["id"] | null;
   errorMessage?: string | null;
   listStatus?: "idle" | "loading" | "ready" | "error";
   searchQuery: string;
@@ -48,7 +49,7 @@ export component SessionsList(props: {
   <ul class={styles.list}>
     for (const session of props.sessions) {
       <li key={session.id}>
-        <ListRow {session} />
+        <ListRow isActive={props.activeSessionId === session.id} {session} />
       </li>
     }
   </ul>

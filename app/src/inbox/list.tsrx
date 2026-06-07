@@ -5,6 +5,7 @@ import { InboxRow } from "./row.tsrx"
 import styles from "./page.style.ts"
 
 export component InboxList(props: {
+  activeItemId?: InboxItem["id"] | null;
   errorMessage?: string | null;
   filterId: InboxFilterId;
   items: readonly InboxItem[];
@@ -63,6 +64,7 @@ export component InboxList(props: {
 
       <li key={item.id}>
         <InboxRow
+          isActive={props.activeItemId === item.id}
           {item}
           isSelected={props.selectedEntityIds?.has(item.entityId) ?? false}
           {onSelectionChange}

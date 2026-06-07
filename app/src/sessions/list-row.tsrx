@@ -105,6 +105,7 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
 }
 
 export component ListRow(props: {
+  isActive?: boolean;
   session: DaemonSession;
 }) {
   const status = getSessionStatusPresentation(props.session.status)
@@ -115,6 +116,7 @@ export component ListRow(props: {
 
   <div
     class={styles.row}
+    data-active={props.isActive ? "true" : undefined}
     data-session-row="true"
     role="button"
     tabIndex={0}

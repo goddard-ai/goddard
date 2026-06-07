@@ -31,6 +31,9 @@ export default {
     '&:focus-within [data-timestamp="true"]': {
       opacity: 0,
     },
+    "&[data-active='true']": {
+      backgroundColor: "surface",
+    },
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",

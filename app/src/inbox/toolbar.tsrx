@@ -9,6 +9,7 @@ export component InboxToolbar(props: {
   searchQuery: string;
   onFilterSelect: (id: InboxFilterId) => void;
   onRefresh: () => void;
+  onRowNavigationKeyDown?: (event: preact.TargetedKeyboardEvent<HTMLInputElement>) => void;
   onSearchInput: (value: string) => void;
 }) {
   const hasSearchQuery = props.searchQuery.trim().length > 0
@@ -47,6 +48,7 @@ export component InboxToolbar(props: {
           placeholder="Search inbox"
           type="search"
           value={props.searchQuery}
+          onKeyDown={props.onRowNavigationKeyDown}
           onInput={(event) => {
             props.onSearchInput(event.currentTarget.value)
           }}

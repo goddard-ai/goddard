@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks"
+import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
   CompleteSessionInboxItemRequest,
@@ -9,6 +9,7 @@ import type {
 
 import { useInbox, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { appToaster } from "~/lib/good-toaster.tsrx"
+import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
@@ -49,6 +50,7 @@ function getErrorMessage(error: unknown) {
 }
 
 component InboxQueryContent(props: {
+  activeItemId: InboxItem["id"] | null;
   filterId: InboxFilterId;
   searchQuery: string;
   selectedEntityIds: ReadonlySet<InboxEntityId>;
@@ -66,6 +68,9 @@ component InboxQueryContent(props: {
   })
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
+  const resolvedActiveItemId = visibleItems.some((item) => item.id === props.activeItemId)
+    ? props.activeItemId
+    : visibleItems[0]?.id ?? null
 
   useEffect(() => {
     inbox.applyItems(items)
@@ -73,6 +78,7 @@ component InboxQueryContent(props: {
 
   <InboxList
     filterId={props.filterId}
+    activeItemId={resolvedActiveItemId}
     items={visibleItems}
     selectedEntityIds={props.selectedEntityIds}
     searchQuery={props.searchQuery}
@@ -83,8 +89,10 @@ component InboxQueryContent(props: {
 component InboxPage() {
   const inbox = useInbox()
   const workbenchTabSet = useWorkbenchTabSet()
+  const pageRef = useRef<HTMLDivElement | null>(null)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
+  const [activeItemId, setActiveItemId] = useState<InboxItem["id"] | null>(null)
   const [realtimeErrorMessage, setRealtimeErrorMessage] = useState<string | null>(null)
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
     () => new Set(),
@@ -141,6 +149,22 @@ component InboxPage() {
       }
       return nextIds
     })
+  }
+
+  function getVisibleInboxRowElements() {
+    return [...(pageRef.current?.querySelectorAll<HTMLElement>("[data-inbox-row-id]") ?? [])]
+  }
+
+  function getInboxRowElementItemId(element: HTMLElement | undefined) {
+    return element?.dataset.inboxRowId as InboxItem["id"] | undefined ?? null
+  }
+
+  function getResolvedActiveItemId(rowElements: readonly HTMLElement[]) {
+    if (rowElements.some((element) => element.dataset.inboxRowId === activeItemId)) {
+      return activeItemId
+    }
+
+    return getInboxRowElementItemId(rowElements[0])
   }
 
   async function runBulkInboxAction(
@@ -251,7 +275,7 @@ component InboxPage() {
       updateInboxItem,
     }}
   >
-    <div class={styles.root}>
+    <div ref={pageRef} class={styles.root}>
       <InboxToolbar
         {filterId}
         {searchQuery}
@@ -267,10 +291,40 @@ component InboxPage() {
         }}
         onRefresh={() => {
           clearSelectedInboxItems()
+          setActiveItemId(null)
           invalidateInboxQueries()
+        }}
+        onRowNavigationKeyDown={(event) => {
+          const rowElements = getVisibleInboxRowElements()
+          const resolvedActiveItemId = getResolvedActiveItemId(rowElements)
+          const activeItemIndex = rowElements.findIndex(
+            (element) => element.dataset.inboxRowId === resolvedActiveItemId,
+          )
+
+          switch (event.key) {
+            case "ArrowDown":
+            case "ArrowUp": {
+              event.preventDefault()
+              const nextIndex = getNextKeyboardRowIndex({
+                currentIndex: activeItemIndex,
+                direction: event.key === "ArrowDown" ? 1 : -1,
+                rowCount: rowElements.length,
+              })
+              setActiveItemId(
+                nextIndex === null ? null : getInboxRowElementItemId(rowElements[nextIndex]),
+              )
+              return
+            }
+            case "Enter":
+              if (resolvedActiveItemId) {
+                event.preventDefault()
+                rowElements[activeItemIndex]?.click()
+              }
+          }
         }}
         onSearchInput={(value) => {
           clearSelectedInboxItems()
+          setActiveItemId(null)
           setSearchQuery(value)
         }}
       />
@@ -306,6 +360,7 @@ component InboxPage() {
         }
         try {
           <InboxQueryContent
+            {activeItemId}
             {filterId}
             {searchQuery}
             {selectedEntityIds}
@@ -314,6 +369,7 @@ component InboxPage() {
         } pending {
           <InboxList
             {filterId}
+            {activeItemId}
             items={[]}
             listStatus="loading"
             {searchQuery}
@@ -324,6 +380,7 @@ component InboxPage() {
           <InboxList
             errorMessage={getErrorMessage(error)}
             {filterId}
+            {activeItemId}
             items={[]}
             listStatus="error"
             {searchQuery}

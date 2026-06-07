@@ -256,6 +256,9 @@ export default {
         backgroundColor: "surface",
       },
     },
+    "&[data-active='true']": {
+      backgroundColor: "surface",
+    },
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",

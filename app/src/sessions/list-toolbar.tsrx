@@ -4,6 +4,7 @@ import styles from "./list-toolbar.style.ts"
 
 export component ListToolbar(props: {
   searchQuery: string;
+  onRowNavigationKeyDown: (event: preact.TargetedKeyboardEvent<HTMLInputElement>) => void;
   onSearchInput: (value: string) => void;
 }) {
   <label class={styles.searchField}>
@@ -14,6 +15,7 @@ export component ListToolbar(props: {
       placeholder="Search session titles"
       type="search"
       value={props.searchQuery}
+      onKeyDown={props.onRowNavigationKeyDown}
       onInput={(event) => {
         props.onSearchInput(event.currentTarget.value)
       }}

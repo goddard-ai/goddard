@@ -5,6 +5,7 @@ import { invalidateSessionChanges } from "./cache.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
 import { evictSessionHistory, SessionsPageMutations } from "./mutations.ts"
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
@@ -64,17 +65,47 @@ component SessionsPage() {
   >
     <div class={styles.root}>
       const [searchQuery, setSearchQuery] = useState("")
+      const [activeSessionId, setActiveSessionId] = useState<DaemonSession["id"] | null>(null)
+      const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+      const activeSessionIndex = visibleSessions.findIndex(
+        (session) => session.id === activeSessionId,
+      )
+      const resolvedActiveSession =
+        activeSessionIndex >= 0 ? visibleSessions[activeSessionIndex] : visibleSessions[0] ?? null
 
       <ListToolbar
         {searchQuery}
+        onRowNavigationKeyDown={(event) => {
+          switch (event.key) {
+            case "ArrowDown":
+            case "ArrowUp": {
+              event.preventDefault()
+              const nextIndex = getNextKeyboardRowIndex({
+                currentIndex: activeSessionIndex,
+                direction: event.key === "ArrowDown" ? 1 : -1,
+                rowCount: visibleSessions.length,
+              })
+              setActiveSessionId(nextIndex === null ? null : visibleSessions[nextIndex]?.id ?? null)
+              return
+            }
+            case "Enter":
+              if (resolvedActiveSession) {
+                event.preventDefault()
+                openSession(resolvedActiveSession.id)
+              }
+          }
+        }}
         onSearchInput={(value) => {
+          setActiveSessionId(null)
           setSearchQuery(value)
         }}
       />
       <div class={styles.listBody}>
-        const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
-
-        <SessionsList {searchQuery} sessions={visibleSessions} />
+        <SessionsList
+          activeSessionId={resolvedActiveSession?.id ?? null}
+          {searchQuery}
+          sessions={visibleSessions}
+        />
       </div>
     </div>
   </SessionsPageMutations>
