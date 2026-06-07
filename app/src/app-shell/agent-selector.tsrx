@@ -58,8 +58,10 @@ export component AppShellAgentSelector() {
     projectContext.activeProjectPath ?? projectRegistry.projectList[0]?.path ?? null
   const open = useSignal(false)
   const search = useSignal("")
+  const highlightedIndex = useSignal(0)
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
+  const itemElementsRef = useRef<Record<string, HTMLButtonElement | null>>({})
   const subpackages = useQuery(projectPath ? goddardSdk.session.subpackages : null, {
     params: projectPath ? [{ cwd: projectPath }] : null,
   })
@@ -72,12 +74,9 @@ export component AppShellAgentSelector() {
   useEffect(() => {
     if (!open.value) {
       search.value = ""
+      highlightedIndex.value = 0
     }
-  }, [open.value, search])
-
-  useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
-    open.value = true
-  }, { active: adapterCatalog != null })
+  }, [highlightedIndex, open.value, search])
 
   if (!adapterCatalog) {
     return
@@ -112,6 +111,57 @@ export component AppShellAgentSelector() {
         ).items.filter((item) => isStrongMatch(search.value, item)).map(
           (item) => item.value.adapter,
         )
+  const highlightedAdapterIndex =
+    filteredAdapters.length === 0
+      ? 0
+      : Math.min(highlightedIndex.value, filteredAdapters.length - 1)
+  const highlightedAdapter = filteredAdapters[highlightedAdapterIndex] ?? null
+
+  function moveHighlightedAdapter(step: 1 | -1) {
+    if (filteredAdapters.length === 0) {
+      highlightedIndex.value = 0
+      return
+    }
+
+    const currentIndex = Math.min(highlightedIndex.value, filteredAdapters.length - 1)
+    highlightedIndex.value = (currentIndex + step + filteredAdapters.length) %
+    filteredAdapters.length
+  }
+
+  function commitAdapter(adapter: (typeof filteredAdapters)[number] | null) {
+    if (!adapter) {
+      return
+    }
+
+    recordSessionLaunchAgentUse(adapter.id)
+    open.value = false
+  }
+
+  function resetHighlightedAdapter() {
+    const selectedIndex = filteredAdapters.findIndex((adapter) => adapter.id === agentId)
+    highlightedIndex.value = !isEmptyQuery(search.value)
+      ? 0
+      : selectedIndex >= 0
+        ? selectedIndex
+        : 0
+  }
+
+  function openSelectorMenu() {
+    resetHighlightedAdapter()
+    open.value = true
+  }
+
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openSelectorMenu)
+
+  useEffect(() => {
+    if (!open.value || !highlightedAdapter) {
+      return
+    }
+
+    itemElementsRef.current[highlightedAdapter.id]?.scrollIntoView({
+      block: "nearest",
+    })
+  }, [highlightedAdapter?.id, open.value])
 
   <button
     {ref triggerElementRef}
@@ -121,12 +171,16 @@ export component AppShellAgentSelector() {
     class={cx(styles.trigger, noDragClass)}
     type="button"
     onClick={() => {
-      open.value = !open.value
+      if (open.value) {
+        open.value = false
+      } else {
+        openSelectorMenu()
+      }
     }}
     onKeyDown={(event) => {
       if (event.key === "ArrowDown" && !open.value) {
         event.preventDefault()
-        open.value = true
+        openSelectorMenu()
       }
     }}
   >
@@ -153,6 +207,27 @@ export component AppShellAgentSelector() {
       value={search.value}
       onInput={(event) => {
         search.value = event.currentTarget.value
+        highlightedIndex.value = 0
+      }}
+      onKeyDown={(event) => {
+        switch (event.key) {
+          case "ArrowDown":
+            event.preventDefault()
+            moveHighlightedAdapter(1)
+            return
+          case "ArrowUp":
+            event.preventDefault()
+            moveHighlightedAdapter(-1)
+            return
+          case "Enter":
+            event.preventDefault()
+            commitAdapter(highlightedAdapter)
+            return
+          case "Escape":
+            event.preventDefault()
+            event.stopPropagation()
+            open.value = false
+        }
       }}
     />
 
@@ -163,14 +238,22 @@ export component AppShellAgentSelector() {
         for (const adapter of filteredAdapters) {
           <li key={adapter.id}>
             <button
+              {ref (element) => {
+                itemElementsRef.current[adapter.id] = element
+              }}
               class={styles.item}
               data-active={adapter.id === agentId ? "true" : undefined}
+              data-highlighted={adapter.id === highlightedAdapter?.id ? "true" : undefined}
               role="menuitemradio"
               aria-checked={adapter.id === agentId ? "true" : "false"}
               type="button"
+              onMouseEnter={() => {
+                highlightedIndex.value = filteredAdapters.findIndex(
+                  (entry) => entry.id === adapter.id,
+                )
+              }}
               onClick={() => {
-                recordSessionLaunchAgentUse(adapter.id)
-                open.value = false
+                commitAdapter(adapter)
               }}
             >
               <AcpAgentIcon class={styles.icon} icon={adapter.icon} />

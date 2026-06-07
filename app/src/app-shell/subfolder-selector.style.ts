@@ -138,6 +138,9 @@ export default {
     "&[data-active='true']": {
       backgroundColor: "surface",
     },
+    "&[data-highlighted='true']": {
+      backgroundColor: "surface",
+    },
     "& svg": {
       width: "16px",
       height: "16px",

@@ -113,6 +113,9 @@ export default {
     "&[data-active='true']": {
       backgroundColor: "surface",
     },
+    "&[data-highlighted='true']": {
+      backgroundColor: "surface",
+    },
   }),
   itemBody: css({
     display: "grid",

@@ -54,8 +54,10 @@ export component AppShellSubfolderSelector() {
     projectContext.activeProjectPath ?? projectRegistry.projectList[0]?.path ?? null
   const open = useSignal(false)
   const search = useSignal("")
+  const highlightedIndex = useSignal(0)
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
+  const itemElementsRef = useRef<Record<string, HTMLButtonElement | null>>({})
   const response = useQuery(projectPath ? goddardSdk.session.subpackages : null, {
     params: projectPath ? [{ cwd: projectPath }] : null,
   })
@@ -63,12 +65,9 @@ export component AppShellSubfolderSelector() {
   useEffect(() => {
     if (!open.value) {
       search.value = ""
+      highlightedIndex.value = 0
     }
-  }, [open.value, search])
-
-  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, () => {
-    open.value = true
-  }, { active: projectPath !== null })
+  }, [highlightedIndex, open.value, search])
 
   if (!projectPath) {
     return
@@ -113,6 +112,54 @@ export component AppShellSubfolderSelector() {
           ],
           { threshold: 0 },
         ).items.filter((item) => isStrongMatch(search.value, item)).map((item) => item.value.item)
+  const highlightedItemIndex =
+    filteredItems.length === 0 ? 0 : Math.min(highlightedIndex.value, filteredItems.length - 1)
+  const highlightedItem = filteredItems[highlightedItemIndex] ?? null
+
+  function moveHighlightedItem(step: 1 | -1) {
+    if (filteredItems.length === 0) {
+      highlightedIndex.value = 0
+      return
+    }
+
+    const currentIndex = Math.min(highlightedIndex.value, filteredItems.length - 1)
+    highlightedIndex.value = (currentIndex + step + filteredItems.length) % filteredItems.length
+  }
+
+  function commitItem(item: AppShellSubfolderItem | null) {
+    if (!item) {
+      return
+    }
+
+    recordSessionLaunchCwdUse(projectPath, item.path)
+    open.value = false
+  }
+
+  function resetHighlightedItem() {
+    const selectedIndex = filteredItems.findIndex((item) => item.path === selectedCwd)
+    highlightedIndex.value = !isEmptyQuery(search.value)
+      ? 0
+      : selectedIndex >= 0
+        ? selectedIndex
+        : 0
+  }
+
+  function openSelectorMenu() {
+    resetHighlightedItem()
+    open.value = true
+  }
+
+  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, openSelectorMenu)
+
+  useEffect(() => {
+    if (!open.value || !highlightedItem) {
+      return
+    }
+
+    itemElementsRef.current[highlightedItem.path]?.scrollIntoView({
+      block: "nearest",
+    })
+  }, [highlightedItem?.path, open.value])
 
   <button
     {ref triggerElementRef}
@@ -125,12 +172,16 @@ export component AppShellSubfolderSelector() {
     data-icon-only={selectedSubfolderLabel ? undefined : "true"}
     type="button"
     onClick={() => {
-      open.value = !open.value
+      if (open.value) {
+        open.value = false
+      } else {
+        openSelectorMenu()
+      }
     }}
     onKeyDown={(event) => {
       if (event.key === "ArrowDown" && !open.value) {
         event.preventDefault()
-        open.value = true
+        openSelectorMenu()
       }
     }}
   >
@@ -161,6 +212,27 @@ export component AppShellSubfolderSelector() {
       value={search.value}
       onInput={(event) => {
         search.value = event.currentTarget.value
+        highlightedIndex.value = 0
+      }}
+      onKeyDown={(event) => {
+        switch (event.key) {
+          case "ArrowDown":
+            event.preventDefault()
+            moveHighlightedItem(1)
+            return
+          case "ArrowUp":
+            event.preventDefault()
+            moveHighlightedItem(-1)
+            return
+          case "Enter":
+            event.preventDefault()
+            commitItem(highlightedItem)
+            return
+          case "Escape":
+            event.preventDefault()
+            event.stopPropagation()
+            open.value = false
+        }
       }}
     />
 
@@ -171,14 +243,22 @@ export component AppShellSubfolderSelector() {
         for (const item of filteredItems) {
           <li key={item.path}>
             <button
+              {ref (element) => {
+                itemElementsRef.current[item.path] = element
+              }}
               class={styles.item}
               data-active={item.path === selectedCwd ? "true" : undefined}
+              data-highlighted={item.path === highlightedItem?.path ? "true" : undefined}
               role="menuitemradio"
               aria-checked={item.path === selectedCwd ? "true" : "false"}
               type="button"
+              onMouseEnter={() => {
+                highlightedIndex.value = filteredItems.findIndex(
+                  (entry) => entry.path === item.path,
+                )
+              }}
               onClick={() => {
-                recordSessionLaunchCwdUse(projectPath, item.path)
-                open.value = false
+                commitItem(item)
               }}
             >
               <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
