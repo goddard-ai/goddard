@@ -6,6 +6,7 @@ import { Folder } from "lucide-react"
 import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -64,6 +65,10 @@ export component AppShellSubfolderSelector() {
       search.value = ""
     }
   }, [open.value, search])
+
+  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, () => {
+    open.value = true
+  }, { active: projectPath !== null })
 
   if (!projectPath) {
     return

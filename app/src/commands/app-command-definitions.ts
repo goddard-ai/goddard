@@ -106,6 +106,10 @@ export const AppCommand = defineAppCommands({
         label: "Open Project Selector",
         icon: FolderOpen,
       },
+      openSubpackageSelector: {
+        label: "Open Working Directory Selector",
+        icon: Folder,
+      },
       openAdapterSelector: {
         label: "Open Adapter Selector",
         icon: Bot,

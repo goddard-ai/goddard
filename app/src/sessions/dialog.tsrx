@@ -34,6 +34,7 @@ component SessionLaunchDialog(props: {
   const hasLocationSelector = !!form.launchPreview.value?.repoRoot
   const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
   const hasProjectSelector = projects.length > 0
+  const hasSubpackageSelector = form.draftProjectPath.value !== null
   const hasThinkingLevel = form.thinkingOption.value !== null
   const canSubmit = form.canSubmit.value
 
@@ -88,6 +89,9 @@ component SessionLaunchDialog(props: {
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
   }, { active: hasProjectSelector })
+  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, () => {
+    form.setOpenPicker("subpackage")
+  }, { active: hasSubpackageSelector })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
     form.setOpenPicker("adapter")
   }, { active: hasAdapterSelector })

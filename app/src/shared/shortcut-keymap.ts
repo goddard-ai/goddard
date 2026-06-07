@@ -36,6 +36,7 @@ export const shortcutKeymapProfiles = {
       "navigation.openSwitchProject": ["Mod+o"],
       "navigation.openSettings": ["Mod+,"],
       "sessionInput.openProjectSelector": ["Mod+o"],
+      "sessionInput.openSubpackageSelector": ["Mod+Shift+d"],
       "sessionInput.openAdapterSelector": ["Mod+Shift+a"],
       "sessionInput.openLocationSelector": ["Mod+Shift+l"],
       "sessionInput.openBranchSelector": ["Mod+Shift+b"],

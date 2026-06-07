@@ -15,6 +15,7 @@ const openRoadmap = "navigation.openRoadmap" as const
 const openSettings = "navigation.openSettings" as const
 const openCommandPalette = "navigation.openCommandPalette" as const
 const openProjectSelector = "sessionInput.openProjectSelector" as const
+const openSubpackageSelector = "sessionInput.openSubpackageSelector" as const
 const openAdapterSelector = "sessionInput.openAdapterSelector" as const
 const openLocationSelector = "sessionInput.openLocationSelector" as const
 const openBranchSelector = "sessionInput.openBranchSelector" as const
@@ -79,6 +80,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openRoadmap]: ["Alt+Digit6"],
     [openSettings]: ["Mod+,"],
     [openProjectSelector]: ["Mod+o"],
+    [openSubpackageSelector]: ["Mod+Shift+d"],
     [openAdapterSelector]: ["Mod+Shift+a"],
     [openLocationSelector]: ["Mod+Shift+l"],
     [openBranchSelector]: ["Mod+Shift+b"],

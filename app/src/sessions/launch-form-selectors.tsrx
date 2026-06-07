@@ -100,6 +100,7 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
 
 export component SessionSubpackageSelector(props: { form: SessionLaunchFormState }) {
   const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
   const projectPath = form.draftProjectPath.value
   const response = useQuery(projectPath ? goddardSdk.session.subpackages : null, {
     params: projectPath ? [{ cwd: projectPath }] : null,
@@ -110,6 +111,9 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
   const preferredCwd =
     projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages) : null
   const selectedValue = preferredCwd ?? projectPath
+  const subpackageShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openSubpackageSelector.id]?.[0],
+  )
 
   useEffect(() => {
     if (!projectPath) {
@@ -136,6 +140,7 @@ export component SessionSubpackageSelector(props: { form: SessionLaunchFormState
     label="Working directory"
     open={form.getPickerOpen("subpackage")}
     placeholder="Project root"
+    shortcut={subpackageShortcut}
     value={selectedValue}
     onValueChange={(value) => {
       form.draftSubpackagePath.value = value === projectPath ? null : value
