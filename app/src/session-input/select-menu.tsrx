@@ -81,6 +81,12 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
   const SelectedIcon = selectedItem?.Icon
 
   <div class={styles.field} data-compact={props.compact}>
+    if (!props.compact) {
+      <span class={styles.label}>
+        {props.label}
+      </span>
+    }
+
     <GoodTooltip
       ariaLabel={props.label}
       content={<tsrx>

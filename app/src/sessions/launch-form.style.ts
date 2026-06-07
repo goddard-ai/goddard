@@ -4,11 +4,11 @@ import { token } from "@goddard-ai/styled-system/tokens"
 export default {
   form: css({
     display: "grid",
-    gap: "12px",
+    gap: "10px",
   }),
   editorFrame: css({
     position: "relative",
-    borderRadius: "14px",
+    borderRadius: "10px",
     border: "1px solid {colors.border}",
     backgroundColor: "background",
     transition:
@@ -20,8 +20,8 @@ export default {
   }),
   contentEditable: css({
     width: "100%",
-    minHeight: "124px",
-    padding: "12px 14px",
+    minHeight: "116px",
+    padding: "12px",
     color: "text",
     fontSize: "0.9rem",
     lineHeight: "1.55",
@@ -47,7 +47,8 @@ export default {
   }),
   placeholder: css({
     position: "absolute",
-    inset: "12px 14px auto",
+    inset: "12px auto auto 12px",
+    maxWidth: "calc(100% - 24px)",
     color: "muted",
     fontSize: "0.9rem",
     lineHeight: "1.55",
@@ -57,7 +58,11 @@ export default {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: "12px",
+    gap: "10px",
+    "@media (max-width: 719px)": {
+      alignItems: "stretch",
+      flexDirection: "column",
+    },
   }),
   helperText: css({
     color: "muted",
@@ -70,11 +75,11 @@ export default {
     justifyContent: "center",
     gap: "8px",
     minWidth: "124px",
-    height: "40px",
-    paddingInline: "14px",
-    borderRadius: "12px",
+    height: "36px",
+    paddingInline: "12px",
+    borderRadius: "8px",
     border: "1px solid {colors.accent}",
-    backgroundColor: "surface",
+    backgroundColor: "accent",
     color: "text",
     fontSize: "0.88rem",
     fontWeight: "640",

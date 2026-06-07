@@ -3,11 +3,19 @@ import { token } from "@goddard-ai/styled-system/tokens"
 
 export default {
   field: css({
+    display: "grid",
+    gap: "5px",
     minWidth: "0",
     '&[data-compact="true"]': {
       width: "fit-content",
       maxWidth: "100%",
     },
+  }),
+  label: css({
+    color: "muted",
+    fontSize: "0.76rem",
+    fontWeight: "650",
+    lineHeight: "1.2",
   }),
   tooltipTrigger: css({
     display: "block",
@@ -20,20 +28,21 @@ export default {
     alignItems: "center",
     gap: "6px",
     width: "100%",
-    minHeight: "28px",
-    padding: "0",
-    border: "none",
-    backgroundColor: "transparent",
+    minHeight: "36px",
+    paddingInline: "10px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "background",
     color: "text",
     cursor: "pointer",
     textAlign: "left",
     outline: "none",
     transition: "color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
     _hover: {
-      color: "accentStrong",
+      borderColor: "accent",
     },
     _focusVisible: {
-      borderRadius: "8px",
+      borderColor: "accentStrong",
       boxShadow: `0 0 0 3px color-mix(in srgb, ${token.var("colors.accent")} 18%, transparent)`,
     },
     _disabled: {
@@ -43,6 +52,13 @@ export default {
     '&[data-compact="true"]': {
       width: "auto",
       maxWidth: "100%",
+      minHeight: "28px",
+      paddingInline: "0",
+      border: "none",
+      backgroundColor: "transparent",
+      _hover: {
+        color: "accentStrong",
+      },
     },
   }),
   triggerContent: css({
@@ -98,10 +114,9 @@ export default {
     maxWidth: "var(--available-width)",
     maxHeight: "min(360px, var(--available-height))",
     overflow: "hidden",
-    border: "none",
-    borderRadius: "14px",
+    border: "1px solid {colors.border}",
+    borderRadius: "10px",
     backgroundColor: "panel",
-    boxShadow: "0 12px 28px rgba(98, 112, 128, 0.16)",
     outline: "none",
   }),
   menuBody: css({
@@ -138,9 +153,9 @@ export default {
     alignItems: "flex-start",
     gap: "8px",
     width: "100%",
-    minHeight: "32px",
+    minHeight: "34px",
     paddingBlock: "7px",
-    paddingInline: "12px",
+    paddingInline: "10px",
     border: "none",
     backgroundColor: "transparent",
     color: "text",
@@ -151,7 +166,7 @@ export default {
     textAlign: "left",
     transition: "background-color 120ms ease",
     _hover: {
-      backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
+      backgroundColor: "surface",
     },
     _focusVisible: {
       _after: {
@@ -188,7 +203,7 @@ export default {
     lineHeight: "1.35",
   }),
   menuButtonActive: css({
-    backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 18%, transparent)`,
+    backgroundColor: "surface",
   }),
   menuEmpty: css({
     display: "grid",
