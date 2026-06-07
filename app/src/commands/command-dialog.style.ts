@@ -27,6 +27,7 @@ export default {
   failureCopy: css({
     display: "grid",
     gap: "7px",
+    userSelect: "text",
   }),
   failureTitle: css({
     srOnly: true,

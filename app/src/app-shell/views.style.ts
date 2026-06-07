@@ -23,6 +23,7 @@ export default {
     display: "grid",
     gap: "10px",
     maxWidth: "28rem",
+    userSelect: "text",
   }),
   tabFailureTitle: css({
     color: "text",
