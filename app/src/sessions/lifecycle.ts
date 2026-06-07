@@ -1,19 +1,5 @@
-import type { SessionLifecycleEvent } from "@goddard-ai/sdk"
-
-import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
-
-/** Refreshes cached session reads affected by one daemon-published lifecycle update. */
-export function invalidateSessionLifecycleQueries(event: SessionLifecycleEvent) {
-  if (event.kind === "sessionDeleted") {
-    queryClient.invalidate(goddardSdk.session.list)
-    return
-  }
-
-  queryClient.invalidate(goddardSdk.session.get, [{ id: event.session.id }])
-  queryClient.invalidate(goddardSdk.session.history, [{ id: event.session.id }])
-  queryClient.invalidate(goddardSdk.session.list)
-}
+import { invalidateSessionLifecycleEvent } from "./cache.ts"
 
 /** Starts the app-wide daemon session lifecycle subscription for the current webview. */
 export function startSessionLifecycleSubscription() {
@@ -23,7 +9,7 @@ export function startSessionLifecycleSubscription() {
   void goddardSdk.session.lifecycle
     .subscribe((event) => {
       if (active) {
-        invalidateSessionLifecycleQueries(event)
+        invalidateSessionLifecycleEvent(event)
       }
     })
     .then(

@@ -1,10 +1,11 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { useState } from "preact/hooks"
 
+import { invalidateSessionChanges } from "./cache.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
 import { evictSessionHistory, SessionsPageMutations } from "./mutations.ts"
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
-import { queryClient, useQuery } from "~/lib/query.ts"
+import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import { ListToolbar } from "./list-toolbar.tsrx"
@@ -44,7 +45,7 @@ component SessionsPage() {
       return
     }
 
-    queryClient.invalidate(goddardSdk.session.changes, [{ id: session.id }])
+    invalidateSessionChanges(session.id)
     workbenchTabSet.openOrFocusTab({
       kind: "sessionChanges",
       props: {

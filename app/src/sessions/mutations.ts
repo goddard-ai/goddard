@@ -10,13 +10,11 @@ import type {
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { SESSION_LIST_LIMIT } from "./queries.ts"
-
-function refreshSessionViews(sessionId: DaemonSession["id"]) {
-  queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
-  queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
-  queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
-}
+import {
+  invalidateSessionLaunchPreview,
+  invalidateSessionLists,
+  invalidateSessionViews,
+} from "./cache.ts"
 
 export function evictSessionHistory(sessionId: DaemonSession["id"]) {
   queryClient.evict(goddardSdk.session.history, [{ id: sessionId }])
@@ -27,8 +25,8 @@ export function evictSessionHistory(sessionId: DaemonSession["id"]) {
  */
 export async function createSession(input: CreateSessionRequest) {
   const result = await goddardSdk.session.create(input)
-  queryClient.invalidate(goddardSdk.session.list, [{ limit: SESSION_LIST_LIMIT }])
-  queryClient.invalidate(goddardSdk.session.launchPreview)
+  invalidateSessionLists()
+  invalidateSessionLaunchPreview()
   return result
 }
 
@@ -48,7 +46,7 @@ export async function releaseSessionLaunchLease(launchLeaseId: string | null | u
  */
 export async function submitSessionPrompt(props: SessionPromptRequest) {
   await goddardSdk.session.prompt(props)
-  refreshSessionViews(props.id)
+  invalidateSessionViews(props.id)
 }
 
 /**
@@ -56,7 +54,7 @@ export async function submitSessionPrompt(props: SessionPromptRequest) {
  */
 export async function setSessionConfigOption(props: SetSessionConfigOptionRequest) {
   const result = await goddardSdk.session.configOption.set(props)
-  refreshSessionViews(props.id)
+  invalidateSessionViews(props.id)
   return result
 }
 
@@ -65,7 +63,7 @@ export async function setSessionConfigOption(props: SetSessionConfigOptionReques
  */
 export async function setSessionModel(props: SetSessionModelRequest) {
   const result = await goddardSdk.session.model.set(props)
-  refreshSessionViews(props.id)
+  invalidateSessionViews(props.id)
   return result
 }
 
@@ -74,7 +72,7 @@ export async function setSessionModel(props: SetSessionModelRequest) {
  */
 export async function respondSessionPermission(props: SessionPermissionResponseRequest) {
   await goddardSdk.session.respondPermission(props)
-  refreshSessionViews(props.id)
+  invalidateSessionViews(props.id)
 }
 
 /**
@@ -82,7 +80,7 @@ export async function respondSessionPermission(props: SessionPermissionResponseR
  */
 export async function reconnectSession(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.session.connect({ id: sessionId })
-  refreshSessionViews(sessionId)
+  invalidateSessionViews(sessionId)
   return result
 }
 
@@ -91,7 +89,7 @@ export async function reconnectSession(sessionId: DaemonSession["id"]) {
  */
 export async function cancelSessionTurn(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.session.cancel({ id: sessionId })
-  refreshSessionViews(sessionId)
+  invalidateSessionViews(sessionId)
   return result
 }
 
@@ -100,7 +98,7 @@ export async function cancelSessionTurn(sessionId: DaemonSession["id"]) {
  */
 export async function completeSession(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.inbox.completeSession({ id: sessionId })
-  refreshSessionViews(sessionId)
+  invalidateSessionViews(sessionId)
   queryClient.invalidate(goddardSdk.inbox.list)
   return result
 }

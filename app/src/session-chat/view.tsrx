@@ -25,7 +25,7 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { queryClient, useQueries, useQuery } from "~/lib/query.ts"
+import { useQueries, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
   findSelectConfigOption,
@@ -45,6 +45,7 @@ import {
   setSessionModel,
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
+import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
 export default component SessionChatView(props: {
@@ -181,7 +182,7 @@ export default component SessionChatView(props: {
                 </AppCommandTooltip>
 
                 function openSessionChanges() {
-                  queryClient.invalidate(goddardSdk.session.changes, [{ id: chat.session.id }])
+                  invalidateSessionChanges(chat.session.id)
                   workbenchTabSet.openOrFocusTab({
                     kind: "sessionChanges",
                     props: {
@@ -645,8 +646,7 @@ export default component SessionChatView(props: {
           actionLabel="Try again"
           description="The daemon-backed session or history request failed."
           onAction={() => {
-            queryClient.invalidate(goddardSdk.session.get, [{ id: props.sessionId }])
-            queryClient.invalidate(goddardSdk.session.history, [{ id: props.sessionId }])
+            invalidateSessionDetail(props.sessionId)
             retry()
           }}
           title="Couldn't load session"
