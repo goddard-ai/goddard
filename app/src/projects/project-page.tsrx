@@ -359,6 +359,28 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
         title: getSessionDisplayTitle(item.session),
       }),
     )
+    const goddardWorktrees = projectSessions.flatMap((item) => {
+      const worktree = item.worktree
+
+      if (!worktree) {
+        return []
+      }
+
+      const summary = gitStatus.worktrees.find(
+        (candidate) => candidate.path === worktree.worktreeDir,
+      )
+
+      if (!summary) {
+        return []
+      }
+
+      return [
+        {
+          session: item.session,
+          summary,
+        },
+      ]
+    })
 
     function openSession(session: DaemonSession) {
       evictSessionHistory(session.id)
@@ -472,23 +494,18 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
         <SectionHeading
           icon={GitBranch}
           title="Git checkouts"
-          count={gitStatus.worktrees.length + 1}
+          count={goddardWorktrees.length + 1}
         />
         <div class={styles.list}>
           <CheckoutRow kind="primary" summary={gitStatus.primary} />
 
-          for (const worktree of gitStatus.worktrees) {
-            const worktreeSession =
-              projectSessions.find(
-                (item) => item.worktree?.worktreeDir === worktree.path,
-              )?.session ?? null
-
+          for (const worktree of goddardWorktrees) {
             <CheckoutRow
-              key={worktree.path}
+              key={worktree.summary.path}
               kind="worktree"
-              summary={worktree}
+              summary={worktree.summary}
               showArchive
-              onViewChanges={worktreeSession ? () => openSessionChanges(worktreeSession) : null}
+              onViewChanges={() => openSessionChanges(worktree.session)}
             />
           }
         </div>
@@ -533,7 +550,7 @@ component EmptyState(props: { text: string }) {
 
 component CheckoutRow(props: {
   kind: "primary" | "worktree";
-  onViewChanges?: (() => void) | null;
+  onViewChanges?: () => void;
   summary: ProjectGitCheckoutSummary;
   showArchive?: boolean;
 }) {
@@ -567,11 +584,10 @@ component CheckoutRow(props: {
 
     if (props.kind === "worktree") {
       <div class={styles.checkoutActions} data-checkout-actions="true">
-        <GoodTooltip content={props.onViewChanges ? "View changes" : "No linked session changes"}>
+        <GoodTooltip content="View changes">
           <button
             aria-label={`View changes for ${props.summary.path}`}
             class={styles.iconButton}
-            disabled={!props.onViewChanges}
             type="button"
             onClick={() => {
               props.onViewChanges?.()
