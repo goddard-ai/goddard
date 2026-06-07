@@ -54,11 +54,6 @@ export default {
     "&[data-selected='true']": {
       backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
     },
-    "&[data-disabled='true']": {
-      color: "muted",
-      cursor: "not-allowed",
-      opacity: "0.65",
-    },
     "& > span": {
       minWidth: "0",
       overflow: "hidden",

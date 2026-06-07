@@ -258,7 +258,7 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   const hasBranchSelector =
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
       !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true)
-  const hasLocationSelector = form.launchPreview.value !== null
+  const hasLocationSelector = !!form.launchPreview.value?.repoRoot
   const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
   const hasThinkingLevel = form.thinkingOption.value !== null
   const canSubmit = form.canSubmit.value

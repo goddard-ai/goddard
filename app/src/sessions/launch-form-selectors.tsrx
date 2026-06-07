@@ -194,12 +194,10 @@ export component SessionLaunchPreviewSelectors(props: {
     {
       value: "local",
       label: "Work locally",
-      disabled: false,
     },
     {
       value: "worktree",
       label: "New worktree",
-      disabled: !preview?.repoRoot,
     },
   ] as const
   const branchItems: SessionInputSelectItem[] =
@@ -262,37 +260,38 @@ export component SessionLaunchPreviewSelectors(props: {
   )
 
   <div class={styles.grid}>
-    <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
-      <legend class={styles.radioLegend}>
-        <span>"Launch location"</span>
+    if (preview?.repoRoot) {
+      <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
+        <legend class={styles.radioLegend}>
+          <span>"Launch location"</span>
 
-        if (locationShortcut) {
-          <GoodKeyboardShortcut expression={locationShortcut} />
-        }
-      </legend>
-      <div class={styles.radioGroup}>
-        for (const option of locationOptions) {
-          <label
-            class={styles.radioOption}
-            data-disabled={option.disabled ? "true" : undefined}
-            data-selected={form.draftLocation.value === option.value ? "true" : undefined}
-            key={option.value}
-          >
-            <span>{option.label}</span>
-            <input
-              checked={form.draftLocation.value === option.value}
-              disabled={option.disabled}
-              name="session-launch-location"
-              type="radio"
-              value={option.value}
-              onInput={() => {
-                form.setLaunchLocation(option.value)
-              }}
-            />
-          </label>
-        }
-      </div>
-    </fieldset>
+          if (locationShortcut) {
+            <GoodKeyboardShortcut expression={locationShortcut} />
+          }
+        </legend>
+        <div class={styles.radioGroup}>
+          for (const option of locationOptions) {
+            <label
+              class={styles.radioOption}
+              data-selected={form.draftLocation.value === option.value ? "true" : undefined}
+              key={option.value}
+            >
+              <span>{option.label}</span>
+              <input
+                checked={form.draftLocation.value === option.value}
+                name="session-launch-location"
+                type="radio"
+                value={option.value}
+                onInput={() => {
+                  form.setLaunchLocation(option.value)
+                }}
+              />
+            </label>
+          }
+        </div>
+      </fieldset>
+    }
+
     <SessionInputSelect
       disabled={branchItems.length === 0 || localCheckoutDirty}
       filterable={true}
