@@ -39,10 +39,6 @@ const workbenchTabDragDataType = "workbench-tab"
 
 type WorkbenchTabDragPlacement = "before" | "after"
 
-function isWorkbenchTabDragData(data: Record<string, unknown>) {
-  return data.type === workbenchTabDragDataType && typeof data.tabId === "string"
-}
-
 function getWorkbenchTabDragId(data: Record<string, unknown>) {
   if (data.type === workbenchTabDragDataType && typeof data.tabId === "string") {
     return data.tabId
@@ -138,12 +134,16 @@ function useAppShellTabStrip(
       return
     }
 
-    setDropIndicator({
-      left: placement === "after"
+    const left =
+      placement === "after"
         ? targetElement.offsetLeft + targetElement.offsetWidth
-        : targetElement.offsetLeft,
-      opacity: 1,
-    })
+        : targetElement.offsetLeft
+
+    setDropIndicator(
+      (current) => (current.left === left && current.opacity === 1
+        ? current
+        : { left, opacity: 1 }),
+    )
   }
 
   function hideDropIndicator() {
@@ -201,7 +201,7 @@ function useAppShellTabStrip(
     scrollbarRef.current = scrollbar
     const cleanupAutoScroll = autoScrollForElements({
       element: scrollbar.elements().viewport ?? tabStripElement,
-      canScroll: ({ source }) => isWorkbenchTabDragData(source.data),
+      canScroll: ({ source }) => getWorkbenchTabDragId(source.data) !== null,
       getAllowedAxis: () => "horizontal",
     })
     scrollActiveTabIntoView()
@@ -635,6 +635,14 @@ component TabButton(props: {
       return
     }
 
+    function notifyDragOver(data: Record<string | symbol, unknown>) {
+      const placement = getWorkbenchTabDragPlacement(data)
+
+      if (placement) {
+        props.onTabDragOver?.(props.id, placement)
+      }
+    }
+
     return combine(
       draggable({
         element,
@@ -653,8 +661,11 @@ component TabButton(props: {
       }),
       dropTargetForElements({
         element,
-        canDrop: ({ source }) => isWorkbenchTabDragData(source.data) &&
-          source.data.tabId !== props.id,
+        canDrop: ({ source }) => {
+          const sourceTabId = getWorkbenchTabDragId(source.data)
+
+          return sourceTabId !== null && sourceTabId !== props.id
+        },
         getData: ({ input, element }) => attachClosestEdge(
           {
             type: workbenchTabDragDataType,
@@ -669,18 +680,10 @@ component TabButton(props: {
         getDropEffect: () => "move",
         getIsSticky: () => true,
         onDrag: ({ self }) => {
-          const placement = getWorkbenchTabDragPlacement(self.data)
-
-          if (placement) {
-            props.onTabDragOver?.(props.id, placement)
-          }
+          notifyDragOver(self.data)
         },
         onDragEnter: ({ self }) => {
-          const placement = getWorkbenchTabDragPlacement(self.data)
-
-          if (placement) {
-            props.onTabDragOver?.(props.id, placement)
-          }
+          notifyDragOver(self.data)
         },
         onDragLeave: () => {
           props.onTabDragEnd?.()
