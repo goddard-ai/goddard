@@ -39,6 +39,22 @@ export const WORKBENCH_MAIN_TAB: WorkbenchMainTab = {
 /** Maximum number of closable workbench tabs kept open at once. */
 export const WORKBENCH_TAB_LIMIT = 20
 
+function isFocusableWorkbenchTab(tabSet: WorkbenchTabSetState, tabId: string) {
+  return tabId === WORKBENCH_MAIN_TAB.id || tabId in tabSet.tabs
+}
+
+function findLeastRecentClosableTabId(tabSet: WorkbenchTabSetState) {
+  for (let index = tabSet.recency.length - 1; index >= 0; index -= 1) {
+    const tabId = tabSet.recency[index]
+
+    if (tabId !== WORKBENCH_MAIN_TAB.id && tabId in tabSet.tabs) {
+      return tabId
+    }
+  }
+
+  return null
+}
+
 /** Sigma state for the shell's closable workbench tab strip. */
 export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   // Close listeners keep non-persisted tab resources in sync with persisted tab records.
@@ -49,7 +65,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       tabs: {},
       orderedTabIds: [],
       activeTabId: WORKBENCH_MAIN_TAB.id,
-      recency: [],
+      recency: [WORKBENCH_MAIN_TAB.id],
     })
 
     this.#onCloseTab = input.onCloseTab ?? (() => {})
@@ -75,6 +91,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
   openOrFocusTab(input: WorkbenchOpenTabInput) {
     const tab = createWorkbenchTab(input)
+    const previousActiveTabId = this.activeTabId
 
     if (this.tabs[tab.id]) {
       this.tabs[tab.id] = tab
@@ -89,16 +106,22 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.tabs[tab.id] = tab
     this.orderedTabIds.push(tab.id)
     this.activeTabId = tab.id
-    this.recency = [tab.id, ...this.recency.filter((tabId) => tabId !== tab.id)]
+    this.recency = [
+      tab.id,
+      previousActiveTabId,
+      ...this.recency.filter((tabId) => tabId !== tab.id && tabId !== previousActiveTabId),
+    ].filter((tabId) => isFocusableWorkbenchTab(this, tabId))
   }
 
   /** Activates one visible tab and updates the recency stack used for LRU eviction. */
   activateTab(tabId: string) {
+    const previousActiveTabId = this.activeTabId
     this.activeTabId = tabId
-
-    if (tabId !== WORKBENCH_MAIN_TAB.id) {
-      this.recency = [tabId, ...this.recency.filter((id) => id !== tabId)]
-    }
+    this.recency = [
+      tabId,
+      previousActiveTabId,
+      ...this.recency.filter((id) => id !== tabId && id !== previousActiveTabId),
+    ].filter((id) => isFocusableWorkbenchTab(this, id))
   }
 
   /** Closes one closable tab and falls back to the most recently used remaining tab when needed. */
@@ -111,7 +134,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
 
     delete this.tabs[tabId]
     this.orderedTabIds = this.orderedTabIds.filter((id) => id !== tabId)
-    this.recency = this.recency.filter((id) => id !== tabId)
+    this.recency = this.recency.filter((id) => id !== tabId && isFocusableWorkbenchTab(this, id))
     this.#onCloseTab(tabId)
 
     if (this.activeTabId === tabId) {
@@ -122,7 +145,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   /** Enforces the tab cap by closing the least-recently-used closable tab. */
   closeLeastRecentlyUsedTab() {
     const leastRecentTabId =
-      this.recency[this.recency.length - 1] ?? this.orderedTabIds[0] ?? WORKBENCH_MAIN_TAB.id
+      findLeastRecentClosableTabId(this) ?? this.orderedTabIds[0] ?? WORKBENCH_MAIN_TAB.id
 
     if (leastRecentTabId !== WORKBENCH_MAIN_TAB.id) {
       this.closeTab(leastRecentTabId)
