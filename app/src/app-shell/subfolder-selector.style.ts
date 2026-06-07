@@ -25,6 +25,19 @@ export default {
       outlineColor: "accentStrong",
       outlineOffset: "2px",
     },
+    "&[data-icon-only='true']": {
+      width: "28px",
+      paddingInline: "0",
+    },
+    "& svg": {
+      width: "16px",
+      height: "16px",
+      minWidth: "16px",
+      minHeight: "16px",
+      inlineSize: "16px",
+      blockSize: "16px",
+      flexShrink: "0",
+    },
   }),
   label: css({
     minWidth: "0",
@@ -96,6 +109,15 @@ export default {
     },
     "&[data-active='true']": {
       backgroundColor: "surface",
+    },
+    "& svg": {
+      width: "16px",
+      height: "16px",
+      minWidth: "16px",
+      minHeight: "16px",
+      inlineSize: "16px",
+      blockSize: "16px",
+      flexShrink: "0",
     },
   }),
   itemBody: css({

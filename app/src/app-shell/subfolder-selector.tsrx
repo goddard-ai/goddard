@@ -60,6 +60,7 @@ export component AppShellSubfolderSelector() {
       ? `Working directory: ${selectedSubfolderLabel}`
       : "Project root"}
     class={styles.trigger}
+    data-icon-only={selectedSubfolderLabel ? undefined : "true"}
     type="button"
     onClick={() => {
       open.value = !open.value
