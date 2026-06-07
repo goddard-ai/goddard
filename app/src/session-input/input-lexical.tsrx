@@ -10,6 +10,7 @@ import {
   COMMAND_PRIORITY_HIGH,
   KEY_ARROW_DOWN_COMMAND,
   KEY_ARROW_UP_COMMAND,
+  KEY_BACKSPACE_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
@@ -19,7 +20,10 @@ import { useEffect } from "preact/hooks"
 
 import { ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
 import { serializeComposerEditorState } from "~/session-chat/composer-content.ts"
-import { insertSessionInputWebLink } from "./input-editor-content.ts"
+import {
+  deleteSessionInputChipBeforeCaret,
+  insertSessionInputWebLink,
+} from "./input-editor-content.ts"
 import {
   detectSessionInputMenuState,
   getSessionInputMenuAnchorPosition,
@@ -166,6 +170,18 @@ export component SessionInputPlugins(props: {
       },
       COMMAND_PRIORITY_HIGH,
     )
+    const unregisterBackspace = editor.registerCommand(
+      KEY_BACKSPACE_COMMAND,
+      (event) => {
+        if (!deleteSessionInputChipBeforeCaret()) {
+          return false
+        }
+
+        event?.preventDefault()
+        return true
+      },
+      COMMAND_PRIORITY_HIGH,
+    )
     const unregisterEscape = editor.registerCommand(
       KEY_ESCAPE_COMMAND,
       (event) => {
@@ -206,6 +222,7 @@ export component SessionInputPlugins(props: {
       unregisterArrowDown()
       unregisterArrowUp()
       unregisterTab()
+      unregisterBackspace()
       unregisterEscape()
       unregisterPaste()
     }

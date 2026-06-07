@@ -5,13 +5,18 @@ import {
   $createTextNode,
   $getNodeByKey,
   $getRoot,
+  $getSelection,
   $insertNodes,
+  $isElementNode,
+  $isRangeSelection,
   $isTextNode,
   type LexicalEditor,
+  type LexicalNode,
 } from "lexical"
 
 import {
   $createComposerChipNode,
+  $isComposerChipNode,
   type ComposerChipData,
 } from "~/session-chat/composer-chip-node.tsrx"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
@@ -24,6 +29,52 @@ function isWebLinkUri(uri: string) {
   } catch {
     return false
   }
+}
+
+function removeComposerChipNode(node: LexicalNode | null | undefined) {
+  if (!$isComposerChipNode(node)) {
+    return false
+  }
+
+  node.remove()
+  return true
+}
+
+export function deleteSessionInputChipBeforeCaret() {
+  const selection = $getSelection()
+
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+    return false
+  }
+
+  const anchor = selection.anchor
+  const anchorNode = anchor.getNode()
+
+  if ($isTextNode(anchorNode)) {
+    if (anchor.offset !== 0) {
+      return false
+    }
+
+    if (!removeComposerChipNode(anchorNode.getPreviousSibling())) {
+      return false
+    }
+
+    anchorNode.select(0, 0)
+    return true
+  }
+
+  if (!$isElementNode(anchorNode) || anchor.offset === 0) {
+    return false
+  }
+
+  const chipIndex = anchor.offset - 1
+
+  if (!removeComposerChipNode(anchorNode.getChildAtIndex(chipIndex))) {
+    return false
+  }
+
+  anchorNode.select(chipIndex, chipIndex)
+  return true
 }
 
 function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData {
