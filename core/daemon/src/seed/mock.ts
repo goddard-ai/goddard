@@ -11,52 +11,152 @@ type SeedMockDataOptions = {
   reset?: boolean
 }
 
-type SessionSeed = {
+type SessionSeed = Parameters<ComposedDaemonStore["sessions"]["put"]>[1] & {
   id: DaemonSession["id"]
-  acpSessionId: string
-  title: string
-  status: DaemonSession["status"]
-  stopReason: DaemonSession["stopReason"]
-  blockedReason: string | null
-  errorMessage: string | null
-  lastAgentMessage: string | null
-  repository: string | null
-  prNumber: number | null
-  token: string | null
-  permissions: DaemonSession["permissions"]
-  initiative: string | null
-  inboxScope: string | null
-  availableCommands?: DaemonSession["availableCommands"]
-  models?: DaemonSession["models"]
-  configOptions?: DaemonSession["configOptions"]
-  contextUsage?: DaemonSession["contextUsage"]
   timestamp: number
 }
+
+type SessionSeedOverrides = Pick<SessionSeed, "id" | "title" | "timestamp"> &
+  Partial<Omit<SessionSeed, "id" | "title" | "timestamp">>
 
 type SessionTurnSeed = Parameters<ComposedDaemonStore["sessionTurns"]["put"]>[1] & {
   id: `trn_${string}`
   timestamp: number
 }
 
+type SessionTurnSeedOverrides = Pick<
+  SessionTurnSeed,
+  "id" | "messages" | "sequence" | "sessionId" | "timestamp" | "turnId"
+> &
+  Partial<
+    Omit<SessionTurnSeed, "id" | "messages" | "sequence" | "sessionId" | "timestamp" | "turnId">
+  >
+
 type PullRequestSeed = Parameters<ComposedDaemonStore["pullRequests"]["put"]>[1] & {
   id: `pr_${string}`
   timestamp: number
 }
 
+type PullRequestSeedOverrides = Pick<PullRequestSeed, "id" | "prNumber" | "timestamp"> &
+  Partial<Omit<PullRequestSeed, "id" | "prNumber" | "timestamp">>
+
 type InboxItemSeed = Parameters<ComposedDaemonStore["inboxItems"]["put"]>[1] & {
   id: `inb_${string}`
 }
 
+type InboxItemSeedOverrides = Pick<InboxItemSeed, "entityId" | "headline" | "id"> &
+  Partial<Omit<InboxItemSeed, "entityId" | "headline" | "id">> & {
+    timestamp?: number
+  }
+
 type MockSeedScenario = {
   id: string
   label: string
-  sessions?: SessionSeed[]
-  sessionTurns?: SessionTurnSeed[]
-  pullRequests?: PullRequestSeed[]
-  inboxItems?: InboxItemSeed[]
+  sessions?: SessionSeedOverrides[]
+  sessionTurns?: SessionTurnSeedOverrides[]
+  pullRequests?: PullRequestSeedOverrides[]
+  inboxItems?: InboxItemSeedOverrides[]
 }
 
 const cwd = "/mock/goddard-ai"
+
+function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: string): SessionSeed {
+  const status = overrides.status ?? "done"
+
+  return {
+    acpSessionId: overrides.acpSessionId ?? overrides.id.replace(/^ses_/, "acp_"),
+    status,
+    stopReason: overrides.stopReason ?? defaultStopReason(status),
+    agent: "mock-agent",
+    agentName: "Mock Agent",
+    cwd,
+    titleState: "generated",
+    mcpServers: [],
+    connectionMode: "history",
+    supportsLoadSession: false,
+    activeDaemonSession: false,
+    completedHidden: false,
+    errorMessage: null,
+    blockedReason: null,
+    initiative: null,
+    inboxScope: null,
+    lastAgentMessage: null,
+    repository: "goddard-ai/goddard-ai",
+    prNumber: null,
+    token: null,
+    permissions: null,
+    models: null,
+    configOptions: [],
+    availableCommands: [
+      {
+        name: "summarize",
+        description: "Summarize the current session",
+        input: { hint: "Focus area" },
+      },
+    ],
+    contextUsage: {
+      size: 200_000,
+      used: status === "blocked" ? 84_000 : 42_000,
+    },
+    ...overrides,
+    metadata: {
+      mock: true,
+      scenario: scenarioLabel,
+      ...overrides.metadata,
+    },
+  }
+}
+
+function createTurnSeed(overrides: SessionTurnSeedOverrides): SessionTurnSeed {
+  return {
+    promptRequestId: overrides.turnId.replace(/^turn_/, "prompt_"),
+    startedAt: new Date(overrides.timestamp - 30_000).toISOString(),
+    completedAt: new Date(overrides.timestamp).toISOString(),
+    completionKind: "result",
+    stopReason: "end_turn",
+    inboxScope: null,
+    inboxHeadline: null,
+    ...overrides,
+  }
+}
+
+function createPullRequestSeed(overrides: PullRequestSeedOverrides): PullRequestSeed {
+  return {
+    host: "github",
+    owner: "goddard-ai",
+    repo: "goddard-ai",
+    cwd,
+    ...overrides,
+  }
+}
+
+function createInboxItemSeed(overrides: InboxItemSeedOverrides): InboxItemSeed {
+  const updatedAt = overrides.timestamp ?? overrides.updatedAt ?? MOCK_NOW
+  const { timestamp: _timestamp, ...input } = overrides
+
+  return {
+    reason: "session.turn_ended",
+    status: "unread",
+    priority: "normal",
+    updatedAt,
+    readAt: null,
+    scope: null,
+    turnId: null,
+    ...input,
+  }
+}
+
+function defaultStopReason(status: DaemonSession["status"]): DaemonSession["stopReason"] {
+  if (status === "cancelled") {
+    return "cancelled"
+  }
+
+  if (status === "archived" || status === "done") {
+    return "end_turn"
+  }
+
+  return null
+}
 
 const scenarios: MockSeedScenario[] = [
   {
@@ -65,17 +165,10 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_review_boundary",
-        acpSessionId: "acp_mock_review_boundary",
         title: "Review app data loading boundary",
         status: "done",
-        stopReason: "end_turn",
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage: "I verified the data boundary and left follow-up notes.",
-        repository: "goddard-ai/goddard-ai",
         prNumber: 123,
-        token: null,
-        permissions: null,
         initiative: "Verify the app reads shared daemon state without local mock data.",
         inboxScope: "goddard-ai/goddard-ai#123",
         availableCommands: [
@@ -100,11 +193,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_review_boundary",
         turnId: "turn_mock_review_boundary_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_review_boundary_1",
         startedAt: new Date(MOCK_NOW - 90_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 60_000).toISOString(),
-        completionKind: "result",
-        stopReason: "end_turn",
         inboxScope: "goddard-ai/goddard-ai#123",
         inboxHeadline: "Data boundary review complete",
         messages: [
@@ -136,11 +226,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_review_boundary",
         turnId: "turn_mock_review_boundary_2",
         sequence: 2,
-        promptRequestId: "prompt_mock_review_boundary_2",
         startedAt: new Date(MOCK_NOW - 55_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 20_000).toISOString(),
-        completionKind: "result",
-        stopReason: "end_turn",
         inboxScope: "goddard-ai/goddard-ai#123",
         inboxHeadline: "Follow-up notes added",
         messages: [
@@ -171,11 +258,7 @@ const scenarios: MockSeedScenario[] = [
       {
         id: "pr_mock_123",
         timestamp: MOCK_NOW - 123,
-        host: "github",
-        owner: "goddard-ai",
-        repo: "goddard-ai",
         prNumber: 123,
-        cwd,
       },
     ],
     inboxItems: [
@@ -184,9 +267,7 @@ const scenarios: MockSeedScenario[] = [
         entityId: "ses_mock_review_boundary",
         reason: "session.turn_ended",
         status: "unread",
-        priority: "normal",
         updatedAt: MOCK_NOW - 1_000,
-        readAt: null,
         scope: "goddard-ai/goddard-ai#123",
         headline: "Data boundary review complete",
         turnId: "turn_mock_review_boundary_1",
@@ -196,7 +277,6 @@ const scenarios: MockSeedScenario[] = [
         entityId: "pr_mock_123",
         reason: "pull_request.updated",
         status: "read",
-        priority: "normal",
         updatedAt: MOCK_NOW - 4_000,
         readAt: MOCK_NOW - 3_500,
         scope: "goddard-ai/goddard-ai#123",
@@ -211,17 +291,12 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_blocked_config",
-        acpSessionId: "acp_mock_blocked_config",
         title: "Resolve config reload ambiguity",
         status: "blocked",
         stopReason: null,
         blockedReason: "Waiting for confirmation on repository-local config precedence.",
-        errorMessage: null,
         lastAgentMessage: "The implementation is blocked until config precedence is confirmed.",
-        repository: "goddard-ai/goddard-ai",
         prNumber: 124,
-        token: null,
-        permissions: null,
         initiative: "Clarify hot reload behavior for repository-scoped configuration.",
         inboxScope: "goddard-ai/goddard-ai#124",
         timestamp: MOCK_NOW - 2_000,
@@ -234,7 +309,6 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_blocked_config",
         turnId: "turn_mock_blocked_config_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_blocked_config_1",
         startedAt: new Date(MOCK_NOW - 180_000).toISOString(),
         completedAt: null,
         completionKind: null,
@@ -262,11 +336,7 @@ const scenarios: MockSeedScenario[] = [
       {
         id: "pr_mock_124",
         timestamp: MOCK_NOW - 124,
-        host: "github",
-        owner: "goddard-ai",
-        repo: "goddard-ai",
         prNumber: 124,
-        cwd,
       },
     ],
     inboxItems: [
@@ -275,7 +345,6 @@ const scenarios: MockSeedScenario[] = [
         entityId: "ses_mock_blocked_config",
         reason: "session.blocked",
         status: "saved",
-        priority: "normal",
         updatedAt: MOCK_NOW - 2_000,
         readAt: MOCK_NOW - 1_500,
         scope: "goddard-ai/goddard-ai#124",
@@ -290,17 +359,12 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_error_worktree",
-        acpSessionId: "acp_mock_error_worktree",
         title: "Diagnose worktree preparation failure",
         status: "error",
         stopReason: null,
-        blockedReason: null,
         errorMessage: "Mock fixture: package manager bootstrap failed.",
         lastAgentMessage: null,
-        repository: "goddard-ai/goddard-ai",
         prNumber: 125,
-        token: null,
-        permissions: null,
         initiative: "Inspect failed worktree bootstrap diagnostics.",
         inboxScope: "goddard-ai/goddard-ai#125",
         timestamp: MOCK_NOW - 3_000,
@@ -310,11 +374,7 @@ const scenarios: MockSeedScenario[] = [
       {
         id: "pr_mock_125",
         timestamp: MOCK_NOW - 125,
-        host: "github",
-        owner: "goddard-ai",
-        repo: "goddard-ai",
         prNumber: 125,
-        cwd,
       },
     ],
     inboxItems: [
@@ -328,7 +388,6 @@ const scenarios: MockSeedScenario[] = [
         readAt: MOCK_NOW - 2_500,
         scope: "goddard-ai/goddard-ai#125",
         headline: "Worktree bootstrap failed",
-        turnId: null,
       },
     ],
   },
@@ -338,17 +397,11 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_local_idle",
-        acpSessionId: "acp_mock_local_idle",
         title: "Explore local onboarding cleanup",
         status: "idle",
         stopReason: null,
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage: "I found a small documentation cleanup path for local onboarding.",
         repository: null,
-        prNumber: null,
-        token: null,
-        permissions: null,
         initiative: "Collect local-only onboarding cleanup ideas.",
         inboxScope: "local workspace",
         timestamp: MOCK_NOW - 4_000,
@@ -361,11 +414,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_local_idle",
         turnId: "turn_mock_local_idle_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_local_idle_1",
         startedAt: new Date(MOCK_NOW - 240_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 210_000).toISOString(),
-        completionKind: "result",
-        stopReason: "end_turn",
         inboxScope: "local workspace",
         inboxHeadline: "Onboarding cleanup ideas collected",
         messages: [
@@ -406,17 +456,11 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_cancelled_audit",
-        acpSessionId: "acp_mock_cancelled_audit",
         title: "Cancel outdated dependency audit",
         status: "cancelled",
         stopReason: "cancelled",
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage: "The dependency audit was cancelled before making changes.",
         repository: null,
-        prNumber: null,
-        token: null,
-        permissions: null,
         initiative: "Audit dependency drift without changing package versions.",
         inboxScope: "local workspace",
         timestamp: MOCK_NOW - 5_000,
@@ -429,10 +473,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_cancelled_audit",
         turnId: "turn_mock_cancelled_audit_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_cancelled_audit_1",
         startedAt: new Date(MOCK_NOW - 320_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 300_000).toISOString(),
-        completionKind: "result",
         stopReason: "cancelled",
         inboxScope: "local workspace",
         inboxHeadline: "Audit cancelled before changes",
@@ -459,7 +501,6 @@ const scenarios: MockSeedScenario[] = [
         entityId: "ses_mock_cancelled_audit",
         reason: "session.turn_ended",
         status: "replied",
-        priority: "normal",
         updatedAt: MOCK_NOW - 5_000,
         readAt: MOCK_NOW - 4_800,
         scope: "local workspace",
@@ -474,17 +515,9 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_archived_release_notes",
-        acpSessionId: "acp_mock_archived_release_notes",
         title: "Archive release notes cleanup",
         status: "archived",
-        stopReason: "end_turn",
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage: "Release note cleanup was archived after completion.",
-        repository: "goddard-ai/goddard-ai",
-        prNumber: null,
-        token: null,
-        permissions: null,
         initiative: "Clean up release note wording for local review.",
         inboxScope: "goddard-ai/goddard-ai",
         timestamp: MOCK_NOW - 6_000,
@@ -497,11 +530,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_archived_release_notes",
         turnId: "turn_mock_archived_release_notes_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_archived_release_notes_1",
         startedAt: new Date(MOCK_NOW - 420_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 390_000).toISOString(),
-        completionKind: "result",
-        stopReason: "end_turn",
         inboxScope: "goddard-ai/goddard-ai",
         inboxHeadline: "Release notes cleanup archived",
         messages: [
@@ -542,19 +572,11 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_long_content",
-        acpSessionId: "acp_mock_long_content",
         title:
           "Review the exceptionally long workspace navigation label and ensure it wraps cleanly in compact session lists",
         status: "done",
-        stopReason: "end_turn",
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage:
           "This deliberately long message checks whether the session list, inbox preview, and detail header preserve readable wrapping without overlapping nearby controls.",
-        repository: "goddard-ai/goddard-ai",
-        prNumber: null,
-        token: null,
-        permissions: null,
         initiative: "Stress-test long copy in session and inbox surfaces.",
         inboxScope: "goddard-ai/goddard-ai",
         timestamp: MOCK_NOW - 7_000,
@@ -566,13 +588,11 @@ const scenarios: MockSeedScenario[] = [
         entityId: "ses_mock_long_content",
         reason: "session.turn_ended",
         status: "saved",
-        priority: "normal",
         updatedAt: MOCK_NOW - 7_000,
         readAt: MOCK_NOW - 6_800,
         scope: "goddard-ai/goddard-ai with a deliberately long scope label",
         headline:
           "Long inbox headline used to verify wrapping behavior in dense lists and narrow panes",
-        turnId: null,
       },
     ],
   },
@@ -582,17 +602,10 @@ const scenarios: MockSeedScenario[] = [
     sessions: [
       {
         id: "ses_mock_context_limit",
-        acpSessionId: "acp_mock_context_limit",
         title: "Summarize near-limit planning context",
         status: "done",
         stopReason: "max_tokens",
-        blockedReason: null,
-        errorMessage: null,
         lastAgentMessage: "Context usage is near the configured model limit.",
-        repository: "goddard-ai/goddard-ai",
-        prNumber: null,
-        token: null,
-        permissions: null,
         initiative: "Summarize a large planning context before continuing.",
         inboxScope: "goddard-ai/goddard-ai",
         models: {
@@ -638,10 +651,8 @@ const scenarios: MockSeedScenario[] = [
         sessionId: "ses_mock_context_limit",
         turnId: "turn_mock_context_limit_1",
         sequence: 1,
-        promptRequestId: "prompt_mock_context_limit_1",
         startedAt: new Date(MOCK_NOW - 520_000).toISOString(),
         completedAt: new Date(MOCK_NOW - 500_000).toISOString(),
-        completionKind: "result",
         stopReason: "max_tokens",
         inboxScope: "goddard-ai/goddard-ai",
         inboxHeadline: "Context summary reached token limit",
@@ -670,8 +681,6 @@ const scenarios: MockSeedScenario[] = [
       {
         id: "pr_mock_docs_7",
         timestamp: MOCK_NOW - 9_000,
-        host: "github",
-        owner: "goddard-ai",
         repo: "docs",
         prNumber: 7,
         cwd: "/mock/goddard-docs",
@@ -683,12 +692,9 @@ const scenarios: MockSeedScenario[] = [
         entityId: "pr_mock_docs_7",
         reason: "pull_request.created",
         status: "unread",
-        priority: "normal",
         updatedAt: MOCK_NOW - 9_000,
-        readAt: null,
         scope: "goddard-ai/docs#7",
         headline: "Documentation navigation PR created",
-        turnId: null,
       },
     ],
   },
@@ -699,7 +705,6 @@ const scenarios: MockSeedScenario[] = [
       {
         id: "pr_mock_tools_42",
         timestamp: MOCK_NOW - 10_000,
-        host: "github",
         owner: "acme",
         repo: "developer-tools",
         prNumber: 42,
@@ -717,7 +722,6 @@ const scenarios: MockSeedScenario[] = [
         readAt: MOCK_NOW - 9_500,
         scope: "acme/developer-tools#42",
         headline: "Tooling PR received a follow-up review",
-        turnId: null,
       },
     ],
   },
@@ -754,56 +758,20 @@ function seedStore(store: ComposedDaemonStore) {
 }
 
 function seedScenario(store: ComposedDaemonStore, scenario: MockSeedScenario) {
-  seedSessions(store, scenario.sessions ?? [])
-  seedSessionTurns(store, scenario.sessionTurns ?? [])
-  seedPullRequests(store, scenario.pullRequests ?? [])
-  seedInbox(store, scenario.inboxItems ?? [])
+  seedSessions(
+    store,
+    (scenario.sessions ?? []).map((session) => createSessionSeed(session, scenario.label)),
+  )
+  seedSessionTurns(store, (scenario.sessionTurns ?? []).map(createTurnSeed))
+  seedPullRequests(store, (scenario.pullRequests ?? []).map(createPullRequestSeed))
+  seedInbox(store, (scenario.inboxItems ?? []).map(createInboxItemSeed))
 }
 
 function seedSessions(store: ComposedDaemonStore, seeds: SessionSeed[]) {
   for (const seed of seeds) {
-    withFixtureTime(seed.timestamp, () => {
-      store.sessions.put(seed.id, {
-        acpSessionId: seed.acpSessionId,
-        status: seed.status,
-        stopReason: seed.stopReason,
-        agent: "mock-agent",
-        agentName: "Mock Agent",
-        cwd,
-        title: seed.title,
-        titleState: "generated",
-        mcpServers: [],
-        connectionMode: "history",
-        supportsLoadSession: false,
-        activeDaemonSession: false,
-        completedHidden: false,
-        errorMessage: seed.errorMessage,
-        blockedReason: seed.blockedReason,
-        initiative: seed.initiative,
-        inboxScope: seed.inboxScope,
-        lastAgentMessage: seed.lastAgentMessage,
-        repository: seed.repository,
-        prNumber: seed.prNumber,
-        token: seed.token,
-        permissions: seed.permissions,
-        metadata: {
-          mock: true,
-          scenario: seedScenarioLabel(seed.id),
-        },
-        models: seed.models ?? null,
-        configOptions: seed.configOptions ?? [],
-        availableCommands: seed.availableCommands ?? [
-          {
-            name: "summarize",
-            description: "Summarize the current session",
-            input: { hint: "Focus area" },
-          },
-        ],
-        contextUsage: seed.contextUsage ?? {
-          size: 200_000,
-          used: seed.status === "blocked" ? 84_000 : 42_000,
-        },
-      })
+    const { id, timestamp, ...input } = seed
+    withFixtureTime(timestamp, () => {
+      store.sessions.put(id, input)
     })
   }
 }
@@ -831,12 +799,6 @@ function seedInbox(store: ComposedDaemonStore, seeds: InboxItemSeed[]) {
     const { id, ...input } = seed
     store.inboxItems.put(id, input)
   }
-}
-
-function seedScenarioLabel(sessionId: DaemonSession["id"]) {
-  return scenarios.find((scenario) =>
-    scenario.sessions?.some((session) => session.id === sessionId),
-  )?.label
 }
 
 function removeDatabaseArtifacts(filename: string) {
