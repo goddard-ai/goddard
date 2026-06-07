@@ -13,11 +13,7 @@ import { appToaster } from "~/lib/good-toaster.tsrx"
 import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
-import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
-import { getSessionDisplayTitle } from "~/sessions/display.ts"
-import { evictSessionHistory } from "~/sessions/mutations.ts"
 import { applyInboxItemsToCache } from "./cache.ts"
-import { isInboxEntityKind } from "./entity-kind.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
 import {
   allInboxStatuses,
@@ -41,6 +37,7 @@ import {
   prepareInboxSearchItems,
   replaceInboxSearchStatusFilters,
 } from "./search.ts"
+import { openInboxItemInWorkbench } from "./open.ts"
 import { handleInboxItemsLoaded } from "./session-visit.ts"
 import styles from "./page.style.ts"
 
@@ -244,39 +241,7 @@ component InboxPage() {
 
   async function openInboxItem(item: InboxItem) {
     try {
-      if (isInboxEntityKind(item, "session")) {
-        const { session } = await goddardSdk.session.get({
-          id: item.entityId,
-        })
-
-        evictSessionHistory(session.id)
-        workbenchTabSet.openOrFocusTab({
-          kind: "sessionChat",
-          props: {
-            relatedFilesystemPath: session.cwd,
-            sessionId: session.id,
-            sessionTitle: getSessionDisplayTitle(session),
-          },
-        })
-        return
-      }
-
-      if (!isInboxEntityKind(item, "pullRequest")) {
-        return
-      }
-
-      const { pullRequest } = await goddardSdk.pr.get({
-        id: item.entityId,
-      })
-
-      workbenchTabSet.openOrFocusTab({
-        kind: "pullRequest",
-        props: {
-          relatedFilesystemPath: pullRequest.cwd,
-          pullRequestId: pullRequest.id,
-          pullRequestTitle: getPullRequestDisplayTitle(pullRequest),
-        },
-      })
+      await openInboxItemInWorkbench({ item, workbenchTabSet })
     } catch (error) {
       console.error("Failed to open inbox item.", error)
       appToaster.create({

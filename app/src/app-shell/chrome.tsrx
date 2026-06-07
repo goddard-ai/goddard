@@ -1,12 +1,15 @@
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
-import { Folder } from "lucide-react"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
+import { ChevronRight, Folder } from "lucide-react"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
-import { hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
+import { getNextUnreadInboxAttentionItem, hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
+import { openInboxItemInWorkbench } from "~/inbox/open.ts"
+import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
 import { useQuery } from "~/lib/query.ts"
 import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
@@ -228,6 +231,9 @@ export component AppShellChrome() {
     <div class={styles.main}>
       <AppShellTabStrip
         activeTabId={workbenchTabSet.activeTabId}
+        endAccessory={<tsrx>
+          <AppShellNextInboxAttentionSlot {workbenchTabSet} />
+        </tsrx>}
         selectedMainTabId={mainTab.selectedKind}
         selectedMainTabTitle={selectedMainTab?.label ?? WORKBENCH_MAIN_TAB.title}
         tabs={workbenchTabSet.tabList}
@@ -267,6 +273,81 @@ export component AppShellChrome() {
       </div>
     </div>
   </div>
+}
+
+component AppShellNextInboxAttentionSlot(props: {
+  workbenchTabSet: ReturnType<typeof useWorkbenchTabSet>;
+}) {
+  try {
+    <AppShellNextInboxAttentionButton workbenchTabSet={props.workbenchTabSet} />
+  } pending {
+    <AppShellNextInboxAttentionShortcutFallback />
+  } catch (error) {
+    console.error("Next inbox attention render failed.", error)
+
+    <AppShellNextInboxAttentionShortcutFallback />
+  }
+}
+
+component AppShellNextInboxAttentionShortcutFallback() {
+  useAppCommand(AppCommand.navigation.openNextUnreadInboxItem, () => {}, { active: false })
+
+  <></>
+}
+
+component AppShellNextInboxAttentionButton(props: {
+  workbenchTabSet: ReturnType<typeof useWorkbenchTabSet>;
+}) {
+  const { items } = useQuery(goddardSdk.inbox.list, {
+    params: [
+      { statuses: ["unread"], limit: 100 },
+    ],
+  })
+  const nextItem = getNextUnreadInboxAttentionItem(items)
+
+  async function openNextInboxItem(item: InboxItem) {
+    try {
+      await openInboxItemInWorkbench({ item, workbenchTabSet: props.workbenchTabSet })
+    } catch (error) {
+      console.error("Failed to open next inbox item.", error)
+      appToaster.create({
+        description: "The linked daemon entity could not be loaded.",
+        duration: 3200,
+        title: "Couldn't open next item",
+        type: "error",
+      })
+    }
+  }
+
+  useAppCommand(AppCommand.navigation.openNextUnreadInboxItem, () => {
+    if (nextItem) {
+      void openNextInboxItem(nextItem)
+    }
+  }, { active: nextItem !== null })
+
+  if (nextItem) {
+    <AppCommandTooltip
+      command={AppCommand.navigation.openNextUnreadInboxItem}
+      group="app-shell-next-attention"
+      label="Next"
+      side="bottom"
+      sideOffset={8}
+    >
+      <button
+        aria-label="Open next unread inbox item"
+        class={cx(styles.nextAttentionButton, noDragClass)}
+        type="button"
+        onClick={() => {
+          void openNextInboxItem(nextItem)
+        }}
+      >
+        <span>"Next"</span>
+        <ChevronRight aria-hidden={true} size={14} strokeWidth={2.2} />
+      </button>
+    </AppCommandTooltip>
+  } else {
+    <></>
+  }
 }
 
 component AppShellSidebarQueryContent(props: {

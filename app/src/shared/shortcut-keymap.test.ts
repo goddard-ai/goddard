@@ -5,6 +5,7 @@ import { resolveShortcutBindings, ShortcutKeymapOverrides } from "./shortcut-key
 const newSession = "navigation.openNewSessionDialog" as const
 const openSwitchProject = "navigation.openSwitchProject" as const
 const openInbox = "navigation.openInbox" as const
+const openNextUnreadInboxItem = "navigation.openNextUnreadInboxItem" as const
 const openKeyboardShortcuts = "navigation.openKeyboardShortcuts" as const
 const closeActiveTab = "workbench.closeActiveTab" as const
 const openSessions = "navigation.openSessions" as const
@@ -89,6 +90,7 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [selectRepliedInboxFilter]: ["Mod+Digit3"],
     [selectCompletedInboxFilter]: ["Mod+Digit4"],
     [selectArchivedInboxFilter]: ["Mod+Digit5"],
+    [openNextUnreadInboxItem]: ["Alt+Shift+n"],
     [openProjectSelector]: ["Mod+o"],
     [openSubpackageSelector]: ["Mod+Shift+d"],
     [openAdapterSelector]: ["Mod+Shift+a"],
@@ -114,6 +116,7 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
   ).toMatchObject({
     [closeActiveTab]: ["Mod+w"],
     [openInbox]: ["Alt+Digit1"],
+    [openNextUnreadInboxItem]: ["Alt+Shift+n"],
     [openKeyboardShortcuts]: ["Mod+/"],
     [openApprovalPresetSelector]: ["Mod+."],
     [selectUnreadInboxFilter]: ["Mod+Digit1"],

@@ -198,6 +198,7 @@ function useAppShellTabStrip(
 
 export component AppShellTabStrip(props: {
   activeTabId: string;
+  endAccessory?: preact.ComponentChildren;
   selectedMainTabId: string;
   selectedMainTabTitle: string;
   tabs: readonly WorkbenchTab[];
@@ -207,59 +208,63 @@ export component AppShellTabStrip(props: {
 }) {
   const tabStrip = useAppShellTabStrip(props.activeTabId, props.selectedMainTabId, props.tabs)
 
-  <div ref={tabStrip.tabStripRef} class={styles.tabStrip} data-overlayscrollbars-initialize="">
-    <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
-      <TabButton
-        activeTabId={props.activeTabId}
-        icon="tabs/home"
-        id={WORKBENCH_MAIN_TAB.id}
-        isHome={true}
-        onSelect={props.onActivateTab}
-        refCallback={(element) => {
-          tabStrip.tabRefs.current[WORKBENCH_MAIN_TAB.id] = element
-        }}
-        title={props.selectedMainTabTitle}
-      />
-
-      for (const tab of props.tabs) {
+  <div class={styles.tabStripRow}>
+    <div ref={tabStrip.tabStripRef} class={styles.tabStrip} data-overlayscrollbars-initialize="">
+      <div class={styles.tabList} role="tablist" aria-label="Workbench tabs">
         <TabButton
           activeTabId={props.activeTabId}
-          dirty={tab.dirty}
-          icon={getWorkbenchTabIcon(tab.kind)}
-          id={tab.id}
-          key={tab.id}
-          onClose={props.onCloseTab}
+          icon="tabs/home"
+          id={WORKBENCH_MAIN_TAB.id}
+          isHome={true}
           onSelect={props.onActivateTab}
-          onTabDragEnd={tabStrip.hideDropIndicator}
-          onTabDragOver={(id, placement) => {
-            tabStrip.showDropIndicator(id, placement)
-          }}
-          onTabDrop={props.onMoveTab}
           refCallback={(element) => {
-            tabStrip.tabRefs.current[tab.id] = element
+            tabStrip.tabRefs.current[WORKBENCH_MAIN_TAB.id] = element
           }}
-          title={tab.title}
+          title={props.selectedMainTabTitle}
         />
-      }
 
-      <span
-        aria-hidden="true"
-        class={styles.indicator}
-        style={{
-          opacity: tabStrip.indicator.opacity,
-          transform: `translateX(${tabStrip.indicator.left}px)`,
-          width: `${tabStrip.indicator.width}px`,
-        }}
-      />
-      <span
-        aria-hidden="true"
-        class={styles.tabDropIndicator}
-        style={{
-          opacity: tabStrip.dropIndicator.opacity,
-          transform: `translateX(${tabStrip.dropIndicator.left - 1}px)`,
-        }}
-      />
+        for (const tab of props.tabs) {
+          <TabButton
+            activeTabId={props.activeTabId}
+            dirty={tab.dirty}
+            icon={getWorkbenchTabIcon(tab.kind)}
+            id={tab.id}
+            key={tab.id}
+            onClose={props.onCloseTab}
+            onSelect={props.onActivateTab}
+            onTabDragEnd={tabStrip.hideDropIndicator}
+            onTabDragOver={(id, placement) => {
+              tabStrip.showDropIndicator(id, placement)
+            }}
+            onTabDrop={props.onMoveTab}
+            refCallback={(element) => {
+              tabStrip.tabRefs.current[tab.id] = element
+            }}
+            title={tab.title}
+          />
+        }
+
+        <span
+          aria-hidden="true"
+          class={styles.indicator}
+          style={{
+            opacity: tabStrip.indicator.opacity,
+            transform: `translateX(${tabStrip.indicator.left}px)`,
+            width: `${tabStrip.indicator.width}px`,
+          }}
+        />
+        <span
+          aria-hidden="true"
+          class={styles.tabDropIndicator}
+          style={{
+            opacity: tabStrip.dropIndicator.opacity,
+            transform: `translateX(${tabStrip.dropIndicator.left - 1}px)`,
+          }}
+        />
+      </div>
     </div>
+
+    {props.endAccessory}
   </div>
 }
 

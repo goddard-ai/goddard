@@ -40,6 +40,7 @@ export const shortcutKeymapProfiles = {
       "inbox.selectRepliedFilter": ["Mod+Digit3"],
       "inbox.selectCompletedFilter": ["Mod+Digit4"],
       "inbox.selectArchivedFilter": ["Mod+Digit5"],
+      "navigation.openNextUnreadInboxItem": ["Alt+Shift+n"],
       "sessionInput.openProjectSelector": ["Mod+o"],
       "sessionInput.openSubpackageSelector": ["Mod+Shift+d"],
       "sessionInput.openAdapterSelector": ["Mod+Shift+a"],

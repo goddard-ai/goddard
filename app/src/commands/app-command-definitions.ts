@@ -12,6 +12,7 @@ import {
   Inbox,
   Keyboard,
   Lightbulb,
+  ListChecks,
   ListTodo,
   Map,
   MapPin,
@@ -62,6 +63,10 @@ export const AppCommand = defineAppCommands({
       openInbox: {
         label: "Open Inbox",
         icon: Inbox,
+      },
+      openNextUnreadInboxItem: {
+        label: "Open Next Unread Inbox Item",
+        icon: ListChecks,
       },
       openSessions: {
         label: "Open Sessions",

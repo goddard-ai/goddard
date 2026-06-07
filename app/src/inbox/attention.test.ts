@@ -1,7 +1,11 @@
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { expect, test } from "bun:test"
 
-import { hasUnreadSessionInboxItems, isUnreadSessionInboxItem } from "./attention.ts"
+import {
+  getNextUnreadInboxAttentionItem,
+  hasUnreadSessionInboxItems,
+  isUnreadSessionInboxItem,
+} from "./attention.ts"
 
 function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
   return {
@@ -39,4 +43,37 @@ test("hasUnreadSessionInboxItems detects unread session attention", () => {
       createInboxItem({ entityId: "ses_unread" }),
     ]),
   ).toBe(true)
+})
+
+test("getNextUnreadInboxAttentionItem returns null with no unread items", () => {
+  expect(
+    getNextUnreadInboxAttentionItem([
+      createInboxItem({ entityId: "ses_read", status: "read" }),
+      createInboxItem({ entityId: "ses_archived", status: "archived" }),
+    ]),
+  ).toBeNull()
+})
+
+test("getNextUnreadInboxAttentionItem prefers normal priority over low priority", () => {
+  const lowPriorityFresh = createInboxItem({
+    entityId: "ses_low",
+    priority: "low",
+    updatedAt: 20,
+  })
+  const normalPriorityStale = createInboxItem({
+    entityId: "ses_normal",
+    priority: "normal",
+    updatedAt: 10,
+  })
+
+  expect(getNextUnreadInboxAttentionItem([lowPriorityFresh, normalPriorityStale])).toBe(
+    normalPriorityStale,
+  )
+})
+
+test("getNextUnreadInboxAttentionItem uses updatedAt freshness within equal priority", () => {
+  const stale = createInboxItem({ entityId: "ses_stale", updatedAt: 10 })
+  const fresh = createInboxItem({ entityId: "pr_fresh", updatedAt: 20 })
+
+  expect(getNextUnreadInboxAttentionItem([stale, fresh])).toBe(fresh)
 })

@@ -179,17 +179,23 @@ export default {
     minWidth: "0",
     minHeight: "0",
   }),
-  tabStrip: css({
+  tabStripRow: css({
     position: "relative",
     display: "flex",
     alignItems: "stretch",
     minHeight: "31px",
     height: "31px",
+    backgroundColor: "surface",
+    boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
+  }),
+  tabStrip: css({
+    position: "relative",
+    flex: "1 1 auto",
+    minWidth: "0",
+    height: "31px",
     overflowX: "auto",
     overflowY: "hidden",
     overscrollBehaviorX: "contain",
-    backgroundColor: "surface",
-    boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
   }),
   tabList: css({
     position: "relative",
@@ -216,6 +222,36 @@ export default {
     pointerEvents: "none",
     transition:
       "transform 120ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
+  }),
+  nextAttentionButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
+    height: "24px",
+    margin: "3px 8px 0 4px",
+    padding: "0 9px",
+    flexShrink: "0",
+    border: "1px solid",
+    borderColor: `color-mix(in srgb, ${accentStrongColor} 56%, transparent)`,
+    borderRadius: "6px",
+    backgroundColor: `color-mix(in srgb, ${accentColor} 18%, ${panelColor})`,
+    color: "accentStrong",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "500",
+    letterSpacing: "0",
+    lineHeight: "1",
+    transition:
+      "background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _hover: {
+      borderColor: "accentStrong",
+      backgroundColor: `color-mix(in srgb, ${accentColor} 28%, ${panelColor})`,
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "-2px",
+    },
   }),
   actionItem: css({
     width: "46px",
