@@ -41,9 +41,14 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   const sessions = await send(client, "session.list", { limit: 10 })
-  expect(sessions.sessions).toHaveLength(3)
+  expect(sessions.sessions).toHaveLength(8)
   expect(sessions.sessions.every((session: any) => !session.activeDaemonSession)).toBe(true)
   expect(sessions.sessions.every((session: any) => session.connectionMode !== "live")).toBe(true)
+  expect(new Set(sessions.sessions.map((session: any) => session.status))).toEqual(
+    new Set(["archived", "blocked", "cancelled", "done", "error", "idle"]),
+  )
+  expect(sessions.sessions.some((session: any) => session.repository === null)).toBe(true)
+  expect(sessions.sessions.some((session: any) => session.contextUsage?.used > 190_000)).toBe(true)
 
   await expect(send(client, "session.connect", { id: "ses_mock_review_boundary" })).rejects.toThrow(
     /archived/i,
@@ -55,13 +60,20 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
     reconnectable: false,
     activeDaemonSession: false,
   })
-  expect(history.turns).toHaveLength(1)
+  expect(history.turns).toHaveLength(2)
+
+  const contextLimit = await send(client, "session.get", { id: "ses_mock_context_limit" })
+  expect(contextLimit.session.models?.availableModels).toHaveLength(2)
+  expect(contextLimit.session.configOptions).toHaveLength(1)
 
   const inbox = await send(client, "inbox.list", {
-    statuses: ["unread", "read", "saved", "archived"],
+    statuses: ["unread", "read", "saved", "archived", "replied", "completed"],
     limit: 10,
   })
-  expect(inbox.items).toHaveLength(4)
+  expect(inbox.items).toHaveLength(8)
+  expect(new Set(inbox.items.map((item: any) => item.status))).toEqual(
+    new Set(["unread", "read", "saved", "archived", "replied", "completed"]),
+  )
 
   const pullRequest = await send(client, "pr.get", { id: "pr_mock_123" })
   expect(pullRequest.pullRequest).toMatchObject({
@@ -85,9 +97,9 @@ test("seed mock reset is mock-profile only and repeated seeding does not duplica
   process.env.GODDARD_DATA_PROFILE = "mock"
   const store = openComposedDaemonStore()
   try {
-    expect(store.sessions.findMany()).toHaveLength(3)
-    expect(store.sessionTurns.findMany()).toHaveLength(2)
-    expect(store.inboxItems.findMany()).toHaveLength(4)
+    expect(store.sessions.findMany()).toHaveLength(8)
+    expect(store.sessionTurns.findMany()).toHaveLength(7)
+    expect(store.inboxItems.findMany()).toHaveLength(8)
     expect(store.pullRequests.findMany()).toHaveLength(3)
   } finally {
     store.close()

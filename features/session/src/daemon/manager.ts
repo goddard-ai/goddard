@@ -162,6 +162,16 @@ type SessionDoc = DaemonSession
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 type SessionWorktreeDoc = DaemonWorktree
 
+/** Identifies seeded display fixtures that were never owned by a live daemon process. */
+function isMockHistoricalSession(session: SessionDoc) {
+  return (
+    session.metadata?.mock === true &&
+    session.connectionMode !== "live" &&
+    session.activeDaemonSession === false &&
+    session.supportsLoadSession === false
+  )
+}
+
 type SessionManagerRootConfig = {
   agents?: AgentsConfig
   session?: StaticSessionParams
@@ -1792,9 +1802,8 @@ export function createSessionManager(input: {
         }
 
         if (
-          session.status === "active" ||
-          session.status === "blocked" ||
-          session.status === "idle"
+          !isMockHistoricalSession(session) &&
+          (session.status === "active" || session.status === "blocked" || session.status === "idle")
         ) {
           const sessionDocument = db.sessions.get(session.id) ?? null
           if (sessionDocument) {
