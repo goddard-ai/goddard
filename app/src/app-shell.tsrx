@@ -27,12 +27,6 @@ export component AppShell() {
           props: {},
         })
         return
-      case "SessionChatTranscript":
-        workbenchTabSet.openOrFocusTab({
-          kind: "sessionChatTranscriptDebug",
-          props: {},
-        })
-        return
       case "Terminal":
         workbenchTabSet.openOrFocusTab({
           kind: "terminalDebug",

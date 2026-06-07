@@ -49,20 +49,11 @@ export type TranscriptProps = {
     loading: boolean;
     onLoad: () => Promise<void> | void;
   };
-  scrollCacheKey?: string;
   showThinkingLabel?: boolean;
   stickToBottomKey?: number | string;
 }
 
 const PROMPT_NAVIGATION_TOP_GAP = 8
-const transcriptScrollCache = new Map<
-  string,
-  {
-    itemKeys: readonly string[];
-    measurements: readonly VirtualItem[];
-    scrollTop: number;
-  }
->()
 
 type CoalescedToolTranscriptRow = {
   kind: "toolGroup";
@@ -385,7 +376,7 @@ export component Transcript(props: TranscriptProps) {
   const previousScrollHeightRef = useRef(0)
   const previousItemKeysRef = useRef<readonly string[]>([])
   const userScrollIntentRef = useRef(false)
-  const initialBottomScrollCompleteRef = useRef(false)
+  const initialBottomScrollStartedRef = useRef(false)
   const [isStickingToBottom, setIsStickingToBottom] = useState(false)
   const tabContext = useTabContext()
   const [viewport, setViewport] = useState<TranscriptViewport>({
@@ -394,14 +385,7 @@ export component Transcript(props: TranscriptProps) {
     width: 0,
   })
 
-  const effectiveScrollCacheKey = props.scrollCacheKey ?? tabContext.id
   const itemKeys = useMemo(() => renderItems.map((item) => item.id), [renderItems])
-  const cachedScrollSnapshot = transcriptScrollCache.get(effectiveScrollCacheKey)
-  const restoredScrollSnapshot =
-    cachedScrollSnapshot && cachedScrollSnapshot.itemKeys.length === itemKeys.length &&
-    cachedScrollSnapshot.itemKeys.every((itemKey, index) => itemKeys[index] === itemKey)
-      ? cachedScrollSnapshot
-      : undefined
 
   useLayoutEffect(() => {
     if (props.stickToBottomKey === undefined) {
@@ -466,18 +450,13 @@ export component Transcript(props: TranscriptProps) {
     estimateSize: (index) => estimateRenderItemSize(renderItems[index], viewport.width),
     getItemKey: (index) => itemKeys[index] ?? index,
     getScrollElement: () => tabContext.scrollParentRef.current,
-    initialMeasurementsCache: restoredScrollSnapshot
-      ? [...restoredScrollSnapshot.measurements]
+    initialOffset: effectiveInitialScroll === "bottom"
+      ? () => getEstimatedBottomOffset({
+          items: renderItems,
+          scrollElement: tabContext.scrollParentRef.current,
+          viewport,
+        })
       : undefined,
-    initialOffset: restoredScrollSnapshot
-      ? restoredScrollSnapshot.scrollTop
-      : effectiveInitialScroll === "bottom"
-        ? () => getEstimatedBottomOffset({
-            items: renderItems,
-            scrollElement: tabContext.scrollParentRef.current,
-            viewport,
-          })
-        : undefined,
     overscan: Math.max(1, Math.ceil(VIRTUAL_OVERSCAN_PX / DEFAULT_ROW_HEIGHT)),
     scrollMargin: viewport.scrollMargin,
     useFlushSync: false,
@@ -622,24 +601,6 @@ export component Transcript(props: TranscriptProps) {
   }, [itemKeys, props.olderHistory, tabContext.scrollParentRef])
 
   useLayoutEffect(() => {
-    return () => {
-      const scrollElement = tabContext.scrollParentRef.current
-
-      if (scrollElement) {
-        transcriptScrollCache.set(effectiveScrollCacheKey, {
-          itemKeys,
-          measurements: virtualizer.measurementsCache.map(
-            (measurement) => ({
-              ...measurement,
-            }),
-          ),
-          scrollTop: scrollElement.scrollTop,
-        })
-      }
-    }
-  }, [effectiveScrollCacheKey, itemKeys, tabContext.scrollParentRef, virtualizer])
-
-  useLayoutEffect(() => {
     if (
       !isStickingToBottom || renderItems.length === 0 || viewport.width <= 0 ||
         !viewport.scrollMarginMeasured
@@ -665,18 +626,16 @@ export component Transcript(props: TranscriptProps) {
       return
     }
 
-    if (initialBottomScrollCompleteRef.current || restoredScrollSnapshot) {
+    if (initialBottomScrollStartedRef.current) {
       return
     }
 
-    initialBottomScrollCompleteRef.current = true
-    scrollToBottom()
-    requestAnimationFrame(scrollToBottom)
+    initialBottomScrollStartedRef.current = true
+    userScrollIntentRef.current = false
+    setIsStickingToBottom(true)
   }, [
     effectiveInitialScroll,
-    effectiveScrollCacheKey,
     renderItems.length,
-    restoredScrollSnapshot,
     totalSize,
     viewport.scrollMarginMeasured,
     viewport.width,

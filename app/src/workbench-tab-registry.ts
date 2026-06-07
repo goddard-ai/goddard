@@ -114,13 +114,6 @@ export const workbenchTabKinds = {
     getTitle: () => "Inbox Debug",
     icon: "tabs/inbox",
   },
-  sessionChatTranscriptDebug: {
-    component: lazy(() => import("~/session-chat/transcript-debug-view.tsrx")),
-    getId: () => "debug:session-chat-transcript",
-    getTitle: () => "Session Chat Debug",
-    icon: "tabs/sessions",
-    restoreScroll: false,
-  },
   terminalDebug: {
     component: lazy(() => import("~/terminal/debug-view.tsrx")),
     getId: () => "debug:terminal",
