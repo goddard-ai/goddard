@@ -39,6 +39,7 @@ const mainTabCommands: Record<MainTabItemId, AppCommand> = {
 export component AppShellChrome() {
   const mainTab = useMainTab()
   const workbenchTabSet = useWorkbenchTabSet()
+  const topBarSelectorShortcutActive = workbenchTabSet.activeClosableTab?.kind !== "project"
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
@@ -105,7 +106,7 @@ export component AppShellChrome() {
       <div class={cx(styles.switcher, "electrobun-webkit-app-region-no-drag")}>
         <div class={styles.switcherLeftControl}>
           try {
-            <AppShellAgentSelector />
+            <AppShellAgentSelector shortcutActive={topBarSelectorShortcutActive} />
           } pending {
             <button
               aria-label="Loading ACP agent selector"
@@ -142,7 +143,7 @@ export component AppShellChrome() {
         </div>
         <div class={styles.switcherRightControl}>
           try {
-            <AppShellSubfolderSelector />
+            <AppShellSubfolderSelector shortcutActive={topBarSelectorShortcutActive} />
           } pending {
             <button
               aria-label="Loading project subfolder selector"

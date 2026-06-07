@@ -722,6 +722,76 @@ test("session input commands require a handler in the active command layer", asy
   }
 })
 
+test("inactive top bar selector handlers leave project tab selector shortcuts to the project tab", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const topBarMatches: unknown[] = []
+  const projectTabMatches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  try {
+    render(
+      h(
+        Fragment,
+        {},
+        h(TestCommandHandler, {
+          active: false,
+          command: AppCommand.sessionInput.openAdapterSelector,
+          onMatch(match) {
+            topBarMatches.push(match)
+          },
+        }),
+        h(TestCommandHandler, {
+          active: false,
+          command: AppCommand.sessionInput.openSubpackageSelector,
+          onMatch(match) {
+            topBarMatches.push(match)
+          },
+        }),
+        h(TestCommandHandler, {
+          command: AppCommand.sessionInput.openAdapterSelector,
+          onMatch(match) {
+            projectTabMatches.push(match)
+          },
+        }),
+        h(TestCommandHandler, {
+          command: AppCommand.sessionInput.openSubpackageSelector,
+          onMatch(match) {
+            projectTabMatches.push(match)
+          },
+        }),
+      ),
+      container,
+    )
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: "A",
+      code: "KeyA",
+      ctrlKey: true,
+      shiftKey: true,
+    })
+
+    dispatchKeydown(runtimeDocument, {
+      key: "D",
+      code: "KeyD",
+      ctrlKey: true,
+      shiftKey: true,
+    })
+
+    expect(topBarMatches).toEqual([])
+    expect(projectTabMatches).toHaveLength(2)
+    expect(projectTabMatches.map((match) => (match as { combo: string }).combo)).toEqual([
+      "Ctrl+Shift+a",
+      "Ctrl+Shift+d",
+    ])
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
 test("command palette visibility can include handlers outside the active command layer", async () => {
   const { registry, cleanup } = createTestRegistry()
   const container = document.createElement("div")

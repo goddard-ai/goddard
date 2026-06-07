@@ -47,7 +47,9 @@ function isStrongMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
   return match.score >= subfolderSelectorMinimumFuzzyScore || hasDirectMatch(query, match)
 }
 
-export component AppShellSubfolderSelector() {
+export component AppShellSubfolderSelector(props: {
+  shortcutActive?: boolean;
+}) {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const projectPath =
@@ -149,7 +151,9 @@ export component AppShellSubfolderSelector() {
     open.value = true
   }
 
-  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, openSelectorMenu)
+  useAppCommand(AppCommand.sessionInput.openSubpackageSelector, openSelectorMenu, {
+    active: props.shortcutActive ?? true,
+  })
 
   useEffect(() => {
     if (!open.value || !highlightedItem) {

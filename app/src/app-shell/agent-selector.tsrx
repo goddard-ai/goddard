@@ -51,7 +51,9 @@ function isStrongMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
   return match.score >= agentSelectorMinimumFuzzyScore || hasDirectMatch(query, match)
 }
 
-export component AppShellAgentSelector() {
+export component AppShellAgentSelector(props: {
+  shortcutActive?: boolean;
+}) {
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const projectPath =
@@ -151,7 +153,9 @@ export component AppShellAgentSelector() {
     open.value = true
   }
 
-  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openSelectorMenu)
+  useAppCommand(AppCommand.sessionInput.openAdapterSelector, openSelectorMenu, {
+    active: props.shortcutActive ?? true,
+  })
 
   useEffect(() => {
     if (!open.value || !highlightedAdapter) {
