@@ -7,6 +7,11 @@ export default defineConfig({
   outdir: "styled-system",
   jsxFramework: "preact",
   theme: {
+    tokens: {
+      fonts: {
+        mono: { value: '"SF Mono", "JetBrains Mono", "Menlo", monospace' },
+      },
+    },
     semanticTokens: {
       colors: {
         background: { value: "var(--theme-color-background)" },
