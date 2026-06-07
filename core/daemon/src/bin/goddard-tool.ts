@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 import * as fs from "node:fs/promises"
+import { basename, join } from "node:path"
 import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
+import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import { SessionId, type DaemonSession } from "@goddard-ai/session/schema"
-import { command, option, optional, run, string, subcommands } from "cmd-ts"
+import { command, oneOf, option, optional, positional, run, string, subcommands } from "cmd-ts"
+
+const logSurfaces = ["app", "daemon", "agent-process"] as const
+const defaultLogLineLimit = 200
+
+type LogSurface = (typeof logSurfaces)[number]
 
 async function requireSessionId(): Promise<DaemonSession["id"]> {
   const { client } = createDaemonIpcClientFromEnv()
@@ -58,6 +65,78 @@ export async function replyPr(message: string, metadata: AttentionMetadataInput 
     message,
     ...metadata,
   })
+}
+
+export async function readLogSurface(input: {
+  surface: LogSurface
+  lines?: string
+  logDir?: string
+}) {
+  const logDir = input.logDir ?? getGoddardTempLogDir()
+  const paths = await resolveLogSurfacePaths(input.surface, logDir)
+  if (paths.length === 0) {
+    return `No ${input.surface} logs found in ${logDir}`
+  }
+
+  const lineLimit = resolveLineLimit(input.lines)
+  const content = await Promise.all(
+    paths.map(async (path) => {
+      const text = await fs.readFile(path, "utf-8")
+      const body = takeLastLines(text, lineLimit)
+      return paths.length === 1 ? body : [`== ${basename(path)} ==`, body].join("\n")
+    }),
+  )
+
+  return content.join("\n")
+}
+
+async function resolveLogSurfacePaths(surface: LogSurface, logDir: string) {
+  if (surface === "app") {
+    return await existingPaths([join(logDir, "app.log")])
+  }
+
+  if (surface === "daemon") {
+    return await existingPaths([join(logDir, "daemon.log")])
+  }
+
+  const entries = await fs.readdir(logDir, { withFileTypes: true }).catch(() => [])
+  return entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.startsWith("agent-process-") &&
+        entry.name.endsWith(".stderr.log"),
+    )
+    .map((entry) => join(logDir, entry.name))
+    .sort()
+}
+
+async function existingPaths(paths: string[]) {
+  const existing = await Promise.all(
+    paths.map(async (path) => ((await fs.stat(path).catch(() => null))?.isFile() ? path : null)),
+  )
+  return existing.filter((path): path is string => path !== null)
+}
+
+function resolveLineLimit(value: string | undefined) {
+  if (!value) {
+    return defaultLogLineLimit
+  }
+
+  const lineLimit = Number(value)
+  if (!Number.isInteger(lineLimit) || lineLimit < 0) {
+    throw new Error("--lines must be a non-negative integer")
+  }
+
+  return lineLimit
+}
+
+function takeLastLines(content: string, lineLimit: number) {
+  if (lineLimit === 0) {
+    return content.trimEnd()
+  }
+
+  return content.trimEnd().split("\n").slice(-lineLimit).join("\n")
 }
 
 function metadataOptions() {
@@ -193,6 +272,26 @@ export async function main(argv: string[]) {
           const message = await fs.readFile(args.messageFile, "utf-8")
           await replyPr(message, resolveMetadataInput(args))
           console.log(`PR replied from file: ${args.messageFile}`)
+        },
+      }),
+
+      logs: command({
+        name: "logs",
+        description: "Print recent Goddard process logs for one surface.",
+        args: {
+          surface: positional({
+            type: oneOf(logSurfaces),
+            displayName: "surface",
+            description: "Log surface to inspect: app, daemon, or agent-process.",
+          }),
+          lines: option({
+            type: optional(string),
+            long: "lines",
+            description: "Number of trailing lines to print. Use 0 for the full log.",
+          }),
+        },
+        handler: async (args) => {
+          console.log(await readLogSurface(args))
         },
       }),
     },

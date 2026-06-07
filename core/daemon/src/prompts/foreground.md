@@ -24,4 +24,9 @@ AVAILABLE COMMANDS:
    - `--scope "Task update" --headline "I made progress"`
    - `--scope "Needs review" --headline "Done with this"`
 
+4. `goddard logs <surface>`
+   Use this to inspect recent process logs when debugging app, daemon, or agent process behavior.
+   Supported surfaces are `app`, `daemon`, and `agent-process`.
+   The command prints the last 200 lines by default. Use `--lines 0` only when you need the full log.
+
 ${global_rules}
