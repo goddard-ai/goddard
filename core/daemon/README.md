@@ -108,6 +108,24 @@ Mock seeding does not contact external services, does not seed production or
 development data, and does not create reconnectable live sessions. The app and
 SDK should consume the mock profile through the normal daemon IPC surface.
 
+The default mock dataset is scenario-comprehensive rather than
+schema-comprehensive. It covers the core user-visible states needed for app and
+SDK development:
+
+- Eight daemon session scenarios spanning completed, blocked, errored,
+  cancelled, archived, and idle-looking historical sessions.
+- Session detail fixtures for multi-turn history, interrupted-style history,
+  long copy, near-limit context usage, model state, config options, and slash
+  command suggestions.
+- Ten inbox rows spanning unread, read, saved, archived, replied, and completed
+  statuses, including both session-owned and pull-request-owned rows.
+- Five local-only daemon-managed pull request records across three repositories,
+  with both created and updated PR attention rows.
+
+Future mock fixtures should be added only when they exercise a named
+user-visible screen state or workflow. Avoid adding rows solely because a schema
+field or enum exists.
+
 ## Standalone Build
 
 Build standalone Bun executables for the daemon and bundled helper tools with:
