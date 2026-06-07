@@ -11,6 +11,45 @@ import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
 import styles from "./views.style.ts"
 
 const panelScrollCache = new Map<string, number>()
+const activationFocusSelector = [
+  "input[type='search']",
+  "[role='searchbox']",
+  "[data-workbench-activation-focus='true']",
+].join(",")
+
+function getFocusableActivationTarget(element: Element) {
+  if (!(element instanceof HTMLElement)) {
+    return null
+  }
+
+  if (element.hidden || element.closest("[hidden], [aria-hidden='true']")) {
+    return null
+  }
+
+  if (
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLButtonElement
+  ) {
+    return element.disabled ? null : element
+  }
+
+  return element.getAttribute("aria-disabled") === "true" ? null : element
+}
+
+function findActivationFocusTarget(container: HTMLElement) {
+  const targets = container.querySelectorAll(activationFocusSelector)
+
+  for (const target of targets) {
+    const focusableTarget = getFocusableActivationTarget(target)
+
+    if (focusableTarget) {
+      return focusableTarget
+    }
+  }
+
+  return null
+}
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
 export component WorkbenchScrollPanel(props: {
@@ -37,7 +76,48 @@ export component WorkbenchScrollPanel(props: {
 
     if (lastFocusedScrollKeyRef.current !== props.scrollKey) {
       lastFocusedScrollKeyRef.current = props.scrollKey
+      const focusActivationTarget = () => {
+        const target = findActivationFocusTarget(scrollerElement)
+
+        if (!target) {
+          return false
+        }
+
+        target.focus({ preventScroll: true })
+        return true
+      }
+
+      if (focusActivationTarget()) {
+        return
+      }
+
       scrollerElement.focus({ preventScroll: true })
+
+      const observer = new MutationObserver(() => {
+        if (document.activeElement !== scrollerElement) {
+          observer.disconnect()
+          return
+        }
+
+        if (focusActivationTarget()) {
+          observer.disconnect()
+        }
+      })
+
+      observer.observe(scrollerElement, {
+        attributes: true,
+        childList: true,
+        subtree: true,
+      })
+
+      const timeout = window.setTimeout(() => {
+        observer.disconnect()
+      }, 250)
+
+      return () => {
+        window.clearTimeout(timeout)
+        observer.disconnect()
+      }
     }
   }, [props.scrollKey, shouldRestoreScroll])
 

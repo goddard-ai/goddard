@@ -12,6 +12,7 @@ export component ListToolbar(props: {
     <input
       class={styles.searchInput}
       placeholder="Search session titles"
+      type="search"
       value={props.searchQuery}
       onInput={(event) => {
         props.onSearchInput(event.currentTarget.value)

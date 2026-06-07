@@ -45,6 +45,7 @@ export component InboxToolbar(props: {
         <input
           class={styles.searchInput}
           placeholder="Search inbox"
+          type="search"
           value={props.searchQuery}
           onInput={(event) => {
             props.onSearchInput(event.currentTarget.value)

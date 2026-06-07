@@ -45,3 +45,77 @@ test("WorkbenchScrollPanel focuses tab content when the active content changes",
   render(null, container)
   container.remove()
 })
+
+test("WorkbenchScrollPanel focuses a search box when the active content changes", async () => {
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:first">
+        <button>First tab action</button>
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:second">
+        <input type="search" />
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  const searchInput = container.querySelector("input[type='search']")
+
+  expect(document.activeElement).toBe(searchInput)
+
+  render(null, container)
+  container.remove()
+})
+
+test("WorkbenchScrollPanel focuses a delayed activation target", async () => {
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:first">
+        <button>First tab action</button>
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:second">
+        <div />
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:second">
+        <div contentEditable={true} data-workbench-activation-focus="true" />
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  const contentEditable = container.querySelector("[data-workbench-activation-focus='true']")
+
+  expect(document.activeElement).toBe(contentEditable)
+
+  render(null, container)
+  container.remove()
+})

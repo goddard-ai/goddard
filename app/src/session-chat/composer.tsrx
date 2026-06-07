@@ -38,6 +38,7 @@ export component Composer(props: {
     footerControls={props.footerControls}
     helperText={props.helperText}
     iconOnlySubmit={true}
+    activationFocus={true}
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}
     placeholder={props.placeholder}

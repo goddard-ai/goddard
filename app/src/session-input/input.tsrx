@@ -46,6 +46,7 @@ export type SessionInputContextUsage = {
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
 export component SessionInput(props: {
+  activationFocus?: boolean;
   autoFocus?: boolean;
   classes?: Partial<SessionInputClasses>;
   disabled?: boolean;
@@ -367,6 +368,7 @@ export component SessionInput(props: {
               aria-label={placeholder}
               class={classes.contentEditable}
               contentEditable={!disabled}
+              data-workbench-activation-focus={props.activationFocus ? "true" : undefined}
             />
           </tsrx>}
           placeholder={<tsrx>
