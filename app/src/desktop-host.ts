@@ -6,6 +6,7 @@ import type { AppStateSnapshot } from "~/shared/app-state.ts"
 import { createDaemonSubscriptionCoordinator } from "~/shared/daemon-subscriptions.ts"
 import type {
   AppDesktopRpc,
+  AppLogInput,
   DaemonRequestName,
   DaemonRequestPayload,
   DaemonRequestResponse,
@@ -31,6 +32,7 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
   },
 })
 
+const consoleMethods: AppLogInput["level"][] = ["debug", "error", "info", "log", "warn"]
 let electroview: Electroview<typeof rpc> | undefined
 let daemonSubscriptionCoordinator:
   | ReturnType<typeof createDaemonSubscriptionCoordinator>
@@ -79,6 +81,7 @@ export interface DesktopHostBridge {
 declare global {
   interface Window {
     __goddardDesktop: DesktopHostBridge
+    __goddardDidInstallLogCapture?: boolean
   }
 }
 
@@ -107,6 +110,7 @@ function getDaemonSubscriptionCoordinator() {
 /** Creates the Electrobun view bridge once for the active browser context. */
 export function initializeDesktopHost(): void {
   electroview ??= new Electroview({ rpc })
+  installRendererLogCapture()
 
   if (!didRegisterDaemonResetOnUnload) {
     didRegisterDaemonResetOnUnload = true
@@ -128,6 +132,59 @@ export function initializeDesktopHost(): void {
     .catch((error) => {
       console.error("Failed to reset daemon stream subscriptions.", error)
     })
+}
+
+function installRendererLogCapture() {
+  if (window.__goddardDidInstallLogCapture) {
+    return
+  }
+
+  window.__goddardDidInstallLogCapture = true
+
+  for (const method of consoleMethods) {
+    const original = console[method].bind(console)
+    console[method] = (...args: unknown[]) => {
+      void writeRendererLog(method, args.map(formatConsoleValue).join(" "))
+      original(...args)
+    }
+  }
+
+  window.addEventListener("error", (event) => {
+    void writeRendererLog("error", formatErrorEvent(event))
+  })
+  window.addEventListener("unhandledrejection", (event) => {
+    void writeRendererLog("error", formatConsoleValue(event.reason))
+  })
+}
+
+async function writeRendererLog(level: AppLogInput["level"], message: string) {
+  await rpc.request
+    .writeAppLog({
+      source: "renderer",
+      level,
+      message,
+    })
+    .catch(() => {})
+}
+
+function formatErrorEvent(event: ErrorEvent) {
+  return event.error ? formatConsoleValue(event.error) : event.message
+}
+
+function formatConsoleValue(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (value instanceof Error) {
+    return value.stack ?? value.message
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 /** Returns one runtime handshake from the Bun host. */

@@ -1,3 +1,7 @@
+import { createWriteStream } from "node:fs"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
+import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
@@ -28,8 +32,10 @@ export type RunInput = {
 
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
 export async function runDaemon(input: RunInput): Promise<number> {
+  const logWriter = await createDaemonLogWriter()
   const restoreLogging = configureLogging({
     mode: input.logMode ?? "pretty",
+    writeLine: logWriter.writeLine,
   })
   const logger = createLogger()
   const enableIpc = input.enableIpc ?? true
@@ -191,6 +197,24 @@ export async function runDaemon(input: RunInput): Promise<number> {
       store.close()
     }
     restoreLogging()
+    logWriter.close()
+  }
+}
+
+/** Creates the daemon process log sink shared by terminal output and temp-file inspection. */
+async function createDaemonLogWriter() {
+  const logDir = getGoddardTempLogDir()
+  await mkdir(logDir, { recursive: true })
+  const stream = createWriteStream(join(logDir, "daemon.log"), { flags: "a" })
+
+  return {
+    writeLine(line: string) {
+      process.stdout.write(`${line}\n`)
+      stream.write(`${line}\n`)
+    },
+    close() {
+      stream.end()
+    },
   }
 }
 

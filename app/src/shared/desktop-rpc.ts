@@ -47,6 +47,13 @@ export type RuntimeInfo = {
   runtime: "electrobun"
 }
 
+/** Browser or Bun-host app log record forwarded into the shared temp log file. */
+export type AppLogInput = {
+  source: "host" | "renderer"
+  level: "debug" | "error" | "info" | "log" | "warn"
+  message: string
+}
+
 /** Shared Electrobun RPC contract between the Bun host and the browser view. */
 export type AppDesktopRpc = {
   bun: RPCSchema<{
@@ -93,6 +100,10 @@ export type AppDesktopRpc = {
       }
       maximizeWindow: {
         params: {}
+        response: {}
+      }
+      writeAppLog: {
+        params: AppLogInput
         response: {}
       }
     }

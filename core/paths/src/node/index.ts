@@ -1,4 +1,4 @@
-import { homedir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
@@ -13,6 +13,8 @@ import {
   GODDARD_SESSION_PERMISSIONS_FILENAME,
   GODDARD_SESSION_STATE_DIRECTORY,
   GODDARD_SHORTCUT_KEYMAP_FILENAME,
+  GODDARD_TEMP_DIRECTORY_NAME,
+  GODDARD_TEMP_LOG_DIRECTORY_NAME,
   GODDARD_USER_DIRECTORY,
 } from "../constants.ts"
 
@@ -51,6 +53,11 @@ export function getGoddardCacheDir(): string {
     process.env.XDG_CACHE_HOME || join(resolveHomeDir(), ".cache"),
     GODDARD_CACHE_DIRECTORY_NAME,
   )
+}
+
+/** Returns the well-known temporary directory that holds agent-readable Goddard logs. */
+export function getGoddardTempLogDir(): string {
+  return join(tmpdir(), GODDARD_TEMP_DIRECTORY_NAME, GODDARD_TEMP_LOG_DIRECTORY_NAME)
 }
 
 /** Returns the global root config file path. */

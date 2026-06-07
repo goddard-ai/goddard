@@ -1,7 +1,8 @@
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { getAppStatePath, getDatabasePath } from "../src/node/index.ts"
+import { getAppStatePath, getDatabasePath, getGoddardTempLogDir } from "../src/node/index.ts"
 
 const originalHome = process.env.HOME
 const originalNodeEnv = process.env.NODE_ENV
@@ -40,6 +41,10 @@ test("getAppStatePath stores app-owned state under the user directory", () => {
   process.env.HOME = "/tmp/goddard-home"
 
   expect(getAppStatePath()).toBe(join("/tmp/goddard-home", ".goddard", "user", "app-state.json"))
+})
+
+test("getGoddardTempLogDir stores process logs under a well-known temp directory", () => {
+  expect(getGoddardTempLogDir()).toBe(join(tmpdir(), "goddard", "logs"))
 })
 
 function restoreEnv(key: string, value: string | undefined) {

@@ -4,6 +4,12 @@ export const GODDARD_DIRECTORY_NAME = ".goddard"
 /** Directory name used for Goddard-managed OS cache contents. */
 export const GODDARD_CACHE_DIRECTORY_NAME = "goddard"
 
+/** Directory name used under the OS temp root for agent-readable runtime logs. */
+export const GODDARD_TEMP_DIRECTORY_NAME = "goddard"
+
+/** Directory name under the Goddard temp root that holds process logs. */
+export const GODDARD_TEMP_LOG_DIRECTORY_NAME = "logs"
+
 /** Filename used for the root JSON configuration document. */
 export const GODDARD_CONFIG_FILENAME = "config.json"
 

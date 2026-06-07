@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto"
-import { constants as fsConstants } from "node:fs"
+import { createWriteStream, constants as fsConstants } from "node:fs"
 import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
 import type { ACPRegistryService, DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
-import { getGoddardGlobalDir } from "@goddard-ai/paths/node"
+import { getGoddardGlobalDir, getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import {
   agentBinaryPlatforms,
   type AgentBinaryPlatform,
@@ -130,7 +130,7 @@ function createAgentProcessHandle(input: {
     env: input.env,
     stdin: "pipe",
     stdout: "pipe",
-    stderr: "inherit",
+    stderr: "pipe",
     onExit(_subprocess, exitCode, signalCode) {
       exitState = {
         code: exitCode,
@@ -147,6 +147,8 @@ function createAgentProcessHandle(input: {
   if (!subprocess.stdin || !subprocess.stdout) {
     throw new Error(`Agent process ${input.cmd} did not expose piped stdio`)
   }
+
+  captureAgentProcessStderr(subprocess)
 
   const stdin = new Writable({
     write(chunk, _encoding, callback) {
@@ -187,6 +189,33 @@ function createAgentProcessHandle(input: {
       exitHandlers.add(wrapped)
     },
   }
+}
+
+function captureAgentProcessStderr(subprocess: Bun.Subprocess<"pipe", "pipe", "pipe">) {
+  if (!subprocess.stderr) {
+    return
+  }
+
+  mkdir(getGoddardTempLogDir(), { recursive: true })
+    .then(() => {
+      const stream = createWriteStream(
+        join(getGoddardTempLogDir(), `agent-process-${subprocess.pid}.stderr.log`),
+        { flags: "a" },
+      )
+      const stderr = Readable.fromWeb(subprocess.stderr as unknown as ReadableStream)
+
+      stderr.on("data", (chunk: Buffer | string) => {
+        process.stderr.write(chunk)
+        stream.write(chunk)
+      })
+      stderr.once("end", () => {
+        stream.end()
+      })
+      stderr.once("error", () => {
+        stream.end()
+      })
+    })
+    .catch(() => {})
 }
 
 /** Waits until one tracked agent process reports that it has exited. */

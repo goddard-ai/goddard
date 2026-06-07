@@ -9,6 +9,7 @@ import {
   daemonSubscribe,
   daemonUnsubscribe,
 } from "./daemon.ts"
+import { writeAppLog } from "./logging.ts"
 import { getMainWindow } from "./main-window.ts"
 import { browseForProject } from "./projects.ts"
 import { loadShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"
@@ -37,6 +38,10 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
       daemonResetSubscriptions: async (input) => await daemonResetSubscriptions(input),
       maximizeWindow: async () => {
         getMainWindow()?.maximize()
+        return {}
+      },
+      writeAppLog: async (input) => {
+        await writeAppLog(input)
         return {}
       },
     },
