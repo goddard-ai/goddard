@@ -83,6 +83,7 @@
 
 ## Documentation Routing
 
+- Whenever implementing a new user-visible feature, add one or more entries for it to `.git/undocumented-features.yaml`.
 - Read the nearest `glossary.md` before changing domain behavior, naming, states, roles, identifiers, or ownership rules in a package that has one.
 - Put package boundaries and integration surfaces in the nearest `README.md`.
 - Put domain terminology in the nearest `glossary.md`.
