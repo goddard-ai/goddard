@@ -40,7 +40,6 @@ export component SessionLaunchLoadingSelect(props: { label: string; compact?: bo
 
 export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
   <div class={styles.composerControls}>
-    <SessionLaunchLoadingSelect compact={props.compact} label="Launch location" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Git branch" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
@@ -87,6 +86,97 @@ export component AgentHarnessSelector(props: { form: SessionLaunchFormState }) {
       form.setOpenPicker(null)
     }}
   />
+}
+
+export component SessionLaunchLocationSelector(props: { form: SessionLaunchFormState }) {
+  const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
+  const preview = useQuery(
+    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    {
+      params: form.effectiveCwd.value && form.draftAdapterId.value
+        ? [
+            {
+              agent: form.draftAdapterId.value,
+              cwd: form.effectiveCwd.value,
+            },
+          ]
+        : null,
+    },
+  )
+
+  useEffect(() => {
+    form.launchPreview.value = preview
+
+    return () => {
+      const launchLeaseId = preview?.launchLeaseId
+
+      if (form.launchPreview.value?.launchLeaseId === launchLeaseId) {
+        form.launchPreview.value = null
+      }
+
+      queueMicrotask(() => {
+        if (
+          !launchLeaseId || form.launchPreview.value?.launchLeaseId === launchLeaseId ||
+            isKeptSessionLaunchLease(launchLeaseId)
+        ) {
+          return
+        }
+
+        void releaseSessionLaunchLease(launchLeaseId).catch((error) => {
+          console.error("Failed to release launch lease.", error)
+        })
+      })
+    }
+  }, [form, preview])
+
+  if (!preview?.repoRoot) {
+    return
+  }
+
+  const locationOptions = [
+    {
+      value: "local",
+      label: "Work locally",
+    },
+    {
+      value: "worktree",
+      label: "New worktree",
+    },
+  ] as const
+  const locationShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openLocationSelector.id]?.[0],
+  )
+
+  <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
+    <legend class={styles.radioLegend}>
+      <span>"Launch location"</span>
+
+      if (locationShortcut) {
+        <GoodKeyboardShortcut expression={locationShortcut} />
+      }
+    </legend>
+    <div class={styles.radioGroup}>
+      for (const option of locationOptions) {
+        <label
+          class={styles.radioOption}
+          data-selected={form.draftLocation.value === option.value ? "true" : undefined}
+          key={option.value}
+        >
+          <span>{option.label}</span>
+          <input
+            checked={form.draftLocation.value === option.value}
+            name="session-launch-location"
+            type="radio"
+            value={option.value}
+            onInput={() => {
+              form.setLaunchLocation(option.value)
+            }}
+          />
+        </label>
+      }
+    </div>
+  </fieldset>
 }
 
 /** Builds the explicit project-root option followed by discovered package boundaries. */
@@ -182,41 +272,6 @@ export component SessionLaunchPreviewSelectors(props: {
     },
   )
 
-  useEffect(() => {
-    form.launchPreview.value = preview
-
-    return () => {
-      const launchLeaseId = preview?.launchLeaseId
-
-      if (form.launchPreview.value?.launchLeaseId === launchLeaseId) {
-        form.launchPreview.value = null
-      }
-
-      queueMicrotask(() => {
-        if (
-          !launchLeaseId || form.launchPreview.value?.launchLeaseId === launchLeaseId ||
-            isKeptSessionLaunchLease(launchLeaseId)
-        ) {
-          return
-        }
-
-        void releaseSessionLaunchLease(launchLeaseId).catch((error) => {
-          console.error("Failed to release launch lease.", error)
-        })
-      })
-    }
-  }, [form, preview])
-
-  const locationOptions = [
-    {
-      value: "local",
-      label: "Work locally",
-    },
-    {
-      value: "worktree",
-      label: "New worktree",
-    },
-  ] as const
   const branchItems: SessionInputSelectItem[] =
     preview?.branches.map(
       (branch) => ({
@@ -259,9 +314,6 @@ export component SessionLaunchPreviewSelectors(props: {
             }),
           )
         : []
-  const locationShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openLocationSelector.id]?.[0],
-  )
   const branchShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
   )
@@ -277,38 +329,6 @@ export component SessionLaunchPreviewSelectors(props: {
   )
 
   <div class={props.compact ? styles.composerControls : styles.grid}>
-    if (preview?.repoRoot) {
-      <fieldset class={styles.radioField} disabled={!form.draftProjectPath.value}>
-        <legend class={styles.radioLegend}>
-          <span>"Launch location"</span>
-
-          if (locationShortcut) {
-            <GoodKeyboardShortcut expression={locationShortcut} />
-          }
-        </legend>
-        <div class={styles.radioGroup}>
-          for (const option of locationOptions) {
-            <label
-              class={styles.radioOption}
-              data-selected={form.draftLocation.value === option.value ? "true" : undefined}
-              key={option.value}
-            >
-              <span>{option.label}</span>
-              <input
-                checked={form.draftLocation.value === option.value}
-                name="session-launch-location"
-                type="radio"
-                value={option.value}
-                onInput={() => {
-                  form.setLaunchLocation(option.value)
-                }}
-              />
-            </label>
-          }
-        </div>
-      </fieldset>
-    }
-
     <SessionInputSelect
       compact={props.compact}
       disabled={branchItems.length === 0 || localCheckoutDirty}

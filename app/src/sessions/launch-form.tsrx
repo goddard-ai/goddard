@@ -12,6 +12,7 @@ import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input
 import selectorStyles from "./launch-form-selectors.style.ts"
 import {
   AgentHarnessSelector,
+  SessionLaunchLocationSelector,
   SessionLaunchLoadingSelect,
   SessionLaunchPreviewLoadingSelectors,
   SessionLaunchPreviewSelectors,
@@ -100,6 +101,11 @@ export component SessionLaunchForm(props: {
         <AgentHarnessSelector {form} />
       } pending {
         <SessionLaunchLoadingSelect label="Adapter" />
+      }
+      try {
+        <SessionLaunchLocationSelector {form} />
+      } pending {
+        <SessionLaunchLoadingSelect label="Launch location" />
       }
     </div>
 
