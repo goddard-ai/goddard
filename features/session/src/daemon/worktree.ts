@@ -88,6 +88,33 @@ export async function resolveGitRepoRoot(cwd: string) {
   return resolve(repoRoot)
 }
 
+/** Returns true when the requested cwd points at a bare git repository. */
+export async function inspectGitBareRepository(cwd: string) {
+  const { success, stdout } = await runGit(cwd, ["rev-parse", "--is-bare-repository"])
+
+  return success && stdout.trim() === "true"
+}
+
+/** Resolves the git source directory that can create linked worktrees for one launch cwd. */
+export async function resolveGitWorktreeSource(cwd: string) {
+  const repoRoot = await resolveGitRepoRoot(cwd)
+  if (repoRoot) {
+    return {
+      path: repoRoot,
+      bare: false,
+    }
+  }
+
+  if (!(await inspectGitBareRepository(cwd))) {
+    return null
+  }
+
+  return {
+    path: resolve(realpathSync.native(cwd)),
+    bare: true,
+  }
+}
+
 /**
  * Converts persisted worktree metadata into the logging wrapper used by session launch.
  */

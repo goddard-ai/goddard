@@ -172,6 +172,7 @@ export component SessionLaunchLocationSelector(props: {
           <span>{option.label}</span>
           <input
             checked={form.draftLocation.value === option.value}
+            disabled={option.value === "local" && preview.bare}
             name="session-launch-location"
             type="radio"
             value={option.value}
@@ -291,7 +292,8 @@ export component SessionLaunchPreviewSelectors(props: {
       }),
     ) ??
       []
-  const localCheckoutDirty = form.draftLocation.value === "local" && preview?.dirty === true
+  const localCheckoutUnavailable =
+    form.draftLocation.value === "local" && (preview?.bare === true || preview?.dirty === true)
   const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =
     previewModels?.availableModels.map(
@@ -341,7 +343,7 @@ export component SessionLaunchPreviewSelectors(props: {
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <SessionInputSelect
       compact={props.compact}
-      disabled={props.disabled || branchItems.length === 0 || localCheckoutDirty}
+      disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
       filterable={true}
       items={branchItems}
       label="Git branch"
@@ -355,7 +357,7 @@ export component SessionLaunchPreviewSelectors(props: {
     />
   </div>
 
-  if (localCheckoutDirty) {
+  if (form.draftLocation.value === "local" && preview?.dirty === true) {
     <p class={props.compact ? styles.composerWarning : styles.warning}>
       "Commit or stash local changes to launch from another branch."
     </p>

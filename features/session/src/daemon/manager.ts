@@ -129,6 +129,7 @@ import {
 import {
   inspectWorktreeCompletionState,
   resolveGitRepoRoot,
+  resolveGitWorktreeSource,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
   type PreparedSessionWorktree,
@@ -201,16 +202,16 @@ function readTextPrompt(name: string) {
 
 /** Lists local git branches for one launch dialog in git's refname order. */
 async function listLaunchBranches(cwd: string) {
-  const repoRoot = await resolveGitRepoRoot(cwd)
+  const source = await resolveGitWorktreeSource(cwd)
 
-  if (!repoRoot) {
+  if (!source) {
     return { branches: [], currentBranch: null }
   }
 
   const result = Bun.spawn(
     ["git", "for-each-ref", "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)", "refs/heads"],
     {
-      cwd: repoRoot,
+      cwd: source.path,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "ignore",
@@ -789,18 +790,23 @@ async function resolveLaunchWorktree(params: {
     return toPreparedSessionWorktree(params.existingWorktree)
   }
 
+  const source = await resolveGitWorktreeSource(params.request.cwd)
+
   if (params.request.worktree?.enabled !== true) {
+    if (source?.bare) {
+      throw new IpcClientError("Cannot launch a local session from a bare git repository.")
+    }
+
     return null
   }
 
-  const repoRoot = await resolveGitRepoRoot(params.request.cwd)
-  if (!repoRoot) {
+  if (!source) {
     return null
   }
 
   return toPreparedSessionWorktree(
     await createWorktree({
-      cwd: repoRoot,
+      cwd: source.path,
       requestedCwd: params.request.cwd,
       branchName:
         typeof params.request.prNumber === "number"
@@ -809,7 +815,7 @@ async function resolveLaunchWorktree(params: {
               prNumber: params.request.prNumber,
             })
           : await resolveAvailableWorktreeBranchName({
-              cwd: repoRoot,
+              cwd: source.path,
               branchPrefix: params.branchPrefix,
             }),
       baseBranchName: params.request.worktree?.baseBranchName,
@@ -3045,11 +3051,13 @@ export function createSessionManager(input: {
     await ready
 
     const key = createLaunchLeaseKey(params)
-    const [repoRoot, launchBranches, dirty] = await Promise.all([
-      resolveGitRepoRoot(params.cwd),
+    const [source, launchBranches, dirty] = await Promise.all([
+      resolveGitWorktreeSource(params.cwd),
       listLaunchBranches(params.cwd),
       inspectLaunchCheckoutDirty(params.cwd),
     ])
+    const repoRoot = source?.path ?? null
+    const bare = source?.bare ?? false
     const { branches, currentBranch } = launchBranches
     const existingLease = launchLeaseStore.findByKey(key)
     if (existingLease) {
@@ -3061,6 +3069,7 @@ export function createSessionManager(input: {
       return {
         launchLeaseId: existingLease.id,
         repoRoot,
+        bare,
         branches,
         currentBranch,
         dirty,
@@ -3180,6 +3189,7 @@ export function createSessionManager(input: {
       return {
         launchLeaseId: lease.id,
         repoRoot: lease.repoRoot,
+        bare,
         branches: lease.branches,
         currentBranch: lease.currentBranch,
         dirty: lease.dirty,

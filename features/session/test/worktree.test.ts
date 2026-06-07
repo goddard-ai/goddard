@@ -66,6 +66,40 @@ test("default worktree setup creates and cleans up a workspace inside an explici
   expect(existsSync(created.worktreeDir)).toBe(false)
 })
 
+test("default worktree setup creates and cleans up a workspace from a bare repository", async () => {
+  const repoDir = await createRepoFixture()
+  const bareRepoDir = await mkdtemp(join(tmpdir(), "goddard-worktree-bare-repo-"))
+  cleanup.push(bareRepoDir)
+  await runGit(repoDir, ["clone", "--bare", repoDir, bareRepoDir])
+  const normalizedBareRepoDir = realpathSync.native(bareRepoDir)
+
+  const created = await createWorktree({
+    cwd: bareRepoDir,
+    defaultPluginDirName: ".custom-dir",
+    branchName: "feature-1",
+  })
+
+  expect(created.repoRoot).toBe(normalizedBareRepoDir)
+  expect(created.requestedCwd).toBe(normalizedBareRepoDir)
+  expect(created.effectiveCwd).toBe(created.worktreeDir)
+  expect(created.worktreeDir).toMatch(/\.custom-dir[\\/]feature-1-\d+$/)
+  expect(existsSync(created.worktreeDir)).toBe(true)
+  expect(created.poweredBy).toBe(defaultPlugin.name)
+  expect(await resolveGitCommonDir(created.repoRoot)).toBe(
+    await resolveGitCommonDir(created.worktreeDir),
+  )
+
+  expect(
+    await deleteWorktree({
+      cwd: created.repoRoot,
+      worktreeDir: created.worktreeDir,
+      branchName: created.branchName,
+      poweredBy: created.poweredBy,
+    }),
+  ).toBe(true)
+  expect(existsSync(created.worktreeDir)).toBe(false)
+})
+
 test("default worktree setup supports branch path prefixes", async () => {
   const repoDir = await createRepoFixture()
   const normalizedRepoDir = realpathSync.native(repoDir)

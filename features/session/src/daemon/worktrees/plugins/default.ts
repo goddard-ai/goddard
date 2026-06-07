@@ -17,12 +17,13 @@ export const defaultPlugin: WorktreePlugin = {
 
   async setup(options: WorktreeSetupOptions) {
     let agentsDirPath: string
+    const bareRepository = await isBareRepository(options.cwd)
 
     if (options.defaultDirName) {
       agentsDirPath = path.join(options.cwd, options.defaultDirName)
-    } else if (fs.existsSync(path.join(options.cwd, ".worktrees"))) {
+    } else if (!bareRepository && fs.existsSync(path.join(options.cwd, ".worktrees"))) {
       agentsDirPath = path.join(options.cwd, ".worktrees")
-    } else if (fs.existsSync(path.join(options.cwd, "worktrees"))) {
+    } else if (!bareRepository && fs.existsSync(path.join(options.cwd, "worktrees"))) {
       agentsDirPath = path.join(options.cwd, "worktrees")
     } else {
       const hash = crypto.createHash("sha256").update(options.cwd).digest("hex").substring(0, 7)
@@ -117,4 +118,13 @@ export const defaultPlugin: WorktreePlugin = {
  */
 function resolveHomeDir() {
   return process.env.HOME || os.homedir()
+}
+
+async function isBareRepository(cwd: string) {
+  const result = await runCommand("git", ["rev-parse", "--is-bare-repository"], {
+    cwd,
+    stdin: "ignore",
+  })
+
+  return result.status === 0 && result.stdout.trim() === "true"
 }

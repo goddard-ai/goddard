@@ -78,7 +78,7 @@ export type CreatedWorktree = Omit<DaemonWorktree, "id" | "sessionId">
  * Resolves the first applicable worktree plugin for one repository.
  */
 export async function resolveWorktreePlugin(options: WorktreeOptions) {
-  assertGitRepository(options.cwd)
+  await assertGitRepository(options.cwd)
 
   for (const candidate of listWorktreePlugins(options)) {
     if (await candidate.isApplicable(options.cwd)) {
@@ -171,7 +171,7 @@ function listWorktreePlugins(options: WorktreeOptions) {
  * Resolves the plugin that should be used for worktree deletion.
  */
 async function resolveDeleteWorktreePlugin(options: DeleteWorktreeOptions) {
-  assertGitRepository(options.cwd)
+  await assertGitRepository(options.cwd)
 
   if (options.poweredBy) {
     const poweredByPlugin = listWorktreePlugins(options).find(
@@ -327,8 +327,17 @@ function normalizeExistingPath(value: string) {
 /**
  * Verifies that one cwd points at a git repository before any plugin work runs.
  */
-function assertGitRepository(cwd: string) {
-  if (!fs.existsSync(path.join(cwd, ".git"))) {
+async function assertGitRepository(cwd: string) {
+  if (!fs.existsSync(cwd)) {
+    throw new Error(`Not a git repository: ${cwd}`)
+  }
+
+  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
+    cwd,
+    stdin: "ignore",
+  })
+
+  if (result.status !== 0) {
     throw new Error(`Not a git repository: ${cwd}`)
   }
 }

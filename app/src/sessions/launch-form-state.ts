@@ -123,7 +123,12 @@ export const SessionLaunchFormState = createModel(function () {
     const cwd = effectiveCwd.value
     const initialPrompt = draftPromptBlocks.value
 
-    if (!agent || !cwd || !hasPromptContent(initialPrompt)) {
+    if (
+      !agent ||
+      !cwd ||
+      !hasPromptContent(initialPrompt) ||
+      (launchPreview.value?.bare === true && draftLocation.value === "local")
+    ) {
       return null
     }
 
@@ -214,7 +219,9 @@ export const SessionLaunchFormState = createModel(function () {
       return
     }
 
-    if (!nextLaunchPreview.repoRoot && draftLocation.value === "worktree") {
+    if (nextLaunchPreview.bare) {
+      draftLocation.value = "worktree"
+    } else if (!nextLaunchPreview.repoRoot && draftLocation.value === "worktree") {
       draftLocation.value = "local"
     }
 
@@ -292,7 +299,11 @@ export const SessionLaunchFormState = createModel(function () {
 
   function setLaunchLocation(nextLocation: SessionLaunchLocation) {
     const resolvedLocation =
-      nextLocation === "worktree" && !launchPreview.value?.repoRoot ? "local" : nextLocation
+      nextLocation === "local" && launchPreview.value?.bare
+        ? "worktree"
+        : nextLocation === "worktree" && !launchPreview.value?.repoRoot
+          ? "local"
+          : nextLocation
 
     draftLocation.value = resolvedLocation
 
@@ -304,6 +315,11 @@ export const SessionLaunchFormState = createModel(function () {
   function cycleLaunchLocation() {
     if (!launchPreview.value?.repoRoot) {
       setLaunchLocation("local")
+      return
+    }
+
+    if (launchPreview.value.bare) {
+      setLaunchLocation("worktree")
       return
     }
 

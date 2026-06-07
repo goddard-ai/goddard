@@ -560,6 +560,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     send.mockResolvedValueOnce({
       launchLeaseId: "lease_1",
       repoRoot: "/repo",
+      bare: false,
       branches: ["main", "feature-a"],
       currentBranch: "main",
       dirty: false,
@@ -592,6 +593,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     ).resolves.toEqual({
       launchLeaseId: "lease_1",
       repoRoot: "/repo",
+      bare: false,
       branches: ["main", "feature-a"],
       currentBranch: "main",
       dirty: false,

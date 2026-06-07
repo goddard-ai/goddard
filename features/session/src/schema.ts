@@ -442,6 +442,7 @@ export type SessionSubpackagesResponse = {
 export type SessionLaunchPreviewResponse = {
   launchLeaseId: string
   repoRoot: string | null
+  bare: boolean
   branches: string[]
   currentBranch: string | null
   dirty: boolean

@@ -258,7 +258,8 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
   const hasBranchSelector =
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
-      !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true)
+      !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true) &&
+      !(form.draftLocation.value === "local" && form.launchPreview.value?.bare === true)
   const hasLocationSelector = !!form.launchPreview.value?.repoRoot
   const hasModelSelector = (form.launchModelConfig.value.models?.availableModels.length ?? 0) > 0
   const hasSubpackageSelector = form.draftProjectPath.value !== null
