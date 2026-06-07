@@ -130,6 +130,8 @@ const TRANSCRIPT_IGNORED_SESSION_UPDATES = new Set([
 ])
 
 const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set(["user_message_chunk"])
+const LEADING_SYSTEM_PROMPT_BLOCK_PATTERN =
+  /^\s*<system-prompt(?:\s+[^>]*)?>[\s\S]*?<\/system-prompt>\s*/u
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -184,7 +186,43 @@ function extractPromptContent(message: SessionHistoryMessage) {
     return []
   }
 
-  return promptBlocksToTranscriptContent(message.params.prompt)
+  return stripLeadingSystemPromptBlocks(promptBlocksToTranscriptContent(message.params.prompt))
+}
+
+function stripLeadingSystemPromptBlocks(content: SessionTranscriptContentBlock[]) {
+  const visibleContent: SessionTranscriptContentBlock[] = []
+  let isPromptStart = true
+
+  for (const block of content) {
+    if (!isPromptStart) {
+      visibleContent.push(block)
+      continue
+    }
+
+    if (block.type !== "text") {
+      isPromptStart = false
+      visibleContent.push(block)
+      continue
+    }
+
+    let text = block.text
+
+    while (LEADING_SYSTEM_PROMPT_BLOCK_PATTERN.test(text)) {
+      text = text.replace(LEADING_SYSTEM_PROMPT_BLOCK_PATTERN, "")
+    }
+
+    if (text.length === 0) {
+      continue
+    }
+
+    isPromptStart = false
+    visibleContent.push({
+      ...block,
+      text,
+    })
+  }
+
+  return visibleContent
 }
 
 function extractSessionUpdate(message: SessionHistoryMessage) {

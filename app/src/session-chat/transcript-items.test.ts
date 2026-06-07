@@ -179,6 +179,39 @@ test("buildSessionChatTranscript appends the latest daemon summary when turns ha
   })
 })
 
+test("buildSessionChatTranscript hides leading system prompt blocks from user prompts", () => {
+  const session = createSession(null)
+  const turns = createTurns([
+    {
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: "session/prompt",
+      params: {
+        sessionId: session.acpSessionId,
+        prompt: [
+          {
+            type: "text",
+            text: '<system-prompt name="goddard">Keep responses short.</system-prompt>',
+          },
+          {
+            type: "text",
+            text: '<system-prompt source="launcher" priority="low">Use repo defaults.</system-prompt>\nReview the current diff.',
+          },
+        ],
+      },
+    },
+  ])
+  const promptMessage = createTranscriptMessages(session, turns).find(
+    (message) => message.id === "turn-1:prompt:0",
+  )
+
+  expect(promptMessage).toMatchObject({
+    kind: "message",
+    role: "user",
+    content: [{ type: "text", text: "Review the current diff." }],
+  })
+})
+
 test("buildSessionChatTranscript accumulates agent_message_chunk updates into one assistant row", () => {
   const session = createSession(null)
   const turns = createTurns([
