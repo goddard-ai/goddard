@@ -129,22 +129,30 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     }
   }
 
-  /** Reorders two visible closable tabs inside the tab strip. */
-  reorderTabs(fromId: string, toId: string) {
-    if (fromId === toId) {
+  /** Moves one visible closable tab before or after another visible closable tab. */
+  moveTab(fromId: string, targetId: string, placement: "before" | "after") {
+    if (fromId === targetId) {
       return
     }
 
     const fromIndex = this.orderedTabIds.indexOf(fromId)
-    const toIndex = this.orderedTabIds.indexOf(toId)
+    const targetIndex = this.orderedTabIds.indexOf(targetId)
 
-    if (fromIndex < 0 || toIndex < 0) {
+    if (fromIndex < 0 || targetIndex < 0) {
       return
     }
 
     const nextOrder = [...this.orderedTabIds]
     nextOrder.splice(fromIndex, 1)
-    nextOrder.splice(toIndex, 0, fromId)
+
+    const adjustedTargetIndex = targetIndex > fromIndex ? targetIndex - 1 : targetIndex
+    const insertIndex = placement === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex
+
+    if (insertIndex === fromIndex) {
+      return
+    }
+
+    nextOrder.splice(insertIndex, 0, fromId)
     this.orderedTabIds = nextOrder
   }
 }

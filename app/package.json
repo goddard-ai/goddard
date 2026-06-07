@@ -18,6 +18,9 @@
     "typecheck": "bun run panda:codegen && tsrx-tsc --noEmit"
   },
   "dependencies": {
+    "@atlaskit/pragmatic-drag-and-drop": "^1.8.1",
+    "@atlaskit/pragmatic-drag-and-drop-auto-scroll": "^2.1.5",
+    "@atlaskit/pragmatic-drag-and-drop-hitbox": "^1.1.0",
     "@chenglou/pretext": "^0.0.4",
     "@floating-ui/dom": "catalog:",
     "@goddard-ai/daemon-client": "workspace:*",

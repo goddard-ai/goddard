@@ -1,3 +1,11 @@
+import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine"
+import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter"
+import { autoScrollForElements } from "@atlaskit/pragmatic-drag-and-drop-auto-scroll/element"
+import {
+  attachClosestEdge,
+  extractClosestEdge,
+  type Edge,
+} from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { Folder } from "lucide-react"
@@ -27,6 +35,35 @@ import { MainWorkbenchView, WorkbenchScrollPanel, WorkbenchTabPanel } from "./vi
 const accentStrongColor = token.var("colors.accentStrong")
 const textColor = token.var("colors.text")
 const noDragClass = "electrobun-webkit-app-region-no-drag"
+const workbenchTabDragDataType = "workbench-tab"
+
+type WorkbenchTabDragPlacement = "before" | "after"
+
+function isWorkbenchTabDragData(data: Record<string, unknown>) {
+  return data.type === workbenchTabDragDataType && typeof data.tabId === "string"
+}
+
+function getWorkbenchTabDragId(data: Record<string, unknown>) {
+  if (data.type === workbenchTabDragDataType && typeof data.tabId === "string") {
+    return data.tabId
+  }
+
+  return null
+}
+
+function getWorkbenchTabDragPlacement(data: Record<string | symbol, unknown>) {
+  const edge = extractClosestEdge(data)
+
+  if (edge === "right") {
+    return "after"
+  }
+
+  if (edge === "left") {
+    return "before"
+  }
+
+  return null
+}
 
 const mainTabCommands: Record<MainTabItemId, AppCommand> = {
   inbox: AppCommand.navigation.openInbox,
@@ -45,8 +82,8 @@ function useAppShellTabStrip(
   const tabStripRef = useRef<HTMLDivElement | null>(null)
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const scrollbarRef = useRef<ReturnType<typeof OverlayScrollbars> | null>(null)
-  const dragSourceTabId = useRef<string | null>(null)
   const [indicator, setIndicator] = useState({ left: 0, width: 0, opacity: 0 })
+  const [dropIndicator, setDropIndicator] = useState({ left: 0, opacity: 0 })
 
   function syncIndicator() {
     const activeTabElement = tabRefs.current[activeTabId]
@@ -91,6 +128,26 @@ function useAppShellTabStrip(
         behavior: "smooth",
       })
     }
+  }
+
+  function showDropIndicator(targetTabId: string, placement: WorkbenchTabDragPlacement) {
+    const targetElement = tabRefs.current[targetTabId]
+
+    if (!targetElement) {
+      setDropIndicator((current) => current.opacity === 0 ? current : { ...current, opacity: 0 })
+      return
+    }
+
+    setDropIndicator({
+      left: placement === "after"
+        ? targetElement.offsetLeft + targetElement.offsetWidth
+        : targetElement.offsetLeft,
+      opacity: 1,
+    })
+  }
+
+  function hideDropIndicator() {
+    setDropIndicator((current) => current.opacity === 0 ? current : { ...current, opacity: 0 })
   }
 
   useLayoutEffect(() => {
@@ -142,17 +199,25 @@ function useAppShellTabStrip(
     })
 
     scrollbarRef.current = scrollbar
+    const cleanupAutoScroll = autoScrollForElements({
+      element: scrollbar.elements().viewport ?? tabStripElement,
+      canScroll: ({ source }) => isWorkbenchTabDragData(source.data),
+      getAllowedAxis: () => "horizontal",
+    })
     scrollActiveTabIntoView()
 
     return () => {
+      cleanupAutoScroll()
       scrollbarRef.current = null
       scrollbar.destroy()
     }
   }, [])
 
   return {
-    dragSourceTabId,
+    dropIndicator,
+    hideDropIndicator,
     indicator,
+    showDropIndicator,
     tabRefs,
     tabStripRef,
   }
@@ -376,19 +441,15 @@ export component AppShellChrome() {
               onClose={(id) => {
                 workbenchTabSet.closeTab(id)
               }}
-              onDragEnd={() => {
-                tabStrip.dragSourceTabId.current = null
-              }}
-              onDragEnter={(id) => {
-                if (tabStrip.dragSourceTabId.current && tabStrip.dragSourceTabId.current !== id) {
-                  workbenchTabSet.reorderTabs(tabStrip.dragSourceTabId.current, id)
-                }
-              }}
-              onDragStart={(id) => {
-                tabStrip.dragSourceTabId.current = id
-              }}
               onSelect={(id) => {
                 workbenchTabSet.activateTab(id)
+              }}
+              onTabDragEnd={tabStrip.hideDropIndicator}
+              onTabDragOver={(id, placement) => {
+                tabStrip.showDropIndicator(id, placement)
+              }}
+              onTabDrop={(sourceId, targetId, placement) => {
+                workbenchTabSet.moveTab(sourceId, targetId, placement)
               }}
               refCallback={(element) => {
                 tabStrip.tabRefs.current[tab.id] = element
@@ -404,6 +465,14 @@ export component AppShellChrome() {
               opacity: tabStrip.indicator.opacity,
               transform: `translateX(${tabStrip.indicator.left}px)`,
               width: `${tabStrip.indicator.width}px`,
+            }}
+          />
+          <span
+            aria-hidden="true"
+            class={styles.tabDropIndicator}
+            style={{
+              opacity: tabStrip.dropIndicator.opacity,
+              transform: `translateX(${tabStrip.dropIndicator.left - 1}px)`,
             }}
           />
         </div>
@@ -523,16 +592,19 @@ component TabButton(props: {
   id: string;
   isHome?: boolean;
   onClose?: (id: string) => void;
-  onDragEnd?: () => void;
-  onDragEnter?: (id: string) => void;
-  onDragStart?: (id: string) => void;
   onSelect: (id: string) => void;
+  onTabDragEnd?: () => void;
+  onTabDragOver?: (id: string, placement: WorkbenchTabDragPlacement) => void;
+  onTabDrop?: (sourceId: string, targetId: string, placement: WorkbenchTabDragPlacement) => void;
   refCallback: (element: HTMLDivElement | null) => void;
   title: string;
 }) {
   const isActive = props.activeTabId === props.id
   const isHome = props.isHome === true
   const [isHovered, setIsHovered] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const tabRef = useRef<HTMLDivElement | null>(null)
+  const tabButtonRef = useRef<HTMLButtonElement | null>(null)
   const showCloseButton = isActive || isHovered
   const iconColor =
     isActive
@@ -555,24 +627,85 @@ component TabButton(props: {
           ? `color-mix(in srgb, ${textColor} 52%, transparent)`
           : `color-mix(in srgb, ${textColor} 34%, transparent)`
 
+  useEffect(() => {
+    const element = tabRef.current
+    const dragHandle = tabButtonRef.current
+
+    if (isHome || !element || !dragHandle) {
+      return
+    }
+
+    return combine(
+      draggable({
+        element,
+        dragHandle,
+        getInitialData: () => ({
+          type: workbenchTabDragDataType,
+          tabId: props.id,
+        }),
+        onDragStart: () => {
+          setIsDragging(true)
+        },
+        onDrop: () => {
+          setIsDragging(false)
+          props.onTabDragEnd?.()
+        },
+      }),
+      dropTargetForElements({
+        element,
+        canDrop: ({ source }) => isWorkbenchTabDragData(source.data) &&
+          source.data.tabId !== props.id,
+        getData: ({ input, element }) => attachClosestEdge(
+          {
+            type: workbenchTabDragDataType,
+            tabId: props.id,
+          },
+          {
+            element,
+            input,
+            allowedEdges: ["left", "right"] satisfies Edge[],
+          },
+        ),
+        getDropEffect: () => "move",
+        getIsSticky: () => true,
+        onDrag: ({ self }) => {
+          const placement = getWorkbenchTabDragPlacement(self.data)
+
+          if (placement) {
+            props.onTabDragOver?.(props.id, placement)
+          }
+        },
+        onDragEnter: ({ self }) => {
+          const placement = getWorkbenchTabDragPlacement(self.data)
+
+          if (placement) {
+            props.onTabDragOver?.(props.id, placement)
+          }
+        },
+        onDragLeave: () => {
+          props.onTabDragEnd?.()
+        },
+        onDrop: ({ source, self }) => {
+          const placement = getWorkbenchTabDragPlacement(self.data)
+          const sourceTabId = getWorkbenchTabDragId(source.data)
+
+          if (placement && sourceTabId) {
+            props.onTabDrop?.(sourceTabId, props.id, placement)
+          }
+        },
+      }),
+    )
+  }, [isHome, props.id])
+
   <div
-    {ref props.refCallback}
+    ref={(element) => {
+      tabRef.current = element
+      props.refCallback(element)
+    }}
     class={styles.tab}
-    draggable={!isHome}
     role="presentation"
-    onDragEnd={() => {
-      props.onDragEnd?.()
-    }}
-    onDragEnter={() => {
-      props.onDragEnter?.(props.id)
-    }}
-    onDragOver={(event) => {
-      if (!isHome) {
-        event.preventDefault()
-      }
-    }}
-    onDragStart={() => {
-      props.onDragStart?.(props.id)
+    style={{
+      opacity: isDragging ? "0.45" : "1",
     }}
     onMouseEnter={() => {
       setIsHovered(true)
@@ -582,6 +715,7 @@ component TabButton(props: {
     }}
   >
     <button
+      ref={tabButtonRef}
       aria-selected={isActive}
       class={styles.tabButton}
       style={{

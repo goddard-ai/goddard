@@ -206,6 +206,17 @@ export default {
     transition:
       "transform 180ms cubic-bezier(0.23, 1, 0.32, 1), width 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
+  tabDropIndicator: css({
+    position: "absolute",
+    top: "4px",
+    bottom: "4px",
+    width: "2px",
+    borderRadius: "999px",
+    backgroundColor: "accentStrong",
+    pointerEvents: "none",
+    transition:
+      "transform 120ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
+  }),
   actionItem: css({
     width: "46px",
     height: "22px",
@@ -254,6 +265,7 @@ export default {
     alignItems: "stretch",
     height: "30px",
     flexShrink: "0",
+    transition: "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   tabButton: css({
     position: "relative",
