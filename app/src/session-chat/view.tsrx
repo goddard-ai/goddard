@@ -19,7 +19,9 @@ import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-mo
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
-import { useInbox, useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { applyInboxItemsToCache } from "~/inbox/cache.ts"
+import { markInboxSessionVisited } from "~/inbox/session-visit.ts"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
@@ -95,10 +97,9 @@ export default component SessionChatView(props: {
           (message) => message.kind === "message" && message.role === "user",
         ).length
 
-        const inbox = useInbox()
         useEffect(() => {
-          void inbox.markSessionVisited(session.id)
-        }, [inbox, session.id])
+          markInboxSessionVisited(session.id)
+        }, [session.id])
 
         const canLoadOlderHistory = chat.hasMore && chat.nextCursor !== null
         const canNavigatePrompts = userPromptCount > 0
@@ -230,7 +231,7 @@ export default component SessionChatView(props: {
                       const result = await completeSession(chat.session.id)
 
                       if (result.item) {
-                        inbox.applyItem(result.item)
+                        applyInboxItemsToCache([result.item])
                       }
 
                       chat.toggleCompletedHidden(true)

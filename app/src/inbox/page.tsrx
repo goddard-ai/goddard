@@ -41,6 +41,7 @@ import {
   prepareInboxSearchItems,
   replaceInboxSearchStatusFilters,
 } from "./search.ts"
+import { handleInboxItemsLoaded } from "./session-visit.ts"
 import styles from "./page.style.ts"
 
 function getErrorMessage(error: unknown) {
@@ -72,6 +73,10 @@ component InboxQueryContent(props: {
   const resolvedActiveItemId = visibleItems.some((item) => item.id === props.activeItemId)
     ? props.activeItemId
     : visibleItems[0]?.id ?? null
+
+  useEffect(() => {
+    handleInboxItemsLoaded(items)
+  }, [items])
 
   <InboxList
     filterId={props.filterId}
@@ -132,6 +137,7 @@ component InboxPage() {
 
       setRealtimeErrorMessage(null)
       applyInboxItemsToCache([event.item])
+      handleInboxItemsLoaded([event.item])
       invalidateInboxQueries()
     }).then(
       (nextUnsubscribe) => {
