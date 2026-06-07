@@ -5,7 +5,11 @@ import { getAppStatePath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
 import type { AppStateSnapshot } from "~/shared/app-state.ts"
-import { loadAppStateSnapshot, writeAppStateSnapshot } from "./app-state-store.ts"
+import {
+  loadAppStateSnapshot,
+  updateAppStateSnapshotSync,
+  writeAppStateSnapshot,
+} from "./app-state-store.ts"
 
 const originalHome = process.env.HOME
 const tempHomes: string[] = []
@@ -41,6 +45,61 @@ test("app state persistence writes and reads the Goddard user app state file", a
   expect(file.version).toBe(1)
   expect(typeof file.savedAt).toBe("number")
   expect(file.value).toEqual(secondSnapshot)
+})
+
+test("app state persistence preserves host-owned window layout during UI snapshot writes", async () => {
+  process.env.HOME = await createTempHome()
+
+  await writeAppStateSnapshot({
+    ...createSnapshot("inbox"),
+    windowLayout: {
+      mainWindow: {
+        frame: {
+          x: 20,
+          y: 40,
+          width: 1200,
+          height: 800,
+        },
+      },
+    },
+  })
+
+  await writeAppStateSnapshot(createSnapshot("sessions"))
+
+  await expect(loadAppStateSnapshot()).resolves.toEqual({
+    ...createSnapshot("sessions"),
+    windowLayout: {
+      mainWindow: {
+        frame: {
+          x: 20,
+          y: 40,
+          width: 1200,
+          height: 800,
+        },
+      },
+    },
+  })
+})
+
+test("app state persistence supports sync updates for shutdown handlers", async () => {
+  process.env.HOME = await createTempHome()
+  await writeAppStateSnapshot(createSnapshot("inbox"))
+
+  const updatedSnapshot = updateAppStateSnapshotSync((snapshot) => ({
+    ...snapshot,
+    windowLayout: {
+      mainWindow: {
+        frame: {
+          x: 60,
+          y: 80,
+          width: 1280,
+          height: 820,
+        },
+      },
+    },
+  }))
+
+  await expect(loadAppStateSnapshot()).resolves.toEqual(updatedSnapshot)
 })
 
 test("app state persistence rejects invalid app state files", async () => {

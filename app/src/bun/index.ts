@@ -1,19 +1,28 @@
-import { BrowserWindow, Updater } from "electrobun/bun"
+import { BrowserWindow, Screen, Updater } from "electrobun/bun"
 
+import { loadAppStateSnapshot } from "./app-state-store.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { installAppLogCapture } from "./logging.ts"
 import { getMainWindow, setMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
+import {
+  readWindowLayoutSnapshot,
+  resolveInitialWindowFrame,
+  writeMainWindowFrame,
+  writeMainWindowFrameSync,
+  type WindowFrame,
+} from "./window-layout.ts"
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
 
 /** Creates the one primary Electrobun window used by the current app shell. */
-function createMainWindow(url: string) {
+function createMainWindow(url: string, frame: WindowFrame) {
   const window = new BrowserWindow({
     title: "Goddard",
     titleBarStyle: "hiddenInset",
+    frame,
     url,
     rpc: appRpc,
     // Dev mode falls back to the native renderer when build.json is absent, so
@@ -25,6 +34,7 @@ function createMainWindow(url: string) {
   })
 
   window.show()
+  installWindowLayoutPersistence(window)
   return window
 }
 
@@ -45,10 +55,62 @@ async function getMainWindowUrl() {
   return "views://main/index.html"
 }
 
+function installWindowLayoutPersistence(window: BrowserWindow<typeof appRpc>) {
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+  function clearSaveTimer() {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+  }
+
+  function saveWindowFrame() {
+    clearSaveTimer()
+
+    if (window.isMinimized() || window.isFullScreen()) {
+      return
+    }
+
+    void writeMainWindowFrame(window.getFrame()).catch((error) => {
+      console.error("Failed to save window layout.", error)
+    })
+  }
+
+  function saveWindowFrameBeforeClose() {
+    clearSaveTimer()
+
+    if (window.isMinimized() || window.isFullScreen()) {
+      return
+    }
+
+    try {
+      writeMainWindowFrameSync(window.getFrame())
+    } catch (error) {
+      console.error("Failed to save window layout.", error)
+    }
+  }
+
+  function queueWindowFrameSave() {
+    clearSaveTimer()
+    saveTimer = setTimeout(saveWindowFrame, 500)
+  }
+
+  window.on("move", queueWindowFrameSave)
+  window.on("resize", queueWindowFrameSave)
+  window.on("close", saveWindowFrameBeforeClose)
+}
+
 installApplicationMenu(getMainWindow)
 
 await installAppLogCapture()
 await ensureDaemonRuntime()
 const mainWindowUrl = await getMainWindowUrl()
-const mainWindow = createMainWindow(mainWindowUrl)
+const windowLayout = readWindowLayoutSnapshot(await loadAppStateSnapshot())
+const mainWindowFrame = resolveInitialWindowFrame(
+  windowLayout?.mainWindow.frame ?? null,
+  Screen.getAllDisplays(),
+  Screen.getPrimaryDisplay(),
+)
+const mainWindow = createMainWindow(mainWindowUrl, mainWindowFrame)
 setMainWindow(mainWindow)
