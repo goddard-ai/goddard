@@ -183,7 +183,7 @@ export function createSessionRecordUpdate(params: {
     acpSessionId: string
     status: DaemonSession["status"]
     stopReason: acp.PromptResponse["stopReason"] | null
-    models?: acp.SessionModelState | null
+    models?: DaemonSession["models"]
     configOptions?: acp.SessionConfigOption[] | null
   }
   request: ResolvedCreateSessionRequest

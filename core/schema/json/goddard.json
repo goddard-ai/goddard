@@ -286,6 +286,11 @@
                     "minLength": 1,
                     "description": "Package specifier to install or execute with the selected package runner."
                   },
+                  "cmd": {
+                    "description": "Executable command to run from the managed package install.",
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "args": {
                     "description": "Default command-line arguments to pass through the package runner.",
                     "type": "array",
@@ -315,6 +320,11 @@
                     "type": "string",
                     "minLength": 1,
                     "description": "Package specifier to install or execute with the selected package runner."
+                  },
+                  "cmd": {
+                    "description": "Executable command to run from the managed package install.",
+                    "type": "string",
+                    "minLength": 1
                   },
                   "args": {
                     "description": "Default command-line arguments to pass through the package runner.",
@@ -672,6 +682,11 @@
                       "minLength": 1,
                       "description": "Package specifier to install or execute with the selected package runner."
                     },
+                    "cmd": {
+                      "description": "Executable command to run from the managed package install.",
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "args": {
                       "description": "Default command-line arguments to pass through the package runner.",
                       "type": "array",
@@ -701,6 +716,11 @@
                       "type": "string",
                       "minLength": 1,
                       "description": "Package specifier to install or execute with the selected package runner."
+                    },
+                    "cmd": {
+                      "description": "Executable command to run from the managed package install.",
+                      "type": "string",
+                      "minLength": 1
                     },
                     "args": {
                       "description": "Default command-line arguments to pass through the package runner.",
@@ -1372,6 +1392,11 @@
                           "minLength": 1,
                           "description": "Package specifier to install or execute with the selected package runner."
                         },
+                        "cmd": {
+                          "description": "Executable command to run from the managed package install.",
+                          "type": "string",
+                          "minLength": 1
+                        },
                         "args": {
                           "description": "Default command-line arguments to pass through the package runner.",
                           "type": "array",
@@ -1401,6 +1426,11 @@
                           "type": "string",
                           "minLength": 1,
                           "description": "Package specifier to install or execute with the selected package runner."
+                        },
+                        "cmd": {
+                          "description": "Executable command to run from the managed package install.",
+                          "type": "string",
+                          "minLength": 1
                         },
                         "args": {
                           "description": "Default command-line arguments to pass through the package runner.",

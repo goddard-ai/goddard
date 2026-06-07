@@ -63,6 +63,11 @@ export const AgentPackageDistribution = z
       .string()
       .min(1)
       .describe("Package specifier to install or execute with the selected package runner."),
+    cmd: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Executable command to run from the managed package install."),
     args: z
       .array(z.string())
       .optional()

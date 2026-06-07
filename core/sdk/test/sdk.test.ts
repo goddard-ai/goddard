@@ -1078,16 +1078,20 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  test("AgentSession.setAgentModel forwards the requested model id through ACP", async () => {
-    const setModelMock = vi.fn()
+  test("AgentSession.setAgentModel uses the daemon-owned model path", async () => {
+    const setModelMock = vi.fn().mockResolvedValueOnce({})
     const session = new AgentSession(
       "ses_1",
       "acp-session-1",
       {
-        unstable_setSessionModel: setModelMock,
+        prompt: vi.fn(),
       } as never,
       {
-        send: vi.fn(),
+        session: {
+          model: {
+            set: setModelMock,
+          },
+        },
       } as never,
       vi.fn(),
     )
@@ -1095,7 +1099,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     await session.setAgentModel("gpt-5.4")
 
     expect(setModelMock).toHaveBeenCalledWith({
-      sessionId: "acp-session-1",
+      id: "ses_1",
       modelId: "gpt-5.4",
     })
   })

@@ -81,8 +81,6 @@ function dispatchFixtureAgentMethod(agent, method, params) {
       return agent.closeSession(params)
     case acp.AGENT_METHODS.session_set_config_option:
       return agent.setSessionConfigOption(params)
-    case acp.AGENT_METHODS.session_set_model:
-      return agent.unstable_setSessionModel(params)
     case acp.AGENT_METHODS.authenticate:
       return agent.authenticate(params)
     default:

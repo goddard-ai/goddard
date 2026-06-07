@@ -38,13 +38,6 @@ class DaemonBackedAcpClient implements AgentSessionAcpClient {
     return this.sendRequest<acp.PromptResponse>(acp.AGENT_METHODS.session_prompt, params)
   }
 
-  unstable_setSessionModel(params: acp.SetSessionModelRequest) {
-    return this.sendRequest<acp.SetSessionModelResponse>(
-      acp.AGENT_METHODS.session_set_model,
-      params,
-    )
-  }
-
   private sendRequest<T>(method: string, params: unknown) {
     const id = `goddard-sdk-${++this.nextRequestId}`
 

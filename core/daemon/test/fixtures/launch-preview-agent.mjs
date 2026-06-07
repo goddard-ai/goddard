@@ -24,6 +24,51 @@ function readCurrentBranch() {
   return result.status === 0 ? result.stdout.trim() : null
 }
 
+function createConfigOptions(session) {
+  return [
+    {
+      id: "model",
+      type: "select",
+      name: "Model",
+      category: "model",
+      currentValue: session.currentModelId,
+      options: [
+        {
+          value: "gpt-5.4",
+          name: "GPT-5.4",
+          description: "Balanced frontier model",
+        },
+        {
+          value: "gpt-5.4-mini",
+          name: "GPT-5.4 Mini",
+          description: "Faster lower-latency variant",
+        },
+      ],
+    },
+    {
+      id: "thinking",
+      type: "select",
+      name: "Thinking level",
+      category: "thought_level",
+      description: "Select how much reasoning budget to use.",
+      currentValue: session.thinkingLevel,
+      options: [
+        { value: "low", name: "Low", description: "Keep reasoning light." },
+        {
+          value: "medium",
+          name: "Medium",
+          description: "Balanced reasoning.",
+        },
+        {
+          value: "high",
+          name: "High",
+          description: "Use the deepest reasoning.",
+        },
+      ],
+    },
+  ]
+}
+
 class LaunchPreviewFixtureAgent {
   constructor(connection) {
     this.connection = connection
@@ -68,44 +113,7 @@ class LaunchPreviewFixtureAgent {
 
     return {
       sessionId,
-      models: {
-        currentModelId: session.currentModelId,
-        availableModels: [
-          {
-            modelId: "gpt-5.4",
-            name: "GPT-5.4",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-mini",
-            name: "GPT-5.4 Mini",
-            description: "Faster lower-latency variant",
-          },
-        ],
-      },
-      configOptions: [
-        {
-          id: "thinking",
-          type: "select",
-          name: "Thinking level",
-          category: "thought_level",
-          description: "Select how much reasoning budget to use.",
-          currentValue: session.thinkingLevel,
-          options: [
-            { value: "low", name: "Low", description: "Keep reasoning light." },
-            {
-              value: "medium",
-              name: "Medium",
-              description: "Balanced reasoning.",
-            },
-            {
-              value: "high",
-              name: "High",
-              description: "Use the deepest reasoning.",
-            },
-          ],
-        },
-      ],
+      configOptions: createConfigOptions(session),
     }
   }
 
@@ -115,28 +123,25 @@ class LaunchPreviewFixtureAgent {
     return {}
   }
 
-  async unstable_setSessionModel(params) {
-    const session = this.sessions.get(params.sessionId)
-    if (!session) {
-      throw new Error(`Session ${params.sessionId} not found`)
-    }
-
-    session.currentModelId = params.modelId
-    recordEvent({ type: "setModel", sessionId: params.sessionId, modelId: params.modelId })
-    return {}
-  }
-
   async setSessionConfigOption(params) {
     const session = this.sessions.get(params.sessionId)
     if (!session) {
       throw new Error(`Session ${params.sessionId} not found`)
     }
 
-    if (params.configId !== "thinking" || typeof params.value !== "string") {
+    if (typeof params.value !== "string") {
       throw new Error("Unsupported config option")
     }
 
-    session.thinkingLevel = params.value
+    if (params.configId === "model") {
+      session.currentModelId = params.value
+      recordEvent({ type: "setModel", sessionId: params.sessionId, modelId: params.value })
+    } else if (params.configId === "thinking") {
+      session.thinkingLevel = params.value
+    } else {
+      throw new Error("Unsupported config option")
+    }
+
     recordEvent({
       type: "setConfigOption",
       sessionId: params.sessionId,
@@ -145,29 +150,7 @@ class LaunchPreviewFixtureAgent {
     })
 
     return {
-      configOptions: [
-        {
-          id: "thinking",
-          type: "select",
-          name: "Thinking level",
-          category: "thought_level",
-          description: "Select how much reasoning budget to use.",
-          currentValue: session.thinkingLevel,
-          options: [
-            { value: "low", name: "Low", description: "Keep reasoning light." },
-            {
-              value: "medium",
-              name: "Medium",
-              description: "Balanced reasoning.",
-            },
-            {
-              value: "high",
-              name: "High",
-              description: "Use the deepest reasoning.",
-            },
-          ],
-        },
-      ],
+      configOptions: createConfigOptions(session),
     }
   }
 

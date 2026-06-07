@@ -9,7 +9,6 @@ import * as acp from "acp-client/protocol"
 /** Minimal ACP client surface used by daemon-backed SDK sessions. */
 export type AgentSessionAcpClient = {
   prompt(params: acp.PromptRequest): Promise<acp.PromptResponse>
-  unstable_setSessionModel(params: acp.SetSessionModelRequest): Promise<acp.SetSessionModelResponse>
 }
 
 /** Managed agent session connected to the daemon over IPC. */
@@ -58,8 +57,8 @@ export class AgentSession {
 
   /** Sets the active model for the connected agent session. */
   async setAgentModel(modelId: string) {
-    await this.acpClient.unstable_setSessionModel({
-      sessionId: this.acpSessionId,
+    await this.daemonClient.session.model.set({
+      id: this.sessionId,
       modelId,
     })
   }

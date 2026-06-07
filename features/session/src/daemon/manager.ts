@@ -42,6 +42,7 @@ import {
   type CreateSessionRequest,
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
+  type DaemonSessionModelState,
   type DaemonSessionStatus,
   type DaemonSessionTurn,
   type DaemonSessionTurnDraft,
@@ -299,7 +300,7 @@ async function checkoutLocalBranch(params: { cwd: string; branchName: string }) 
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
   session: AcpSession
-  models: acp.SessionModelState | null | undefined
+  models: DaemonSessionModelState | null | undefined
   configOptions: acp.SessionConfigOption[] | null | undefined
   request: CreateSessionRequest
 }) {
@@ -307,14 +308,9 @@ async function applyInitialSessionConfiguration(params: {
   let configOptions = params.configOptions ?? []
 
   if (params.request.initialModelId) {
-    await params.session.setModel(params.request.initialModelId)
-
-    if (models) {
-      models = {
-        ...models,
-        currentModelId: params.request.initialModelId,
-      }
-    }
+    const response = await params.session.setModel(params.request.initialModelId)
+    configOptions = response.configOptions
+    models = deriveSessionModelState(configOptions)
   }
 
   for (const option of params.request.initialConfigOptions ?? []) {
@@ -328,6 +324,40 @@ async function applyInitialSessionConfiguration(params: {
   return {
     models,
     configOptions,
+  }
+}
+
+type SelectSessionConfigOption = Extract<acp.SessionConfigOption, { type: "select" }>
+
+function isSelectConfigOption(
+  option: acp.SessionConfigOption,
+): option is SelectSessionConfigOption {
+  return option.type === "select"
+}
+
+function flattenSelectOptions(options: acp.SessionConfigSelectOptions) {
+  return options.flatMap((option) => ("group" in option ? option.options : [option]))
+}
+
+/** Projects ACP's config-option model selector into Goddard's persisted UI model state. */
+function deriveSessionModelState(
+  configOptions: acp.SessionConfigOption[],
+): DaemonSessionModelState | null {
+  const modelOption = configOptions.find(
+    (option): option is SelectSessionConfigOption =>
+      option.category === "model" && isSelectConfigOption(option),
+  )
+  if (!modelOption) {
+    return null
+  }
+
+  return {
+    currentModelId: modelOption.currentValue,
+    availableModels: flattenSelectOptions(modelOption.options).map((model) => ({
+      modelId: model.value,
+      name: model.name,
+      description: model.description,
+    })),
   }
 }
 
@@ -522,7 +552,7 @@ type InitializedSession = acp.InitializeResponse & {
   initialPromptStartedAt: string | null
   initialPromptCompletedAt: string | null
   acpSessionId: string
-  models?: acp.SessionModelState | null
+  models?: DaemonSessionModelState | null
   configOptions?: acp.SessionConfigOption[] | null
   stopReason: acp.PromptResponse["stopReason"] | null
 }
@@ -654,7 +684,7 @@ async function initializeSession(params: {
     let isFirstPrompt = true
     let acpSessionId: string
     let session: AcpSession
-    let models: acp.SessionModelState | null | undefined
+    let models: DaemonSessionModelState | null | undefined
     let configOptions: acp.SessionConfigOption[] | null | undefined
 
     if (params.resumeAcpId !== undefined) {
@@ -676,8 +706,8 @@ async function initializeSession(params: {
       session = await client.newSession(params.request)
       acpSessionId = session.sessionId
       routeAcpSessionId = acpSessionId
-      models = session.models
       configOptions = session.configOptions
+      models = deriveSessionModelState(configOptions)
 
       if (
         params.request.initialModelId !== undefined ||
@@ -726,7 +756,7 @@ async function initializeSessionFromLaunchLease(params: {
   request: ResolvedCreateSessionRequest
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
-  let models: acp.SessionModelState | null | undefined = params.lease.models
+  let models: DaemonSessionModelState | null | undefined = params.lease.models
   let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
 
   if (
@@ -3214,8 +3244,8 @@ export function createSessionManager(input: {
         initializeResult: client.initialize,
         history,
         availableCommands,
-        models: session.models ?? null,
-        configOptions: session.configOptions ?? [],
+        models: deriveSessionModelState(session.configOptions),
+        configOptions: session.configOptions,
         repoRoot,
         branches,
         currentBranch,
@@ -3617,15 +3647,10 @@ export function createSessionManager(input: {
       throw new IpcClientError(`Session ${params.id} is not active`)
     }
 
-    await active.session.setModel(params.modelId)
-    const session = requireSessionDocument(params.id)
+    const response = await active.session.setModel(params.modelId)
     updateSession(params.id, {
-      models: session.models
-        ? {
-            ...session.models,
-            currentModelId: params.modelId,
-          }
-        : null,
+      models: deriveSessionModelState(response.configOptions),
+      configOptions: response.configOptions,
     })
     return getSession(params.id)
   }

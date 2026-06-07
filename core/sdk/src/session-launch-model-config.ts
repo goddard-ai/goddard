@@ -1,5 +1,8 @@
 /** ACP launch-preview model normalization helpers shared by SDK consumers. */
-import type { InitialSessionConfigOption } from "@goddard-ai/session/schema"
+import type {
+  DaemonSessionModelState,
+  InitialSessionConfigOption,
+} from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 const derivedThinkingConfigId = "_goddard_derived_thinking_level"
@@ -74,7 +77,9 @@ function parseThinkingModelId(modelId: string) {
   }
 }
 
-function parseThinkingModel(model: acp.ModelInfo) {
+type SessionModelInfo = DaemonSessionModelState["availableModels"][number]
+
+function parseThinkingModel(model: SessionModelInfo) {
   const parsedName = parseThinkingModelName(model.name)
   if (parsedName) {
     return parsedName
@@ -115,7 +120,7 @@ function slugifyModelName(name: string) {
 }
 
 function createPassthroughLaunchModelConfig(input: {
-  models: acp.SessionModelState | null
+  models: DaemonSessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
   return {
@@ -203,7 +208,7 @@ function createConfigOptionLaunchModelConfig(input: { configOptions: acp.Session
 
 /** Derives launch-time model and thinking selectors from one ACP launch preview. */
 export function deriveSessionLaunchModelConfig(input: {
-  models: acp.SessionModelState | null
+  models: DaemonSessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
   const configOptionModelConfig = createConfigOptionLaunchModelConfig(input)

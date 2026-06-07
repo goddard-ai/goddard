@@ -5,7 +5,11 @@ import type { AcpClient, AcpSession } from "acp-client"
 import type * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
-import type { CreateSessionRequest, SessionLaunchPreviewRequest } from "../schema.ts"
+import type {
+  CreateSessionRequest,
+  DaemonSessionModelState,
+  SessionLaunchPreviewRequest,
+} from "../schema.ts"
 import { waitForAgentProcessExit, type AgentProcessHandle } from "./agent-process.ts"
 import type { ResolvedCreateSessionRequest } from "./session-records.ts"
 import type { PreparedSessionWorktree } from "./worktree.ts"
@@ -26,7 +30,7 @@ export type LaunchLease = {
   initializeResult: acp.InitializeResponse
   history: acp.AnyMessage[]
   availableCommands: acp.AvailableCommand[]
-  models: acp.SessionModelState | null
+  models: DaemonSessionModelState | null
   configOptions: acp.SessionConfigOption[]
   repoRoot: string | null
   branches: string[]
