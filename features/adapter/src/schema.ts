@@ -1,4 +1,4 @@
-import type { AdapterCatalogEntry } from "acp-client"
+import { AdapterCatalogEntry as AcpAdapterCatalogEntry } from "acp-client"
 import { z } from "zod"
 
 /** Request payload used to list adapters available to one project or global session launch flow. */
@@ -11,7 +11,48 @@ export type ListAdaptersRequest = z.infer<typeof ListAdaptersRequest>
 export type ListAdaptersRequestType = ListAdaptersRequest
 
 /** One adapter entry surfaced to SDK and app consumers for launch selection and install flows. */
-export { AdapterCatalogEntry } from "acp-client"
+export const AdapterManagedInstallAgent = z.strictObject({
+  agentId: z.string(),
+  version: z.string(),
+  method: z.enum(["binary", "npx", "uvx"]),
+  installedAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export type AdapterManagedInstallAgent = z.infer<typeof AdapterManagedInstallAgent>
+
+export const AdapterManagedInstallState = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("missing"),
+  }),
+  z.strictObject({
+    status: z.literal("installed"),
+    agent: AdapterManagedInstallAgent,
+  }),
+  z.strictObject({
+    status: z.literal("failed"),
+    lastError: z.string(),
+    checkedAt: z.string(),
+    agent: AdapterManagedInstallAgent.optional(),
+  }),
+])
+
+export type AdapterManagedInstallState = z.infer<typeof AdapterManagedInstallState>
+
+export const AdapterManagedInstall = z.strictObject({
+  managed: z.literal(true),
+  install: z.literal("beforeUse").optional(),
+  update: z.literal("daily").optional(),
+  state: AdapterManagedInstallState,
+})
+
+export type AdapterManagedInstall = z.infer<typeof AdapterManagedInstall>
+
+export const AdapterCatalogEntry = AcpAdapterCatalogEntry.extend({
+  managedInstall: AdapterManagedInstall.optional(),
+})
+
+export type AdapterCatalogEntry = z.infer<typeof AdapterCatalogEntry>
 
 /** Installation state for one ACP adapter catalog entry. */
 export type AdapterInstallationState = {

@@ -160,7 +160,24 @@ describe("@goddard-ai/sdk session namespace", () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
-      adapters: [],
+      adapters: [
+        {
+          id: "pi-acp",
+          name: "Pi ACP",
+          version: "1.0.0",
+          description: "Pi adapter",
+          distribution: { npx: { package: "pi-acp" } },
+          unofficial: false,
+          source: "registry",
+          managedInstall: {
+            managed: true,
+            install: "beforeUse",
+            state: {
+              status: "missing",
+            },
+          },
+        },
+      ],
       installations: [],
       defaultAdapterId: "pi-acp",
       registrySource: "cache",
@@ -170,7 +187,24 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     await expect(sdk.adapter.list({ cwd: "/tmp/project" })).resolves.toEqual({
-      adapters: [],
+      adapters: [
+        {
+          id: "pi-acp",
+          name: "Pi ACP",
+          version: "1.0.0",
+          description: "Pi adapter",
+          distribution: { npx: { package: "pi-acp" } },
+          unofficial: false,
+          source: "registry",
+          managedInstall: {
+            managed: true,
+            install: "beforeUse",
+            state: {
+              status: "missing",
+            },
+          },
+        },
+      ],
       installations: [],
       defaultAdapterId: "pi-acp",
       registrySource: "cache",

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { DaemonAgentInstallService } from "@goddard-ai/daemon-plugin"
 import { createAcpRegistryService } from "acp-client/node"
 import { describe, expect, test } from "bun:test"
 
@@ -30,6 +31,69 @@ async function withIsolatedHome(callback: () => Promise<void>) {
   }
 }
 
+function createAgentInstallService(
+  statuses: Record<
+    string,
+    Awaited<ReturnType<DaemonAgentInstallService["getInstalledAgent"]>>
+  > = {},
+): DaemonAgentInstallService {
+  return {
+    cacheDir: "/tmp/acp-client",
+    async resolveAgent({ agent }) {
+      if (typeof agent !== "string") {
+        return agent
+      }
+
+      return {
+        id: agent,
+        name: agent,
+        version: "1.0.0",
+        description: `${agent} agent`,
+        distribution: { npx: { package: agent } },
+      }
+    },
+    async getInstalledAgent({ agent }) {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      return statuses[agentId] ?? { status: "missing" }
+    },
+    async listInstalledAgents() {
+      return []
+    },
+    async ensureAgentInstalled({ agent }) {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      return {
+        agent: createInstalledAgent(agentId),
+        installed: true,
+        updated: false,
+      }
+    },
+    async updateAgent({ agent }) {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      return {
+        agent: createInstalledAgent(agentId),
+        checkedAt: "2026-06-08T00:00:00.000Z",
+        updated: false,
+      }
+    },
+    async resolveInstalledAgentProcessSpec({ agent }) {
+      return { cmd: typeof agent === "string" ? agent : agent.id, args: [] }
+    },
+  }
+}
+
+function createInstalledAgent(agentId: string) {
+  return {
+    agentId,
+    version: "1.0.0",
+    distributionHash: `${agentId}-hash`,
+    method: "npx" as const,
+    platform: undefined,
+    installDir: `/tmp/${agentId}`,
+    installedAt: "2026-06-08T00:00:00.000Z",
+    updatedAt: "2026-06-08T00:00:00.000Z",
+  }
+}
+
 describe("adapter listing", () => {
   test("merges config-declared adapters and resolves a valid default adapter", async () => {
     await expect(
@@ -56,6 +120,7 @@ describe("adapter listing", () => {
               }
             },
           },
+          agentInstallService: createAgentInstallService(),
           configProvider: {
             async getRootConfig() {
               return {
@@ -113,6 +178,7 @@ describe("adapter listing", () => {
               },
             },
           }),
+          agentInstallService: createAgentInstallService(),
           configProvider: {
             async getRootConfig() {
               return {
@@ -172,6 +238,7 @@ describe("adapter listing", () => {
               }
             },
           },
+          agentInstallService: createAgentInstallService(),
           configProvider: {
             async getRootConfig() {
               return {
@@ -314,6 +381,7 @@ describe("adapter listing", () => {
               }
             },
           },
+          agentInstallService: createAgentInstallService(),
           configProvider: {
             async getRootConfig() {
               return {
@@ -332,5 +400,150 @@ describe("adapter listing", () => {
       defaultAdapterId: null,
       adapters: [],
     })
+  })
+
+  test("surfaces managed install status without local install paths", async () => {
+    await expect(
+      listAdapters(
+        {
+          registryService: {
+            async listAdapters() {
+              return {
+                adapters: [
+                  {
+                    id: "managed-acp",
+                    name: "Managed ACP",
+                    version: "1.0.0",
+                    description: "Managed adapter",
+                    distribution: { npx: { package: "managed-acp" } },
+                    unofficial: false,
+                    source: "registry" as const,
+                  },
+                ],
+                registrySource: "cache",
+                lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+                stale: false,
+                lastError: null,
+              }
+            },
+          },
+          agentInstallService: createAgentInstallService({
+            "managed-acp": {
+              status: "installed",
+              agent: createInstalledAgent("managed-acp"),
+            },
+          }),
+          configProvider: {
+            async getRootConfig() {
+              return {
+                config: {
+                  agents: {
+                    managed: {
+                      "managed-acp": {
+                        install: "beforeUse",
+                        update: "daily",
+                      },
+                    },
+                  },
+                },
+              }
+            },
+          },
+        },
+        { cwd: "/repo" },
+      ),
+    ).resolves.toMatchObject({
+      adapters: [
+        {
+          id: "managed-acp",
+          managedInstall: {
+            managed: true,
+            install: "beforeUse",
+            update: "daily",
+            state: {
+              status: "installed",
+              agent: {
+                agentId: "managed-acp",
+                version: "1.0.0",
+                method: "npx",
+                installedAt: "2026-06-08T00:00:00.000Z",
+                updatedAt: "2026-06-08T00:00:00.000Z",
+              },
+            },
+          },
+        },
+      ],
+    })
+  })
+
+  test("surfaces failed managed install status with sanitized previous install metadata", async () => {
+    const response = await listAdapters(
+      {
+        registryService: {
+          async listAdapters() {
+            return {
+              adapters: [
+                {
+                  id: "failed-acp",
+                  name: "Failed ACP",
+                  version: "1.0.0",
+                  description: "Failed adapter",
+                  distribution: { npx: { package: "failed-acp" } },
+                  unofficial: false,
+                  source: "registry" as const,
+                },
+              ],
+              registrySource: "cache",
+              lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+              stale: false,
+              lastError: null,
+            }
+          },
+        },
+        agentInstallService: createAgentInstallService({
+          "failed-acp": {
+            status: "failed",
+            lastError: "update failed",
+            checkedAt: "2026-06-08T00:00:00.000Z",
+            agent: createInstalledAgent("failed-acp"),
+          },
+        }),
+        configProvider: {
+          async getRootConfig() {
+            return {
+              config: {
+                agents: {
+                  managed: {
+                    "failed-acp": {
+                      update: "daily",
+                    },
+                  },
+                },
+              },
+            }
+          },
+        },
+      },
+      { cwd: "/repo" },
+    )
+
+    expect(response.adapters[0]?.managedInstall).toEqual({
+      managed: true,
+      update: "daily",
+      state: {
+        status: "failed",
+        lastError: "update failed",
+        checkedAt: "2026-06-08T00:00:00.000Z",
+        agent: {
+          agentId: "failed-acp",
+          version: "1.0.0",
+          method: "npx",
+          installedAt: "2026-06-08T00:00:00.000Z",
+          updatedAt: "2026-06-08T00:00:00.000Z",
+        },
+      },
+    })
+    expect(JSON.stringify(response)).not.toContain("installDir")
+    expect(JSON.stringify(response)).not.toContain("distributionHash")
   })
 })

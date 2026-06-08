@@ -1,4 +1,9 @@
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
+import type {
+  DaemonAgentInstallService,
+  DaemonAgentInstallStatus,
+  DaemonInstalledAgent,
+} from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 
@@ -6,6 +11,9 @@ import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from ".
 import { getAdapterInstallationStates, installAdapter, uninstallAdapter } from "./installations.ts"
 import {
   AdapterCatalogEntry,
+  type AdapterManagedInstall,
+  type AdapterManagedInstallAgent,
+  type AdapterManagedInstallState,
   type InstallAdapterRequest,
   type InstallAdapterResponse,
   type ListAdaptersRequestType,
@@ -38,6 +46,7 @@ export type AdapterConfigManager = {
 export type ListAdaptersContext = {
   registryService: AdapterRegistryService
   configProvider: AdapterConfigManager
+  agentInstallService: DaemonAgentInstallService
 }
 
 function orderAdaptersByInstallationState(
@@ -94,11 +103,17 @@ export async function listAdapters(
       : mergedAdapters.filter((adapter) => installedAdapterIds.has(adapter.id)),
     installedAdapterIds,
   )
+  const adapters = await attachManagedInstallStatus({
+    adapters: listedAdapters,
+    agentInstallService: context.agentInstallService,
+    managedAgents: resolvedConfig?.agents?.managed,
+    registry: resolvedConfig?.registry,
+  })
   const defaultAgent = await resolveDefaultAgent(resolvedConfig).catch(() => null)
 
   return {
     ...registrySnapshot,
-    adapters: listedAdapters,
+    adapters,
     installations,
     defaultAdapterId:
       typeof defaultAgent === "string" &&
@@ -135,4 +150,69 @@ export async function uninstallCatalogAdapter(
   await uninstallAdapter(adapterId)
 
   return { adapterId }
+}
+
+async function attachManagedInstallStatus(input: {
+  adapters: AdapterCatalogEntry[]
+  agentInstallService: DaemonAgentInstallService
+  managedAgents?: AgentsConfig["managed"]
+  registry?: Record<string, AgentDistribution>
+}) {
+  if (!input.managedAgents) {
+    return input.adapters
+  }
+
+  return Promise.all(
+    input.adapters.map(async (adapter) => {
+      const managedAgent = input.managedAgents?.[adapter.id]
+      if (!managedAgent) {
+        return adapter
+      }
+
+      const state = await input.agentInstallService.getInstalledAgent({
+        agent: adapter.id,
+        registry: input.registry,
+      })
+
+      return {
+        ...adapter,
+        managedInstall: {
+          managed: true,
+          install: managedAgent.install,
+          update: managedAgent.update,
+          state: toAdapterManagedInstallState(state),
+        } satisfies AdapterManagedInstall,
+      }
+    }),
+  )
+}
+
+function toAdapterManagedInstallState(state: DaemonAgentInstallStatus): AdapterManagedInstallState {
+  if (state.status === "missing") {
+    return { status: "missing" }
+  }
+
+  if (state.status === "installed") {
+    return {
+      status: "installed",
+      agent: toAdapterManagedInstallAgent(state.agent),
+    }
+  }
+
+  return {
+    status: "failed",
+    lastError: state.lastError,
+    checkedAt: state.checkedAt,
+    agent: state.agent ? toAdapterManagedInstallAgent(state.agent) : undefined,
+  }
+}
+
+function toAdapterManagedInstallAgent(agent: DaemonInstalledAgent): AdapterManagedInstallAgent {
+  return {
+    agentId: agent.agentId,
+    version: agent.version,
+    method: agent.method,
+    installedAt: agent.installedAt,
+    updatedAt: agent.updatedAt,
+  }
 }
