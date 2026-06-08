@@ -80,6 +80,7 @@ export component AgentHarnessSelector(props: {
     compact={props.compact}
     disabled={props.disabled || !form.draftProjectPath.value}
     filterable={true}
+    iconOnlyTrigger={props.compact}
     {items}
     label="ACP adapter"
     open={form.getPickerOpen("adapter")}

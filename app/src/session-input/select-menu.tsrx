@@ -46,6 +46,7 @@ export type SessionInputSelectProps = {
   open: Signal<boolean>;
   disabled?: boolean;
   filterable?: boolean;
+  iconOnlyTrigger?: boolean;
   loading?: boolean;
   compact?: boolean;
   tooltipDetail?: preact.ComponentChildren;
@@ -152,8 +153,16 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
             }
           }}
         >
-          <span class={cx(styles.triggerContent, !selectedItem && styles.triggerPlaceholder)}>
-            if (SelectedIcon) {
+          <span
+            class={cx(
+              styles.triggerContent,
+              props.iconOnlyTrigger && selectedItem && styles.triggerIconOnlyContent,
+              !selectedItem && styles.triggerPlaceholder,
+            )}
+          >
+            if (props.iconOnlyTrigger && selectedItem) {
+              <AcpAgentIcon class={styles.agentItemIcon} icon={selectedItem.icon} />
+            } else if (SelectedIcon) {
               <SelectedIcon
                 aria-hidden={true}
                 class={styles.itemIcon}
@@ -164,9 +173,11 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
               <AcpAgentIcon class={styles.agentItemIcon} icon={selectedItem.icon} />
             }
 
-            <span class={styles.triggerLabel}>
-              {triggerLabel}
-            </span>
+            if (!props.iconOnlyTrigger || !selectedItem) {
+              <span class={styles.triggerLabel}>
+                {triggerLabel}
+              </span>
+            }
           </span>
           <ChevronDown
             class={styles.chevron}

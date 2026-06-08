@@ -68,6 +68,9 @@ export default {
     minWidth: "0",
     maxWidth: "100%",
   }),
+  triggerIconOnlyContent: css({
+    justifyContent: "center",
+  }),
   triggerLabel: css({
     minWidth: "0",
     maxWidth: "100%",
