@@ -9,6 +9,7 @@ import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SessionInput, type SessionInputClasses } from "~/session-input/input.tsrx"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
+import { listCustomSlashCommandSuggestions } from "~/session-input/slash-command.ts"
 import selectorStyles from "./launch-form-selectors.style.ts"
 import {
   AgentHarnessSelector,
@@ -137,10 +138,18 @@ export component SessionLaunchForm(props: {
         }
 
         if (input.trigger === "slash") {
-          return filterSlashCommandSuggestions(
-            form.launchPreview.value?.slashCommands ?? [],
-            input.query,
-          )
+          const customSuggestions = await listCustomSlashCommandSuggestions({
+            cwd,
+            query: input.query,
+          })
+
+          return [
+            ...customSuggestions,
+            ...filterSlashCommandSuggestions(
+              form.launchPreview.value?.slashCommands ?? [],
+              input.query,
+            ),
+          ]
         }
 
         const response = await goddardSdk.session.draftSuggestions({

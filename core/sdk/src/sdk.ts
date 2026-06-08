@@ -7,6 +7,7 @@ import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
+import { slashCommandSdkPlugin } from "@goddard-ai/slash-command/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 import type * as acp from "acp-client/protocol"
 
@@ -29,6 +30,7 @@ const sdkPlugins = composeSdkPlugins([
   pullRequestSdkPlugin,
   reviewSessionSdkPlugin,
   sessionSdkPlugin,
+  slashCommandSdkPlugin,
   workforceSdkPlugin,
 ])
 
@@ -137,6 +139,10 @@ export class GoddardSdk {
 
   get loop() {
     return defineCachedNamespace(this, "loop", this.#features.loop)
+  }
+
+  get slashCommand() {
+    return defineCachedNamespace(this, "slashCommand", this.#features.slashCommand)
   }
 
   get workforce() {
