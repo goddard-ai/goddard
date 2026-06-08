@@ -15,6 +15,7 @@ import { type DaemonSession } from "@goddard-ai/session/schema"
 import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
+import { createAgentInstallService } from "../agent-install-service.ts"
 import type { BackendClient } from "../backend.ts"
 import { createConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
@@ -58,6 +59,7 @@ export async function startDaemonServer(
   const ownsStore = options.store == null
 
   const registryService = createAcpRegistryService()
+  const agentInstallService = createAgentInstallService({ registryService })
   let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {
@@ -98,6 +100,7 @@ export async function startDaemonServer(
       createChunkPreview,
     },
     registryService,
+    agentInstallService,
     sessionContext: {
       run: (context, callback) => SessionContext.run(context, callback),
     },

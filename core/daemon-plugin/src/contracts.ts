@@ -165,6 +165,72 @@ export type DaemonAgentEnvironmentService = {
   }) => Record<string, string>
 }
 
+/** Runnable process spec returned for one managed ACP agent install. */
+export type DaemonManagedAgentProcessSpec = {
+  readonly cmd: string
+  readonly args: readonly string[]
+  readonly env?: Record<string, string>
+}
+
+/** Successful managed install metadata exposed by the daemon install service. */
+export type DaemonInstalledAgent = {
+  readonly agentId: string
+  readonly version: string
+  readonly distributionHash: string
+  readonly method: "binary" | "npx" | "uvx"
+  readonly platform?: string
+  readonly installDir: string
+  readonly installedAt: string
+  readonly updatedAt: string
+}
+
+/** Managed install status for one ACP agent id or distribution. */
+export type DaemonAgentInstallStatus =
+  | { readonly status: "missing" }
+  | { readonly status: "installed"; readonly agent: DaemonInstalledAgent }
+  | {
+      readonly status: "failed"
+      readonly lastError: string
+      readonly checkedAt: string
+      readonly agent?: DaemonInstalledAgent
+    }
+
+/** Result returned after ensuring one managed agent install exists. */
+export type DaemonAgentInstallResult = {
+  readonly agent: DaemonInstalledAgent
+  readonly installed: boolean
+  readonly updated: boolean
+}
+
+/** Result returned after checking whether one managed agent install should be updated. */
+export type DaemonAgentUpdateResult = {
+  readonly agent: DaemonInstalledAgent
+  readonly checkedAt: string
+  readonly updated: boolean
+  readonly previous?: DaemonInstalledAgent
+}
+
+/** Shared inputs for resolving registry-backed or inline ACP agents. */
+export type DaemonManagedAgentInput = {
+  readonly agent: string | AgentDistribution
+  readonly registry?: Record<string, AgentDistribution>
+}
+
+/** Daemon-owned policy wrapper around acp-client managed install operations. */
+export type DaemonAgentInstallService = {
+  readonly cacheDir: string
+  readonly resolveAgent: (input: DaemonManagedAgentInput) => Promise<AgentDistribution>
+  readonly getInstalledAgent: (input: DaemonManagedAgentInput) => Promise<DaemonAgentInstallStatus>
+  readonly listInstalledAgents: () => Promise<readonly DaemonInstalledAgent[]>
+  readonly ensureAgentInstalled: (
+    input: DaemonManagedAgentInput,
+  ) => Promise<DaemonAgentInstallResult>
+  readonly updateAgent: (input: DaemonManagedAgentInput) => Promise<DaemonAgentUpdateResult>
+  readonly resolveInstalledAgentProcessSpec: (
+    input: DaemonManagedAgentInput & { readonly installIfMissing?: boolean },
+  ) => Promise<DaemonManagedAgentProcessSpec>
+}
+
 type SetupResult<TPlugin> = TPlugin extends {
   readonly setup?: (...args: any[]) => infer TResult
 }
@@ -255,6 +321,7 @@ export type DaemonSetupSubstrate = {
   }
   readonly log: DaemonLogService
   readonly registryService: ACPRegistryService
+  readonly agentInstallService: DaemonAgentInstallService
   readonly sessionContext: DaemonSessionContextService
   readonly ipc: {
     readonly requestContext: {
