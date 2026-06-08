@@ -19,6 +19,13 @@ export type StoreConnectionOptions = {
 
 const metadata = {
   authToken: z.string(),
+  managedAgentUpdateChecks: z.record(
+    z.string(),
+    z.strictObject({
+      checkedAt: z.string(),
+      configFingerprint: z.string(),
+    }),
+  ),
 }
 
 const coreDbSchema = {} satisfies KindRegistry

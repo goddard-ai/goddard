@@ -16,6 +16,7 @@ import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
 import { createAgentInstallService } from "../agent-install-service.ts"
+import { createManagedAgentUpdateScheduler } from "../agent-update-scheduler.ts"
 import type { BackendClient } from "../backend.ts"
 import { createConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
@@ -60,6 +61,20 @@ export async function startDaemonServer(
 
   const registryService = createAcpRegistryService()
   const agentInstallService = createAgentInstallService({ registryService })
+  const agentUpdateScheduler = createManagedAgentUpdateScheduler({
+    configProvider: {
+      getRootConfig: configManager.getRootConfig,
+      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
+    },
+    agentInstallService,
+    updateCheckStore: {
+      get: () => store.metadata.get("managedAgentUpdateChecks") ?? {},
+      set: (state) => {
+        store.metadata.set("managedAgentUpdateChecks", state)
+      },
+    },
+    logger,
+  })
   let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {
@@ -177,6 +192,7 @@ export async function startDaemonServer(
     port,
     daemonUrl,
   })
+  agentUpdateScheduler.start()
 
   let closed = false
 
@@ -192,6 +208,7 @@ export async function startDaemonServer(
         port,
         daemonUrl,
       })
+      agentUpdateScheduler.close()
       await pluginSetup.close().catch(() => {})
       if (ownsConfigManager) {
         await configManager.close().catch(() => {})
