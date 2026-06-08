@@ -17,6 +17,7 @@ import {
   DaemonWorkforce,
   WorkforceRootConfig,
   type WorkforceEventEnvelope,
+  type WorkforceLedgerEvent,
   type WorkforceRootConfig as WorkforceRootConfigType,
 } from "./schema.ts"
 
@@ -69,13 +70,13 @@ export const workforcePlugin = definePlugin({
     })
 
     async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
-      const queue: WorkforceEventEnvelope[] = []
+      const queue: WorkforceLedgerEvent[] = []
       let wake: (() => void) | undefined
       const listener = (event: WorkforceEventEnvelope) => {
         if (event.rootDir !== rootDir) {
           return
         }
-        queue.push(event)
+        queue.push(event.event)
         wake?.()
       }
       const abort = () => {
@@ -285,7 +286,7 @@ export const workforcePlugin = definePlugin({
               actor,
             )
           },
-          event: async (ctx) => {
+          streamEvents: async (ctx) => {
             const { query } = ctx
             const status = await workforce.getWorkforce(query.rootDir)
             return subscribeWorkforceEvents(status.rootDir, ctx.request.signal)

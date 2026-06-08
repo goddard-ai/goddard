@@ -563,16 +563,9 @@ export type CompleteSessionResponse = {
 }
 
 /** Stream payload emitted for one daemon-managed ACP session message. */
-export const SessionMessageEvent = z.strictObject({
-  id: SessionId,
-  message: z.unknown(),
-})
+export const SessionMessageEvent = z.custom<acp.AnyMessage>()
 
-/** Compile-time shape of one daemon-managed ACP session message event. */
-export interface SessionMessageEvent {
-  id: SessionId
-  message: acp.AnyMessage
-}
+export type SessionMessageEvent = z.infer<typeof SessionMessageEvent>
 
 /** Session record or runtime area affected by one app-wide lifecycle event. */
 export const SessionLifecycleField = z.enum([

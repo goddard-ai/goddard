@@ -31,6 +31,11 @@ import {
   type SessionMessageEvent,
 } from "./schema.ts"
 
+type RoutedSessionMessageEvent = {
+  id: SessionId
+  message: SessionMessageEvent
+}
+
 export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type {
@@ -125,7 +130,7 @@ export const sessionPlugin = definePlugin({
   },
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
-    const messageListeners = new Set<(event: SessionMessageEvent) => void>()
+    const messageListeners = new Set<(event: RoutedSessionMessageEvent) => void>()
     const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>()
     const sessionManager = createSessionManager({
       db: context.db,
@@ -152,11 +157,11 @@ export const sessionPlugin = definePlugin({
     async function* subscribeSessionMessages(id: SessionId, signal: AbortSignal) {
       const queue: SessionMessageEvent[] = []
       let wake: (() => void) | undefined
-      const listener = (event: SessionMessageEvent) => {
+      const listener = (event: RoutedSessionMessageEvent) => {
         if (event.id !== id) {
           return
         }
-        queue.push(event)
+        queue.push(event.message)
         wake?.()
       }
       const abort = () => {
@@ -305,11 +310,11 @@ export const sessionPlugin = definePlugin({
               id,
             }
           },
-          messageEvents: async function* (ctx) {
+          streamMessages: async function* (ctx) {
             const { query } = ctx
             yield* subscribeSessionMessages(query.id, ctx.request.signal)
           },
-          lifecycleEvents: async function* (ctx) {
+          streamLifecycle: async function* (ctx) {
             yield* subscribeSessionLifecycle(ctx.request.signal)
           },
         },

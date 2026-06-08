@@ -22,7 +22,7 @@ import {
   type MutateWorkforceResponse,
   type ShutdownWorkforceResponse,
   type StartWorkforceResponse,
-  type WorkforceEventEnvelope,
+  type WorkforceLedgerEvent,
 } from "./schema.ts"
 
 export const workforceIpcRoutes = defineIpcRoutes({
@@ -95,10 +95,10 @@ export const workforceIpcRoutes = defineIpcRoutes({
       body: SuspendWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
     }),
-    /** Emits live daemon-published workforce ledger events for one repository root. */
-    event: http.get("event", {
+    /** Streams live daemon-published workforce ledger events for one repository root. */
+    streamEvents: http.get("stream-events", {
       query: SubscribeWorkforceEventsRequest,
-      response: ndjson.$type<WorkforceEventEnvelope>(),
+      response: ndjson.$type<WorkforceLedgerEvent>(),
     }),
   }),
 })

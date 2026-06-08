@@ -123,39 +123,33 @@ component InboxPage() {
   })
 
   useEffect(() => {
-    let active = true
-    let unsubscribe: (() => void) | null = null
+    const controller = new AbortController()
 
-    void goddardSdk.inbox.subscribe((event) => {
-      if (!active) {
-        return
+    void (async () => {
+      try {
+        const items = await goddardSdk.inbox.streamItems(undefined, { signal: controller.signal })
+        const iterator = items[Symbol.asyncIterator]()
+        while (!controller.signal.aborted) {
+          const result = await iterator.next()
+          if (result.done) {
+            break
+          }
+
+          const item = result.value
+          setRealtimeErrorMessage(null)
+          handleInboxItemsLoaded([item])
+          invalidateInboxQueries()
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to subscribe to inbox updates.", error)
+          setRealtimeErrorMessage(getErrorMessage(error))
+        }
       }
-
-      setRealtimeErrorMessage(null)
-      handleInboxItemsLoaded([event.item])
-      invalidateInboxQueries()
-    }).then(
-      (nextUnsubscribe) => {
-        if (active) {
-          unsubscribe = nextUnsubscribe
-        } else {
-          nextUnsubscribe()
-        }
-      },
-      (error) => {
-        if (!active) {
-          return
-        }
-
-        console.error("Failed to subscribe to inbox updates.", error)
-        setRealtimeErrorMessage(getErrorMessage(error))
-      },
-    )
+    })()
 
     return () => {
-      active = false
-      unsubscribe?.()
-      unsubscribe = null
+      controller.abort()
     }
   }, [])
 

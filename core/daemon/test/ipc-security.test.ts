@@ -392,13 +392,11 @@ test("daemon session reporting creates and updates session inbox rows", async ()
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const inboxEvents: Array<{
-    mutation: string
     status: string
   }> = []
-  const unsubscribe = await subscribe(client, "inbox.item", ({ item, mutation }) => {
+  const unsubscribe = await subscribe(client, "inbox.streamItems", (item) => {
     if (item.entityId === "ses_inbox") {
       inboxEvents.push({
-        mutation,
         status: item.status,
       })
     }
@@ -430,11 +428,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   await send(client, "inbox.completeSession", { id: "ses_inbox" })
   expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
   await waitFor(async () => inboxEvents.length >= 3)
-  expect(inboxEvents).toEqual([
-    { mutation: "touched", status: "unread" },
-    { mutation: "updated", status: "read" },
-    { mutation: "completed", status: "completed" },
-  ])
+  expect(inboxEvents).toEqual([{ status: "unread" }, { status: "read" }, { status: "completed" }])
 })
 
 test("daemon workforce request rejects mismatched roots for token-backed sessions", async () => {

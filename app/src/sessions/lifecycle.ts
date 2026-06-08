@@ -3,33 +3,28 @@ import { invalidateSessionLifecycleEvent } from "./cache.ts"
 
 /** Starts the app-wide daemon session lifecycle subscription for the current webview. */
 export function startSessionLifecycleSubscription() {
-  let active = true
-  let unsubscribe: (() => void) | null = null
+  const controller = new AbortController()
 
-  void goddardSdk.session.lifecycle
-    .subscribe((event) => {
-      if (active) {
+  void (async () => {
+    try {
+      const events = await goddardSdk.session.streamLifecycle(undefined, {
+        signal: controller.signal,
+      })
+      for await (const event of events) {
+        if (controller.signal.aborted) {
+          break
+        }
+
         invalidateSessionLifecycleEvent(event)
       }
-    })
-    .then(
-      (nextUnsubscribe) => {
-        if (active) {
-          unsubscribe = nextUnsubscribe
-        } else {
-          nextUnsubscribe()
-        }
-      },
-      (error) => {
-        if (active) {
-          console.error("Failed to subscribe to session lifecycle updates.", error)
-        }
-      },
-    )
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        console.error("Failed to subscribe to session lifecycle updates.", error)
+      }
+    }
+  })()
 
   return () => {
-    active = false
-    unsubscribe?.()
-    unsubscribe = null
+    controller.abort()
   }
 }

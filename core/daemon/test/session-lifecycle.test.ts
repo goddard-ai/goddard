@@ -177,9 +177,9 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   const promptStops: string[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         method?: string
         params?: { update?: { content?: { text?: string } } }
         result?: { stopReason?: string }
@@ -385,9 +385,9 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
   const liveChunks: string[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         method?: string
         params?: {
           update?: {
@@ -478,13 +478,13 @@ test("daemon stores usage updates on the session instead of durable turn history
   const liveUsageUpdates: unknown[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.message", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
       const update = matchAcpRequest<{
         update?: {
           sessionUpdate?: string
         }
-      }>(payload.message, "session/update")?.update
+      }>(payload, "session/update")?.update
 
       if (update?.sessionUpdate === "usage_update") {
         liveUsageUpdates.push(update)
@@ -827,16 +827,16 @@ test("multiple clients can observe the same live session stream independently", 
   const clientBMessages: unknown[] = []
   const unsubscribeA = await subscribe(
     clientA,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientAMessages.push(payload.message)
+      clientAMessages.push(payload)
     },
   )
   const unsubscribeB = await subscribe(
     clientB,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientBMessages.push(payload.message)
+      clientBMessages.push(payload)
     },
   )
 
@@ -920,7 +920,7 @@ test("session idle auto-shutdown uses configured duration", async () => {
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
-test("session.message subscribers cancel idle auto-shutdown before expiry", async () => {
+test("session.streamMessages subscribers cancel idle auto-shutdown before expiry", async () => {
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -933,7 +933,7 @@ test("session.message subscribers cancel idle auto-shutdown before expiry", asyn
 
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     () => {},
   )
   await waitFor(async () =>
@@ -959,7 +959,7 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
     session?: { id?: string; activeDaemonSession?: boolean }
     changed?: string[]
   }> = []
-  const unsubscribe = await subscribe(client, "session.lifecycleEvents", (event) => {
+  const unsubscribe = await subscribe(client, "session.streamLifecycle", (event) => {
     lifecycleEvents.push(event)
   })
   cleanup.push(async () => {
@@ -996,7 +996,7 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
   ).toBe(true)
 })
 
-test("idle auto-shutdown waits for the last session.message subscriber to disconnect", async () => {
+test("idle auto-shutdown waits for the last session.streamMessages subscriber to disconnect", async () => {
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -1010,12 +1010,12 @@ test("idle auto-shutdown waits for the last session.message subscriber to discon
 
   const unsubscribeA = await subscribe(
     clientA,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     () => {},
   )
   const unsubscribeB = await subscribe(
     clientB,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     () => {},
   )
 
@@ -1201,9 +1201,9 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
   const promptStops: string[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         method?: string
         params?: { update?: { content?: { text?: string } } }
         error?: { message?: string }
@@ -1268,9 +1268,9 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
   }> = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         id?: string
         method?: string
         params?: { update?: { content?: { text?: string } } }
@@ -1357,9 +1357,9 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
   const events: string[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         id?: string
         method?: string
         params?: {
@@ -1448,9 +1448,9 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
   const events: string[] = []
   const unsubscribe = await subscribe(
     client,
-    { name: "session.messageEvents", filter: { id: created.session.id } },
+    { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload.message as {
+      const message = payload as {
         id?: string
         method?: string
         params?: {

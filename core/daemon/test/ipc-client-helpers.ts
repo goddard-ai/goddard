@@ -14,7 +14,7 @@ export async function subscribe(
   const abortController = new AbortController()
   const name = typeof target === "string" ? target : target.name
   const filter = typeof target === "string" ? undefined : target.filter
-  const stream = (await selectRouteFunction(client, resolveStreamRouteName(name))(filter, {
+  const stream = (await selectRouteFunction(client, name)(filter, {
     signal: abortController.signal,
   })) as AsyncIterable<unknown>
   const done = (async () => {
@@ -27,10 +27,6 @@ export async function subscribe(
     abortController.abort()
     void done.catch(() => {})
   }
-}
-
-function resolveStreamRouteName(name: string) {
-  return name === "session.message" ? "session.messageEvents" : name
 }
 
 function selectRouteFunction(client: DaemonIpcClient, name: string) {

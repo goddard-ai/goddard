@@ -36,10 +36,10 @@ export const inboxPlugin = definePlugin({
     })
 
     async function* subscribeInboxItems(signal: AbortSignal) {
-      const queue: InboxItemEvent[] = []
+      const queue: InboxItem[] = []
       let wake: (() => void) | undefined
       const listener = (event: InboxItemEvent) => {
-        queue.push(event)
+        queue.push(event.item)
         wake?.()
       }
       const abort = () => {
@@ -118,7 +118,7 @@ export const inboxPlugin = definePlugin({
               item: inbox.completeSession(id),
             }
           },
-          item: async function* (ctx) {
+          streamItems: async function* (ctx) {
             yield* subscribeInboxItems(ctx.request.signal)
           },
         },

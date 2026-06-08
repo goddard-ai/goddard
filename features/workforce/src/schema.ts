@@ -330,7 +330,7 @@ export const SuspendWorkforceRequest = z.strictObject({
 
 export type SuspendWorkforceRequest = z.infer<typeof SuspendWorkforceRequest>
 
-/** Stream payload emitted for one workforce ledger event from one active repository runtime. */
+/** Internal routing envelope for one workforce ledger event from one active repository runtime. */
 export interface WorkforceEventEnvelope {
   rootDir: string
   event: WorkforceLedgerEvent

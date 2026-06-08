@@ -174,13 +174,13 @@ export const sessionIpcRoutes = defineIpcRoutes({
       body: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
     }),
-    /** Emits live daemon-published ACP messages for one daemon-managed session id. */
-    messageEvents: http.get("message-events", {
+    /** Streams live daemon-published ACP messages for one daemon-managed session id. */
+    streamMessages: http.get("stream-messages", {
       query: SessionIdParams,
       response: ndjson.$type<SessionMessageEvent>(),
     }),
-    /** Emits app-wide daemon session lifecycle updates without observing transcript messages. */
-    lifecycleEvents: http.get("lifecycle-events", {
+    /** Streams app-wide daemon session lifecycle updates without observing transcript messages. */
+    streamLifecycle: http.get("stream-lifecycle", {
       response: ndjson.$type<SessionLifecycleEvent>(),
     }),
   }),

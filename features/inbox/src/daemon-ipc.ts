@@ -7,7 +7,7 @@ import {
   UpdateInboxItemRequest,
   type BulkUpdateInboxItemsResponse,
   type CompleteSessionInboxItemResponse,
-  type InboxItemEvent,
+  type InboxItem,
   type ListInboxResponse,
   type UpdateInboxItemResponse,
 } from "./schema.ts"
@@ -34,9 +34,9 @@ export const inboxIpcRoutes = defineIpcRoutes({
       body: CompleteSessionInboxItemRequest,
       response: $type<CompleteSessionInboxItemResponse>(),
     }),
-    /** Emits daemon-published inbox item updates. */
-    item: http.get("item-events", {
-      response: ndjson.$type<InboxItemEvent>(),
+    /** Streams daemon-published inbox item updates. */
+    streamItems: http.get("stream-items", {
+      response: ndjson.$type<InboxItem>(),
     }),
   }),
 })

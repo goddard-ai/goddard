@@ -32,7 +32,8 @@ Use `@goddard-ai/sdk` when you need to:
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, daemon-owned turn cancellation, steering, history, shutdown, and model changes.
-- Subscribe to live daemon-filtered session updates through `sdk.session.subscribe(...)`.
+- Stream live daemon-filtered session updates through generated stream routes such as
+  `sdk.session.streamMessages(...)`.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -44,7 +45,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 - The SDK mirrors the daemon IPC contract through namespace getters.
 - Feature-owned SDK namespaces are contributed by internal packages under `features/<name>/src/sdk.ts` and then bundled by this public SDK composition root.
 - `sdk.session.run(...)` is the object-backed exception used for live agent session interaction.
-- `sdk.session.subscribe(...)` is the callback-based exception used for live daemon session updates.
+- Generated stream routes return async iterables and use `AbortSignal` cancellation.
 - Each namespace method takes one plain object payload.
 - Each namespace method exposes the daemon response shape directly.
 - The namespace getters are cached after first access.
@@ -100,11 +101,14 @@ const loop = await sdk.loop.get({
   rootDir: "/workspace",
   loopName: "triage",
 })
-const unsubscribe = await sdk.session.subscribe({ id: "session-1" }, (message) => {
+const abortController = new AbortController()
+const messages = await sdk.session.streamMessages(
+  { id: "session-1" },
+  { signal: abortController.signal },
+)
+for await (const message of messages) {
   console.log(message)
-})
-
-unsubscribe()
+}
 ```
 
 Node usage:

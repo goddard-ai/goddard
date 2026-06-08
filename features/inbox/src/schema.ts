@@ -84,7 +84,7 @@ export const InboxItemEventMutation = z.enum([
 
 export type InboxItemEventMutation = z.infer<typeof InboxItemEventMutation>
 
-/** Stream payload emitted whenever the daemon changes one inbox item. */
+/** Internal routing envelope emitted whenever the daemon changes one inbox item. */
 export const InboxItemEvent = z.strictObject({
   item: InboxItem,
   mutation: InboxItemEventMutation,

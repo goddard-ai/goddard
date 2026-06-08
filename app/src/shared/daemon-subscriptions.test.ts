@@ -22,7 +22,7 @@ test("daemon subscription coordinator resets once before the first subscription 
   const received: SessionMessageEvent[] = []
   const unsubscribe = await coordinator.subscribe(
     {
-      name: "session.message",
+      name: "session.streamMessages",
       filter: { id: "ses_1" },
     },
     (payload) => {
@@ -32,23 +32,19 @@ test("daemon subscription coordinator resets once before the first subscription 
 
   coordinator.dispatchEvent({
     subscriptionId: "sub-1",
-    name: "session.message",
-    payload: {
-      id: "ses_1",
-      message: { jsonrpc: "2.0", method: "session/update", params: {} },
-    },
+    name: "session.streamMessages",
+    payload: { jsonrpc: "2.0", method: "session/update", params: {} },
   })
 
   unsubscribe()
   await Promise.resolve()
 
-  expect(calls).toEqual(["reset:7", "subscribe:7:sub-1:session.message", "unsubscribe:sub-1"])
-  expect(received).toEqual([
-    {
-      id: "ses_1",
-      message: { jsonrpc: "2.0", method: "session/update", params: {} },
-    },
+  expect(calls).toEqual([
+    "reset:7",
+    "subscribe:7:sub-1:session.streamMessages",
+    "unsubscribe:sub-1",
   ])
+  expect(received).toEqual([{ jsonrpc: "2.0", method: "session/update", params: {} }])
 })
 
 test("daemon subscription coordinator removes callbacks when subscribe fails", async () => {
@@ -65,7 +61,7 @@ test("daemon subscription coordinator removes callbacks when subscribe fails", a
   await expect(
     coordinator.subscribe(
       {
-        name: "session.message",
+        name: "session.streamMessages",
         filter: { id: "ses_1" },
       },
       () => {
@@ -76,11 +72,8 @@ test("daemon subscription coordinator removes callbacks when subscribe fails", a
 
   coordinator.dispatchEvent({
     subscriptionId: "sub-fail",
-    name: "session.message",
-    payload: {
-      id: "ses_1",
-      message: { jsonrpc: "2.0", method: "session/update", params: {} },
-    },
+    name: "session.streamMessages",
+    payload: { jsonrpc: "2.0", method: "session/update", params: {} },
   })
 })
 
@@ -108,7 +101,7 @@ test("daemon subscription coordinator retries reset after a reset failure", asyn
   await expect(
     coordinator.subscribe(
       {
-        name: "session.message",
+        name: "session.streamMessages",
         filter: { id: "ses_1" },
       },
       () => {},
@@ -117,7 +110,7 @@ test("daemon subscription coordinator retries reset after a reset failure", asyn
 
   await coordinator.subscribe(
     {
-      name: "session.message",
+      name: "session.streamMessages",
       filter: { id: "ses_1" },
     },
     () => {},
@@ -140,7 +133,7 @@ test("daemon subscription coordinator returns an idempotent unsubscribe function
 
   const unsubscribe = await coordinator.subscribe(
     {
-      name: "workforce.event",
+      name: "workforce.streamEvents",
       filter: { rootDir: "/repo" },
     },
     () => {},

@@ -109,7 +109,7 @@ test("daemon workforce event stream rejects inactive repositories", async () => 
   const client = createDaemonClient(daemon.daemonUrl)
   const normalizedRootDir = await realpath(rootDir)
 
-  await expect(client.workforce.event({ rootDir })).rejects.toThrow(
+  await expect(client.workforce.streamEvents({ rootDir })).rejects.toThrow(
     `No workforce is running for ${normalizedRootDir}`,
   )
 })

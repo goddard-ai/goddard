@@ -957,36 +957,32 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   onSetup() {
-    let active = true
-    let unsubscribe: (() => void) | null = null
+    const controller = new AbortController()
 
-    void goddardSdk.session
-      .subscribe({ id: this.session.id }, (message) => {
-        if (active) {
+    void (async () => {
+      try {
+        const messages = await goddardSdk.session.streamMessages(
+          { id: this.session.id },
+          { signal: controller.signal },
+        )
+        for await (const message of messages) {
+          if (controller.signal.aborted) {
+            break
+          }
+
           this.receiveMessage(message)
         }
-      })
-      .then(
-        (nextUnsubscribe) => {
-          if (active) {
-            unsubscribe = nextUnsubscribe
-          } else {
-            nextUnsubscribe()
-          }
-        },
-        (error) => {
-          if (active) {
-            console.error("Failed to subscribe to session chat updates.", error)
-          }
-        },
-      )
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error("Failed to subscribe to session chat updates.", error)
+        }
+      }
+    })()
 
     return [
       () => {
-        active = false
         this.#clearQueuedChunks()
-        unsubscribe?.()
-        unsubscribe = null
+        controller.abort()
       },
     ]
   }

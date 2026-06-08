@@ -322,14 +322,14 @@ async function createMessageOutputTransport(
   let closed = false
   const abortController = new AbortController()
 
-  const events = await client.session.messageEvents(
+  const events = await client.session.streamMessages(
     { id },
     {
       signal: abortController.signal,
     },
   )
   const done = (async () => {
-    for await (const { message } of events) {
+    for await (const message of events) {
       if (
         closed ||
         (typeof message === "object" &&

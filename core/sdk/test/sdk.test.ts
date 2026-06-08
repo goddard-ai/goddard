@@ -94,59 +94,50 @@ async function* createMockStream(
   }
 }
 
-async function flushAsyncStream() {
-  await new Promise((resolve) => setTimeout(resolve, 0))
-}
-
 describe("@goddard-ai/sdk session namespace", () => {
-  test("inbox.subscribe passes the daemon inbox stream through", async () => {
+  test("inbox.streamItems streams daemon inbox item updates", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const unsubscribe = vi.fn()
-    const onItem = vi.fn()
+    const controller = new AbortController()
 
     subscribe.mockImplementationOnce(
       async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("inbox.item")
+        expect(target).toBe("inbox.streamItems")
         handler({
-          item: {
-            id: "inb_1",
-            entityId: "ses_1",
-            reason: "session.turn_ended",
-            status: "unread",
-            priority: "normal",
-            updatedAt: 1,
-            readAt: null,
-            scope: "Checkout flow",
-            headline: "Review needed",
-            turnId: "turn-1",
-          },
-          mutation: "touched",
+          id: "inb_1",
+          entityId: "ses_1",
+          reason: "session.turn_ended",
+          status: "unread",
+          priority: "normal",
+          updatedAt: 1,
+          readAt: null,
+          scope: "Checkout flow",
+          headline: "Review needed",
+          turnId: "turn-1",
         })
         return unsubscribe
       },
     )
 
-    const result = await sdk.inbox.subscribe(onItem)
-    await flushAsyncStream()
+    const events = await sdk.inbox.streamItems(undefined, { signal: controller.signal })
+    const iterator = events[Symbol.asyncIterator]()
+    const result = await iterator.next()
 
-    expect(subscribe).toHaveBeenCalledWith("inbox.item", expect.any(Function))
-    expect(onItem).toHaveBeenCalledWith({
-      item: {
-        id: "inb_1",
-        entityId: "ses_1",
-        reason: "session.turn_ended",
-        status: "unread",
-        priority: "normal",
-        updatedAt: 1,
-        readAt: null,
-        scope: "Checkout flow",
-        headline: "Review needed",
-        turnId: "turn-1",
-      },
-      mutation: "touched",
+    expect(subscribe).toHaveBeenCalledWith("inbox.streamItems", expect.any(Function))
+    expect(result.value).toEqual({
+      id: "inb_1",
+      entityId: "ses_1",
+      reason: "session.turn_ended",
+      status: "unread",
+      priority: "normal",
+      updatedAt: 1,
+      readAt: null,
+      scope: "Checkout flow",
+      headline: "Review needed",
+      turnId: "turn-1",
     })
-    result()
-    await flushAsyncStream()
+    controller.abort()
+    await iterator.return?.()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
@@ -368,55 +359,52 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session.subscribe passes the daemon-side session filter and unwraps messages", async () => {
+  test("session.streamMessages streams daemon-side session messages", async () => {
     const { sdk, subscribe } = createSdkWithClient()
-    const onMessage = vi.fn()
     const unsubscribe = vi.fn()
+    const controller = new AbortController()
 
     subscribe.mockImplementationOnce(
       async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
-          name: "session.messageEvents",
+          name: "session.streamMessages",
           filter: { id: "ses_1" },
         })
         handler({
-          id: "ses_1",
-          message: {
-            jsonrpc: "2.0",
-            method: acp.CLIENT_METHODS.session_update,
-            params: { value: "kept" },
-          },
+          jsonrpc: "2.0",
+          method: acp.CLIENT_METHODS.session_update,
+          params: { value: "kept" },
         })
         return unsubscribe
       },
     )
 
-    const result = await sdk.session.subscribe({ id: "ses_1" }, onMessage)
-    await flushAsyncStream()
+    const events = await sdk.session.streamMessages({ id: "ses_1" }, { signal: controller.signal })
+    const iterator = events[Symbol.asyncIterator]()
+    const result = await iterator.next()
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.messageEvents", filter: { id: "ses_1" } },
+      { name: "session.streamMessages", filter: { id: "ses_1" } },
       expect.any(Function),
     )
-    expect(onMessage).toHaveBeenCalledTimes(1)
-    expect(onMessage).toHaveBeenCalledWith({
+    expect(result.value).toEqual({
       jsonrpc: "2.0",
       method: acp.CLIENT_METHODS.session_update,
       params: { value: "kept" },
     })
-    result()
-    await flushAsyncStream()
+    controller.abort()
+    await iterator.return?.()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  test("session.lifecycle.subscribe passes daemon session lifecycle events through", async () => {
+  test("session.streamLifecycle streams daemon session lifecycle events", async () => {
     const { sdk, subscribe } = createSdkWithClient()
-    const onEvent = vi.fn()
     const unsubscribe = vi.fn()
+    const controller = new AbortController()
 
     subscribe.mockImplementationOnce(
       async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("session.lifecycleEvents")
+        expect(target).toBe("session.streamLifecycle")
         handler({
           kind: "sessionUpdated",
           session: {
@@ -457,18 +445,18 @@ describe("@goddard-ai/sdk session namespace", () => {
       },
     )
 
-    const result = await sdk.session.lifecycle.subscribe(onEvent)
-    await flushAsyncStream()
+    const events = await sdk.session.streamLifecycle(undefined, { signal: controller.signal })
+    const iterator = events[Symbol.asyncIterator]()
+    const result = await iterator.next()
 
-    expect(subscribe).toHaveBeenCalledWith("session.lifecycleEvents", expect.any(Function))
-    expect(onEvent).toHaveBeenCalledTimes(1)
-    expect(onEvent.mock.calls[0]?.[0]).toMatchObject({
+    expect(subscribe).toHaveBeenCalledWith("session.streamLifecycle", expect.any(Function))
+    expect(result.value).toMatchObject({
       kind: "sessionUpdated",
       session: { id: "ses_1", status: "done" },
       changed: ["status", "connection"],
     })
-    result()
-    await flushAsyncStream()
+    controller.abort()
+    await iterator.return?.()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
@@ -956,7 +944,7 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.messageEvents", filter: { id: "ses_1" } },
+      { name: "session.streamMessages", filter: { id: "ses_1" } },
       expect.any(Function),
     )
     expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
@@ -1001,43 +989,43 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("workforce.subscribe passes the root filter and unwraps ledger events", async () => {
+  test("workforce.streamEvents streams ledger events", async () => {
     const { sdk, subscribe } = createSdkWithClient()
-    const onEvent = vi.fn()
     const unsubscribe = vi.fn()
+    const controller = new AbortController()
 
     subscribe.mockImplementationOnce(
       async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
-          name: "workforce.event",
+          name: "workforce.streamEvents",
           filter: { rootDir: "/repo" },
         })
         handler({
-          rootDir: "/repo",
-          event: {
-            id: "evt-1",
-            at: "2026-03-31T00:00:00.000Z",
-            type: "request",
-            requestId: "req-1",
-            toAgentId: "root",
-            fromAgentId: null,
-            intent: "default",
-            input: "Review the queue.",
-          },
+          id: "evt-1",
+          at: "2026-03-31T00:00:00.000Z",
+          type: "request",
+          requestId: "req-1",
+          toAgentId: "root",
+          fromAgentId: null,
+          intent: "default",
+          input: "Review the queue.",
         })
         return unsubscribe
       },
     )
 
-    const result = await sdk.workforce.subscribe({ rootDir: "/repo" }, onEvent)
-    await flushAsyncStream()
+    const events = await sdk.workforce.streamEvents(
+      { rootDir: "/repo" },
+      { signal: controller.signal },
+    )
+    const iterator = events[Symbol.asyncIterator]()
+    const result = await iterator.next()
 
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "workforce.event", filter: { rootDir: "/repo" } },
+      { name: "workforce.streamEvents", filter: { rootDir: "/repo" } },
       expect.any(Function),
     )
-    expect(onEvent).toHaveBeenCalledTimes(1)
-    expect(onEvent).toHaveBeenCalledWith({
+    expect(result.value).toEqual({
       id: "evt-1",
       at: "2026-03-31T00:00:00.000Z",
       type: "request",
@@ -1047,8 +1035,8 @@ describe("@goddard-ai/sdk session namespace", () => {
       intent: "default",
       input: "Review the queue.",
     })
-    result()
-    await flushAsyncStream()
+    controller.abort()
+    await iterator.return?.()
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 

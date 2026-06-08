@@ -12,9 +12,9 @@
 - `Agent Session Wrapper`
   - The minimal object-backed SDK helper returned by `sdk.session.run(...)` for one live daemon-backed ACP session.
   - Why: so callers that need interactive session semantics can prompt, cancel, inspect history, stop the session, and set the active model without rebuilding transport wiring on top of the root SDK session namespace.
-- `Session Update Subscription`
-  - The SDK helper exposed through `sdk.session.subscribe(...)` that subscribes to daemon-filtered session stream events for one session id.
-  - Why: so hosts can observe live agent output without manually subscribing to the raw daemon stream and filtering envelopes themselves.
+- `Session Message Stream`
+  - The generated SDK route exposed through `sdk.session.streamMessages(...)` that streams daemon-filtered ACP messages for one session id.
+  - Why: so hosts can observe live agent output through the shared daemon route contract without an extra callback wrapper.
 - `Node Surface`
   - The SDK layer that injects a Node-resolved daemon client into the browser-safe daemon surface.
   - Why: so env and socket defaults stay host-specific without changing the SDK method signatures.
