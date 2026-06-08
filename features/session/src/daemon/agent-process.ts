@@ -5,7 +5,11 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
-import type { ACPRegistryService, DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
+import type {
+  ACPRegistryService,
+  DaemonAgentEnvironmentService,
+  DaemonAgentInstallService,
+} from "@goddard-ai/daemon-plugin"
 import { getGoddardGlobalDir, getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import {
   agentBinaryPlatforms,
@@ -13,6 +17,7 @@ import {
   type AgentBinaryTarget,
   type AgentDistribution,
 } from "@goddard-ai/schema/agent-distribution"
+import type { ManagedAgentsConfig } from "@goddard-ai/schema/config"
 import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
 import {
   binaryInstallMarkerFileName,
@@ -24,7 +29,7 @@ import { getErrorMessage } from "radashi"
 import type { SessionEnvPolicyConfig } from "../schema.ts"
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
-type AgentProcessSpec = {
+export type AgentProcessSpec = {
   cmd: string
   args: string[]
   env?: Record<string, string>
@@ -237,23 +242,17 @@ export async function spawnAgentProcess(params: {
   env?: Record<string, string>
   envPolicy?: SessionEnvPolicyConfig
   registryService: ACPRegistryService
+  agentInstallService?: DaemonAgentInstallService
   registry?: Record<string, AgentDistribution>
+  managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessHandle> {
-  let agent = params.agent
-
-  if (typeof agent === "string") {
-    if (params.registry?.[agent]) {
-      agent = params.registry[agent]
-    } else {
-      const registryEntry = await params.registryService.getAdapter(agent)
-      if (!registryEntry.adapter) {
-        throw new Error(`Agent not found: ${agent}`)
-      }
-      agent = registryEntry.adapter
-    }
-  }
-
-  const { cmd, args, env } = await resolveAgentProcessSpec(agent)
+  const { cmd, args, env } = await resolveLaunchAgentProcessSpec({
+    agent: params.agent,
+    registryService: params.registryService,
+    agentInstallService: params.agentInstallService,
+    registry: params.registry,
+    managedAgents: params.managedAgents,
+  })
 
   return createAgentProcessHandle({
     cmd,
@@ -268,6 +267,70 @@ export async function spawnAgentProcess(params: {
       envPolicy: params.envPolicy,
     }),
   })
+}
+
+/** Resolves the command used for one session launch, honoring user-managed install policy. */
+export async function resolveLaunchAgentProcessSpec(params: {
+  agent: AcpAdapterId | AgentDistribution
+  registryService: ACPRegistryService
+  agentInstallService?: DaemonAgentInstallService
+  registry?: Record<string, AgentDistribution>
+  managedAgents?: ManagedAgentsConfig
+}): Promise<AgentProcessSpec> {
+  if (shouldUseManagedInstall(params.agent, params.managedAgents)) {
+    if (!params.agentInstallService) {
+      throw new Error("Managed ACP agent install service is unavailable.")
+    }
+
+    const processSpec = await params.agentInstallService.resolveInstalledAgentProcessSpec({
+      agent: params.agent,
+      registry: params.registry,
+      installIfMissing: true,
+    })
+
+    return {
+      ...processSpec,
+      args: [...processSpec.args],
+    }
+  }
+
+  const agent = await resolveLaunchAgent({
+    agent: params.agent,
+    registryService: params.registryService,
+    registry: params.registry,
+  })
+
+  return resolveAgentProcessSpec(agent)
+}
+
+function shouldUseManagedInstall(
+  agent: AcpAdapterId | AgentDistribution,
+  managedAgents?: ManagedAgentsConfig,
+) {
+  const agentId = typeof agent === "string" ? agent : agent.id
+  return managedAgents?.[agentId]?.install === "beforeUse"
+}
+
+async function resolveLaunchAgent(params: {
+  agent: AcpAdapterId | AgentDistribution
+  registryService: ACPRegistryService
+  registry?: Record<string, AgentDistribution>
+}) {
+  if (typeof params.agent !== "string") {
+    return params.agent
+  }
+
+  const configuredAgent = params.registry?.[params.agent]
+  if (configuredAgent) {
+    return configuredAgent
+  }
+
+  const registryEntry = await params.registryService.getAdapter(params.agent)
+  if (!registryEntry.adapter) {
+    throw new Error(`Agent not found: ${params.agent}`)
+  }
+
+  return registryEntry.adapter
 }
 
 /** Chooses the concrete command invocation for a resolved agent distribution. */

@@ -1,10 +1,12 @@
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { agentBinaryPlatforms } from "@goddard-ai/schema/agent-distribution"
+import type { ACPRegistryService, DaemonAgentInstallService } from "@goddard-ai/daemon-plugin"
+import { agentBinaryPlatforms, type AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
+import { resolveLaunchAgentProcessSpec } from "../src/daemon/agent-process.ts"
 import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
@@ -24,6 +26,89 @@ afterEach(async () => {
     await rm(cleanupDirs.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
+
+function createAgent(id: string): AgentDistribution {
+  return {
+    id,
+    name: id,
+    version: "1.0.0",
+    description: `${id} agent`,
+    distribution: {
+      npx: {
+        package: id,
+      },
+    },
+  }
+}
+
+function createRegistryService(registry: Record<string, AgentDistribution>): ACPRegistryService {
+  return {
+    async listAdapters() {
+      return {
+        adapters: Object.values(registry),
+        registrySource: "cache",
+        lastSuccessfulSyncAt: "2026-06-08T00:00:00.000Z",
+        stale: false,
+        lastError: null,
+      }
+    },
+    async getAdapter(id) {
+      return {
+        adapter: registry[id] ?? null,
+        registrySource: "cache",
+        lastSuccessfulSyncAt: "2026-06-08T00:00:00.000Z",
+        stale: false,
+        lastError: null,
+      }
+    },
+  }
+}
+
+function createAgentInstallService(
+  resolveInstalledAgentProcessSpec: DaemonAgentInstallService["resolveInstalledAgentProcessSpec"],
+): DaemonAgentInstallService {
+  return {
+    cacheDir: "/tmp/acp-client",
+    async resolveAgent({ agent }) {
+      return typeof agent === "string" ? createAgent(agent) : agent
+    },
+    async getInstalledAgent() {
+      return { status: "missing" }
+    },
+    async listInstalledAgents() {
+      return []
+    },
+    async ensureAgentInstalled({ agent }) {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      return {
+        agent: createInstalledAgent(agentId),
+        installed: true,
+        updated: false,
+      }
+    },
+    async updateAgent({ agent }) {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      return {
+        agent: createInstalledAgent(agentId),
+        checkedAt: "2026-06-08T00:00:00.000Z",
+        updated: false,
+      }
+    },
+    resolveInstalledAgentProcessSpec,
+  }
+}
+
+function createInstalledAgent(agentId: string) {
+  return {
+    agentId,
+    version: "1.0.0",
+    distributionHash: `${agentId}-hash`,
+    method: "npx" as const,
+    installDir: `/tmp/${agentId}`,
+    installedAt: "2026-06-08T00:00:00.000Z",
+    updatedAt: "2026-06-08T00:00:00.000Z",
+  }
+}
 
 test("resolveAgentProcessSpec installs archive-backed binaries into the global cache", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-home-"))
@@ -65,6 +150,123 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
   expect(firstSpec.cmd.startsWith(join(homeDir, ".goddard", "binaries"))).toBe(true)
   expect(firstSpec.cmd.endsWith(join("bin", "agent"))).toBe(true)
   await expect(stat(firstSpec.cmd)).resolves.toBeTruthy()
+})
+
+test("resolveLaunchAgentProcessSpec uses managed installs before launching configured agents", async () => {
+  const calls: unknown[] = []
+  const agentInstallService = createAgentInstallService(async (input) => {
+    calls.push(input)
+    return {
+      cmd: "/tmp/managed-agent/bin/agent",
+      args: ["serve"],
+      env: { MANAGED_AGENT: "1" },
+    }
+  })
+
+  await expect(
+    resolveLaunchAgentProcessSpec({
+      agent: "managed-agent",
+      registryService: createRegistryService({}),
+      agentInstallService,
+      managedAgents: {
+        "managed-agent": {
+          install: "beforeUse",
+        },
+      },
+    }),
+  ).resolves.toEqual({
+    cmd: "/tmp/managed-agent/bin/agent",
+    args: ["serve"],
+    env: { MANAGED_AGENT: "1" },
+  })
+
+  expect(calls).toEqual([
+    {
+      agent: "managed-agent",
+      registry: undefined,
+      installIfMissing: true,
+    },
+  ])
+})
+
+test("resolveLaunchAgentProcessSpec forwards configured registry overrides to managed installs", async () => {
+  const configuredAgent = createAgent("configured-agent")
+  const calls: unknown[] = []
+  const agentInstallService = createAgentInstallService(async (input) => {
+    calls.push(input)
+    return {
+      cmd: "/tmp/configured-agent/bin/agent",
+      args: [],
+    }
+  })
+
+  await resolveLaunchAgentProcessSpec({
+    agent: "configured-agent",
+    registryService: createRegistryService({}),
+    agentInstallService,
+    registry: {
+      "configured-agent": configuredAgent,
+    },
+    managedAgents: {
+      "configured-agent": {
+        install: "beforeUse",
+      },
+    },
+  })
+
+  expect(calls).toEqual([
+    {
+      agent: "configured-agent",
+      registry: {
+        "configured-agent": configuredAgent,
+      },
+      installIfMissing: true,
+    },
+  ])
+})
+
+test("resolveLaunchAgentProcessSpec preserves unmanaged launch resolution", async () => {
+  const agentInstallService = createAgentInstallService(async () => {
+    throw new Error("managed install should not be used")
+  })
+
+  await expect(
+    resolveLaunchAgentProcessSpec({
+      agent: "unmanaged-agent",
+      registryService: createRegistryService({
+        "unmanaged-agent": createAgent("unmanaged-agent"),
+      }),
+      agentInstallService,
+      managedAgents: {
+        "other-agent": {
+          install: "beforeUse",
+        },
+      },
+    }),
+  ).resolves.toEqual({
+    cmd: "npx",
+    args: ["-y", "unmanaged-agent"],
+    env: undefined,
+  })
+})
+
+test("resolveLaunchAgentProcessSpec propagates managed install failures", async () => {
+  const agentInstallService = createAgentInstallService(async () => {
+    throw new Error("managed install failed")
+  })
+
+  await expect(
+    resolveLaunchAgentProcessSpec({
+      agent: "managed-agent",
+      registryService: createRegistryService({}),
+      agentInstallService,
+      managedAgents: {
+        "managed-agent": {
+          install: "beforeUse",
+        },
+      },
+    }),
+  ).rejects.toThrow("managed install failed")
 })
 
 test("injectSystemPrompt leaves prompts unchanged when the daemon system prompt is empty", () => {

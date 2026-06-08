@@ -149,6 +149,7 @@ export const sessionPlugin = definePlugin({
       configProvider: context.configProvider,
       log: context.log,
       registryService: context.registryService,
+      agentInstallService: context.agentInstallService,
       sessionContext: context.sessionContext,
       events: context.events,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,

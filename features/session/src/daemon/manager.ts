@@ -5,6 +5,7 @@ import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
   ACPRegistryService,
   DaemonAgentEnvironmentService,
+  DaemonAgentInstallService,
   DaemonConfigProvider,
   DaemonLogger,
   DaemonLogService,
@@ -1047,6 +1048,7 @@ export function createSessionManager(input: {
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
   registryService: ACPRegistryService
+  agentInstallService: DaemonAgentInstallService
   sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
 }) {
@@ -2702,7 +2704,9 @@ export function createSessionManager(input: {
           env: resolvedRequest.env,
           envPolicy: resolvedConfig?.sessions?.envPolicy,
           registryService: input.registryService,
+          agentInstallService: input.agentInstallService,
           registry: resolvedRegistry,
+          managedAgents: resolvedConfig?.agents?.managed,
         })
         spawnedAgentProcess = agentProcess
 
@@ -3166,7 +3170,9 @@ export function createSessionManager(input: {
       createAgentEnvironment: input.createAgentEnvironment,
       envPolicy: resolvedConfig?.sessions?.envPolicy,
       registryService: input.registryService,
+      agentInstallService: input.agentInstallService,
       registry: resolvedRegistry,
+      managedAgents: resolvedConfig?.agents?.managed,
     })
     let availableCommands: acp.AvailableCommand[] = []
     let acpSessionId: string | null = null
