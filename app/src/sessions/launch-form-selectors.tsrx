@@ -40,7 +40,6 @@ export component SessionLaunchLoadingSelect(props: { label: string; compact?: bo
 
 export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
   <div class={styles.composerControls}>
-    <SessionLaunchLoadingSelect compact={props.compact} label="Git branch" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
@@ -89,6 +88,61 @@ export component AgentHarnessSelector(props: {
       form.setOpenPicker(null)
     }}
   />
+}
+
+export component SessionLaunchBranchSelector(props: {
+  disabled?: boolean;
+  form: SessionLaunchFormState;
+}) {
+  const { form } = props
+  const shortcutRegistry = useShortcutRegistry()
+  const preview = useQuery(
+    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    {
+      params: form.effectiveCwd.value && form.draftAdapterId.value
+        ? [
+            {
+              agent: form.draftAdapterId.value,
+              cwd: form.effectiveCwd.value,
+            },
+          ]
+        : null,
+    },
+  )
+  const branchItems: SessionInputSelectItem[] =
+    preview?.branches.map(
+      (branch) => ({
+        value: branch,
+        label: branch,
+        detail: branch === preview.currentBranch ? "Current branch" : null,
+      }),
+    ) ??
+      []
+  const localCheckoutUnavailable =
+    form.draftLocation.value === "local" && (preview?.bare === true || preview?.dirty === true)
+  const branchShortcut = getShortcutLabel(
+    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
+  )
+
+  <div class={styles.grid}>
+    <SessionInputSelect
+      disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
+      filterable={true}
+      items={branchItems}
+      label="Git branch"
+      open={form.getPickerOpen("branch")}
+      placeholder="Choose a branch"
+      shortcut={branchShortcut}
+      value={form.draftBaseBranchName.value}
+      onValueChange={(value) => {
+        form.draftBaseBranchName.value = value
+      }}
+    />
+  </div>
+
+  if (form.draftLocation.value === "local" && preview?.dirty === true) {
+    <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
+  }
 }
 
 export component SessionLaunchLocationSelector(props: {
@@ -269,7 +323,7 @@ export component SessionLaunchPreviewSelectors(props: {
 }) {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
-  const preview = useQuery(
+  useQuery(
     form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
     {
       params: form.effectiveCwd.value && form.draftAdapterId.value
@@ -283,17 +337,6 @@ export component SessionLaunchPreviewSelectors(props: {
     },
   )
 
-  const branchItems: SessionInputSelectItem[] =
-    preview?.branches.map(
-      (branch) => ({
-        value: branch,
-        label: branch,
-        detail: branch === preview.currentBranch ? "Current branch" : null,
-      }),
-    ) ??
-      []
-  const localCheckoutUnavailable =
-    form.draftLocation.value === "local" && (preview?.bare === true || preview?.dirty === true)
   const previewModels = form.launchModelConfig.value.models
   const modelItems: SessionInputSelectItem[] =
     previewModels?.availableModels.map(
@@ -326,9 +369,6 @@ export component SessionLaunchPreviewSelectors(props: {
             }),
           )
         : []
-  const branchShortcut = getShortcutLabel(
-    shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
-  )
   const approvalPresetShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openApprovalPresetSelector.id]?.[0],
   )
@@ -339,29 +379,6 @@ export component SessionLaunchPreviewSelectors(props: {
   const thinkingShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
-
-  <div class={props.compact ? styles.composerControls : styles.grid}>
-    <SessionInputSelect
-      compact={props.compact}
-      disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
-      filterable={true}
-      items={branchItems}
-      label="Git branch"
-      open={form.getPickerOpen("branch")}
-      placeholder="Choose a branch"
-      shortcut={branchShortcut}
-      value={form.draftBaseBranchName.value}
-      onValueChange={(value) => {
-        form.draftBaseBranchName.value = value
-      }}
-    />
-  </div>
-
-  if (form.draftLocation.value === "local" && preview?.dirty === true) {
-    <p class={props.compact ? styles.composerWarning : styles.warning}>
-      "Commit or stash local changes to launch from another branch."
-    </p>
-  }
 
   <div class={props.compact ? styles.composerControls : styles.grid}>
     if (form.modeOption.value) {

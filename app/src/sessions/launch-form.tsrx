@@ -12,6 +12,7 @@ import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input
 import selectorStyles from "./launch-form-selectors.style.ts"
 import {
   AgentHarnessSelector,
+  SessionLaunchBranchSelector,
   SessionLaunchLocationSelector,
   SessionLaunchLoadingSelect,
   SessionLaunchPreviewLoadingSelectors,
@@ -163,5 +164,11 @@ export component SessionLaunchForm(props: {
         await props.onSubmit()
       }}
     />
+
+    try {
+      <SessionLaunchBranchSelector {disabled} {form} />
+    } pending {
+      <SessionLaunchLoadingSelect label="Git branch" />
+    }
   </div>
 }
