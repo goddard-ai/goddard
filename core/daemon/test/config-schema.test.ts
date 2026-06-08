@@ -29,6 +29,37 @@ test("daemon root config schema accepts worktree branch prefix config", () => {
   expect(config.worktrees?.branchPrefix).toBe("agent")
 })
 
+test("daemon root config schema accepts managed agent policies", () => {
+  const config = buildRootConfigSchema().parse({
+    agents: {
+      default: "codex-acp",
+      managed: {
+        "codex-acp": {
+          install: "beforeUse",
+          update: "daily",
+        },
+      },
+    },
+  }) as { agents?: { managed?: Record<string, unknown> } }
+
+  expect(config.agents?.managed?.["codex-acp"]).toEqual({
+    install: "beforeUse",
+    update: "daily",
+  })
+})
+
+test("managed agent policies must declare install or update intent", () => {
+  expect(() =>
+    buildRootConfigSchema().parse({
+      agents: {
+        managed: {
+          "codex-acp": {},
+        },
+      },
+    }),
+  ).toThrow("Managed agents must declare `install`, `update`, or both.")
+})
+
 test("generated goddard schema embeds the model schema once under local defs", () => {
   const goddardSchema = buildGeneratedSchemaArtifacts().find(
     (artifact: { name: string }) => artifact.name === "goddard.json",
@@ -59,4 +90,47 @@ test("root config merging rejects non-object config fragments before merging", a
       sessions: "15m",
     }),
   ).rejects.toThrow("sessions must be an object.")
+})
+
+test("root config merging keeps managed agents global only", async () => {
+  await expect(
+    mergeRootConfigLayers(
+      {
+        agents: {
+          default: "global-agent",
+          managed: {
+            "global-agent": {
+              install: "beforeUse",
+            },
+          },
+        },
+      },
+      {
+        agents: {
+          default: "local-agent",
+        },
+      },
+    ),
+  ).resolves.toMatchObject({
+    agents: {
+      default: "local-agent",
+      managed: {
+        "global-agent": {
+          install: "beforeUse",
+        },
+      },
+    },
+  })
+
+  await expect(
+    mergeRootConfigLayers(undefined, {
+      agents: {
+        managed: {
+          "local-agent": {
+            install: "beforeUse",
+          },
+        },
+      },
+    }),
+  ).rejects.toThrow("`agents.managed` is only supported in the global Goddard config.")
 })

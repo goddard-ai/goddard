@@ -83,6 +83,18 @@ export async function mergeRootConfigLayers(
     readOptionalRecord(user?.agents, "agents"),
     readOptionalRecord(project?.agents, "agents"),
   ])
+  const projectAgents = readOptionalRecord(project?.agents, "agents")
+  if (projectAgents && "managed" in projectAgents) {
+    throw new Error("`agents.managed` is only supported in the global Goddard config.")
+  }
+
+  const userAgents = readOptionalRecord(user?.agents, "agents")
+  if (userAgents && "managed" in userAgents) {
+    agents.managed = userAgents.managed
+  } else {
+    delete agents.managed
+  }
+
   if (Object.keys(agents).length > 0) {
     config.agents = AgentsConfig.parse(agents)
   }

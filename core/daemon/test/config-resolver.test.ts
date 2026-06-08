@@ -110,6 +110,62 @@ test("merges agents.default from repository-local config", async () => {
   })
 })
 
+test("rejects managed agents in repository-local config", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeLocalRootConfig(repoDir, {
+    agents: {
+      managed: {
+        "local-agent": {
+          install: "beforeUse",
+        },
+      },
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).rejects.toThrow(
+    "`agents.managed` is only supported in the global Goddard config",
+  )
+})
+
+test("merges managed agents from global config with repository-local default agent", async () => {
+  await useTempHome()
+  const repoDir = await createRepoFixture()
+
+  await writeGlobalRootConfig({
+    agents: {
+      default: "global-agent",
+      managed: {
+        "global-agent": {
+          install: "beforeUse",
+          update: "daily",
+        },
+      },
+    },
+  })
+
+  await writeLocalRootConfig(repoDir, {
+    agents: {
+      default: "local-agent",
+    },
+  })
+
+  await expect(readMergedRootConfig(repoDir)).resolves.toMatchObject({
+    config: {
+      agents: {
+        default: "local-agent",
+        managed: {
+          "global-agent": {
+            install: "beforeUse",
+            update: "daily",
+          },
+        },
+      },
+    },
+  })
+})
+
 test("merges session idle-shutdown duration from repository-local config", async () => {
   await useTempHome()
   const repoDir = await createRepoFixture()

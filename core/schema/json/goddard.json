@@ -406,6 +406,10 @@
         "default": {
           "description": "Global fallback agent to use when no narrower session or feature config selects an agent.",
           "$ref": "#/$defs/AgentSetting"
+        },
+        "managed": {
+          "description": "Global user-authorized ACP agents the daemon may install before use or update proactively.",
+          "$ref": "#/$defs/ManagedAgentsConfig"
         }
       },
       "additionalProperties": false
@@ -792,6 +796,32 @@
         "stakpak",
         "vtcode"
       ]
+    },
+    "ManagedAgentsConfig": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/ManagedAgentConfig"
+      }
+    },
+    "ManagedAgentConfig": {
+      "type": "object",
+      "properties": {
+        "install": {
+          "description": "Whether the daemon should install this agent before launching it.",
+          "type": "string",
+          "enum": ["beforeUse"]
+        },
+        "update": {
+          "description": "Whether the daemon should proactively update this agent.",
+          "type": "string",
+          "enum": ["daily"]
+        }
+      },
+      "additionalProperties": false
     },
     "SecurityConfig": {
       "type": "object",

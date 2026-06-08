@@ -18,11 +18,48 @@ export const AgentSetting = z.union([
 ])
 export type AgentSetting = z.infer<typeof AgentSetting>
 
+/** Supported policies for installing a managed ACP agent before launch. */
+export const ManagedAgentInstallPolicy = z.enum(["beforeUse"])
+
+export type ManagedAgentInstallPolicy = z.infer<typeof ManagedAgentInstallPolicy>
+
+/** Supported policies for proactively updating a managed ACP agent. */
+export const ManagedAgentUpdatePolicy = z.enum(["daily"])
+
+export type ManagedAgentUpdatePolicy = z.infer<typeof ManagedAgentUpdatePolicy>
+
+/** User-authorized managed install and update policy for one ACP agent id. */
+export const ManagedAgentConfig = z
+  .strictObject({
+    install: ManagedAgentInstallPolicy.optional().describe(
+      "Whether the daemon should install this agent before launching it.",
+    ),
+    update: ManagedAgentUpdatePolicy.optional().describe(
+      "Whether the daemon should proactively update this agent.",
+    ),
+  })
+  .refine((value) => value.install !== undefined || value.update !== undefined, {
+    message: "Managed agents must declare `install`, `update`, or both.",
+  })
+  .describe("User-authorized managed install and update policy for one ACP agent id.")
+
+export type ManagedAgentConfig = z.infer<typeof ManagedAgentConfig>
+
+/** User-authorized managed ACP agent policies keyed by agent id. */
+export const ManagedAgentsConfig = z
+  .record(z.string().min(1), ManagedAgentConfig)
+  .describe("User-authorized managed ACP agent policies keyed by agent id.")
+
+export type ManagedAgentsConfig = z.infer<typeof ManagedAgentsConfig>
+
 /** Schema for persisted agent runtime defaults loaded from JSON. */
 export const AgentsConfig = z
   .strictObject({
     default: AgentSetting.optional().describe(
       "Global fallback agent to use when no narrower session or feature config selects an agent.",
+    ),
+    managed: ManagedAgentsConfig.optional().describe(
+      "Global user-authorized ACP agents the daemon may install before use or update proactively.",
     ),
   })
   .describe("Persisted agent runtime defaults loaded from JSON.")
@@ -156,6 +193,8 @@ export function registerConfigSchemas(acpRegistry: z.core.$ZodRegistry) {
 
   z.globalRegistry.add(AgentSetting, { id: "AgentSetting", examples: [...knownAcpAdapterIds] })
   z.globalRegistry.add(AgentsConfig, { id: "AgentsConfig" })
+  z.globalRegistry.add(ManagedAgentConfig, { id: "ManagedAgentConfig" })
+  z.globalRegistry.add(ManagedAgentsConfig, { id: "ManagedAgentsConfig" })
   z.globalRegistry.add(McpServer, { id: "McpServer" })
   z.globalRegistry.add(DaemonConfig, { id: "DaemonConfig" })
   z.globalRegistry.add(SecurityConfig, { id: "SecurityConfig" })

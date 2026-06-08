@@ -153,6 +153,13 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
     )
   }
 
+  const agents = config.agents
+  if (isRecord(agents) && "managed" in agents) {
+    throw new Error(
+      "`agents.managed` is only supported in the global Goddard config, not repository-local config.",
+    )
+  }
+
   const sessions = config.sessions
   const envPolicy = isObject(sessions) ? (sessions as Record<string, unknown>).envPolicy : null
   if (isObject(envPolicy) && "set" in envPolicy) {
