@@ -2304,6 +2304,52 @@ test("session.create applies the foreground prompt to interactive initial prompt
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("session.create returns before an interactive initial prompt completes", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await Promise.race([
+    send(client, "session.create", {
+      agent: createWrappedNodeAgent(queueAgentPath),
+      cwd: repoDir,
+      mcpServers: [],
+      initialPrompt: "hold:final-only",
+    }),
+    new Promise<never>((_, reject) => {
+      setTimeout(
+        () => reject(new Error("session.create did not return before the prompt completed")),
+        250,
+      )
+    }),
+  ])
+
+  expect(created.session.activeDaemonSession).toBe(true)
+  expect(created.session.connectionMode).toBe("live")
+
+  await waitFor(async () => {
+    const history = await send(client, "session.history", { id: created.session.id })
+    return history.turns.some((turn: any) =>
+      turn.messages.some((message: any) => {
+        const update = matchAcpRequest<{
+          update?: {
+            sessionUpdate?: string
+            content?: { type?: string; text?: string }
+          }
+        }>(message, "session/update")?.update
+        return (
+          update?.sessionUpdate === "agent_message_chunk" &&
+          update.content?.type === "text" &&
+          update.content.text === "prompt_started:hold:final-only"
+        )
+      }),
+    )
+  })
+
+  await send(client, "session.cancel", { id: created.session.id })
+  await send(client, "session.shutdown", { id: created.session.id })
+})
+
 test("session.create leaves one-shot initial prompts unframed by default", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

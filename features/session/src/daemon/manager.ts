@@ -2492,6 +2492,16 @@ export function createSessionManager(input: {
       resolvedRequest.initialPrompt,
       resolvedConfig?.sessionTitles?.generator,
     )
+    const deferredInitialPrompt = !exitAfterInitialPrompt
+      ? resolvedRequest.initialPrompt
+      : undefined
+    const initializationRequest =
+      deferredInitialPrompt === undefined
+        ? resolvedRequest
+        : {
+            ...resolvedRequest,
+            initialPrompt: undefined,
+          }
     const resolvedRegistry = resolvedConfig?.registry
     const worktree = await resolveLaunchWorktree({
       request: resolvedRequest,
@@ -2626,7 +2636,7 @@ export function createSessionManager(input: {
         initialized = await initializeSessionFromLaunchLease({
           lease: launchLease,
           request: {
-            ...resolvedRequest,
+            ...initializationRequest,
             cwd,
             launchLeaseId: undefined,
             localCheckout: undefined,
@@ -2653,7 +2663,7 @@ export function createSessionManager(input: {
           input: agentProcess.stdin,
           output: agentProcess.stdout,
           request: {
-            ...resolvedRequest,
+            ...initializationRequest,
             cwd,
             launchLeaseId: undefined,
             localCheckout: undefined,
@@ -2767,6 +2777,18 @@ export function createSessionManager(input: {
         systemPrompt: resolvedRequest.systemPrompt,
         idleShutdownTimeoutMs: resolveIdleSessionShutdownTimeoutMs(resolvedConfig),
       })
+      if (deferredInitialPrompt !== undefined) {
+        void promptSession(id, deferredInitialPrompt).catch((error) => {
+          emitDiagnostic(
+            id,
+            "session_initial_prompt_failed",
+            {
+              errorMessage: getErrorMessage(error),
+            },
+            sessionLogger,
+          )
+        })
+      }
       if (worktree) {
         await input.events.emit("session.activated", {
           sessionId: id,
