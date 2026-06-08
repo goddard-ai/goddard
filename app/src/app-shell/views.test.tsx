@@ -78,6 +78,67 @@ test("WorkbenchScrollPanel focuses a search box when the active content changes"
   container.remove()
 })
 
+test("WorkbenchScrollPanel focuses a search box on Mod+f", async () => {
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:search">
+        <button>Other action</button>
+        <input type="search" />
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  const searchInput = container.querySelector("input[type='search']")
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "f",
+    metaKey: true,
+  })
+
+  document.dispatchEvent(event)
+
+  expect(event.defaultPrevented).toBe(true)
+  expect(document.activeElement).toBe(searchInput)
+
+  render(null, container)
+  container.remove()
+})
+
+test("WorkbenchScrollPanel leaves Mod+f alone when no search box is available", async () => {
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  await act(async () => {
+    render(
+      <WorkbenchScrollPanel scrollKey="detail:plain">
+        <button>Only action</button>
+      </WorkbenchScrollPanel>,
+      container,
+    )
+  })
+  await flushEffects()
+
+  const event = new KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "f",
+    metaKey: true,
+  })
+
+  document.dispatchEvent(event)
+
+  expect(event.defaultPrevented).toBe(false)
+
+  render(null, container)
+  container.remove()
+})
+
 test("WorkbenchScrollPanel focuses a delayed activation target", async () => {
   const container = document.createElement("div")
   document.body.append(container)

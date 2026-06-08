@@ -1,5 +1,6 @@
 /** Workbench content surfaces rendered inside the merged app shell chrome. */
 import { useLayoutEffect, useRef } from "preact/hooks"
+import { useListener } from "preact-sigma"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { TabContextProvider } from "~/tab-context.tsrx"
@@ -51,6 +52,22 @@ function findActivationFocusTarget(container: HTMLElement) {
   return null
 }
 
+function focusActivationTarget(container: HTMLElement) {
+  const target = findActivationFocusTarget(container)
+
+  if (!target) {
+    return false
+  }
+
+  target.focus({ preventScroll: true })
+  return true
+}
+
+function isFocusSearchKeyboardEvent(event: KeyboardEvent) {
+  return event.key.toLowerCase() === "f" && (event.metaKey || event.ctrlKey) && !event.altKey &&
+    !event.shiftKey
+}
+
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
 export function WorkbenchScrollPanel(props: {
   scrollKey: string;
@@ -61,6 +78,18 @@ export function WorkbenchScrollPanel(props: {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastFocusedScrollKeyRef = useRef(props.scrollKey)
   const shouldRestoreScroll = props.restoreScroll ?? true
+
+  useListener(document, "keydown", (event) => {
+    const scrollerElement = scrollerRef.current
+
+    if (!scrollerElement || !isFocusSearchKeyboardEvent(event)) {
+      return
+    }
+
+    if (focusActivationTarget(scrollerElement)) {
+      event.preventDefault()
+    }
+  })
 
   useLayoutEffect(() => {
     const scrollerElement = scrollerRef.current
@@ -76,18 +105,7 @@ export function WorkbenchScrollPanel(props: {
 
     if (lastFocusedScrollKeyRef.current !== props.scrollKey) {
       lastFocusedScrollKeyRef.current = props.scrollKey
-      const focusActivationTarget = () => {
-        const target = findActivationFocusTarget(scrollerElement)
-
-        if (!target) {
-          return false
-        }
-
-        target.focus({ preventScroll: true })
-        return true
-      }
-
-      if (focusActivationTarget()) {
+      if (focusActivationTarget(scrollerElement)) {
         return
       }
 
@@ -99,7 +117,7 @@ export function WorkbenchScrollPanel(props: {
           return
         }
 
-        if (focusActivationTarget()) {
+        if (focusActivationTarget(scrollerElement)) {
           observer.disconnect()
         }
       })
