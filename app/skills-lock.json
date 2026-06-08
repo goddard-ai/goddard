@@ -61,6 +61,12 @@
       "sourceType": "local",
       "computedHash": "6a9a74f7a5621d1ef394b84a79f870a7eb80e4a5dc067b8f6b50e3a9b2512f82"
     },
+    "tsrx": {
+      "source": "aleclarson/tsrx-resources",
+      "sourceType": "github",
+      "skillPath": "skills/tsrx/SKILL.md",
+      "computedHash": "f391747a3984d0189015792eec2b070ec4dc20bb61fb26835c52571d541ed851"
+    },
     "tsrx-preact": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
