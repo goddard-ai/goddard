@@ -11,7 +11,6 @@ import { SessionInput, type SessionInputClasses } from "~/session-input/input.ts
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import selectorStyles from "./launch-form-selectors.style.ts"
 import {
-  AgentHarnessSelector,
   SessionLaunchBranchSelector,
   SessionLaunchLocationSelector,
   SessionLaunchLoadingSelect,
@@ -104,11 +103,6 @@ export component SessionLaunchForm(props: {
         <SessionSubpackageSelector {disabled} {form} />
       } pending {
         <SessionLaunchLoadingSelect label="Working directory" />
-      }
-      try {
-        <AgentHarnessSelector {disabled} {form} />
-      } pending {
-        <SessionLaunchLoadingSelect label="Adapter" />
       }
       try {
         <SessionLaunchLocationSelector {disabled} {form} />

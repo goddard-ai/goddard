@@ -119,6 +119,12 @@ export default {
     fontWeight: "560",
     lineHeight: "1.2",
   }),
+  tooltipDetail: css({
+    color: "muted",
+    fontSize: "0.72rem",
+    fontWeight: "520",
+    lineHeight: "1.2",
+  }),
   menu: css({
     display: "grid",
     gridTemplateRows: "auto minmax(0, 1fr)",

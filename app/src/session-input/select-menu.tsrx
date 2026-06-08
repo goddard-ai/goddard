@@ -48,6 +48,7 @@ export type SessionInputSelectProps = {
   filterable?: boolean;
   loading?: boolean;
   compact?: boolean;
+  tooltipDetail?: preact.ComponentChildren;
   onValueChange: (value: string) => void;
 }
 
@@ -101,6 +102,13 @@ export component SessionInputSelect(props: SessionInputSelectProps) {
           <span>
             {props.label}
           </span>
+
+          if (props.tooltipDetail) {
+            <span class={styles.tooltipDetail}>
+              {props.tooltipDetail}
+            </span>
+          }
+
           <span class={styles.tooltipShortcut}>
             if (props.shortcut) {
               <GoodKeyboardShortcut expression={props.shortcut} />

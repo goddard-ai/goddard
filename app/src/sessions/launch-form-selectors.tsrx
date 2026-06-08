@@ -41,6 +41,7 @@ export component SessionLaunchLoadingSelect(props: { label: string; compact?: bo
 export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
   <div class={styles.composerControls}>
     <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="ACP adapter" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
   </div>
@@ -48,6 +49,7 @@ export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean
 
 export component AgentHarnessSelector(props: {
   disabled?: boolean;
+  compact?: boolean;
   form: SessionLaunchFormState;
 }) {
   const { form } = props
@@ -67,19 +69,23 @@ export component AgentHarnessSelector(props: {
   const adapterShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openAdapterSelector.id]?.[0],
   )
+  const selectedAdapter =
+    adapterCatalog.adapters.find((adapter) => adapter.id === form.draftAdapterId.value) ?? null
 
   useEffect(() => {
     form.adapterCatalog.value = adapterCatalog
   }, [adapterCatalog, form])
 
   <SessionInputSelect
+    compact={props.compact}
     disabled={props.disabled || !form.draftProjectPath.value}
     filterable={true}
     {items}
-    label="Adapter"
+    label="ACP adapter"
     open={form.getPickerOpen("adapter")}
     placeholder="Select an adapter"
     shortcut={adapterShortcut}
+    tooltipDetail={selectedAdapter ? `Version ${selectedAdapter.version}` : null}
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
       form.draftAdapterId.value = value
@@ -393,6 +399,8 @@ export component SessionLaunchPreviewSelectors(props: {
         }}
       />
     }
+
+    <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
 
     <SessionInputSelect
       compact={props.compact}
