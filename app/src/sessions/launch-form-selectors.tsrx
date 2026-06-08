@@ -40,8 +40,8 @@ export component SessionLaunchLoadingSelect(props: { label: string; compact?: bo
 
 export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
   <div class={styles.composerControls}>
-    <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="ACP adapter" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
   </div>
@@ -385,6 +385,8 @@ export component SessionLaunchPreviewSelectors(props: {
   )
 
   <div class={props.compact ? styles.composerControls : styles.grid}>
+    <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
+
     if (form.modeOption.value) {
       <SessionModeSelector
         compact={props.compact}
@@ -397,8 +399,6 @@ export component SessionLaunchPreviewSelectors(props: {
         }}
       />
     }
-
-    <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
 
     <SessionInputSelect
       compact={props.compact}
@@ -414,10 +414,8 @@ export component SessionLaunchPreviewSelectors(props: {
         form.draftModelId.value = value
       }}
     />
-  </div>
 
-  if (form.thinkingOption.value) {
-    <div class={props.compact ? styles.composerControls : styles.grid}>
+    if (form.thinkingOption.value) {
       <SessionInputSelect
         compact={props.compact}
         disabled={props.disabled || thinkingItems.length === 0}
@@ -436,6 +434,6 @@ export component SessionLaunchPreviewSelectors(props: {
             : value
         }}
       />
-    </div>
-  }
+    }
+  </div>
 }
