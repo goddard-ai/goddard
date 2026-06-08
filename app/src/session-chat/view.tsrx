@@ -183,9 +183,6 @@ function SessionChatViewContent(props: {
             messages={transcriptMessages}
             olderHistory={{
               canLoad: canLoadOlderHistory,
-              error: page.olderHistory.error.value
-                ? formatSessionRequestError(page.olderHistory.error.value)
-                : null,
               loading: page.olderHistory.isPending.value,
               onLoad: loadOlderHistory,
             }}

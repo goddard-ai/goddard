@@ -32,58 +32,6 @@ export default {
     pointerEvents: "none",
   }),
 
-  historyPager: css({
-    display: "grid",
-    justifyItems: "center",
-    gap: "8px",
-    paddingBottom: "18px",
-  }),
-
-  historyLoadButton: css({
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "7px",
-    minHeight: "30px",
-    border: "1px solid token(colors.border)",
-    borderRadius: "6px",
-    paddingBlock: "5px",
-    paddingInline: "11px",
-    backgroundColor: "surface",
-    color: "fg.default",
-    fontSize: "0.82rem",
-    fontWeight: "650",
-    lineHeight: "1.3",
-    _hover: {
-      backgroundColor: "bg.hover",
-    },
-    _disabled: {
-      cursor: "default",
-      color: "fg.muted",
-      opacity: "0.72",
-    },
-  }),
-
-  historyLoadButtonIcon: css({
-    animation: "spin 1s linear infinite",
-  }),
-
-  historyLoadError: css({
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "7px",
-    maxWidth: "min(100%, 560px)",
-    border: "1px solid token(colors.danger)",
-    borderRadius: "6px",
-    paddingBlock: "6px",
-    paddingInline: "10px",
-    backgroundColor: "surface",
-    color: "danger",
-    fontSize: "0.8rem",
-    fontWeight: "620",
-    lineHeight: "1.4",
-  }),
-
   thinkingLabelRow: css({
     display: "flex",
     justifyContent: "flex-start",

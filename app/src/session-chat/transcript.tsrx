@@ -1,6 +1,5 @@
 import { cx } from "@goddard-ai/styled-system/css"
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
-import { AlertCircle, ChevronUp, LoaderCircle } from "lucide-react"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { useListener, type SigmaTarget } from "preact-sigma"
 
@@ -45,7 +44,6 @@ export type TranscriptProps = {
   }) => Promise<void> | void;
   olderHistory?: {
     canLoad: boolean;
-    error: string | null;
     loading: boolean;
     onLoad: () => Promise<void> | void;
   };
@@ -316,45 +314,6 @@ function TranscriptRow(props: {
     default:
       throw new Error("Unsupported transcript row.")
   }
-}
-
-function OlderHistoryPager(props: {
-  olderHistory: NonNullable<TranscriptProps["olderHistory"]>;
-}) @{
-  if (!props.olderHistory.canLoad && !props.olderHistory.loading && !props.olderHistory.error) {
-    return null
-  }
-
-  <div class={styles.historyPager}>
-    @if (props.olderHistory.canLoad || props.olderHistory.loading) {
-      <button
-        class={styles.historyLoadButton}
-        disabled={props.olderHistory.loading}
-        type="button"
-        onClick={() => {
-          void props.olderHistory.onLoad()
-        }}
-      >
-        @if (props.olderHistory.loading) {
-          <>
-            <LoaderCircle class={styles.historyLoadButtonIcon} size={14} strokeWidth={2.2} />
-            Loading older messages
-          </>
-        } @else {
-          <>
-            <ChevronUp size={14} strokeWidth={2.2} />
-            Load older messages
-          </>
-        }
-      </button>
-    }
-    @if (props.olderHistory.error) {
-      <div class={styles.historyLoadError} role="alert">
-        <AlertCircle size={14} strokeWidth={2.2} />
-        <span>{props.olderHistory.error}</span>
-      </div>
-    }
-  </div>
 }
 
 function ThinkingLabel() @{
@@ -679,42 +638,38 @@ export function Transcript(props: TranscriptProps) @{
       @if (viewport.width <= 0) {
         <div class={styles.loadingState}>Preparing transcript layout...</div>
       } @else {
-        <>
-          {props.olderHistory ? <OlderHistoryPager olderHistory={props.olderHistory} /> : null}
+        <div
+          ref={spacerRef}
+          class={styles.virtualSpacer}
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+          }}
+        >{virtualizer.getVirtualItems().map((virtualItem) => {
+          const item = renderItems[virtualItem.index]
 
-          <div
-            ref={spacerRef}
-            class={styles.virtualSpacer}
+          if (!item) {
+            return null
+          }
+
+          return <div
+            key={virtualItem.key}
+            data-index={virtualItem.index}
+            ref={virtualizer.measureElement}
+            class={styles.virtualRow}
             style={{
-              height: `${virtualizer.getTotalSize()}px`,
+              transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
             }}
-          >{virtualizer.getVirtualItems().map((virtualItem) => {
-            const item = renderItems[virtualItem.index]
-
-            if (!item) {
-              return null
-            }
-
-            return <div
-              key={virtualItem.key}
-              data-index={virtualItem.index}
-              ref={virtualizer.measureElement}
-              class={styles.virtualRow}
-              style={{
-                transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+          >
+            <TranscriptRow
+              onSelectPermissionOption={props.onSelectPermissionOption}
+              row={{
+                item,
+                index: virtualItem.index,
+                viewportWidth: viewport.width,
               }}
-            >
-              <TranscriptRow
-                onSelectPermissionOption={props.onSelectPermissionOption}
-                row={{
-                  item,
-                  index: virtualItem.index,
-                  viewportWidth: viewport.width,
-                }}
-              />
-            </div>
-          })}</div>
-        </>
+            />
+          </div>
+        })}</div>
       }
     </div>
 
