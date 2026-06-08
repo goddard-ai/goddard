@@ -69,8 +69,6 @@ export component AgentHarnessSelector(props: {
   const adapterShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openAdapterSelector.id]?.[0],
   )
-  const selectedAdapter =
-    adapterCatalog.adapters.find((adapter) => adapter.id === form.draftAdapterId.value) ?? null
 
   useEffect(() => {
     form.adapterCatalog.value = adapterCatalog
@@ -86,7 +84,6 @@ export component AgentHarnessSelector(props: {
     open={form.getPickerOpen("adapter")}
     placeholder="Select an adapter"
     shortcut={adapterShortcut}
-    tooltipDetail={selectedAdapter ? `Version ${selectedAdapter.version}` : null}
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
       form.draftAdapterId.value = value
