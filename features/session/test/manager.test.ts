@@ -7,7 +7,7 @@ import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
 import { resolveLaunchAgentProcessSpec } from "../src/daemon/agent-process.ts"
-import { injectSystemPrompt, resolveAgentProcessSpec } from "../src/daemon/manager.ts"
+import { injectSystemPrompt, resolveUnmanagedAgentProcessSpec } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME
@@ -110,7 +110,7 @@ function createInstalledAgent(agentId: string) {
   }
 }
 
-test("resolveAgentProcessSpec installs archive-backed binaries into the global cache", async () => {
+test("resolveUnmanagedAgentProcessSpec installs archive-backed unmanaged binaries", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-home-"))
   cleanupDirs.push(homeDir)
   process.env.HOME = homeDir
@@ -140,8 +140,8 @@ test("resolveAgentProcessSpec installs archive-backed binaries into the global c
     },
   }
 
-  const firstSpec = await resolveAgentProcessSpec(agent)
-  const secondSpec = await resolveAgentProcessSpec(agent)
+  const firstSpec = await resolveUnmanagedAgentProcessSpec(agent)
+  const secondSpec = await resolveUnmanagedAgentProcessSpec(agent)
 
   expect(fetchMock).toHaveBeenCalledTimes(1)
   expect(firstSpec).toEqual(secondSpec)

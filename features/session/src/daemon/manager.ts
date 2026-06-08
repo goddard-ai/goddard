@@ -142,7 +142,7 @@ import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
-export { resolveAgentProcessSpec } from "./agent-process.ts"
+export { resolveUnmanagedAgentProcessSpec } from "./agent-process.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string

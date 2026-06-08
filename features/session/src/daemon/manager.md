@@ -18,10 +18,14 @@
 - `Agent Distribution`
   - The way an agent is identified and made runnable.
   - Why: so the daemon can support multiple sourcing and launch models without changing session meaning.
+- `Managed Agent Install`
+  - A user-authorized install/update path for an ACP agent declared in global `agents.managed`.
+  - Why: so Goddard can decide when an agent may be installed or updated while `acp-client` owns managed install state, update checks, and runnable process-spec resolution.
 - `Binary Target`
   - The platform-specific executable shape of an agent distribution.
   - Why: so the same logical agent can run correctly across operating systems and architectures.
-  - Archive-backed or raw-binary targets are installed into the global `.goddard/binaries` cache before launch.
+  - Unmanaged archive-backed or raw-binary targets are installed into the global `.goddard/binaries` cache before launch.
+  - Managed agents do not use this Goddard-owned binary cache path; they resolve through the daemon install service and `acp-client` managed install APIs.
   - Supported payloads include `.zip`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, and raw binaries.
   - Relative `cmd` values are resolved from the installed payload root instead of the caller's current `PATH`.
 - `Registry Agent`

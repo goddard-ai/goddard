@@ -300,7 +300,7 @@ export async function resolveLaunchAgentProcessSpec(params: {
     registry: params.registry,
   })
 
-  return resolveAgentProcessSpec(agent)
+  return resolveUnmanagedAgentProcessSpec(agent)
 }
 
 function shouldUseManagedInstall(
@@ -333,8 +333,10 @@ async function resolveLaunchAgent(params: {
   return registryEntry.adapter
 }
 
-/** Chooses the concrete command invocation for a resolved agent distribution. */
-export async function resolveAgentProcessSpec(agent: AgentDistribution): Promise<AgentProcessSpec> {
+/** Chooses the concrete command invocation for an unmanaged resolved agent distribution. */
+export async function resolveUnmanagedAgentProcessSpec(
+  agent: AgentDistribution,
+): Promise<AgentProcessSpec> {
   const binaryTarget = resolveBinaryTarget(agent)
   if (binaryTarget) {
     return {
@@ -405,7 +407,7 @@ function toAgentBinaryPlatform(
     : null
 }
 
-/** Resolves the runnable binary path for an archive-backed target, installing it into the global cache first. */
+/** Resolves the runnable binary path for an unmanaged archive-backed target. */
 async function resolveBinaryCommand(
   agent: AgentDistribution,
   binaryTarget: ResolvedBinaryTarget,
@@ -441,7 +443,7 @@ function getBinaryInstallDir(agent: AgentDistribution, binaryTarget: ResolvedBin
   )
 }
 
-/** Downloads and installs one archive-backed or raw binary target into its final global cache directory. */
+/** Downloads and installs one unmanaged archive-backed or raw binary target. */
 async function installBinaryArchive(
   agentId: string,
   archiveUrl: string,
@@ -469,7 +471,7 @@ async function installBinaryArchive(
   }
 }
 
-/** Removes cached binary installs for the same agent id except for the active install directory. */
+/** Removes unmanaged cached binary installs for the same agent id except for the active install directory. */
 async function cleanupOtherAgentBinaryInstalls(
   agentId: string,
   activeInstallDir: string,

@@ -36,7 +36,7 @@ type RoutedSessionMessageEvent = {
   message: SessionMessageEvent
 }
 
-export { resolveAgentProcessSpec } from "./daemon/agent-process.ts"
+export { resolveUnmanagedAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type {
   LoadSessionParams,
