@@ -14,7 +14,7 @@ import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
 
 /** Renders the projects page plus its local add-project modal flow. */
-export component ProjectsPage() {
+export function ProjectsPage() @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -58,9 +58,9 @@ export component ProjectsPage() {
       <section class={styles.panel}>
         <header class={styles.sectionHeader}>
           <div class={styles.sectionCopy}>
-            <h1 class={styles.title}>"Projects"</h1>
+            <h1 class={styles.title}>Projects</h1>
             <p class={styles.body}>
-              "Keep an explicit set of local roots available to the workbench."
+              Keep an explicit set of local roots available to the workbench.
             </p>
           </div>
           <button
@@ -71,16 +71,16 @@ export component ProjectsPage() {
             }}
           >
             <Plus size={16} strokeWidth={2.2} />
-            " Add project"
+            Add project
           </button>
         </header>
 
-        if (projects.length === 0) {
+        @if (projects.length === 0) {
           <div class={styles.empty}>
             <div class={styles.emptyCopy}>
-              <h2 class={styles.title}>"No projects yet"</h2>
+              <h2 class={styles.title}>No projects yet</h2>
               <p class={styles.body}>
-                "Add a local directory to establish the app's explicit working set."
+                Add a local directory to establish the app's explicit working set.
               </p>
               <div>
                 <button
@@ -91,19 +91,19 @@ export component ProjectsPage() {
                   }}
                 >
                   <Plus size={16} strokeWidth={2.2} />
-                  "Add project"
+                  Add project
                 </button>
               </div>
             </div>
           </div>
-        } else {
+        } @else {
           <ProjectList {projects} selectedProjectPath={resolvedSelectedProjectPath} />
         }
       </section>
       <aside class={styles.panel}>
         <div class={styles.asideBody}>
           <div class={styles.intro}>
-            <h2 class={styles.subheading}>"Project details"</h2>
+            <h2 class={styles.subheading}>Project details</h2>
             <p class={styles.body}>
               {selectedProject
                 ? "Selected project metadata for the current workspace."
@@ -111,14 +111,14 @@ export component ProjectsPage() {
             </p>
           </div>
 
-          if (selectedProject) {
-            <h3 class={styles.selectedTitle}>
-              {selectedProject.name}
-            </h3>
-            <div class={styles.cardList}>
-              <InfoCard label="Path" value={selectedProject.path} />
-              <InfoCard label="Display name" value={selectedProject.name} />
-            </div>
+          @if (selectedProject) {
+            <>
+              <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
+              <div class={styles.cardList}>
+                <InfoCard label="Path" value={selectedProject.path} />
+                <InfoCard label="Display name" value={selectedProject.name} />
+              </div>
+            </>
           }
         </div>
       </aside>
@@ -130,12 +130,12 @@ export component ProjectsPage() {
 export default ProjectsPage
 
 /** Renders the machine-wide project list. */
-component ProjectList(props: {
+function ProjectList(props: {
   projects: readonly ProjectRecord[];
   selectedProjectPath: string | null;
-}) {
+}) @{
   <ul class={styles.list}>
-    for (const project of props.projects) {
+    @for (const project of props.projects) {
       <li key={project.path}>
         <ProjectListRow isSelected={props.selectedProjectPath === project.path} {project} />
       </li>
@@ -144,10 +144,10 @@ component ProjectList(props: {
 }
 
 /** Renders one project row with quick actions and identity metadata. */
-component ProjectListRow(props: {
+function ProjectListRow(props: {
   project: ProjectRecord;
   isSelected: boolean;
-}) {
+}) @{
   const { openProjectTab, removeProject, selectProject } = useMutations(ProjectsPageMutations)
 
   <article
@@ -165,17 +165,13 @@ component ProjectListRow(props: {
       }}
     >
       <div class={styles.rowHeader}>
-        <h3 class={styles.rowTitle}>
-          {props.project.name}
-        </h3>
+        <h3 class={styles.rowTitle}>{props.project.name}</h3>
 
-        if (props.isSelected) {
-          <span class={styles.selectedBadge}>"Selected"</span>
+        @if (props.isSelected) {
+          <span class={styles.selectedBadge}>Selected</span>
         }
       </div>
-      <p class={styles.path}>
-        {props.project.path}
-      </p>
+      <p class={styles.path}>{props.project.path}</p>
     </button>
     <div class={styles.rowActions}>
       <button
@@ -187,7 +183,7 @@ component ProjectListRow(props: {
         }}
       >
         <ArrowUpRight size={15} strokeWidth={2.2} />
-        "Open tab"
+        Open tab
       </button>
       <button
         class={cx(styles.buttonBase, styles.dangerButton)}
@@ -198,29 +194,25 @@ component ProjectListRow(props: {
         }}
       >
         <Trash2 size={15} strokeWidth={2.1} />
-        "Remove"
+        Remove
       </button>
     </div>
   </article>
 }
 
 /** Renders one small inspector card. */
-component InfoCard(props: { label: string; value: string }) {
+function InfoCard(props: { label: string; value: string }) @{
   <dl class={styles.infoCard}>
-    <dt class={styles.quietLabel}>
-      {props.label}
-    </dt>
-    <dd class={styles.infoValue}>
-      {props.value}
-    </dd>
+    <dt class={styles.quietLabel}>{props.label}</dt>
+    <dd class={styles.infoValue}>{props.value}</dd>
   </dl>
 }
 
 /** Renders the modal flow used to add one project. */
-component AddProjectDialog(props: {
+function AddProjectDialog(props: {
   open: Signal<boolean>;
   selectedProjectPath: Signal<string | null>;
-}) {
+}) @{
   const projectRegistry = useProjectRegistry()
 
   const draftPath = useSignal("")
@@ -313,9 +305,9 @@ component AddProjectDialog(props: {
     >
       <header class={styles.dialogHeader}>
         <div class={styles.dialogHeaderCopy}>
-          <h2 id={titleId} class={styles.dialogTitle}>"Add project"</h2>
+          <h2 id={titleId} class={styles.dialogTitle}>Add project</h2>
           <p id={descriptionId} class={styles.body}>
-            "Choose one local root and optionally adjust the display name."
+            Choose one local root and optionally adjust the display name.
           </p>
         </div>
         <button
@@ -329,7 +321,7 @@ component AddProjectDialog(props: {
         </button>
       </header>
       <label class={styles.field}>
-        <span class={styles.label}>"Project path"</span>
+        <span class={styles.label}>Project path</span>
         <input
           ref={pathInputRef}
           class={styles.textInput}
@@ -350,11 +342,11 @@ component AddProjectDialog(props: {
           }}
         >
           <FolderSearch2 size={15} strokeWidth={2.1} />
-          "Browse"
+          Browse
         </button>
       </div>
       <label class={styles.field}>
-        <span class={styles.label}>"Display name"</span>
+        <span class={styles.label}>Display name</span>
         <input
           class={styles.textInput}
           placeholder="Derived from folder name"
@@ -372,9 +364,7 @@ component AddProjectDialog(props: {
           onClick={() => {
             props.open.value = false
           }}
-        >
-          "Cancel"
-        </button>
+        >Cancel</button>
         <button
           class={cx(styles.buttonBase, styles.primaryButton)}
           disabled={!canAddProject}
@@ -384,7 +374,7 @@ component AddProjectDialog(props: {
           }}
         >
           <Plus size={15} strokeWidth={2.2} />
-          "Add project"
+          Add project
         </button>
       </div>
     </form>

@@ -199,59 +199,53 @@ function getRelatedInboxItems(
 }
 
 /** Renders one project-backed closable workbench tab. */
-export component ProjectPage(props: { projectName?: string; projectPath: string }) {
+export function ProjectPage(props: { projectName?: string; projectPath: string }) @{
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
 
   const project = projectRegistry.projectsByPath[props.projectPath] ?? null
 
   if (!project) {
-    <div class={styles.page}>
+    return <div class={styles.page}>
       <section class={styles.panel}>
-        <h1 class={styles.title}>"Project unavailable"</h1>
+        <h1 class={styles.title}>Project unavailable</h1>
         <p class={styles.body}>
-          "The project record for this tab is no longer in the machine-wide project registry."
+          The project record for this tab is no longer in the machine-wide project registry.
         </p>
       </section>
     </div>
-
-    return
   }
 
   <div class={styles.page}>
     <header class={styles.header}>
       <div>
-        <span class={styles.eyebrow}>"Project dashboard"</span>
-        <h1 class={styles.title}>
-          {project.name}
-        </h1>
-        <p class={styles.path}>
-          {project.path}
-        </p>
+        <span class={styles.eyebrow}>Project dashboard</span>
+        <h1 class={styles.title}>{project.name}</h1>
+        <p class={styles.path}>{project.path}</p>
       </div>
     </header>
 
     <ProjectLaunchSection {project} />
 
-    try {
+    @try {
       <ProjectDashboardSections {project} />
-    } pending {
+    } @pending {
       <section class={styles.panel}>
-        <p class={styles.body}>"Loading project dashboard."</p>
+        <p class={styles.body}>Loading project dashboard.</p>
       </section>
-    } catch (error, retry) {
+    } @catch (error, retry) {
       <section class={styles.panel}>
-        <h2 class={styles.sectionTitle}>"Couldn't load project dashboard"</h2>
+        <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
         <p class={styles.body}>
           {error instanceof Error ? error.message : "The project dashboard data request failed."}
         </p>
-        <button class={styles.secondaryButton} type="button" onClick={retry}>"Retry"</button>
+        <button class={styles.secondaryButton} type="button" onClick={retry}>Retry</button>
       </section>
     }
   </div>
 }
 
-component ProjectLaunchSection(props: { project: ProjectRecord }) {
+function ProjectLaunchSection(props: { project: ProjectRecord }) @{
   const form = useModel(SessionLaunchFormState)
   const isLaunching = useSignal(false)
   const workbenchTabSet = useWorkbenchTabSet()
@@ -368,10 +362,10 @@ component ProjectLaunchSection(props: { project: ProjectRecord }) {
   </section>
 }
 
-component ProjectDashboardSections(props: { project: ProjectRecord }) {
+function ProjectDashboardSections(props: { project: ProjectRecord }) @{
   const workbenchTabSet = useWorkbenchTabSet()
 
-  try {
+  @try {
     const [{ sessions }, { items }, gitStatus] = useQueries(
       (query) => [
         query(goddardSdk.session.list, {
@@ -457,23 +451,17 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
         <section class={styles.panel}>
           <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
 
-          if (relatedInboxItems.length === 0) {
+          @if (relatedInboxItems.length === 0) {
             <EmptyState text="No unread or read inbox messages are linked to this project." />
-          } else {
+          } @else {
             <div class={styles.list}>
-              for (const item of relatedInboxItems) {
+              @for (const item of relatedInboxItems) {
                 <article class={styles.inboxRow} key={item.id}>
                   <div class={styles.rowMain}>
-                    <h2 class={styles.rowTitle}>
-                      {getInboxItemPrimaryText(item)}
-                    </h2>
-                    <p class={styles.rowDescription}>
-                      {getInboxItemSecondaryText(item)}
-                    </p>
+                    <h2 class={styles.rowTitle}>{getInboxItemPrimaryText(item)}</h2>
+                    <p class={styles.rowDescription}>{getInboxItemSecondaryText(item)}</p>
                   </div>
-                  <span class={styles.statusBadge} data-status={item.status}>
-                    {item.status}
-                  </span>
+                  <span class={styles.statusBadge} data-status={item.status}>{item.status}</span>
                 </article>
               }
             </div>
@@ -487,11 +475,11 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
             count={recentSessions.length}
           />
 
-          if (recentSessions.length === 0) {
+          @if (recentSessions.length === 0) {
             <EmptyState text="No recent sessions are linked to this project." />
-          } else {
+          } @else {
             <div class={styles.sessionList}>
-              for (const item of recentSessions) {
+              @for (const item of recentSessions) {
                 <article class={styles.sessionRow} key={item.session.id}>
                   <button
                     class={styles.sessionButton}
@@ -502,12 +490,10 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
                   >
                     <span class={styles.statusDot} data-status={item.session.status} />
                     <span class={styles.rowMain}>
-                      <span class={styles.rowTitle}>
-                        {item.title}
-                      </span>
-                      <span class={styles.rowDescription}>
-                        {getSessionRepositoryLabel(item.session)}
-                      </span>
+                      <span class={styles.rowTitle}>{item.title}</span>
+                      <span class={styles.rowDescription}>{getSessionRepositoryLabel(
+                        item.session,
+                      )}</span>
                     </span>
                     <time
                       class={styles.updated}
@@ -516,9 +502,7 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
                         dateStyle: "medium",
                         timeStyle: "short",
                       }).format(new Date(item.session.updatedAt))}
-                    >
-                      {formatRelativeTime(item.session.updatedAt)}
-                    </time>
+                    >{formatRelativeTime(item.session.updatedAt)}</time>
                   </button>
                   <button
                     aria-label={`View changes for ${item.title}`}
@@ -546,7 +530,7 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
         <div class={styles.list}>
           <CheckoutRow kind="primary" summary={gitStatus.primary} />
 
-          for (const worktree of goddardWorktrees) {
+          @for (const worktree of goddardWorktrees) {
             <CheckoutRow
               key={worktree.summary.path}
               kind="worktree"
@@ -558,49 +542,43 @@ component ProjectDashboardSections(props: { project: ProjectRecord }) {
         </div>
       </section>
     </div>
-  } pending {
+  } @pending {
     <section class={styles.panel}>
-      <p class={styles.body}>"Loading project dashboard."</p>
+      <p class={styles.body}>Loading project dashboard.</p>
     </section>
-  } catch (error, retry) {
+  } @catch (error, retry) {
     <section class={styles.panel}>
-      <h2 class={styles.sectionTitle}>"Couldn't load project dashboard"</h2>
+      <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
       <p class={styles.body}>
         {error instanceof Error ? error.message : "The project dashboard data request failed."}
       </p>
-      <button class={styles.secondaryButton} type="button" onClick={retry}>"Retry"</button>
+      <button class={styles.secondaryButton} type="button" onClick={retry}>Retry</button>
     </section>
   }
 }
 
-component SectionHeading(props: { icon: typeof CircleDot; title: string; count: number }) {
+function SectionHeading(props: { icon: typeof CircleDot; title: string; count: number }) @{
   const Icon = props.icon
 
   <header class={styles.sectionHeader}>
     <div class={styles.sectionTitleRow}>
       <Icon size={16} strokeWidth={2.2} />
-      <h2 class={styles.sectionTitle}>
-        {props.title}
-      </h2>
+      <h2 class={styles.sectionTitle}>{props.title}</h2>
     </div>
-    <span class={styles.countBadge}>
-      {props.count}
-    </span>
+    <span class={styles.countBadge}>{props.count}</span>
   </header>
 }
 
-component EmptyState(props: { text: string }) {
-  <p class={styles.empty}>
-    {props.text}
-  </p>
+function EmptyState(props: { text: string }) @{
+  <p class={styles.empty}>{props.text}</p>
 }
 
-component CheckoutRow(props: {
+function CheckoutRow(props: {
   kind: "primary" | "worktree";
   onViewChanges?: () => void;
   summary: ProjectGitCheckoutSummary;
   showArchive?: boolean;
-}) {
+}) @{
   const KindIcon =
     props.kind === "primary" ? Laptop : GitFork
   const kindLabel =
@@ -616,11 +594,9 @@ component CheckoutRow(props: {
     </GoodTooltip>
     <div class={styles.rowMain}>
       <div class={styles.checkoutHeader}>
-        <h3 class={styles.rowTitle}>
-          {getCheckoutMainLabel(props.summary)}
-        </h3>
+        <h3 class={styles.rowTitle}>{getCheckoutMainLabel(props.summary)}</h3>
 
-        if (checkoutState && CheckoutStateIcon) {
+        @if (checkoutState && CheckoutStateIcon) {
           <GoodTooltip content={checkoutState.label}>
             <span
               class={styles.checkoutStateIcon}
@@ -632,12 +608,10 @@ component CheckoutRow(props: {
           </GoodTooltip>
         }
       </div>
-      <p class={styles.rowDescription}>
-        {getCheckoutDetail(props.summary)}
-      </p>
+      <p class={styles.rowDescription}>{getCheckoutDetail(props.summary)}</p>
     </div>
 
-    if (props.kind === "worktree") {
+    @if (props.kind === "worktree") {
       <div class={styles.checkoutActions} data-checkout-actions="true">
         <GoodTooltip content="View changes">
           <button
@@ -652,7 +626,7 @@ component CheckoutRow(props: {
           </button>
         </GoodTooltip>
 
-        if (props.showArchive) {
+        @if (props.showArchive) {
           <GoodTooltip content="Archive">
             <button
               aria-label={`Archive ${props.summary.path}`}

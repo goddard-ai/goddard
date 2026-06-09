@@ -47,7 +47,7 @@ const themeModeOptions: readonly {
   },
 ]
 
-export component AppearanceSettingsSection() {
+export function AppearanceSettingsSection() @{
   const appearance = useAppearance()
 
   <SettingsSection
@@ -55,33 +55,28 @@ export component AppearanceSettingsSection() {
     aria-labelledby="settings-appearance-heading"
   >
     <SettingsSectionHeader>
-      <SettingsSectionTitle id="settings-appearance-heading">
-        {appearanceSettingsSectionMetadata.title}
-      </SettingsSectionTitle>
-      <SettingsSectionDescription>
-        {appearanceSettingsSectionMetadata.description}
-      </SettingsSectionDescription>
+      <SettingsSectionTitle
+        id="settings-appearance-heading"
+      >{appearanceSettingsSectionMetadata.title}</SettingsSectionTitle>
+      <SettingsSectionDescription>{appearanceSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>"Color mode"</SettingsLegend>
+      <SettingsLegend>Color mode</SettingsLegend>
       <SettingsHelperText>
-        "Current effective theme: "
+        Current effective theme:
+        {" "}
         {appearance.effectiveTheme}
       </SettingsHelperText>
       <SettingsChoiceList>
-        for (const option of themeModeOptions) {
+        @for (const option of themeModeOptions) {
           <SettingsChoiceItem key={option.mode}>
             <SettingsChoiceLabel
               class={styles.choiceLabel}
               data-selected={appearance.mode === option.mode ? "true" : undefined}
             >
               <SettingsChoiceBody>
-                <SettingsChoiceTitle>
-                  {option.label}
-                </SettingsChoiceTitle>
-                <SettingsChoiceDescription>
-                  {option.description}
-                </SettingsChoiceDescription>
+                <SettingsChoiceTitle>{option.label}</SettingsChoiceTitle>
+                <SettingsChoiceDescription>{option.description}</SettingsChoiceDescription>
               </SettingsChoiceBody>
               <SettingsChoiceInput
                 checked={appearance.mode === option.mode}
@@ -98,16 +93,16 @@ export component AppearanceSettingsSection() {
       </SettingsChoiceList>
     </SettingsFieldset>
     <SettingsFieldset>
-      <SettingsLegend>"Contrast"</SettingsLegend>
+      <SettingsLegend>Contrast</SettingsLegend>
       <SettingsHelperText>
-        "Tightens muted text and border separation across the app."
+        Tightens muted text and border separation across the app.
       </SettingsHelperText>
       <SettingsControlRowLabel
         class={styles.controlRow}
         data-selected={appearance.highContrast ? "true" : undefined}
       >
         <SettingsChoiceBody>
-          <SettingsChoiceTitle>"High contrast"</SettingsChoiceTitle>
+          <SettingsChoiceTitle>High contrast</SettingsChoiceTitle>
           <SettingsChoiceDescription>
             {appearance.highContrast ? "Enabled" : "Disabled"}
           </SettingsChoiceDescription>

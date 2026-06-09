@@ -48,13 +48,13 @@ function getErrorMessage(error: unknown) {
   return "The daemon-backed inbox request failed."
 }
 
-component InboxQueryContent(props: {
+function InboxQueryContent(props: {
   activeItemId: InboxItem["id"] | null;
   filterId: InboxFilterId;
   searchQuery: string;
   selectedEntityIds: ReadonlySet<InboxEntityId>;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
-}) {
+}) @{
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
@@ -84,7 +84,7 @@ component InboxQueryContent(props: {
   />
 }
 
-component InboxPage() {
+function InboxPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
   const pageRef = useRef<HTMLDivElement | null>(null)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
@@ -324,12 +324,12 @@ component InboxPage() {
         }}
       />
       <div class={styles.listBody}>
-        if (realtimeErrorMessage) {
+        @if (realtimeErrorMessage) {
           <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
-            "Realtime inbox updates are unavailable. Manual refresh still works."
+            Realtime inbox updates are unavailable. Manual refresh still works.
           </div>
         }
-        try {
+        @try {
           <InboxQueryContent
             {activeItemId}
             {filterId}
@@ -337,7 +337,7 @@ component InboxPage() {
             {selectedEntityIds}
             onItemSelectionChange={setInboxItemSelected}
           />
-        } pending {
+        } @pending {
           <InboxList
             {filterId}
             {activeItemId}
@@ -347,7 +347,7 @@ component InboxPage() {
             {selectedEntityIds}
             onItemSelectionChange={setInboxItemSelected}
           />
-        } catch (error) {
+        } @catch (error) {
           <InboxList
             errorMessage={getErrorMessage(error)}
             {filterId}

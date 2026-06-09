@@ -4,7 +4,7 @@ import { inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxRow } from "./row.tsrx"
 import styles from "./page.style.ts"
 
-export component InboxList(props: {
+export function InboxList(props: {
   activeItemId?: InboxItem["id"] | null;
   errorMessage?: string | null;
   filterId: InboxFilterId;
@@ -13,31 +13,27 @@ export component InboxList(props: {
   selectedEntityIds?: ReadonlySet<InboxEntityId>;
   searchQuery: string;
   onItemSelectionChange?: (item: InboxItem, isSelected: boolean) => void;
-}) {
+}) @{
   const filter = inboxFilterDefinitions[props.filterId]
   const hasSearchQuery = props.searchQuery.trim().length > 0
 
   if (props.listStatus === "loading" && props.items.length === 0) {
-    <div class={styles.loading}>{"Loading inbox..."}</div>
-
-    return
+    return <div class={styles.loading}>Loading inbox...</div>
   }
 
   if (props.listStatus === "error" && props.items.length === 0) {
-    <div class={styles.error}>
+    return <div class={styles.error}>
       <div class={styles.messageContent}>
-        <h2 class={styles.messageTitle}>{"Couldn't load inbox"}</h2>
+        <h2 class={styles.messageTitle}>Couldn't load inbox</h2>
         <p class={styles.messageBody}>
           {props.errorMessage ?? "The daemon-backed inbox request failed."}
         </p>
       </div>
     </div>
-
-    return
   }
 
   if (props.items.length === 0) {
-    <div class={styles.empty}>
+    return <div class={styles.empty}>
       <div class={styles.messageContent}>
         <h2 class={styles.messageTitle}>
           {hasSearchQuery ? "No matching inbox items" : filter.emptyTitle}
@@ -49,12 +45,10 @@ export component InboxList(props: {
         </p>
       </div>
     </div>
-
-    return
   }
 
   <ul class={styles.list} aria-label={`${filter.label} inbox items`}>
-    for (const item of props.items) {
+    @for (const item of props.items) {
       const onSelectionChange =
         props.onItemSelectionChange
           ? (isSelected: boolean) => {

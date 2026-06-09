@@ -3,11 +3,11 @@ import { Archive, ArrowDown, ArrowUp, Bookmark, Mail, MailOpen, X } from "lucide
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import styles from "./page.style.ts"
 
-component InboxBulkToolbarButton(props: {
+function InboxBulkToolbarButton(props: {
   ariaLabel: string;
   icon: typeof Archive;
   onPress: () => void;
-}) {
+}) @{
   const Icon = props.icon
 
   <GoodTooltip content={props.ariaLabel}>
@@ -25,7 +25,7 @@ component InboxBulkToolbarButton(props: {
   </GoodTooltip>
 }
 
-export component InboxBulkToolbar(props: {
+export function InboxBulkToolbar(props: {
   selectedCount: number;
   onArchive: () => void;
   onClear: () => void;
@@ -34,9 +34,9 @@ export component InboxBulkToolbar(props: {
   onSave: () => void;
   onSetLowPriority: () => void;
   onSetNormalPriority: () => void;
-}) {
+}) @{
   if (props.selectedCount === 0) {
-    return
+    return null
   }
 
   <div class={styles.bulkToolbar} aria-label="Selected inbox item actions" role="toolbar">

@@ -23,13 +23,13 @@ import { InboxPageMutations } from "./mutations.ts"
 import styles from "./page.style.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "./text.ts"
 
-component InboxRowActionButton(props: {
+function InboxRowActionButton(props: {
   ariaLabel: string;
   disabled?: boolean;
   icon: typeof Archive;
   isActive?: boolean;
   onPress: () => void;
-}) {
+}) @{
   const Icon = props.icon
 
   <GoodTooltip content={props.ariaLabel}>
@@ -62,12 +62,12 @@ function handleRowOpenKeyDown(
   onPress()
 }
 
-export component InboxRow(props: {
+export function InboxRow(props: {
   isActive?: boolean;
   item: InboxItem;
   isSelected?: boolean;
   onSelectionChange?: (isSelected: boolean) => void;
-}) {
+}) @{
   const mutations = useMutations(InboxPageMutations)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const sessionItem = isInboxEntityKind(props.item, "session") ? props.item : null
@@ -144,30 +144,21 @@ export component InboxRow(props: {
       </span>
       <div class={styles.rowMain}>
         <div class={styles.rowMeta}>
-          <span class={styles.entityLabel}>
-            {getInboxEntityLabel(props.item.entityId)}
-          </span>
-          <span class={styles.reasonLabel}>
-            {reasonLabel}
-          </span>
+          <span class={styles.entityLabel}>{getInboxEntityLabel(props.item.entityId)}</span>
+          <span class={styles.reasonLabel}>{reasonLabel}</span>
         </div>
         <div class={styles.rowCopy}>
-          <h2 class={styles.rowTitle}>
-            {getInboxItemPrimaryText(props.item)}
-          </h2>
-          <p class={styles.rowDescription}>
-            {getInboxItemSecondaryText(props.item)}
-          </p>
+          <h2 class={styles.rowTitle}>{getInboxItemPrimaryText(props.item)}</h2>
+          <p class={styles.rowDescription}>{getInboxItemSecondaryText(props.item)}</p>
         </div>
       </div>
       <div class={styles.rowState}>
         <div class={styles.badgeRow}>
-          <span class={styles.statusBadge} data-status={props.item.status}>
-            {statusLabel}
-          </span>
-          <span class={styles.priorityBadge} data-priority={props.item.priority}>
-            {priorityLabel}
-          </span>
+          <span class={styles.statusBadge} data-status={props.item.status}>{statusLabel}</span>
+          <span
+            class={styles.priorityBadge}
+            data-priority={props.item.priority}
+          >{priorityLabel}</span>
         </div>
         <time
           class={styles.updated}
@@ -176,9 +167,7 @@ export component InboxRow(props: {
             dateStyle: "medium",
             timeStyle: "short",
           }).format(new Date(props.item.updatedAt))}
-        >
-          {formatInboxUpdatedTime(props.item.updatedAt)}
-        </time>
+        >{formatInboxUpdatedTime(props.item.updatedAt)}</time>
       </div>
     </div>
     <div
@@ -231,7 +220,7 @@ export component InboxRow(props: {
         }}
       />
 
-      if (sessionItem) {
+      @if (sessionItem) {
         <InboxRowActionButton
           ariaLabel={isCompleted ? "Completed" : "Complete"}
           disabled={hasPendingAction || isCompleted}

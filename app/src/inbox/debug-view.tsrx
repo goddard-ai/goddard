@@ -95,7 +95,7 @@ export type InboxDebugViewProps = {
   items?: readonly InboxItem[];
 }
 
-export component InboxDebugView(props: InboxDebugViewProps) {
+export function InboxDebugView(props: InboxDebugViewProps) @{
   const [items, setItems] = useState<readonly InboxItem[]>(props.items ?? INBOX_DEBUG_ITEMS)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
@@ -179,10 +179,12 @@ export component InboxDebugView(props: InboxDebugViewProps) {
     <div class={styles.page}>
       <section class={styles.header}>
         <div class={styles.headingGroup}>
-          <div class={styles.eyebrow}>{"Debug Surface"}</div>
-          <h1 class={styles.title}>{"Inbox"}</h1>
+          <div class={styles.eyebrow}>Debug Surface</div>
+          <h1 class={styles.title}>Inbox</h1>
           <p class={styles.body}>
-            {"This surface renders deterministic inbox fixture rows through the real inbox toolbar, filter, fuzzy search, list, empty-state, and row-click code paths without loading daemon data."}
+            This surface renders deterministic inbox fixture rows through the real inbox toolbar,
+            filter, fuzzy search, list, empty-state, and row-click code paths without loading daemon
+            data.
           </p>
         </div>
         <div class={styles.statRow}>
@@ -252,7 +254,7 @@ export component InboxDebugView(props: InboxDebugViewProps) {
           />
         </div>
         <div class={styles.selectedPanel}>
-          <h2 class={styles.selectedTitle}>{"Selected fixture item"}</h2>
+          <h2 class={styles.selectedTitle}>Selected fixture item</h2>
           <p class={styles.selectedBody}>
             {selectedItem
               ? `${selectedItem.id} · ${getInboxEntityKind(

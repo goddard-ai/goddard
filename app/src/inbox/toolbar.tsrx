@@ -4,22 +4,22 @@ import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./
 import { getInboxSearchActiveFilterIds } from "./search.ts"
 import styles from "./page.style.ts"
 
-export component InboxToolbar(props: {
+export function InboxToolbar(props: {
   filterId: InboxFilterId;
   searchQuery: string;
   onFilterSelect: (id: InboxFilterId) => void;
   onRefresh: () => void;
   onRowNavigationKeyDown?: (event: preact.TargetedKeyboardEvent<HTMLInputElement>) => void;
   onSearchInput: (value: string) => void;
-}) {
+}) @{
   const hasSearchQuery = props.searchQuery.trim().length > 0
   const activeSearchFilterIds = new Set(getInboxSearchActiveFilterIds(props.searchQuery))
 
   <div class={styles.toolbar}>
     <div class={styles.headingGroup}>
-      <h1 class={styles.heading}>{"Inbox"}</h1>
+      <h1 class={styles.heading}>Inbox</h1>
       <div class={styles.filterGroup} aria-label="Inbox filters">
-        for (const id of inboxFilterOrder) {
+        @for (const id of inboxFilterOrder) {
           const filter = inboxFilterDefinitions[id]
           const isSelected =
             hasSearchQuery ? activeSearchFilterIds.has(id) : props.filterId === id
@@ -33,15 +33,13 @@ export component InboxToolbar(props: {
             onClick={() => {
               props.onFilterSelect(id)
             }}
-          >
-            {filter.label}
-          </button>
+          >{filter.label}</button>
         }
       </div>
     </div>
     <div class={styles.toolbarControls}>
       <label class={styles.searchField}>
-        <span class={styles.srOnly}>{"Search inbox items"}</span>
+        <span class={styles.srOnly}>Search inbox items</span>
         <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
         <input
           class={styles.searchInput}
