@@ -45,7 +45,7 @@ export type SessionInputContextUsage = {
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
 
-export component SessionInput(props: {
+export function SessionInput(props: {
   activationFocus?: boolean;
   autoFocus?: boolean;
   classes?: Partial<SessionInputClasses>;
@@ -62,7 +62,7 @@ export component SessionInput(props: {
   initialPrompt?: SessionInputPromptBlocks;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
-}) {
+}) @{
   const formElementRef = useRef<HTMLFormElement>(null)
   const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
@@ -80,16 +80,16 @@ export component SessionInput(props: {
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
   const helperText =
     props.helperText === undefined
-      ? <tsrx>
+      ? <>
           <GoodKeyboardShortcut expression="Enter" />
-          " sends at the end, "
+          {" sends at the end, "}
           <GoodKeyboardShortcut expression="Mod+Enter" />
-          " sends anywhere, "
+          {" sends anywhere, "}
           <GoodKeyboardShortcut expression="Shift+Enter" />
-          " inserts a newline, and "
-          <span>"@, $, or /"</span>
-          " open suggestions."
-        </tsrx>
+          {" inserts a newline, and "}
+          <span>@, $, or /</span>
+          {" open suggestions."}
+        </>
       : props.helperText
   const submitLabel = props.submitLabel ?? "Send"
   const contextUsage =
@@ -352,7 +352,7 @@ export component SessionInput(props: {
   })
 
   <form
-    {ref formElementRef}
+    ref={formElementRef}
     class={classes.form}
     onSubmit={(event) => {
       event.preventDefault()
@@ -363,20 +363,14 @@ export component SessionInput(props: {
       <div class={classes.editorFrame}>
         <RichTextPlugin
           ErrorBoundary={LexicalErrorBoundary}
-          contentEditable={<tsrx>
-            <ContentEditable
-              aria-disabled={disabled}
-              aria-label={placeholder}
-              class={classes.contentEditable}
-              contentEditable={!disabled}
-              data-workbench-activation-focus={props.activationFocus ? "true" : undefined}
-            />
-          </tsrx>}
-          placeholder={<tsrx>
-            <div class={classes.placeholder}>
-              {placeholder}
-            </div>
-          </tsrx>}
+          contentEditable={<ContentEditable
+            aria-disabled={disabled}
+            aria-label={placeholder}
+            class={classes.contentEditable}
+            contentEditable={!disabled}
+            data-workbench-activation-focus={props.activationFocus ? "true" : undefined}
+          />}
+          placeholder={<div class={classes.placeholder}>{placeholder}</div>}
         />
         <SessionInputPlugins
           {menu}
@@ -391,7 +385,7 @@ export component SessionInput(props: {
           onSubmit={submitFromEditor}
         />
 
-        if (props.footerInsideFrame) {
+        @if (props.footerInsideFrame) {
           <SessionInputFooter
             {canSubmit}
             {classes}
@@ -417,7 +411,7 @@ export component SessionInput(props: {
       onHighlight={highlightSuggestion}
     />
 
-    if (!props.footerInsideFrame) {
+    @if (!props.footerInsideFrame) {
       <SessionInputFooter
         {canSubmit}
         {classes}
@@ -432,7 +426,7 @@ export component SessionInput(props: {
   </form>
 }
 
-component SessionInputFooter(props: {
+function SessionInputFooter(props: {
   canSubmit: boolean;
   classes: Partial<SessionInputClasses>;
   contextUsage: SessionInputContextUsage | null;
@@ -441,19 +435,15 @@ component SessionInputFooter(props: {
   helperText: preact.ComponentChildren;
   iconOnlySubmit?: boolean;
   submitLabel: string;
-}) {
+}) @{
   <div class={props.classes.footer}>
-    if (props.footerControls) {
-      <div class={props.classes.footerControls}>
-        {props.footerControls}
-      </div>
+    @if (props.footerControls) {
+      <div class={props.classes.footerControls}>{props.footerControls}</div>
     }
-    if (props.helperText) {
-      <p class={props.classes.helperText}>
-        {props.helperText}
-      </p>
+    @if (props.helperText) {
+      <p class={props.classes.helperText}>{props.helperText}</p>
     }
-    if (props.contextUsage) {
+    @if (props.contextUsage) {
       <GoodTooltip
         ariaLabel={`Context usage ${props.contextUsagePercent}%`}
         content={`${props.contextUsagePercent}%`}
@@ -479,8 +469,10 @@ component SessionInputFooter(props: {
       disabled={!props.canSubmit}
       type="submit"
     >
-      if (!props.iconOnlySubmit) {
-        {props.submitLabel}
+      @if (!props.iconOnlySubmit) {
+        <>
+          {props.submitLabel}
+        </>
       }
 
       <SendHorizontal size={15} strokeWidth={2.2} />

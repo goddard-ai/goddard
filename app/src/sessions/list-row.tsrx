@@ -104,10 +104,10 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
   }
 }
 
-export component ListRow(props: {
+export function ListRow(props: {
   isActive?: boolean;
   session: DaemonSession;
-}) {
+}) @{
   const status = getSessionStatusPresentation(props.session.status)
   const StatusIcon = status.icon
   const sessionTitle = getSessionDisplayTitle(props.session)
@@ -133,16 +133,13 @@ export component ListRow(props: {
           color: status.color,
         }}
       />
-      <span class={styles.srOnly}>
-        {status.label}
-      </span>
+      <span class={styles.srOnly}>{status.label}</span>
     </span>
-    <span class={styles.repository} title={props.session.repository?.trim() || props.session.cwd}>
-      {getSessionRepositoryLabel(props.session)}
-    </span>
-    <h2 class={styles.title}>
-      {sessionTitle}
-    </h2>
+    <span
+      class={styles.repository}
+      title={props.session.repository?.trim() || props.session.cwd}
+    >{getSessionRepositoryLabel(props.session)}</span>
+    <h2 class={styles.title}>{sessionTitle}</h2>
     <div class={styles.trailing}>
       <time
         class={styles.updated}
@@ -152,9 +149,7 @@ export component ListRow(props: {
           dateStyle: "medium",
           timeStyle: "short",
         }).format(new Date(props.session.updatedAt))}
-      >
-        {formatTimeLabel(props.session.updatedAt)}
-      </time>
+      >{formatTimeLabel(props.session.updatedAt)}</time>
       <GoodTooltip ariaLabel="View changes" content="View changes">
         <button
           class={styles.actionButton}

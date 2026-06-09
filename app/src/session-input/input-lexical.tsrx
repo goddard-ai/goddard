@@ -69,7 +69,7 @@ function readPastedWebLink(event: Event) {
   }
 }
 
-export component SessionInputPlugins(props: {
+export function SessionInputPlugins(props: {
   menu: SessionInputMenuState | null;
   onEditorReady: (editor: LexicalEditor) => void;
   onDismissMenu: () => void;
@@ -80,7 +80,7 @@ export component SessionInputPlugins(props: {
   onEscape?: () => void;
   onSubmit: () => void;
   onAcceptMenu: () => void;
-}) {
+}) @{
   const [editor] = useLexicalComposerContext()
 
   useEffect(() => {
@@ -228,13 +228,15 @@ export component SessionInputPlugins(props: {
     }
   }, [editor, props])
 
-  <HistoryPlugin />
-  <ListPlugin />
-  <MarkdownShortcutPlugin transformers={sessionInputMarkdownTransformers} />
-  <OnChangePlugin
-    ignoreSelectionChange={true}
-    onChange={(editorState) => {
-      props.onPromptBlocksChange(serializeComposerEditorState(editorState))
-    }}
-  />
+  <>
+    <HistoryPlugin />
+    <ListPlugin />
+    <MarkdownShortcutPlugin transformers={sessionInputMarkdownTransformers} />
+    <OnChangePlugin
+      ignoreSelectionChange={true}
+      onChange={(editorState) => {
+        props.onPromptBlocksChange(serializeComposerEditorState(editorState))
+      }}
+    />
+  </>
 }

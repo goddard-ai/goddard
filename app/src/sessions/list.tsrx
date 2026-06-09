@@ -3,34 +3,30 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 
-export component SessionsList(props: {
+export function SessionsList(props: {
   activeSessionId?: DaemonSession["id"] | null;
   errorMessage?: string | null;
   listStatus?: "idle" | "loading" | "ready" | "error";
   searchQuery: string;
   sessions: readonly DaemonSession[];
-}) {
+}) @{
   if (props.listStatus === "loading" && props.sessions.length === 0) {
-    <div class={styles.loading}>"Loading sessions..."</div>
-
-    return
+    return <div class={styles.loading}>Loading sessions...</div>
   }
 
   if (props.listStatus === "error" && props.sessions.length === 0) {
-    <div class={styles.error}>
+    return <div class={styles.error}>
       <div class={styles.errorContent}>
-        <h2 class={styles.title}>"Couldn't load sessions"</h2>
+        <h2 class={styles.title}>Couldn't load sessions</h2>
         <p class={styles.body}>
           {props.errorMessage ?? "The daemon-backed session list request failed."}
         </p>
       </div>
     </div>
-
-    return
   }
 
   if (props.sessions.length === 0) {
-    <div class={styles.empty}>
+    return <div class={styles.empty}>
       <div class={styles.emptyContent}>
         <h2 class={styles.title}>
           {props.searchQuery.trim().length > 0 ? "No matching sessions" : "No sessions yet"}
@@ -42,12 +38,10 @@ export component SessionsList(props: {
         </p>
       </div>
     </div>
-
-    return
   }
 
   <ul class={styles.list}>
-    for (const session of props.sessions) {
+    @for (const session of props.sessions) {
       <li key={session.id}>
         <ListRow isActive={props.activeSessionId === session.id} {session} />
       </li>

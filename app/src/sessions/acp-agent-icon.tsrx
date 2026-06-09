@@ -88,26 +88,26 @@ function getTextIcon(icon: string | null | undefined) {
   return Array.from(source).length <= 3 ? source : null
 }
 
-export component AcpAgentIcon(props: {
+export function AcpAgentIcon(props: {
   class?: string;
   icon?: string | null;
   size?: number;
   strokeWidth?: number;
-}) {
+}) @{
   const svgMarkup = getSvgMarkup(props.icon)
   const textIcon =
     svgMarkup ? null : getTextIcon(props.icon)
 
   <span class={cx(styles.root, props.class)} aria-hidden={true}>
-    if (svgMarkup) {
+    @if (svgMarkup) {
       <span
         dangerouslySetInnerHTML={{
           __html: svgMarkup,
         }}
       />
-    } else if (textIcon) {
+    } @else if (textIcon) {
       <span class={styles.text}>{textIcon}</span>
-    } else {
+    } @else {
       <Bot aria-hidden={true} size={props.size ?? 16} strokeWidth={props.strokeWidth ?? 2.2} />
     }
   </span>

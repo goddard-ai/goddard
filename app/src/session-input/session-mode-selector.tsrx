@@ -3,14 +3,14 @@ import type { Signal } from "@preact/signals"
 import { flattenConfigOptionValues, type SelectSessionConfigOption } from "./config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "./select-menu.tsrx"
 
-export component SessionModeSelector(props: {
+export function SessionModeSelector(props: {
   disabled?: boolean;
   compact?: boolean;
   modeOption: SelectSessionConfigOption | null;
   open: Signal<boolean>;
   shortcut?: string | null;
   onValueChange: (value: string) => void;
-}) {
+}) @{
   <SessionConfigOptionSelector
     disabled={props.disabled}
     compact={props.compact}
@@ -23,7 +23,7 @@ export component SessionModeSelector(props: {
   />
 }
 
-export component SessionConfigOptionSelector(props: {
+export function SessionConfigOptionSelector(props: {
   disabled?: boolean;
   compact?: boolean;
   label?: string;
@@ -32,7 +32,7 @@ export component SessionConfigOptionSelector(props: {
   placeholder?: string;
   shortcut?: string | null;
   onValueChange: (value: string) => void;
-}) {
+}) @{
   const optionItems: SessionInputSelectItem[] =
     props.option
       ? flattenConfigOptionValues(props.option).map(

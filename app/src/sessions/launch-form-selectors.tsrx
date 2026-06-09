@@ -21,7 +21,7 @@ import {
 import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
 import { releaseSessionLaunchLease } from "./mutations.ts"
 
-export component SessionLaunchLoadingSelect(props: { label: string; compact?: boolean }) {
+export function SessionLaunchLoadingSelect(props: { label: string; compact?: boolean }) @{
   const open = useSignal(false)
 
   <SessionInputSelect
@@ -38,7 +38,7 @@ export component SessionLaunchLoadingSelect(props: { label: string; compact?: bo
   />
 }
 
-export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) {
+export function SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) @{
   <div class={styles.composerControls}>
     <SessionLaunchLoadingSelect compact={props.compact} label="ACP adapter" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
@@ -47,11 +47,11 @@ export component SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean
   </div>
 }
 
-export component AgentHarnessSelector(props: {
+export function AgentHarnessSelector(props: {
   disabled?: boolean;
   compact?: boolean;
   form: SessionLaunchFormState;
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {
@@ -94,10 +94,10 @@ export component AgentHarnessSelector(props: {
   />
 }
 
-export component SessionLaunchBranchSelector(props: {
+export function SessionLaunchBranchSelector(props: {
   disabled?: boolean;
   form: SessionLaunchFormState;
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
@@ -128,31 +128,33 @@ export component SessionLaunchBranchSelector(props: {
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
   )
 
-  <div class={styles.grid}>
-    <SessionInputSelect
-      disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
-      filterable={true}
-      items={branchItems}
-      label="Git branch"
-      open={form.getPickerOpen("branch")}
-      placeholder="Choose a branch"
-      shortcut={branchShortcut}
-      value={form.draftBaseBranchName.value}
-      onValueChange={(value) => {
-        form.draftBaseBranchName.value = value
-      }}
-    />
-  </div>
+  <>
+    <div class={styles.grid}>
+      <SessionInputSelect
+        disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
+        filterable={true}
+        items={branchItems}
+        label="Git branch"
+        open={form.getPickerOpen("branch")}
+        placeholder="Choose a branch"
+        shortcut={branchShortcut}
+        value={form.draftBaseBranchName.value}
+        onValueChange={(value) => {
+          form.draftBaseBranchName.value = value
+        }}
+      />
+    </div>
 
-  if (form.draftLocation.value === "local" && preview?.dirty === true) {
-    <p class={styles.warning}>"Commit or stash local changes to launch from another branch."</p>
-  }
+    @if (form.draftLocation.value === "local" && preview?.dirty === true) {
+      <p class={styles.warning}>Commit or stash local changes to launch from another branch.</p>
+    }
+  </>
 }
 
-export component SessionLaunchLocationSelector(props: {
+export function SessionLaunchLocationSelector(props: {
   disabled?: boolean;
   form: SessionLaunchFormState;
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
@@ -195,7 +197,7 @@ export component SessionLaunchLocationSelector(props: {
   }, [form, preview])
 
   if (!preview?.repoRoot) {
-    return
+    return null
   }
 
   const locationOptions = [
@@ -214,14 +216,14 @@ export component SessionLaunchLocationSelector(props: {
 
   <fieldset class={styles.radioField} disabled={props.disabled || !form.draftProjectPath.value}>
     <legend class={styles.radioLegend}>
-      <span>"Launch location"</span>
+      <span>Launch location</span>
 
-      if (locationShortcut) {
+      @if (locationShortcut) {
         <GoodKeyboardShortcut expression={locationShortcut} />
       }
     </legend>
     <div class={styles.radioGroup}>
-      for (const option of locationOptions) {
+      @for (const option of locationOptions) {
         <label
           class={styles.radioOption}
           data-selected={form.draftLocation.value === option.value ? "true" : undefined}
@@ -264,10 +266,10 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
   ]
 }
 
-export component SessionSubpackageSelector(props: {
+export function SessionSubpackageSelector(props: {
   disabled?: boolean;
   form: SessionLaunchFormState;
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const projectPath = form.draftProjectPath.value
@@ -299,7 +301,7 @@ export component SessionSubpackageSelector(props: {
   }, [form, preferredCwd, projectPath])
 
   if (subpackages.length === 0) {
-    return
+    return null
   }
 
   <SessionInputSelect
@@ -320,11 +322,11 @@ export component SessionSubpackageSelector(props: {
   />
 }
 
-export component SessionLaunchPreviewSelectors(props: {
+export function SessionLaunchPreviewSelectors(props: {
   compact?: boolean;
   disabled?: boolean;
   form: SessionLaunchFormState;
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   useQuery(
@@ -387,7 +389,7 @@ export component SessionLaunchPreviewSelectors(props: {
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
 
-    if (form.modeOption.value) {
+    @if (form.modeOption.value) {
       <SessionModeSelector
         compact={props.compact}
         disabled={props.disabled}
@@ -415,7 +417,7 @@ export component SessionLaunchPreviewSelectors(props: {
       }}
     />
 
-    if (form.thinkingOption.value) {
+    @if (form.thinkingOption.value) {
       <SessionInputSelect
         compact={props.compact}
         disabled={props.disabled || thinkingItems.length === 0}

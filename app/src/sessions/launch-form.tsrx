@@ -32,14 +32,14 @@ const launchInputClasses: SessionInputClasses = {
   submitButton: composerInputStyles.submitButton,
 }
 
-export component SessionLaunchForm(props: {
+export function SessionLaunchForm(props: {
   disabled?: boolean;
   form: SessionLaunchFormState;
   onEscape?: () => void;
   showProjectSelector?: boolean;
   onSubmit: () => Promise<void> | void;
   projects: readonly ProjectRecord[];
-}) {
+}) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const disabled = props.disabled ?? false
@@ -80,7 +80,7 @@ export component SessionLaunchForm(props: {
     data-disabled={disabled ? "true" : undefined}
   >
     <div class={selectorStyles.grid}>
-      if (showProjectSelector) {
+      @if (showProjectSelector) {
         <SessionInputSelect
           disabled={disabled || props.projects.length === 0}
           filterable={true}
@@ -99,14 +99,14 @@ export component SessionLaunchForm(props: {
         />
       }
 
-      try {
+      @try {
         <SessionSubpackageSelector {disabled} {form} />
-      } pending {
+      } @pending {
         <SessionLaunchLoadingSelect label="Working directory" />
       }
-      try {
+      @try {
         <SessionLaunchLocationSelector {disabled} {form} />
-      } pending {
+      } @pending {
         <SessionLaunchLoadingSelect label="Launch location" />
       }
     </div>
@@ -116,13 +116,13 @@ export component SessionLaunchForm(props: {
       classes={launchInputClasses}
       {disabled}
       footerInsideFrame={true}
-      footerControls={<tsrx>
-        try {
+      footerControls={@{
+        @try {
           <SessionLaunchPreviewSelectors compact={true} {disabled} {form} />
-        } pending {
+        } @pending {
           <SessionLaunchPreviewLoadingSelectors compact={true} />
         }
-      </tsrx>}
+      }}
       helperText={null}
       initialPrompt={form.draftPromptBlocks.value}
       loadSuggestions={async (input) => {
@@ -159,9 +159,9 @@ export component SessionLaunchForm(props: {
       }}
     />
 
-    try {
+    @try {
       <SessionLaunchBranchSelector {disabled} {form} />
-    } pending {
+    } @pending {
       <SessionLaunchLoadingSelect label="Git branch" />
     }
   </div>

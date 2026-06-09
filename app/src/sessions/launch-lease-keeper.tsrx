@@ -13,9 +13,9 @@ export function isKeptSessionLaunchLease(launchLeaseId: string | null | undefine
     keptLaunchLeaseId.value === launchLeaseId
 }
 
-export component SessionLaunchLeaseKeeper(props: {
+export function SessionLaunchLeaseKeeper(props: {
   currentProjectPath: string | null;
-}) {
+}) @{
   const subpackages = useQuery(props.currentProjectPath ? goddardSdk.session.subpackages : null, {
     params: props.currentProjectPath ? [{ cwd: props.currentProjectPath }] : null,
   })

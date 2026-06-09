@@ -14,12 +14,18 @@ import { SessionsList } from "./list.tsrx"
 import styles from "./page.style.ts"
 import { filterSessionsByTitle } from "./title-search.ts"
 
-component SessionsPage() {
+function SessionsPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
 
   const { sessions } = useQuery(goddardSdk.session.list, {
     params: [{ limit: SESSION_LIST_LIMIT }],
   })
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeSessionId, setActiveSessionId] = useState<DaemonSession["id"] | null>(null)
+  const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+  const activeSessionIndex = visibleSessions.findIndex((session) => session.id === activeSessionId)
+  const resolvedActiveSession =
+    activeSessionIndex >= 0 ? visibleSessions[activeSessionIndex] : visibleSessions[0] ?? null
 
   function openSession(sessionId: DaemonSession["id"]) {
     const session = sessions.find((candidate) => candidate.id === sessionId)
@@ -64,15 +70,6 @@ component SessionsPage() {
     }}
   >
     <div class={styles.root}>
-      const [searchQuery, setSearchQuery] = useState("")
-      const [activeSessionId, setActiveSessionId] = useState<DaemonSession["id"] | null>(null)
-      const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
-      const activeSessionIndex = visibleSessions.findIndex(
-        (session) => session.id === activeSessionId,
-      )
-      const resolvedActiveSession =
-        activeSessionIndex >= 0 ? visibleSessions[activeSessionIndex] : visibleSessions[0] ?? null
-
       <ListToolbar
         {searchQuery}
         onRowNavigationKeyDown={(event) => {

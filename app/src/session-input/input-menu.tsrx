@@ -49,29 +49,23 @@ function suggestionKey(suggestion: SessionInputSuggestion) {
   return `${suggestion.type}:${suggestion.path}`
 }
 
-component SuggestionIcon(props: { suggestion: SessionInputSuggestion }) {
+function SuggestionIcon(props: { suggestion: SessionInputSuggestion }) @{
   if (props.suggestion.type === "folder") {
-    <Folder size={14} strokeWidth={2.2} />
-
-    return
+    return <Folder size={14} strokeWidth={2.2} />
   }
 
   if (props.suggestion.type === "file") {
-    <File size={14} strokeWidth={2.2} />
-
-    return
+    return <File size={14} strokeWidth={2.2} />
   }
 
   if (props.suggestion.type === "skill") {
-    <BookOpen size={14} strokeWidth={2.2} />
-
-    return
+    return <BookOpen size={14} strokeWidth={2.2} />
   }
 
   <Command size={14} strokeWidth={2.2} />
 }
 
-export component SessionInputMenu(props: {
+export function SessionInputMenu(props: {
   isLoadingSuggestions: boolean;
   menu: SessionInputMenuState | null;
   menuRef: (element: HTMLDivElement | null) => void;
@@ -79,25 +73,23 @@ export component SessionInputMenu(props: {
   onHighlight: (index: number) => void;
   selectedIndex: number;
   suggestions: readonly SessionInputSuggestion[];
-}) {
+}) @{
   if (!props.menu) {
-    return
+    return null
   }
 
   <OverlayPortal root="menu">
     <div
-      {ref props.menuRef}
+      ref={props.menuRef}
       class={inputMenuClass}
       style={{
         left: `${props.menu.anchorLeft}px`,
         top: `${props.menu.anchorTop}px`,
       }}
     >
-      <div class={inputMenuHeaderClass}>
-        {getMenuHeading(props.menu.trigger)}
-      </div>
+      <div class={inputMenuHeaderClass}>{getMenuHeading(props.menu.trigger)}</div>
       <div class={inputMenuListClass}>
-        if (props.isLoadingSuggestions) {
+        @if (props.isLoadingSuggestions) {
           <div class={inputMenuEmptyClass}>
             <span
               class={css({
@@ -107,13 +99,13 @@ export component SessionInputMenu(props: {
               })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              "Loading suggestions..."
+              Loading suggestions...
             </span>
           </div>
-        } else if (props.suggestions.length === 0) {
-          <div class={inputMenuEmptyClass}>"No matches for this trigger yet."</div>
-        } else {
-          for (const suggestion of props.suggestions; index index) {
+        } @else if (props.suggestions.length === 0) {
+          <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
+        } @else {
+          @for (const suggestion of props.suggestions; index index) {
             <button
               class={cx(
                 inputMenuButtonClass,
@@ -135,12 +127,8 @@ export component SessionInputMenu(props: {
                 <SuggestionIcon {suggestion} />
               </span>
               <span class={inputMenuBodyClass}>
-                <span class={inputMenuLabelClass}>
-                  {getSuggestionLabel(suggestion)}
-                </span>
-                <span class={inputMenuDetailClass}>
-                  {getSuggestionDetail(suggestion)}
-                </span>
+                <span class={inputMenuLabelClass}>{getSuggestionLabel(suggestion)}</span>
+                <span class={inputMenuDetailClass}>{getSuggestionDetail(suggestion)}</span>
               </span>
             </button>
           }
