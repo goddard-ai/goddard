@@ -4,14 +4,14 @@ import type { Protected } from "preact-sigma"
 import { translateKeyboardEvent, type TerminalSession } from "./terminal-session.ts"
 import styles from "./terminal-viewport.style.ts"
 
-export component TerminalViewport(props: {
+export function TerminalViewport(props: {
   terminal: Protected<TerminalSession>;
   class?: string;
   ariaLabel?: string;
-}) {
+}) @{
   <div class={cx(styles.frame, props.class)}>
     <div
-      {ref props.terminal.attachViewport}
+      ref={props.terminal.attachViewport}
       aria-label={props.ariaLabel ?? "Terminal viewport"}
       class={styles.viewport}
       onFocus={() => {
@@ -53,13 +53,11 @@ export component TerminalViewport(props: {
       }}
       tabIndex={0}
     >
-      for (const row of props.terminal.viewRows) {
+      @for (const row of props.terminal.viewRows) {
         <div class={styles.row} key={row.key}>
           {row.segments.length === 0 ? " " : null}
-          for (const segment of row.segments) {
-            <span key={segment.key} style={segment.style}>
-              {segment.text}
-            </span>
+          @for (const segment of row.segments) {
+            <span key={segment.key} style={segment.style}>{segment.text}</span>
           }
         </div>
       }

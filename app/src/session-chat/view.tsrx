@@ -139,6 +139,8 @@ function SessionChatViewContent(props: {
         }
       }
 
+      const headerActionError = page.headerAction.error.value
+
       <SessionChatQueryDataProvider value={{ chat: protectedChat, session, sessionHistory }}>
         <header class={styles.header} data-session-chat-header="true">
           <div class={styles.headerIdentity}>
@@ -158,7 +160,6 @@ function SessionChatViewContent(props: {
           </div>
         </header>
 
-        const headerActionError = page.headerAction.error.value
         {headerActionError
           ? <div class={styles.headerActionError} role="alert">
               <strong class={styles.headerActionErrorTitle}>{headerActionError.title}</strong>

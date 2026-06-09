@@ -8,7 +8,7 @@ import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import styles from "./capture-dialog.style.ts"
 
-export component KeyboardShortcutCaptureDialog(props: {
+export function KeyboardShortcutCaptureDialog(props: {
   open: Signal<boolean>;
   label: string;
   mode: "add" | "change";
@@ -16,7 +16,7 @@ export component KeyboardShortcutCaptureDialog(props: {
   whenClause: string | null;
   onRemove?: () => Promise<void> | void;
   onSave: (expression: string) => Promise<void> | void;
-}) {
+}) @{
   const shortcutRegistry = useShortcutRegistry()
   const sessionRef = useRef<RecordingSession | null>(null)
   const titleId = useId()
@@ -102,9 +102,7 @@ export component KeyboardShortcutCaptureDialog(props: {
       <span class={styles.titleLabel}>
         {props.mode === "add" ? "Add shortcut" : "Change shortcut"}
       </span>
-      <span class={styles.titleText}>
-        {props.label}
-      </span>
+      <span class={styles.titleText}>{props.label}</span>
     </h2>
     <button
       class={styles.closeButton}
@@ -116,36 +114,34 @@ export component KeyboardShortcutCaptureDialog(props: {
       <X size={16} strokeWidth={2.2} />
     </button>
     <dl class={styles.metaList}>
-      if (props.currentExpression) {
+      @if (props.currentExpression) {
         <div class={styles.metaRow}>
-          <dt class={styles.metaTerm}>"Current shortcut"</dt>
+          <dt class={styles.metaTerm}>Current shortcut</dt>
           <dd class={styles.metaDetail}>
             <GoodKeyboardShortcut expression={props.currentExpression} />
           </dd>
         </div>
       }
-      if (props.whenClause) {
+      @if (props.whenClause) {
         <div class={styles.metaRow}>
-          <dt class={styles.metaTerm}>"When"</dt>
-          <dd class={styles.metaDetail}>
-            {props.whenClause}
-          </dd>
+          <dt class={styles.metaTerm}>When</dt>
+          <dd class={styles.metaDetail}>{props.whenClause}</dd>
         </div>
       }
     </dl>
     <section class={styles.captureSection}>
       <div class={styles.captureHeading}>
-        <span class={styles.captureLabel}>"Press the shortcut you want to use"</span>
+        <span class={styles.captureLabel}>Press the shortcut you want to use</span>
 
-        if (isRecording) {
-          <span class={styles.captureStatus}>"Listening…"</span>
+        @if (isRecording) {
+          <span class={styles.captureStatus}>Listening...</span>
         }
       </div>
       <div class={styles.captureValue}>
-        if (draftExpression) {
+        @if (draftExpression) {
           <GoodKeyboardShortcut expression={draftExpression} />
-        } else {
-          <span class={styles.capturePlaceholder}>"Type a key combination or sequence"</span>
+        } @else {
+          <span class={styles.capturePlaceholder}>Type a key combination or sequence</span>
         }
       </div>
     </section>
@@ -156,20 +152,16 @@ export component KeyboardShortcutCaptureDialog(props: {
         onClick={() => {
           props.open.value = false
         }}
-      >
-        "Cancel"
-      </button>
+      >Cancel</button>
 
-      if (props.onRemove) {
+      @if (props.onRemove) {
         <button
           class={`${styles.actionButton} ${styles.actionButtonDanger}`}
           type="button"
           onClick={() => {
             void props.onRemove?.()
           }}
-        >
-          "Remove shortcut"
-        </button>
+        >Remove shortcut</button>
       }
 
       <button
@@ -179,9 +171,7 @@ export component KeyboardShortcutCaptureDialog(props: {
         onClick={() => {
           void props.onSave(draftExpression.trim())
         }}
-      >
-        "Save shortcut"
-      </button>
+      >Save shortcut</button>
     </div>
   </Modal>
 }

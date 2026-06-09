@@ -4,49 +4,39 @@ import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import styles from "./view.style.ts"
 
-component SessionChangesView(props: {
+function SessionChangesView(props: {
   repositoryLabel: string;
   sessionId: DaemonSession["id"];
   sessionTitle: string;
-}) {
+}) @{
   const changes = useQuery(goddardSdk.session.changes, { params: [{ id: props.sessionId }] })
 
   <section class={styles.root}>
     <header class={styles.header}>
-      <p class={styles.repository}>
-        {props.repositoryLabel}
-      </p>
-      <h1 class={styles.title}>
-        {props.sessionTitle}
-      </h1>
-      <p class={styles.description}>"Current git diff for this session workspace."</p>
+      <p class={styles.repository}>{props.repositoryLabel}</p>
+      <h1 class={styles.title}>{props.sessionTitle}</h1>
+      <p class={styles.description}>Current git diff for this session workspace.</p>
 
-      if (changes.workspaceRoot) {
-        <p class={styles.workspaceRoot}>
-          {changes.workspaceRoot}
-        </p>
+      @if (changes.workspaceRoot) {
+        <p class={styles.workspaceRoot}>{changes.workspaceRoot}</p>
       }
     </header>
 
-    if (changes.workspaceRoot === null) {
+    @if (changes.workspaceRoot === null) {
       <div class={styles.empty}>
-        <h2 class={styles.emptyTitle}>"Git diff unavailable"</h2>
-        <p class={styles.description}>
-          "This session is not currently attached to a git workspace."
-        </p>
+        <h2 class={styles.emptyTitle}>Git diff unavailable</h2>
+        <p class={styles.description}>This session is not currently attached to a git workspace.</p>
       </div>
-    } else if (changes.hasChanges) {
+    } @else if (changes.hasChanges) {
       <div class={styles.panel}>
         <div class={styles.diffViewport}>
-          <pre class={styles.diff}>
-            {changes.diff}
-          </pre>
+          <pre class={styles.diff}>{changes.diff}</pre>
         </div>
       </div>
-    } else {
+    } @else {
       <div class={styles.empty}>
-        <h2 class={styles.emptyTitle}>"No changes"</h2>
-        <p class={styles.description}>"This session workspace is currently clean."</p>
+        <h2 class={styles.emptyTitle}>No changes</h2>
+        <p class={styles.description}>This session workspace is currently clean.</p>
       </div>
     }
   </section>
