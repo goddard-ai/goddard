@@ -79,32 +79,23 @@ async function resolveRepositoryRoot(startDir: string): Promise<string> {
   }
 }
 
-/** Keeps the current process alive until the operator interrupts the tail command. */
-async function waitForTerminationSignal(unsubscribe: () => void): Promise<void> {
-  await new Promise<void>((resolve) => {
-    let finished = false
+/** Creates an abort signal that follows the operator interrupting a streaming command. */
+function createTerminationSignal(): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController()
+  const handleSignal = () => {
+    controller.abort()
+  }
 
-    const cleanup = () => {
+  process.on("SIGINT", handleSignal)
+  process.on("SIGTERM", handleSignal)
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
       process.off("SIGINT", handleSignal)
       process.off("SIGTERM", handleSignal)
-    }
-    const finish = () => {
-      if (finished) {
-        return
-      }
-
-      finished = true
-      cleanup()
-      unsubscribe()
-      resolve()
-    }
-    const handleSignal = () => {
-      finish()
-    }
-
-    process.on("SIGINT", handleSignal)
-    process.on("SIGTERM", handleSignal)
-  })
+    },
+  }
 }
 
 /** Runs the workforce CLI entrypoint against one argv payload. */
@@ -196,16 +187,22 @@ export async function main(argv: string[]) {
         handler: async ({ root, daemonUrl }) => {
           const sdk = getSdk(daemonUrl)
           const repositoryRoot = await resolveRepositoryRoot(root)
-          const unsubscribe = await sdk.workforce.subscribe(
-            {
-              rootDir: repositoryRoot,
-            },
-            (event) => {
-              process.stdout.write(`${JSON.stringify(event)}\n`)
-            },
-          )
+          const termination = createTerminationSignal()
 
-          await waitForTerminationSignal(unsubscribe)
+          try {
+            const events = await sdk.workforce.streamEvents(
+              {
+                rootDir: repositoryRoot,
+              },
+              { signal: termination.signal },
+            )
+
+            for await (const event of events) {
+              process.stdout.write(`${JSON.stringify(event)}\n`)
+            }
+          } finally {
+            termination.cleanup()
+          }
         },
       }),
       request: command({
