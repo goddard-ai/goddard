@@ -120,10 +120,6 @@ const Component = (props) => @{
 
 Function declarations and arrow functions may use `@{ ... }` bodies. Top-level early `return` exits the function; otherwise the final JSX-producing statement is the output. In fine-grained targets, guard clauses can compile to reactive control flow.
 
-## Conditional Hooks
-
-Hooks may be authored inside conditionals, loops, switches, after early returns, and extractable TSRX templates. The compiler extracts hook-containing paths into target-safe internal components while preserving captured values.
-
 ## Native `<style>`
 
 JSX-child style blocks contain direct CSS, are extracted, scoped, and render as `null`.

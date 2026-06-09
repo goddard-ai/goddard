@@ -21,6 +21,7 @@ This guide lists legacy TSRX syntax that changed or was removed in current TSRX.
 | `switch` / `case` / `default` / `break` | `@switch` / `@case:` / `@default:` |
 | `try` / `pending` / `catch` | `@try` / `@pending` / `@catch` |
 | Guard fallback + bare `return;` | `return <Fallback />` or `return null` in top-level function `@{}` |
+| Conditional hook extraction | Hoist hooks or extract explicit child components |
 | `{text expr}` | Removed from TSRX |
 | `{html expr}` | Removed from TSRX |
 | `{style "className"}` | Removed from TSRX |
@@ -180,6 +181,43 @@ function Dashboard({ user }: { user: User | null }) @{
 ```
 
 Other TSRX templates and control-flow blocks produce output from their final JSX-producing statement.
+
+## Hook usage
+
+Legacy TSRX designs allowed hooks in conditional render paths and relied on compiler extraction to keep the target framework's hook rules intact. Current TSRX no longer treats hooks as conditionally extractable.
+
+Do not place hooks inside `@if`, `@for`, `@switch`, conditional branches, loops, or paths after early returns.
+
+When the hook should always exist for the component, hoist the hook call before conditional control flow:
+
+```tsx
+function Panel(props) @{
+  const data = useData(props.id);
+
+  @if (!props.visible) {
+    <Hidden />
+  } @else {
+    <View data={data} />
+  }
+}
+```
+
+When the hook should only exist for one branch or one repeated item, move that branch or item into an explicit child component and call the hook at the child component's top level:
+
+```tsx
+function StatusWrapper(props: { streamId: string | null }) @{
+  @if (!props.streamId) {
+    <p>Disconnected</p>
+  } @else {
+    <ActiveStream streamId={props.streamId} />
+  }
+}
+
+function ActiveStream(props: { streamId: string }) @{
+  const data = useSubscription(props.streamId);
+  <div>Live: {data}</div>
+}
+```
 
 ## Removed directives and refs
 
