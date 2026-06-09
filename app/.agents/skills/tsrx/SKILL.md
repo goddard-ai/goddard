@@ -102,6 +102,8 @@ Each iteration may run local JS statements, then finishes with JSX. `break` and 
 
 `@try` protects the main render tree, `@pending` supplies async fallback UI, and `@catch` supplies error UI. `@catch` receives `error` and optionally `reset`. Each block finishes with JSX; emitted boundaries are target-specific.
 
+Use empty `@pending {}` or `@catch (...) {}` blocks when there is no fallback or error UI; do not add an empty fragment solely to satisfy the block.
+
 ## Function Bodies
 
 ```tsx

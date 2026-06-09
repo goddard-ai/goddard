@@ -53,9 +53,7 @@ export function AppShell() @{
           <SessionLaunchLeaseKeeper
             currentProjectPath={projectContext.activeProjectPath ?? projects[0]?.path ?? null}
           />
-        } @pending {
-          <></>
-        }
+        } @pending {}
 
         <CommandDialog
           command={AppCommand.navigation.openCommandPalette}

@@ -153,6 +153,8 @@ Legacy switch fallthrough changed to stacked `@case` labels sharing a block. `br
 }
 ```
 
+When no fallback or error UI is needed, leave `@pending` or `@catch` empty instead of rendering `<></>`.
+
 ## Early returns
 
 Legacy guards rendered fallback UI, then exited with bare `return;`:

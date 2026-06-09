@@ -44,9 +44,7 @@ export function CommandDialog(props: CommandDialogProps) @{
     @if (open.value) {
       @try {
         <Content {open} />
-      } @pending {
-        <></>
-      } @catch (error, retry) {
+      } @pending {} @catch (error, retry) {
         console.error("Command dialog render failed.", error)
 
         <CommandDialogFailure {open} {retry} />
