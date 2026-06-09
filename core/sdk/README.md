@@ -48,7 +48,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 - Generated stream routes return async iterables and use `AbortSignal` cancellation.
 - Each namespace method takes one plain object payload.
 - Each namespace method exposes the daemon response shape directly.
-- The namespace getters are cached after first access.
+- The namespaces are assigned when the SDK instance is constructed.
 
 Namespaces:
 

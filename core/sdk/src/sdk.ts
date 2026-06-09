@@ -37,15 +37,6 @@ type FeatureSdkNamespaces = InferSdkNamespaces<typeof sdkPlugins>
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
 
-/** Caches one namespace on first access by replacing the instance getter with the concrete value. */
-function defineCachedNamespace<TValue>(owner: object, key: string, value: TValue): TValue {
-  Object.defineProperty(owner, key, {
-    configurable: true,
-    value,
-  })
-  return value
-}
-
 /** Builds the health namespace with one thin method per daemon health IPC action. */
 function createDaemonNamespace(client: any) {
   return {
@@ -86,60 +77,33 @@ function createSessionNamespace(client: any, sessionFeature: FeatureSdkNamespace
 /** Browser-safe SDK facade that mirrors the daemon IPC contract through thin namespace methods. */
 export class GoddardSdk {
   readonly #client: GoddardClient
-  #featureNamespaces: FeatureSdkNamespaces | undefined
+
+  readonly daemon: ReturnType<typeof createDaemonNamespace>
+  readonly auth: FeatureSdkNamespaces["auth"]
+  readonly adapter: FeatureSdkNamespaces["adapter"]
+  readonly pr: FeatureSdkNamespaces["pr"]
+  readonly inbox: FeatureSdkNamespaces["inbox"]
+  readonly session: ReturnType<typeof createSessionNamespace>
+  readonly reviewSession: FeatureSdkNamespaces["reviewSession"]
+  readonly action: FeatureSdkNamespaces["action"]
+  readonly loop: FeatureSdkNamespaces["loop"]
+  readonly workforce: FeatureSdkNamespaces["workforce"]
 
   constructor(options: GoddardClientOptions) {
     this.#client = resolveIpcClient(options)
-  }
-
-  get #features() {
-    this.#featureNamespaces ??= sdkPlugins.wrap({
+    const features = sdkPlugins.wrap({
       client: this.#client,
     }) as FeatureSdkNamespaces
-    return this.#featureNamespaces
-  }
 
-  get daemon() {
-    return defineCachedNamespace(this, "daemon", createDaemonNamespace(this.#client))
-  }
-
-  get auth() {
-    return defineCachedNamespace(this, "auth", this.#features.auth)
-  }
-
-  get adapter() {
-    return defineCachedNamespace(this, "adapter", this.#features.adapter)
-  }
-
-  get pr() {
-    return defineCachedNamespace(this, "pr", this.#features.pr)
-  }
-
-  get inbox() {
-    return defineCachedNamespace(this, "inbox", this.#features.inbox)
-  }
-
-  get session() {
-    return defineCachedNamespace(
-      this,
-      "session",
-      createSessionNamespace(this.#client, this.#features.session),
-    )
-  }
-
-  get reviewSession() {
-    return defineCachedNamespace(this, "reviewSession", this.#features.reviewSession)
-  }
-
-  get action() {
-    return defineCachedNamespace(this, "action", this.#features.action)
-  }
-
-  get loop() {
-    return defineCachedNamespace(this, "loop", this.#features.loop)
-  }
-
-  get workforce() {
-    return defineCachedNamespace(this, "workforce", this.#features.workforce)
+    this.daemon = createDaemonNamespace(this.#client)
+    this.auth = features.auth
+    this.adapter = features.adapter
+    this.pr = features.pr
+    this.inbox = features.inbox
+    this.session = createSessionNamespace(this.#client, features.session)
+    this.reviewSession = features.reviewSession
+    this.action = features.action
+    this.loop = features.loop
+    this.workforce = features.workforce
   }
 }

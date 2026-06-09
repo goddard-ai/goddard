@@ -95,6 +95,21 @@ async function* createMockStream(
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
+  test("assigns daemon and feature namespaces during construction", () => {
+    const { sdk } = createSdkWithClient()
+
+    expect(Object.hasOwn(sdk, "daemon")).toBe(true)
+    expect(Object.hasOwn(sdk, "auth")).toBe(true)
+    expect(Object.hasOwn(sdk, "adapter")).toBe(true)
+    expect(Object.hasOwn(sdk, "pr")).toBe(true)
+    expect(Object.hasOwn(sdk, "inbox")).toBe(true)
+    expect(Object.hasOwn(sdk, "session")).toBe(true)
+    expect(Object.hasOwn(sdk, "reviewSession")).toBe(true)
+    expect(Object.hasOwn(sdk, "action")).toBe(true)
+    expect(Object.hasOwn(sdk, "loop")).toBe(true)
+    expect(Object.hasOwn(sdk, "workforce")).toBe(true)
+  })
+
   test("inbox.streamItems streams daemon inbox item updates", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const unsubscribe = vi.fn()
