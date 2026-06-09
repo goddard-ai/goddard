@@ -7,38 +7,36 @@ import type {
 import { buildToolDiffPreview } from "./layout.ts"
 import styles from "./transcript.style.ts"
 
-component WorkDrawerToolContent(props: {
+function WorkDrawerToolContent(props: {
   content: SessionTranscriptToolContent;
-}) {
+}) @{
   if (props.content.type === "content") {
     const contentText = props.content.text?.trim()
 
     if (contentText) {
-      <div class={styles.workDrawerDetailText}>{contentText}</div>
+      return <div class={styles.workDrawerDetailText}>{contentText}</div>
     }
+
+    return null
   } else if (props.content.type === "diff") {
-    <div class={styles.workDrawerDetailList}>
-      if (props.content.path) {
-        <div class={styles.workDrawerDetailMono}>
-          {props.content.path}
-        </div>
+    return <div class={styles.workDrawerDetailList}>
+      @if (props.content.path) {
+        <div class={styles.workDrawerDetailMono}>{props.content.path}</div>
       }
 
-      <div class={styles.workDrawerDetailMono}>
-        {buildToolDiffPreview(props.content)}
-      </div>
-    </div>
-  } else {
-    <div class={styles.workDrawerDetailMono}>
-      "Terminal session "
-      {props.content.terminalId}
+      <div class={styles.workDrawerDetailMono}>{buildToolDiffPreview(props.content)}</div>
     </div>
   }
+
+  return <div class={styles.workDrawerDetailMono}>
+    Terminal session
+    {props.content.terminalId}
+  </div>
 }
 
-export component WorkDrawerTranscriptRow(props: {
+export function WorkDrawerTranscriptRow(props: {
   message: SessionTranscriptWorkDrawer;
-}) {
+}) @{
   <article class={styles.row}>
     <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
       <div class={styles.rowColumn} style={{ width: "100%" }}>
@@ -54,18 +52,18 @@ export component WorkDrawerTranscriptRow(props: {
           </summary>
 
           <ol class={styles.workDrawerItemList}>
-            for (const item of props.message.items) {
+            @for (const item of props.message.items) {
               <li class={styles.workDrawerItem} key={`${props.message.id}:${item.id}`}>
-                if (item.kind === "thought") {
+                @if (item.kind === "thought") {
                   <article class={styles.workDrawerThought}>
-                    <div class={styles.workDrawerItemHeading}>"Thought"</div>
+                    <div class={styles.workDrawerItemHeading}>Thought</div>
                     <div class={styles.workDrawerDetailText}>{item.text}</div>
                   </article>
-                } else {
+                } @else {
                   <article class={styles.workDrawerTool}>
                     <div class={styles.workDrawerItemHeading}>{item.title}</div>
 
-                    for (const content of item.content; index contentIndex) {
+                    @for (const content of item.content; index contentIndex) {
                       <WorkDrawerToolContent key={`${item.id}:content:${contentIndex}`} {content} />
                     }
                   </article>

@@ -24,11 +24,11 @@ function createMessageParser() {
   })
 }
 
-export component MarkdownMessage(props: {
+export function MarkdownMessage(props: {
   markdown: string;
   role: "assistant" | "user";
   streaming?: boolean;
-}) {
+}) @{
   const parserRef = useRef<ReturnType<typeof createMessageParser> | null>(null)
 
   if (!parserRef.current) {
@@ -70,11 +70,7 @@ export component MarkdownMessage(props: {
   }, [props.markdown, props.streaming])
 
   if (!tree) {
-    <div class={cx(renderClass, styles.fallback)}>
-      {props.markdown}
-    </div>
-
-    return
+    return <div class={cx(renderClass, styles.fallback)}>{props.markdown}</div>
   }
 
   <ComarkRenderer className={renderClass} streaming={props.streaming} {tree} />

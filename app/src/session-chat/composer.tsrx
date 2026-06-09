@@ -19,7 +19,7 @@ const composerClasses: SessionInputClasses = {
   submitButton: styles.submitButton,
 }
 
-export component Composer(props: {
+export function Composer(props: {
   disabled?: boolean;
   loadSuggestions: SessionInputSuggestionLoader;
   onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
@@ -29,7 +29,7 @@ export component Composer(props: {
   footerControls?: preact.ComponentChildren;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
-}) {
+}) @{
   <SessionInput
     classes={composerClasses}
     contextUsage={props.contextUsage}

@@ -281,57 +281,51 @@ function getEstimatedBottomOffset(input: {
 }
 
 /** Renders one transcript row using the row-specific presentation path. */
-component TranscriptRow(props: {
+function TranscriptRow(props: {
   row: TranscriptRowContext;
   onSelectPermissionOption?: TranscriptProps["onSelectPermissionOption"];
 }) {
   const item = props.row.item
   switch (item.kind) {
     case "toolGroup":
-      <ToolTranscriptRow groupId={item.id} toolCalls={item.toolCalls} />
-      return
+      return <ToolTranscriptRow groupId={item.id} toolCalls={item.toolCalls} />
     case "permissionRequest":
-      <PermissionRequestTranscriptRow
+      return <PermissionRequestTranscriptRow
         message={item}
         onSelectOption={props.onSelectPermissionOption}
       />
-      return
     case "planUpdate":
-      <PlanUpdateTranscriptRow message={item} />
-      return
+      return <PlanUpdateTranscriptRow message={item} />
     case "workDrawer":
-      <WorkDrawerTranscriptRow message={item} />
-      return
+      return <WorkDrawerTranscriptRow message={item} />
     case "turnStop":
-      <TurnStopTranscriptRow
+      return <TurnStopTranscriptRow
         row={props.row as
           TranscriptRowContext & {
             item: SessionTranscriptTurnStop;
           }}
       />
-      return
     case "message":
-      <TextTranscriptRow
+      return <TextTranscriptRow
         row={props.row as
           TranscriptRowContext & {
             item: SessionTranscriptTextMessage;
           }}
       />
-      return
     default:
       throw new Error("Unsupported transcript row.")
   }
 }
 
-component OlderHistoryPager(props: {
+function OlderHistoryPager(props: {
   olderHistory: NonNullable<TranscriptProps["olderHistory"]>;
-}) {
+}) @{
   if (!props.olderHistory.canLoad && !props.olderHistory.loading && !props.olderHistory.error) {
-    return
+    return null
   }
 
   <div class={styles.historyPager}>
-    if (props.olderHistory.canLoad || props.olderHistory.loading) {
+    @if (props.olderHistory.canLoad || props.olderHistory.loading) {
       <button
         class={styles.historyLoadButton}
         disabled={props.olderHistory.loading}
@@ -340,16 +334,20 @@ component OlderHistoryPager(props: {
           void props.olderHistory.onLoad()
         }}
       >
-        if (props.olderHistory.loading) {
-          <LoaderCircle class={styles.historyLoadButtonIcon} size={14} strokeWidth={2.2} />
-          "Loading older messages"
-        } else {
-          <ChevronUp size={14} strokeWidth={2.2} />
-          "Load older messages"
+        @if (props.olderHistory.loading) {
+          <>
+            <LoaderCircle class={styles.historyLoadButtonIcon} size={14} strokeWidth={2.2} />
+            Loading older messages
+          </>
+        } @else {
+          <>
+            <ChevronUp size={14} strokeWidth={2.2} />
+            Load older messages
+          </>
         }
       </button>
     }
-    if (props.olderHistory.error) {
+    @if (props.olderHistory.error) {
       <div class={styles.historyLoadError} role="alert">
         <AlertCircle size={14} strokeWidth={2.2} />
         <span>{props.olderHistory.error}</span>
@@ -358,14 +356,14 @@ component OlderHistoryPager(props: {
   </div>
 }
 
-component ThinkingLabel() {
+function ThinkingLabel() @{
   <div class={styles.thinkingLabelRow} aria-live="polite">
-    <span class={styles.thinkingLabel}>"Thinking..."</span>
+    <span class={styles.thinkingLabel}>Thinking...</span>
   </div>
 }
 
 /** Renders one chat transcript with virtualized row layout. */
-export component Transcript(props: TranscriptProps) {
+export function Transcript(props: TranscriptProps) @{
   const effectiveInitialScroll = props.initialScrollPosition ?? "bottom"
   const renderItems = useMemo(() => coalesceTranscriptItems(props.messages), [
     props.messages,
@@ -643,53 +641,49 @@ export component Transcript(props: TranscriptProps) {
 
   <div class={cx(styles.transcriptViewport, props.class)}>
     <div ref={rootRef} style={{ minHeight: "100%" }}>
-      if (viewport.width <= 0) {
-        <div class={styles.loadingState}>"Preparing transcript layout..."</div>
-      } else {
-        if (props.olderHistory) {
-          <OlderHistoryPager olderHistory={props.olderHistory} />
-        }
+      @if (viewport.width <= 0) {
+        <div class={styles.loadingState}>Preparing transcript layout...</div>
+      } @else {
+        <>
+          {props.olderHistory ? <OlderHistoryPager olderHistory={props.olderHistory} /> : null}
 
-        <div
-          ref={spacerRef}
-          class={styles.virtualSpacer}
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-          }}
-        >
-          {virtualizer.getVirtualItems().map((virtualItem) => {
+          <div
+            ref={spacerRef}
+            class={styles.virtualSpacer}
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+            }}
+          >{virtualizer.getVirtualItems().map((virtualItem) => {
             const item = renderItems[virtualItem.index]
 
             if (!item) {
-              return
+              return null
             }
 
-            return <tsrx>
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
-                class={styles.virtualRow}
-                style={{
-                  transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+            return <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+              class={styles.virtualRow}
+              style={{
+                transform: `translateY(${virtualItem.start - viewport.scrollMargin}px)`,
+              }}
+            >
+              <TranscriptRow
+                onSelectPermissionOption={props.onSelectPermissionOption}
+                row={{
+                  item,
+                  index: virtualItem.index,
+                  viewportWidth: viewport.width,
                 }}
-              >
-                <TranscriptRow
-                  onSelectPermissionOption={props.onSelectPermissionOption}
-                  row={{
-                    item,
-                    index: virtualItem.index,
-                    viewportWidth: viewport.width,
-                  }}
-                />
-              </div>
-            </tsrx>
-          })}
-        </div>
+              />
+            </div>
+          })}</div>
+        </>
       }
     </div>
 
-    if (props.showThinkingLabel) {
+    @if (props.showThinkingLabel) {
       <ThinkingLabel />
     }
   </div>

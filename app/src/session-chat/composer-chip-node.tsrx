@@ -136,34 +136,29 @@ function importComposerChipFromElement(element: HTMLElement) {
 const ComposerChipDecoratorNode = DecoratorNode as ComposerChipDecoratorNodeConstructor
 
 /** Renders the shared icon used by one visible composer chip. */
-component ChipIcon(props: { chip: ComposerChipData }) {
+function ChipIcon(props: { chip: ComposerChipData }) {
   switch (props.chip.kind) {
     case "folder":
-      <Folder size={14} strokeWidth={2.2} />
-      break
+      return <Folder size={14} strokeWidth={2.2} />
     case "file":
-      <File size={14} strokeWidth={2.2} />
-      break
+      return <File size={14} strokeWidth={2.2} />
     case "skill":
-      <BookOpen size={14} strokeWidth={2.2} />
-      break
+      return <BookOpen size={14} strokeWidth={2.2} />
     case "slash_command":
-      <Command size={14} strokeWidth={2.2} />
-      break
+      return <Command size={14} strokeWidth={2.2} />
     case "link":
-      <Link2 size={14} strokeWidth={2.2} />
-      break
+      return <Link2 size={14} strokeWidth={2.2} />
   }
 }
 
 /** Visual chip surface rendered inline by the Lexical decorator node. */
-component ComposerChipView(props: { chip: ComposerChipData }) {
+function ComposerChipView(props: { chip: ComposerChipData }) @{
   <span class={styles.chip} data-chip-kind={props.chip.kind}>
     <span class={cx(styles.muted)} aria-hidden="true">
       <ChipIcon chip={props.chip} />
     </span>
 
-    if (props.chip.kind === "link") {
+    @if (props.chip.kind === "link") {
       <a
         class={cx(styles.label, styles.link)}
         href={props.chip.uri}
@@ -178,10 +173,8 @@ component ComposerChipView(props: { chip: ComposerChipData }) {
 
           event.stopPropagation()
         }}
-      >
-        {props.chip.label}
-      </a>
-    } else {
+      >{props.chip.label}</a>
+    } @else {
       <span class={styles.label}>
         {props.chip.kind === "slash_command" ? `/${props.chip.label}` : props.chip.label}
       </span>
@@ -273,9 +266,7 @@ export class ComposerChipNode extends ComposerChipDecoratorNode {
   }
 
   decorate() {
-    return <tsrx>
-      <ComposerChipView chip={this.getChip()} />
-    </tsrx>
+    return <ComposerChipView chip={this.getChip()} />
   }
 }
 

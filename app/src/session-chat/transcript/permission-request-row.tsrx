@@ -100,19 +100,19 @@ function formatPermissionActionError(error: unknown) {
   return "The daemon rejected the permission response."
 }
 
-component PermissionTargets(props: {
+function PermissionTargets(props: {
   message: SessionTranscriptPermissionRequest;
-}) {
+}) @{
   if (props.message.locations.length === 0 && !props.message.context) {
-    return
+    return null
   }
 
   <div class={styles.permissionDetailGrid}>
-    if (props.message.locations.length > 0) {
+    @if (props.message.locations.length > 0) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>"Target"</div>
+        <div class={styles.permissionDetailLabel}>Target</div>
 
-        for (const location of props.message.locations; index index) {
+        @for (const location of props.message.locations; index index) {
           <div
             class={styles.permissionDetailMono}
             key={`${location.path}:${location.line ?? "none"}:${index}`}
@@ -123,25 +123,23 @@ component PermissionTargets(props: {
         }
       </div>
     }
-    if (props.message.context) {
+    @if (props.message.context) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>"Context"</div>
-        <div class={styles.permissionDetailText}>
-          {props.message.context}
-        </div>
+        <div class={styles.permissionDetailLabel}>Context</div>
+        <div class={styles.permissionDetailText}>{props.message.context}</div>
       </div>
     }
   </div>
 }
 
 /** Renders one ACP permission request and sends the selected option through the session transport. */
-export component PermissionRequestTranscriptRow(props: {
+export function PermissionRequestTranscriptRow(props: {
   message: SessionTranscriptPermissionRequest;
   onSelectOption?: (input: {
     optionId: string;
     requestId: SessionTranscriptPermissionRequest["requestId"];
   }) => Promise<void> | void;
-}) {
+}) @{
   const [pendingOptionId, setPendingOptionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const StatusIcon = getPermissionStatusIcon(props.message.status)
@@ -157,9 +155,9 @@ export component PermissionRequestTranscriptRow(props: {
           </span>
           <div class={styles.permissionTitleGroup}>
             <h3 class={styles.permissionTitle}>{props.message.title}</h3>
-            <div class={styles.permissionMeta}>
-              {formatPermissionToolKind(props.message.toolKind)}
-            </div>
+            <div class={styles.permissionMeta}>{formatPermissionToolKind(
+              props.message.toolKind,
+            )}</div>
           </div>
           <span class={styles.permissionStatusBadge} data-status={props.message.status}>
             <StatusIcon size={12} strokeWidth={2.2} />
@@ -169,9 +167,9 @@ export component PermissionRequestTranscriptRow(props: {
 
         <PermissionTargets message={props.message} />
 
-        if (hasActions) {
+        @if (hasActions) {
           <div class={styles.permissionActionRow}>
-            for (const option of props.message.options) {
+            @for (const option of props.message.options) {
               <button
                 aria-label={`${formatPermissionOptionKind(option.kind)}: ${option.name}`}
                 class={styles.permissionOptionButton}
@@ -207,16 +205,12 @@ export component PermissionRequestTranscriptRow(props: {
               </button>
             }
           </div>
-        } else {
-          <div class={styles.permissionResolution}>
-            {formatPermissionResolution(props.message)}
-          </div>
+        } @else {
+          <div class={styles.permissionResolution}>{formatPermissionResolution(props.message)}</div>
         }
 
-        if (error && props.message.status === "pending") {
-          <div class={styles.permissionError} role="alert">
-            {error}
-          </div>
+        @if (error && props.message.status === "pending") {
+          <div class={styles.permissionError} role="alert">{error}</div>
         }
       </div>
     </div>

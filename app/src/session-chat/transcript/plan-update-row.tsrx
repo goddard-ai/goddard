@@ -45,9 +45,9 @@ function buildPlanSummary(entries: readonly SessionTranscriptPlanEntry[]) {
 }
 
 /** Renders one complete ACP plan state update without exposing agent-thought content. */
-export component PlanUpdateTranscriptRow(props: {
+export function PlanUpdateTranscriptRow(props: {
   message: SessionTranscriptPlanUpdate;
-}) {
+}) @{
   <article class={styles.row}>
     <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
       <section class={styles.planCard} aria-label={props.message.title}>
@@ -57,17 +57,15 @@ export component PlanUpdateTranscriptRow(props: {
           </span>
           <div class={styles.planTitleGroup}>
             <h3 class={styles.planTitle}>{props.message.title}</h3>
-            <div class={styles.planMeta}>
-              {buildPlanSummary(props.message.entries)}
-            </div>
+            <div class={styles.planMeta}>{buildPlanSummary(props.message.entries)}</div>
           </div>
         </header>
 
-        if (props.message.entries.length === 0) {
-          <div class={styles.planEmpty}>"The agent cleared its plan."</div>
-        } else {
+        @if (props.message.entries.length === 0) {
+          <div class={styles.planEmpty}>The agent cleared its plan.</div>
+        } @else {
           <ol class={styles.planEntryList}>
-            for (const entry of props.message.entries; index index) {
+            @for (const entry of props.message.entries; index index) {
               const StatusIcon = getPlanEntryStatusIcon(entry.status)
 
               <li

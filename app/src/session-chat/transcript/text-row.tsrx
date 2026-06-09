@@ -35,9 +35,9 @@ function getResourceLinkDetail(block: Extract<SessionTranscriptContentBlock, {
   return block.uri
 }
 
-component CopyMessageMarkdownButton(props: {
+function CopyMessageMarkdownButton(props: {
   markdown: string;
-}) {
+}) @{
   const [copied, setCopied] = useState(false)
   const resetTimerRef = useRef<number | null>(null)
 
@@ -80,56 +80,52 @@ component CopyMessageMarkdownButton(props: {
       type="button"
       onClick={copyMarkdown}
     >
-      if (copied) {
+      @if (copied) {
         <Check size={14} strokeWidth={2.3} />
-      } else {
+      } @else {
         <Copy size={14} strokeWidth={2.3} />
       }
     </button>
   </GoodTooltip>
 }
 
-component TranscriptContentBlock(props: {
+function TranscriptContentBlock(props: {
   block: SessionTranscriptContentBlock;
   blockIndex: number;
   lastTextBlockIndex: number;
   message: SessionTranscriptTextMessage;
-}) {
+}) @{
   if (props.block.type === "resource_link") {
-    <div class={styles.attachmentCard}>
+    return <div class={styles.attachmentCard}>
       <div class={styles.attachmentHeading}>
         <span class={styles.attachmentIcon} aria-hidden="true">
-          if (isSkillResourceLink(props.block)) {
+          @if (isSkillResourceLink(props.block)) {
             <BookOpen size={14} strokeWidth={2.2} />
-          } else {
+          } @else {
             <Link2 size={14} strokeWidth={2.2} />
           }
         </span>
-        <span>
-          {props.block.name}
-        </span>
+        <span>{props.block.name}</span>
       </div>
-      <div class={styles.attachmentDetail}>
-        {getResourceLinkDetail(props.block)}
-      </div>
+      <div class={styles.attachmentDetail}>{getResourceLinkDetail(props.block)}</div>
     </div>
-  } else {
-    const markdownRole =
-      props.message.role === "user" ? "user" : "assistant"
-
-    <MarkdownMessage
-      markdown={props.block.text}
-      role={markdownRole}
-      streaming={props.message.streaming && props.blockIndex === props.lastTextBlockIndex}
-    />
   }
+
+  const markdownRole =
+    props.message.role === "user" ? "user" : "assistant"
+
+  <MarkdownMessage
+    markdown={props.block.text}
+    role={markdownRole}
+    streaming={props.message.streaming && props.blockIndex === props.lastTextBlockIndex}
+  />
 }
 
-component UserPromptContent(props: {
+function UserPromptContent(props: {
   lastTextBlockIndex: number;
   message: SessionTranscriptTextMessage;
   messageId: string;
-}) {
+}) @{
   const contentRef = useRef<HTMLDivElement | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [clamped, setClamped] = useState(false)
@@ -159,44 +155,46 @@ component UserPromptContent(props: {
     }
   }, [expanded, props.messageId])
 
-  <div
-    ref={contentRef}
-    aria-expanded={expanded ? "true" : undefined}
-    class={cx(styles.transcriptContent, !expanded && styles.userPromptClampedContent)}
-  >
-    for (const block of props.message.content; index blockIndex) {
-      <TranscriptContentBlock
-        key={`${props.message.id}:block:${blockIndex}`}
-        {block}
-        {blockIndex}
-        lastTextBlockIndex={props.lastTextBlockIndex}
-        message={props.message}
-      />
-    }
-  </div>
-
-  if (clamped && !expanded) {
-    <button
-      class={styles.seeFullMessageButton}
-      type="button"
-      onClick={() => {
-        setExpanded(true)
-      }}
+  <>
+    <div
+      ref={contentRef}
+      aria-expanded={expanded ? "true" : undefined}
+      class={cx(styles.transcriptContent, !expanded && styles.userPromptClampedContent)}
     >
-      <span>"See full message"</span>
-      <ChevronDown size={15} strokeWidth={2.2} />
-    </button>
-  }
+      @for (const block of props.message.content; index blockIndex) {
+        <TranscriptContentBlock
+          key={`${props.message.id}:block:${blockIndex}`}
+          {block}
+          {blockIndex}
+          lastTextBlockIndex={props.lastTextBlockIndex}
+          message={props.message}
+        />
+      }
+    </div>
+
+    @if (clamped && !expanded) {
+      <button
+        class={styles.seeFullMessageButton}
+        type="button"
+        onClick={() => {
+          setExpanded(true)
+        }}
+      >
+        <span>See full message</span>
+        <ChevronDown size={15} strokeWidth={2.2} />
+      </button>
+    }
+  </>
 }
 
 /** Renders one text transcript row with Markdown-rich assistant and user bubbles. */
-export component TextTranscriptRow(props: {
+export function TextTranscriptRow(props: {
   row: {
     item: SessionTranscriptTextMessage;
     index: number;
     viewportWidth: number;
   };
-}) {
+}) @{
   const message = props.row.item
   const isUserMessage = message.role === "user"
   const lastTextBlockIndex = message.content.reduce((lastIndex, block, index) => {
@@ -210,7 +208,7 @@ export component TextTranscriptRow(props: {
   ).join("\n\n")
 
   if (message.role === "system") {
-    return
+    return null
   }
 
   <article class={styles.row}>
@@ -230,10 +228,10 @@ export component TextTranscriptRow(props: {
             : cx(styles.assistantMessage, styles.assistantBubble)}
         >
           <div class={styles.transcriptContent}>
-            if (isUserMessage) {
+            @if (isUserMessage) {
               <UserPromptContent {lastTextBlockIndex} {message} messageId={message.id} />
-            } else {
-              for (const block of message.content; index blockIndex) {
+            } @else {
+              @for (const block of message.content; index blockIndex) {
                 <TranscriptContentBlock
                   key={`${message.id}:block:${blockIndex}`}
                   {block}
@@ -245,14 +243,14 @@ export component TextTranscriptRow(props: {
             }
           </div>
 
-          if (!isUserMessage && rawMarkdown.length > 0) {
+          @if (!isUserMessage && rawMarkdown.length > 0) {
             <div data-message-actions class={cx(styles.messageActions, styles.messageActionsLeft)}>
               <CopyMessageMarkdownButton markdown={rawMarkdown} />
             </div>
           }
         </div>
 
-        if (isUserMessage && rawMarkdown.length > 0) {
+        @if (isUserMessage && rawMarkdown.length > 0) {
           <div data-message-actions class={cx(styles.messageActions, styles.messageActionsRight)}>
             <CopyMessageMarkdownButton markdown={rawMarkdown} />
           </div>

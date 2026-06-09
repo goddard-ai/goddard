@@ -200,64 +200,61 @@ function buildToolGroupDescription(toolCalls: readonly SessionTranscriptToolCall
   }).join(", ")
 }
 
-component ToolDetailHeading(props: {
+function ToolDetailHeading(props: {
   toolCall: SessionTranscriptToolCall;
-}) {
+}) @{
   const description = buildToolCallDetailDescription(props.toolCall)
 
-  <div class={styles.toolDetailHeading} title={description.tooltip ?? undefined}>
-    {description.text}
+  <div
+    class={styles.toolDetailHeading}
+    title={description.tooltip ?? undefined}
+  >{description.text}</div>
+}
+
+function ToolContentDetail(props: {
+  content: SessionTranscriptToolContent;
+}) @{
+  if (props.content.type === "content") {
+    return <div class={styles.toolDetailText}>
+      {props.content.text?.trim() || "Structured tool output."}
+    </div>
+  }
+
+  if (props.content.type === "diff") {
+    return <div class={styles.toolDetailList}>
+      @if (props.content.path) {
+        <div class={styles.toolDetailMono}>{props.content.path}</div>
+      }
+
+      <div class={styles.toolDetailMono}>{buildToolDiffPreview(props.content)}</div>
+    </div>
+  }
+
+  <div class={styles.toolDetailMono}>
+    Terminal session
+    {props.content.terminalId}
   </div>
 }
 
-component ToolContentDetail(props: {
-  content: SessionTranscriptToolContent;
-}) {
-  if (props.content.type === "content") {
-    <div class={styles.toolDetailText}>
-      {props.content.text?.trim() || "Structured tool output."}
-    </div>
-  } else if (props.content.type === "diff") {
-    <div class={styles.toolDetailList}>
-      if (props.content.path) {
-        <div class={styles.toolDetailMono}>
-          {props.content.path}
-        </div>
-      }
-
-      <div class={styles.toolDetailMono}>
-        {buildToolDiffPreview(props.content)}
-      </div>
-    </div>
-  } else {
-    <div class={styles.toolDetailMono}>
-      "Terminal session "
-      {props.content.terminalId}
-    </div>
-  }
-}
-
 /** Renders one collapsed transcript tool row that expands into plain-text details on demand. */
-export component ToolTranscriptRow(props: {
+export function ToolTranscriptRow(props: {
   groupId: string;
   toolCalls: readonly SessionTranscriptToolCall[];
-}) {
+}) @{
   <article class={styles.row}>
     <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
       <div class={styles.rowColumn} style={{ width: "100%" }}>
         <details class={styles.toolDisclosure}>
           <summary class={styles.toolSummary}>
-            <span class={styles.toolSummaryText}>
-              {buildToolGroupDescription(props.toolCalls)}
-            </span>
+            <span class={styles.toolSummaryText}>{buildToolGroupDescription(props.toolCalls)}</span>
           </summary>
           <ol class={styles.toolDetailList}>
-            for (const toolCall of props.toolCalls) {
+            @for (const toolCall of props.toolCalls) {
               <li class={styles.toolDetailItem} key={`${props.groupId}:${toolCall.id}`}>
                 <article>
                   <ToolDetailHeading {toolCall} />
 
-                  for (const content of toolCall.content; index index) {
+                  @for (const content of toolCall.content; index index) {
                     <ToolContentDetail key={`${toolCall.id}:content:${index}`} {content} />
                   }
                 </article>
