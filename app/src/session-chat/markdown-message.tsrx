@@ -77,10 +77,5 @@ export component MarkdownMessage(props: {
     return
   }
 
-  <ComarkRenderer
-    caret={props.streaming ? { class: styles.caret } : false}
-    className={renderClass}
-    streaming={props.streaming}
-    {tree}
-  />
+  <ComarkRenderer className={renderClass} streaming={props.streaming} {tree} />
 }

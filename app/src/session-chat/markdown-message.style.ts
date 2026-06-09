@@ -132,16 +132,6 @@ export default {
     "--session-chat-inline-code-border": token.var("colors.transcript.userCode.border"),
     "--session-chat-code-block-border": token.var("colors.transcript.userBubble.border"),
   }),
-  caret: css({
-    display: "inline-block",
-    width: "0.66ch",
-    height: "1.05em",
-    marginInlineStart: "0.08em",
-    verticalAlign: "-0.12em",
-    borderRadius: "999px",
-    background: "currentColor",
-    opacity: "0.72",
-  }),
   fallback: css({
     whiteSpace: "pre-wrap",
   }),
