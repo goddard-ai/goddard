@@ -9,7 +9,7 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "./app
 import { CommandDialog } from "./commands/command-dialog.tsrx"
 import { SessionLaunchLeaseKeeper } from "./sessions/launch-lease-keeper.tsrx"
 
-export component AppShell() {
+export function AppShell() @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -44,25 +44,31 @@ export component AppShell() {
     })
   })
 
-  if (projects.length === 0) {
-    <AppShellOnboarding />
-  } else {
-    try {
-      <SessionLaunchLeaseKeeper
-        currentProjectPath={projectContext.activeProjectPath ?? projects[0]?.path ?? null}
-      />
-    } pending {}
+  <>
+    @if (projects.length === 0) {
+      <AppShellOnboarding />
+    } @else {
+      <>
+        @try {
+          <SessionLaunchLeaseKeeper
+            currentProjectPath={projectContext.activeProjectPath ?? projects[0]?.path ?? null}
+          />
+        } @pending {
+          <></>
+        }
 
-    <CommandDialog
-      command={AppCommand.navigation.openCommandPalette}
-      content={() => import("~/command-palette.tsrx")}
-    />
-    <AppShellChrome />
-    <CommandDialog
-      command={AppCommand.navigation.openNewSessionDialog}
-      content={() => import("~/sessions/dialog.tsrx")}
-    />
-  }
+        <CommandDialog
+          command={AppCommand.navigation.openCommandPalette}
+          content={() => import("~/command-palette.tsrx")}
+        />
+        <AppShellChrome />
+        <CommandDialog
+          command={AppCommand.navigation.openNewSessionDialog}
+          content={() => import("~/sessions/dialog.tsrx")}
+        />
+      </>
+    }
 
-  <GoodToaster />
+    <GoodToaster />
+  </>
 }

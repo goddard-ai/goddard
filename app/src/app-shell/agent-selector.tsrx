@@ -51,9 +51,9 @@ function isStrongMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
   return match.score >= agentSelectorMinimumFuzzyScore || hasDirectMatch(query, match)
 }
 
-export component AppShellAgentSelector(props: {
+export function AppShellAgentSelector(props: {
   shortcutActive?: boolean;
-}) {
+}) @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const projectPath =
@@ -81,7 +81,7 @@ export component AppShellAgentSelector(props: {
   }, [highlightedIndex, open.value, search])
 
   if (!adapterCatalog) {
-    return
+    return null
   }
 
   const agentId = resolvePreferredLaunchAgentId(adapterCatalog)
@@ -167,114 +167,116 @@ export component AppShellAgentSelector(props: {
     })
   }, [highlightedAdapter?.id, open.value])
 
-  <button
-    {ref triggerElementRef}
-    aria-expanded={open.value}
-    aria-haspopup="menu"
-    aria-label={selectedAgent ? `ACP agent: ${selectedAgent.name}` : "Select ACP agent"}
-    class={cx(styles.trigger, noDragClass)}
-    type="button"
-    onClick={() => {
-      if (open.value) {
-        open.value = false
-      } else {
-        openSelectorMenu()
-      }
-    }}
-    onKeyDown={(event) => {
-      if (event.key === "ArrowDown" && !open.value) {
-        event.preventDefault()
-        openSelectorMenu()
-      }
-    }}
-  >
-    <AcpAgentIcon class={styles.icon} icon={selectedAgent?.icon} />
-  </button>
-
-  <Popover
-    anchor={() => triggerElementRef.current}
-    class={styles.menu}
-    closeOnEscape={true}
-    closeOnOutsidePointer={true}
-    initialFocus={() => filterInputRef.current}
-    modalFocus={true}
-    offset={8}
-    {open}
-    placement="bottom-end"
-    role="menu"
-    strategy="fixed"
-  >
-    <input
-      {ref filterInputRef}
-      class={styles.filter}
-      placeholder="Type to filter"
-      value={search.value}
-      onInput={(event) => {
-        search.value = event.currentTarget.value
-        highlightedIndex.value = 0
+  <>
+    <button
+      ref={triggerElementRef}
+      aria-expanded={open.value}
+      aria-haspopup="menu"
+      aria-label={selectedAgent ? `ACP agent: ${selectedAgent.name}` : "Select ACP agent"}
+      class={cx(styles.trigger, noDragClass)}
+      type="button"
+      onClick={() => {
+        if (open.value) {
+          open.value = false
+        } else {
+          openSelectorMenu()
+        }
       }}
       onKeyDown={(event) => {
-        switch (event.key) {
-          case "ArrowDown":
-            event.preventDefault()
-            moveHighlightedAdapter(1)
-            return
-          case "ArrowUp":
-            event.preventDefault()
-            moveHighlightedAdapter(-1)
-            return
-          case "Enter":
-            event.preventDefault()
-            commitAdapter(highlightedAdapter)
-            return
-          case "Escape":
-            event.preventDefault()
-            event.stopPropagation()
-            open.value = false
+        if (event.key === "ArrowDown" && !open.value) {
+          event.preventDefault()
+          openSelectorMenu()
         }
       }}
-    />
+    >
+      <AcpAgentIcon class={styles.icon} icon={selectedAgent?.icon} />
+    </button>
 
-    if (filteredAdapters.length === 0) {
-      <div class={styles.empty}>"No matching agents."</div>
-    } else {
-      <ul class={styles.list}>
-        for (const adapter of filteredAdapters) {
-          <li key={adapter.id}>
-            <button
-              {ref (element) => {
-                itemElementsRef.current[adapter.id] = element
-              }}
-              class={styles.item}
-              data-active={adapter.id === agentId ? "true" : undefined}
-              data-highlighted={adapter.id === highlightedAdapter?.id ? "true" : undefined}
-              role="menuitemradio"
-              aria-checked={adapter.id === agentId ? "true" : "false"}
-              type="button"
-              onMouseEnter={() => {
-                highlightedIndex.value = filteredAdapters.findIndex(
-                  (entry) => entry.id === adapter.id,
-                )
-              }}
-              onClick={() => {
-                commitAdapter(adapter)
-              }}
-            >
-              <AcpAgentIcon class={styles.icon} icon={adapter.icon} />
+    <Popover
+      anchor={() => triggerElementRef.current}
+      class={styles.menu}
+      closeOnEscape={true}
+      closeOnOutsidePointer={true}
+      initialFocus={() => filterInputRef.current}
+      modalFocus={true}
+      offset={8}
+      {open}
+      placement="bottom-end"
+      role="menu"
+      strategy="fixed"
+    >
+      <input
+        ref={filterInputRef}
+        class={styles.filter}
+        placeholder="Type to filter"
+        value={search.value}
+        onInput={(event) => {
+          search.value = event.currentTarget.value
+          highlightedIndex.value = 0
+        }}
+        onKeyDown={(event) => {
+          switch (event.key) {
+            case "ArrowDown":
+              event.preventDefault()
+              moveHighlightedAdapter(1)
+              return
+            case "ArrowUp":
+              event.preventDefault()
+              moveHighlightedAdapter(-1)
+              return
+            case "Enter":
+              event.preventDefault()
+              commitAdapter(highlightedAdapter)
+              return
+            case "Escape":
+              event.preventDefault()
+              event.stopPropagation()
+              open.value = false
+          }
+        }}
+      />
 
-              <span class={styles.itemBody}>
-                <span class={styles.itemLabel}>{adapter.name}</span>
-                <span class={styles.itemDetail}>
-                  {adapter.version}
-                  if (adapter.unofficial) {
-                    " · Unofficial"
-                  }
+      @if (filteredAdapters.length === 0) {
+        <div class={styles.empty}>No matching agents.</div>
+      } @else {
+        <ul class={styles.list}>
+          @for (const adapter of filteredAdapters) {
+            <li key={adapter.id}>
+              <button
+                ref={(element) => {
+                  itemElementsRef.current[adapter.id] = element
+                }}
+                class={styles.item}
+                data-active={adapter.id === agentId ? "true" : undefined}
+                data-highlighted={adapter.id === highlightedAdapter?.id ? "true" : undefined}
+                role="menuitemradio"
+                aria-checked={adapter.id === agentId ? "true" : "false"}
+                type="button"
+                onMouseEnter={() => {
+                  highlightedIndex.value = filteredAdapters.findIndex(
+                    (entry) => entry.id === adapter.id,
+                  )
+                }}
+                onClick={() => {
+                  commitAdapter(adapter)
+                }}
+              >
+                <AcpAgentIcon class={styles.icon} icon={adapter.icon} />
+
+                <span class={styles.itemBody}>
+                  <span class={styles.itemLabel}>{adapter.name}</span>
+                  <span class={styles.itemDetail}>
+                    {adapter.version}
+                    @if (adapter.unofficial) {
+                      <>· Unofficial</>
+                    }
+                  </span>
                 </span>
-              </span>
-            </button>
-          </li>
-        }
-      </ul>
-    }
-  </Popover>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </Popover>
+  </>
 }

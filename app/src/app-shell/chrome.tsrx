@@ -42,10 +42,11 @@ const mainTabCommands: Record<MainTabItemId, AppCommand> = {
 }
 
 /** Renders the merged shell chrome and owns its local interaction wiring. */
-export component AppShellChrome() {
+export function AppShellChrome() @{
   const mainTab = useMainTab()
   const workbenchTabSet = useWorkbenchTabSet()
   const topBarSelectorShortcutActive = workbenchTabSet.activeClosableTab?.kind !== "project"
+  const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
@@ -111,16 +112,16 @@ export component AppShellChrome() {
     >
       <div class={cx(styles.switcher, "electrobun-webkit-app-region-no-drag")}>
         <div class={styles.switcherLeftControl}>
-          try {
+          @try {
             <AppShellAgentSelector shortcutActive={topBarSelectorShortcutActive} />
-          } pending {
+          } @pending {
             <button
               aria-label="Loading ACP agent selector"
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
             />
-          } catch (error, retry) {
+          } @catch (error, retry) {
             console.error("ACP agent selector render failed.", error)
 
             <button
@@ -137,20 +138,20 @@ export component AppShellChrome() {
             width: "100%",
           })}
         >
-          try {
+          @try {
             <SwitchProjectDropdown />
-          } catch (error, retry) {
+          } @catch (error, retry) {
             console.error("Project switcher render failed.", error)
 
             <button class={cx(styles.switcherFallback, noDragClass)} type="button" onClick={retry}>
-              "Project switcher unavailable"
+              Project switcher unavailable
             </button>
           }
         </div>
         <div class={styles.switcherRightControl}>
-          try {
+          @try {
             <AppShellSubfolderSelector shortcutActive={topBarSelectorShortcutActive} />
-          } pending {
+          } @pending {
             <button
               aria-label="Loading project subfolder selector"
               class={cx(styles.switcherSideFallback, noDragClass)}
@@ -159,7 +160,7 @@ export component AppShellChrome() {
             >
               <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
             </button>
-          } catch (error, retry) {
+          } @catch (error, retry) {
             console.error("Project subfolder selector render failed.", error)
 
             <button
@@ -177,17 +178,13 @@ export component AppShellChrome() {
         <div class={styles.actionGroup}>
           <ActionButton
             ariaLabel="Propose task"
-            icon={<tsrx>
-              <InlineSvgIcon icon="what-next" size="17px 12px" />
-            </tsrx>}
+            icon={<InlineSvgIcon icon="what-next" size="17px 12px" />}
             onAction={AppCommand.navigation.openProposeTaskDialog}
           />
           <span class={styles.actionDivider} />
           <ActionButton
             ariaLabel="New session"
-            icon={<tsrx>
-              <InlineSvgIcon icon="new-session" size="16px 16px" />
-            </tsrx>}
+            icon={<InlineSvgIcon icon="new-session" size="16px 16px" />}
             onAction={AppCommand.navigation.openNewSessionDialog}
           />
         </div>
@@ -204,18 +201,18 @@ export component AppShellChrome() {
       </div>
     </header>
     <nav aria-label="Primary" class={styles.nav}>
-      try {
+      @try {
         <AppShellSidebarQueryContent
           items={mainTab.items}
           selectedMainTabId={mainTab.selectedKind}
         />
-      } pending {
+      } @pending {
         <AppShellSidebarContent
           hasUnreadInboxItems={false}
           items={mainTab.items}
           selectedMainTabId={mainTab.selectedKind}
         />
-      } catch (error) {
+      } @catch (error) {
         console.error("Inbox unread indicator render failed.", error)
 
         <AppShellSidebarContent
@@ -226,14 +223,10 @@ export component AppShellChrome() {
       }
     </nav>
 
-    const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
-
     <div class={styles.main}>
       <AppShellTabStrip
         activeTabId={workbenchTabSet.activeTabId}
-        endAccessory={<tsrx>
-          <AppShellNextInboxAttentionSlot {workbenchTabSet} />
-        </tsrx>}
+        endAccessory={<AppShellNextInboxAttentionSlot {workbenchTabSet} />}
         selectedMainTabId={mainTab.selectedKind}
         selectedMainTabTitle={selectedMainTab?.label ?? WORKBENCH_MAIN_TAB.title}
         tabs={workbenchTabSet.tabList}
@@ -253,12 +246,12 @@ export component AppShellChrome() {
           overflow: "hidden",
         })}
       >
-        try {
-          if (workbenchTabSet.activeTabId === WORKBENCH_MAIN_TAB.id) {
+        @try {
+          @if (workbenchTabSet.activeTabId === WORKBENCH_MAIN_TAB.id) {
             <WorkbenchScrollPanel scrollKey={`main:${mainTab.selectedKind}`}>
               <MainWorkbenchView />
             </WorkbenchScrollPanel>
-          } else if (workbenchTabSet.activeClosableTab) {
+          } @else if (workbenchTabSet.activeClosableTab) {
             <WorkbenchScrollPanel
               restoreScroll={shouldRestoreWorkbenchTabScroll(
                 workbenchTabSet.activeClosableTab.kind,
@@ -269,35 +262,37 @@ export component AppShellChrome() {
               <WorkbenchTabPanel />
             </WorkbenchScrollPanel>
           }
-        } pending {}
+        } @pending {
+          <></>
+        }
       </div>
     </div>
   </div>
 }
 
-component AppShellNextInboxAttentionSlot(props: {
+function AppShellNextInboxAttentionSlot(props: {
   workbenchTabSet: ReturnType<typeof useWorkbenchTabSet>;
-}) {
-  try {
+}) @{
+  @try {
     <AppShellNextInboxAttentionButton workbenchTabSet={props.workbenchTabSet} />
-  } pending {
+  } @pending {
     <AppShellNextInboxAttentionShortcutFallback />
-  } catch (error) {
+  } @catch (error) {
     console.error("Next inbox attention render failed.", error)
 
     <AppShellNextInboxAttentionShortcutFallback />
   }
 }
 
-component AppShellNextInboxAttentionShortcutFallback() {
+function AppShellNextInboxAttentionShortcutFallback() @{
   useAppCommand(AppCommand.navigation.openNextUnreadInboxItem, () => {}, { active: false })
 
   <></>
 }
 
-component AppShellNextInboxAttentionButton(props: {
+function AppShellNextInboxAttentionButton(props: {
   workbenchTabSet: ReturnType<typeof useWorkbenchTabSet>;
-}) {
+}) @{
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
       { statuses: ["unread"], limit: 100 },
@@ -325,7 +320,7 @@ component AppShellNextInboxAttentionButton(props: {
     }
   }, { active: nextItem !== null })
 
-  if (nextItem) {
+  @if (nextItem) {
     <AppCommandTooltip
       command={AppCommand.navigation.openNextUnreadInboxItem}
       group="app-shell-next-attention"
@@ -341,19 +336,19 @@ component AppShellNextInboxAttentionButton(props: {
           void openNextInboxItem(nextItem)
         }}
       >
-        <span>"Next"</span>
+        <span>Next</span>
         <ChevronRight aria-hidden={true} size={14} strokeWidth={2.2} />
       </button>
     </AppCommandTooltip>
-  } else {
+  } @else {
     <></>
   }
 }
 
-component AppShellSidebarQueryContent(props: {
+function AppShellSidebarQueryContent(props: {
   items: readonly MainTabItem[];
   selectedMainTabId: MainTabItemId;
-}) {
+}) @{
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
       { statuses: ["unread"], limit: 100 },
@@ -367,11 +362,11 @@ component AppShellSidebarQueryContent(props: {
   />
 }
 
-component AppShellSidebarContent(props: {
+function AppShellSidebarContent(props: {
   hasUnreadInboxItems: boolean;
   items: readonly MainTabItem[];
   selectedMainTabId: MainTabItemId;
-}) {
+}) @{
   const sidebarState: AppShellSidebarState = {
     hasUnreadInboxItems: props.hasUnreadInboxItems,
   }
@@ -382,28 +377,30 @@ component AppShellSidebarContent(props: {
     }),
   )
 
-  <AppShellSidebarSection
-    items={mainTabItems.filter((item) => item.group === "primary")}
-    {sidebarState}
-    selectedMainTabId={props.selectedMainTabId}
-  />
-  <div aria-hidden="true" class={styles.navDivider} />
-  <AppShellSidebarSection
-    items={mainTabItems.filter((item) => item.group === "secondary")}
-    {sidebarState}
-    selectedMainTabId={props.selectedMainTabId}
-  />
+  <>
+    <AppShellSidebarSection
+      items={mainTabItems.filter((item) => item.group === "primary")}
+      {sidebarState}
+      selectedMainTabId={props.selectedMainTabId}
+    />
+    <div aria-hidden="true" class={styles.navDivider} />
+    <AppShellSidebarSection
+      items={mainTabItems.filter((item) => item.group === "secondary")}
+      {sidebarState}
+      selectedMainTabId={props.selectedMainTabId}
+    />
+  </>
 }
 
 /** Renders one grouped section of the left sidebar. */
-component AppShellSidebarSection(props: {
+function AppShellSidebarSection(props: {
   items: Array<MainTabItem & {
     icon: SvgIconName;
   }>;
   sidebarState: AppShellSidebarState;
   selectedMainTabId: MainTabItemId;
-}) {
-  for (const item of props.items) {
+}) @{
+  @for (const item of props.items) {
     const command = mainTabCommands[item.id]
 
     <SidebarItem
@@ -418,11 +415,11 @@ component AppShellSidebarSection(props: {
   }
 }
 
-component ActionButton(props: {
+function ActionButton(props: {
   ariaLabel: string;
   icon: preact.JSX.Element;
   onAction: () => void;
-}) {
+}) @{
   <button
     aria-label={props.ariaLabel}
     class={cx(styles.actionButton, styles.actionItem, noDragClass)}
@@ -430,19 +427,17 @@ component ActionButton(props: {
     onClick={() => {
       props.onAction()
     }}
-  >
-    {props.icon}
-  </button>
+  >{props.icon}</button>
 }
 
-component SidebarItem(props: {
+function SidebarItem(props: {
   command: AppCommand;
   dot: AppShellSidebarDot;
   icon: SvgIconName;
   isSelected: boolean;
   label: string;
   sidebarState: AppShellSidebarState;
-}) {
+}) @{
   const hasDot = props.dot.isVisible(props.sidebarState)
   const ariaLabel =
     hasDot ? props.dot.getAriaLabel(props.label) : props.label
@@ -468,14 +463,14 @@ component SidebarItem(props: {
     >
       <InlineSvgIcon icon={props.icon} size="22px 21px" />
 
-      if (hasDot) {
+      @if (hasDot) {
         <span aria-hidden="true" class={styles.sidebarUnreadDot} />
       }
     </button>
   </AppCommandTooltip>
 }
 
-component InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
+function InlineSvgIcon(props: { icon: SvgIconName; size: string }) @{
   const [width, height = width] = props.size.split(" ")
 
   <GoodIcon class={styles.icon} name={props.icon} {height} {width} />

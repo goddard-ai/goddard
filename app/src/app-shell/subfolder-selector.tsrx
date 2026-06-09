@@ -47,9 +47,9 @@ function isStrongMatch<T>(query: string, match: fuzzysort.RecordMatch<T>) {
   return match.score >= subfolderSelectorMinimumFuzzyScore || hasDirectMatch(query, match)
 }
 
-export component AppShellSubfolderSelector(props: {
+export function AppShellSubfolderSelector(props: {
   shortcutActive?: boolean;
-}) {
+}) @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const projectPath =
@@ -72,7 +72,7 @@ export component AppShellSubfolderSelector(props: {
   }, [highlightedIndex, open.value, search])
 
   if (!projectPath) {
-    return
+    return null
   }
 
   const items: AppShellSubfolderItem[] = [
@@ -165,116 +165,118 @@ export component AppShellSubfolderSelector(props: {
     })
   }, [highlightedItem?.path, open.value])
 
-  <button
-    {ref triggerElementRef}
-    aria-expanded={open.value}
-    aria-haspopup="menu"
-    aria-label={selectedSubfolderLabel
-      ? `Working directory: ${selectedSubfolderLabel}`
-      : "Project root"}
-    class={cx(styles.trigger, noDragClass)}
-    data-icon-only={selectedSubfolderLabel ? undefined : "true"}
-    type="button"
-    onClick={() => {
-      if (open.value) {
-        open.value = false
-      } else {
-        openSelectorMenu()
-      }
-    }}
-    onKeyDown={(event) => {
-      if (event.key === "ArrowDown" && !open.value) {
-        event.preventDefault()
-        openSelectorMenu()
-      }
-    }}
-  >
-    <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
-
-    if (selectedSubfolderLabel) {
-      <span class={styles.label}>{selectedSubfolderLabel}</span>
-    }
-  </button>
-
-  <Popover
-    anchor={() => triggerElementRef.current}
-    class={styles.menu}
-    closeOnEscape={true}
-    closeOnOutsidePointer={true}
-    initialFocus={() => filterInputRef.current}
-    modalFocus={true}
-    offset={8}
-    {open}
-    placement="bottom-start"
-    role="menu"
-    strategy="fixed"
-  >
-    <input
-      {ref filterInputRef}
-      class={styles.filter}
-      placeholder="Type to filter"
-      value={search.value}
-      onInput={(event) => {
-        search.value = event.currentTarget.value
-        highlightedIndex.value = 0
+  <>
+    <button
+      ref={triggerElementRef}
+      aria-expanded={open.value}
+      aria-haspopup="menu"
+      aria-label={selectedSubfolderLabel
+        ? `Working directory: ${selectedSubfolderLabel}`
+        : "Project root"}
+      class={cx(styles.trigger, noDragClass)}
+      data-icon-only={selectedSubfolderLabel ? undefined : "true"}
+      type="button"
+      onClick={() => {
+        if (open.value) {
+          open.value = false
+        } else {
+          openSelectorMenu()
+        }
       }}
       onKeyDown={(event) => {
-        switch (event.key) {
-          case "ArrowDown":
-            event.preventDefault()
-            moveHighlightedItem(1)
-            return
-          case "ArrowUp":
-            event.preventDefault()
-            moveHighlightedItem(-1)
-            return
-          case "Enter":
-            event.preventDefault()
-            commitItem(highlightedItem)
-            return
-          case "Escape":
-            event.preventDefault()
-            event.stopPropagation()
-            open.value = false
+        if (event.key === "ArrowDown" && !open.value) {
+          event.preventDefault()
+          openSelectorMenu()
         }
       }}
-    />
+    >
+      <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
 
-    if (filteredItems.length === 0) {
-      <div class={styles.empty}>"No matching directories."</div>
-    } else {
-      <ul class={styles.list}>
-        for (const item of filteredItems) {
-          <li key={item.path}>
-            <button
-              {ref (element) => {
-                itemElementsRef.current[item.path] = element
-              }}
-              class={styles.item}
-              data-active={item.path === selectedCwd ? "true" : undefined}
-              data-highlighted={item.path === highlightedItem?.path ? "true" : undefined}
-              role="menuitemradio"
-              aria-checked={item.path === selectedCwd ? "true" : "false"}
-              type="button"
-              onMouseEnter={() => {
-                highlightedIndex.value = filteredItems.findIndex(
-                  (entry) => entry.path === item.path,
-                )
-              }}
-              onClick={() => {
-                commitItem(item)
-              }}
-            >
-              <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
+      @if (selectedSubfolderLabel) {
+        <span class={styles.label}>{selectedSubfolderLabel}</span>
+      }
+    </button>
 
-              <span class={styles.itemBody}>
-                <span class={styles.itemLabel}>{item.label}</span>
-                <span class={styles.itemDetail}>{item.detail}</span>
-              </span>
-            </button>
-          </li>
-        }
-      </ul>
-    }
-  </Popover>
+    <Popover
+      anchor={() => triggerElementRef.current}
+      class={styles.menu}
+      closeOnEscape={true}
+      closeOnOutsidePointer={true}
+      initialFocus={() => filterInputRef.current}
+      modalFocus={true}
+      offset={8}
+      {open}
+      placement="bottom-start"
+      role="menu"
+      strategy="fixed"
+    >
+      <input
+        ref={filterInputRef}
+        class={styles.filter}
+        placeholder="Type to filter"
+        value={search.value}
+        onInput={(event) => {
+          search.value = event.currentTarget.value
+          highlightedIndex.value = 0
+        }}
+        onKeyDown={(event) => {
+          switch (event.key) {
+            case "ArrowDown":
+              event.preventDefault()
+              moveHighlightedItem(1)
+              return
+            case "ArrowUp":
+              event.preventDefault()
+              moveHighlightedItem(-1)
+              return
+            case "Enter":
+              event.preventDefault()
+              commitItem(highlightedItem)
+              return
+            case "Escape":
+              event.preventDefault()
+              event.stopPropagation()
+              open.value = false
+          }
+        }}
+      />
+
+      @if (filteredItems.length === 0) {
+        <div class={styles.empty}>No matching directories.</div>
+      } @else {
+        <ul class={styles.list}>
+          @for (const item of filteredItems) {
+            <li key={item.path}>
+              <button
+                ref={(element) => {
+                  itemElementsRef.current[item.path] = element
+                }}
+                class={styles.item}
+                data-active={item.path === selectedCwd ? "true" : undefined}
+                data-highlighted={item.path === highlightedItem?.path ? "true" : undefined}
+                role="menuitemradio"
+                aria-checked={item.path === selectedCwd ? "true" : "false"}
+                type="button"
+                onMouseEnter={() => {
+                  highlightedIndex.value = filteredItems.findIndex(
+                    (entry) => entry.path === item.path,
+                  )
+                }}
+                onClick={() => {
+                  commitItem(item)
+                }}
+              >
+                <Folder aria-hidden={true} class={styles.icon} strokeWidth={2.1} />
+
+                <span class={styles.itemBody}>
+                  <span class={styles.itemLabel}>{item.label}</span>
+                  <span class={styles.itemDetail}>{item.detail}</span>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      }
+    </Popover>
+  </>
 }

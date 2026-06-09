@@ -196,7 +196,7 @@ function useAppShellTabStrip(
   }
 }
 
-export component AppShellTabStrip(props: {
+export function AppShellTabStrip(props: {
   activeTabId: string;
   endAccessory?: preact.ComponentChildren;
   selectedMainTabId: string;
@@ -205,7 +205,7 @@ export component AppShellTabStrip(props: {
   onActivateTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onMoveTab: (sourceId: string, targetId: string, placement: WorkbenchTabDragPlacement) => void;
-}) {
+}) @{
   const tabStrip = useAppShellTabStrip(props.activeTabId, props.selectedMainTabId, props.tabs)
 
   <div class={styles.tabStripRow}>
@@ -223,7 +223,7 @@ export component AppShellTabStrip(props: {
           title={props.selectedMainTabTitle}
         />
 
-        for (const tab of props.tabs) {
+        @for (const tab of props.tabs) {
           <TabButton
             activeTabId={props.activeTabId}
             dirty={tab.dirty}
@@ -268,7 +268,7 @@ export component AppShellTabStrip(props: {
   </div>
 }
 
-component TabButton(props: {
+function TabButton(props: {
   activeTabId: string;
   dirty?: boolean;
   icon: SvgIconName;
@@ -281,7 +281,7 @@ component TabButton(props: {
   onTabDrop?: (sourceId: string, targetId: string, placement: WorkbenchTabDragPlacement) => void;
   refCallback: (element: HTMLDivElement | null) => void;
   title: string;
-}) {
+}) @{
   const isActive = props.activeTabId === props.id
   const isHome = props.isHome === true
   const [isHovered, setIsHovered] = useState(false)
@@ -427,19 +427,17 @@ component TabButton(props: {
         style={{
           color: labelColor,
         }}
-      >
-        {props.title}
-      </span>
+      >{props.title}</span>
     </button>
 
-    if (!isHome) {
+    @if (!isHome) {
       <div
         class={styles.tabTail}
         onClick={() => {
           props.onSelect(props.id)
         }}
       >
-        if (props.dirty) {
+        @if (props.dirty) {
           <span
             aria-hidden="true"
             class={styles.tabDirty}
@@ -469,7 +467,7 @@ component TabButton(props: {
   </div>
 }
 
-component InlineSvgIcon(props: { icon: SvgIconName; size: string }) {
+function InlineSvgIcon(props: { icon: SvgIconName; size: string }) @{
   const [width, height = width] = props.size.split(" ")
 
   <GoodIcon class={styles.icon} name={props.icon} {height} {width} />

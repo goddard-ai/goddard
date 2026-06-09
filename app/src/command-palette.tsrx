@@ -21,10 +21,11 @@ const preparedAppCommands = appCommandList.map(
   }),
 )
 
-component CommandPalette(props: { open: Signal<boolean> }) {
+function CommandPalette(props: { open: Signal<boolean> }) @{
   const shortcutRegistry = useShortcutRegistry()
   const titleId = useId()
   const listboxId = useId()
+  const inputId = useId()
   const search = useSignal("")
   const activeIndex = useSignal(0)
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -72,6 +73,48 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     itemRefs.current[activeCommand.id]?.scrollIntoView({ block: "nearest" })
   }, [activeCommand?.id])
 
+  const selectCommand = (command: AppCommand) => {
+    props.open.value = false
+    window.setTimeout(() => {
+      command()
+    }, 0)
+  }
+
+  const moveActiveIndex = (delta: number) => {
+    if (visibleCommands.length === 0) {
+      return
+    }
+
+    activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
+    visibleCommands.length
+  }
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault()
+        moveActiveIndex(1)
+        return
+      case "ArrowUp":
+        event.preventDefault()
+        moveActiveIndex(-1)
+        return
+      case "Home":
+        event.preventDefault()
+        activeIndex.value = 0
+        return
+      case "End":
+        event.preventDefault()
+        activeIndex.value = Math.max(visibleCommands.length - 1, 0)
+        return
+      case "Enter":
+        if (activeCommand) {
+          event.preventDefault()
+          selectCommand(activeCommand)
+        }
+    }
+  }
+
   <Modal
     open={props.open}
     {titleId}
@@ -79,49 +122,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
     positionerClass={styles.positioner}
     contentClass={styles.content}
   >
-    <h2 id={titleId} class={styles.title}>"Command menu"</h2>
-
-    const selectCommand = (command: AppCommand) => {
-      props.open.value = false
-      window.setTimeout(() => {
-        command()
-      }, 0)
-    }
-
-    const moveActiveIndex = (delta: number) => {
-      if (visibleCommands.length === 0) {
-        return
-      }
-
-      activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
-      visibleCommands.length
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      switch (event.key) {
-        case "ArrowDown":
-          event.preventDefault()
-          moveActiveIndex(1)
-          return
-        case "ArrowUp":
-          event.preventDefault()
-          moveActiveIndex(-1)
-          return
-        case "Home":
-          event.preventDefault()
-          activeIndex.value = 0
-          return
-        case "End":
-          event.preventDefault()
-          activeIndex.value = Math.max(visibleCommands.length - 1, 0)
-          return
-        case "Enter":
-          if (activeCommand) {
-            event.preventDefault()
-            selectCommand(activeCommand)
-          }
-      }
-    }
+    <h2 id={titleId} class={styles.title}>Command menu</h2>
 
     <div
       class={styles.root}
@@ -134,8 +135,6 @@ component CommandPalette(props: { open: Signal<boolean> }) {
       onKeyDown={handleKeyDown}
     >
       <div class={styles.searchRow}>
-        const inputId = useId()
-
         <Search aria-hidden={true} class={styles.searchIcon} size={16} />
         <input
           id={inputId}
@@ -155,10 +154,10 @@ component CommandPalette(props: { open: Signal<boolean> }) {
         />
       </div>
       <div id={listboxId} class={styles.list} role="listbox" aria-label="Command menu">
-        if (visibleCommands.length === 0) {
-          <div class={styles.empty}>"No matching commands."</div>
-        } else {
-          for (const command of visibleCommands) {
+        @if (visibleCommands.length === 0) {
+          <div class={styles.empty}>No matching commands.</div>
+        } @else {
+          @for (const command of visibleCommands) {
             const isActive = activeCommand?.id === command.id
             const itemId = `${listboxId}-${command.id}`
             const Icon = command.icon
@@ -189,7 +188,7 @@ component CommandPalette(props: { open: Signal<boolean> }) {
                 selectCommand(command)
               }}
             >
-              if (Icon) {
+              @if (Icon) {
                 <Icon
                   aria-hidden={true}
                   size={16}
@@ -200,11 +199,9 @@ component CommandPalette(props: { open: Signal<boolean> }) {
                 />
               }
 
-              <span class={styles.itemLabel}>
-                {command.label}
-              </span>
+              <span class={styles.itemLabel}>{command.label}</span>
 
-              if (shortcut) {
+              @if (shortcut) {
                 <GoodKeyboardShortcut class={styles.shortcut} expression={shortcut} />
               }
             </div>

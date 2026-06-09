@@ -52,12 +52,12 @@ function findActivationFocusTarget(container: HTMLElement) {
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
-export component WorkbenchScrollPanel(props: {
+export function WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
   restoreScroll?: boolean;
   tabId?: string;
-}) {
+}) @{
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastFocusedScrollKeyRef = useRef(props.scrollKey)
   const shouldRestoreScroll = props.restoreScroll ?? true
@@ -130,25 +130,28 @@ export component WorkbenchScrollPanel(props: {
     }}
   >
     <div class={styles.scrollPanelInner}>
-      if (props.tabId) {
-        <TabContextProvider id={props.tabId} scrollParentRef={scrollerRef}>
+      @if (props.tabId) {
+        <TabContextProvider
+          id={props.tabId}
+          scrollParentRef={scrollerRef}
+        >{props.children}</TabContextProvider>
+      } @else {
+        <>
           {props.children}
-        </TabContextProvider>
-      } else {
-        {props.children}
+        </>
       }
     </div>
   </div>
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-export component MainWorkbenchView() {
+export function MainWorkbenchView() @{
   const mainTab = useMainTab()
   const ActiveMainTabComponent = getWorkbenchTabComponent(mainTab.selectedKind)
 
-  try {
+  @try {
     <ActiveMainTabComponent />
-  } catch (error, retry) {
+  } @catch (error, retry) {
     console.error("Main workbench view render failed.", error)
 
     <WorkbenchTabFailure
@@ -160,19 +163,19 @@ export component MainWorkbenchView() {
 }
 
 /** Renders the active closable workbench tab panel. */
-export component WorkbenchTabPanel() {
+export function WorkbenchTabPanel() @{
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeClosableTab
 
   if (!activeTab) {
-    return
+    return null
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
-  try {
+  @try {
     <ActiveTabComponent {...activeTab.props} />
-  } catch (error, retry) {
+  } @catch (error, retry) {
     console.error("Workbench tab render failed.", error)
 
     <WorkbenchTabFailure
@@ -183,17 +186,17 @@ export component WorkbenchTabPanel() {
   }
 }
 
-component WorkbenchTabFailure(props: {
+function WorkbenchTabFailure(props: {
   description: string;
   onRetry: () => void;
   title: string;
-}) {
+}) @{
   <div class={styles.tabFailureRoot}>
     <div class={styles.tabFailureContent}>
       <h2 class={styles.tabFailureTitle}>{props.title}</h2>
       <p class={styles.tabFailureBody}>{props.description}</p>
       <button class={styles.tabFailureAction} type="button" onClick={props.onRetry}>
-        "Try again"
+        Try again
       </button>
     </div>
   </div>
