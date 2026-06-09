@@ -522,6 +522,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@tsrx/preact@0.1.25": "patches/@tsrx%2Fpreact@0.1.25.patch",
+  },
   "catalog": {
     "@agentclientprotocol/sdk": "^0.22.1",
     "@b9g/async-context": "^0.2.1",

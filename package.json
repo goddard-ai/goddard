@@ -91,5 +91,8 @@
     "typescript": "^6.0.3",
     "unplugin-raw": "^0.7.0"
   },
-  "packageManager": "bun@1.3.11"
+  "packageManager": "bun@1.3.11",
+  "patchedDependencies": {
+    "@tsrx/preact@0.1.25": "patches/@tsrx%2Fpreact@0.1.25.patch"
+  }
 }
