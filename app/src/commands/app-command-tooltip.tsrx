@@ -5,14 +5,14 @@ import { getShortcutBindingExpression } from "~/shared/shortcut-keymap.ts"
 import type { AppCommand as AppCommandType } from "./app-command.ts"
 import styles from "./app-command-tooltip.style.ts"
 
-export component AppCommandTooltip(props: {
+export function AppCommandTooltip(props: {
   children: preact.ComponentChildren;
   command: AppCommandType;
   group?: string;
   label?: string;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
-}) {
+}) @{
   const shortcutRegistry = useShortcutRegistry()
   const shortcut = getShortcutBindingExpression(
     shortcutRegistry.resolvedBindings[props.command.id]?.[0],
@@ -21,19 +21,17 @@ export component AppCommandTooltip(props: {
 
   <GoodTooltip
     ariaLabel={label}
-    content={<tsrx>
+    content={@{
       <span class={styles.content}>
         <span>{label}</span>
 
-        if (shortcut) {
+        @if (shortcut) {
           <GoodKeyboardShortcut class={styles.shortcut} expression={shortcut} />
         }
       </span>
-    </tsrx>}
+    }}
     group={props.group}
     side={props.side}
     sideOffset={props.sideOffset}
-  >
-    {props.children}
-  </GoodTooltip>
+  >{props.children}</GoodTooltip>
 }

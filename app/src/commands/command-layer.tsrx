@@ -40,10 +40,10 @@ export function useCommandLayer() {
 }
 
 /** Provides a command layer for command handlers rendered inside one UI surface. */
-export component CommandLayerProvider(props: {
+export function CommandLayerProvider(props: {
   active?: boolean;
   children?: preact.ComponentChildren;
-}) {
+}) @{
   const layerId = useId()
   const active = props.active ?? true
 
@@ -55,7 +55,5 @@ export component CommandLayerProvider(props: {
     return registerActiveCommandLayer(layerId)
   }, [active, layerId])
 
-  <commandLayerContext.Provider value={layerId}>
-    {props.children}
-  </commandLayerContext.Provider>
+  <commandLayerContext.Provider value={layerId}>{props.children}</commandLayerContext.Provider>
 }

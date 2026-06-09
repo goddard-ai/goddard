@@ -142,11 +142,11 @@ function parseShortcutExpression(expression: string) {
 }
 
 /** Renders one canonical shortcut expression with macOS key symbols and monospace character keys. */
-export component GoodKeyboardShortcut(props: {
+export function GoodKeyboardShortcut(props: {
   expression: string;
   class?: string;
   "aria-label"?: string;
-}) {
+}) @{
   const combos = parseShortcutExpression(props.expression)
 
   <span
@@ -154,23 +154,21 @@ export component GoodKeyboardShortcut(props: {
     class={cx(styles.root, props.class)}
     title={props.expression}
   >
-    for (const combo of combos) {
-      const comboIndex = combos.indexOf(combo)
+    @for (const combo of combos; index comboIndex) {
+      <>
+        @if (comboIndex > 0) {
+          <span aria-hidden={true} class={styles.sequenceSeparator}>then</span>
+        }
 
-      if (comboIndex > 0) {
-        <span aria-hidden={true} class={styles.sequenceSeparator}>"then"</span>
-      }
-
-      for (const part of combo) {
-        <span
-          aria-hidden={true}
-          class={getShortcutPartClass(part)}
-          data-key-kind={part.kind}
-          key={`${comboIndex}:${part.key}`}
-        >
-          {part.label}
-        </span>
-      }
+        @for (const part of combo) {
+          <span
+            aria-hidden={true}
+            class={getShortcutPartClass(part)}
+            data-key-kind={part.kind}
+            key={`${comboIndex}:${part.key}`}
+          >{part.label}</span>
+        }
+      </>
     }
   </span>
 }

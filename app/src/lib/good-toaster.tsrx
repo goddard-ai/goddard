@@ -138,26 +138,22 @@ export const appToaster = createToaster({
   max: 4,
 })
 
-export component GoodToaster() {
+export function GoodToaster() @{
   <OverlayPortal root="menu">
     <div aria-live="polite" aria-relevant="additions text" class={styles.group}>
-      for (const toast of appToaster.toasts.value) {
+      @for (const toast of appToaster.toasts.value) {
         <div key={toast.id} class={styles.root} data-state="open" data-type={toast.type}>
-          if (toast.type === "loading") {
+          @if (toast.type === "loading") {
             <LoaderCircle aria-hidden="true" class={styles.loadingIcon} size={16} />
-          } else {
+          } @else {
             <span aria-hidden="true" class={styles.accent} />
           }
 
           <div class={styles.body}>
-            <span class={styles.title}>
-              {toast.title}
-            </span>
+            <span class={styles.title}>{toast.title}</span>
 
-            if (toast.description != null) {
-              <span class={styles.description}>
-                {toast.description}
-              </span>
+            @if (toast.description != null) {
+              <span class={styles.description}>{toast.description}</span>
             }
           </div>
           <button

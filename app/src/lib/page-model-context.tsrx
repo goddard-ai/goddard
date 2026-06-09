@@ -23,14 +23,12 @@ export function createPageModelContext<TModel, TFactoryArgs extends any[] = []>(
   const PageModel = createModel<TModel>(createPageModel)
   const pageModelContext = createContext<Model<TModel> | null>(null)
 
-  component PageModelProvider(props: {
+  function PageModelProvider(props: {
     children: preact.ComponentChildren;
-  }) {
+  }) @{
     const page = useModel(PageModel)
 
-    <pageModelContext.Provider value={page}>
-      {props.children}
-    </pageModelContext.Provider>
+    <pageModelContext.Provider value={page}>{props.children}</pageModelContext.Provider>
   }
 
   function usePageModel() {

@@ -34,15 +34,13 @@ function useStableObjectByValues<QueryData extends Record<string, unknown>>(valu
 export function createQueryDataContext<QueryData extends Record<string, unknown>>() {
   const queryDataContext = createContext<QueryData | null>(null)
 
-  component QueryDataProvider(props: {
+  function QueryDataProvider(props: {
     children: preact.ComponentChildren;
     value: QueryData;
-  }) {
+  }) @{
     const value = useStableObjectByValues(props.value)
 
-    <queryDataContext.Provider {value}>
-      {props.children}
-    </queryDataContext.Provider>
+    <queryDataContext.Provider {value}>{props.children}</queryDataContext.Provider>
   }
 
   function useQueryData() {

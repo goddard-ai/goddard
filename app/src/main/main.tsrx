@@ -18,10 +18,10 @@ setOverlayPortalRoots({
 window.__goddardDesktop = desktopHost
 
 render(
-  <tsrx>
+  <>
     <AppStateProvider>
       <AppShell />
     </AppStateProvider>
-  </tsrx>,
+  </>,
   document.getElementById("root")!,
 )

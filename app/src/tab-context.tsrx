@@ -12,14 +12,14 @@ const tabContext = (globalThis as typeof globalThis & {
     __goddardTabContext?: preact.Context<TabContextSnapshot | null>;
   }).__goddardTabContext ??= createContext<TabContextSnapshot | null>(null)
 
-export component TabContextProvider(props: {
+export function TabContextProvider(props: {
   children: preact.ComponentChildren;
   id: string;
   scrollParentRef: preact.RefObject<HTMLDivElement | null>;
-}) {
-  <tabContext.Provider value={{ id: props.id, scrollParentRef: props.scrollParentRef }}>
-    {props.children}
-  </tabContext.Provider>
+}) @{
+  <tabContext.Provider
+    value={{ id: props.id, scrollParentRef: props.scrollParentRef }}
+  >{props.children}</tabContext.Provider>
 }
 
 export function useOptionalTabContext() {

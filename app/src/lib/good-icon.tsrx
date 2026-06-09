@@ -22,10 +22,10 @@ type ParsedInlineSvg = {
 const parsedInlineSvgs = new Map<string, ParsedInlineSvg>()
 
 /** Renders either one generated spritemap icon or one inline SVG string. */
-export component GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["svg"]) {
+export function GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["svg"]) @{
   const svgProps = getSvgElementProps(props)
 
-  if (props.data !== undefined) {
+  @if (props.data !== undefined) {
     const parsedSvg = getParsedInlineSvg(props.data)
 
     <svg
@@ -36,7 +36,7 @@ export component GoodIcon(props: SvgIconSource & preact.JSX.IntrinsicElements["s
         __html: parsedSvg.innerMarkup,
       }}
     />
-  } else {
+  } @else {
     <svg {...svgProps}>
       <use href={`/__spritemap#${svgIconSymbolIds[props.name]}`} />
     </svg>

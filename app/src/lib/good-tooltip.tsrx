@@ -3,14 +3,14 @@ import styles from "./good-tooltip.style.ts"
 import { Tooltip } from "@goddard-ai/ui-primitives"
 
 /** Attaches the shared app tooltip treatment to one trigger element. */
-export component GoodTooltip(props: {
+export function GoodTooltip(props: {
   ariaLabel?: string;
   children: preact.ComponentChildren;
   content: preact.ComponentChildren;
   group?: string;
   side?: "top" | "right" | "bottom" | "left";
   sideOffset?: number;
-}) {
+}) @{
   <Tooltip
     ariaLabel={props.ariaLabel}
     class={styles.content}
@@ -20,7 +20,5 @@ export component GoodTooltip(props: {
     openDelay={450}
     side={props.side}
     sideOffset={props.sideOffset}
-  >
-    {props.children}
-  </Tooltip>
+  >{props.children}</Tooltip>
 }

@@ -56,9 +56,9 @@ const context = {
   WorkbenchTabSet: defineAppStateContext("workbenchTabSet"),
 }
 
-export component AppStateProvider(props: {
+export function AppStateProvider(props: {
   children: preact.ComponentChildren;
-}) {
+}) @{
   const appState = useAppState()
 
   <context.Appearance value={appState.appearance}>
@@ -67,9 +67,9 @@ export component AppStateProvider(props: {
         <context.ProjectRegistry value={appState.projectRegistry}>
           <context.ShortcutRegistry value={appState.shortcutRegistry}>
             <context.WorkbenchTabCache value={appState.workbenchTabCache}>
-              <context.WorkbenchTabSet value={appState.workbenchTabSet}>
-                {props.children}
-              </context.WorkbenchTabSet>
+              <context.WorkbenchTabSet
+                value={appState.workbenchTabSet}
+              >{props.children}</context.WorkbenchTabSet>
             </context.WorkbenchTabCache>
           </context.ShortcutRegistry>
         </context.ProjectRegistry>

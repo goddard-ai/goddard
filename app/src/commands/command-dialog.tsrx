@@ -22,7 +22,7 @@ export interface CommandDialogProps {
 }
 
 /** Provides one signal-backed modal controller for a lazily loaded command-dialog surface. */
-export component CommandDialog(props: CommandDialogProps) {
+export function CommandDialog(props: CommandDialogProps) @{
   const Content = useMemo(() => lazy(props.content), [])
   const dialogId = useId()
   const open = useSignal(false)
@@ -41,12 +41,12 @@ export component CommandDialog(props: CommandDialogProps) {
   useAppCommand(props.command, openDialog)
 
   <CommandLayerProvider active={open.value}>
-    if (open.value) {
-      try {
+    @if (open.value) {
+      @try {
         <Content {open} />
-      } pending {
+      } @pending {
         <></>
-      } catch (error, retry) {
+      } @catch (error, retry) {
         console.error("Command dialog render failed.", error)
 
         <CommandDialogFailure {open} {retry} />
@@ -55,10 +55,10 @@ export component CommandDialog(props: CommandDialogProps) {
   </CommandLayerProvider>
 }
 
-component CommandDialogFailure(props: {
+function CommandDialogFailure(props: {
   open: Signal<boolean>;
   retry: () => void;
-}) {
+}) @{
   const titleId = useId()
   const descriptionId = useId()
 
@@ -71,9 +71,9 @@ component CommandDialogFailure(props: {
     contentClass={styles.failureContent}
   >
     <div class={styles.failureCopy}>
-      <h2 id={titleId} class={styles.failureTitle}>"Dialog unavailable"</h2>
+      <h2 id={titleId} class={styles.failureTitle}>Dialog unavailable</h2>
       <p id={descriptionId} class={styles.failureDescription}>
-        "This dialog failed to render. The rest of the app is still available."
+        This dialog failed to render. The rest of the app is still available.
       </p>
     </div>
     <div class={styles.failureActions}>
@@ -83,10 +83,8 @@ component CommandDialogFailure(props: {
         onClick={() => {
           props.open.value = false
         }}
-      >
-        "Close"
-      </button>
-      <button class={styles.failureButton} type="button" onClick={props.retry}>"Try again"</button>
+      >Close</button>
+      <button class={styles.failureButton} type="button" onClick={props.retry}>Try again</button>
     </div>
   </Modal>
 }
