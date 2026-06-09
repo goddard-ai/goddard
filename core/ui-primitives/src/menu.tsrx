@@ -26,7 +26,7 @@ export type MenuItemProps = {
 
 const menuContext = createContext<MenuControls | null>(null)
 
-export component Menu(props: MenuProps) {
+export function Menu(props: MenuProps) @{
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   const menuControls = useMemo<MenuControls>(
@@ -91,9 +91,7 @@ export component Menu(props: MenuProps) {
         }
       }}
     >
-      <div ref={menuRef}>
-        {props.children}
-      </div>
+      <div ref={menuRef}>{props.children}</div>
     </Popover>
   </menuContext.Provider>
 }
@@ -119,7 +117,7 @@ function focusMenuItem(container: HTMLElement, index: number) {
   }
 }
 
-export component MenuItem(props: MenuItemProps) {
+export function MenuItem(props: MenuItemProps) @{
   const menu = useContext(menuContext)
 
   <button
@@ -136,7 +134,5 @@ export component MenuItem(props: MenuItemProps) {
       props.onSelect?.()
       menu?.close()
     }}
-  >
-    {props.children}
-  </button>
+  >{props.children}</button>
 }

@@ -24,7 +24,7 @@ export type ModalProps = {
 }
 
 /** Renders one modal dialog with owned focus, dismissal, and portal behavior. */
-export component Modal(props: ModalProps) {
+export function Modal(props: ModalProps) @{
   const modalId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
 
@@ -76,7 +76,7 @@ export component Modal(props: ModalProps) {
   }, [modalId, props.open.value])
 
   if (!props.open.value) {
-    return
+    return null
   }
 
   <OverlayPortal root="dialog">
@@ -93,9 +93,7 @@ export component Modal(props: ModalProps) {
         onKeyDown={(event) => {
           keepFocusInside(event.currentTarget, event)
         }}
-      >
-        {props.children}
-      </div>
+      >{props.children}</div>
     </div>
   </OverlayPortal>
 }

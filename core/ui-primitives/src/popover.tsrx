@@ -32,13 +32,14 @@ export type PopoverProps = FloatingPositionOptions & {
   }
 
 /** Renders unstyled anchored overlay content for feature-owned popovers. */
-export component Popover(props: PopoverProps) {
+export function Popover(props: PopoverProps) @{
   if (!props.open.value) {
-    return
+    return null
   }
 
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
+  const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
   const close = (reason: PopoverCloseReason) => {
     props.open.value = false
     props.onOpenChange?.(false, reason)
@@ -96,10 +97,7 @@ export component Popover(props: PopoverProps) {
   }, [popoverId])
 
   <OverlayPortal root="menu">
-    const shouldBlockOutsidePointer =
-      props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
-
-    if (shouldBlockOutsidePointer) {
+    @if (shouldBlockOutsidePointer) {
       <div
         aria-hidden="true"
         data-overlay-pointer-blocker="true"
@@ -125,8 +123,6 @@ export component Popover(props: PopoverProps) {
 
         props.onKeyDown?.(event)
       }}
-    >
-      {props.children}
-    </div>
+    >{props.children}</div>
   </OverlayPortal>
 }
