@@ -9,59 +9,10 @@ import {
   shouldRestoreWorkbenchTabScroll,
 } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
+import { findActivationFocusTarget, findSearchFocusTarget } from "./focus-targets.ts"
 import styles from "./views.style.ts"
 
 const panelScrollCache = new Map<string, number>()
-const activationFocusSelector = [
-  "input[type='search']",
-  "[role='searchbox']",
-  "[data-workbench-activation-focus='true']",
-].join(",")
-
-function getFocusableActivationTarget(element: Element) {
-  if (!(element instanceof HTMLElement)) {
-    return null
-  }
-
-  if (element.hidden || element.closest("[hidden], [aria-hidden='true']")) {
-    return null
-  }
-
-  if (
-    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ||
-      element instanceof HTMLSelectElement ||
-      element instanceof HTMLButtonElement
-  ) {
-    return element.disabled ? null : element
-  }
-
-  return element.getAttribute("aria-disabled") === "true" ? null : element
-}
-
-function findActivationFocusTarget(container: HTMLElement) {
-  const targets = container.querySelectorAll(activationFocusSelector)
-
-  for (const target of targets) {
-    const focusableTarget = getFocusableActivationTarget(target)
-
-    if (focusableTarget) {
-      return focusableTarget
-    }
-  }
-
-  return null
-}
-
-function focusActivationTarget(container: HTMLElement) {
-  const target = findActivationFocusTarget(container)
-
-  if (!target) {
-    return false
-  }
-
-  target.focus({ preventScroll: true })
-  return true
-}
 
 function isFocusSearchKeyboardEvent(event: KeyboardEvent) {
   return event.key.toLowerCase() === "f" && (event.metaKey || event.ctrlKey) && !event.altKey &&
@@ -69,12 +20,12 @@ function isFocusSearchKeyboardEvent(event: KeyboardEvent) {
 }
 
 /** Owns one tab panel scroller and restores its previous offset when the panel remounts. */
-export function WorkbenchScrollPanel(props: {
+export component WorkbenchScrollPanel(props: {
   scrollKey: string;
   children: preact.ComponentChildren;
   restoreScroll?: boolean;
   tabId?: string;
-}) @{
+}) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastFocusedScrollKeyRef = useRef(props.scrollKey)
   const shouldRestoreScroll = props.restoreScroll ?? true
@@ -86,7 +37,10 @@ export function WorkbenchScrollPanel(props: {
       return
     }
 
-    if (focusActivationTarget(scrollerElement)) {
+    const searchTarget = findSearchFocusTarget(scrollerElement)
+
+    if (searchTarget) {
+      searchTarget.focus()
       event.preventDefault()
     }
   })
@@ -105,7 +59,18 @@ export function WorkbenchScrollPanel(props: {
 
     if (lastFocusedScrollKeyRef.current !== props.scrollKey) {
       lastFocusedScrollKeyRef.current = props.scrollKey
-      if (focusActivationTarget(scrollerElement)) {
+      const focusActivationTarget = () => {
+        const target = findActivationFocusTarget(scrollerElement)
+
+        if (!target) {
+          return false
+        }
+
+        target.focus({ preventScroll: true })
+        return true
+      }
+
+      if (focusActivationTarget()) {
         return
       }
 
@@ -117,7 +82,7 @@ export function WorkbenchScrollPanel(props: {
           return
         }
 
-        if (focusActivationTarget(scrollerElement)) {
+        if (focusActivationTarget()) {
           observer.disconnect()
         }
       })
@@ -148,28 +113,25 @@ export function WorkbenchScrollPanel(props: {
     }}
   >
     <div class={styles.scrollPanelInner}>
-      @if (props.tabId) {
-        <TabContextProvider
-          id={props.tabId}
-          scrollParentRef={scrollerRef}
-        >{props.children}</TabContextProvider>
-      } @else {
-        <>
+      if (props.tabId) {
+        <TabContextProvider id={props.tabId} scrollParentRef={scrollerRef}>
           {props.children}
-        </>
+        </TabContextProvider>
+      } else {
+        {props.children}
       }
     </div>
   </div>
 }
 
 /** Renders the non-closable main workbench view for the currently selected primary domain. */
-export function MainWorkbenchView() @{
+export component MainWorkbenchView() {
   const mainTab = useMainTab()
   const ActiveMainTabComponent = getWorkbenchTabComponent(mainTab.selectedKind)
 
-  @try {
+  try {
     <ActiveMainTabComponent />
-  } @catch (error, retry) {
+  } catch (error, retry) {
     console.error("Main workbench view render failed.", error)
 
     <WorkbenchTabFailure
@@ -181,19 +143,19 @@ export function MainWorkbenchView() @{
 }
 
 /** Renders the active closable workbench tab panel. */
-export function WorkbenchTabPanel() @{
+export component WorkbenchTabPanel() {
   const workbenchTabSet = useWorkbenchTabSet()
   const activeTab = workbenchTabSet.activeClosableTab
 
   if (!activeTab) {
-    return null
+    return
   }
 
   const ActiveTabComponent = getWorkbenchTabComponent(activeTab.kind)
 
-  @try {
+  try {
     <ActiveTabComponent {...activeTab.props} />
-  } @catch (error, retry) {
+  } catch (error, retry) {
     console.error("Workbench tab render failed.", error)
 
     <WorkbenchTabFailure
@@ -208,13 +170,13 @@ function WorkbenchTabFailure(props: {
   description: string;
   onRetry: () => void;
   title: string;
-}) @{
+}) {
   <div class={styles.tabFailureRoot}>
     <div class={styles.tabFailureContent}>
       <h2 class={styles.tabFailureTitle}>{props.title}</h2>
       <p class={styles.tabFailureBody}>{props.description}</p>
       <button class={styles.tabFailureAction} type="button" onClick={props.onRetry}>
-        Try again
+        "Try again"
       </button>
     </div>
   </div>

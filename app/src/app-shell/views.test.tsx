@@ -110,14 +110,14 @@ test("WorkbenchScrollPanel focuses a search box on Mod+f", async () => {
   container.remove()
 })
 
-test("WorkbenchScrollPanel leaves Mod+f alone when no search box is available", async () => {
+test("WorkbenchScrollPanel leaves Mod+f alone when only activation targets are available", async () => {
   const container = document.createElement("div")
   document.body.append(container)
 
   await act(async () => {
     render(
       <WorkbenchScrollPanel scrollKey="detail:plain">
-        <button>Only action</button>
+        <div contentEditable={true} data-workbench-activation-focus="true" />
       </WorkbenchScrollPanel>,
       container,
     )
@@ -134,6 +134,9 @@ test("WorkbenchScrollPanel leaves Mod+f alone when no search box is available", 
   document.dispatchEvent(event)
 
   expect(event.defaultPrevented).toBe(false)
+  expect(document.activeElement).not.toBe(
+    container.querySelector("[data-workbench-activation-focus='true']"),
+  )
 
   render(null, container)
   container.remove()
