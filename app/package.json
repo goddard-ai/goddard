@@ -76,6 +76,7 @@
     "postcss": "^8.5.10",
     "react": "npm:@preact/compat",
     "react-dom": "npm:@preact/compat",
+    "sculpted": "^0.2.1",
     "vite": "^8.0.10"
   },
   "overrides": {}

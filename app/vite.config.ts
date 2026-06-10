@@ -1,5 +1,7 @@
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
+import { tsrxSourceParserAdapter } from "sculpted"
+import { sculpted } from "sculpted/vite"
 import { defineConfig } from "vite"
 
 import svgIcons from "./plugins/svg-icon-build-plugin.ts"
@@ -11,6 +13,14 @@ export default defineConfig({
   publicDir: "../../public",
   plugins: [
     svgIcons(),
+    sculpted({
+      projectRoot: import.meta.dirname,
+      include: ["src/**/*.{ts,tsx,tsrx}"],
+      sourceSyntax: [tsrxSourceParserAdapter],
+      panda: {
+        cssImportSources: ["@goddard-ai/styled-system/css"],
+      },
+    }),
     tsrxPreact(),
     preact({
       // Workspace source can contain standard decorators; transform them before Prefresh parses HMR signatures.

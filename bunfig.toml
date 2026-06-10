@@ -11,6 +11,7 @@ minimumReleaseAgeExcludes = [
   "procband",
   "radashi",
   "rouzer",
+  "sculpted",
 
   # Turbo
   "turbo",
