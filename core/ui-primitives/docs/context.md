@@ -46,6 +46,14 @@ Use `Menu` and `MenuItem` for action lists that need menu roles, roving keyboard
 
 Use `Tooltip` for non-interactive explanatory content attached to one trigger element.
 
+Use `useListNavigation` for indexed list surfaces that need shared keyboard movement,
+active-row DOM attributes, disabled-row skipping, pointer hover highlighting, and
+scroll-into-view behavior without giving the primitive ownership of item rendering.
+
+Use `useSearchNavigation` when a search input should wire input, keyboard, active-row,
+and activation behavior through DOM refs while the caller keeps filtering and ranking
+logic local.
+
 Use `startFloatingPosition` only when building a custom primitive that needs the same Floating UI positioning behavior without rendering `Popover`.
 
 Use `OverlayPortal` only when building a new overlay primitive inside this package or a tightly coupled Goddard UI package.

@@ -15,6 +15,8 @@ import {
   setOverlayPortalRoots,
   startFloatingPosition,
   Tooltip,
+  useListNavigation,
+  useSearchNavigation,
 } from "@goddard-ai/ui-primitives"
 ```
 
@@ -38,8 +40,10 @@ import {
 | `OverlayPortal`         | component | Low-level portal helper for overlay primitives.                                                |
 | `setOverlayPortalRoots` | function  | Configure `dialog` and `menu` host elements from application code. Do not call from libraries. |
 | `startFloatingPosition` | function  | Position a custom floating element against an element or `{ x, y }` point.                     |
+| `useListNavigation`     | hook      | DOM-ref driven active-row behavior for indexed list surfaces.                                  |
+| `useSearchNavigation`   | hook      | Search-input DOM wiring layered on `useListNavigation`; callers own filtering and rendering.   |
 
-Exported types: `MenuProps`, `MenuItemProps`, `ModalProps`, `ModalCloseReason`, `PopoverProps`, `PopoverCloseReason`, `OverlayPortalRoot`, `OverlayPortalRootResolver`, `FloatingPoint`, `FloatingReference`, and `FloatingPositionOptions`.
+Exported types: `MenuProps`, `MenuItemProps`, `ModalProps`, `ModalCloseReason`, `PopoverProps`, `PopoverCloseReason`, `OverlayPortalRoot`, `OverlayPortalRootResolver`, `FloatingPoint`, `FloatingReference`, `FloatingPositionOptions`, `ListNavigationController`, `ListNavigationOptions`, `SearchNavigationController`, and `SearchNavigationOptions`.
 
 ## Component contracts
 
@@ -115,6 +119,22 @@ Useful props:
 - optional controlled `open: Signal<boolean>`
 
 Tooltips use `Popover` with `focusOnOpen={false}`, `restoreFocus={false}`, `role="tooltip"`, and fixed positioning.
+
+### `useListNavigation` and `useSearchNavigation`
+
+Use these hooks for list-like surfaces that keep filtering, item rendering, and
+overlay behavior in the caller but need shared active-row behavior.
+
+`useListNavigation` requires `count: () => number` and returns an active-index
+controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
+Enter activation, pointer hover, disabled-row skipping from DOM state, active
+DOM attributes, and scroll-into-view. Wrapping and scroll-into-view are enabled
+by default.
+
+`useSearchNavigation` adds `inputRef` for search inputs. It listens for input
+changes, resets active index, delegates movement keys to list navigation, and
+supports optional Escape handling. Keep fuzzy search, typeahead matching, and
+ranking outside the hook.
 
 ## Runnable examples
 

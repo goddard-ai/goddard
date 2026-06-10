@@ -1,3 +1,4 @@
+import { useListNavigation, useSearchNavigation } from "./list-navigation.ts"
 import { Menu, MenuItem } from "./menu.tsrx"
 import { Modal } from "./modal.tsrx"
 import { OverlayPortal, setOverlayPortalRoots } from "./overlay/portal.ts"
@@ -14,7 +15,15 @@ export {
   setOverlayPortalRoots,
   startFloatingPosition,
   Tooltip,
+  useListNavigation,
+  useSearchNavigation,
 }
+export type {
+  ListNavigationController,
+  ListNavigationOptions,
+  SearchNavigationController,
+  SearchNavigationOptions,
+} from "./list-navigation.ts"
 export type { MenuItemProps, MenuProps } from "./menu.tsrx"
 export type { ModalCloseReason, ModalProps } from "./modal.tsrx"
 export type { OverlayPortalRoot, OverlayPortalRootResolver } from "./overlay/portal.ts"
