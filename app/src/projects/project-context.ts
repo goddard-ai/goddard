@@ -1,5 +1,6 @@
 import { effect } from "@preact/signals"
 import { Sigma } from "preact-sigma"
+import { unique } from "radashi"
 
 import {
   getWorkbenchTabRelatedFilesystemPath,
@@ -42,10 +43,6 @@ function isContainingProjectPath(containerPath: string, candidatePath: string) {
   }
 
   return candidatePath.startsWith(`${containerPath}/`)
-}
-
-function uniqueProjectPaths(paths: readonly string[]) {
-  return [...new Set(paths)]
 }
 
 /** Resolves one filesystem path to the nearest containing opened project path. */
@@ -191,7 +188,7 @@ export class ProjectContext extends Sigma<ProjectContextState> {
       this.activeProjectPath && validProjectPathSet.has(this.activeProjectPath)
         ? this.activeProjectPath
         : null
-    const nextRecentProjectPaths = uniqueProjectPaths(
+    const nextRecentProjectPaths = unique(
       this.recentProjectPaths.filter((path) => validProjectPathSet.has(path)),
     )
     const nextFocusedTabProjectPath =

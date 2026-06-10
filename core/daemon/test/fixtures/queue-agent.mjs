@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto"
 import { createInterface } from "node:readline"
+import { isObject } from "radashi"
 
 const sessionId = `queue-agent-session-${randomUUID()}`
 let activePrompt = null
@@ -102,7 +103,7 @@ function toPromptText(prompt) {
 
   const text = prompt
     .map((block) => {
-      if (typeof block === "object" && block !== null && block.type === "text") {
+      if (isObject(block) && block.type === "text") {
         return typeof block.text === "string" ? block.text : ""
       }
 

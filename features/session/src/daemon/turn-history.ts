@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto"
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import * as acp from "acp-client/protocol"
+import { isObject } from "radashi"
 
 import type { DaemonSession, SessionHistoryTurn, SessionId } from "../schema.ts"
 
@@ -88,27 +89,25 @@ type StreamedTextChunkParts = {
   }
 }
 
-/** Returns true when one unknown value is a plain object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 /** Extracts one mergeable streamed text chunk from ACP session history. */
 function getStreamedTextChunkParts(message: acp.AnyMessage) {
   if (
-    !isRecord(message) ||
+    !isObject(message) ||
     "method" in message === false ||
     message.method !== acp.CLIENT_METHODS.session_update
   ) {
     return null
   }
 
-  const params = "params" in message && isRecord(message.params) ? message.params : null
+  const params =
+    "params" in message && isObject(message.params)
+      ? (message.params as Record<string, unknown>)
+      : null
   if (!params) {
     return null
   }
 
-  const update = isRecord(params.update) ? params.update : null
+  const update = isObject(params.update) ? (params.update as Record<string, unknown>) : null
   if (
     !update ||
     (update.sessionUpdate !== "agent_message_chunk" &&
@@ -117,7 +116,7 @@ function getStreamedTextChunkParts(message: acp.AnyMessage) {
     return null
   }
 
-  const content = isRecord(update.content) ? update.content : null
+  const content = isObject(update.content) ? (update.content as Record<string, unknown>) : null
   if (!content || content.type !== "text" || typeof content.text !== "string") {
     return null
   }
@@ -169,27 +168,34 @@ export function appendSessionHistoryMessage(history: acp.AnyMessage[], message: 
 /** Returns true when one ACP message is a context usage update, including malformed payloads. */
 export function isContextUsageUpdateMessage(message: acp.AnyMessage) {
   if (
-    !isRecord(message) ||
+    !isObject(message) ||
     "method" in message === false ||
     message.method !== acp.CLIENT_METHODS.session_update ||
-    !isRecord(message.params)
+    !isObject(message.params)
   ) {
     return false
   }
 
-  const params = "params" in message && isRecord(message.params) ? message.params : null
-  const update = params && isRecord(params.update) ? params.update : null
+  const params =
+    "params" in message && isObject(message.params)
+      ? (message.params as Record<string, unknown>)
+      : null
+  const update =
+    params && isObject(params.update) ? (params.update as Record<string, unknown>) : null
   return update?.sessionUpdate === "usage_update"
 }
 
 /** Extracts model context window usage when an ACP update reports it. */
 export function getContextUsageFromMessage(message: acp.AnyMessage) {
-  const params = "params" in message && isRecord(message.params) ? message.params : null
+  const params =
+    "params" in message && isObject(message.params)
+      ? (message.params as Record<string, unknown>)
+      : null
   if (!isContextUsageUpdateMessage(message) || !params) {
     return null
   }
 
-  const update = isRecord(params.update) ? params.update : null
+  const update = isObject(params.update) ? (params.update as Record<string, unknown>) : null
   if (
     !update ||
     typeof update.size !== "number" ||
@@ -235,15 +241,16 @@ export function coalesceSessionHistoryMessages(messages: readonly acp.AnyMessage
 /** Extracts slash-command availability when one ACP update carries a full replacement list. */
 export function getAvailableCommandsFromMessage(message: acp.AnyMessage) {
   if (
-    !isRecord(message) ||
+    !isObject(message) ||
     "method" in message === false ||
     message.method !== acp.CLIENT_METHODS.session_update ||
-    !isRecord(message.params)
+    !isObject(message.params)
   ) {
     return null
   }
 
-  const update = isRecord(message.params.update) ? message.params.update : null
+  const params = message.params as Record<string, unknown>
+  const update = isObject(params.update) ? (params.update as Record<string, unknown>) : null
   if (
     !update ||
     update.sessionUpdate !== "available_commands_update" ||
@@ -254,9 +261,9 @@ export function getAvailableCommandsFromMessage(message: acp.AnyMessage) {
 
   return update.availableCommands.filter((command): command is acp.AvailableCommand => {
     return (
-      isRecord(command) &&
-      typeof command.name === "string" &&
-      typeof command.description === "string"
+      isObject(command) &&
+      typeof (command as Record<string, unknown>).name === "string" &&
+      typeof (command as Record<string, unknown>).description === "string"
     )
   })
 }
@@ -378,20 +385,18 @@ export function shouldFlushTurnDraftImmediately<TDraftId extends string>(
   message: acp.AnyMessage,
 ) {
   if (
-    isRecord(message) &&
+    isObject(message) &&
     "method" in message &&
     message.method === acp.CLIENT_METHODS.session_update &&
-    isRecord(message.params) &&
-    isRecord(message.params.update)
+    isObject(message.params) &&
+    isObject((message.params as Record<string, unknown>).update)
   ) {
-    return (
-      message.params.update.sessionUpdate === "tool_call" ||
-      message.params.update.sessionUpdate === "tool_call_update"
-    )
+    const update = (message.params as Record<string, unknown>).update as Record<string, unknown>
+    return update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update"
   }
 
   if (
-    isRecord(message) &&
+    isObject(message) &&
     "method" in message &&
     message.method === acp.AGENT_METHODS.session_cancel
   ) {

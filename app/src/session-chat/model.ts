@@ -3,6 +3,7 @@ import * as acp from "acp-client/protocol"
 import hashSum from "hash-sum"
 import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"
+import { isObject } from "radashi"
 
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
@@ -92,6 +93,11 @@ type ApplySessionChatMessageOptions = {
 }
 
 type MessageId = string | number
+type MessageError = {
+  code: number
+  data?: unknown
+  message: string
+}
 
 type SessionPermissionRequest = Extract<SessionChatTurnEvent, { kind: "permissionRequest" }>
 
@@ -102,63 +108,76 @@ type QueuedSessionChatMessage = {
 
 const liveChunkBatchIntervalMs = 33
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+function isRequestOrNotificationMessage(
+  message: acp.AnyMessage,
+): message is Extract<acp.AnyMessage, { method: string }> {
+  return "method" in message
 }
 
-function getMessageField(message: acp.AnyMessage, key: string) {
-  if (!isRecord(message)) {
-    return null
-  }
+function isRequestMessage(
+  message: acp.AnyMessage,
+): message is Extract<acp.AnyMessage, { method: string; id: MessageId | null }> {
+  return isRequestOrNotificationMessage(message) && "id" in message
+}
 
-  return (message as Record<string, unknown>)[key]
+function isResponseMessage(
+  message: acp.AnyMessage,
+): message is Extract<acp.AnyMessage, { id: MessageId | null }> &
+  ({ result: unknown } | { error: MessageError }) {
+  return "id" in message && ("result" in message || "error" in message)
 }
 
 function getMessageId(message: acp.AnyMessage) {
-  const id = getMessageField(message, "id")
+  if (!("id" in message)) {
+    return null
+  }
 
-  return typeof id === "string" || typeof id === "number" ? id : null
-}
-
-function getMessageMethod(message: acp.AnyMessage) {
-  const method = getMessageField(message, "method")
-
-  return typeof method === "string" ? method : null
+  return typeof message.id === "string" || typeof message.id === "number" ? message.id : null
 }
 
 function getMessageResult(message: acp.AnyMessage) {
-  const result = getMessageField(message, "result")
-
-  return isRecord(result) ? result : null
+  return isResponseMessage(message) && "result" in message ? message.result : null
 }
 
 function getMessageError(message: acp.AnyMessage) {
-  const error = getMessageField(message, "error")
-
-  return isRecord(error) ? error : null
+  return isResponseMessage(message) && "error" in message ? message.error : null
 }
 
-function isPromptMessage(message: acp.AnyMessage) {
+function isPromptMessage(
+  message: acp.AnyMessage,
+): message is Extract<acp.AnyMessage, { method: string; id: MessageId | null }> {
   return (
-    getMessageMethod(message) === acp.AGENT_METHODS.session_prompt && getMessageId(message) !== null
-  )
-}
-
-function isPermissionRequestMessage(message: acp.AnyMessage) {
-  return (
-    getMessageMethod(message) === acp.CLIENT_METHODS.session_request_permission &&
+    isRequestMessage(message) &&
+    message.method === acp.AGENT_METHODS.session_prompt &&
     getMessageId(message) !== null
   )
 }
 
-function getSessionUpdate(message: acp.AnyMessage) {
-  const params = getMessageField(message, "params")
+function isPermissionRequestMessage(message: acp.AnyMessage): message is Extract<
+  acp.AnyMessage,
+  { method: string; id: MessageId | null }
+> & {
+  params: acp.RequestPermissionRequest
+} {
+  return (
+    isRequestMessage(message) &&
+    message.method === acp.CLIENT_METHODS.session_request_permission &&
+    getMessageId(message) !== null &&
+    isObject(message.params)
+  )
+}
 
-  if (getMessageMethod(message) !== acp.CLIENT_METHODS.session_update || !isRecord(params)) {
+function getSessionUpdate(message: acp.AnyMessage) {
+  if (
+    !isRequestOrNotificationMessage(message) ||
+    message.method !== acp.CLIENT_METHODS.session_update ||
+    !isObject(message.params)
+  ) {
     return null
   }
 
-  return isRecord(params.update) ? params.update : null
+  const params = message.params as acp.SessionNotification
+  return isObject(params.update) ? (params.update as acp.SessionUpdate) : null
 }
 
 function isTextAgentMessageChunk(message: acp.AnyMessage) {
@@ -166,7 +185,6 @@ function isTextAgentMessageChunk(message: acp.AnyMessage) {
 
   return (
     update?.sessionUpdate === "agent_message_chunk" &&
-    isRecord(update.content) &&
     update.content.type === "text" &&
     typeof update.content.text === "string"
   )
@@ -176,7 +194,6 @@ function getTextAgentMessageChunkText(message: acp.AnyMessage) {
   const update = getSessionUpdate(message)
 
   return update?.sessionUpdate === "agent_message_chunk" &&
-    isRecord(update.content) &&
     update.content.type === "text" &&
     typeof update.content.text === "string"
     ? update.content.text
@@ -240,17 +257,13 @@ function resolveTurnStatus(
   return "completed"
 }
 
-function parsePlanEvent(update: Record<string, unknown>) {
-  return update.sessionUpdate === "plan" && Array.isArray(update.entries)
-    ? (update as acp.Plan)
-    : null
+function parsePlanEvent(update: acp.SessionUpdate) {
+  return update.sessionUpdate === "plan" ? update : null
 }
 
-function parseContextUsage(update: Record<string, unknown>): SessionChatContextUsage | null {
+function parseContextUsage(update: acp.SessionUpdate): SessionChatContextUsage | null {
   if (
     update.sessionUpdate !== "usage_update" ||
-    typeof update.size !== "number" ||
-    typeof update.used !== "number" ||
     !Number.isFinite(update.size) ||
     !Number.isFinite(update.used) ||
     update.size <= 0 ||
@@ -323,13 +336,11 @@ function getMessageContextUsage(message: acp.AnyMessage) {
 }
 
 function getPermissionRequest(message: acp.AnyMessage) {
-  const params = getMessageField(message, "params")
-
-  if (!isPermissionRequestMessage(message) || !isRecord(params)) {
+  if (!isPermissionRequestMessage(message)) {
     return null
   }
 
-  return params as acp.RequestPermissionRequest
+  return message.params
 }
 
 function resolveNextLiveSequence(turns: readonly SessionChatTurn[]) {

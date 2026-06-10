@@ -32,7 +32,7 @@ import {
   type AgentOutputStream,
 } from "acp-client"
 import * as acp from "acp-client/protocol"
-import { getErrorMessage } from "radashi"
+import { clamp, getErrorMessage, unique } from "radashi"
 
 import type { SessionDb } from "../daemon.ts"
 import {
@@ -1003,10 +1003,7 @@ function normalizeSessionPageSize(limit?: number): number {
     return DEFAULT_SESSION_PAGE_SIZE
   }
 
-  return Math.min(
-    Math.max(Math.trunc(limit ?? DEFAULT_SESSION_PAGE_SIZE), 1),
-    MAX_SESSION_PAGE_SIZE,
-  )
+  return clamp(Math.trunc(limit ?? DEFAULT_SESSION_PAGE_SIZE), 1, MAX_SESSION_PAGE_SIZE)
 }
 
 /** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
@@ -1046,7 +1043,7 @@ export function createSessionManager(input: {
     input.emitLifecycleEvent({
       kind: "sessionUpdated",
       session,
-      changed: [...new Set(changed)],
+      changed: unique(changed),
     })
   }
 

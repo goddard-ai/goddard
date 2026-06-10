@@ -1,4 +1,5 @@
 import { appendFile } from "node:fs/promises"
+import { isObject } from "radashi"
 
 import type {
   WorkforceLedgerEvent,
@@ -7,10 +8,6 @@ import type {
   WorkforceTruncateEvent,
 } from "../schema.ts"
 import { buildWorkforcePaths } from "./paths.ts"
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && Array.isArray(value) === false
-}
 
 function createRequestRecord(
   event: Extract<WorkforceLedgerEvent, { type: "request" }>,
@@ -161,7 +158,8 @@ export async function readWorkforceLedger(rootDir: string): Promise<WorkforceLed
     .filter((line) => line.length > 0)
     .map((line, index) => {
       const parsed = JSON.parse(line) as unknown
-      if (isRecord(parsed) === false || typeof parsed.type !== "string") {
+      const record = isObject(parsed) ? (parsed as Record<string, unknown>) : null
+      if (!record || typeof record.type !== "string") {
         throw new Error(`Invalid workforce ledger event at line ${index + 1}`)
       }
       return parsed as unknown as WorkforceLedgerEvent

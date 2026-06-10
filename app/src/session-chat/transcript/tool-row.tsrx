@@ -1,4 +1,5 @@
 import type { SessionTranscriptToolCall, SessionTranscriptToolContent } from "~/sessions/models.ts"
+import { isObject } from "radashi"
 import { buildToolDiffPreview } from "./layout.ts"
 import styles from "./transcript.style.ts"
 
@@ -38,17 +39,13 @@ function getPathBasename(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
 }
 
-function isRecord(value: unknown) {
-  return typeof value === "object" && value !== null
-}
-
 function findRawString(value: unknown, keys: readonly string[]) {
   if (typeof value === "string") {
     const text = value.trim()
     return text.length > 0 ? text : null
   }
 
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     return null
   }
 
@@ -70,7 +67,7 @@ function findRawCommand(value: unknown) {
     return command.length > 0 ? command : null
   }
 
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     return null
   }
 

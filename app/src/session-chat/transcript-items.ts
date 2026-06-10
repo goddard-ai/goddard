@@ -1,5 +1,6 @@
 import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
 import hashSum from "hash-sum"
+import { isObject } from "radashi"
 
 import type {
   SessionTranscriptContentBlock,
@@ -133,25 +134,22 @@ const TRANSCRIPT_IGNORED_CHUNK_SESSION_UPDATES = new Set(["user_message_chunk"])
 const LEADING_SYSTEM_PROMPT_BLOCK_PATTERN =
   /^\s*<system-prompt(?:\s+[^>]*)?>[\s\S]*?<\/system-prompt>\s*/u
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 function getMessageId(message: unknown) {
-  if (!isRecord(message)) {
+  if (!isObject(message)) {
     return null
   }
 
-  const id = message.id
+  const id = (message as Record<string, unknown>).id
   return typeof id === "string" || typeof id === "number" ? id : null
 }
 
 function getMessageMethod(message: unknown) {
-  if (!isRecord(message)) {
+  if (!isObject(message)) {
     return null
   }
 
-  return typeof message.method === "string" ? message.method : null
+  const method = (message as Record<string, unknown>).method
+  return typeof method === "string" ? method : null
 }
 
 function hasMethod(
@@ -182,11 +180,12 @@ function textContentBlock(text: string): SessionTranscriptContentBlock {
 }
 
 function extractPromptContent(message: SessionHistoryMessage) {
-  if (!hasMethod(message, "session/prompt") || !isRecord(message.params)) {
+  if (!hasMethod(message, "session/prompt") || !isObject(message.params)) {
     return []
   }
 
-  return stripLeadingSystemPromptBlocks(promptBlocksToTranscriptContent(message.params.prompt))
+  const params = message.params as Record<string, unknown>
+  return stripLeadingSystemPromptBlocks(promptBlocksToTranscriptContent(params.prompt))
 }
 
 function stripLeadingSystemPromptBlocks(content: SessionTranscriptContentBlock[]) {
@@ -226,11 +225,12 @@ function stripLeadingSystemPromptBlocks(content: SessionTranscriptContentBlock[]
 }
 
 function extractSessionUpdate(message: SessionHistoryMessage) {
-  if (!hasMethod(message, "session/update") || !isRecord(message.params)) {
+  if (!hasMethod(message, "session/update") || !isObject(message.params)) {
     return null
   }
 
-  return isRecord(message.params.update) ? message.params.update : null
+  const params = message.params as Record<string, unknown>
+  return isObject(params.update) ? (params.update as Record<string, unknown>) : null
 }
 
 function extractToolKind(value: unknown) {
@@ -278,19 +278,20 @@ function extractPlanEntries(value: unknown): SessionTranscriptPlanEntry[] | null
   const entries: SessionTranscriptPlanEntry[] = []
 
   for (const entry of value) {
-    if (!isRecord(entry) || typeof entry.content !== "string") {
+    const record = isObject(entry) ? (entry as Record<string, unknown>) : null
+    if (!record || typeof record.content !== "string") {
       return null
     }
 
-    const priority = extractPlanEntryPriority(entry.priority)
-    const status = extractPlanEntryStatus(entry.status)
+    const priority = extractPlanEntryPriority(record.priority)
+    const status = extractPlanEntryStatus(record.status)
 
     if (!priority || !status) {
       return null
     }
 
     entries.push({
-      content: entry.content,
+      content: record.content,
       priority,
       status,
     })
@@ -325,22 +326,23 @@ function extractPermissionOptions(value: unknown): SessionTranscriptPermissionOp
 
   for (const option of value) {
     if (
-      !isRecord(option) ||
-      typeof option.optionId !== "string" ||
-      typeof option.name !== "string"
+      !isObject(option) ||
+      typeof (option as Record<string, unknown>).optionId !== "string" ||
+      typeof (option as Record<string, unknown>).name !== "string"
     ) {
       continue
     }
 
-    const kind = extractPermissionOptionKind(option.kind)
+    const record = option as Record<string, unknown>
+    const kind = extractPermissionOptionKind(record.kind)
 
     if (!kind) {
       continue
     }
 
     options.push({
-      optionId: option.optionId,
-      name: option.name,
+      optionId: record.optionId as string,
+      name: record.name as string,
       kind,
     })
   }
@@ -356,13 +358,14 @@ function extractToolCallLocations(value: unknown): SessionTranscriptToolLocation
   const locations: SessionTranscriptToolLocation[] = []
 
   for (const location of value) {
-    if (!isRecord(location) || typeof location.path !== "string") {
+    const record = isObject(location) ? (location as Record<string, unknown>) : null
+    if (!record || typeof record.path !== "string") {
       continue
     }
 
     locations.push({
-      path: location.path,
-      line: typeof location.line === "number" ? location.line : null,
+      path: record.path,
+      line: typeof record.line === "number" ? record.line : null,
     })
   }
 
@@ -377,32 +380,33 @@ function extractToolCallContent(value: unknown): SessionTranscriptToolContent[] 
   const content: SessionTranscriptToolContent[] = []
 
   for (const item of value) {
-    if (!isRecord(item) || typeof item.type !== "string") {
+    const record = isObject(item) ? (item as Record<string, unknown>) : null
+    if (!record || typeof record.type !== "string") {
       continue
     }
 
-    if (item.type === "content") {
+    if (record.type === "content") {
       content.push({
         type: "content",
-        text: textFromContentBlocks(item.content),
+        text: textFromContentBlocks(record.content),
       })
       continue
     }
 
-    if (item.type === "diff") {
+    if (record.type === "diff") {
       content.push({
         type: "diff",
-        path: typeof item.path === "string" ? item.path : null,
-        oldText: typeof item.oldText === "string" ? item.oldText : null,
-        newText: typeof item.newText === "string" ? item.newText : null,
+        path: typeof record.path === "string" ? record.path : null,
+        oldText: typeof record.oldText === "string" ? record.oldText : null,
+        newText: typeof record.newText === "string" ? record.newText : null,
       })
       continue
     }
 
-    if (item.type === "terminal" && typeof item.terminalId === "string") {
+    if (record.type === "terminal" && typeof record.terminalId === "string") {
       content.push({
         type: "terminal",
-        terminalId: item.terminalId,
+        terminalId: record.terminalId,
       })
     }
   }
@@ -428,12 +432,13 @@ function formatPermissionContext(value: unknown) {
 }
 
 function extractPermissionRequest(message: SessionHistoryMessage) {
-  if (!hasMethod(message, "session/request_permission") || !isRecord(message.params)) {
+  if (!hasMethod(message, "session/request_permission") || !isObject(message.params)) {
     return null
   }
 
   const requestId = getMessageId(message)
-  const toolCall = isRecord(message.params.toolCall) ? message.params.toolCall : null
+  const params = message.params as Record<string, unknown>
+  const toolCall = isObject(params.toolCall) ? (params.toolCall as Record<string, unknown>) : null
 
   if (requestId === null || !toolCall || typeof toolCall.toolCallId !== "string") {
     return null
@@ -450,14 +455,14 @@ function extractPermissionRequest(message: SessionHistoryMessage) {
     toolKind,
     context: formatPermissionContext(toolCall.rawInput),
     locations: extractToolCallLocations(toolCall.locations),
-    options: extractPermissionOptions(message.params.options),
+    options: extractPermissionOptions(params.options),
   }
 }
 
 function extractPermissionResponse(
   message: SessionHistoryMessage,
 ): ParsedPermissionResponse | null {
-  if (!isRecord(message)) {
+  if (!isObject(message)) {
     return null
   }
 
@@ -470,13 +475,15 @@ function extractPermissionResponse(
     }
   }
 
-  const result = "result" in message ? message.result : null
+  const messageRecord = message as Record<string, unknown>
+  const result = "result" in messageRecord ? messageRecord.result : null
 
-  if (!isRecord(result) || !isRecord(result.outcome)) {
+  const resultRecord = isObject(result) ? (result as Record<string, unknown>) : null
+  if (!resultRecord || !isObject(resultRecord.outcome)) {
     return null
   }
 
-  const outcome = result.outcome
+  const outcome = resultRecord.outcome as Record<string, unknown>
 
   if (outcome.outcome === "cancelled") {
     return {
@@ -576,14 +583,14 @@ function extractTextChunk(update: Record<string, unknown>, sessionUpdate: string
   }
 
   if (
-    !isRecord(update.content) ||
-    update.content.type !== "text" ||
-    typeof update.content.text !== "string"
+    !isObject(update.content) ||
+    (update.content as Record<string, unknown>).type !== "text" ||
+    typeof (update.content as Record<string, unknown>).text !== "string"
   ) {
     return null
   }
 
-  return update.content.text
+  return (update.content as Record<string, unknown>).text as string
 }
 
 function parseTranscriptSessionUpdate(
@@ -707,14 +714,15 @@ function createThoughtRow(input: Omit<SessionTranscriptThought, "kind">) {
 }
 
 function extractMessageErrorText(message: SessionHistoryMessage) {
-  const error = isRecord(message) ? (message as Record<string, unknown>)["error"] : null
+  const error = isObject(message) ? (message as Record<string, unknown>)["error"] : null
 
-  if (!isRecord(error)) {
+  if (!isObject(error)) {
     return null
   }
 
-  return typeof error.message === "string" && error.message.trim().length > 0
-    ? error.message.trim()
+  const record = error as Record<string, unknown>
+  return typeof record.message === "string" && record.message.trim().length > 0
+    ? record.message.trim()
     : null
 }
 
@@ -792,7 +800,7 @@ function extractTurnFailureReason(turn: SessionHistoryTurn, session: DaemonSessi
 }
 
 function messageIdMatchesPrompt(turn: SessionHistoryTurn, message: SessionHistoryMessage) {
-  return isRecord(message) && (message as Record<string, unknown>)["id"] === turn.promptRequestId
+  return isObject(message) && (message as Record<string, unknown>)["id"] === turn.promptRequestId
 }
 
 function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {

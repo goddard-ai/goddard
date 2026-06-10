@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { promisify } from "node:util"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
-import { getErrorMessage } from "radashi"
+import { getErrorMessage, isObject } from "radashi"
 
 import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"
 import { buildWorkforcePaths, normalizeWorkforceRootDir } from "./paths.ts"
@@ -29,36 +29,33 @@ export type InitializedWorkforce = {
   createdPaths: string[]
 }
 
-/** Checks whether a parsed JSON value is a plain object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && Array.isArray(value) === false
-}
-
 /** Validates one agent entry loaded from the repo-local workforce config file. */
 function assertAgentConfig(value: unknown, index: number): asserts value is WorkforceAgentConfig {
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     throw new Error(`Invalid workforce agent at index ${index}`)
   }
 
-  if (typeof value.id !== "string" || value.id.length === 0) {
+  const record = value as Record<string, unknown>
+
+  if (typeof record.id !== "string" || record.id.length === 0) {
     throw new Error(`Workforce agent ${index} must include a non-empty id`)
   }
 
-  if (typeof value.name !== "string" || value.name.length === 0) {
+  if (typeof record.name !== "string" || record.name.length === 0) {
     throw new Error(`Workforce agent ${index} must include a non-empty name`)
   }
 
-  if (value.role !== "root" && value.role !== "domain") {
+  if (record.role !== "root" && record.role !== "domain") {
     throw new Error(`Workforce agent ${index} has an invalid role`)
   }
 
-  if (typeof value.cwd !== "string" || value.cwd.length === 0) {
+  if (typeof record.cwd !== "string" || record.cwd.length === 0) {
     throw new Error(`Workforce agent ${index} must include a non-empty cwd`)
   }
 
   if (
-    Array.isArray(value.owns) === false ||
-    value.owns.some((entry) => typeof entry !== "string" || entry.length === 0)
+    Array.isArray(record.owns) === false ||
+    record.owns.some((entry) => typeof entry !== "string" || entry.length === 0)
   ) {
     throw new Error(`Workforce agent ${index} must include non-empty owned paths`)
   }
@@ -186,23 +183,29 @@ export async function readWorkforceConfig(rootDir: string): Promise<WorkforceCon
   const paths = buildWorkforcePaths(rootDir)
   const parsed = JSON.parse(await Bun.file(paths.configPath).text()) as unknown
 
-  if (!isRecord(parsed) || parsed.version !== 1) {
+  if (!isObject(parsed)) {
+    throw new Error(`Invalid workforce config at ${paths.configPath}`)
+  }
+
+  const record = parsed as Record<string, unknown>
+
+  if (record.version !== 1) {
     throw new Error(`Invalid workforce config at ${paths.configPath}`)
   }
 
   if (
-    (typeof parsed.defaultAgent !== "string" && isRecord(parsed.defaultAgent) === false) ||
-    typeof parsed.rootAgentId !== "string" ||
-    Array.isArray(parsed.agents) === false
+    (typeof record.defaultAgent !== "string" && isObject(record.defaultAgent) === false) ||
+    typeof record.rootAgentId !== "string" ||
+    Array.isArray(record.agents) === false
   ) {
     throw new Error(`Invalid workforce config at ${paths.configPath}`)
   }
 
-  parsed.agents.forEach((agent, index) => {
+  record.agents.forEach((agent, index) => {
     assertAgentConfig(agent, index)
   })
 
-  if (parsed.agents.some((agent) => agent.id === parsed.rootAgentId) === false) {
+  if (record.agents.some((agent) => agent.id === record.rootAgentId) === false) {
     throw new Error(`Workforce config at ${paths.configPath} must include the root agent`)
   }
 

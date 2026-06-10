@@ -73,11 +73,6 @@ export function dedupeDiagnostics(diagnostics: SprintDiagnostic[]) {
   return unique
 }
 
-/** Deduplicates blocked-state reason strings without changing their first-seen order. */
-export function dedupeStrings(values: string[]) {
-  return [...new Set(values)]
-}
-
 async function checkBaseBranches(report: SprintStatusReport) {
   const diagnostics: SprintDiagnostic[] = []
   const { state } = report

@@ -1,13 +1,10 @@
 import { textModelConfigJsonSchema } from "ai-sdk-json-schema"
+import { isObject } from "radashi"
 import { toJSONSchema, z } from "zod"
 import type { ToJSONSchemaParams } from "zod/v4/core"
 
 import { buildRootConfigSchema, registerRootConfigSchemas } from "./config-schema.ts"
 import { getDaemonPluginComposition } from "./plugins.ts"
-
-function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 /** Builds generated JSON Schema artifacts for daemon-consumed config files. */
 export function buildGeneratedSchemaArtifacts() {
@@ -49,7 +46,7 @@ export function buildGeneratedSchemaArtifacts() {
 }
 
 function replaceSessionTitleModelConfig(jsonSchema: Record<string, unknown>) {
-  const defs = isJsonObject(jsonSchema.$defs)
+  const defs = isObject(jsonSchema.$defs)
     ? (jsonSchema.$defs as Record<string, unknown>)
     : ((jsonSchema.$defs = {}) as Record<string, unknown>)
   const embeddedModelConfig = JSON.parse(JSON.stringify(textModelConfigJsonSchema)) as Record<
@@ -59,13 +56,13 @@ function replaceSessionTitleModelConfig(jsonSchema: Record<string, unknown>) {
   delete embeddedModelConfig.$schema
   defs.ModelConfig = embeddedModelConfig
 
-  const sessionTitlesDefinition = isJsonObject(defs.SessionTitlesConfig)
+  const sessionTitlesDefinition = isObject(defs.SessionTitlesConfig)
     ? (defs.SessionTitlesConfig as Record<string, unknown>)
     : null
-  const sessionTitlesProperties = isJsonObject(sessionTitlesDefinition?.properties)
+  const sessionTitlesProperties = isObject(sessionTitlesDefinition?.properties)
     ? (sessionTitlesDefinition.properties as Record<string, unknown>)
     : null
-  const generatorProperty = isJsonObject(sessionTitlesProperties?.generator)
+  const generatorProperty = isObject(sessionTitlesProperties?.generator)
     ? (sessionTitlesProperties.generator as Record<string, unknown>)
     : null
 

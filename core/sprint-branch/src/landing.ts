@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
+import { isObject } from "radashi"
 
 import { hasDiagnosticErrors } from "./diagnostics"
 import { GitCommandError, runGit } from "./git/command"
@@ -228,10 +229,7 @@ export async function executeCleanupOperations(
   try {
     await fs.rmdir(path.dirname(statePath))
   } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? (error as { code?: unknown }).code
-        : null
+    const code = isObject(error) && "code" in error ? (error as { code?: unknown }).code : null
     if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EEXIST") {
       throw error
     }

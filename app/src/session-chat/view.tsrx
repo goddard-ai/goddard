@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "preact/hooks"
 import { castProtected, SigmaTarget, useSigmaSync } from "preact-sigma"
+import { isObject } from "radashi"
 
 import { Composer } from "./composer.tsrx"
 import { SessionChat } from "./model.ts"
@@ -695,5 +696,5 @@ function formatSessionRequestError(error: unknown) {
 }
 
 function isSessionChatHeaderActionError(error: unknown) {
-  return typeof error === "object" && error !== null && "description" in error && "title" in error
+  return isObject(error) && "description" in error && "title" in error
 }

@@ -1,7 +1,8 @@
+import { unique } from "radashi"
+
 import { hasDiagnosticErrors } from "./diagnostics"
 import {
   dedupeDiagnostics,
-  dedupeStrings,
   filterStatusDiagnostics,
   resolveDoctorNextSafeCommand,
   runDoctorChecks,
@@ -35,7 +36,7 @@ export async function buildDoctorReport(input: SprintInferenceInput) {
     blocked: {
       ...report.blocked,
       conflict: report.blocked.conflict || Boolean(doctorContext.transientConflict),
-      reasons: dedupeStrings([
+      reasons: unique([
         ...report.blocked.reasons,
         ...(doctorContext.transientConflict ? ["transition retry pending"] : []),
       ]),

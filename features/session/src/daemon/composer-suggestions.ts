@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import * as acp from "acp-client/protocol"
+import { isObject } from "radashi"
 
 import type {
   SessionComposerFileSuggestion,
@@ -33,11 +34,6 @@ async function readDirectoryEntries(path: string) {
     encoding: "utf-8",
     withFileTypes: true,
   })) as Dirent<string>[]
-}
-
-/** Returns true when one unknown value is a plain object record. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 /** Bounds the chat-composer suggestion limit to one small stable range. */
@@ -297,7 +293,7 @@ export function getSlashComposerSuggestions(
 
   for (const command of availableCommands) {
     const inputHint =
-      isRecord(command.input) && typeof command.input.hint === "string" ? command.input.hint : null
+      isObject(command.input) && typeof command.input.hint === "string" ? command.input.hint : null
 
     if (
       normalizedQuery.length > 0 &&

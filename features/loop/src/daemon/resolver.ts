@@ -4,6 +4,7 @@ import { join, resolve } from "node:path"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/session/schema"
+import { isObject, omit } from "radashi"
 
 import {
   LoopConfig,
@@ -52,10 +53,6 @@ const DEFAULT_LOOP_RETRIES = {
   jitterRatio: 0.2,
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
 /** Reads and validates one packaged loop config document. */
 async function readLoopConfig(path: string) {
   let parsed: unknown
@@ -66,8 +63,8 @@ async function readLoopConfig(path: string) {
     throw new Error(`Loop config at ${path} must be valid JSON.`, { cause: error })
   }
 
-  const normalized = isRecord(parsed)
-    ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
+  const normalized = isObject(parsed)
+    ? omit(parsed as Record<string, unknown>, ["$schema"])
     : parsed
 
   return LoopConfig.parse(normalized)

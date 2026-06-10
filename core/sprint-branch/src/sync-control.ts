@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto"
 import * as fs from "node:fs/promises"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
+import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
 import { runGit } from "./git/command"
@@ -424,14 +425,10 @@ function formatStaleSyncCheckoutFailure(cwd: string, currentBranch: string, erro
   return {
     severity: "warning" as const,
     code: "stale_sync_checkout_not_restored",
-    message: `Left ${cwd} on ${currentBranch} because the starting checkout could not be restored: ${formatError(error)}.`,
+    message: `Left ${cwd} on ${currentBranch} because the starting checkout could not be restored: ${getErrorMessage(error)}.`,
     suggestion:
       "Resolve the checkout failure, then check out the intended starting branch manually.",
   }
-}
-
-function formatError(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function isErrno(error: unknown, code: string) {

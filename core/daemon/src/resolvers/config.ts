@@ -6,7 +6,7 @@ import {
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
-import { getErrorMessage } from "radashi"
+import { getErrorMessage, isObject, omit } from "radashi"
 import { z } from "zod"
 
 import { buildRootConfigSchema, mergeRootConfigLayers } from "../config-schema.ts"
@@ -31,10 +31,6 @@ type JsonConfigReadOptions = {
 
 const SCHEMA_BASE_URL =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/"
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 /** Returns true when a filesystem path exists. */
 export async function pathExists(path: string): Promise<boolean> {
@@ -68,7 +64,7 @@ export async function readJsonConfig<T>(
     })
   }
 
-  if (isRecord(parsed) && !("$schema" in parsed)) {
+  if (isObject(parsed) && !("$schema" in parsed)) {
     try {
       await writeFile(
         path,
@@ -87,8 +83,8 @@ export async function readJsonConfig<T>(
     }
   }
 
-  const normalized = isRecord(parsed)
-    ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
+  const normalized = isObject(parsed)
+    ? omit(parsed as Record<string, unknown>, ["$schema"])
     : parsed
 
   try {
@@ -139,11 +135,11 @@ export async function readMergedRootConfig(
  * Prevents repository-local config from declaring daemon-owned global-only settings.
  */
 function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
-  if (!isRecord(normalized)) {
+  if (!isObject(normalized)) {
     return
   }
 
-  const config = normalized
+  const config = normalized as Record<string, unknown>
   if ("daemon" in config) {
     throw new Error(
       "`daemon` is only supported in the global Goddard config, not repository-local config.",
@@ -151,25 +147,28 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   }
 
   const worktrees = config.worktrees
-  if (isRecord(worktrees) && "plugins" in worktrees) {
+  if (isObject(worktrees) && "plugins" in worktrees) {
     throw new Error(
       "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 
   const sessions = config.sessions
-  const envPolicy = isRecord(sessions) ? sessions.envPolicy : null
-  if (isRecord(envPolicy) && "set" in envPolicy) {
+  const envPolicy = isObject(sessions) ? (sessions as Record<string, unknown>).envPolicy : null
+  if (isObject(envPolicy) && "set" in envPolicy) {
     throw new Error(
       "`sessions.envPolicy.set` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 
   const security = config.security
-  const pullRequests = isRecord(security) ? security.pullRequests : null
-  if (isRecord(pullRequests)) {
+  const pullRequests = isObject(security)
+    ? (security as Record<string, unknown>).pullRequests
+    : null
+  if (isObject(pullRequests)) {
+    const pullRequestOptions = pullRequests as Record<string, unknown>
     for (const key of ["submit", "reply"]) {
-      if (pullRequests[key] === "allow") {
+      if (pullRequestOptions[key] === "allow") {
         throw new Error(
           `\`security.pullRequests.${key}\` cannot be set to "allow" in repository-local config.`,
         )

@@ -1,3 +1,5 @@
+import { isObject } from "radashi"
+
 import { hasDiagnosticErrors } from "../diagnostics"
 import type {
   SprintActiveStash,
@@ -15,7 +17,7 @@ type SprintStateParseOptions = {
 /** Parses and validates the canonical sprint branch state JSON object. */
 export function parseSprintState(value: unknown, options: SprintStateParseOptions = {}) {
   const diagnostics: SprintDiagnostic[] = []
-  const record = isRecord(value) ? value : null
+  const record = isObject(value) ? (value as Record<string, unknown>) : null
 
   if (!record) {
     return {
@@ -46,11 +48,11 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
     diagnostics,
   )
   const conflict =
-    record.conflict === null || isRecord(record.conflict)
+    record.conflict === null || isObject(record.conflict)
       ? (record.conflict as SprintBranchState["conflict"] | null)
       : null
 
-  if (!("conflict" in record) || (record.conflict !== null && !isRecord(record.conflict))) {
+  if (!("conflict" in record) || (record.conflict !== null && !isObject(record.conflict))) {
     diagnostics.push({
       severity: "error",
       code: "invalid_conflict",
@@ -96,7 +98,7 @@ export function parseSprintState(value: unknown, options: SprintStateParseOption
 }
 
 function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     diagnostics.push({
       severity: "error",
       code: "invalid_tasks",
@@ -105,13 +107,14 @@ function parseTasks(value: unknown, diagnostics: SprintDiagnostic[]) {
     return null
   }
 
-  const review = readOptionalString(value.review, "tasks.review", diagnostics)
-  const next = readOptionalString(value.next, "tasks.next", diagnostics)
-  const approved = readStringArray(value.approved, "tasks.approved", diagnostics)
+  const record = value as Record<string, unknown>
+  const review = readOptionalString(record.review, "tasks.review", diagnostics)
+  const next = readOptionalString(record.next, "tasks.next", diagnostics)
+  const approved = readStringArray(record.approved, "tasks.approved", diagnostics)
   const finishedUnreviewed =
-    value.finishedUnreviewed === undefined
+    record.finishedUnreviewed === undefined
       ? []
-      : readStringArray(value.finishedUnreviewed, "tasks.finishedUnreviewed", diagnostics)
+      : readStringArray(record.finishedUnreviewed, "tasks.finishedUnreviewed", diagnostics)
 
   if (!approved || !finishedUnreviewed || hasDiagnosticErrors(diagnostics)) {
     return null
@@ -137,7 +140,7 @@ function parseActiveStashes(value: unknown, diagnostics: SprintDiagnostic[]) {
 
   const stashes: SprintActiveStash[] = []
   for (const [index, stash] of value.entries()) {
-    if (!isRecord(stash)) {
+    if (!isObject(stash)) {
       diagnostics.push({
         severity: "error",
         code: "invalid_active_stash",
@@ -146,12 +149,13 @@ function parseActiveStashes(value: unknown, diagnostics: SprintDiagnostic[]) {
       continue
     }
 
+    const record = stash as Record<string, unknown>
     stashes.push({
-      ref: typeof stash.ref === "string" ? stash.ref : undefined,
-      sourceBranch: typeof stash.sourceBranch === "string" ? stash.sourceBranch : undefined,
-      task: typeof stash.task === "string" || stash.task === null ? stash.task : undefined,
-      reason: typeof stash.reason === "string" ? stash.reason : undefined,
-      message: typeof stash.message === "string" ? stash.message : undefined,
+      ref: typeof record.ref === "string" ? record.ref : undefined,
+      sourceBranch: typeof record.sourceBranch === "string" ? record.sourceBranch : undefined,
+      task: typeof record.task === "string" || record.task === null ? record.task : undefined,
+      reason: typeof record.reason === "string" ? record.reason : undefined,
+      message: typeof record.message === "string" ? record.message : undefined,
     })
   }
 
@@ -162,7 +166,7 @@ function parseIgnoredNextBranchAtFinalize(value: unknown, diagnostics: SprintDia
   if (value === null || value === undefined) {
     return null
   }
-  if (!isRecord(value)) {
+  if (!isObject(value)) {
     diagnostics.push({
       severity: "error",
       code: "invalid_ignored_next_branch_at_finalize",
@@ -171,13 +175,14 @@ function parseIgnoredNextBranchAtFinalize(value: unknown, diagnostics: SprintDia
     return null
   }
 
+  const record = value as Record<string, unknown>
   const reviewCommit = readString(
-    value.reviewCommit,
+    record.reviewCommit,
     "ignoredNextBranchAtFinalize.reviewCommit",
     diagnostics,
   )
   const nextCommit = readString(
-    value.nextCommit,
+    record.nextCommit,
     "ignoredNextBranchAtFinalize.nextCommit",
     diagnostics,
   )
@@ -262,8 +267,4 @@ function readStringArray(value: unknown, field: string, diagnostics: SprintDiagn
     message: `${field} must be an array of strings.`,
   })
   return null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
