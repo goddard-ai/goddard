@@ -40,6 +40,16 @@ export type ListAdaptersContext = {
   configProvider: AdapterConfigManager
 }
 
+function orderAdaptersByInstallationState(
+  adapters: AdapterCatalogEntry[],
+  installedAdapterIds: Set<string>,
+) {
+  return [
+    ...adapters.filter((adapter) => installedAdapterIds.has(adapter.id)),
+    ...adapters.filter((adapter) => !installedAdapterIds.has(adapter.id)),
+  ]
+}
+
 async function readMergedAdapterCatalog(
   { registryService, configProvider }: ListAdaptersContext,
   cwd?: string,
@@ -78,14 +88,17 @@ export async function listAdapters(
       .filter((installation) => installation.installed)
       .map((installation) => installation.adapterId),
   )
-  const listedAdapters = includeUninstalled
-    ? mergedAdapters
-    : mergedAdapters.filter((adapter) => installedAdapterIds.has(adapter.id))
+  const listedAdapters = orderAdaptersByInstallationState(
+    includeUninstalled
+      ? mergedAdapters
+      : mergedAdapters.filter((adapter) => installedAdapterIds.has(adapter.id)),
+    installedAdapterIds,
+  )
   const defaultAgent = await resolveDefaultAgent(resolvedConfig).catch(() => null)
 
   return {
     ...registrySnapshot,
-    adapters: includeUninstalled ? mergedAdapters : listedAdapters,
+    adapters: listedAdapters,
     installations,
     defaultAdapterId:
       typeof defaultAgent === "string" &&

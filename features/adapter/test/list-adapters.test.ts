@@ -208,6 +208,15 @@ describe("adapter listing", () => {
             return {
               adapters: [
                 {
+                  id: "aaa-agent",
+                  name: "AAA Agent",
+                  version: "1.0.0",
+                  description: "Alphabetically early registry adapter",
+                  distribution: { npx: { package: "aaa-agent" } },
+                  unofficial: false,
+                  source: "registry" as const,
+                },
+                {
                   id: "registry-agent",
                   name: "Registry Agent",
                   version: "1.0.0",
@@ -253,6 +262,12 @@ describe("adapter listing", () => {
         ],
         installations: expect.arrayContaining([
           {
+            adapterId: "aaa-agent",
+            installable: true,
+            installed: false,
+            method: "npx",
+          },
+          {
             adapterId: "registry-agent",
             installable: true,
             installed: false,
@@ -270,8 +285,17 @@ describe("adapter listing", () => {
       await installCatalogAdapter(context, { adapterId: "registry-agent" })
 
       const installedResponse = await listAdapters(context, { cwd: "/repo" })
+      const settingsResponse = await listAdapters(context, {
+        cwd: "/repo",
+        includeUninstalled: true,
+      })
 
       expect(installedResponse.adapters.map((adapter) => adapter.id)).toContain("registry-agent")
+      expect(settingsResponse.adapters.map((adapter) => adapter.id)).toEqual([
+        "local-acp",
+        "registry-agent",
+        "aaa-agent",
+      ])
     })
   })
 
