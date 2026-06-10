@@ -986,14 +986,14 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
   expect(getDiagnosticEventTypes(created.session.id)).toContain(
     "session_idle_shutdown_timer_expired",
   )
-  expect(
+  await waitFor(async () =>
     lifecycleEvents.some(
       (event) =>
         event.kind === "sessionUpdated" &&
         event.session?.id === created.session.id &&
         event.session?.activeDaemonSession === false,
     ),
-  ).toBe(true)
+  )
 })
 
 test("idle auto-shutdown waits for the last session.streamMessages subscriber to disconnect", async () => {
@@ -1008,15 +1008,39 @@ test("idle auto-shutdown waits for the last session.streamMessages subscriber to
     systemPrompt: "Keep responses short.",
   })
 
+  const clientAMessages: unknown[] = []
+  const clientBMessages: unknown[] = []
   const unsubscribeA = await subscribe(
     clientA,
     { name: "session.streamMessages", filter: { id: created.session.id } },
-    () => {},
+    (payload) => {
+      clientAMessages.push(payload)
+    },
   )
   const unsubscribeB = await subscribe(
     clientB,
     { name: "session.streamMessages", filter: { id: created.session.id } },
-    () => {},
+    (payload) => {
+      clientBMessages.push(payload)
+    },
+  )
+
+  await send(clientA, "session.send", {
+    id: created.session.id,
+    message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "subscriber-check"),
+  })
+  await waitFor(async () =>
+    [clientAMessages, clientBMessages].every((messages) =>
+      messages.some((payload) => {
+        const update = matchAcpRequest<{
+          update?: {
+            content?: { text?: string }
+          }
+        }>(payload, "session/update")?.update
+
+        return update?.content?.text === "prompt_finished:subscriber-check"
+      }),
+    ),
   )
 
   await Promise.resolve(unsubscribeA()).catch(() => {})
