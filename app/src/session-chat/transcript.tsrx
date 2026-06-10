@@ -154,7 +154,7 @@ function getScrollMargin(spacerElement: HTMLDivElement | null, scrollElement: HT
 }
 
 function getPromptNavigationTopInset(scrollElement: HTMLDivElement) {
-  const headerElement = scrollElement.querySelector<HTMLElement>("[data-session-chat-header]")
+  const headerElement = scrollElement.querySelector<HTMLElement>(".session-chat-header")
 
   return (headerElement?.getBoundingClientRect().height ?? 0) + PROMPT_NAVIGATION_TOP_GAP
 }

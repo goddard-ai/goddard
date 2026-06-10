@@ -1,4 +1,5 @@
 import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
+import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
 import {
   CheckCircle2,
@@ -142,7 +143,7 @@ function SessionChatViewContent(props: {
       const headerActionError = page.headerAction.error.value
 
       <SessionChatQueryDataProvider value={{ chat: protectedChat, session, sessionHistory }}>
-        <header class={styles.header} data-session-chat-header="true">
+        <header class={cx(styles.header, "session-chat-header")}>
           <div class={styles.headerIdentity}>
             <p class={styles.headerRepository}>
               @if (sessionWorktree.worktree) {

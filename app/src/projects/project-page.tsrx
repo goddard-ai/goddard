@@ -612,7 +612,7 @@ function CheckoutRow(props: {
     </div>
 
     @if (props.kind === "worktree") {
-      <div class={styles.checkoutActions} data-checkout-actions="true">
+      <div class={styles.checkoutActions}>
         <GoodTooltip content="View changes">
           <button
             aria-label={`View changes for ${props.summary.path}`}

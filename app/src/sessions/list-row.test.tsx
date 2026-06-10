@@ -84,7 +84,7 @@ function renderListRow(input: {
     container,
     openSession,
     openSessionChanges,
-    row: container.querySelector("[data-session-row='true']") as HTMLElement,
+    row: container.querySelector(".session-list-row") as HTMLElement,
   }
 }
 
@@ -163,7 +163,7 @@ test("SessionsList renders loading, error, empty, and row states from observable
     </SessionsPageMutations>,
     container,
   )
-  expect(container.querySelector("[data-session-row='true']")?.textContent).toContain(
+  expect(container.querySelector(".session-list-row")?.textContent).toContain(
     "Stabilize app sessions",
   )
 

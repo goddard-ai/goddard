@@ -2,6 +2,9 @@ import { css } from "@goddard-ai/styled-system/css"
 
 export default {
   row: css({
+    "--session-row-action-opacity": "0",
+    "--session-row-action-pointer-events": "none",
+    "--session-row-timestamp-opacity": "1",
     display: "flex",
     alignItems: "center",
     gap: "8px",
@@ -14,22 +17,16 @@ export default {
     outline: "none",
     "@media (hover: hover) and (pointer: fine)": {
       _hover: {
+        "--session-row-action-opacity": "1",
+        "--session-row-action-pointer-events": "auto",
+        "--session-row-timestamp-opacity": "0",
         backgroundColor: "surface",
       },
-      '&:hover [data-row-action="true"]': {
-        opacity: 1,
-        pointerEvents: "auto",
-      },
-      '&:hover [data-timestamp="true"]': {
-        opacity: 0,
-      },
     },
-    '&:focus-within [data-row-action="true"]': {
-      opacity: 1,
-      pointerEvents: "auto",
-    },
-    '&:focus-within [data-timestamp="true"]': {
-      opacity: 0,
+    _focusWithin: {
+      "--session-row-action-opacity": "1",
+      "--session-row-action-pointer-events": "auto",
+      "--session-row-timestamp-opacity": "0",
     },
     "&[data-active='true']": {
       backgroundColor: "surface",
@@ -63,6 +60,7 @@ export default {
     color: "muted",
     fontSize: "0.76rem",
     flexShrink: "0",
+    opacity: "var(--session-row-timestamp-opacity)",
     transition: "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   title: css({
@@ -99,8 +97,8 @@ export default {
     border: "1px solid {colors.border}",
     backgroundColor: "background",
     color: "text",
-    opacity: 0,
-    pointerEvents: "none",
+    opacity: "var(--session-row-action-opacity)",
+    pointerEvents: "var(--session-row-action-pointer-events)",
     transition:
       "opacity 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), border-color 160ms cubic-bezier(0.23, 1, 0.32, 1)",
     _focusVisible: {

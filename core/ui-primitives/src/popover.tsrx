@@ -100,7 +100,7 @@ export function Popover(props: PopoverProps) @{
     @if (shouldBlockOutsidePointer) {
       <div
         aria-hidden="true"
-        data-overlay-pointer-blocker="true"
+        class="goddard-overlay-pointer-blocker"
         style={{
           position: "fixed",
           inset: "0",

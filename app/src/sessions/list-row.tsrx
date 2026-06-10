@@ -1,4 +1,5 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
+import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import {
   AlertCircle,
@@ -115,9 +116,8 @@ export function ListRow(props: {
   const { openSession, openSessionChanges } = useMutations(SessionsPageMutations)
 
   <div
-    class={styles.row}
+    class={cx(styles.row, "session-list-row")}
     data-active={props.isActive ? "true" : undefined}
-    data-session-row="true"
     role="button"
     tabIndex={0}
     onClick={() => openSession(props.session.id)}
@@ -143,7 +143,6 @@ export function ListRow(props: {
     <div class={styles.trailing}>
       <time
         class={styles.updated}
-        data-timestamp="true"
         dateTime={new Date(props.session.updatedAt).toISOString()}
         title={new Intl.DateTimeFormat(undefined, {
           dateStyle: "medium",
@@ -154,7 +153,6 @@ export function ListRow(props: {
         <button
           class={styles.actionButton}
           aria-label={`View changes for ${sessionTitle}`}
-          data-row-action="true"
           type="button"
           onClick={(event) => {
             event.stopPropagation()

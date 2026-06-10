@@ -115,6 +115,8 @@ export default {
     backgroundColor: "background",
   }),
   checkoutRow: css({
+    "--project-checkout-actions-opacity": "0",
+    "--project-checkout-actions-pointer-events": "none",
     display: "flex",
     alignItems: "center",
     gap: "12px",
@@ -123,9 +125,13 @@ export default {
     border: "1px solid {colors.border}",
     borderRadius: "8px",
     backgroundColor: "background",
-    "&:hover [data-checkout-actions], &:focus-within [data-checkout-actions]": {
-      opacity: "1",
-      pointerEvents: "auto",
+    _hover: {
+      "--project-checkout-actions-opacity": "1",
+      "--project-checkout-actions-pointer-events": "auto",
+    },
+    _focusWithin: {
+      "--project-checkout-actions-opacity": "1",
+      "--project-checkout-actions-pointer-events": "auto",
     },
   }),
   checkoutIcon: css({
@@ -166,8 +172,8 @@ export default {
     alignItems: "center",
     gap: "6px",
     flex: "0 0 auto",
-    opacity: "0",
-    pointerEvents: "none",
+    opacity: "var(--project-checkout-actions-opacity)",
+    pointerEvents: "var(--project-checkout-actions-pointer-events)",
     transition: "opacity 120ms ease",
   }),
   sessionList: css({
