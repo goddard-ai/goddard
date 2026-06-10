@@ -409,9 +409,12 @@ function findTurnWithPendingPermissionRequest(
 
 function extractStopReason(message: acp.AnyMessage) {
   const result = getMessageResult(message)
-  return typeof result?.stopReason === "string"
-    ? (result.stopReason as SessionHistoryTurn["stopReason"])
-    : null
+
+  if (!isObject(result) || !("stopReason" in result) || typeof result.stopReason !== "string") {
+    return null
+  }
+
+  return result.stopReason as SessionHistoryTurn["stopReason"]
 }
 
 function findPendingPermissionRequest(turns: readonly SessionChatTurn[]) {
