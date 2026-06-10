@@ -95,7 +95,7 @@ function createPassthroughLaunchModelConfig(input: {
   configOptions: acp.SessionConfigOption[]
 }) {
   return {
-    models: input.models,
+    models: resolveSessionModelState(input.models),
     configOptions: input.configOptions,
     resolveSelection(input: {
       modelId?: string | null
@@ -110,13 +110,30 @@ function createPassthroughLaunchModelConfig(input: {
   }
 }
 
+function resolveSessionModelState(models: acp.SessionModelState | null) {
+  if (!models || models.availableModels.length === 0) {
+    return models
+  }
+
+  if (models.availableModels.some((model) => model.modelId === models.currentModelId)) {
+    return models
+  }
+
+  return {
+    ...models,
+    currentModelId: models.availableModels[0]!.modelId,
+  }
+}
+
 /** Derives launch-time model and thinking selectors from one ACP launch preview. */
 export function deriveSessionLaunchModelConfig(input: {
   models: acp.SessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
-  if (!input.models || input.models.availableModels.length === 0) {
-    return createPassthroughLaunchModelConfig(input)
+  const models = resolveSessionModelState(input.models)
+
+  if (!models || models.availableModels.length === 0) {
+    return createPassthroughLaunchModelConfig({ ...input, models })
   }
 
   const existingThinkingOption = input.configOptions.find(
@@ -124,16 +141,16 @@ export function deriveSessionLaunchModelConfig(input: {
   )
 
   if (existingThinkingOption && existingThinkingOption.type !== "select") {
-    return createPassthroughLaunchModelConfig(input)
+    return createPassthroughLaunchModelConfig({ ...input, models })
   }
 
-  const parsedModels = input.models.availableModels.map((model) => {
+  const parsedModels = models.availableModels.map((model) => {
     const parsedModel = parseThinkingModel(model)
     return parsedModel ? { model, ...parsedModel } : null
   })
 
   if (parsedModels.some((model) => model === null)) {
-    return createPassthroughLaunchModelConfig(input)
+    return createPassthroughLaunchModelConfig({ ...input, models })
   }
 
   const groups = new Map<
@@ -165,8 +182,8 @@ export function deriveSessionLaunchModelConfig(input: {
     parsedModels.flatMap((parsedModel) => (parsedModel ? [parsedModel.thinkingValue] : [])),
   )
 
-  if (groups.size === input.models.availableModels.length || thinkingOptions.length < 2) {
-    return createPassthroughLaunchModelConfig(input)
+  if (groups.size === models.availableModels.length || thinkingOptions.length < 2) {
+    return createPassthroughLaunchModelConfig({ ...input, models })
   }
 
   const availableModels = [...groups.values()].map((group) => ({
@@ -175,14 +192,14 @@ export function deriveSessionLaunchModelConfig(input: {
     description: group.variants.find((variant) => variant.model.description)?.model.description,
   }))
   const currentVariant = parsedModels.find(
-    (parsedModel) => parsedModel?.model.modelId === input.models?.currentModelId,
+    (parsedModel) => parsedModel?.model.modelId === models.currentModelId,
   )
   const currentGroup = currentVariant ? groups.get(currentVariant.baseName) : null
 
   return {
     models: {
-      ...input.models,
-      currentModelId: currentGroup?.syntheticModelId ?? input.models.currentModelId,
+      ...models,
+      currentModelId: currentGroup?.syntheticModelId ?? models.currentModelId,
       availableModels,
     },
     configOptions: existingThinkingOption

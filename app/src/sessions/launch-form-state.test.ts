@@ -188,6 +188,32 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   })
 })
 
+test("SessionLaunchFormState falls back to the first valid model when adapter models change", () => {
+  preferredLaunchAgentId.value = null
+  const form = new SessionLaunchFormState()
+
+  form.adapterCatalog.value = createAdapterCatalog({
+    adapterIds: ["codex"],
+    defaultAdapterId: "codex",
+  })
+  form.draftProjectPath.value = "/repo"
+  form.launchPreview.value = createLaunchPreview()
+  form.draftModelId.value = "opus"
+  form.launchPreview.value = createLaunchPreview({
+    models: {
+      currentModelId: "removed-model",
+      availableModels: [
+        {
+          modelId: "haiku",
+          name: "Haiku",
+        },
+      ],
+    },
+  })
+
+  expect(form.draftModelId.value).toBe("haiku")
+})
+
 test("filterSlashCommandSuggestions preserves the default cap and fuzzy matches command text", () => {
   const suggestions = createLaunchPreview().slashCommands
 

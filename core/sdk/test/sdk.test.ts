@@ -683,6 +683,27 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("deriveSessionLaunchModelConfig defaults invalid current models to the first available model", () => {
+    const launchModelConfig = deriveSessionLaunchModelConfig({
+      models: {
+        currentModelId: "removed-model",
+        availableModels: [
+          {
+            modelId: "gpt-5.4",
+            name: "GPT-5.4",
+          },
+          {
+            modelId: "gpt-5.4-mini",
+            name: "GPT-5.4 Mini",
+          },
+        ],
+      },
+      configOptions: [],
+    })
+
+    expect(launchModelConfig.models?.currentModelId).toBe("gpt-5.4")
+  })
+
   test("deriveSessionLaunchModelConfig folds thinking suffixes into one selector", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
       models: {
