@@ -166,8 +166,7 @@ function isPermissionRequestMessage(message: acp.AnyMessage): message is Extract
 function getSessionUpdate(message: acp.AnyMessage) {
   if (
     !isRequestOrNotificationMessage(message) ||
-    message.method !== acp.CLIENT_METHODS.session_update ||
-    !isObject(message.params)
+    message.method !== acp.CLIENT_METHODS.session_update
   ) {
     return null
   }
