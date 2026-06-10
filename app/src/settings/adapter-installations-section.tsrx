@@ -17,9 +17,9 @@ import {
 import styles from "./adapter-installations-section.style.ts"
 
 export const adapterInstallationsSettingsSectionMetadata = {
-  description: "Choose which ACP adapters are available in launch selectors.",
+  description: "Choose which agent harnesses are available when launching sessions.",
   id: "settings-adapter-installations",
-  title: "ACP adapters",
+  title: "Agent harnesses",
 }
 
 function getInstallationDetail(installation: AdapterInstallationState) {
@@ -145,6 +145,13 @@ function AdapterInstallationList() @{
   const installationsByAdapterId = new Map(adapterCatalog.installations.map(
     (installation) => [installation.adapterId, installation],
   ))
+  const installedAdapters = adapterCatalog.adapters.filter((adapter) => {
+    return installationsByAdapterId.get(adapter.id)?.installed
+  })
+  const availableAdapters = adapterCatalog.adapters.filter((adapter) => {
+    const installation = installationsByAdapterId.get(adapter.id)
+    return installation && !installation.installed
+  })
 
   async function installAdapter(adapterId: string) {
     setPendingAdapterId(adapterId)
@@ -167,22 +174,47 @@ function AdapterInstallationList() @{
   }
 
   @if (adapterCatalog.adapters.length === 0) {
-    <p class={styles.emptyText}>No ACP adapters are available.</p>
+    <p class={styles.emptyText}>No agent harnesses are available.</p>
   } @else {
-    <ul class={styles.adapterList}>
-      @for (const adapter of adapterCatalog.adapters) {
-        @if (installationsByAdapterId.get(adapter.id)) {
-          <AdapterInstallationRow
-            key={adapter.id}
-            {adapter}
-            installation={installationsByAdapterId.get(adapter.id)!}
-            pending={pendingAdapterId === adapter.id}
-            onInstall={installAdapter}
-            onUninstall={uninstallAdapter}
-          />
+    <div class={styles.agentGroups}>
+      <section class={styles.agentGroup}>
+        @if (installedAdapters.length === 0) {
+          <p class={styles.emptyText}>No installed agents.</p>
+        } @else {
+          <ul class={styles.adapterList}>
+            @for (const adapter of installedAdapters) {
+              <AdapterInstallationRow
+                key={adapter.id}
+                {adapter}
+                installation={installationsByAdapterId.get(adapter.id)!}
+                pending={pendingAdapterId === adapter.id}
+                onInstall={installAdapter}
+                onUninstall={uninstallAdapter}
+              />
+            }
+          </ul>
         }
-      }
-    </ul>
+      </section>
+      <section class={styles.agentGroup}>
+        <h3 class={styles.agentGroupTitle}>Available agents</h3>
+        @if (availableAdapters.length === 0) {
+          <p class={styles.emptyText}>No available agents.</p>
+        } @else {
+          <ul class={styles.adapterList}>
+            @for (const adapter of availableAdapters) {
+              <AdapterInstallationRow
+                key={adapter.id}
+                {adapter}
+                installation={installationsByAdapterId.get(adapter.id)!}
+                pending={pendingAdapterId === adapter.id}
+                onInstall={installAdapter}
+                onUninstall={uninstallAdapter}
+              />
+            }
+          </ul>
+        }
+      </section>
+    </div>
   }
 }
 
@@ -198,19 +230,19 @@ export function AdapterInstallationsSettingsSection() @{
       <SettingsSectionDescription>{adapterInstallationsSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>Installed adapters</SettingsLegend>
+      <SettingsLegend>Installed agents</SettingsLegend>
       <SettingsHelperText>
-        Launch selectors only show adapters installed here or declared in configuration.
+        Launch selectors only show installed agents or agents declared in configuration.
       </SettingsHelperText>
 
       @try {
         <AdapterInstallationList />
       } @pending {
-        <p class={styles.emptyText}>Loading ACP adapters.</p>
+        <p class={styles.emptyText}>Loading agent harnesses.</p>
       } @catch (error, retry) {
         <>
           <p class={styles.emptyText}>
-            {error instanceof Error ? error.message : "Failed to load ACP adapters."}
+            {error instanceof Error ? error.message : "Failed to load agent harnesses."}
           </p>
           <button class={styles.actionButton} type="button" onClick={retry}>Retry</button>
         </>

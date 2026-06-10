@@ -141,7 +141,7 @@ export const AppCommand = defineAppCommands({
         icon: Folder,
       },
       openAdapterSelector: {
-        label: "Open Adapter Selector",
+        label: "Open Agent Harness Selector",
         icon: Bot,
       },
       openLocationSelector: {

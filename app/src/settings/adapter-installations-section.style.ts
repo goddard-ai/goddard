@@ -4,6 +4,21 @@ import { token } from "@goddard-ai/styled-system/tokens"
 const accentColor = token.var("colors.accent")
 
 export default {
+  agentGroups: css({
+    display: "grid",
+    gap: "18px",
+  }),
+  agentGroup: css({
+    display: "grid",
+    gap: "8px",
+  }),
+  agentGroupTitle: css({
+    margin: "0",
+    color: "text",
+    fontSize: "0.86rem",
+    fontWeight: "670",
+    lineHeight: "1.35",
+  }),
   adapterList: css({
     display: "grid",
     gap: "8px",

@@ -116,16 +116,16 @@ export function AppShellChrome() @{
             <AppShellAgentSelector shortcutActive={topBarSelectorShortcutActive} />
           } @pending {
             <button
-              aria-label="Loading ACP agent selector"
+              aria-label="Loading agent harness selector"
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
             />
           } @catch (error, retry) {
-            console.error("ACP agent selector render failed.", error)
+            console.error("Agent harness selector render failed.", error)
 
             <button
-              aria-label="Retry ACP agent selector"
+              aria-label="Retry agent harness selector"
               class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}

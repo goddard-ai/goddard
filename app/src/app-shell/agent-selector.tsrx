@@ -172,7 +172,7 @@ export function AppShellAgentSelector(props: {
       ref={triggerElementRef}
       aria-expanded={open.value}
       aria-haspopup="menu"
-      aria-label={selectedAgent ? `ACP agent: ${selectedAgent.name}` : "Select ACP agent"}
+      aria-label={selectedAgent ? `Agent harness: ${selectedAgent.name}` : "Select agent harness"}
       class={cx(styles.trigger, noDragClass)}
       type="button"
       onClick={() => {

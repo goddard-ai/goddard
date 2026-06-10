@@ -51,3 +51,6 @@
 - `Loop Runtime`
   - One daemon-managed autonomous loop instance addressed by project root and loop name.
   - Why: so operators can inspect and control repeated automation separately from ordinary daemon sessions.
+- `Agent Harness`
+  - A user-facing session launcher integration that supplies an agent runtime and its launch options.
+  - Why: so app UI uses product terminology instead of implementation terminology.

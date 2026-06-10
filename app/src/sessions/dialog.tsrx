@@ -141,7 +141,7 @@ function SessionLaunchDialog(props: {
     <header class={styles.header}>
       <h2 id={titleId} class={styles.title}>Launch session</h2>
       <p class={styles.description}>
-        Choose the project, adapter, launch options, and initial prompt.
+        Choose the project, agent harness, launch options, and initial prompt.
       </p>
     </header>
     <button

@@ -470,7 +470,7 @@ function SessionChatComposerDock(props: {
       ? <div class={styles.composerControls}>
           {props.chat.session.agentName
             ? <GoodTooltip
-                ariaLabel={`ACP agent: ${props.chat.session.agentName}`}
+                ariaLabel={`Agent harness: ${props.chat.session.agentName}`}
                 content={<span class={styles.composerAgentTooltip}>
                   <span>{props.chat.session.agentName}</span>
                   {agentVersion
@@ -479,7 +479,7 @@ function SessionChatComposerDock(props: {
                 </span>}
               >
                 <div
-                  aria-label={`ACP agent: ${props.chat.session.agentName}`}
+                  aria-label={`Agent harness: ${props.chat.session.agentName}`}
                   class={styles.composerAgentControl}
                 >
                   <AcpAgentIcon class={styles.composerAgentIcon} icon={agentIcon} />
@@ -507,7 +507,7 @@ function SessionChatComposerDock(props: {
                 items={modelItems}
                 label="Model"
                 open={modelPickerOpen}
-                placeholder="Use the adapter default model"
+                placeholder="Use the agent harness default model"
                 shortcut={modelShortcut}
                 value={draftModelId.value ?? currentModelId}
                 onValueChange={(value) => {

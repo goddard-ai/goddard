@@ -17,7 +17,7 @@ export function SessionModeSelector(props: {
     option={props.modeOption}
     open={props.open}
     label="Approval preset"
-    placeholder="Use the adapter default"
+    placeholder="Use the agent harness default"
     shortcut={props.shortcut}
     onValueChange={props.onValueChange}
   />
@@ -52,7 +52,7 @@ export function SessionConfigOptionSelector(props: {
     items={optionItems}
     label={props.option?.name ?? props.label ?? "Session option"}
     open={props.open}
-    placeholder={props.placeholder ?? "Use the adapter default"}
+    placeholder={props.placeholder ?? "Use the agent harness default"}
     shortcut={props.shortcut}
     value={props.option?.currentValue ?? null}
     onValueChange={props.onValueChange}

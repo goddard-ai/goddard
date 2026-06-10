@@ -40,7 +40,7 @@ export function SessionLaunchLoadingSelect(props: { label: string; compact?: boo
 
 export function SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) @{
   <div class={styles.composerControls}>
-    <SessionLaunchLoadingSelect compact={props.compact} label="ACP adapter" />
+    <SessionLaunchLoadingSelect compact={props.compact} label="Agent harness" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
@@ -80,9 +80,9 @@ export function AgentHarnessSelector(props: {
     filterable={true}
     iconOnlyTrigger={props.compact}
     {items}
-    label="ACP adapter"
+    label="Agent harness"
     open={form.getPickerOpen("adapter")}
-    placeholder="Select an adapter"
+    placeholder="Select an agent harness"
     shortcut={adapterShortcut}
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
@@ -409,7 +409,7 @@ export function SessionLaunchPreviewSelectors(props: {
       items={modelItems}
       label="Model"
       open={form.getPickerOpen("model")}
-      placeholder="Use the adapter default model"
+      placeholder="Use the agent harness default model"
       shortcut={modelShortcut}
       value={form.draftModelId.value}
       onValueChange={(value) => {
@@ -425,7 +425,7 @@ export function SessionLaunchPreviewSelectors(props: {
         items={thinkingItems}
         label="Thinking level"
         open={form.getPickerOpen("thinking")}
-        placeholder="Use the adapter default"
+        placeholder="Use the agent harness default"
         shortcut={thinkingShortcut}
         value={typeof form.draftThinkingValue.value === "boolean"
           ? String(form.draftThinkingValue.value)
