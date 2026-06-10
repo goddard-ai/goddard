@@ -29,6 +29,7 @@ function renderListNavigation(props: {
   disabledIndexes?: Set<number>
   onActivate?: (index: number) => void
   scrollIntoView?: boolean | ScrollIntoViewOptions
+  shouldIgnorePointer?: () => boolean
   wrap?: boolean
 }) {
   const container = document.createElement("div")
@@ -40,6 +41,7 @@ function renderListNavigation(props: {
       count: () => props.count.value,
       onActivate: props.onActivate,
       scrollIntoView: props.scrollIntoView,
+      shouldIgnorePointer: props.shouldIgnorePointer,
       wrap: props.wrap,
     })
 
@@ -267,6 +269,38 @@ test("useListNavigation supports ref cleanup functions and null cleanup", async 
   element.setAttribute("data-highlighted", "false")
   element.dispatchEvent(new PointerEvent("pointerenter"))
   expect(element.getAttribute("data-highlighted")).toBe("false")
+
+  harness.cleanup()
+})
+
+test("useListNavigation can focus registered items and suppress pointer highlighting", async () => {
+  const count = signal(2)
+  let ignorePointer = true
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    count,
+    capture(controller) {
+      navigation = controller
+    },
+    shouldIgnorePointer: () => ignorePointer,
+  })
+
+  await harness.render()
+
+  const buttons = harness.container.querySelectorAll("button")
+
+  buttons[1]?.dispatchEvent(new PointerEvent("pointerenter"))
+  expect(navigation!.activeIndex()).toBe(0)
+
+  ignorePointer = false
+  buttons[1]?.dispatchEvent(new PointerEvent("pointerenter"))
+  expect(navigation!.activeIndex()).toBe(1)
+
+  navigation!.focusActiveItem()
+  expect(document.activeElement).toBe(buttons[1])
+
+  navigation!.focusItem(0)
+  expect(document.activeElement).toBe(buttons[0])
 
   harness.cleanup()
 })

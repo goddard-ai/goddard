@@ -2,6 +2,8 @@ import { useLayoutEffect, useMemo, useRef } from "preact/hooks"
 
 export type ListNavigationController = {
   activeIndex: () => number
+  focusActiveItem: () => void
+  focusItem: (index: number) => void
   itemRef: (index: number) => (element: HTMLElement | null) => void | (() => void)
   moveActiveIndex: (delta: -1 | 1) => void
   onKeyDown: (event: KeyboardEvent) => boolean
@@ -14,10 +16,11 @@ export type ListNavigationOptions = {
   count: () => number
   onActivate?: (index: number) => void
   scrollIntoView?: boolean | ScrollIntoViewOptions
+  shouldIgnorePointer?: () => boolean
   wrap?: boolean
 }
 
-export type SearchNavigationController = Omit<ListNavigationController, "onKeyDown"> & {
+export type SearchNavigationController = ListNavigationController & {
   inputRef: (element: HTMLInputElement | null) => void | (() => void)
 }
 
@@ -170,6 +173,10 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       optionsRef.current.onActivate?.(activeIndexRef.current)
     }
 
+    function focusItem(index: number) {
+      itemElementsRef.current.get(index)?.focus()
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       switch (event.key) {
         case "ArrowDown":
@@ -209,7 +216,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       itemElementsRef.current.set(index, element)
 
       const handlePointerEnter = () => {
-        if (!isItemDisabled(index)) {
+        if (!optionsRef.current.shouldIgnorePointer?.() && !isItemDisabled(index)) {
           setActiveIndex(index)
         }
       }
@@ -226,6 +233,10 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       activeIndex() {
         return activeIndexRef.current
       },
+      focusActiveItem() {
+        focusItem(activeIndexRef.current)
+      },
+      focusItem,
       itemRef(index) {
         return (element) => {
           registerItem(index, element)
@@ -277,6 +288,8 @@ export function useSearchNavigation(options: SearchNavigationOptions): SearchNav
   return useMemo<SearchNavigationController>(
     () => ({
       activeIndex: listNavigation.activeIndex,
+      focusActiveItem: listNavigation.focusActiveItem,
+      focusItem: listNavigation.focusItem,
       inputRef(element) {
         inputCleanupRef.current?.()
         inputCleanupRef.current = null
@@ -314,6 +327,7 @@ export function useSearchNavigation(options: SearchNavigationOptions): SearchNav
       },
       itemRef: listNavigation.itemRef,
       moveActiveIndex: listNavigation.moveActiveIndex,
+      onKeyDown: listNavigation.onKeyDown,
       resetActiveIndex: listNavigation.resetActiveIndex,
       setActiveIndex: listNavigation.setActiveIndex,
     }),

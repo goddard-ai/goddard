@@ -184,6 +184,9 @@ export default {
     _hover: {
       backgroundColor: "surface",
     },
+    "&[data-active='true']": {
+      backgroundColor: "surface",
+    },
     _focusVisible: {
       _after: {
         content: '""',
@@ -217,9 +220,6 @@ export default {
     fontSize: "0.76rem",
     fontWeight: "480",
     lineHeight: "1.35",
-  }),
-  menuButtonActive: css({
-    backgroundColor: "surface",
   }),
   menuEmpty: css({
     display: "grid",

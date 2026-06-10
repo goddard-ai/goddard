@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
-import { Popover } from "@goddard-ai/ui-primitives"
+import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import styles from "./select-menu.style.ts"
@@ -89,8 +89,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   }, [props.disabled, props.open])
 
   const [query, setQuery] = useState("")
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const [itemElements] = useState<Record<string, HTMLButtonElement | null>>(() => ({}))
   const typeaheadQueryRef = useRef("")
   const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ignorePointerHoverRef = useRef(false)
@@ -122,27 +120,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   }, [props.filterable, props.items, query, searchableItems])
 
   const filteredItemSignature = filteredItems.map((item) => item.value).join("\n")
-  const highlightedItem = filteredItems[selectedIndex] ?? filteredItems[0] ?? null
-
-  function getNextFocusableIndex(startIndex: number, step: 1 | -1) {
-    if (filteredItems.length === 0) {
-      return null
-    }
-
-    for (let offset = 1; offset <= filteredItems.length; offset += 1) {
-      const index = (startIndex + step * offset + filteredItems.length) % filteredItems.length
-
-      if (!filteredItems[index]?.disabled) {
-        return index
-      }
-    }
-
-    return null
-  }
-
-  function getFocusedItemIndex() {
-    return filteredItems.findIndex((item) => itemElements[item.value] === document.activeElement)
-  }
 
   function clearTypeaheadQuery() {
     typeaheadQueryRef.current = ""
@@ -182,38 +159,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     lastPointerPositionRef.current = nextPosition
   }
 
-  function moveFocusedItem(step: 1 | -1) {
-    setSelectedIndex((currentIndex) => {
-      const focusedIndex = getFocusedItemIndex()
-      const nextIndex = getNextFocusableIndex(focusedIndex >= 0 ? focusedIndex : currentIndex, step)
-
-      if (nextIndex === null) {
-        return filteredItems.length === 0 ? 0 : currentIndex
-      }
-
-      ignorePointerHoverUntilPointerMoves()
-      queueMicrotask(() => {
-        const item = filteredItems[nextIndex]
-        if (item) {
-          itemElements[item.value]?.focus()
-        }
-      })
-      return nextIndex
-    })
-  }
-
-  function moveHighlightedItem(step: 1 | -1) {
-    setSelectedIndex((currentIndex) => {
-      const nextIndex = getNextFocusableIndex(currentIndex, step)
-
-      if (nextIndex !== null) {
-        ignorePointerHoverUntilPointerMoves()
-      }
-
-      return nextIndex === null ? currentIndex : nextIndex
-    })
-  }
-
   function getSearchableItemMatch(query: string, item: SessionInputSelectItem) {
     const searchableItem = searchableItems.find((entry) => entry.item.value === item.value)
 
@@ -232,14 +177,36 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       null
   }
 
+  function commitSelection(item: SessionInputSelectItem | null) {
+    if (props.disabled || !item || item.disabled) {
+      return
+    }
+
+    props.onValueChange(item.value)
+    props.open.value = false
+  }
+
+  const navigation = useSearchNavigation({
+    activeAttribute: "data-active",
+    count: () => filteredItems.length,
+    onActivate(index) {
+      commitSelection(filteredItems[index] ?? null)
+    },
+    onEscape() {
+      props.open.value = false
+    },
+    onQueryChange(nextQuery) {
+      setQuery(nextQuery)
+    },
+    shouldIgnorePointer: () => ignorePointerHoverRef.current,
+  })
+
   function findNearestTypeaheadIndex(query: string) {
     if (isEmptyQuery(query) || filteredItems.length === 0) {
       return null
     }
 
-    const focusedIndex = getFocusedItemIndex()
-    const currentIndex =
-      focusedIndex >= 0 ? focusedIndex : selectedIndex
+    const currentIndex = navigation.activeIndex()
     const firstOffset =
       query.length > 1 ? 0 : 1
 
@@ -279,28 +246,16 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     }
 
     ignorePointerHoverUntilPointerMoves()
-    setSelectedIndex(nextIndex)
+    navigation.setActiveIndex(nextIndex)
     queueMicrotask(() => {
-      const item = filteredItems[nextIndex]
-      if (item) {
-        itemElements[item.value]?.focus()
-      }
+      navigation.focusItem(nextIndex)
     })
-  }
-
-  function commitSelection(item: SessionInputSelectItem | null) {
-    if (props.disabled || !item || item.disabled) {
-      return
-    }
-
-    props.onValueChange(item.value)
-    props.open.value = false
   }
 
   useEffect(() => {
     if (!props.open.value) {
       setQuery("")
-      setSelectedIndex(0)
+      navigation.resetActiveIndex()
       clearTypeaheadQuery()
       ignorePointerHoverRef.current = false
       return
@@ -308,7 +263,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
     ignorePointerHoverUntilPointerMoves()
     const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
-    setSelectedIndex(
+    navigation.setActiveIndex(
       props.filterable && !isEmptyQuery(query)
         ? 0
         : currentIndex >= 0
@@ -318,16 +273,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   }, [filteredItemSignature, props.filterable, props.open.value, props.value, query])
 
   useEffect(() => clearTypeaheadQuery, [])
-
-  useEffect(() => {
-    if (!props.open.value || !highlightedItem) {
-      return
-    }
-
-    itemElements[highlightedItem.value]?.scrollIntoView({
-      block: "nearest",
-    })
-  }, [highlightedItem?.value, props.open.value])
 
   <div class={styles.field} data-compact={props.compact}>
     @if (!props.compact) {
@@ -454,16 +399,16 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
           switch (event.key) {
             case "ArrowDown":
-              event.preventDefault()
-              moveFocusedItem(1)
-              return
             case "ArrowUp":
-              event.preventDefault()
-              moveFocusedItem(-1)
+            case "Home":
+            case "End":
+              ignorePointerHoverUntilPointerMoves()
+              if (navigation.onKeyDown(event)) {
+                queueMicrotask(navigation.focusActiveItem)
+              }
               return
             case "Enter":
-              event.preventDefault()
-              commitSelection(highlightedItem)
+              navigation.onKeyDown(event)
               return
             case "Escape":
               event.preventDefault()
@@ -474,35 +419,22 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       >
         @if (props.filterable) {
           <input
-            ref={filterInputRef}
+            ref={(element) => {
+              filterInputRef.current = element
+              const cleanup = navigation.inputRef(element)
+
+              return () => {
+                cleanup?.()
+
+                if (filterInputRef.current === element) {
+                  filterInputRef.current = null
+                }
+              }
+            }}
             class={styles.menuFilter}
             disabled={props.disabled}
             placeholder="Type to filter"
             value={query}
-            onInput={(event) => {
-              setQuery(event.currentTarget.value)
-              setSelectedIndex(0)
-            }}
-            onKeyDown={(event) => {
-              switch (event.key) {
-                case "ArrowDown":
-                  event.preventDefault()
-                  moveHighlightedItem(1)
-                  return
-                case "ArrowUp":
-                  event.preventDefault()
-                  moveHighlightedItem(-1)
-                  return
-                case "Enter":
-                  event.preventDefault()
-                  commitSelection(highlightedItem)
-                  return
-                case "Escape":
-                  event.preventDefault()
-                  event.stopPropagation()
-                  props.open.value = false
-              }
-            }}
           />
         }
         @if (props.loading) {
@@ -527,22 +459,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
               <li key={item.value}>
                 <button
-                  ref={(element) => {
-                    itemElements[item.value] = element
-                  }}
-                  class={cx(styles.menuButton, index === selectedIndex && styles.menuButtonActive)}
+                  ref={navigation.itemRef(index)}
+                  class={styles.menuButton}
                   disabled={props.disabled || item.disabled}
                   type="button"
-                  onMouseEnter={() => {
-                    if (ignorePointerHoverRef.current) {
-                      return
-                    }
-
-                    setSelectedIndex(index)
-                  }}
-                  onFocus={() => {
-                    setSelectedIndex(index)
-                  }}
+                  data-active="false"
                   onClick={() => {
                     commitSelection(item)
                   }}

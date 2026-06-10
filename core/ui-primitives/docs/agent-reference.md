@@ -127,9 +127,11 @@ overlay behavior in the caller but need shared active-row behavior.
 
 `useListNavigation` requires `count: () => number` and returns an active-index
 controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
-Enter activation, pointer hover, disabled-row skipping from DOM state, active
-DOM attributes, and scroll-into-view. Wrapping and scroll-into-view are enabled
-by default.
+Enter activation, pointer hover, registered-row focus helpers, disabled-row
+skipping from DOM state, active DOM attributes, and scroll-into-view. Wrapping
+and scroll-into-view are enabled by default. Use `shouldIgnorePointer` for
+menus that temporarily suppress hover while keyboard or typeahead navigation is
+in progress.
 
 `useSearchNavigation` adds `inputRef` for search inputs. It listens for input
 changes, resets active index, delegates movement keys to list navigation, and
