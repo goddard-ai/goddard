@@ -17,6 +17,7 @@ import {
   git,
   runCli,
   spawnCli,
+  workingTreePorcelain,
   writeSprintLock,
 } from "./support"
 
@@ -319,7 +320,7 @@ describe("sprint-branch sync", () => {
     let syncExited = false
 
     try {
-      await waitForReviewSyncCheckout(reviewWorktree)
+      await waitForCleanReviewSyncCheckout(reviewWorktree)
       syncProcess.kill("SIGKILL")
       await waitForCliExit(syncProcess, "stale sprint-branch sync")
       syncExited = true
@@ -482,6 +483,15 @@ async function waitForReviewSyncCheckout(reviewWorktree: string) {
   await waitUntil(
     async () => (await currentBranch(reviewWorktree)) === "review-sync/sprint/example/review",
     "sync did not check out the review-sync branch",
+  )
+}
+
+async function waitForCleanReviewSyncCheckout(reviewWorktree: string) {
+  await waitUntil(
+    async () =>
+      (await currentBranch(reviewWorktree)) === "review-sync/sprint/example/review" &&
+      (await workingTreePorcelain(reviewWorktree)) === "",
+    "sync did not leave a clean review-sync checkout",
   )
 }
 
