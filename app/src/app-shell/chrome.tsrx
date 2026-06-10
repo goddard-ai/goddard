@@ -262,7 +262,8 @@ export function AppShellChrome() @{
               <WorkbenchTabPanel />
             </WorkbenchScrollPanel>
           }
-        } @pending {}
+        } @pending {
+        }
       </div>
     </div>
   </div>
