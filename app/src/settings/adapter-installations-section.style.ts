@@ -58,6 +58,37 @@ export default {
     lineClamp: "2",
     lineHeight: "1.45",
   }),
+  adapterLinks: css({
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "8px",
+    paddingBlockStart: "2px",
+  }),
+  adapterLink: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    minWidth: "0",
+    color: "accentStrong",
+    fontSize: "0.8rem",
+    fontWeight: "620",
+    lineHeight: "1.4",
+    textDecoration: "none",
+    _hover: {
+      textDecoration: "underline",
+      textUnderlineOffset: "2px",
+    },
+    _focusVisible: {
+      outline: "2px solid {colors.accentStrong}",
+      outlineOffset: "2px",
+    },
+  }),
+  githubIcon: css({
+    width: "14px",
+    height: "14px",
+    flexShrink: "0",
+  }),
   actionButton: css({
     display: "inline-flex",
     alignItems: "center",
