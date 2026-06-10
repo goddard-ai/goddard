@@ -60,6 +60,10 @@ function orderAdaptersByInstallationState(
   ]
 }
 
+function isManagedAdapter(adapter: AdapterCatalogEntry, managedAgents?: AgentsConfig["managed"]) {
+  return managedAgents?.[adapter.id] !== undefined
+}
+
 async function readMergedAdapterCatalog(
   { registryService, configProvider }: ListAdaptersContext,
   cwd?: string,
@@ -101,7 +105,11 @@ export async function listAdapters(
   const listedAdapters = orderAdaptersByInstallationState(
     includeUninstalled
       ? mergedAdapters
-      : mergedAdapters.filter((adapter) => installedAdapterIds.has(adapter.id)),
+      : mergedAdapters.filter(
+          (adapter) =>
+            installedAdapterIds.has(adapter.id) ||
+            isManagedAdapter(adapter, resolvedConfig?.agents?.managed),
+        ),
     installedAdapterIds,
   )
   const adapters = await attachManagedInstallStatus({
@@ -119,7 +127,9 @@ export async function listAdapters(
     defaultAdapterId:
       typeof defaultAgent === "string" &&
       mergedAdapters.some((adapter) => adapter.id === defaultAgent) &&
-      (includeUninstalled || installedAdapterIds.has(defaultAgent))
+      (includeUninstalled ||
+        installedAdapterIds.has(defaultAgent) ||
+        resolvedConfig?.agents?.managed?.[defaultAgent] !== undefined)
         ? defaultAgent
         : null,
   }

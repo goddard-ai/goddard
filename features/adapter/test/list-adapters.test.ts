@@ -300,6 +300,7 @@ describe("adapter listing", () => {
             }
           },
         },
+        agentInstallService: createAgentInstallService(),
         configProvider: {
           async getRootConfig() {
             return {
