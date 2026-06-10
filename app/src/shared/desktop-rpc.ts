@@ -125,6 +125,10 @@ export type AppDesktopRpc = {
         params: {}
         response: {}
       }
+      openExternal: {
+        params: { url: string }
+        response: { opened: boolean }
+      }
       writeAppLog: {
         params: AppLogInput
         response: {}

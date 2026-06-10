@@ -1,7 +1,8 @@
 import type { PullRequestId } from "@goddard-ai/pull-request/schema"
-import { ExternalLink, GitPullRequest } from "lucide-react"
+import { ExternalLink as ExternalLinkIcon, GitPullRequest } from "lucide-react"
 import { useState } from "preact/hooks"
 
+import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getPullRequestDisplayTitle } from "./display.ts"
@@ -67,10 +68,10 @@ function PullRequestView(props: {
           </h1>
           <p class={styles.description}>Daemon-managed pull request linked from the inbox.</p>
         </div>
-        <a class={styles.externalLink} href={url} rel="noreferrer" target="_blank">
-          <ExternalLink size={15} strokeWidth={2.1} />
+        <ExternalLink class={styles.externalLink} href={url}>
+          <ExternalLinkIcon size={15} strokeWidth={2.1} />
           Open on GitHub
-        </a>
+        </ExternalLink>
       </header>
       <section class={styles.detailGrid} aria-label="Pull request details">
         <InfoCard label="Host" value={pullRequest.host} />

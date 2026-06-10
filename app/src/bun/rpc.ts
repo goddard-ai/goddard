@@ -1,4 +1,4 @@
-import { BrowserView } from "electrobun/bun"
+import { BrowserView, Utils } from "electrobun/bun"
 
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
@@ -42,6 +42,7 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
         getMainWindow()?.maximize()
         return {}
       },
+      openExternal: async ({ url }) => ({ opened: Utils.openExternal(url) }),
       writeAppLog: async (input) => {
         await writeAppLog(input)
         return {}

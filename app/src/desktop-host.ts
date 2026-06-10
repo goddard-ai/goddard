@@ -66,6 +66,9 @@ export interface DesktopHostBridge {
   /** Maximizes the active desktop window through the Bun host bridge. */
   maximizeWindow(): Promise<void>
 
+  /** Opens one URL through the operating system default browser or URL handler. */
+  openExternal(url: string): Promise<boolean>
+
   /** Forwards one daemon IPC request through the Bun host's default daemon client. */
   daemonSend<Name extends DaemonRequestName>(
     name: Name,
@@ -234,6 +237,12 @@ export async function maximizeWindow(): Promise<void> {
   await rpc.request.maximizeWindow({})
 }
 
+/** Opens one URL through the operating system default browser or URL handler. */
+export async function openExternal(url: string): Promise<boolean> {
+  const response = await rpc.request.openExternal({ url })
+  return response.opened
+}
+
 /** Forwards one daemon IPC request through the Bun host. */
 export async function daemonSend<Name extends DaemonRequestName>(
   name: Name,
@@ -280,6 +289,7 @@ export const desktopHost: DesktopHostBridge = {
   loadShortcutKeymap,
   writeShortcutKeymap,
   maximizeWindow,
+  openExternal,
   daemonSend,
   daemonSubscribe,
   // Resolve lazily so the desktop bridge and SDK transport can share a module cycle safely.

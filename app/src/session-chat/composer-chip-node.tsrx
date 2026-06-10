@@ -13,6 +13,7 @@ import { $applyNodeReplacement, DecoratorNode } from "lexical"
 import { BookOpen, Command, File, Folder, Link2 } from "lucide-react"
 import type { JSX } from "preact"
 
+import { ExternalLink } from "~/lib/external-link.tsrx"
 import styles from "./composer-chip-node.style.ts"
 import type { ComposerChipDecoratorNodeConstructor } from "./composer-chip-node-types.ts"
 
@@ -159,11 +160,9 @@ function ComposerChipView(props: { chip: ComposerChipData }) @{
     </span>
 
     @if (props.chip.kind === "link") {
-      <a
+      <ExternalLink
         class={cx(styles.label, styles.link)}
         href={props.chip.uri}
-        rel="noreferrer"
-        target="_blank"
         title="Cmd-click to open"
         onClick={(event) => {
           if (!event.metaKey) {
@@ -173,7 +172,7 @@ function ComposerChipView(props: { chip: ComposerChipData }) @{
 
           event.stopPropagation()
         }}
-      >{props.chip.label}</a>
+      >{props.chip.label}</ExternalLink>
     } @else {
       <span class={styles.label}>
         {props.chip.kind === "slash_command" ? `/${props.chip.label}` : props.chip.label}

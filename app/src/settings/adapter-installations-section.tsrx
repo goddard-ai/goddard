@@ -2,6 +2,7 @@ import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/
 import { Download, GitBranch, Globe, Trash2 } from "lucide-react"
 import { useState } from "preact/hooks"
 
+import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
@@ -84,24 +85,14 @@ function AdapterInstallationRow(props: {
       @if (props.adapter.website || props.adapter.repository) {
         <span class={styles.adapterLinks}>
           @if (props.adapter.website) {
-            <a
-              class={styles.adapterLink}
-              href={props.adapter.website}
-              rel="noreferrer"
-              target="_blank"
-            >
+            <ExternalLink class={styles.adapterLink} href={props.adapter.website}>
               <Globe aria-hidden={true} size={14} strokeWidth={2.1} />
               Website
-            </a>
+            </ExternalLink>
           }
 
           @if (props.adapter.repository) {
-            <a
-              class={styles.adapterLink}
-              href={props.adapter.repository}
-              rel="noreferrer"
-              target="_blank"
-            >
+            <ExternalLink class={styles.adapterLink} href={props.adapter.repository}>
               @if (isGithubRepository(props.adapter.repository)) {
                 <svg aria-hidden={true} class={styles.githubIcon} viewBox="0 0 16 16">
                   <path
@@ -113,7 +104,7 @@ function AdapterInstallationRow(props: {
                 <GitBranch aria-hidden={true} size={14} strokeWidth={2.1} />
               }
               Repository
-            </a>
+            </ExternalLink>
           }
         </span>
       }
