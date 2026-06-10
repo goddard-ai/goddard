@@ -139,7 +139,7 @@ function createPassthroughLaunchModelConfig(input: {
   }
 }
 
-function resolveSessionModelState(models: acp.SessionModelState | null) {
+function resolveSessionModelState(models: DaemonSessionModelState | null) {
   if (!models || models.availableModels.length === 0) {
     return models
   }
