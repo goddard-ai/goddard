@@ -23,7 +23,7 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test --dots",
+    "test": "bun test --dots --timeout=30000",
     "repair-local-sprints": "bun run ./scripts/repair-local-sprints.ts"
   },
   "dependencies": {
