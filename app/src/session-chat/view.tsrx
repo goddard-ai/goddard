@@ -426,7 +426,9 @@ function SessionChatComposerDock(props: {
     configOptions: props.chat.session.configOptions,
   })
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {
-    params: [{ cwd: props.chat.session.cwd }],
+    params: [
+      { cwd: props.chat.session.cwd, includeUninstalled: true },
+    ],
   })
   const agentAdapter =
     typeof props.chat.session.agent === "string"

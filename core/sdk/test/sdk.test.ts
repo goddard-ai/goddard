@@ -161,6 +161,7 @@ describe("@goddard-ai/sdk session namespace", () => {
 
     send.mockResolvedValueOnce({
       adapters: [],
+      installations: [],
       defaultAdapterId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
@@ -170,6 +171,7 @@ describe("@goddard-ai/sdk session namespace", () => {
 
     await expect(sdk.adapter.list({ cwd: "/tmp/project" })).resolves.toEqual({
       adapters: [],
+      installations: [],
       defaultAdapterId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",

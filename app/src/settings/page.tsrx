@@ -5,6 +5,10 @@ import {
   appearanceSettingsSectionMetadata,
   AppearanceSettingsSection,
 } from "~/appearance/appearance-settings-section.tsrx"
+import {
+  adapterInstallationsSettingsSectionMetadata,
+  AdapterInstallationsSettingsSection,
+} from "./adapter-installations-section.tsrx"
 import { filterPreparedSettingsSearchSections, prepareSettingsSearchSections } from "./search.ts"
 import styles from "./page.style.ts"
 
@@ -12,6 +16,10 @@ const settingsSections = [
   {
     ...appearanceSettingsSectionMetadata,
     href: `#${appearanceSettingsSectionMetadata.id}`,
+  },
+  {
+    ...adapterInstallationsSettingsSectionMetadata,
+    href: `#${adapterInstallationsSettingsSectionMetadata.id}`,
   },
 ]
 
@@ -43,6 +51,8 @@ export function SettingsPage() @{
       @for (const section of visibleSections) {
         @if (section.id === appearanceSettingsSectionMetadata.id) {
           <AppearanceSettingsSection key={section.id} />
+        } @else if (section.id === adapterInstallationsSettingsSectionMetadata.id) {
+          <AdapterInstallationsSettingsSection key={section.id} />
         } @else {
           <></>
         }

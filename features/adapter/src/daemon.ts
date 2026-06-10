@@ -1,7 +1,7 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
 
 import { adapterIpcRoutes } from "./daemon-ipc.ts"
-import { listAdapters } from "./list-adapters.ts"
+import { installCatalogAdapter, listAdapters, uninstallCatalogAdapter } from "./list-adapters.ts"
 
 export const adapterPlugin = definePlugin({
   name: "adapter",
@@ -11,6 +11,8 @@ export const adapterPlugin = definePlugin({
       ipcHandlers: {
         adapter: {
           list: async ({ body }) => listAdapters(context, body),
+          install: async ({ body }) => installCatalogAdapter(context, body),
+          uninstall: async ({ body }) => uninstallCatalogAdapter(context, body),
         },
       },
     }

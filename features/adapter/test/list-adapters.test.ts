@@ -4,7 +4,24 @@ import { join } from "node:path"
 import { createAcpRegistryService } from "acp-client/node"
 import { describe, expect, test } from "bun:test"
 
-import { listAdapters } from "../src/list-adapters.ts"
+import { installCatalogAdapter, listAdapters } from "../src/list-adapters.ts"
+
+async function withIsolatedHome(callback: () => Promise<void>) {
+  const previousHome = process.env.HOME
+  const homeDir = await mkdtemp(join(tmpdir(), "goddard-adapter-installations-"))
+
+  process.env.HOME = homeDir
+  try {
+    await callback()
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME
+    } else {
+      process.env.HOME = previousHome
+    }
+    await rm(homeDir, { recursive: true, force: true })
+  }
+}
 
 describe("adapter listing", () => {
   test("merges config-declared adapters and resolves a valid default adapter", async () => {
@@ -53,7 +70,7 @@ describe("adapter listing", () => {
             },
           },
         },
-        { cwd: "/repo" },
+        { cwd: "/repo", includeUninstalled: true },
       ),
     ).resolves.toMatchObject({
       defaultAdapterId: "local-acp",
@@ -110,7 +127,7 @@ describe("adapter listing", () => {
             },
           },
         },
-        { cwd: "/repo" },
+        { cwd: "/repo", includeUninstalled: true },
       )
 
       expect(response.registrySource).toBe("fallback")
@@ -173,6 +190,80 @@ describe("adapter listing", () => {
       ),
     ).resolves.toMatchObject({
       defaultAdapterId: "local-acp",
+    })
+  })
+
+  test("omits uninstalled registry adapters from launch listings", async () => {
+    await withIsolatedHome(async () => {
+      const context = {
+        registryService: {
+          async listAdapters() {
+            return {
+              adapters: [
+                {
+                  id: "registry-agent",
+                  name: "Registry Agent",
+                  version: "1.0.0",
+                  description: "Registry-provided adapter",
+                  distribution: { npx: { package: "registry-agent" } },
+                  unofficial: false,
+                  source: "registry" as const,
+                },
+              ],
+              registrySource: "cache" as const,
+              lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+              stale: false,
+              lastError: null,
+            }
+          },
+        },
+        configProvider: {
+          async getRootConfig() {
+            return {
+              config: {
+                registry: {
+                  "local-acp": {
+                    id: "local-acp",
+                    name: "Local ACP",
+                    version: "1.0.0",
+                    description: "Config-provided adapter",
+                    distribution: { npx: { package: "local-acp" } },
+                  },
+                },
+              },
+            }
+          },
+        },
+      }
+
+      await expect(listAdapters(context, { cwd: "/repo" })).resolves.toMatchObject({
+        adapters: [
+          {
+            id: "local-acp",
+            source: "config",
+          },
+        ],
+        installations: expect.arrayContaining([
+          {
+            adapterId: "registry-agent",
+            installable: true,
+            installed: false,
+            method: "npx",
+          },
+          {
+            adapterId: "local-acp",
+            installable: false,
+            installed: true,
+            method: "config",
+          },
+        ]),
+      })
+
+      await installCatalogAdapter(context, { adapterId: "registry-agent" })
+
+      const installedResponse = await listAdapters(context, { cwd: "/repo" })
+
+      expect(installedResponse.adapters.map((adapter) => adapter.id)).toContain("registry-agent")
     })
   })
 

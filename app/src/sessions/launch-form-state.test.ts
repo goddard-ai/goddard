@@ -18,6 +18,12 @@ function createAdapterCatalog(input: {
       source: "config",
       unofficial: false,
     })),
+    installations: input.adapterIds.map((id) => ({
+      adapterId: id,
+      installed: true,
+      installable: false,
+      method: "config",
+    })),
     defaultAdapterId: input.defaultAdapterId,
     registrySource: "cache",
     lastSuccessfulSyncAt: "2026-06-10T00:00:00.000Z",

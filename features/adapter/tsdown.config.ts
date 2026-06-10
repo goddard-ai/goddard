@@ -7,6 +7,7 @@ export default defineConfig({
     "./src/catalog.ts",
     "./src/daemon.ts",
     "./src/daemon-ipc.ts",
+    "./src/installations.ts",
     "./src/list-adapters.ts",
     "./src/sdk.ts",
     "./src/schema.ts",
