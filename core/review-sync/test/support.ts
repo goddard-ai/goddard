@@ -20,12 +20,13 @@ type StoredSessionState = {
   reviewBranch: string
 }
 
+const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 
 export async function cleanupReviewSyncFixtures() {
   while (fixtureCleanup.length > 0) {
-    await rm(fixtureCleanup.pop()!, { recursive: true, force: true })
+    await removeTemporaryPath(fixtureCleanup.pop()!)
   }
 }
 
@@ -98,6 +99,8 @@ export async function createFixture(files: Record<string, string>) {
   await runGit(agentDir, ["init", "-b", "main"])
   await runGit(agentDir, ["config", "user.email", "bot@example.com"])
   await runGit(agentDir, ["config", "user.name", "Bot"])
+  await runGit(agentDir, ["config", "core.autocrlf", "false"])
+  await runGit(agentDir, ["config", "core.eol", "lf"])
 
   for (const [path, content] of Object.entries(files)) {
     await writeText(join(agentDir, path), content)
@@ -158,6 +161,24 @@ export function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     setTimeout(resolve, ms)
   })
+}
+
+async function removeTemporaryPath(path: string) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true })
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (process.platform !== "win32" || !code || !WINDOWS_BUSY_ERROR_CODES.has(code)) {
+        throw error
+      }
+
+      await sleep(100 * (attempt + 1))
+    }
+  }
+
+  await rm(path, { recursive: true, force: true })
 }
 
 export async function waitForFileContent(path: string, expected: string) {
