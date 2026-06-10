@@ -8,9 +8,11 @@ import { installCatalogAdapter, listAdapters } from "../src/list-adapters.ts"
 
 async function withIsolatedHome(callback: () => Promise<void>) {
   const previousHome = process.env.HOME
+  const previousPath = process.env.PATH
   const homeDir = await mkdtemp(join(tmpdir(), "goddard-adapter-installations-"))
 
   process.env.HOME = homeDir
+  process.env.PATH = ""
   try {
     await callback()
   } finally {
@@ -18,6 +20,11 @@ async function withIsolatedHome(callback: () => Promise<void>) {
       delete process.env.HOME
     } else {
       process.env.HOME = previousHome
+    }
+    if (previousPath === undefined) {
+      delete process.env.PATH
+    } else {
+      process.env.PATH = previousPath
     }
     await rm(homeDir, { recursive: true, force: true })
   }
@@ -237,6 +244,7 @@ describe("adapter listing", () => {
       }
 
       await expect(listAdapters(context, { cwd: "/repo" })).resolves.toMatchObject({
+        defaultAdapterId: null,
         adapters: [
           {
             id: "local-acp",

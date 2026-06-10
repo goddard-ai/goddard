@@ -81,7 +81,7 @@ export async function listAdapters(
   const listedAdapters = includeUninstalled
     ? mergedAdapters
     : mergedAdapters.filter((adapter) => installedAdapterIds.has(adapter.id))
-  const defaultAgent = await resolveDefaultAgent(resolvedConfig)
+  const defaultAgent = await resolveDefaultAgent(resolvedConfig).catch(() => null)
 
   return {
     ...registrySnapshot,
