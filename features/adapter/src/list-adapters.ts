@@ -6,6 +6,7 @@ import type {
 } from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
+import { omit } from "radashi"
 
 import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from "./catalog.ts"
 import { getAdapterInstallationStates, installAdapter, uninstallAdapter } from "./installations.ts"
@@ -208,11 +209,5 @@ function toAdapterManagedInstallState(state: DaemonAgentInstallStatus): AdapterM
 }
 
 function toAdapterManagedInstallAgent(agent: DaemonInstalledAgent): AdapterManagedInstallAgent {
-  return {
-    agentId: agent.agentId,
-    version: agent.version,
-    method: agent.method,
-    installedAt: agent.installedAt,
-    updatedAt: agent.updatedAt,
-  }
+  return omit(agent, ["distributionHash", "platform", "installDir"])
 }
