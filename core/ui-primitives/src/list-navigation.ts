@@ -1,38 +1,99 @@
 import { useLayoutEffect, useMemo, useRef } from "preact/hooks"
 
+/** Imperative controller for a DOM-backed indexed list navigation surface. */
 export type ListNavigationController = {
+  /** Returns the currently active item index after clamping and disabled-row skipping. */
   activeIndex: () => number
+  /** Moves DOM focus to the currently active registered item, if it is mounted. */
   focusActiveItem: () => void
+  /** Moves DOM focus to a registered item by index, if it is mounted. */
   focusItem: (index: number) => void
+  /**
+   * Registers the DOM element for an item index.
+   *
+   * The ref function supports both callback-ref cleanup returns and later `null`
+   * calls so callers can use whichever lifecycle their renderer provides.
+   */
   itemRef: (index: number) => (element: HTMLElement | null) => void | (() => void)
+  /** Moves the active index by one step, respecting wrapping and disabled rows. */
   moveActiveIndex: (delta: -1 | 1) => void
+  /**
+   * Handles ArrowUp, ArrowDown, Home, End, and Enter for the list.
+   *
+   * Returns `true` when it handled the event and prevented the default action.
+   */
   onKeyDown: (event: KeyboardEvent) => boolean
+  /** Resets the active index to the first enabled row. */
   resetActiveIndex: () => void
+  /** Sets the active index directly, clamping to the current count and skipping disabled rows. */
   setActiveIndex: (index: number) => void
 }
 
+/** Configuration for `useListNavigation`. */
 export type ListNavigationOptions = {
+  /**
+   * DOM attribute used to mark active rows.
+   *
+   * Defaults to `data-highlighted`; the active row receives `"true"` and other
+   * registered rows receive `"false"`.
+   */
   activeAttribute?: string
+  /**
+   * Returns the number of visible rows the controller should navigate.
+   *
+   * The hook intentionally uses a count instead of an item array so callers keep
+   * filtering, ranking, identity, and rendering policy outside the primitive.
+   */
   count: () => number
+  /** Called with the active index when Enter activates an enabled row. */
   onActivate?: (index: number) => void
+  /**
+   * Controls whether active rows scroll into view.
+   *
+   * Defaults to `{ block: "nearest" }`; pass `false` to disable scrolling.
+   */
   scrollIntoView?: boolean | ScrollIntoViewOptions
+  /**
+   * Suppresses pointer-enter highlighting while it returns true.
+   *
+   * Use this for menus that temporarily ignore hover after keyboard or typeahead
+   * movement until the pointer actually moves.
+   */
   shouldIgnorePointer?: () => boolean
+  /** Whether keyboard movement wraps at list boundaries. Defaults to true. */
   wrap?: boolean
 }
 
+/** `useListNavigation` controller plus a ref for wiring a search input element. */
 export type SearchNavigationController = ListNavigationController & {
+  /**
+   * Registers a search input and wires input, Escape, and list-navigation keys.
+   *
+   * Non-search lists may ignore this ref and still use the controller as a list
+   * navigation controller.
+   */
   inputRef: (element: HTMLInputElement | null) => void | (() => void)
 }
 
+/** Configuration for `useSearchNavigation`. */
 export type SearchNavigationOptions = ListNavigationOptions & {
+  /** Called when Escape is pressed in the registered search input. */
   onEscape?: () => void
+  /** Called with the input value on each input event before the active row is reset. */
   onQueryChange: (query: string) => void
 }
 
 const defaultActiveAttribute = "data-highlighted"
 const defaultScrollOptions: ScrollIntoViewOptions = { block: "nearest" }
 
-/** Manages DOM-backed active-row state for indexed list surfaces. */
+/**
+ * Manages DOM-backed active-row state for indexed list surfaces.
+ *
+ * The hook owns keyboard movement, pointer-enter highlighting, disabled-row
+ * inference from registered DOM elements, active DOM attributes, and
+ * scroll-into-view. Callers keep item data, filtering, rendering, and ARIA roles
+ * outside the primitive.
+ */
 export function useListNavigation(options: ListNavigationOptions): ListNavigationController {
   const optionsRef = useRef(options)
   const activeIndexRef = useRef(0)
@@ -277,7 +338,13 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
   return controller
 }
 
-/** Wires an input element to list navigation for search-driven result lists. */
+/**
+ * Wires a search input element to `useListNavigation`.
+ *
+ * The input ref listens for query changes, resets the active row after input,
+ * delegates list-navigation keys, and optionally handles Escape. Filtering and
+ * ranking stay with the caller.
+ */
 export function useSearchNavigation(options: SearchNavigationOptions): SearchNavigationController {
   const optionsRef = useRef(options)
   const inputCleanupRef = useRef<(() => void) | null>(null)
