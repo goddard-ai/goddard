@@ -108,9 +108,17 @@ export default {
     backgroundColor: "transparent",
     color: "text",
     cursor: "pointer",
-    "&[data-active='true']": {
+    "&[aria-selected='true']": {
       backgroundColor: "surface",
     },
+    "&[aria-selected='true'] [data-command-palette-icon='true']": {
+      color: "text",
+    },
+  }),
+  itemIcon: css({
+    display: "inline-flex",
+    alignItems: "center",
+    color: "muted",
   }),
   itemLabel: css({
     overflow: "hidden",

@@ -1,15 +1,14 @@
-import { token } from "@goddard-ai/styled-system/tokens"
 import { type Signal, useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
-import { useEffect, useId, useLayoutEffect, useRef } from "preact/hooks"
+import { useEffect, useId } from "preact/hooks"
 
 import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandPaletteVisible } from "./commands/command-context.ts"
 import GoodKeyboardShortcut from "./lib/good-keyboard-shortcut.tsrx"
-import { Modal } from "@goddard-ai/ui-primitives"
+import { Modal, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "./lib/search-query.ts"
 import { getShortcutBindingExpression } from "./shared/shortcut-keymap.ts"
 
@@ -27,14 +26,6 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
   const listboxId = useId()
   const inputId = useId()
   const search = useSignal("")
-  const activeIndex = useSignal(0)
-  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({})
-
-  useEffect(() => {
-    if (!props.open.value && search.value.length > 0) {
-      search.value = ""
-    }
-  }, [props.open.value, search.value])
 
   const visibleCommands = (() => {
     const availableCommands = preparedAppCommands.filter(
@@ -59,19 +50,6 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
   })()
 
   const visibleCommandIds = visibleCommands.map((command) => command.id).join("\n")
-  const activeCommand = visibleCommands[activeIndex.value] ?? visibleCommands[0] ?? null
-
-  useEffect(() => {
-    activeIndex.value = 0
-  }, [props.open.value, visibleCommandIds])
-
-  useLayoutEffect(() => {
-    if (!activeCommand) {
-      return
-    }
-
-    itemRefs.current[activeCommand.id]?.scrollIntoView({ block: "nearest" })
-  }, [activeCommand?.id])
 
   const selectCommand = (command: AppCommand) => {
     props.open.value = false
@@ -80,40 +58,28 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
     }, 0)
   }
 
-  const moveActiveIndex = (delta: number) => {
-    if (visibleCommands.length === 0) {
-      return
+  const navigation = useSearchNavigation({
+    activeAttribute: "aria-selected",
+    count: () => visibleCommands.length,
+    onActivate(index) {
+      const command = visibleCommands[index]
+
+      if (command) {
+        selectCommand(command)
+      }
+    },
+    onQueryChange(query) {
+      search.value = query
+    },
+  })
+
+  useEffect(() => {
+    if (!props.open.value && search.value.length > 0) {
+      search.value = ""
     }
 
-    activeIndex.value = (activeIndex.value + delta + visibleCommands.length) %
-    visibleCommands.length
-  }
-
-  const handleKeyDown = (event: KeyboardEvent) => {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault()
-        moveActiveIndex(1)
-        return
-      case "ArrowUp":
-        event.preventDefault()
-        moveActiveIndex(-1)
-        return
-      case "Home":
-        event.preventDefault()
-        activeIndex.value = 0
-        return
-      case "End":
-        event.preventDefault()
-        activeIndex.value = Math.max(visibleCommands.length - 1, 0)
-        return
-      case "Enter":
-        if (activeCommand) {
-          event.preventDefault()
-          selectCommand(activeCommand)
-        }
-    }
-  }
+    navigation.resetActiveIndex()
+  }, [props.open.value, search.value, visibleCommandIds])
 
   <Modal
     open={props.open}
@@ -132,11 +98,11 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
       aria-haspopup="listbox"
       aria-labelledby={titleId}
       aria-owns={listboxId}
-      onKeyDown={handleKeyDown}
     >
       <div class={styles.searchRow}>
         <Search aria-hidden={true} class={styles.searchIcon} size={16} />
         <input
+          ref={navigation.inputRef}
           id={inputId}
           autoFocus={true}
           class={styles.input}
@@ -144,21 +110,15 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
           role="searchbox"
           type="text"
           value={search.value}
-          aria-activedescendant={activeCommand ? `${listboxId}-${activeCommand.id}` : undefined}
           aria-autocomplete="list"
           aria-controls={listboxId}
-          onInput={(event) => {
-            search.value = event.currentTarget.value
-            activeIndex.value = 0
-          }}
         />
       </div>
       <div id={listboxId} class={styles.list} role="listbox" aria-label="Command menu">
         @if (visibleCommands.length === 0) {
           <div class={styles.empty}>No matching commands.</div>
         } @else {
-          @for (const command of visibleCommands) {
-            const isActive = activeCommand?.id === command.id
+          @for (const command of visibleCommands; index index) {
             const itemId = `${listboxId}-${command.id}`
             const Icon = command.icon
             const shortcut = getShortcutBindingExpression(
@@ -168,35 +128,24 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
             <div
               id={itemId}
               key={command.id}
-              ref={(element) => {
-                itemRefs.current[command.id] = element
-              }}
+              ref={navigation.itemRef(index)}
               class={styles.item}
               role="option"
-              aria-selected={isActive}
-              data-active={isActive ? "true" : "false"}
+              aria-selected="false"
               style={{
                 gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
               }}
               onMouseDown={(event) => {
                 event.preventDefault()
               }}
-              onMouseEnter={() => {
-                activeIndex.value = visibleCommands.indexOf(command)
-              }}
               onClick={() => {
                 selectCommand(command)
               }}
             >
               @if (Icon) {
-                <Icon
-                  aria-hidden={true}
-                  size={16}
-                  strokeWidth={2}
-                  style={{
-                    color: isActive ? token.var("colors.text") : token.var("colors.muted"),
-                  }}
-                />
+                <span class={styles.itemIcon} data-command-palette-icon="true">
+                  <Icon aria-hidden={true} size={16} strokeWidth={2} />
+                </span>
               }
 
               <span class={styles.itemLabel}>{command.label}</span>
