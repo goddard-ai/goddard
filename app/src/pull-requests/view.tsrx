@@ -42,7 +42,7 @@ function PullRequestLoadingState() @{
   </main>
 }
 
-function PullRequestView(props: {
+export default function PullRequestView(props: {
   relatedFilesystemPath: string | null;
   pullRequestId: PullRequestId;
   pullRequestTitle?: string;
@@ -107,5 +107,3 @@ function InfoCard(props: {
     <dd class={styles.infoValue}>{props.value}</dd>
   </dl>
 }
-
-export default PullRequestView

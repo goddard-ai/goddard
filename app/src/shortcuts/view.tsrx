@@ -8,7 +8,7 @@ import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandGroupList, appCommandList } from "~/commands/app-command.ts"
 import { Menu, MenuItem } from "@goddard-ai/ui-primitives"
-import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
 import { KeyboardShortcutCaptureDialog } from "./capture-dialog.tsrx"
@@ -59,7 +59,7 @@ type ShortcutTableRow =
       row: ShortcutRow;
     }
 
-function KeyboardShortcutsView(props: { class?: string }) @{
+export default function KeyboardShortcutsView(props: { class?: string }) @{
   const shortcutRegistry = useShortcutRegistry()
   const persistenceErrors = shortcutPersistenceErrors.value
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -643,5 +643,3 @@ function KeyboardShortcutRow(props: {
     </td>
   </tr>
 }
-
-export default KeyboardShortcutsView

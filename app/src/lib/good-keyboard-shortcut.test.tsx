@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { render } from "preact"
 
-import GoodKeyboardShortcut from "./good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "./good-keyboard-shortcut.tsrx"
 
 function withPlatform(platform: string, runTest: () => void) {
   const userAgentDataDescriptor = Object.getOwnPropertyDescriptor(navigator, "userAgentData")

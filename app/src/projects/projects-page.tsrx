@@ -14,7 +14,7 @@ import type { ProjectRecord } from "./project-registry.ts"
 import styles from "./projects-page.style.ts"
 
 /** Renders the projects page plus its local add-project modal flow. */
-export function ProjectsPage() @{
+export default function ProjectsPage() @{
   const projectContext = useProjectContext()
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
@@ -126,8 +126,6 @@ export function ProjectsPage() @{
     </div>
   </ProjectsPageMutations>
 }
-
-export default ProjectsPage
 
 /** Renders the machine-wide project list. */
 function ProjectList(props: {

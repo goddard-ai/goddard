@@ -172,5 +172,3 @@ export function GoodKeyboardShortcut(props: {
     }
   </span>
 }
-
-export default GoodKeyboardShortcut

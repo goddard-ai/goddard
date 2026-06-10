@@ -7,7 +7,7 @@ import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
 import { isCommandPaletteVisible } from "./commands/command-context.ts"
-import GoodKeyboardShortcut from "./lib/good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "./lib/good-keyboard-shortcut.tsrx"
 import { Modal, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "./lib/search-query.ts"
 import { getShortcutBindingExpression } from "./shared/shortcut-keymap.ts"
@@ -20,7 +20,7 @@ const preparedAppCommands = appCommandList.map(
   }),
 )
 
-function CommandPalette(props: { open: Signal<boolean> }) @{
+export default function CommandPalette(props: { open: Signal<boolean> }) @{
   const shortcutRegistry = useShortcutRegistry()
   const titleId = useId()
   const listboxId = useId()
@@ -160,5 +160,3 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
     </div>
   </Modal>
 }
-
-export default CommandPalette

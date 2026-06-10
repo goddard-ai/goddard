@@ -84,7 +84,7 @@ function InboxQueryContent(props: {
   />
 }
 
-function InboxPage() @{
+export default function InboxPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
   const pageRef = useRef<HTMLDivElement | null>(null)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
@@ -363,5 +363,3 @@ function InboxPage() @{
     </div>
   </InboxPageMutations>
 }
-
-export default InboxPage

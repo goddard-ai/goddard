@@ -11,7 +11,7 @@ const terminalDebugPrompt = "debug@goddard:~/workspace$ "
 export type TerminalDebugViewProps = Record<string, never>
 
 /** Renders the standalone terminal-debug surface used by the native development menu. */
-export function TerminalDebugView(_props: TerminalDebugViewProps) @{
+export default function TerminalDebugView(_props: TerminalDebugViewProps) @{
   const terminal = useSigma(
     () => new TerminalSession({
       minimumCols: 56,
@@ -232,5 +232,3 @@ export function TerminalDebugView(_props: TerminalDebugViewProps) @{
     </section>
   </div>
 }
-
-export default TerminalDebugView

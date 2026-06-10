@@ -15,7 +15,7 @@ import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./display.ts"
 
-function SessionLaunchDialog(props: {
+export default function SessionLaunchDialog(props: {
   open: Signal<boolean>;
 }) @{
   const projectContext = useProjectContext()
@@ -165,5 +165,3 @@ function SessionLaunchDialog(props: {
     />
   </Modal>
 }
-
-export default SessionLaunchDialog

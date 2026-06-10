@@ -199,7 +199,7 @@ function getRelatedInboxItems(
 }
 
 /** Renders one project-backed closable workbench tab. */
-export function ProjectPage(props: { projectName?: string; projectPath: string }) @{
+export default function ProjectPage(props: { projectName?: string; projectPath: string }) @{
   const projectRegistry = useProjectRegistry()
   const workbenchTabSet = useWorkbenchTabSet()
 
@@ -642,5 +642,3 @@ function CheckoutRow(props: {
     }
   </article>
 }
-
-export default ProjectPage

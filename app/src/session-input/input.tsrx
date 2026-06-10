@@ -9,7 +9,7 @@ import { useListener } from "preact-sigma"
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
-import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import {
   clearSessionInputEditor,

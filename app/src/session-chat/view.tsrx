@@ -50,7 +50,7 @@ import {
 import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
-function SessionChatView(props: {
+export default function SessionChatView(props: {
   relatedFilesystemPath: string | null;
   sessionId: DaemonSession["id"];
   sessionTitle?: string;
@@ -697,5 +697,3 @@ function formatSessionRequestError(error: unknown) {
 function isSessionChatHeaderActionError(error: unknown) {
   return typeof error === "object" && error !== null && "description" in error && "title" in error
 }
-
-export default SessionChatView

@@ -7,7 +7,7 @@ import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"

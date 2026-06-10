@@ -25,7 +25,7 @@ const settingsSections = [
 
 const preparedSettingsSections = prepareSettingsSearchSections(settingsSections)
 
-export function SettingsPage() @{
+export default function SettingsPage() @{
   const [searchQuery, setSearchQuery] = useState("")
   const visibleSections = filterPreparedSettingsSearchSections(
     preparedSettingsSections,
@@ -80,5 +80,3 @@ export function SettingsPage() @{
     }
   </main>
 }
-
-export default SettingsPage

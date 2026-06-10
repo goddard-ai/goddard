@@ -1,5 +1,5 @@
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
-import GoodKeyboardShortcut from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { getShortcutBindingExpression } from "~/shared/shortcut-keymap.ts"
 import type { AppCommand as AppCommandType } from "./app-command.ts"

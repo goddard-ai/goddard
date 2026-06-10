@@ -63,6 +63,7 @@
 - Avoid `forwardRef` for cross-component coordination in `app/` unless there is no simpler option. Prefer semantic actions through context or `src/shared/global-event-hub.ts`.
 - Prefer the `class` JSX prop over `className`.
 - Prefer the global `preact.` namespace for Preact types such as `preact.ComponentChildren` instead of importing those types directly.
+- Prefer named exports for TSRX components. Use `export default` only when a framework or tooling contract requires a default export.
 - Prefix reusable, pre-styled UI primitives with `Good` (for example `GoodTooltip`). Reserve that prefix for opinionated design-system components, not feature/domain modules or state.
 - In Panda style objects, prefer tokenized border shorthands such as `border: "1px solid {colors.border}"` over split declarations like `border: "1px solid"` plus `borderColor: "border"` when the border width, style, and token color are fixed together.
 - Prefer app nouns that match `app/glossary.md`. Use `project` for user-added local roots unless a feature specifically requires a git repository.

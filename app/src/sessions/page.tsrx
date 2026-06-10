@@ -14,7 +14,7 @@ import { SessionsList } from "./list.tsrx"
 import styles from "./page.style.ts"
 import { filterSessionsByTitle } from "./title-search.ts"
 
-function SessionsPage() @{
+export default function SessionsPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
 
   const { sessions } = useQuery(goddardSdk.session.list, {
@@ -107,5 +107,3 @@ function SessionsPage() @{
     </div>
   </SessionsPageMutations>
 }
-
-export default SessionsPage

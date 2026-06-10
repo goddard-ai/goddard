@@ -95,7 +95,7 @@ export type InboxDebugViewProps = {
   items?: readonly InboxItem[];
 }
 
-export function InboxDebugView(props: InboxDebugViewProps) @{
+export default function InboxDebugView(props: InboxDebugViewProps) @{
   const [items, setItems] = useState<readonly InboxItem[]>(props.items ?? INBOX_DEBUG_ITEMS)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
@@ -267,5 +267,3 @@ export function InboxDebugView(props: InboxDebugViewProps) @{
     </div>
   </InboxPageMutations>
 }
-
-export default InboxDebugView
