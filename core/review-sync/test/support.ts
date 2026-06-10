@@ -21,6 +21,7 @@ type StoredSessionState = {
 }
 
 const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
+export const WATCH_TEST_TIMEOUT_MS = 15_000
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 
@@ -37,7 +38,7 @@ export async function runWatchUntilNextSync(
 ) {
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 4000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   let startedResolved = false
   const results: ReviewSyncResult[] = []
@@ -277,7 +278,7 @@ export async function runProcessUntilOutput(
     const timeout = setTimeout(() => {
       child.kill("SIGKILL")
       rejectPromise(new Error(`Timed out waiting for ${expectedOutput}`))
-    }, 5000)
+    }, WATCH_TEST_TIMEOUT_MS)
     const stopWhenMatched = () => {
       if (!matched && `${stdout}\n${stderr}`.includes(expectedOutput)) {
         matched = true

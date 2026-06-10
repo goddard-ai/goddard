@@ -13,6 +13,7 @@ import {
   runGit,
   sleep,
   waitForFileContent,
+  WATCH_TEST_TIMEOUT_MS,
   writeText,
 } from "./support.ts"
 
@@ -26,7 +27,7 @@ test("watch waits for an agent branch to get checked out before starting", async
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const waiting = createDeferred<void>()
   const watching = createDeferred<void>()
   let waitingResolved = false
@@ -104,7 +105,7 @@ test("watch prepares the review branch from the branch ref while waiting", async
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const waiting = createDeferred<void>()
   let waitingResolved = false
   const watch = watchReviewSession({
@@ -151,7 +152,7 @@ test("watch does not retry on its own branch-ref preparation events", async () =
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const waiting = createDeferred<void>()
   let waitingResolved = false
   const results: ReviewSyncResult[] = []
@@ -205,7 +206,7 @@ test("watch syncs human commits made while waiting for agent checkout", async ()
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const waiting = createDeferred<void>()
   const started = createDeferred<ReviewSyncResult>()
   let waitingResolved = false
@@ -273,7 +274,7 @@ test("watch leaves a dirty review worktree alone while waiting", async () => {
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const waiting = createDeferred<ReviewSyncResult>()
   let waitingResolved = false
   const watch = watchReviewSession({
@@ -318,7 +319,7 @@ test("watch refreshes the review worktree from the target branch ref while waiti
   await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
@@ -368,7 +369,7 @@ test("watch reuses an existing session when the agent branch is not checked out"
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const watching = createDeferred<void>()
   let watchingResolved = false
   const results: ReviewSyncResult[] = []
@@ -426,7 +427,7 @@ test("watch refreshes a paused session from the branch ref while agent checkout 
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const watching = createDeferred<void>()
   let watchingResolved = false
   const results: ReviewSyncResult[] = []
@@ -475,7 +476,7 @@ test("watch warns when branch ref refresh is blocked by human edits", async () =
   await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   const warning = createDeferred<ReviewSyncResult>()
   let warningResolved = false

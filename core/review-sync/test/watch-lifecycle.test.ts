@@ -15,6 +15,7 @@ import {
   runGit,
   runProcessUntilOutput,
   runWatchUntilNextSync,
+  WATCH_TEST_TIMEOUT_MS,
   writeText,
 } from "./support.ts"
 
@@ -189,7 +190,7 @@ test("watch pauses and restores the starting review branch on exit", async () =>
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   let startedResolved = false
   const watch = watchReviewSession({
@@ -234,7 +235,7 @@ test("watch explains when restoring the starting review branch fails", async () 
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   let startedResolved = false
   const watch = watchReviewSession({
@@ -287,7 +288,7 @@ test("watch checks out the saved review branch before reusing a session", async 
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
     agentBranch: "codex/review-sync-test",

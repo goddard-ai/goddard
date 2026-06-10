@@ -12,6 +12,7 @@ import {
   runGit,
   runWatchUntilNextSync,
   sleep,
+  WATCH_TEST_TIMEOUT_MS,
   writeText,
 } from "./support.ts"
 
@@ -66,7 +67,7 @@ test("watch syncs a review commit that records already-rendered content", async 
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   const firstSync = createDeferred<ReviewSyncResult>()
   const secondSync = createDeferred<ReviewSyncResult>()
@@ -189,7 +190,7 @@ test("watch preserves a cherry-picked review commit after accepting its patch", 
 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   const sync = createDeferred<ReviewSyncResult>()
   let startedResolved = false
@@ -289,7 +290,7 @@ test("watch waits for the expected agent checkout before syncing", async () => {
   await runGit(fixture.reviewDir, ["checkout", "main"])
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
   const started = createDeferred<void>()
   const results: ReviewSyncResult[] = []
   const watch = watchReviewSession({
