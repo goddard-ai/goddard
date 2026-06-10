@@ -128,11 +128,7 @@ function isResponseMessage(
 }
 
 function getMessageId(message: acp.AnyMessage) {
-  if (!("id" in message)) {
-    return null
-  }
-
-  return typeof message.id === "string" || typeof message.id === "number" ? message.id : null
+  return "id" in message ? message.id : null
 }
 
 function getMessageResult(message: acp.AnyMessage) {
@@ -177,25 +173,19 @@ function getSessionUpdate(message: acp.AnyMessage) {
   }
 
   const params = message.params as acp.SessionNotification
-  return isObject(params.update) ? (params.update as acp.SessionUpdate) : null
+  return params.update
 }
 
 function isTextAgentMessageChunk(message: acp.AnyMessage) {
   const update = getSessionUpdate(message)
 
-  return (
-    update?.sessionUpdate === "agent_message_chunk" &&
-    update.content.type === "text" &&
-    typeof update.content.text === "string"
-  )
+  return update?.sessionUpdate === "agent_message_chunk" && update.content.type === "text"
 }
 
 function getTextAgentMessageChunkText(message: acp.AnyMessage) {
   const update = getSessionUpdate(message)
 
-  return update?.sessionUpdate === "agent_message_chunk" &&
-    update.content.type === "text" &&
-    typeof update.content.text === "string"
+  return update?.sessionUpdate === "agent_message_chunk" && update.content.type === "text"
     ? update.content.text
     : null
 }
@@ -283,14 +273,13 @@ function getToolCallUpdateStatus(message: acp.AnyMessage) {
 
   if (
     !update ||
-    (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") ||
-    typeof update.toolCallId !== "string"
+    (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update")
   ) {
     return null
   }
 
   return {
-    status: typeof update.status === "string" ? update.status : null,
+    status: update.status ?? null,
     toolCallId: update.toolCallId,
     updateKind: update.sessionUpdate,
   }
