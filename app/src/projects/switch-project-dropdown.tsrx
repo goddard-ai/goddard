@@ -2,11 +2,11 @@ import { cx } from "@goddard-ai/styled-system/css"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
 import { useComputed, useSignal } from "@preact/signals"
-import { useLayoutEffect, useRef } from "preact/hooks"
+import { useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { Popover } from "@goddard-ai/ui-primitives"
+import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
@@ -32,12 +32,10 @@ export function SwitchProjectDropdown() @{
   const projectRegistry = useProjectRegistry()
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const inputElementRef = useRef<HTMLInputElement>(null)
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
   const isOpen = useSignal(false)
   const workbenchTabSet = useWorkbenchTabSet()
   const search = useSignal("")
-  const highlightedIndex = useSignal(0)
   const activeProject =
     projectContext.activeProjectPath === null
       ? null
@@ -88,21 +86,10 @@ export function SwitchProjectDropdown() @{
     const openFolderItem: SwitchProjectItem = { id: "open-folder", kind: "open-folder" }
     return [openFolderItem, ...projectItems]
   })
-  const highlightedItemIndex =
-    items.value.length === 0 ? 0 : Math.min(highlightedIndex.value, items.value.length - 1)
-  const highlightedItem = items.value[highlightedItemIndex]
 
   useAppCommand(AppCommand.navigation.openSwitchProject, () => {
     isOpen.value = true
   })
-
-  useLayoutEffect(() => {
-    if (!isOpen.value || !highlightedItem) {
-      return
-    }
-
-    itemRefs.current[highlightedItem.id]?.scrollIntoView({ block: "nearest" })
-  }, [highlightedItem?.id, isOpen.value])
 
   const openFolderFromSwitcher = async () => {
     isOpen.value = false
@@ -111,19 +98,6 @@ export function SwitchProjectDropdown() @{
       projectRegistry,
       workbenchTabSet,
     })
-  }
-
-  const moveHighlightedIndex = (delta: -1 | 1) => {
-    if (items.value.length === 0) {
-      highlightedIndex.value = 0
-      return
-    }
-
-    const currentHighlightedIndex = Math.min(highlightedIndex.value, items.value.length - 1)
-
-    highlightedIndex.value = delta > 0
-      ? Math.min(currentHighlightedIndex + 1, items.value.length - 1)
-      : Math.max(currentHighlightedIndex - 1, 0)
   }
 
   const activateItem = (item: SwitchProjectItem | undefined) => {
@@ -144,6 +118,17 @@ export function SwitchProjectDropdown() @{
       workbenchTabSet,
     })
   }
+
+  const navigation = useSearchNavigation({
+    count: () => items.value.length,
+    wrap: false,
+    onActivate(index) {
+      activateItem(items.value[index])
+    },
+    onQueryChange(query) {
+      search.value = query
+    },
+  })
 
   <>
     <button
@@ -187,29 +172,21 @@ export function SwitchProjectDropdown() @{
         <span class={styles.srOnly}>Search projects</span>
         <Search aria-hidden={true} size={16} strokeWidth={2.1} />
         <input
-          ref={inputElementRef}
+          ref={(element) => {
+            inputElementRef.current = element
+            const cleanup = navigation.inputRef(element)
+
+            return () => {
+              cleanup?.()
+
+              if (inputElementRef.current === element) {
+                inputElementRef.current = null
+              }
+            }
+          }}
           class={styles.searchInput}
           placeholder="Search projects"
           value={search.value}
-          onInput={(event) => {
-            search.value = event.currentTarget.value
-            highlightedIndex.value = 0
-          }}
-          onKeyDown={(event) => {
-            switch (event.key) {
-              case "ArrowDown":
-                event.preventDefault()
-                moveHighlightedIndex(1)
-                return
-              case "ArrowUp":
-                event.preventDefault()
-                moveHighlightedIndex(-1)
-                return
-              case "Enter":
-                event.preventDefault()
-                activateItem(highlightedItem)
-            }
-          }}
         />
       </label>
 
@@ -218,15 +195,9 @@ export function SwitchProjectDropdown() @{
           @for (const item of items.value; index index) {
             <li key={item.id}>
               <button
-                ref={(element) => {
-                  itemRefs.current[item.id] = element
-                }}
+                ref={navigation.itemRef(index)}
                 class={styles.item}
-                data-highlighted={highlightedItemIndex === index ? "true" : "false"}
                 type="button"
-                onMouseEnter={() => {
-                  highlightedIndex.value = index
-                }}
                 onClick={() => {
                   activateItem(item)
                 }}
