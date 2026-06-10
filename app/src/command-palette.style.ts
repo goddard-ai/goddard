@@ -1,4 +1,5 @@
 import { css } from "@goddard-ai/styled-system/css"
+import { token } from "@goddard-ai/styled-system/tokens"
 
 export default {
   backdrop: css({
@@ -98,6 +99,7 @@ export default {
     textAlign: "center",
   }),
   item: css({
+    "--command-palette-icon-color": token.var("colors.muted"),
     display: "grid",
     alignItems: "center",
     gap: "10px",
@@ -109,16 +111,14 @@ export default {
     color: "text",
     cursor: "pointer",
     "&[aria-selected='true']": {
+      "--command-palette-icon-color": token.var("colors.text"),
       backgroundColor: "surface",
-    },
-    "&[aria-selected='true'] [data-command-palette-icon='true']": {
-      color: "text",
     },
   }),
   itemIcon: css({
     display: "inline-flex",
     alignItems: "center",
-    color: "muted",
+    color: "var(--command-palette-icon-color)",
   }),
   itemLabel: css({
     overflow: "hidden",

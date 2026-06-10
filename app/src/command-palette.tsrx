@@ -143,7 +143,7 @@ function CommandPalette(props: { open: Signal<boolean> }) @{
               }}
             >
               @if (Icon) {
-                <span class={styles.itemIcon} data-command-palette-icon="true">
+                <span class={styles.itemIcon}>
                   <Icon aria-hidden={true} size={16} strokeWidth={2} />
                 </span>
               }
