@@ -63,7 +63,7 @@ test("Popover blocks outside pointer interactions when outside dismissal is enab
 
   await harness.render()
 
-  expect(harness.menuRoot.querySelector("[data-overlay-pointer-blocker='true']")).toBeInstanceOf(
+  expect(harness.menuRoot.querySelector(".goddard-overlay-pointer-blocker")).toBeInstanceOf(
     HTMLElement,
   )
   harness.cleanup()
@@ -74,7 +74,7 @@ test("Popover does not block outside pointer interactions when outside dismissal
 
   await harness.render()
 
-  expect(harness.menuRoot.querySelector("[data-overlay-pointer-blocker='true']")).toBeNull()
+  expect(harness.menuRoot.querySelector(".goddard-overlay-pointer-blocker")).toBeNull()
   harness.cleanup()
 })
 
