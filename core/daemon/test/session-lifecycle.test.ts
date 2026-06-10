@@ -22,6 +22,8 @@ import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
+type AcpMessage = Parameters<typeof matchAcpRequest>[0]
+
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
 const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
 const usageAgentPath = createRequire(import.meta.url).resolve("./fixtures/usage-agent.mjs")
@@ -1008,8 +1010,8 @@ test("idle auto-shutdown waits for the last session.streamMessages subscriber to
     systemPrompt: "Keep responses short.",
   })
 
-  const clientAMessages: unknown[] = []
-  const clientBMessages: unknown[] = []
+  const clientAMessages: AcpMessage[] = []
+  const clientBMessages: AcpMessage[] = []
   const unsubscribeA = await subscribe(
     clientA,
     { name: "session.streamMessages", filter: { id: created.session.id } },
