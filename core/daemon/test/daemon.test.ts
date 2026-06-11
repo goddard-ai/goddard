@@ -27,8 +27,6 @@ const rootConfigSchemaUrl =
 let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
 afterEach(async () => {
-  db = resetComposedDaemonStore({ filename: ":memory:" })
-
   if (originalHome === undefined) {
     delete process.env.HOME
   } else {
@@ -38,6 +36,9 @@ afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
+
+  db.close()
+  db = resetComposedDaemonStore({ filename: ":memory:" })
 })
 
 test("daemon package ships agent-bin wrappers for goddard and workforce", async () => {
