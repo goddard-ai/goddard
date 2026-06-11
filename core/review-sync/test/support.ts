@@ -201,7 +201,11 @@ async function readTextIfExists(path: string) {
   try {
     return await readFile(path, "utf-8")
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code
+    if (
+      code !== "ENOENT" &&
+      (process.platform !== "win32" || !WINDOWS_BUSY_ERROR_CODES.has(code ?? ""))
+    ) {
       throw error
     }
     return null
