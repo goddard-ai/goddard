@@ -19,6 +19,8 @@ import {
 } from "./styled.tsrx"
 import styles from "./adapter-installations-section.style.ts"
 
+const availableAdapterMinimumFuzzyScore = 0.12
+
 export const adapterInstallationsSettingsSectionMetadata = {
   description: "Choose which agent harnesses are available when launching sessions.",
   id: "settings-adapter-installations",
@@ -91,7 +93,7 @@ function filterPreparedAvailableAdapters(
       { key: "description", extract: (entry) => entry.preparedDescription },
       { key: "version", extract: (entry) => entry.preparedVersion },
     ],
-    { threshold: 0 },
+    { threshold: availableAdapterMinimumFuzzyScore },
   ).items.map((item) => item.value.adapter)
 }
 
