@@ -854,6 +854,9 @@ importers:
 
   features/file-search:
     dependencies:
+      '@ff-labs/fff-bun':
+        specifier: ^0.8.4
+        version: 0.8.4(bun@1.3.13)
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
