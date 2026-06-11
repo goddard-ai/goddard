@@ -18,6 +18,7 @@
 - `Agent Distribution`
   - The way an agent is identified and made runnable.
   - Why: so the daemon can support multiple sourcing and launch models without changing session meaning.
+  - Launch integration boundaries with `acp-client/node` are tracked in [`acp-client-launch.md`](./acp-client-launch.md).
 - `Managed Agent Install`
   - A user-authorized install/update path for an ACP agent declared in global `agents.managed`.
   - Why: so Goddard can decide when an agent may be installed or updated while `acp-client` owns managed install state, update checks, and runnable process-spec resolution.
