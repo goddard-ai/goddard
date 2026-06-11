@@ -698,6 +698,13 @@ test("workforce runtime logs request-to-session correlation for launched session
     await waitFor(() => runtime.getStatus().queuedRequestCount === 0)
   })
 
+  await waitFor(() =>
+    logs.some(
+      (entry) =>
+        entry.event === "workforce.session_completed" && entry.sessionId === "ses_daemon_1",
+    ),
+  )
+
   const launchLog = logs.find((entry) => entry.event === "workforce.session_launch_started")
   expect(launchLog).toBeTruthy()
   expect((launchLog?.workforceDispatch as Record<string, unknown> | undefined)?.rootDir).toBe(
