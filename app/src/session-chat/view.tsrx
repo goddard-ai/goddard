@@ -15,6 +15,7 @@ import { castProtected, SigmaTarget, useSigmaSync } from "preact-sigma"
 import { isObject } from "radashi"
 
 import { Composer } from "./composer.tsrx"
+import { loadSessionChatComposerSuggestions } from "./composer-suggestion-loader.ts"
 import { SessionChat } from "./model.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
 import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
@@ -647,13 +648,13 @@ function SessionChatComposerDock(props: {
       footerControls={footerControls}
       helperText={null}
       loadSuggestions={async (input) => {
-        const response = await goddardSdk.session.composerSuggestions({
-          id: props.chat.session.id,
+        return loadSessionChatComposerSuggestions({
+          cwd: props.chat.session.cwd,
+          sdk: goddardSdk,
+          sessionId: props.chat.session.id,
           trigger: input.trigger,
           query: input.query,
         })
-
-        return response.suggestions
       }}
       onPromptChange={() => {
         if (submitError) {

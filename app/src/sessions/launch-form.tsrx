@@ -18,7 +18,8 @@ import {
   SessionLaunchPreviewSelectors,
   SessionSubpackageSelector,
 } from "./launch-form-selectors.tsrx"
-import { filterSlashCommandSuggestions, type SessionLaunchFormState } from "./launch-form-state.ts"
+import { type SessionLaunchFormState } from "./launch-form-state.ts"
+import { loadSessionLaunchComposerSuggestions } from "./launch-suggestion-loader.ts"
 
 const launchInputClasses: SessionInputClasses = {
   form: composerInputStyles.form,
@@ -127,20 +128,13 @@ export function SessionLaunchForm(props: {
           return []
         }
 
-        if (input.trigger === "slash") {
-          return filterSlashCommandSuggestions(
-            form.launchPreview.value?.slashCommands ?? [],
-            input.query,
-          )
-        }
-
-        const response = await goddardSdk.session.draftSuggestions({
+        return loadSessionLaunchComposerSuggestions({
           cwd,
+          sdk: goddardSdk,
+          slashCommands: form.launchPreview.value?.slashCommands ?? [],
           trigger: input.trigger,
           query: input.query,
         })
-
-        return response.suggestions
       }}
       onPromptChange={(prompt) => {
         form.draftPromptBlocks.value = prompt
