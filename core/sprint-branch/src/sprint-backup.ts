@@ -145,7 +145,7 @@ export async function sprintBackupPath(rootDir: string, sprint: string) {
 
 /** Returns a stable display path for a sprint folder backup. */
 export function sprintBackupDisplayPath(sprint: string) {
-  return path.join(".git", sprintStateRoot, sprint, backupDirectoryName)
+  return path.posix.join(".git", sprintStateRoot, sprint, backupDirectoryName)
 }
 
 async function readOptionalSprintState(statePath: string, diagnostics: SprintDiagnostic[]) {

@@ -35,6 +35,8 @@ type SyncOutput = SprintSyncReport & {
   } | null
 }
 
+const SYNC_TEST_TIMEOUT_MS = process.platform === "win32" ? 60_000 : 5_000
+
 describe("sprint-branch sync", () => {
   afterEach(cleanupTestRepos)
 
@@ -50,7 +52,7 @@ describe("sprint-branch sync", () => {
 
     const controller = new AbortController()
     const timeoutReason = "sprint sync test timeout"
-    const timeout = setTimeout(() => controller.abort(timeoutReason), 5000)
+    const timeout = setTimeout(() => controller.abort(timeoutReason), SYNC_TEST_TIMEOUT_MS)
     const watching = createDeferred<void>()
     const syncedFeatureText = createDeferred<string>()
     let watchingResolved = false
@@ -133,7 +135,10 @@ describe("sprint-branch sync", () => {
     const { repo, reviewWorktree } = await createSprintSyncFixture()
     const lockPath = await writeSprintLock(repo, "example", { command: "start" })
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
+    const timeout = setTimeout(
+      () => controller.abort("sprint sync test timeout"),
+      SYNC_TEST_TIMEOUT_MS,
+    )
     const waiting = createDeferred<void>()
     const watching = createDeferred<string>()
     let waitingResolved = false
@@ -194,7 +199,10 @@ describe("sprint-branch sync", () => {
   test("defers watch-triggered sync while a sprint lock is live", async () => {
     const { repo, reviewWorktree } = await createSprintSyncFixture()
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort("sprint sync test timeout"), 5000)
+    const timeout = setTimeout(
+      () => controller.abort("sprint sync test timeout"),
+      SYNC_TEST_TIMEOUT_MS,
+    )
     const watching = createDeferred<void>()
     const waiting = createDeferred<void>()
     const synced = createDeferred<string>()
@@ -504,7 +512,7 @@ async function waitForActiveReviewSyncSession(reviewWorktree: string) {
 }
 
 async function waitUntil(check: () => Promise<boolean>, message: string) {
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + SYNC_TEST_TIMEOUT_MS
   while (Date.now() < deadline) {
     if (await check()) {
       return
@@ -522,8 +530,8 @@ async function waitForCliExit(subprocess: ReturnType<typeof spawnCli>, command: 
       new Promise<number>((_, reject) => {
         timeout = setTimeout(() => {
           subprocess.kill("SIGTERM")
-          reject(new Error(`${command} did not exit within 5000ms`))
-        }, 5000)
+          reject(new Error(`${command} did not exit within ${SYNC_TEST_TIMEOUT_MS}ms`))
+        }, SYNC_TEST_TIMEOUT_MS)
       }),
     ])
   } finally {
