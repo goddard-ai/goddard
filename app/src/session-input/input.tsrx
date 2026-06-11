@@ -1,8 +1,4 @@
-import type {
-  FileSearchComposerEntry,
-  SessionComposerSuggestionsResponse,
-  SessionPromptRequest,
-} from "@goddard-ai/sdk"
+import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
 import { useListNavigation } from "@goddard-ai/ui-primitives"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { ContentEditable } from "@lexical/react/LexicalContentEditable"
@@ -118,6 +114,8 @@ export function SessionInput(props: {
       acceptSuggestion(suggestions[index] ?? null)
     },
   })
+  const activeSuggestionIndex = navigation.activeIndex()
+  const highlightedSuggestion = suggestions.at(activeSuggestionIndex) ?? suggestions[0] ?? null
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
     setSuggestions(
