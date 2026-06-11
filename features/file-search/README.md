@@ -4,8 +4,8 @@
 composer `@` suggestions. It exposes the `fileSearch` SDK namespace and the
 `fileSearch.composerEntries` IPC route.
 
-The feature uses `@ff-labs/fff-bun` for indexed non-empty queries. Empty-query
-browsing and native create/search failures fall back to deterministic filesystem
+The feature uses `@ff-labs/fff-bun` for indexed queries, including empty query
+strings. Native create/search failures fall back to deterministic filesystem
 listing/search inside the daemon.
 
 ## Runtime Validation
