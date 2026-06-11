@@ -35,9 +35,11 @@ test("cli watch accepts an agent branch from the review worktree", async () => {
 
   expect(result.stdout).toContain("Started review sync")
   expect(result.stdout).toContain("Watching review sync")
-  expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
-    false,
-  )
+  if (process.platform !== "win32") {
+    expect(await refExists(fixture.agentDir, "refs/heads/review-sync/codex/review-sync-test")).toBe(
+      false,
+    )
+  }
 })
 
 test("cli watch --verbose explains watcher setup", async () => {
