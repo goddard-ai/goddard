@@ -164,6 +164,14 @@ export const AppCommand = defineAppCommands({
         label: "Open Thinking Level Selector",
         icon: Brain,
       },
+      decreaseThinkingLevel: {
+        label: "Decrease Thinking Level",
+        icon: Brain,
+      },
+      increaseThinkingLevel: {
+        label: "Increase Thinking Level",
+        icon: Brain,
+      },
       submit: {
         label: "Submit",
         icon: SendHorizontal,

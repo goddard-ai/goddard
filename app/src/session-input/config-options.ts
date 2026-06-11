@@ -1,6 +1,7 @@
 import type { DaemonSession, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
+import { clamp } from "radashi"
 
-type SessionConfigOption =
+export type SessionConfigOption =
   | NonNullable<SessionLaunchPreviewResponse["configOptions"]>[number]
   | NonNullable<DaemonSession["configOptions"]>[number]
 export type SelectSessionConfigOption = Extract<SessionConfigOption, { type: "select" }>
@@ -61,4 +62,20 @@ export function findSessionModeConfigOption(configOptions: readonly SessionConfi
     ) ??
     null
   )
+}
+
+export function stepConfigOptionValue(
+  option: SelectSessionConfigOption,
+  currentValue: string | null,
+  direction: -1 | 1,
+) {
+  const options = flattenConfigOptionValues(option)
+  if (options.length === 0) {
+    return currentValue
+  }
+
+  const currentIndex = options.findIndex((entry) => entry.value === currentValue)
+  const nextIndex = clamp(currentIndex < 0 ? 0 : currentIndex + direction, 0, options.length - 1)
+
+  return options[nextIndex]?.value ?? currentValue
 }

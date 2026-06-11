@@ -49,6 +49,8 @@ export const shortcutKeymapProfiles = {
       "sessionInput.openApprovalPresetSelector": ["Mod+."],
       "sessionInput.openModelSelector": ["Mod+Shift+m", "Mod+/"],
       "sessionInput.openThinkingLevelSelector": ["Mod+t"],
+      "sessionInput.decreaseThinkingLevel": ["Alt+,"],
+      "sessionInput.increaseThinkingLevel": ["Alt+."],
       "sessionInput.submit": ["Mod+Enter"],
       "sessionChat.viewChanges": ["Alt+Shift+g"],
       "sessionChat.completeSession": ["Mod+Shift+Enter"],

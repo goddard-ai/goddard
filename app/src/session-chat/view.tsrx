@@ -32,6 +32,7 @@ import { goddardSdk } from "~/sdk.ts"
 import {
   findSelectConfigOption,
   findSessionModeConfigOption,
+  stepConfigOptionValue,
 } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
@@ -547,6 +548,28 @@ function SessionChatComposerDock(props: {
     modePickerOpen.value = false
     thinkingPickerOpen.value = true
     modelPickerOpen.value = false
+  }, { active: thinkingOption !== null })
+  useAppCommand(AppCommand.sessionInput.decreaseThinkingLevel, () => {
+    if (!thinkingOption) {
+      return
+    }
+
+    draftThinkingValue.value = stepConfigOptionValue(
+      thinkingOption,
+      draftThinkingValue.value ?? thinkingOption.currentValue,
+      -1,
+    )
+  }, { active: thinkingOption !== null })
+  useAppCommand(AppCommand.sessionInput.increaseThinkingLevel, () => {
+    if (!thinkingOption) {
+      return
+    }
+
+    draftThinkingValue.value = stepConfigOptionValue(
+      thinkingOption,
+      draftThinkingValue.value ?? thinkingOption.currentValue,
+      1,
+    )
   }, { active: thinkingOption !== null })
 
   async function applyDraftSessionControls() {

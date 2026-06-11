@@ -3,12 +3,12 @@ import { useSignal } from "@preact/signals"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
-import { AppCommand } from "~/commands/app-command.ts"
+import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { flattenConfigOptionValues } from "~/session-input/config-options.ts"
+import { flattenConfigOptionValues, stepConfigOptionValue } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
 import styles from "./launch-form-selectors.style.ts"
@@ -385,6 +385,31 @@ export function SessionLaunchPreviewSelectors(props: {
   const thinkingShortcut = getShortcutLabel(
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openThinkingLevelSelector.id]?.[0],
   )
+
+  useAppCommand(AppCommand.sessionInput.decreaseThinkingLevel, () => {
+    const thinkingOption = form.thinkingOption.value
+    if (thinkingOption?.type !== "select") {
+      return
+    }
+
+    form.draftThinkingValue.value = stepConfigOptionValue(
+      thinkingOption,
+      typeof form.draftThinkingValue.value === "string" ? form.draftThinkingValue.value : null,
+      -1,
+    )
+  }, { active: !props.disabled && thinkingItems.length > 0 })
+  useAppCommand(AppCommand.sessionInput.increaseThinkingLevel, () => {
+    const thinkingOption = form.thinkingOption.value
+    if (thinkingOption?.type !== "select") {
+      return
+    }
+
+    form.draftThinkingValue.value = stepConfigOptionValue(
+      thinkingOption,
+      typeof form.draftThinkingValue.value === "string" ? form.draftThinkingValue.value : null,
+      1,
+    )
+  }, { active: !props.disabled && thinkingItems.length > 0 })
 
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />

@@ -28,6 +28,8 @@ const openBranchSelector = "sessionInput.openBranchSelector" as const
 const openApprovalPresetSelector = "sessionInput.openApprovalPresetSelector" as const
 const openModelSelector = "sessionInput.openModelSelector" as const
 const openThinkingLevelSelector = "sessionInput.openThinkingLevelSelector" as const
+const decreaseThinkingLevel = "sessionInput.decreaseThinkingLevel" as const
+const increaseThinkingLevel = "sessionInput.increaseThinkingLevel" as const
 const submitSessionInput = "sessionInput.submit" as const
 const viewSessionChanges = "sessionChat.viewChanges" as const
 const completeSession = "sessionChat.completeSession" as const
@@ -99,6 +101,8 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     [openApprovalPresetSelector]: ["Mod+."],
     [openModelSelector]: ["Mod+Shift+m", "Mod+/"],
     [openThinkingLevelSelector]: ["Mod+t"],
+    [decreaseThinkingLevel]: ["Alt+,"],
+    [increaseThinkingLevel]: ["Alt+."],
     [submitSessionInput]: ["Mod+Enter"],
     [viewSessionChanges]: ["Alt+Shift+g"],
     [completeSession]: ["Mod+Shift+Enter"],
@@ -122,6 +126,8 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     [selectUnreadInboxFilter]: ["Mod+Digit1"],
     [selectArchivedInboxFilter]: ["Mod+Digit5"],
     [openThinkingLevelSelector]: ["Mod+t"],
+    [decreaseThinkingLevel]: ["Alt+,"],
+    [increaseThinkingLevel]: ["Alt+."],
     [viewSessionChanges]: ["Alt+Shift+g"],
     [completeSession]: ["Mod+Shift+Enter"],
     [skipToPreviousPrompt]: ["Mod+ArrowUp"],
