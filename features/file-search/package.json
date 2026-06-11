@@ -46,7 +46,6 @@
     "test": "bun test --dots"
   },
   "dependencies": {
-    "@ff-labs/fff-bun": "^0.8.4",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
