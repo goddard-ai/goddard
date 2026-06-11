@@ -49,7 +49,7 @@ export function createAgentInstallService(
 ): DaemonAgentInstallService {
   const cacheDir = resolve(options.cacheDir ?? getDaemonAgentInstallCacheDir())
   const managedInstallApi = options.managedInstallApi ?? defaultManagedInstallApi
-  const inFlightTasks = new Map<string, Promise<unknown>>()
+  const agentTaskTails = new Map<string, Promise<void>>()
 
   function installOptions(extra: AgentInstallOptions = {}): AgentInstallOptions {
     return {
@@ -78,16 +78,16 @@ export function createAgentInstallService(
   }
 
   function runAgentTask<TResult>(agentId: string, task: () => Promise<TResult>) {
-    const existingTask = inFlightTasks.get(agentId) as Promise<TResult> | undefined
-    if (existingTask) {
-      return existingTask
-    }
-
-    const nextTask = task()
-    inFlightTasks.set(agentId, nextTask)
-    void nextTask.finally(() => {
-      if (inFlightTasks.get(agentId) === nextTask) {
-        inFlightTasks.delete(agentId)
+    const previousTask = agentTaskTails.get(agentId) ?? Promise.resolve()
+    const nextTask = previousTask.catch(() => {}).then(task)
+    const nextTail = nextTask.then(
+      () => {},
+      () => {},
+    )
+    agentTaskTails.set(agentId, nextTail)
+    void nextTail.finally(() => {
+      if (agentTaskTails.get(agentId) === nextTail) {
+        agentTaskTails.delete(agentId)
       }
     })
 

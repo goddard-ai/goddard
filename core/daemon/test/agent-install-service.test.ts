@@ -58,6 +58,16 @@ function createInstalledAgent(agentId: string) {
   }
 }
 
+async function waitForCondition(condition: () => boolean) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) {
+      return
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 test("agent install service resolves configured and registry agents", async () => {
   const registryAgent = createAgent("registry-agent")
   const configuredAgent = createAgent("configured-agent")
@@ -135,9 +145,11 @@ test("agent install service forwards deterministic cache options to acp-client",
   ])
 })
 
-test("agent install service coalesces concurrent install work for one agent id", async () => {
+test("agent install service serializes concurrent install work for one agent id", async () => {
   const agent = createAgent("shared-agent")
   let installCallCount = 0
+  let activeInstallCount = 0
+  let maxActiveInstallCount = 0
   let releaseInstall = () => {}
   const installReleased = new Promise<void>((resolve) => {
     releaseInstall = resolve
@@ -154,7 +166,10 @@ test("agent install service coalesces concurrent install work for one agent id",
       },
       async ensureAgentInstalled(agentInput) {
         installCallCount += 1
+        activeInstallCount += 1
+        maxActiveInstallCount = Math.max(maxActiveInstallCount, activeInstallCount)
         await installReleased
+        activeInstallCount -= 1
         return { agent: createInstalledAgent(agentInput.id), installed: true, updated: false }
       },
       async updateAgent(agentInput) {
@@ -173,8 +188,9 @@ test("agent install service coalesces concurrent install work for one agent id",
   const firstInstall = service.ensureAgentInstalled({ agent })
   const secondInstall = service.ensureAgentInstalled({ agent })
 
-  await Promise.resolve()
+  await waitForCondition(() => installCallCount === 1)
   expect(installCallCount).toBe(1)
+  expect(maxActiveInstallCount).toBe(1)
   releaseInstall()
 
   await expect(firstInstall).resolves.toEqual({
@@ -187,7 +203,64 @@ test("agent install service coalesces concurrent install work for one agent id",
     installed: true,
     updated: false,
   })
-  expect(installCallCount).toBe(1)
+  expect(installCallCount).toBe(2)
+  expect(maxActiveInstallCount).toBe(1)
+})
+
+test("agent install service preserves result shape for overlapping update and launch work", async () => {
+  const agent = createAgent("overlap-agent")
+  const calls: string[] = []
+  let releaseUpdate = () => {}
+  const updateReleased = new Promise<void>((resolve) => {
+    releaseUpdate = resolve
+  })
+  const service = createAgentInstallService({
+    registryService: createRegistryService({}),
+    cacheDir: await mkdtemp(join(tmpdir(), "goddard-agent-install-service-")),
+    managedInstallApi: {
+      async getInstalledAgent() {
+        return { status: "missing" }
+      },
+      async listInstalledAgents() {
+        return []
+      },
+      async ensureAgentInstalled(agentInput) {
+        return { agent: createInstalledAgent(agentInput.id), installed: true, updated: false }
+      },
+      async updateAgent(agentInput) {
+        calls.push("update:start")
+        await updateReleased
+        calls.push("update:end")
+        return {
+          agent: createInstalledAgent(agentInput.id),
+          checkedAt: "2026-06-08T00:00:00.000Z",
+          updated: false,
+        }
+      },
+      async resolveInstalledAgentProcessSpec(agentInput) {
+        calls.push("launch")
+        return { cmd: agentInput.id, args: ["--ready"] }
+      },
+    },
+  })
+
+  const update = service.updateAgent({ agent })
+  const launch = service.resolveInstalledAgentProcessSpec({ agent, installIfMissing: true })
+
+  await waitForCondition(() => calls.length > 0)
+  expect(calls).toEqual(["update:start"])
+  releaseUpdate()
+
+  await expect(update).resolves.toEqual({
+    agent: createInstalledAgent(agent.id),
+    checkedAt: "2026-06-08T00:00:00.000Z",
+    updated: false,
+  })
+  await expect(launch).resolves.toEqual({
+    cmd: agent.id,
+    args: ["--ready"],
+  })
+  expect(calls).toEqual(["update:start", "update:end", "launch"])
 })
 
 test("agent install service lets different agent ids install independently", async () => {
