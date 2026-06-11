@@ -22,6 +22,8 @@ type StoredSessionState = {
 
 const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
 export const WATCH_TEST_TIMEOUT_MS = 60_000
+const WINDOWS_BUSY_RETRY_DELAY_MS = 250
+const WINDOWS_BUSY_RETRY_TIMEOUT_MS = 60_000
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 
@@ -165,7 +167,8 @@ export function sleep(ms: number) {
 }
 
 async function removeTemporaryPath(path: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const deadline = Date.now() + WINDOWS_BUSY_RETRY_TIMEOUT_MS
+  while (true) {
     try {
       await rm(path, { recursive: true, force: true })
       return
@@ -174,12 +177,13 @@ async function removeTemporaryPath(path: string) {
       if (process.platform !== "win32" || !code || !WINDOWS_BUSY_ERROR_CODES.has(code)) {
         throw error
       }
+      if (Date.now() >= deadline) {
+        throw error
+      }
 
-      await sleep(100 * (attempt + 1))
+      await sleep(WINDOWS_BUSY_RETRY_DELAY_MS)
     }
   }
-
-  await rm(path, { recursive: true, force: true })
 }
 
 export async function waitForFileContent(path: string, expected: string) {
