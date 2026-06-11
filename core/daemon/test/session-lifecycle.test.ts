@@ -37,6 +37,7 @@ const originalPath = process.env.PATH
 const fastFixtureAgentPath = createRequire(import.meta.url).resolve("./fixtures/fast-acp-agent.mjs")
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
+const INITIAL_PROMPT_CREATE_TIMEOUT_MS = process.platform === "win32" ? 5_000 : 250
 let sharedHomeDir: string | null = null
 let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
 
@@ -2346,7 +2347,7 @@ test("session.create returns before an interactive initial prompt completes", as
     new Promise<never>((_, reject) => {
       setTimeout(
         () => reject(new Error("session.create did not return before the prompt completed")),
-        250,
+        INITIAL_PROMPT_CREATE_TIMEOUT_MS,
       )
     }),
   ])

@@ -49,6 +49,10 @@ function getUserHomeDir() {
   return process.env.HOME || homedir()
 }
 
+function formatDisplayPath(path: string) {
+  return path.replaceAll("\\", "/")
+}
+
 /** Formats one path relative to the active session cwd for compact UI display. */
 function formatCwdRelativePath(cwd: string, path: string) {
   const relativePath = relative(cwd, path)
@@ -57,7 +61,8 @@ function formatCwdRelativePath(cwd: string, path: string) {
     return "."
   }
 
-  return relativePath.startsWith("..") ? relativePath : `./${relativePath}`
+  const displayPath = formatDisplayPath(relativePath)
+  return displayPath.startsWith("..") ? displayPath : `./${displayPath}`
 }
 
 /** Formats one path relative to the user home directory when possible. */
@@ -68,7 +73,7 @@ function formatHomeRelativePath(path: string) {
     return "~"
   }
 
-  return relativePath.startsWith("..") ? path : `~/${relativePath}`
+  return relativePath.startsWith("..") ? path : `~/${formatDisplayPath(relativePath)}`
 }
 
 /** Converts one filesystem path into the ACP-friendly file URI used for resource links. */
