@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -293,12 +293,12 @@ export async function runProcessUntilOutput(
     let stderr = ""
     const timeout = setTimeout(() => {
       timedOut = true
-      child.kill("SIGKILL")
+      terminateProcessTree(child)
     }, WATCH_TEST_TIMEOUT_MS)
     const stopWhenMatched = () => {
       if (!matched && `${stdout}\n${stderr}`.includes(expectedOutput)) {
         matched = true
-        child.kill("SIGTERM")
+        terminateProcessTree(child)
       }
     }
 
@@ -330,4 +330,13 @@ export async function runProcessUntilOutput(
       })
     })
   })
+}
+
+function terminateProcessTree(child: ChildProcess) {
+  if (process.platform === "win32" && child.pid) {
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" })
+    return
+  }
+
+  child.kill("SIGTERM")
 }
