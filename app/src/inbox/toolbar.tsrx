@@ -6,11 +6,11 @@ import styles from "./page.style.ts"
 
 export function InboxToolbar(props: {
   filterId: InboxFilterId;
+  inputRef?: (element: HTMLInputElement | null) => void | (() => void);
   searchQuery: string;
   onFilterSelect: (id: InboxFilterId) => void;
   onRefresh: () => void;
-  onRowNavigationKeyDown?: (event: preact.TargetedKeyboardEvent<HTMLInputElement>) => void;
-  onSearchInput: (value: string) => void;
+  onSearchInput?: (value: string) => void;
 }) @{
   const hasSearchQuery = props.searchQuery.trim().length > 0
   const activeSearchFilterIds = new Set(getInboxSearchActiveFilterIds(props.searchQuery))
@@ -42,13 +42,13 @@ export function InboxToolbar(props: {
         <span class={styles.srOnly}>Search inbox items</span>
         <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
         <input
+          ref={props.inputRef}
           class={styles.searchInput}
           placeholder="Search inbox"
           type="search"
           value={props.searchQuery}
-          onKeyDown={props.onRowNavigationKeyDown}
           onInput={(event) => {
-            props.onSearchInput(event.currentTarget.value)
+            props.onSearchInput?.(event.currentTarget.value)
           }}
         />
       </label>

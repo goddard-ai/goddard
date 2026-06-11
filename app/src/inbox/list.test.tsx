@@ -112,7 +112,6 @@ test("InboxList renders loading, error, empty, and populated states from observa
       }}
     >
       <InboxList
-        activeItemId="inb_ses_session_1"
         filterId="unread"
         items={[createInboxItem({ entityId: "ses_session_1" })]}
         searchQuery=""

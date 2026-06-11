@@ -106,7 +106,7 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
 }
 
 export function ListRow(props: {
-  isActive?: boolean;
+  itemRef?: (element: HTMLElement | null) => void | (() => void);
   session: DaemonSession;
 }) @{
   const status = getSessionStatusPresentation(props.session.status)
@@ -116,8 +116,8 @@ export function ListRow(props: {
   const { openSession, openSessionChanges } = useMutations(SessionsPageMutations)
 
   <div
+    ref={props.itemRef}
     class={cx(styles.row, "session-list-row")}
-    data-active={props.isActive ? "true" : undefined}
     role="button"
     tabIndex={0}
     onClick={() => openSession(props.session.id)}

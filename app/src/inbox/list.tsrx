@@ -5,9 +5,9 @@ import { InboxRow } from "./row.tsrx"
 import styles from "./page.style.ts"
 
 export function InboxList(props: {
-  activeItemId?: InboxItem["id"] | null;
   errorMessage?: string | null;
   filterId: InboxFilterId;
+  itemRef?: (index: number) => (element: HTMLElement | null) => void | (() => void);
   items: readonly InboxItem[];
   listStatus?: "idle" | "loading" | "ready" | "error";
   selectedEntityIds?: ReadonlySet<InboxEntityId>;
@@ -48,7 +48,7 @@ export function InboxList(props: {
   }
 
   <ul class={styles.list} aria-label={`${filter.label} inbox items`}>
-    @for (const item of props.items) {
+    @for (const item of props.items; index index) {
       const onSelectionChange =
         props.onItemSelectionChange
           ? (isSelected: boolean) => {
@@ -58,7 +58,7 @@ export function InboxList(props: {
 
       <li key={item.id}>
         <InboxRow
-          isActive={props.activeItemId === item.id}
+          itemRef={props.itemRef?.(index)}
           {item}
           isSelected={props.selectedEntityIds?.has(item.entityId) ?? false}
           {onSelectionChange}

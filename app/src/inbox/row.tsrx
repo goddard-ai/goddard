@@ -63,7 +63,7 @@ function handleRowOpenKeyDown(
 }
 
 export function InboxRow(props: {
-  isActive?: boolean;
+  itemRef?: (element: HTMLElement | null) => void | (() => void);
   item: InboxItem;
   isSelected?: boolean;
   onSelectionChange?: (isSelected: boolean) => void;
@@ -122,9 +122,8 @@ export function InboxRow(props: {
       />
     </label>
     <div
+      ref={props.itemRef}
       class={styles.rowOpenButton}
-      data-active={props.isActive ? "true" : undefined}
-      data-inbox-row-id={props.item.id}
       role="button"
       tabIndex={0}
       onClick={() => {

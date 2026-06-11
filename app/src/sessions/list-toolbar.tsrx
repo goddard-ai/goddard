@@ -3,22 +3,18 @@ import { Search } from "lucide-react"
 import styles from "./list-toolbar.style.ts"
 
 export function ListToolbar(props: {
+  inputRef?: (element: HTMLInputElement | null) => void | (() => void);
   searchQuery: string;
-  onRowNavigationKeyDown: (event: preact.TargetedKeyboardEvent<HTMLInputElement>) => void;
-  onSearchInput: (value: string) => void;
 }) @{
   <label class={styles.searchField}>
     <span class={styles.srOnly}>Search session titles</span>
     <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
     <input
+      ref={props.inputRef}
       class={styles.searchInput}
       placeholder="Search session titles"
       type="search"
       value={props.searchQuery}
-      onKeyDown={props.onRowNavigationKeyDown}
-      onInput={(event) => {
-        props.onSearchInput(event.currentTarget.value)
-      }}
     />
   </label>
 }

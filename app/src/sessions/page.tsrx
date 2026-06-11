@@ -1,11 +1,11 @@
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { useState } from "preact/hooks"
+import { useEffect, useState } from "preact/hooks"
+import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
 import { invalidateSessionChanges } from "./cache.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
 import { evictSessionHistory, SessionsPageMutations } from "./mutations.ts"
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
-import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
@@ -21,11 +21,27 @@ export default function SessionsPage() @{
     params: [{ limit: SESSION_LIST_LIMIT }],
   })
   const [searchQuery, setSearchQuery] = useState("")
-  const [activeSessionId, setActiveSessionId] = useState<DaemonSession["id"] | null>(null)
   const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
-  const activeSessionIndex = visibleSessions.findIndex((session) => session.id === activeSessionId)
-  const resolvedActiveSession =
-    activeSessionIndex >= 0 ? visibleSessions[activeSessionIndex] : visibleSessions[0] ?? null
+  const visibleSessionIds = visibleSessions.map((session) => session.id).join("\n")
+
+  const navigation = useSearchNavigation({
+    activeAttribute: "data-active",
+    count: () => visibleSessions.length,
+    onActivate(index) {
+      const session = visibleSessions[index]
+
+      if (session) {
+        openSession(session.id)
+      }
+    },
+    onQueryChange(query) {
+      setSearchQuery(query)
+    },
+  })
+
+  useEffect(() => {
+    navigation.resetActiveIndex()
+  }, [navigation, visibleSessionIds])
 
   function openSession(sessionId: DaemonSession["id"]) {
     const session = sessions.find((candidate) => candidate.id === sessionId)
@@ -70,39 +86,9 @@ export default function SessionsPage() @{
     }}
   >
     <div class={styles.root}>
-      <ListToolbar
-        {searchQuery}
-        onRowNavigationKeyDown={(event) => {
-          switch (event.key) {
-            case "ArrowDown":
-            case "ArrowUp": {
-              event.preventDefault()
-              const nextIndex = getNextKeyboardRowIndex({
-                currentIndex: activeSessionIndex,
-                direction: event.key === "ArrowDown" ? 1 : -1,
-                rowCount: visibleSessions.length,
-              })
-              setActiveSessionId(nextIndex === null ? null : visibleSessions[nextIndex]?.id ?? null)
-              return
-            }
-            case "Enter":
-              if (resolvedActiveSession) {
-                event.preventDefault()
-                openSession(resolvedActiveSession.id)
-              }
-          }
-        }}
-        onSearchInput={(value) => {
-          setActiveSessionId(null)
-          setSearchQuery(value)
-        }}
-      />
+      <ListToolbar inputRef={navigation.inputRef} {searchQuery} />
       <div class={styles.listBody}>
-        <SessionsList
-          activeSessionId={resolvedActiveSession?.id ?? null}
-          {searchQuery}
-          sessions={visibleSessions}
-        />
+        <SessionsList itemRef={navigation.itemRef} {searchQuery} sessions={visibleSessions} />
       </div>
     </div>
   </SessionsPageMutations>

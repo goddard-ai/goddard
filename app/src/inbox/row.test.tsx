@@ -67,7 +67,7 @@ function renderInboxRow(input: {
     container,
     item,
     mutations,
-    openTarget: container.querySelector("[data-inbox-row-id]") as HTMLElement,
+    openTarget: container.querySelector("[role='button']") as HTMLElement,
   }
 }
 

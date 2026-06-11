@@ -4,8 +4,8 @@ import { ListRow } from "./list-row.tsrx"
 import styles from "./list.style.ts"
 
 export function SessionsList(props: {
-  activeSessionId?: DaemonSession["id"] | null;
   errorMessage?: string | null;
+  itemRef?: (index: number) => (element: HTMLElement | null) => void | (() => void);
   listStatus?: "idle" | "loading" | "ready" | "error";
   searchQuery: string;
   sessions: readonly DaemonSession[];
@@ -41,9 +41,9 @@ export function SessionsList(props: {
   }
 
   <ul class={styles.list}>
-    @for (const session of props.sessions) {
+    @for (const session of props.sessions; index index) {
       <li key={session.id}>
-        <ListRow isActive={props.activeSessionId === session.id} {session} />
+        <ListRow itemRef={props.itemRef?.(index)} {session} />
       </li>
     }
   </ul>

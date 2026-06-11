@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks"
+import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
   CompleteSessionInboxItemRequest,
@@ -6,11 +6,11 @@ import type {
   InboxItem,
   UpdateInboxItemRequest,
 } from "@goddard-ai/inbox/schema"
+import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
-import { getNextKeyboardRowIndex } from "~/lib/row-keyboard-navigation.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
 import { InboxBulkToolbar } from "./bulk-toolbar.tsrx"
@@ -49,11 +49,17 @@ function getErrorMessage(error: unknown) {
 }
 
 function InboxQueryContent(props: {
-  activeItemId: InboxItem["id"] | null;
   filterId: InboxFilterId;
+  realtimeErrorMessage: string | null;
   searchQuery: string;
   selectedEntityIds: ReadonlySet<InboxEntityId>;
+  onBulkAction: (label: string, input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) => void;
+  onClearSelectedItems: () => void;
+  onFilterSelect: (id: InboxFilterId) => void;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
+  onOpenItem: (item: InboxItem) => void;
+  onRefresh: () => void;
+  onSearchInput: (value: string) => void;
 }) @{
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
   const { items } = useQuery(goddardSdk.inbox.list, {
@@ -66,30 +72,114 @@ function InboxQueryContent(props: {
   })
   const preparedItems = useMemo(() => prepareInboxSearchItems(items), [items])
   const visibleItems = filterPreparedInboxItemsBySearch(preparedItems, parsedSearch)
-  const resolvedActiveItemId = visibleItems.some((item) => item.id === props.activeItemId)
-    ? props.activeItemId
-    : visibleItems[0]?.id ?? null
+  const visibleItemIds = visibleItems.map((item) => item.id).join("\n")
+
+  const navigation = useSearchNavigation({
+    activeAttribute: "data-active",
+    count: () => visibleItems.length,
+    onActivate(index) {
+      const item = visibleItems[index]
+
+      if (item) {
+        props.onOpenItem(item)
+      }
+    },
+    onQueryChange(query) {
+      props.onSearchInput(query)
+    },
+  })
 
   useEffect(() => {
     handleInboxItemsLoaded(items)
   }, [items])
 
-  <InboxList
-    filterId={props.filterId}
-    activeItemId={resolvedActiveItemId}
-    items={visibleItems}
-    selectedEntityIds={props.selectedEntityIds}
-    searchQuery={props.searchQuery}
-    onItemSelectionChange={props.onItemSelectionChange}
-  />
+  useEffect(() => {
+    navigation.resetActiveIndex()
+  }, [navigation, visibleItemIds])
+
+  <>
+    <InboxPageControls
+      filterId={props.filterId}
+      inputRef={navigation.inputRef}
+      searchQuery={props.searchQuery}
+      selectedCount={props.selectedEntityIds.size}
+      onBulkAction={props.onBulkAction}
+      onClearSelectedItems={props.onClearSelectedItems}
+      onFilterSelect={props.onFilterSelect}
+      onRefresh={() => {
+        navigation.resetActiveIndex()
+        props.onRefresh()
+      }}
+      onSearchInput={props.onSearchInput}
+    />
+    <div class={styles.listBody}>
+      @if (props.realtimeErrorMessage) {
+        <div class={styles.realtimeNotice} role="status" title={props.realtimeErrorMessage}>
+          Realtime inbox updates are unavailable. Manual refresh still works.
+        </div>
+      }
+
+      <InboxList
+        filterId={props.filterId}
+        itemRef={navigation.itemRef}
+        items={visibleItems}
+        selectedEntityIds={props.selectedEntityIds}
+        searchQuery={props.searchQuery}
+        onItemSelectionChange={props.onItemSelectionChange}
+      />
+    </div>
+  </>
+}
+
+function InboxPageControls(props: {
+  filterId: InboxFilterId;
+  inputRef?: (element: HTMLInputElement | null) => void | (() => void);
+  searchQuery: string;
+  selectedCount: number;
+  onBulkAction: (label: string, input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) => void;
+  onClearSelectedItems: () => void;
+  onFilterSelect: (id: InboxFilterId) => void;
+  onRefresh: () => void;
+  onSearchInput: (value: string) => void;
+}) @{
+  <>
+    <InboxToolbar
+      filterId={props.filterId}
+      inputRef={props.inputRef}
+      searchQuery={props.searchQuery}
+      onFilterSelect={props.onFilterSelect}
+      onRefresh={props.onRefresh}
+      onSearchInput={props.inputRef ? undefined : props.onSearchInput}
+    />
+    <InboxBulkToolbar
+      selectedCount={props.selectedCount}
+      onArchive={() => {
+        props.onBulkAction("Archive selected", { status: "archived" })
+      }}
+      onClear={props.onClearSelectedItems}
+      onMarkRead={() => {
+        props.onBulkAction("Mark selected read", { status: "read" })
+      }}
+      onMarkUnread={() => {
+        props.onBulkAction("Mark selected unread", { status: "unread" })
+      }}
+      onSave={() => {
+        props.onBulkAction("Save selected", { status: "saved" })
+      }}
+      onSetLowPriority={() => {
+        props.onBulkAction("Set selected low priority", { priority: "low" })
+      }}
+      onSetNormalPriority={() => {
+        props.onBulkAction("Set selected normal priority", { priority: "normal" })
+      }}
+    />
+  </>
 }
 
 export default function InboxPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
-  const pageRef = useRef<HTMLDivElement | null>(null)
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
-  const [activeItemId, setActiveItemId] = useState<InboxItem["id"] | null>(null)
   const [realtimeErrorMessage, setRealtimeErrorMessage] = useState<string | null>(null)
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
     () => new Set(),
@@ -169,20 +259,21 @@ export default function InboxPage() @{
     })
   }
 
-  function getVisibleInboxRowElements() {
-    return [...(pageRef.current?.querySelectorAll<HTMLElement>("[data-inbox-row-id]") ?? [])]
+  function runBulkActionFromControls(
+    label: string,
+    input: Omit<BulkUpdateInboxItemsRequest, "entityIds">,
+  ) {
+    void runBulkInboxAction(label, input)
   }
 
-  function getInboxRowElementItemId(element: HTMLElement | undefined) {
-    return element?.dataset.inboxRowId as InboxItem["id"] | undefined ?? null
+  function refreshInboxList() {
+    clearSelectedInboxItems()
+    invalidateInboxQueries()
   }
 
-  function getResolvedActiveItemId(rowElements: readonly HTMLElement[]) {
-    if (rowElements.some((element) => element.dataset.inboxRowId === activeItemId)) {
-      return activeItemId
-    }
-
-    return getInboxRowElementItemId(rowElements[0])
+  function updateSearchQuery(value: string) {
+    clearSelectedInboxItems()
+    setSearchQuery(value)
   }
 
   async function runBulkInboxAction(
@@ -253,113 +344,83 @@ export default function InboxPage() @{
       updateInboxItem,
     }}
   >
-    <div ref={pageRef} class={styles.root}>
-      <InboxToolbar
-        {filterId}
-        {searchQuery}
-        onFilterSelect={(id) => {
-          selectInboxFilter(id)
-        }}
-        onRefresh={() => {
-          clearSelectedInboxItems()
-          setActiveItemId(null)
-          invalidateInboxQueries()
-        }}
-        onRowNavigationKeyDown={(event) => {
-          const rowElements = getVisibleInboxRowElements()
-          const resolvedActiveItemId = getResolvedActiveItemId(rowElements)
-          const activeItemIndex = rowElements.findIndex(
-            (element) => element.dataset.inboxRowId === resolvedActiveItemId,
-          )
-
-          switch (event.key) {
-            case "ArrowDown":
-            case "ArrowUp": {
-              event.preventDefault()
-              const nextIndex = getNextKeyboardRowIndex({
-                currentIndex: activeItemIndex,
-                direction: event.key === "ArrowDown" ? 1 : -1,
-                rowCount: rowElements.length,
-              })
-              setActiveItemId(
-                nextIndex === null ? null : getInboxRowElementItemId(rowElements[nextIndex]),
-              )
-              return
+    <div class={styles.root}>
+      @try {
+        <InboxQueryContent
+          {filterId}
+          {realtimeErrorMessage}
+          {searchQuery}
+          {selectedEntityIds}
+          onBulkAction={runBulkActionFromControls}
+          onClearSelectedItems={clearSelectedInboxItems}
+          onFilterSelect={selectInboxFilter}
+          onItemSelectionChange={setInboxItemSelected}
+          onOpenItem={(item) => {
+            void openInboxItem(item)
+          }}
+          onRefresh={refreshInboxList}
+          onSearchInput={updateSearchQuery}
+        />
+      } @pending {
+        <>
+          <InboxPageControls
+            {filterId}
+            {searchQuery}
+            selectedCount={selectedEntityIds.size}
+            onBulkAction={runBulkActionFromControls}
+            onClearSelectedItems={clearSelectedInboxItems}
+            onFilterSelect={selectInboxFilter}
+            onRefresh={refreshInboxList}
+            onSearchInput={updateSearchQuery}
+          />
+          <div class={styles.listBody}>
+            @if (realtimeErrorMessage) {
+              <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
+                Realtime inbox updates are unavailable. Manual refresh still works.
+              </div>
             }
-            case "Enter":
-              if (resolvedActiveItemId) {
-                event.preventDefault()
-                rowElements[activeItemIndex]?.click()
-              }
-          }
-        }}
-        onSearchInput={(value) => {
-          clearSelectedInboxItems()
-          setActiveItemId(null)
-          setSearchQuery(value)
-        }}
-      />
-      <InboxBulkToolbar
-        selectedCount={selectedEntityIds.size}
-        onArchive={() => {
-          void runBulkInboxAction("Archive selected", { status: "archived" })
-        }}
-        onClear={() => {
-          clearSelectedInboxItems()
-        }}
-        onMarkRead={() => {
-          void runBulkInboxAction("Mark selected read", { status: "read" })
-        }}
-        onMarkUnread={() => {
-          void runBulkInboxAction("Mark selected unread", { status: "unread" })
-        }}
-        onSave={() => {
-          void runBulkInboxAction("Save selected", { status: "saved" })
-        }}
-        onSetLowPriority={() => {
-          void runBulkInboxAction("Set selected low priority", { priority: "low" })
-        }}
-        onSetNormalPriority={() => {
-          void runBulkInboxAction("Set selected normal priority", { priority: "normal" })
-        }}
-      />
-      <div class={styles.listBody}>
-        @if (realtimeErrorMessage) {
-          <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
-            Realtime inbox updates are unavailable. Manual refresh still works.
+
+            <InboxList
+              {filterId}
+              items={[]}
+              listStatus="loading"
+              {searchQuery}
+              {selectedEntityIds}
+              onItemSelectionChange={setInboxItemSelected}
+            />
           </div>
-        }
-        @try {
-          <InboxQueryContent
-            {activeItemId}
+        </>
+      } @catch (error) {
+        <>
+          <InboxPageControls
             {filterId}
             {searchQuery}
-            {selectedEntityIds}
-            onItemSelectionChange={setInboxItemSelected}
+            selectedCount={selectedEntityIds.size}
+            onBulkAction={runBulkActionFromControls}
+            onClearSelectedItems={clearSelectedInboxItems}
+            onFilterSelect={selectInboxFilter}
+            onRefresh={refreshInboxList}
+            onSearchInput={updateSearchQuery}
           />
-        } @pending {
-          <InboxList
-            {filterId}
-            {activeItemId}
-            items={[]}
-            listStatus="loading"
-            {searchQuery}
-            {selectedEntityIds}
-            onItemSelectionChange={setInboxItemSelected}
-          />
-        } @catch (error) {
-          <InboxList
-            errorMessage={getErrorMessage(error)}
-            {filterId}
-            {activeItemId}
-            items={[]}
-            listStatus="error"
-            {searchQuery}
-            {selectedEntityIds}
-            onItemSelectionChange={setInboxItemSelected}
-          />
-        }
-      </div>
+          <div class={styles.listBody}>
+            @if (realtimeErrorMessage) {
+              <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
+                Realtime inbox updates are unavailable. Manual refresh still works.
+              </div>
+            }
+
+            <InboxList
+              errorMessage={getErrorMessage(error)}
+              {filterId}
+              items={[]}
+              listStatus="error"
+              {searchQuery}
+              {selectedEntityIds}
+              onItemSelectionChange={setInboxItemSelected}
+            />
+          </div>
+        </>
+      }
     </div>
   </InboxPageMutations>
 }
