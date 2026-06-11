@@ -1899,7 +1899,7 @@ test("session worktree launch branches from the selected base branch", async () 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
-test("session.composerSuggestions scopes `@` lookups to the session cwd and skips ignored directories", async () => {
+test("fileSearch.composerEntries scopes `@` lookups to the requested cwd and skips ignored directories", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
@@ -1915,32 +1915,21 @@ test("session.composerSuggestions scopes `@` lookups to the session cwd and skip
   await writeFile(join(repoDir, "node_modules", "pkg", "ignore.ts"), "ignored\n", "utf-8")
   await writeFile(join(repoDir, "dist", "ignore.ts"), "ignored\n", "utf-8")
 
-  const created = await send(client, "session.create", {
-    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+  const emptyQuery = await send(client, "fileSearch.composerEntries", {
     cwd: repoDir,
-    mcpServers: [],
-    systemPrompt: "Keep responses short.",
-  })
-
-  const emptyQuery = await send(client, "session.composerSuggestions", {
-    id: created.session.id,
-    trigger: "at",
     query: "",
   })
-  const filtered = await send(client, "session.composerSuggestions", {
-    id: created.session.id,
-    trigger: "at",
+  const filtered = await send(client, "fileSearch.composerEntries", {
+    cwd: repoDir,
     query: "match",
   })
 
-  const emptyQueryLabels = emptyQuery.suggestions.flatMap((suggestion: any) =>
-    "label" in suggestion ? [suggestion.label] : [],
-  )
+  const emptyQueryLabels = emptyQuery.entries.map((entry: any) => entry.label)
 
   expect(emptyQueryLabels).toContain("src")
   expect(emptyQueryLabels).not.toContain(".git")
   expect(emptyQueryLabels).not.toContain("node_modules")
-  expect(filtered.suggestions).toEqual([
+  expect(filtered.entries).toEqual([
     {
       type: "file",
       path: join(repoDir, "src", "nested", "match.ts"),
@@ -1949,8 +1938,27 @@ test("session.composerSuggestions scopes `@` lookups to the session cwd and skip
       detail: "./src/nested/match.ts",
     },
   ])
+})
 
-  await send(client, "session.shutdown", { id: created.session.id })
+test("session suggestion routes reject removed `@` triggers", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  await expect(
+    send(client, "session.composerSuggestions", {
+      id: "ses_missing",
+      trigger: "at",
+      query: "",
+    }),
+  ).rejects.toThrow("Invalid option")
+  await expect(
+    send(client, "session.draftSuggestions", {
+      cwd: repoDir,
+      trigger: "at",
+      query: "",
+    }),
+  ).rejects.toThrow("Invalid input")
 })
 
 test("session.composerSuggestions prefers local `$` skills over global duplicates", async () => {
@@ -2066,39 +2074,23 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
   ])
 })
 
-test("session.draftSuggestions reads launch-dialog `@` and `$` suggestions without a session id", async () => {
+test("session.draftSuggestions reads launch-dialog `$` suggestions without a session id", async () => {
   await useTempHome()
 
   const repoDir = await createRepoFixture()
   const localSkillDir = join(repoDir, ".agents", "skills", "checks")
   await mkdir(localSkillDir, { recursive: true })
-  await mkdir(join(repoDir, "src"), { recursive: true })
   await writeFile(join(localSkillDir, "SKILL.md"), "# checks\n", "utf-8")
-  await writeFile(join(repoDir, "src", "launch.ts"), "export const launch = true\n", "utf-8")
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const atSuggestions = await send(client, "session.draftSuggestions", {
-    cwd: repoDir,
-    trigger: "at",
-    query: "launch",
-  })
   const dollarSuggestions = await send(client, "session.draftSuggestions", {
     cwd: repoDir,
     trigger: "dollar",
     query: "check",
   })
 
-  expect(atSuggestions.suggestions).toEqual([
-    {
-      type: "file",
-      path: join(repoDir, "src", "launch.ts"),
-      uri: pathToFileURL(join(repoDir, "src", "launch.ts")).toString(),
-      label: "launch.ts",
-      detail: "./src/launch.ts",
-    },
-  ])
   expect(dollarSuggestions.suggestions).toEqual([
     {
       type: "skill",
