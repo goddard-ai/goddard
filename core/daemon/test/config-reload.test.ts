@@ -60,7 +60,7 @@ test("config manager promotes valid root config edits and preserves the last goo
   })
 
   const configManager = createConfigManager()
-  cleanup.push(() => configManager.close())
+  cleanup.push(() => closeConfigManager(configManager))
 
   const firstSnapshot = await configManager.getRootConfig(repoDir)
   expect(firstSnapshot.version).toBe(1)
@@ -173,7 +173,7 @@ test(
     await writePromptOnlyAction(repoDir, "review", "Say hello in one sentence.")
 
     const configManager = createConfigManager()
-    cleanup.push(() => configManager.close())
+    cleanup.push(() => closeConfigManager(configManager))
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
@@ -227,7 +227,7 @@ test(
     })
 
     const configManager = createConfigManager()
-    cleanup.push(() => configManager.close())
+    cleanup.push(() => closeConfigManager(configManager))
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
@@ -367,6 +367,13 @@ function createTestBackendClient(): BackendClient {
       },
     },
   } as unknown as BackendClient
+}
+
+async function closeConfigManager(configManager: ReturnType<typeof createConfigManager>) {
+  await configManager.close()
+  if (process.platform === "win32") {
+    await Bun.sleep(250)
+  }
 }
 
 async function useTempHome() {
