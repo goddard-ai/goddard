@@ -19,6 +19,42 @@ export default {
     fontWeight: "670",
     lineHeight: "1.35",
   }),
+  searchField: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    width: "min(360px, 100%)",
+    height: "34px",
+    paddingInline: "10px",
+    border: "1px solid {colors.border}",
+    borderRadius: "7px",
+    backgroundColor: "background",
+    color: "muted",
+    boxShadow: `0 0 0 3px color-mix(in srgb, ${accentColor} 0%, transparent)`,
+    transition:
+      "border-color 160ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _focusWithin: {
+      borderColor: "accentStrong",
+      boxShadow: `0 0 0 3px color-mix(in srgb, ${accentColor} 14%, transparent)`,
+    },
+  }),
+  searchIcon: css({
+    flexShrink: "0",
+  }),
+  searchInput: css({
+    width: "100%",
+    minWidth: "0",
+    height: "100%",
+    padding: "0",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: "text",
+    fontSize: "0.84rem",
+    "&::placeholder": {
+      color: "muted",
+    },
+  }),
   adapterList: css({
     display: "grid",
     gap: "8px",
@@ -140,5 +176,8 @@ export default {
     color: "muted",
     fontSize: "0.84rem",
     lineHeight: "1.55",
+  }),
+  srOnly: css({
+    srOnly: true,
   }),
 }

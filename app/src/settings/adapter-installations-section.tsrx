@@ -1,5 +1,5 @@
 import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/sdk"
-import { Download, GitBranch, Globe, Trash2 } from "lucide-react"
+import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import { useState } from "preact/hooks"
 
 import { ExternalLink } from "~/lib/external-link.tsrx"
@@ -50,6 +50,21 @@ function isGithubRepository(repository: string | null | undefined) {
   } catch {
     return false
   }
+}
+
+function adapterMatchesSearch(adapter: AdapterCatalogEntry, searchQuery: string) {
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+
+  if (normalizedQuery.length === 0) {
+    return true
+  }
+
+  return [
+    adapter.name,
+    adapter.id,
+    adapter.description,
+    adapter.version,
+  ].some((value) => value.toLowerCase().includes(normalizedQuery))
 }
 
 function AdapterInstallationRow(props: {
@@ -133,6 +148,7 @@ function AdapterInstallationList() @{
     params: [{ includeUninstalled: true }],
   })
   const [pendingAdapterId, setPendingAdapterId] = useState<string | null>(null)
+  const [availableAgentSearchQuery, setAvailableAgentSearchQuery] = useState("")
   const installationsByAdapterId = new Map(adapterCatalog.installations.map(
     (installation) => [installation.adapterId, installation],
   ))
@@ -142,6 +158,9 @@ function AdapterInstallationList() @{
   const availableAdapters = adapterCatalog.adapters.filter((adapter) => {
     const installation = installationsByAdapterId.get(adapter.id)
     return installation && !installation.installed
+  })
+  const visibleAvailableAdapters = availableAdapters.filter((adapter) => {
+    return adapterMatchesSearch(adapter, availableAgentSearchQuery)
   })
 
   async function installAdapter(adapterId: string) {
@@ -188,11 +207,28 @@ function AdapterInstallationList() @{
       </section>
       <section class={styles.agentGroup}>
         <h3 class={styles.agentGroupTitle}>Available agents</h3>
+        @if (availableAdapters.length > 0) {
+          <label class={styles.searchField}>
+            <span class={styles.srOnly}>Filter available agents</span>
+            <Search aria-hidden={true} class={styles.searchIcon} size={15} strokeWidth={2.1} />
+            <input
+              class={styles.searchInput}
+              placeholder="Filter available agents"
+              type="search"
+              value={availableAgentSearchQuery}
+              onInput={(event) => {
+                setAvailableAgentSearchQuery(event.currentTarget.value)
+              }}
+            />
+          </label>
+        }
         @if (availableAdapters.length === 0) {
           <p class={styles.emptyText}>No available agents.</p>
+        } @else if (visibleAvailableAdapters.length === 0) {
+          <p class={styles.emptyText}>No available agents match this search.</p>
         } @else {
           <ul class={styles.adapterList}>
-            @for (const adapter of availableAdapters) {
+            @for (const adapter of visibleAvailableAdapters) {
               <AdapterInstallationRow
                 key={adapter.id}
                 {adapter}
