@@ -1879,22 +1879,10 @@ export function createSessionManager(input: {
     const session = await getSession(params.id)
     const limit = normalizeComposerSuggestionLimit(params.limit)
 
-    if (params.trigger === "at") {
-      return {
-        suggestions: await getDraftComposerSuggestions({
-          cwd: session.cwd,
-          trigger: params.trigger,
-          query: params.query,
-          limit,
-        }),
-      }
-    }
-
     if (params.trigger === "dollar") {
       return {
         suggestions: await getDraftComposerSuggestions({
           cwd: session.cwd,
-          trigger: params.trigger,
           query: params.query,
           limit,
         }),
@@ -1914,7 +1902,6 @@ export function createSessionManager(input: {
     return {
       suggestions: await getDraftComposerSuggestions({
         cwd: params.cwd,
-        trigger: params.trigger,
         query: params.query,
         limit: normalizeComposerSuggestionLimit(params.limit),
       }),

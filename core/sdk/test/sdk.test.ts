@@ -566,11 +566,12 @@ describe("@goddard-ai/sdk session namespace", () => {
     send.mockResolvedValueOnce({
       suggestions: [
         {
-          type: "file",
-          path: "/repo/src/index.ts",
-          uri: "file:///repo/src/index.ts",
-          label: "index.ts",
-          detail: "./src/index.ts",
+          type: "skill",
+          path: "/repo/.agents/skills/checks/SKILL.md",
+          uri: "file:///repo/.agents/skills/checks/SKILL.md",
+          label: "checks",
+          detail: "./.agents/skills/checks/SKILL.md",
+          source: "local",
         },
       ],
     })
@@ -578,25 +579,26 @@ describe("@goddard-ai/sdk session namespace", () => {
     await expect(
       sdk.session.composerSuggestions({
         id: "ses_1",
-        trigger: "at",
-        query: "index",
+        trigger: "dollar",
+        query: "check",
       }),
     ).resolves.toEqual({
       suggestions: [
         {
-          type: "file",
-          path: "/repo/src/index.ts",
-          uri: "file:///repo/src/index.ts",
-          label: "index.ts",
-          detail: "./src/index.ts",
+          type: "skill",
+          path: "/repo/.agents/skills/checks/SKILL.md",
+          uri: "file:///repo/.agents/skills/checks/SKILL.md",
+          label: "checks",
+          detail: "./.agents/skills/checks/SKILL.md",
+          source: "local",
         },
       ],
     })
 
     expect(send).toHaveBeenCalledWith("session.composerSuggestions", {
       id: "ses_1",
-      trigger: "at",
-      query: "index",
+      trigger: "dollar",
+      query: "check",
     })
   })
 

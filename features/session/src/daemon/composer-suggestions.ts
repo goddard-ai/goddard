@@ -1,22 +1,19 @@
 import { constants as fsConstants, type Dirent } from "node:fs"
 import { access, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
-import { basename, dirname, join, relative, resolve } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import * as acp from "acp-client/protocol"
 import { isObject } from "radashi"
 
 import type {
-  SessionComposerFileSuggestion,
   SessionComposerSkillSuggestion,
   SessionComposerSlashCommandSuggestion,
   SessionComposerSuggestionsResponse,
-  SessionDraftSuggestionsRequest,
 } from "../schema.ts"
 
 const DEFAULT_COMPOSER_SUGGESTION_LIMIT = 20
 export const MAX_COMPOSER_SUGGESTION_LIMIT = 50
-const COMPOSER_IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"])
 
 /** Returns true when one filesystem path currently exists. */
 async function pathExists(path: string): Promise<boolean> {
@@ -81,31 +78,6 @@ function toFileUri(path: string) {
   return pathToFileURL(path).toString()
 }
 
-/** Produces one stable display suggestion for a file or folder under the session cwd. */
-function toFilesystemSuggestion(cwd: string, path: string, type: "file" | "folder") {
-  return {
-    type,
-    path,
-    uri: toFileUri(path),
-    label: basename(path),
-    detail: formatCwdRelativePath(cwd, path),
-  } satisfies SessionComposerFileSuggestion
-}
-
-/** Returns true when one filesystem entry matches the current case-insensitive query. */
-function matchesFilesystemQuery(cwd: string, path: string, query: string) {
-  const normalizedQuery = query.trim().toLowerCase()
-
-  if (normalizedQuery.length === 0) {
-    return true
-  }
-
-  return (
-    basename(path).toLowerCase().includes(normalizedQuery) ||
-    formatCwdRelativePath(cwd, path).toLowerCase().includes(normalizedQuery)
-  )
-}
-
 /** Sorts directory entries so folders stay ahead of files and names remain deterministic. */
 function sortDirectoryEntries(entries: readonly Dirent<string>[]) {
   return [...entries].sort((left, right) => {
@@ -115,76 +87,6 @@ function sortDirectoryEntries(entries: readonly Dirent<string>[]) {
 
     return left.name.localeCompare(right.name)
   })
-}
-
-/** Reads immediate child suggestions for one empty `@` lookup. */
-async function listComposerEntriesAtCwd(cwd: string, limit: number) {
-  const entries = sortDirectoryEntries(await readDirectoryEntries(cwd))
-  const suggestions: SessionComposerFileSuggestion[] = []
-
-  for (const entry of entries) {
-    if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
-      continue
-    }
-
-    if (!entry.isDirectory() && !entry.isFile()) {
-      continue
-    }
-
-    const path = join(cwd, entry.name)
-    suggestions.push(toFilesystemSuggestion(cwd, path, entry.isDirectory() ? "folder" : "file"))
-
-    if (suggestions.length >= limit) {
-      break
-    }
-  }
-
-  return suggestions
-}
-
-/** Recursively searches the session cwd subtree for matching file and folder suggestions. */
-async function searchComposerEntriesUnderCwd(cwd: string, query: string, limit: number) {
-  const suggestions: SessionComposerFileSuggestion[] = []
-
-  async function visit(directory: string) {
-    if (suggestions.length >= limit) {
-      return
-    }
-
-    const entries = sortDirectoryEntries(await readDirectoryEntries(directory))
-
-    for (const entry of entries) {
-      if (entry.isDirectory() && COMPOSER_IGNORED_DIRECTORY_NAMES.has(entry.name)) {
-        continue
-      }
-
-      if (!entry.isDirectory() && !entry.isFile()) {
-        continue
-      }
-
-      const path = join(directory, entry.name)
-      const type = entry.isDirectory() ? "folder" : "file"
-
-      if (matchesFilesystemQuery(cwd, path, query)) {
-        suggestions.push(toFilesystemSuggestion(cwd, path, type))
-
-        if (suggestions.length >= limit) {
-          return
-        }
-      }
-
-      if (entry.isDirectory()) {
-        await visit(path)
-
-        if (suggestions.length >= limit) {
-          return
-        }
-      }
-    }
-  }
-
-  await visit(cwd)
-  return suggestions
 }
 
 /** Resolves the nearest `.agents/skills` directory reachable from the session cwd. */
@@ -327,15 +229,8 @@ export function getSlashComposerSuggestions(
 /** Resolves the current set of draft composer suggestions before a daemon session exists. */
 export async function getDraftComposerSuggestions(params: {
   cwd: string
-  trigger: SessionDraftSuggestionsRequest["trigger"]
   query: string
   limit: number
 }) {
-  if (params.trigger === "at") {
-    return params.query.trim().length === 0
-      ? await listComposerEntriesAtCwd(params.cwd, params.limit)
-      : await searchComposerEntriesUnderCwd(params.cwd, params.query, params.limit)
-  }
-
   return await getSkillComposerSuggestions(params.cwd, params.query, params.limit)
 }

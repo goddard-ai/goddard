@@ -310,12 +310,12 @@ export const GetSessionChangesRequest = SessionIdParams
 export type GetSessionChangesRequest = z.infer<typeof GetSessionChangesRequest>
 
 /** Trigger categories supported by the session chat composer suggestion API. */
-export const SessionComposerSuggestionTrigger = z.enum(["at", "dollar", "slash"])
+export const SessionComposerSuggestionTrigger = z.enum(["dollar", "slash"])
 
 export type SessionComposerSuggestionTrigger = z.infer<typeof SessionComposerSuggestionTrigger>
 
 /** Trigger categories supported by the launch dialog composer suggestion API. */
-export const SessionDraftSuggestionTrigger = z.enum(["at", "dollar"])
+export const SessionDraftSuggestionTrigger = z.enum(["dollar"])
 
 export type SessionDraftSuggestionTrigger = z.infer<typeof SessionDraftSuggestionTrigger>
 
@@ -337,17 +337,6 @@ export const SessionDraftSuggestionsRequest = z.strictObject({
 })
 
 export type SessionDraftSuggestionsRequest = z.infer<typeof SessionDraftSuggestionsRequest>
-
-/** Filesystem-backed suggestion item returned for one `@` trigger lookup. */
-export const SessionComposerFileSuggestion = z.strictObject({
-  type: z.union([z.literal("file"), z.literal("folder")]),
-  path: z.string(),
-  uri: z.string(),
-  label: z.string(),
-  detail: z.string(),
-})
-
-export type SessionComposerFileSuggestion = z.infer<typeof SessionComposerFileSuggestion>
 
 /** Skill-backed suggestion item returned for one `$` trigger lookup. */
 export const SessionComposerSkillSuggestionSource = z.enum(["local", "global"])
@@ -382,7 +371,6 @@ export type SessionComposerSlashCommandSuggestion = z.infer<
 
 /** One suggestion item returned for the session chat composer. */
 export const SessionComposerSuggestion = z.union([
-  SessionComposerFileSuggestion,
   SessionComposerSkillSuggestion,
   SessionComposerSlashCommandSuggestion,
 ])

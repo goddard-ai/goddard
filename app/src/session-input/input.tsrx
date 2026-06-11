@@ -1,4 +1,8 @@
-import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
+import type {
+  FileSearchComposerEntry,
+  SessionComposerSuggestionsResponse,
+  SessionPromptRequest,
+} from "@goddard-ai/sdk"
 import { useListNavigation } from "@goddard-ai/ui-primitives"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { ContentEditable } from "@lexical/react/LexicalContentEditable"
@@ -22,7 +26,8 @@ import { SessionInputPlugins, sessionInputInitialConfig } from "./input-lexical.
 import { SessionInputMenu } from "./input-menu.tsrx"
 import { registerSessionInputPromptFocus } from "./prompt-focus.ts"
 
-export type SessionInputSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
+export type SessionInputSuggestion =
+  FileSearchComposerEntry | SessionComposerSuggestionsResponse["suggestions"][number]
 export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 export type SessionInputTrigger = "at" | "dollar" | "slash"
 export type SessionInputSuggestionLoader = (input: {
