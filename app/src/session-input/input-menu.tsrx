@@ -1,14 +1,16 @@
-import { css, cx } from "@goddard-ai/styled-system/css"
-import { OverlayPortal } from "@goddard-ai/ui-primitives"
+import { css } from "@goddard-ai/styled-system/css"
+import { Popover, type ListNavigationController } from "@goddard-ai/ui-primitives"
+import { useSignal } from "@preact/signals"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
+import { useEffect } from "preact/hooks"
 
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsrx"
 import {
   inputMenuBodyClass,
-  inputMenuButtonActiveClass,
   inputMenuButtonClass,
   inputMenuClass,
+  inputMenuContentClass,
   inputMenuDetailClass,
   inputMenuEmptyClass,
   inputMenuHeaderClass,
@@ -67,28 +69,53 @@ function SuggestionIcon(props: { suggestion: SessionInputSuggestion }) @{
 
 export function SessionInputMenu(props: {
   isLoadingSuggestions: boolean;
+  itemRef: ListNavigationController["itemRef"];
   menu: SessionInputMenuState | null;
   menuRef: (element: HTMLDivElement | null) => void;
   onAcceptSuggestion: (suggestion: SessionInputSuggestion) => void;
-  onHighlight: (index: number) => void;
-  selectedIndex: number;
+  onDismiss: () => void;
   suggestions: readonly SessionInputSuggestion[];
 }) @{
+  const open = useSignal(Boolean(props.menu))
+
+  useEffect(() => {
+    open.value = Boolean(props.menu)
+  }, [open, props.menu])
+
   if (!props.menu) {
     return null
   }
 
-  <OverlayPortal root="menu">
-    <div
-      ref={props.menuRef}
-      class={inputMenuClass}
-      style={{
-        left: `${props.menu.anchorLeft}px`,
-        top: `${props.menu.anchorTop}px`,
-      }}
-    >
+  <Popover
+    anchor={() => ({
+      x: props.menu?.anchorLeft ?? 16,
+      y: props.menu?.anchorTop ?? 16,
+    })}
+    ariaLabel={getMenuHeading(props.menu.trigger)}
+    blockOutsidePointer={false}
+    class={inputMenuClass}
+    closeOnEscape={true}
+    closeOnOutsidePointer={true}
+    focusOnOpen={false}
+    offset={0}
+    {open}
+    placement="bottom-start"
+    restoreFocus={false}
+    role="presentation"
+    strategy="fixed"
+    onOpenChange={(nextOpen) => {
+      if (!nextOpen) {
+        props.onDismiss()
+      }
+    }}
+  >
+    <div ref={props.menuRef} class={inputMenuContentClass}>
       <div class={inputMenuHeaderClass}>{getMenuHeading(props.menu.trigger)}</div>
-      <div class={inputMenuListClass}>
+      <div
+        class={inputMenuListClass}
+        role="listbox"
+        aria-label={getMenuHeading(props.menu.trigger)}
+      >
         @if (props.isLoadingSuggestions) {
           <div class={inputMenuEmptyClass}>
             <span
@@ -107,17 +134,14 @@ export function SessionInputMenu(props: {
         } @else {
           @for (const suggestion of props.suggestions; index index) {
             <button
-              class={cx(
-                inputMenuButtonClass,
-                index === props.selectedIndex ? inputMenuButtonActiveClass : undefined,
-              )}
+              ref={props.itemRef(index)}
+              aria-selected="false"
+              class={inputMenuButtonClass}
               key={suggestionKey(suggestion)}
+              role="option"
               type="button"
               onMouseDown={(event) => {
                 event.preventDefault()
-              }}
-              onMouseEnter={() => {
-                props.onHighlight(index)
               }}
               onClick={() => {
                 props.onAcceptSuggestion(suggestion)
@@ -135,5 +159,5 @@ export function SessionInputMenu(props: {
         }
       </div>
     </div>
-  </OverlayPortal>
+  </Popover>
 }
