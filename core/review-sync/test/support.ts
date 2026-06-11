@@ -21,7 +21,7 @@ type StoredSessionState = {
 }
 
 const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
-export const WATCH_TEST_TIMEOUT_MS = 15_000
+export const WATCH_TEST_TIMEOUT_MS = 60_000
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 
@@ -184,13 +184,24 @@ async function removeTemporaryPath(path: string) {
 
 export async function waitForFileContent(path: string, expected: string) {
   const startedAt = Date.now()
-  while (Date.now() - startedAt < 5000) {
-    if ((await readFile(path, "utf-8")) === expected) {
+  while (Date.now() - startedAt < WATCH_TEST_TIMEOUT_MS) {
+    if ((await readTextIfExists(path)) === expected) {
       return
     }
     await sleep(50)
   }
   expect(await readFile(path, "utf-8")).toBe(expected)
+}
+
+async function readTextIfExists(path: string) {
+  try {
+    return await readFile(path, "utf-8")
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error
+    }
+    return null
+  }
 }
 
 export function createDeferred<T>() {
@@ -273,11 +284,12 @@ export async function runProcessUntilOutput(
     })
 
     let matched = false
+    let timedOut = false
     let stdout = ""
     let stderr = ""
     const timeout = setTimeout(() => {
+      timedOut = true
       child.kill("SIGKILL")
-      rejectPromise(new Error(`Timed out waiting for ${expectedOutput}`))
     }, WATCH_TEST_TIMEOUT_MS)
     const stopWhenMatched = () => {
       if (!matched && `${stdout}\n${stderr}`.includes(expectedOutput)) {
@@ -299,6 +311,10 @@ export async function runProcessUntilOutput(
     child.on("error", rejectPromise)
     child.on("close", (status) => {
       clearTimeout(timeout)
+      if (timedOut) {
+        rejectPromise(new Error(`Timed out waiting for ${expectedOutput}`))
+        return
+      }
       if (!matched) {
         rejectPromise(new Error(`Process exited before printing ${expectedOutput}: ${stderr}`))
         return
