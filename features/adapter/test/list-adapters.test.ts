@@ -477,6 +477,80 @@ describe("adapter listing", () => {
     })
   })
 
+  test("lists managed registry adapters while hiding ordinary uninstalled registry adapters", async () => {
+    await withIsolatedHome(async () => {
+      const response = await listAdapters(
+        {
+          registryService: {
+            async listAdapters() {
+              return {
+                adapters: [
+                  {
+                    id: "managed-acp",
+                    name: "Managed ACP",
+                    version: "1.0.0",
+                    description: "Managed adapter",
+                    distribution: { npx: { package: "managed-acp" } },
+                    unofficial: false,
+                    source: "registry" as const,
+                  },
+                  {
+                    id: "ordinary-acp",
+                    name: "Ordinary ACP",
+                    version: "1.0.0",
+                    description: "Ordinary adapter",
+                    distribution: { npx: { package: "ordinary-acp" } },
+                    unofficial: false,
+                    source: "registry" as const,
+                  },
+                ],
+                registrySource: "cache",
+                lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
+                stale: false,
+                lastError: null,
+              }
+            },
+          },
+          agentInstallService: createAgentInstallService(),
+          configProvider: {
+            async getRootConfig() {
+              return {
+                config: {
+                  agents: {
+                    managed: {
+                      "managed-acp": {
+                        install: "beforeUse",
+                      },
+                    },
+                  },
+                },
+              }
+            },
+          },
+        },
+        { cwd: "/repo" },
+      )
+
+      expect(response.adapters.map((adapter) => adapter.id)).toEqual(["managed-acp"])
+      expect(response.installations).toEqual(
+        expect.arrayContaining([
+          {
+            adapterId: "managed-acp",
+            installable: true,
+            installed: false,
+            method: "npx",
+          },
+          {
+            adapterId: "ordinary-acp",
+            installable: true,
+            installed: false,
+            method: "npx",
+          },
+        ]),
+      )
+    })
+  })
+
   test("surfaces failed managed install status with sanitized previous install metadata", async () => {
     const response = await listAdapters(
       {
