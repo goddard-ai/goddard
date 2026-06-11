@@ -278,10 +278,6 @@ export function createFileSearchManager(
     const cwd = resolve(request.cwd)
     const limit = normalizeLimit(request.limit)
 
-    if (request.query.trim().length === 0) {
-      return getFallbackComposerEntries(request, cwd, limit)
-    }
-
     try {
       const entry = await getFinder(cwd)
       if (!entry) {

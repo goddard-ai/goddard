@@ -1899,7 +1899,7 @@ test("session worktree launch branches from the selected base branch", async () 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
-test("fileSearch.composerEntries scopes `@` lookups to the requested cwd and skips ignored directories", async () => {
+test("fileSearch.composerEntries scopes `@` lookups to indexed results under the requested cwd", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
@@ -1918,6 +1918,7 @@ test("fileSearch.composerEntries scopes `@` lookups to the requested cwd and ski
   const emptyQuery = await send(client, "fileSearch.composerEntries", {
     cwd: repoDir,
     query: "",
+    limit: 50,
   })
   const filtered = await send(client, "fileSearch.composerEntries", {
     cwd: repoDir,
@@ -1926,9 +1927,10 @@ test("fileSearch.composerEntries scopes `@` lookups to the requested cwd and ski
 
   const emptyQueryLabels = emptyQuery.entries.map((entry: any) => entry.label)
 
-  expect(emptyQueryLabels).toContain("src")
-  expect(emptyQueryLabels).not.toContain(".git")
-  expect(emptyQueryLabels).not.toContain("node_modules")
+  expect(emptyQueryLabels).toContain("match.ts")
+  expect(emptyQuery.entries.map((entry: any) => entry.path)).toContain(
+    join(repoDir, "src", "nested", "match.ts"),
+  )
   expect(filtered.entries).toEqual([
     {
       type: "file",
