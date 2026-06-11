@@ -12,6 +12,10 @@
 - `Agent Session Wrapper`
   - The minimal object-backed SDK helper returned by `sdk.session.run(...)` for one live daemon-backed ACP session.
   - Why: so callers that need interactive session semantics can prompt, cancel, inspect history, stop the session, and set the active model without rebuilding transport wiring on top of the root SDK session namespace.
+- `Daemon-Backed ACP Session Bridge`
+  - The private SDK transport adapter that connects `AgentSession` to daemon `session.send` and `session.streamMessages` routes for an ACP session the daemon already initialized.
+  - Why: so SDK callers can interact with live daemon-owned ACP sessions without owning the agent process or raw daemon IPC stream details.
+  - Upstream alignment notes live in [`acp-session-bridge.md`](./acp-session-bridge.md).
 - `Session Message Stream`
   - The generated SDK route exposed through `sdk.session.streamMessages(...)` that streams daemon-filtered ACP messages for one session id.
   - Why: so hosts can observe live agent output through the shared daemon route contract without an extra callback wrapper.

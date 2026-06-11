@@ -5,6 +5,7 @@
 ## Related Docs
 
 - [SDK Glossary](./glossary.md)
+- [Daemon-Backed ACP Session Bridge](./acp-session-bridge.md)
 
 ## Package Surfaces
 
