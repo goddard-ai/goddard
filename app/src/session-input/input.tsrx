@@ -1,4 +1,5 @@
 import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
+import { useListNavigation } from "@goddard-ai/ui-primitives"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { ContentEditable } from "@lexical/react/LexicalContentEditable"
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary"
@@ -74,7 +75,6 @@ export function SessionInput(props: {
   )
   const [menu, setMenu] = useState<SessionInputMenuState | null>(null)
   const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([])
-  const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const suggestionRequestIdRef = useRef(0)
@@ -106,13 +106,21 @@ export function SessionInput(props: {
 
   const disabled = props.disabled ?? false
   const canSubmit = !disabled && hasPromptContent(promptBlocks) && menu === null && !isSubmitting
-  const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
+  const navigation = useListNavigation({
+    activeAttribute: "aria-selected",
+    count: () => suggestions.length,
+    onActivate(index) {
+      acceptSuggestion(suggestions[index] ?? null)
+    },
+  })
+  const activeSuggestionIndex = navigation.activeIndex()
+  const highlightedSuggestion = suggestions.at(activeSuggestionIndex) ?? suggestions[0] ?? null
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
     setSuggestions(
       (currentSuggestions) => currentSuggestions.length === 0 ? currentSuggestions : [],
     )
-    setSelectedIndex((currentIndex) => (currentIndex === 0 ? currentIndex : 0))
+    navigation.resetActiveIndex()
     setIsLoadingSuggestions((currentIsLoading) => currentIsLoading ? false : currentIsLoading)
   }
 
@@ -149,7 +157,7 @@ export function SessionInput(props: {
       dismissedMenuRef.current?.startOffset === menuState.startOffset
   }
 
-  function isSameMenuState(
+  function isSameMenuContext(
     currentMenu: SessionInputMenuState | null,
     nextMenu: SessionInputMenuState | null,
   ) {
@@ -161,12 +169,22 @@ export function SessionInput(props: {
       return false
     }
 
-    return currentMenu.trigger === nextMenu.trigger && currentMenu.query === nextMenu.query &&
-      currentMenu.nodeKey === nextMenu.nodeKey &&
-      currentMenu.startOffset === nextMenu.startOffset &&
-      currentMenu.endOffset === nextMenu.endOffset &&
-      currentMenu.anchorLeft === nextMenu.anchorLeft &&
-      currentMenu.anchorTop === nextMenu.anchorTop
+    return currentMenu.trigger === nextMenu.trigger && currentMenu.nodeKey === nextMenu.nodeKey &&
+      currentMenu.startOffset === nextMenu.startOffset
+  }
+
+  function isSameMenuState(
+    currentMenu: SessionInputMenuState | null,
+    nextMenu: SessionInputMenuState | null,
+  ) {
+    if (!isSameMenuContext(currentMenu, nextMenu)) {
+      return false
+    }
+
+    return currentMenu?.query === nextMenu?.query &&
+      currentMenu?.endOffset === nextMenu?.endOffset &&
+      currentMenu?.anchorLeft === nextMenu?.anchorLeft &&
+      currentMenu?.anchorTop === nextMenu?.anchorTop
   }
 
   async function submitPrompt() {
@@ -210,21 +228,11 @@ export function SessionInput(props: {
   }
 
   function highlightNextSuggestion() {
-    setSelectedIndex(
-      (currentIndex) => suggestions.length === 0 ? 0 : (currentIndex + 1) % suggestions.length,
-    )
+    navigation.moveActiveIndex(1)
   }
 
   function highlightPreviousSuggestion() {
-    setSelectedIndex(
-      (currentIndex) => suggestions.length === 0
-        ? 0
-        : (currentIndex - 1 + suggestions.length) % suggestions.length,
-    )
-  }
-
-  function highlightSuggestion(index: number) {
-    setSelectedIndex(index)
+    navigation.moveActiveIndex(-1)
   }
 
   function updateMenu(nextMenu: SessionInputMenuState | null) {
@@ -239,7 +247,23 @@ export function SessionInput(props: {
       return
     }
 
-    setMenu((currentMenu) => isSameMenuState(currentMenu, nextMenu) ? currentMenu : nextMenu)
+    setMenu((currentMenu) => {
+      if (!currentMenu) {
+        return nextMenu
+      }
+
+      if (!isSameMenuContext(currentMenu, nextMenu)) {
+        return nextMenu
+      }
+
+      return isSameMenuState(currentMenu, nextMenu)
+        ? currentMenu
+        : {
+            ...nextMenu,
+            anchorLeft: currentMenu.anchorLeft,
+            anchorTop: currentMenu.anchorTop,
+          }
+    })
   }
 
   function updatePromptBlocks(nextPromptBlocks: SessionInputPromptBlocks) {
@@ -307,7 +331,7 @@ export function SessionInput(props: {
       }
 
       setSuggestions([...response])
-      setSelectedIndex(0)
+      navigation.resetActiveIndex()
     }).catch((error) => {
       if (suggestionRequestIdRef.current !== requestId) {
         return
@@ -315,7 +339,7 @@ export function SessionInput(props: {
 
       console.error("Failed to load session input suggestions.", error)
       setSuggestions([])
-      setSelectedIndex(0)
+      navigation.resetActiveIndex()
     }).finally(() => {
       if (suggestionRequestIdRef.current === requestId) {
         setIsLoadingSuggestions(false)
@@ -327,18 +351,13 @@ export function SessionInput(props: {
     menu?.query,
     menu?.startOffset,
     menu?.trigger,
+    navigation,
     props.loadSuggestions,
   ])
 
   useEffect(() => {
-    setSelectedIndex((currentIndex) => {
-      if (suggestions.length === 0) {
-        return 0
-      }
-
-      return Math.min(currentIndex, suggestions.length - 1)
-    })
-  }, [suggestions])
+    navigation.setActiveIndex(navigation.activeIndex())
+  }, [navigation, suggestions])
 
   useListener(document, "mousedown", (event) => {
     if (!menu) {
@@ -420,10 +439,12 @@ export function SessionInput(props: {
       menuRef={(element) => {
         menuElementRef.current = element
       }}
-      {selectedIndex}
+      itemRef={navigation.itemRef}
       {suggestions}
       onAcceptSuggestion={acceptSuggestion}
-      onHighlight={highlightSuggestion}
+      onDismiss={() => {
+        hideMenu()
+      }}
     />
 
     @if (!props.footerInsideFrame) {

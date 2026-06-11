@@ -3,28 +3,38 @@ import { css } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 
 export const inputMenuClass = css({
-  position: "fixed",
   zIndex: 70,
-  display: "grid",
-  gap: "10px",
-  width: "min(360px, calc(100vw - 32px))",
-  maxHeight: "min(420px, calc(100vh - 32px))",
-  padding: "12px",
-  borderRadius: "18px",
+  width: "min(380px, var(--available-width))",
+  minWidth: "min(280px, var(--available-width))",
+  maxWidth: "var(--available-width)",
+  maxHeight: "min(360px, var(--available-height))",
+  overflow: "hidden",
   border: "1px solid {colors.border}",
-  background: `linear-gradient(180deg, ${token.var("colors.panel")} 0%, ${token.var("colors.background")} 100%)`,
-  boxShadow: "0 24px 60px rgba(98, 112, 128, 0.24)",
+  borderRadius: "10px",
+  backgroundColor: "panel",
+  boxShadow: "0 18px 48px rgba(30, 41, 59, 0.16)",
+  outline: "none",
+})
+
+export const inputMenuContentClass = css({
+  display: "grid",
+  gridTemplateRows: "auto minmax(0, 1fr)",
+  minHeight: "0",
+  maxHeight: "inherit",
 })
 
 export const inputMenuHeaderClass = css({
   display: "flex",
   alignItems: "center",
   gap: "8px",
+  minHeight: "32px",
+  paddingBlock: "8px 4px",
+  paddingInline: "10px",
+  borderBottom: "1px solid {colors.border}",
   color: "muted",
-  fontSize: "0.76rem",
-  fontWeight: "720",
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
+  fontSize: "0.74rem",
+  fontWeight: "680",
+  letterSpacing: "0",
 })
 
 export const inputMenuFilterClass = css({
@@ -45,43 +55,56 @@ export const inputMenuFilterClass = css({
 
 export const inputMenuListClass = css({
   display: "grid",
-  gap: "6px",
-  minHeight: "64px",
+  gap: "0",
+  minHeight: "0",
+  paddingBlock: "4px",
   overflowY: "auto",
 })
 
 export const inputMenuButtonClass = css({
+  position: "relative",
   display: "grid",
   gridTemplateColumns: "auto minmax(0, 1fr)",
-  alignItems: "start",
-  gap: "10px",
+  alignItems: "center",
+  gap: "8px",
   width: "100%",
-  padding: "10px 12px",
-  borderRadius: "14px",
-  border: "1px solid transparent",
+  minHeight: "38px",
+  paddingBlock: "7px",
+  paddingInline: "10px",
+  border: "none",
   backgroundColor: "transparent",
   color: "text",
   cursor: "pointer",
   textAlign: "left",
-  transition: "background-color 120ms ease, border-color 120ms ease",
+  outline: "none",
+  transition: "background-color 120ms ease",
+  _hover: {
+    backgroundColor: "surface",
+  },
+  "&[aria-selected='true']": {
+    backgroundColor: "surface",
+  },
+  _focusVisible: {
+    _after: {
+      content: '""',
+      position: "absolute",
+      inset: "2px",
+      borderRadius: "8px",
+      border: "2px solid {colors.accentStrong}",
+      pointerEvents: "none",
+    },
+  },
   _disabled: {
     cursor: "not-allowed",
     opacity: "0.5",
   },
 })
 
-export const inputMenuButtonActiveClass = css({
-  borderColor: "accent",
-  background: `linear-gradient(180deg, color-mix(in srgb, ${token.var("colors.accent")} 14%, white), color-mix(in srgb, ${token.var("colors.accent")} 8%, white))`,
-})
-
 export const inputMenuIconClass = css({
   display: "grid",
   placeItems: "center",
-  width: "28px",
-  height: "28px",
-  borderRadius: "999px",
-  backgroundColor: "surface",
+  width: "20px",
+  height: "20px",
   color: "muted",
 })
 
@@ -93,15 +116,21 @@ export const inputMenuBodyClass = css({
 
 export const inputMenuLabelClass = css({
   fontSize: "0.87rem",
-  fontWeight: "680",
+  fontWeight: "620",
   lineHeight: "1.35",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 })
 
 export const inputMenuDetailClass = css({
+  minWidth: "0",
   color: "muted",
-  fontSize: "0.8rem",
+  fontSize: "0.76rem",
   lineHeight: "1.45",
-  wordBreak: "break-word",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 })
 
 export const inputMenuEmptyClass = css({
