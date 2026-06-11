@@ -78,6 +78,8 @@ export function createAgentInstallService(
   }
 
   function runAgentTask<TResult>(agentId: string, task: () => Promise<TResult>) {
+    // acp-client install/update/launch operations share per-agent cache state; queue them so
+    // overlapping callers cannot observe another operation's result shape or partial writes.
     const previousTask = agentTaskTails.get(agentId) ?? Promise.resolve()
     const nextTask = previousTask.catch(() => {}).then(task)
     const nextTail = nextTask.then(

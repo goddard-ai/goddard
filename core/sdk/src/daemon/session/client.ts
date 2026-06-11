@@ -334,6 +334,8 @@ async function createMessageOutputTransport(
         typeof message.method === "string" &&
         agentMethods.has(message.method)
       ) {
+        // The daemon stream includes echoed agent-bound requests; the SDK bridge only forwards
+        // agent responses and client-bound requests back into acp-client's readable side.
         continue
       }
 
