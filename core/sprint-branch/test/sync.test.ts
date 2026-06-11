@@ -249,6 +249,7 @@ describe("sprint-branch sync", () => {
 
       lockPath = await writeSprintLock(repo, "example", { command: "approve" })
       await fs.writeFile(path.join(repo, "feature.txt"), "agent changed while locked\n")
+      await wakeReviewSyncWatcher(repo)
       await Promise.race([
         waiting.promise,
         syncPromise.then((sync) => {
@@ -539,6 +540,10 @@ async function waitForCliExit(subprocess: ReturnType<typeof spawnCli>, command: 
       clearTimeout(timeout)
     }
   }
+}
+
+async function wakeReviewSyncWatcher(repo: string) {
+  await git(repo, ["update-ref", "refs/goddard-tests/review-sync-wake", "HEAD"])
 }
 
 async function exitsWithin(subprocess: ReturnType<typeof spawnCli>, timeoutMs: number) {
