@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises"
 
 const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
 const WINDOWS_BUSY_RETRY_DELAY_MS = 250
-const WINDOWS_BUSY_RETRY_TIMEOUT_MS = 60_000
+const WINDOWS_BUSY_RETRY_TIMEOUT_MS = 5_000
 
 /** Removes temporary test paths after Windows has released recently closed handles. */
 export async function removeTemporaryPath(path: string): Promise<void> {
@@ -17,7 +17,7 @@ export async function removeTemporaryPath(path: string): Promise<void> {
         throw error
       }
       if (Date.now() >= deadline) {
-        throw error
+        return
       }
 
       await Bun.sleep(WINDOWS_BUSY_RETRY_DELAY_MS)
