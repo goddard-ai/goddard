@@ -64,6 +64,7 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
+  db.close()
   db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (originalHome === undefined) {

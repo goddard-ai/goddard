@@ -23,6 +23,7 @@ afterEach(async () => {
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
+  db.close()
   db = resetComposedDaemonStore({ filename: ":memory:" })
 
   if (sharedHomeDir) {

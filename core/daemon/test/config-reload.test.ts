@@ -374,6 +374,10 @@ async function useTempHome() {
   process.env.HOME = homeDir
   db = resetComposedDaemonStore()
   cleanup.push(() => removeTemporaryPath(homeDir))
+  cleanup.push(async () => {
+    db.close()
+    db = resetComposedDaemonStore({ filename: ":memory:" })
+  })
   return homeDir
 }
 
