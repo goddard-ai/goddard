@@ -854,6 +854,9 @@ importers:
 
   features/file-search:
     dependencies:
+      '@ff-labs/fff-bun':
+        specifier: ^0.8.4
+        version: 0.8.4(bun@1.3.13)
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
@@ -2035,6 +2038,59 @@ packages:
   '@eslint/plugin-kit@0.7.2':
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
+
+  '@ff-labs/fff-bin-darwin-arm64@0.8.4':
+    resolution: {integrity: sha512-B2l9Io2LEb++q96tvt2/wkx78wMnmWY6pTSi5HpIskSNlCQu0nEOGPSYjfDji7DvQs2IIFMboaamzLiHm6A7NA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@ff-labs/fff-bin-darwin-x64@0.8.4':
+    resolution: {integrity: sha512-xwF9uCot/neZ0cXv4WtAKLDGLKoM+CU04OqSG8btH3jD2QmaBvGy10GRcQzuREI86BfbiQ4FJxK7TNZNACdfug==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@ff-labs/fff-bin-linux-arm64-gnu@0.8.4':
+    resolution: {integrity: sha512-Dj1+093/FQyeV90zEwAePkCrVa2JysBP9YxcF2sakR1vd0Q+kze2HTowPHu4LuGUXIwKUVpiWzIXjmUDq75h2g==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ff-labs/fff-bin-linux-arm64-musl@0.8.4':
+    resolution: {integrity: sha512-GWZFzwaUNDza94Dj7akcipg+PLevWgz4QiD3i4/xsD3v0YVMlwUW9xq8F0eRqut6oIyuAnYUxh3fGmCD4mMueg==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@ff-labs/fff-bin-linux-x64-gnu@0.8.4':
+    resolution: {integrity: sha512-plfvMH1DQRJ2kdpqLkKg8qhtgCyhUltKFxF6dqf1XEaei2MT93LvxC8TnYEHfHWGDkX81ouLHkz6ipryWKJ4sQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ff-labs/fff-bin-linux-x64-musl@0.8.4':
+    resolution: {integrity: sha512-W1PtXbaA4c4MxgomEtOmi9Q8gaGRcaXP6plQurqPd/cQUnFiBG5B2VV++J+rI9b/z9Ubpm3hyj0PCYNvn7qVnw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@ff-labs/fff-bin-win32-arm64@0.8.4':
+    resolution: {integrity: sha512-rcDyuGoLkyfQCYA1/S5EgeS1s7QwFPXR6UV5QuuNCmUPccosHhPKNpOAxc8u9ZsQemahjTIcbpG+U8X0LKLd4w==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@ff-labs/fff-bin-win32-x64@0.8.4':
+    resolution: {integrity: sha512-sQuJGaqgUB1R818WuanRoLh3wFAEGrKkP0ZeCYj8o5XJIfEcIkZ9X8/u3H2P6qCNe+1C2065//r3wjKYSDfTiQ==}
+    cpu: [x64]
+    os: [win32]
+
+  '@ff-labs/fff-bun@0.8.4':
+    resolution: {integrity: sha512-Vzoz5gCusrXHlSurft6fcADnL//hlJdVVdAseiHpMJA1vd6Kt6C/I2tIcR9BlHOv9eMt2QBGM68g1kDPSboadQ==}
+    engines: {bun: '>=1.0.0'}
+    cpu: [x64, arm64]
+    os: [darwin, linux, win32]
+    hasBin: true
+    peerDependencies:
+      bun: '>=1.0.0'
 
   '@floating-ui/core@1.7.5':
     resolution: {integrity: sha512-1Ih4WTWyw0+lKyFMcBHGbb5U5FtuHJuujoyyr5zTaWS5EYMeT6Jb2AuDeftsCsEuchO+mM2ij5+q9crhydzLhQ==}
@@ -7604,6 +7660,43 @@ snapshots:
     dependencies:
       '@eslint/core': 1.2.1
       levn: 0.4.1
+
+  '@ff-labs/fff-bin-darwin-arm64@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-darwin-x64@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-linux-arm64-gnu@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-linux-arm64-musl@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-linux-x64-gnu@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-linux-x64-musl@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-win32-arm64@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bin-win32-x64@0.8.4':
+    optional: true
+
+  '@ff-labs/fff-bun@0.8.4(bun@1.3.13)':
+    dependencies:
+      bun: 1.3.13
+    optionalDependencies:
+      '@ff-labs/fff-bin-darwin-arm64': 0.8.4
+      '@ff-labs/fff-bin-darwin-x64': 0.8.4
+      '@ff-labs/fff-bin-linux-arm64-gnu': 0.8.4
+      '@ff-labs/fff-bin-linux-arm64-musl': 0.8.4
+      '@ff-labs/fff-bin-linux-x64-gnu': 0.8.4
+      '@ff-labs/fff-bin-linux-x64-musl': 0.8.4
+      '@ff-labs/fff-bin-win32-arm64': 0.8.4
+      '@ff-labs/fff-bin-win32-x64': 0.8.4
 
   '@floating-ui/core@1.7.5':
     dependencies:
