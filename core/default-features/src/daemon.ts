@@ -2,6 +2,7 @@ import { actionPlugin } from "@goddard-ai/action/daemon"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composePlugins } from "@goddard-ai/daemon-plugin"
+import { fileSearchPlugin } from "@goddard-ai/file-search/daemon"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
@@ -13,6 +14,7 @@ const defaultDaemonPlugins = [
   actionPlugin,
   adapterPlugin,
   authPlugin,
+  fileSearchPlugin,
   sessionPlugin,
   inboxPlugin,
   pullRequestPlugin,

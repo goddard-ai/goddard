@@ -112,6 +112,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "daemon")).toBe(true)
     expect(Object.hasOwn(sdk, "auth")).toBe(true)
     expect(Object.hasOwn(sdk, "adapter")).toBe(true)
+    expect(Object.hasOwn(sdk, "fileSearch")).toBe(true)
     expect(Object.hasOwn(sdk, "pr")).toBe(true)
     expect(Object.hasOwn(sdk, "inbox")).toBe(true)
     expect(Object.hasOwn(sdk, "session")).toBe(true)
@@ -225,6 +226,44 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
+  })
+
+  test("fileSearch.composerEntries forwards to fileSearch.composerEntries", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      entries: [
+        {
+          type: "file",
+          path: "/tmp/project/src/index.ts",
+          uri: "file:///tmp/project/src/index.ts",
+          label: "index.ts",
+          detail: "./src/index.ts",
+        },
+      ],
+    })
+
+    await expect(
+      sdk.fileSearch.composerEntries({
+        cwd: "/tmp/project",
+        query: "index",
+      }),
+    ).resolves.toEqual({
+      entries: [
+        {
+          type: "file",
+          path: "/tmp/project/src/index.ts",
+          uri: "file:///tmp/project/src/index.ts",
+          label: "index.ts",
+          detail: "./src/index.ts",
+        },
+      ],
+    })
+
+    expect(send).toHaveBeenCalledWith("fileSearch.composerEntries", {
+      cwd: "/tmp/project",
+      query: "index",
+    })
   })
 
   test("session.changes forwards to session.changes", async () => {
