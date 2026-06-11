@@ -9,6 +9,7 @@ import {
   currentBranch,
   diagnosticCodes,
   git,
+  normalizeText,
   readState,
   runCli,
   workingTreePorcelain,
@@ -37,7 +38,9 @@ describe("sprint-branch resume", () => {
 
     expect(result.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
-    expect(await fs.readFile(path.join(repo, "scratch.txt"), "utf-8")).toBe("interrupted\n")
+    expect(normalizeText(await fs.readFile(path.join(repo, "scratch.txt"), "utf-8"))).toBe(
+      "interrupted\n",
+    )
     expect((await readState(repo, "example")).activeStashes).toEqual([])
   })
 
@@ -145,7 +148,9 @@ describe("sprint-branch resume", () => {
 
     expect(second.exitCode).toBe(0)
     expect(await currentBranch(repo)).toBe("sprint/example/next")
-    expect(await fs.readFile(path.join(repo, "work.txt"), "utf-8")).toBe("resolved\n")
+    expect(normalizeText(await fs.readFile(path.join(repo, "work.txt"), "utf-8"))).toBe(
+      "resolved\n",
+    )
     expect(state.conflict).toBeNull()
     expect(state.activeStashes).toEqual([])
   })

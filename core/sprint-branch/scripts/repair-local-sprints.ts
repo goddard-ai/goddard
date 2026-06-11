@@ -99,7 +99,7 @@ export async function repairLocalSprints(input: LocalSprintRepairInput = {}) {
       }
 
       const filePath = path.join(sprintDir, entry.name)
-      const relativePath = path.relative(rootDir, filePath)
+      const relativePath = displayRelativePath(rootDir, filePath)
       if (obsoleteSprintFilePattern.test(entry.name)) {
         fixes.removedObsoleteFiles.push(relativePath)
         if (!dryRun) {
@@ -112,7 +112,7 @@ export async function repairLocalSprints(input: LocalSprintRepairInput = {}) {
     }
 
     for (const taskPath of taskFiles) {
-      const relativePath = path.relative(rootDir, taskPath)
+      const relativePath = displayRelativePath(rootDir, taskPath)
       const text = await fs.readFile(taskPath, "utf-8")
       const repair = repairTaskReviewReport(text)
 
@@ -141,6 +141,10 @@ export async function repairLocalSprints(input: LocalSprintRepairInput = {}) {
     manualActions,
     notes,
   } satisfies LocalSprintRepairReport
+}
+
+function displayRelativePath(rootDir: string, filePath: string) {
+  return path.relative(rootDir, filePath).replaceAll(path.sep, "/")
 }
 
 /** Formats the repair result for agents reading terminal output. */

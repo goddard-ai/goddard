@@ -15,6 +15,7 @@ import {
   createSprintRepo,
   currentBranch,
   git,
+  normalizeText,
   runCli,
   spawnCli,
   workingTreePorcelain,
@@ -66,7 +67,7 @@ describe("sprint-branch sync", () => {
         }
         if (result.command === "sync" && result.status === "ok") {
           syncedFeatureText.resolve(
-            await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8"),
+            normalizeText(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")),
           )
           controller.abort()
         }
@@ -147,9 +148,8 @@ describe("sprint-branch sync", () => {
           waiting.resolve()
         }
         if (result.command === "watch" && result.reviewBranch) {
-          const watchedFeatureText = await fs.readFile(
-            path.join(reviewWorktree, "feature.txt"),
-            "utf-8",
+          const watchedFeatureText = normalizeText(
+            await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8"),
           )
           watchingResolved = true
           watching.resolve(watchedFeatureText)
@@ -215,9 +215,8 @@ describe("sprint-branch sync", () => {
           waiting.resolve()
         }
         if (result.command === "sync" && result.status === "ok" && !syncedResolved) {
-          const syncedFeatureText = await fs.readFile(
-            path.join(reviewWorktree, "feature.txt"),
-            "utf-8",
+          const syncedFeatureText = normalizeText(
+            await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8"),
           )
           syncedResolved = true
           synced.resolve(syncedFeatureText)
@@ -236,9 +235,9 @@ describe("sprint-branch sync", () => {
           }
         }),
       ])
-      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
-        "agent review work\n",
-      )
+      expect(
+        normalizeText(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")),
+      ).toBe("agent review work\n")
 
       lockPath = await writeSprintLock(repo, "example", { command: "approve" })
       await fs.writeFile(path.join(repo, "feature.txt"), "agent changed while locked\n")
@@ -251,9 +250,9 @@ describe("sprint-branch sync", () => {
         }),
       ])
       await Bun.sleep(250)
-      expect(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")).toBe(
-        "agent review work\n",
-      )
+      expect(
+        normalizeText(await fs.readFile(path.join(reviewWorktree, "feature.txt"), "utf-8")),
+      ).toBe("agent review work\n")
 
       await fs.rm(lockPath, { force: true })
       lockPath = null

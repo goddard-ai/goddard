@@ -194,9 +194,9 @@ function statePathForDisplay(rootDir: string, statePath: string) {
   const parts = statePath.split(path.sep)
   const rootIndex = parts.lastIndexOf("sprint-branch")
   if (rootIndex !== -1) {
-    return path.join(".git", ...parts.slice(rootIndex))
+    return path.posix.join(".git", ...parts.slice(rootIndex))
   }
-  return path.relative(rootDir, statePath)
+  return path.relative(rootDir, statePath).replaceAll(path.sep, "/")
 }
 
 async function filterFinalizedCandidates(

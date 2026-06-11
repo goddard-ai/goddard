@@ -17,5 +17,5 @@ export async function sprintStatePath(rootDir: string, sprint: string) {
 
 /** Returns a stable display path for state stored outside the working tree. */
 export function sprintStateDisplayPath(sprint: string) {
-  return path.join(".git", sprintStateGitPath(sprint))
+  return path.posix.join(".git", sprintStateRoot, sprint, sprintStateFileName)
 }

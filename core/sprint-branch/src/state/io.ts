@@ -82,7 +82,7 @@ function statePathForDisplay(statePath: string) {
   const parts = statePath.split(path.sep)
   const rootIndex = parts.lastIndexOf("sprint-branch")
   if (rootIndex !== -1) {
-    return path.join(".git", ...parts.slice(rootIndex))
+    return path.posix.join(".git", ...parts.slice(rootIndex))
   }
-  return statePath
+  return statePath.replaceAll(path.sep, "/")
 }

@@ -37,6 +37,14 @@ export function diagnosticCodes(output: DiagnosticOutput) {
   return output.diagnostics.map((diagnostic) => diagnostic.code)
 }
 
+export function normalizeText(text: string) {
+  return text.replaceAll("\r\n", "\n")
+}
+
+export function displayPath(pathname: string) {
+  return pathname.replaceAll(path.sep, "/")
+}
+
 export async function cleanupTestRepos() {
   await Promise.all(tempRepos.splice(0).map((repo) => removeTemporaryPath(repo)))
 }

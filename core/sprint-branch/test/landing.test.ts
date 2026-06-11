@@ -15,6 +15,7 @@ import {
   createSprintRepo,
   currentBranch,
   diagnosticCodes,
+  displayPath,
   git,
   pathExists,
   readState,
@@ -282,7 +283,7 @@ describe("sprint-branch human landing commands", () => {
     expect(worktreesToDetach).toContain(await fs.realpath(branchWorktree))
     expect(worktreesToDetach).not.toContain(await fs.realpath(snapshot))
     expect(cleanup.gitOperations).toContain(
-      `git -C ${JSON.stringify(await fs.realpath(branchWorktree))} checkout --detach`,
+      `git -C ${JSON.stringify(displayPath(await fs.realpath(branchWorktree)))} checkout --detach`,
     )
     expect(cleanup.gitOperations).toContain("git branch -d sprint/example/review")
     expect(cleanup.stateFilesToRemove).toEqual([".git/sprint-branch/example/state.json"])

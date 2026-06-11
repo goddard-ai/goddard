@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises"
 import path from "node:path"
 import { autocomplete, isCancel } from "@clack/prompts"
 
@@ -70,7 +71,7 @@ export async function inferSprintContext(input: SprintInferenceInput) {
     }
   }
 
-  const pathSprint = inferSprintFromPath(rootDir, input.cwd)
+  const pathSprint = await inferSprintFromPath(rootDir, input.cwd)
   if (pathSprint) {
     return await buildContext(
       rootDir,
@@ -166,8 +167,9 @@ async function buildContext(
   } satisfies SprintContext
 }
 
-function inferSprintFromPath(rootDir: string, cwd: string) {
-  const relative = path.relative(path.join(rootDir, "sprints"), cwd)
+async function inferSprintFromPath(rootDir: string, cwd: string) {
+  const [realRootDir, realCwd] = await Promise.all([realpath(rootDir), realpath(cwd)])
+  const relative = path.relative(path.join(realRootDir, "sprints"), realCwd)
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
     return null
   }
@@ -209,9 +211,9 @@ function statePathForDisplay(rootDir: string, statePath: string) {
   const parts = statePath.split(path.sep)
   const rootIndex = parts.lastIndexOf("sprint-branch")
   if (rootIndex !== -1) {
-    return path.join(".git", ...parts.slice(rootIndex))
+    return path.posix.join(".git", ...parts.slice(rootIndex))
   }
-  return path.relative(rootDir, statePath)
+  return path.relative(rootDir, statePath).replaceAll(path.sep, "/")
 }
 
 function timestampValue(value: string | null) {
