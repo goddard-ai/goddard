@@ -3,10 +3,10 @@ import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { removeTemporaryPath } from "../../test-support/windows-fixtures.ts"
 import { sprintStatePath, type SprintBranchState } from "../src"
 
 const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
-const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
 const tempRepos: string[] = []
 const templateRepos: string[] = []
 const baseRepoTemplatePromises = new Map<string, Promise<string>>()
@@ -47,24 +47,6 @@ export function displayPath(pathname: string) {
 
 export async function cleanupTestRepos() {
   await Promise.all(tempRepos.splice(0).map((repo) => removeTemporaryPath(repo)))
-}
-
-async function removeTemporaryPath(pathname: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      await fs.rm(pathname, { recursive: true, force: true })
-      return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (process.platform !== "win32" || !code || !WINDOWS_BUSY_ERROR_CODES.has(code)) {
-        throw error
-      }
-
-      await Bun.sleep(100 * (attempt + 1))
-    }
-  }
-
-  await fs.rm(pathname, { recursive: true, force: true })
 }
 
 export async function createBaseRepo(sprint: string) {

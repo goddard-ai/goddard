@@ -7,6 +7,7 @@ import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterEach, expect, test } from "bun:test"
 
+import { settleWindowsHandles } from "../../test-support/windows-fixtures.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"
@@ -371,9 +372,7 @@ function createTestBackendClient(): BackendClient {
 
 async function closeConfigManager(configManager: ReturnType<typeof createConfigManager>) {
   await configManager.close()
-  if (process.platform === "win32") {
-    await Bun.sleep(250)
-  }
+  await settleWindowsHandles(250)
 }
 
 async function useTempHome() {

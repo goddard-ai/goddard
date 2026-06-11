@@ -1,10 +1,16 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { expect } from "bun:test"
 
+import {
+  readTextWhenAvailable,
+  removeTemporaryPath,
+  sleep,
+  terminateProcessTree,
+} from "../../test-support/windows-fixtures.ts"
 import { UserError } from "../src/errors.ts"
 import { startReviewSync, watchReviewSession, type ReviewSyncResult } from "../src/index.ts"
 
@@ -20,12 +26,10 @@ type StoredSessionState = {
   reviewBranch: string
 }
 
-const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
 export const WATCH_TEST_TIMEOUT_MS = 60_000
-const WINDOWS_BUSY_RETRY_DELAY_MS = 250
-const WINDOWS_BUSY_RETRY_TIMEOUT_MS = 60_000
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+export { sleep }
 
 export async function cleanupReviewSyncFixtures() {
   while (fixtureCleanup.length > 0) {
@@ -160,56 +164,15 @@ export async function refExists(cwd: string, refName: string) {
   return result.status === 0
 }
 
-export function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, ms)
-  })
-}
-
-async function removeTemporaryPath(path: string) {
-  const deadline = Date.now() + WINDOWS_BUSY_RETRY_TIMEOUT_MS
-  while (true) {
-    try {
-      await rm(path, { recursive: true, force: true })
-      return
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (process.platform !== "win32" || !code || !WINDOWS_BUSY_ERROR_CODES.has(code)) {
-        throw error
-      }
-      if (Date.now() >= deadline) {
-        throw error
-      }
-
-      await sleep(WINDOWS_BUSY_RETRY_DELAY_MS)
-    }
-  }
-}
-
 export async function waitForFileContent(path: string, expected: string) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < WATCH_TEST_TIMEOUT_MS) {
-    if ((await readTextIfExists(path)) === expected) {
+    if ((await readTextWhenAvailable(path)) === expected) {
       return
     }
     await sleep(50)
   }
   expect(await readFile(path, "utf-8")).toBe(expected)
-}
-
-async function readTextIfExists(path: string) {
-  try {
-    return await readFile(path, "utf-8")
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (
-      code !== "ENOENT" &&
-      (process.platform !== "win32" || !WINDOWS_BUSY_ERROR_CODES.has(code ?? ""))
-    ) {
-      throw error
-    }
-    return null
-  }
 }
 
 export function createDeferred<T>() {
@@ -334,13 +297,4 @@ export async function runProcessUntilOutput(
       })
     })
   })
-}
-
-function terminateProcessTree(child: ChildProcess) {
-  if (process.platform === "win32" && child.pid) {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" })
-    return
-  }
-
-  child.kill("SIGTERM")
 }
