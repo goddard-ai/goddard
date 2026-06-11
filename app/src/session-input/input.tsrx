@@ -1,4 +1,8 @@
-import type { SessionComposerSuggestionsResponse, SessionPromptRequest } from "@goddard-ai/sdk"
+import type {
+  FileSearchComposerEntry,
+  SessionComposerSuggestionsResponse,
+  SessionPromptRequest,
+} from "@goddard-ai/sdk"
 import { useListNavigation } from "@goddard-ai/ui-primitives"
 import { LexicalComposer } from "@lexical/react/LexicalComposer"
 import { ContentEditable } from "@lexical/react/LexicalContentEditable"
