@@ -323,15 +323,18 @@ async function createMessageOutputTransport(
   )
   const done = (async () => {
     for await (const message of events) {
-      if (
-        closed ||
-        (typeof message === "object" &&
-          message !== null &&
-          "method" in message &&
-          typeof message.method === "string" &&
-          agentMethods.has(message.method))
-      ) {
+      if (closed) {
         return
+      }
+
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        "method" in message &&
+        typeof message.method === "string" &&
+        agentMethods.has(message.method)
+      ) {
+        continue
       }
 
       void writer.write(encoder.encode(`${JSON.stringify(message)}\n`)).catch(() => {})

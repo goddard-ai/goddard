@@ -94,6 +94,16 @@ async function* createMockStream(
   }
 }
 
+async function waitForCondition(condition: () => boolean) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (condition()) {
+      return
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}
+
 describe("@goddard-ai/sdk session namespace", () => {
   test("assigns daemon and feature namespaces during construction", () => {
     const { sdk } = createSdkWithClient()
@@ -1059,6 +1069,108 @@ describe("@goddard-ai/sdk session namespace", () => {
       initialPrompt: undefined,
       oneShot: undefined,
     })
+  })
+
+  test("session.run keeps daemon-backed ACP stream open after filtered agent-bound frames", async () => {
+    const { sdk, send, subscribe } = createSdkWithClient()
+    const unsubscribe = vi.fn()
+    const requestPermission = vi.fn(async () => ({
+      outcome: {
+        outcome: "cancelled" as const,
+      },
+    }))
+    let publishStreamMessage: ((payload: unknown) => void) | undefined
+
+    subscribe.mockImplementationOnce(async (_target, handler: (payload: unknown) => void) => {
+      publishStreamMessage = handler
+      return unsubscribe
+    })
+    send.mockResolvedValueOnce({
+      session: {
+        id: "ses_1",
+        acpSessionId: "acp-session-1",
+      },
+    })
+    send.mockResolvedValueOnce({ accepted: true })
+    send.mockResolvedValueOnce({ id: "ses_1", success: true })
+
+    const session = await sdk.session.run(
+      {
+        agent: "pi-acp",
+        cwd: "/tmp/project",
+        mcpServers: [],
+      },
+      {
+        requestPermission,
+        async sessionUpdate() {},
+      },
+    )
+
+    publishStreamMessage?.({
+      jsonrpc: "2.0",
+      id: "prompt-1",
+      method: acp.AGENT_METHODS.session_prompt,
+      params: {
+        sessionId: "acp-session-1",
+        prompt: [{ type: "text", text: "Review the diff." }],
+      },
+    })
+    publishStreamMessage?.({
+      jsonrpc: "2.0",
+      id: "permission-1",
+      method: acp.CLIENT_METHODS.session_request_permission,
+      params: {
+        sessionId: "acp-session-1",
+        options: [
+          {
+            optionId: "reject-once",
+            name: "Reject once",
+            kind: "reject_once",
+          },
+        ],
+        toolCall: {
+          toolCallId: "tool-1",
+          title: "Read file",
+          kind: "read",
+          status: "pending",
+          locations: [],
+        },
+      },
+    })
+
+    await waitForCondition(() => requestPermission.mock.calls.length === 1)
+
+    expect(requestPermission).toHaveBeenCalledWith({
+      sessionId: "acp-session-1",
+      options: [
+        {
+          optionId: "reject-once",
+          name: "Reject once",
+          kind: "reject_once",
+        },
+      ],
+      toolCall: {
+        toolCallId: "tool-1",
+        title: "Read file",
+        kind: "read",
+        status: "pending",
+        locations: [],
+      },
+    })
+    expect(send).toHaveBeenCalledWith("session.send", {
+      id: "ses_1",
+      message: {
+        jsonrpc: "2.0",
+        id: "permission-1",
+        result: {
+          outcome: {
+            outcome: "cancelled",
+          },
+        },
+      },
+    })
+
+    await session!.stop()
   })
 
   test("workforce.streamEvents streams ledger events", async () => {
