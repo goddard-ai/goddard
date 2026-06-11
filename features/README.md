@@ -57,6 +57,12 @@ handlers, and SDK auth namespace construction. Backend storage, GitHub device
 flow persistence, daemon token persistence, and HTTP/router substrate remain in
 core packages.
 
+`features/file-search` owns file search schemas, file-search daemon IPC
+handlers, SDK file-search namespace construction, and daemon-local file/folder
+entry discovery for app composer suggestions. App composer UI, prompt chip
+serialization, and session execution remain outside the file-search feature
+boundary.
+
 `features/inbox` owns inbox IPC, SDK namespace construction, inbox manager
 logic, inbox metadata resolution, and inbox item state transitions. Daemon
 persistence remains core substrate.

@@ -1,6 +1,7 @@
 import { actionSdkPlugin } from "@goddard-ai/action/sdk"
 import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
+import { fileSearchSdkPlugin } from "@goddard-ai/file-search/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
@@ -24,6 +25,7 @@ const sdkPlugins = composeSdkPlugins([
   actionSdkPlugin,
   adapterSdkPlugin,
   authSdkPlugin,
+  fileSearchSdkPlugin,
   inboxSdkPlugin,
   loopSdkPlugin,
   pullRequestSdkPlugin,
@@ -81,6 +83,7 @@ export class GoddardSdk {
   readonly daemon: ReturnType<typeof createDaemonNamespace>
   readonly auth: FeatureSdkNamespaces["auth"]
   readonly adapter: FeatureSdkNamespaces["adapter"]
+  readonly fileSearch: FeatureSdkNamespaces["fileSearch"]
   readonly pr: FeatureSdkNamespaces["pr"]
   readonly inbox: FeatureSdkNamespaces["inbox"]
   readonly session: ReturnType<typeof createSessionNamespace>
@@ -98,6 +101,7 @@ export class GoddardSdk {
     this.daemon = createDaemonNamespace(this.#client)
     this.auth = features.auth
     this.adapter = features.adapter
+    this.fileSearch = features.fileSearch
     this.pr = features.pr
     this.inbox = features.inbox
     this.session = createSessionNamespace(this.#client, features.session)

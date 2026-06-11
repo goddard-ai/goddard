@@ -580,6 +580,9 @@ importers:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../daemon-plugin
+      '@goddard-ai/file-search':
+        specifier: workspace:*
+        version: link:../../features/file-search
       '@goddard-ai/inbox':
         specifier: workspace:*
         version: link:../../features/inbox
@@ -682,6 +685,9 @@ importers:
       '@goddard-ai/daemon-client':
         specifier: workspace:*
         version: link:../daemon/client
+      '@goddard-ai/file-search':
+        specifier: workspace:*
+        version: link:../../features/file-search
       '@goddard-ai/inbox':
         specifier: workspace:*
         version: link:../../features/inbox
@@ -833,6 +839,21 @@ importers:
       '@goddard-ai/backend-plugin':
         specifier: workspace:*
         version: link:../../core/backend-plugin
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
+  features/file-search:
+    dependencies:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
