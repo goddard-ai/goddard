@@ -1,9 +1,11 @@
 import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/sdk"
 import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
+import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
 
 import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
+import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
 import {
@@ -21,6 +23,14 @@ export const adapterInstallationsSettingsSectionMetadata = {
   description: "Choose which agent harnesses are available when launching sessions.",
   id: "settings-adapter-installations",
   title: "Agent harnesses",
+}
+
+type SearchableAdapterCatalogEntry = {
+  adapter: AdapterCatalogEntry;
+  preparedDescription: fuzzysort.PreparedTarget;
+  preparedId: fuzzysort.PreparedTarget;
+  preparedName: fuzzysort.PreparedTarget;
+  preparedVersion: fuzzysort.PreparedTarget;
 }
 
 function getInstallationDetail(installation: AdapterInstallationState) {
@@ -52,19 +62,37 @@ function isGithubRepository(repository: string | null | undefined) {
   }
 }
 
-function adapterMatchesSearch(adapter: AdapterCatalogEntry, searchQuery: string) {
-  const normalizedQuery = searchQuery.trim().toLowerCase()
+function prepareAdapterSearchItems(adapters: readonly AdapterCatalogEntry[]) {
+  return adapters.map(
+    (adapter): SearchableAdapterCatalogEntry => ({
+      adapter,
+      preparedDescription: fuzzysort.prepare(adapter.description),
+      preparedId: fuzzysort.prepare(adapter.id),
+      preparedName: fuzzysort.prepare(adapter.name),
+      preparedVersion: fuzzysort.prepare(adapter.version),
+    }),
+  )
+}
 
-  if (normalizedQuery.length === 0) {
-    return true
+function filterPreparedAvailableAdapters(
+  adapters: readonly SearchableAdapterCatalogEntry[],
+  searchQuery: string,
+) {
+  if (isEmptyQuery(searchQuery)) {
+    return adapters.map((entry) => entry.adapter)
   }
 
-  return [
-    adapter.name,
-    adapter.id,
-    adapter.description,
-    adapter.version,
-  ].some((value) => value.toLowerCase().includes(normalizedQuery))
+  return fuzzysort.searchFields(
+    searchQuery,
+    adapters,
+    [
+      { key: "name", extract: (entry) => entry.preparedName },
+      { key: "id", extract: (entry) => entry.preparedId },
+      { key: "description", extract: (entry) => entry.preparedDescription },
+      { key: "version", extract: (entry) => entry.preparedVersion },
+    ],
+    { threshold: 0 },
+  ).items.map((item) => item.value.adapter)
 }
 
 function AdapterInstallationRow(props: {
@@ -159,9 +187,10 @@ function AdapterInstallationList() @{
     const installation = installationsByAdapterId.get(adapter.id)
     return installation && !installation.installed
   })
-  const visibleAvailableAdapters = availableAdapters.filter((adapter) => {
-    return adapterMatchesSearch(adapter, availableAgentSearchQuery)
-  })
+  const visibleAvailableAdapters = filterPreparedAvailableAdapters(
+    prepareAdapterSearchItems(availableAdapters),
+    availableAgentSearchQuery,
+  )
 
   async function installAdapter(adapterId: string) {
     setPendingAdapterId(adapterId)
