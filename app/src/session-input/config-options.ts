@@ -68,7 +68,25 @@ export function stepConfigOptionValue(
   option: SelectSessionConfigOption,
   currentValue: string | null,
   direction: -1 | 1,
+): string | null
+export function stepConfigOptionValue(
+  option: SessionConfigOption,
+  currentValue: string | boolean | null,
+  direction: -1 | 1,
+): string | boolean | null
+export function stepConfigOptionValue(
+  option: SessionConfigOption,
+  currentValue: string | boolean | null,
+  direction: -1 | 1,
 ) {
+  if (option.type === "boolean") {
+    return direction > 0
+  }
+
+  if (option.type !== "select") {
+    return currentValue
+  }
+
   const options = flattenConfigOptionValues(option)
   if (options.length === 0) {
     return currentValue

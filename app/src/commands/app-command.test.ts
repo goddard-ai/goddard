@@ -98,6 +98,12 @@ test("app commands expose stable ids and shortcut groups", () => {
   expect(AppCommand.inbox.selectUnreadFilter.id).toBe("inbox.selectUnreadFilter")
   expect(AppCommand.inbox.selectUnreadFilter.group).toBe("navigation")
   expect(AppCommand.sessionInput.openModelSelector.group).toBe("session")
+  expect(AppCommand.sessionInput.decreaseThinkingLevel.id).toBe(
+    "sessionInput.decreaseThinkingLevel",
+  )
+  expect(AppCommand.sessionInput.increaseThinkingLevel.id).toBe(
+    "sessionInput.increaseThinkingLevel",
+  )
   expect(AppCommand.workbench.closeActiveTab.group).toBe("workbench")
 })
 
@@ -535,6 +541,74 @@ test("default keymap dispatches session chat actions from Alt+Shift+G and Mod+Sh
         modifiers: {
           ctrl: true,
           shift: true,
+        },
+      },
+    })
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("default keymap dispatches thinking level actions from Alt comma and Alt period", async () => {
+  const { registry, runtimeDocument, cleanup } = createTestRegistry()
+  const decreaseMatches: unknown[] = []
+  const increaseMatches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(
+      Fragment,
+      {},
+      h(TestCommandHandler, {
+        command: AppCommand.sessionInput.decreaseThinkingLevel,
+        onMatch(match) {
+          decreaseMatches.push(match)
+        },
+      }),
+      h(TestCommandHandler, {
+        command: AppCommand.sessionInput.increaseThinkingLevel,
+        onMatch(match) {
+          increaseMatches.push(match)
+        },
+      }),
+    ),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+
+    dispatchKeydown(runtimeDocument, {
+      key: ",",
+      code: "Comma",
+      altKey: true,
+    })
+    dispatchKeydown(runtimeDocument, {
+      key: ".",
+      code: "Period",
+      altKey: true,
+    })
+
+    expect(decreaseMatches).toHaveLength(1)
+    expect(decreaseMatches[0]).toMatchObject({
+      combo: "Alt+,",
+      event: {
+        key: ",",
+        modifiers: {
+          alt: true,
+        },
+      },
+    })
+    expect(increaseMatches).toHaveLength(1)
+    expect(increaseMatches[0]).toMatchObject({
+      combo: "Alt+.",
+      event: {
+        key: ".",
+        modifiers: {
+          alt: true,
         },
       },
     })
