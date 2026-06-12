@@ -76,6 +76,7 @@ function isSelectorTypeaheadKey(event: KeyboardEvent) {
 export function SessionInputSelect(props: SessionInputSelectProps) @{
   const triggerElementRef = useRef<HTMLButtonElement>(null)
   const filterInputRef = useRef<HTMLInputElement>(null)
+  const menuBodyRef = useRef<HTMLDivElement>(null)
 
   const selectedItem = props.items.find((item) => item.value === props.value) ?? null
   const triggerLabel = selectedItem?.label ?? props.placeholder
@@ -252,6 +253,17 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     })
   }
 
+  function getInitialFocusElement() {
+    if (props.filterable) {
+      return filterInputRef.current
+    }
+
+    const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
+    navigation.setActiveIndex(currentIndex >= 0 ? currentIndex : 0)
+
+    return menuBodyRef.current?.querySelector<HTMLElement>("[data-active='true']") ?? null
+  }
+
   useEffect(() => {
     if (!props.open.value) {
       setQuery("")
@@ -372,7 +384,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       class={styles.menu}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
-      initialFocus={() => props.filterable ? filterInputRef.current : null}
+      initialFocus={getInitialFocusElement}
       modalFocus={props.filterable ?? false}
       offset={8}
       open={props.open}
@@ -380,6 +392,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       strategy="fixed"
     >
       <div
+        ref={menuBodyRef}
         class={styles.menuBody}
         onPointerMove={updatePointerPosition}
         onKeyDown={(event) => {
