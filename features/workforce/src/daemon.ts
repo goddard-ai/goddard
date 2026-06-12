@@ -31,7 +31,9 @@ export const workforcePlugin = definePlugin({
     },
   },
   db: {
-    workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
+    schema: {
+      workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
+    },
   },
   ipcRoutes: workforceIpcRoutes,
   logContext: {

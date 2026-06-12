@@ -59,16 +59,18 @@ export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
   db: {
-    pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
-      "host_owner_repo_prNumber",
-      {
-        host: "asc",
-        owner: "asc",
-        repo: "asc",
-        prNumber: "asc",
-      },
-      { unique: true },
-    ),
+    schema: {
+      pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
+        "host_owner_repo_prNumber",
+        {
+          host: "asc",
+          owner: "asc",
+          repo: "asc",
+          prNumber: "asc",
+        },
+        { unique: true },
+      ),
+    },
   },
   events: {
     "pull_request.created": event<PullRequestAttentionEvent>(),

@@ -8,6 +8,7 @@ import type {
   Composition,
   ConfigDefinition,
   DaemonLogContextDefinition,
+  DbMigrationDefinition,
   DbSchemaDefinition,
   EventDefinitions,
   JsonSchemaArtifactDefinition,
@@ -16,7 +17,7 @@ import type {
 import type { UnionToIntersection } from "./type-utils.ts"
 
 type PluginDb<TPlugin> = TPlugin extends {
-  readonly db: infer TDb extends DbSchemaDefinition
+  readonly db: { readonly schema: infer TDb extends DbSchemaDefinition }
 }
   ? TDb
   : {}
@@ -39,6 +40,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
   const jsonSchemas: JsonSchemaArtifactDefinition[] = []
   const jsonSchemaNames = new Set<string>()
   const logContexts: DaemonLogContextDefinition[] = []
+  const dbMigrations: DbMigrationDefinition[] = []
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {
@@ -71,7 +73,10 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     if (plugin.logContext) {
       logContexts.push(plugin.logContext)
     }
-    for (const [key, kind] of Object.entries(plugin.db ?? {})) {
+    if (plugin.db?.migrate) {
+      dbMigrations.push(plugin.db.migrate)
+    }
+    for (const [key, kind] of Object.entries(plugin.db?.schema ?? {})) {
       if (db[key]) {
         throw new Error(`Duplicate daemon plugin DB collection: ${key}`)
       }
@@ -86,7 +91,17 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
     config,
     jsonSchemas,
     events,
-    db: db as ComposedPluginDb<TPlugins>,
+    db: {
+      schema: db as ComposedPluginDb<TPlugins>,
+      migrate:
+        dbMigrations.length > 0
+          ? (planner) => {
+              for (const migrate of dbMigrations) {
+                migrate(planner)
+              }
+            }
+          : undefined,
+    },
     logContexts,
   } satisfies Composition
 }

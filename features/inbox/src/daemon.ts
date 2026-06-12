@@ -22,7 +22,9 @@ const inboxDb = {
 export const inboxPlugin = definePlugin({
   name: "inbox",
   consumes: [sessionPlugin, pullRequestPlugin],
-  db: inboxDb,
+  db: {
+    schema: inboxDb,
+  },
   ipcRoutes: inboxIpcRoutes,
   setup({ db, events, session }) {
     const itemListeners = new Set<(event: InboxItemEvent) => void>()

@@ -8,6 +8,7 @@ import {
   type KindBuilder,
   type KindRegistry,
   type Kindstore,
+  type SchemaMigrationPlanner,
 } from "kindstore"
 import { z } from "zod"
 
@@ -21,6 +22,11 @@ const metadata = {
 }
 
 const coreDbSchema = {} satisfies KindRegistry
+
+type DaemonDbDefinition<TSchema extends KindRegistry> = {
+  readonly schema: TSchema
+  readonly migrate?: (planner: SchemaMigrationPlanner) => void
+}
 
 /** Daemon store handle opened against a concrete plugin-contributed schema. */
 export type DaemonStore<TSchema extends KindRegistry = KindRegistry> = Kindstore<
@@ -38,7 +44,7 @@ type NonEmptySchema<TSchema extends KindRegistry> = keyof TSchema extends never 
 
 /** Opens one kindstore handle for a concrete daemon store schema. */
 function openKindstore<const TSchema extends KindRegistry>(
-  options: StoreConnectionOptions & { schema: TSchema },
+  options: StoreConnectionOptions & DaemonDbDefinition<TSchema>,
 ): DaemonStore<TSchema> {
   if (options.filename !== ":memory:") {
     mkdirSync(dirname(options.filename), { recursive: true })
@@ -49,6 +55,7 @@ function openKindstore<const TSchema extends KindRegistry>(
     databaseOptions: options.databaseOptions,
     metadata,
     schema: options.schema as NonEmptySchema<TSchema>,
+    migrate: options.migrate,
   }) as unknown as DaemonStore<TSchema>
 }
 
@@ -60,20 +67,21 @@ function removeDatabaseArtifacts(filename: string) {
 
 /** Opens one daemon store connection against a concrete plugin-contributed schema. */
 export function openDaemonStore<const TSchema extends KindRegistry>(
-  pluginSchema: TSchema,
+  pluginDb: DaemonDbDefinition<TSchema>,
   connection: StoreConnectionOptions = { filename: getDatabasePath() },
 ): DaemonStore<TSchema> {
-  const schema = mergeDbSchema(pluginSchema)
+  const schema = mergeDbSchema(pluginDb.schema)
+  const db = { schema, migrate: pluginDb.migrate }
 
   try {
-    return openKindstore({ ...connection, schema })
+    return openKindstore({ ...connection, ...db })
   } catch (error) {
     if (connection.filename === ":memory:" || !(error instanceof UnrecoverableStoreOpenError)) {
       throw error
     }
 
     removeDatabaseArtifacts(connection.filename)
-    return openKindstore({ ...connection, schema })
+    return openKindstore({ ...connection, ...db })
   }
 }
 

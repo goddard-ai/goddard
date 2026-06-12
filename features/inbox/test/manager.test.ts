@@ -5,12 +5,12 @@ import { kindstore, type Kindstore } from "kindstore"
 
 import { createInboxManager, inboxPlugin } from "../src/daemon.ts"
 
-let store: Kindstore<(typeof inboxPlugin)["db"], {}>
+let store: Kindstore<(typeof inboxPlugin)["db"]["schema"], {}>
 
 beforeEach(() => {
   store = kindstore({
     filename: ":memory:",
-    schema: inboxPlugin.db,
+    schema: inboxPlugin.db.schema,
   })
 })
 

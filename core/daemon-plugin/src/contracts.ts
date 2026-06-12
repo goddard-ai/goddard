@@ -2,7 +2,7 @@
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { KindRegistry, Kindstore } from "kindstore"
+import type { KindRegistry, Kindstore, SchemaMigrationPlanner } from "kindstore"
 import type { z } from "zod"
 
 import type { UnionToIntersection } from "./type-utils.ts"
@@ -59,6 +59,15 @@ export type JsonSchemaArtifactDefinition = {
 
 /** Feature-owned kindstore schema fragment merged by the daemon composition root. */
 export type DbSchemaDefinition = KindRegistry
+
+/** Feature-owned structural kindstore migration applied by the daemon composition root. */
+export type DbMigrationDefinition = (planner: SchemaMigrationPlanner) => void
+
+/** Feature-owned kindstore schema and structural migrations. */
+export type DbDefinition<TSchema extends DbSchemaDefinition = DbSchemaDefinition> = {
+  readonly schema: TSchema
+  readonly migrate?: DbMigrationDefinition
+}
 
 /** Scoped kindstore surface available to one daemon plugin during setup. */
 export type DbContext<TDb extends DbSchemaDefinition> = {
@@ -194,7 +203,7 @@ export type InferConfig<TPlugin> = TPlugin extends {
   : {}
 
 type InferDb<TPlugin> = TPlugin extends {
-  readonly db: infer TDb extends DbSchemaDefinition
+  readonly db: { readonly schema: infer TDb extends DbSchemaDefinition }
 }
   ? TDb
   : {}
@@ -286,7 +295,7 @@ export type Plugin = {
   /** In-process daemon events owned and emitted by this plugin. */
   readonly events?: EventDefinitions
   /** Kindstore collections owned by this plugin. */
-  readonly db?: DbSchemaDefinition
+  readonly db?: DbDefinition
   /** Backend route tree fragment contributed by this plugin. */
   readonly backendRoutes?: BackendRouteTree
   /** IPC route tree fragment contributed by this plugin. */
@@ -311,6 +320,6 @@ export type Composition = {
   readonly config: Record<string, ConfigDefinition<any, any>>
   readonly jsonSchemas: readonly JsonSchemaArtifactDefinition[]
   readonly events: EventDefinitions
-  readonly db: DbSchemaDefinition
+  readonly db: DbDefinition
   readonly logContexts: readonly DaemonLogContextDefinition[]
 }

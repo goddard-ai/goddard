@@ -385,9 +385,9 @@ function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string
 function createPluginDbContext(plugin: ComposedDaemonPlugin, store: ComposedDaemonStore) {
   const schema: Record<string, unknown> = {}
   for (const consumedPlugin of plugin.consumes ?? []) {
-    Object.assign(schema, consumedPlugin.db)
+    Object.assign(schema, consumedPlugin.db?.schema)
   }
-  Object.assign(schema, plugin.db)
+  Object.assign(schema, plugin.db?.schema)
 
   const contextSchema: Record<string, unknown> = {}
   const storeRecord = store as Record<string, unknown> & {

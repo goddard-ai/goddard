@@ -27,7 +27,9 @@ export const loopPlugin = definePlugin({
       resolve: ({ project, user }) => mergeLoopConfigLayers(user, project),
     },
   },
-  db: loopDb,
+  db: {
+    schema: loopDb,
+  },
   jsonSchemas: [{ name: "loop.json", schema: LoopConfig }],
   ipcRoutes: loopIpcRoutes,
   logContext: {

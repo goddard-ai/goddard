@@ -4,7 +4,7 @@ import type { HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 import type {
   ConfigDefinitions,
   DaemonLogContextDefinition,
-  DbSchemaDefinition,
+  DbDefinition,
   EventDefinitions,
   FeatureExtensions,
   IpcHandlers,
@@ -26,7 +26,7 @@ type PluginShape<
   TConfig extends ConfigDefinitions | undefined,
   TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
   TEvents extends EventDefinitions | undefined,
-  TDb extends DbSchemaDefinition | undefined,
+  TDb extends DbDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
 > = { readonly name: TName } & OptionalPluginField<"consumes", TConsumes> &
@@ -44,7 +44,7 @@ type PublicPluginShape<
   TConfig extends ConfigDefinitions | undefined,
   TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
   TEvents extends EventDefinitions | undefined,
-  TDb extends DbSchemaDefinition | undefined,
+  TDb extends DbDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
 > = PluginShape<
@@ -64,7 +64,7 @@ type PluginOptions<
   TConfig extends ConfigDefinitions | undefined,
   TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
   TEvents extends EventDefinitions | undefined,
-  TDb extends DbSchemaDefinition | undefined,
+  TDb extends DbDefinition | undefined,
   TBackendRoutes extends BackendRouteTree | undefined,
   TIpcRoutes extends IpcRouteTree | undefined,
 > = {
@@ -143,7 +143,7 @@ type DefinePlugin = {
     const TConfig extends ConfigDefinitions | undefined,
     const TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
     const TEvents extends EventDefinitions | undefined,
-    const TDb extends DbSchemaDefinition | undefined,
+    const TDb extends DbDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree,
     const TProvides extends FeatureExtensions | undefined,
@@ -193,7 +193,7 @@ type DefinePlugin = {
     const TConfig extends ConfigDefinitions | undefined,
     const TJsonSchemas extends readonly JsonSchemaArtifactDefinition[] | undefined,
     const TEvents extends EventDefinitions | undefined,
-    const TDb extends DbSchemaDefinition | undefined,
+    const TDb extends DbDefinition | undefined,
     const TBackendRoutes extends BackendRouteTree | undefined,
     const TIpcRoutes extends IpcRouteTree | undefined,
     const TProvides extends FeatureExtensions | undefined,

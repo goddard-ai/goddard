@@ -64,6 +64,15 @@ const sessionDb = {
       completedHidden: "asc",
       lastSessionActivityAt: "desc",
       id: "desc",
+    })
+    .migrate(2, {
+      1: (value, context) => {
+        const { updatedAt, ...session } = value
+        return {
+          ...session,
+          lastSessionActivityAt: typeof updatedAt === "number" ? updatedAt : context.now,
+        }
+      },
     }),
 
   sessionTurns: kind("trn", DaemonSessionTurn)
@@ -114,7 +123,9 @@ export const sessionPlugin = definePlugin({
       scopes: ["user", "project"],
     },
   },
-  db: sessionDb,
+  db: {
+    schema: sessionDb,
+  },
   events: {
     "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
     "session.persisted": event<SessionPersistedEvent>(),

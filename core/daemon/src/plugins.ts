@@ -9,7 +9,7 @@ import {
 export type { DaemonStore, StoreConnectionOptions } from "./persistence/store.ts"
 
 type ComposedDaemonPluginComposition = ReturnType<typeof getDefaultDaemonPluginComposition>
-type ComposedDaemonDbSchema = ComposedDaemonPluginComposition["db"]
+type ComposedDaemonDbSchema = ComposedDaemonPluginComposition["db"]["schema"]
 
 /** Store handle opened against this daemon build's composed plugin schema. */
 export type ComposedDaemonStore = DaemonStore<ComposedDaemonDbSchema>
