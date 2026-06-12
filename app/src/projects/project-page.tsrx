@@ -497,12 +497,12 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
                     </span>
                     <time
                       class={styles.updated}
-                      dateTime={new Date(item.session.updatedAt).toISOString()}
+                      dateTime={new Date(item.session.lastSessionActivityAt).toISOString()}
                       title={new Intl.DateTimeFormat(undefined, {
                         dateStyle: "medium",
                         timeStyle: "short",
-                      }).format(new Date(item.session.updatedAt))}
-                    >{formatRelativeTime(item.session.updatedAt)}</time>
+                      }).format(new Date(item.session.lastSessionActivityAt))}
+                    >{formatRelativeTime(item.session.lastSessionActivityAt)}</time>
                   </button>
                   <button
                     aria-label={`View changes for ${item.title}`}

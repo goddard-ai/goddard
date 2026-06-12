@@ -56,7 +56,7 @@ function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
     prNumber: null,
     metadata: null,
     createdAt: 1_800_000_000_000,
-    updatedAt: 1_800_000_001_000,
+    lastSessionActivityAt: 1_800_000_001_000,
     errorMessage: null,
     blockedReason: null,
     initiative: null,

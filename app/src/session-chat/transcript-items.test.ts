@@ -25,7 +25,7 @@ function createSession(lastAgentMessage: string | null) {
     prNumber: null,
     metadata: null,
     createdAt: 1_743_968_000_000,
-    updatedAt: 1_743_968_300_000,
+    lastSessionActivityAt: 1_743_968_300_000,
     errorMessage: null,
     blockedReason: null,
     initiative: null,

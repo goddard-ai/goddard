@@ -71,6 +71,7 @@ function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: strin
     agentName: "Mock Agent",
     cwd,
     titleState: "generated",
+    lastSessionActivityAt: overrides.lastSessionActivityAt ?? overrides.timestamp,
     mcpServers: [],
     connectionMode: "history",
     supportsLoadSession: false,

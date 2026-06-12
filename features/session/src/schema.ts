@@ -113,6 +113,7 @@ export const DaemonSession = z.strictObject({
   cwd: z.string(),
   title: z.string().default("New session"),
   titleState: DaemonSessionTitleState.default("placeholder"),
+  lastSessionActivityAt: z.number().int(),
   mcpServers: z.custom<acp.McpServer[]>(),
   connectionMode: DaemonSessionConnectionMode.default("none"),
   supportsLoadSession: z.boolean().default(false),
@@ -137,7 +138,6 @@ export const DaemonSession = z.strictObject({
 export type DaemonSession = z.output<typeof DaemonSession> & {
   id: SessionId
   createdAt: number
-  updatedAt: number
 }
 
 /** Stable prompt request id stored on one persisted turn or active-turn draft. */
@@ -577,6 +577,7 @@ export const SessionLifecycleField = z.enum([
   "title",
   "contextUsage",
   "lastAgentMessage",
+  "lastSessionActivity",
   "completedHidden",
 ])
 
@@ -589,7 +590,6 @@ export const SessionLifecycleEvent = z.union([
     session: DaemonSession.extend({
       id: SessionId,
       createdAt: z.number(),
-      updatedAt: z.number(),
     }),
     changed: z.array(SessionLifecycleField),
   }),

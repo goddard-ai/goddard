@@ -1065,6 +1065,9 @@ export function createSessionManager(input: {
     if (update.lastAgentMessage !== undefined) {
       fields.push("lastAgentMessage")
     }
+    if (update.lastSessionActivityAt !== undefined) {
+      fields.push("lastSessionActivity")
+    }
     if (update.completedHidden !== undefined) {
       fields.push("completedHidden")
     }
@@ -1119,6 +1122,23 @@ export function createSessionManager(input: {
         resolvedLogger,
       )
     }
+  }
+
+  function updateSessionActivity(
+    id: SessionId,
+    update: Partial<DaemonSession>,
+    detail?: Record<string, unknown>,
+    diagnosticLogger?: DaemonLogger,
+  ) {
+    updateSession(
+      id,
+      {
+        ...update,
+        lastSessionActivityAt: Date.now(),
+      },
+      detail,
+      diagnosticLogger,
+    )
   }
 
   function requireSessionDocument(id: SessionId) {
@@ -1188,7 +1208,6 @@ export function createSessionManager(input: {
       headline: input.metadata?.headline,
       fallbackHeadline: input.metadata?.fallbackHeadline,
     })
-    updateSession(input.session.id, { inboxScope: resolved.scope })
     applyInboxMetadataToCurrentTurn(input.session.id, resolved)
     return resolved
   }
@@ -1875,7 +1894,7 @@ export function createSessionManager(input: {
     if (options.updateStatus !== false) {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
-        updateSession(
+        updateSessionActivity(
           active.id,
           { status: nextStatus },
           {
@@ -1977,7 +1996,7 @@ export function createSessionManager(input: {
     const nextStatus = stopReason === "end_turn" ? "done" : null
 
     if (nextStatus || stopReason) {
-      updateSession(
+      updateSessionActivity(
         active.id,
         {
           ...(nextStatus && { status: nextStatus }),
@@ -2312,7 +2331,7 @@ export function createSessionManager(input: {
       )
     })
 
-    updateSession(
+    updateSessionActivity(
       params.id,
       { status: "done", token: null, permissions: null },
       { reason: "one_shot_completed" },
@@ -2434,7 +2453,8 @@ export function createSessionManager(input: {
       )
       if (Object.keys(nextUpdate).length > 0) {
         try {
-          updateSession(activeSession.id, nextUpdate, {
+          const persistSessionExit = nextUpdate.status ? updateSessionActivity : updateSession
+          persistSessionExit(activeSession.id, nextUpdate, {
             reason: "agent_process_exit",
             code,
             signal,
@@ -2871,7 +2891,7 @@ export function createSessionManager(input: {
           completedHidden: false,
         },
         orderBy: {
-          updatedAt: "desc",
+          lastSessionActivityAt: "desc",
           id: "desc",
         },
         limit: pageSize,
@@ -3330,7 +3350,7 @@ export function createSessionManager(input: {
   async function declareInitiative(id: SessionId, title: string) {
     await ready
     requireSessionDocument(id)
-    updateSession(id, {
+    updateSessionActivity(id, {
       status: "active",
       completedHidden: false,
       initiative: title,
@@ -3355,10 +3375,11 @@ export function createSessionManager(input: {
       },
       blockedReason: reason,
     })
-    updateSession(id, {
+    updateSessionActivity(id, {
       status: "blocked",
       completedHidden: false,
       blockedReason: reason,
+      inboxScope: resolved.scope,
     })
     await input.events.emit("session.blocked", {
       sessionId: id,
@@ -3381,11 +3402,12 @@ export function createSessionManager(input: {
         fallbackHeadline: session.lastAgentMessage ?? session.initiative ?? session.title,
       },
     })
-    updateSession(id, {
+    updateSessionActivity(id, {
       status: "done",
       completedHidden: false,
       initiative: null,
       blockedReason: null,
+      inboxScope: resolved.scope,
     })
 
     const activeTurn = activeSessions.get(id)?.activeTurn ?? null
@@ -3415,6 +3437,9 @@ export function createSessionManager(input: {
     if (activeTurn) {
       activeTurn.touchedAttentionEntity = true
     }
+    updateSessionActivity(id, {
+      inboxScope: resolved.scope,
+    })
 
     return {
       scope: resolved.scope,
@@ -3426,7 +3451,7 @@ export function createSessionManager(input: {
   async function recordSessionResult(id: SessionId, message: string) {
     await ready
     requireSessionDocument(id)
-    updateSession(id, {
+    updateSessionActivity(id, {
       status: "done",
       lastAgentMessage: message,
     })
@@ -3497,7 +3522,7 @@ export function createSessionManager(input: {
       }
     }
 
-    updateSession(id, {
+    updateSessionActivity(id, {
       completedHidden: true,
     })
     await input.events.emit("session.completed", {
@@ -3529,7 +3554,7 @@ export function createSessionManager(input: {
         source: "client",
       })
       publishSessionUpdated(active.id, ["queue"])
-      updateSession(id, {
+      updateSessionActivity(id, {
         completedHidden: false,
       })
       await input.events.emit("session.replied", {
@@ -3631,6 +3656,7 @@ export function createSessionManager(input: {
       })
     })
 
+    updateSessionActivity(active.id, {})
     publishSessionUpdated(active.id, ["queue"])
     refreshIdleShutdownState(active.id, "prompt_enqueued")
     emitDiagnostic(
@@ -3685,6 +3711,7 @@ export function createSessionManager(input: {
         resolve,
         reject,
       }
+      updateSessionActivity(active.id, {})
       refreshIdleShutdownState(active.id, "steer_started")
 
       void sendInternalCancel(active, { updateStatus: false }).catch((error) => {

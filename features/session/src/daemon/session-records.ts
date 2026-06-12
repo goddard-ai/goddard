@@ -216,6 +216,7 @@ export function createSessionRecordUpdate(params: {
     cwd: params.cwd,
     title: params.existingSession?.title ?? params.title,
     titleState: params.existingSession?.titleState ?? params.titleState,
+    lastSessionActivityAt: params.existingSession?.lastSessionActivityAt ?? Date.now(),
     mcpServers: params.request.mcpServers,
     connectionMode,
     supportsLoadSession: params.supportsLoadSession,

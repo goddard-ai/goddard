@@ -427,7 +427,7 @@ describe("@goddard-ai/sdk session namespace", () => {
           session: {
             id: "ses_1",
             createdAt: 1,
-            updatedAt: 2,
+            lastSessionActivityAt: 2,
             acpSessionId: "acp_1",
             status: "done",
             stopReason: "end_turn",

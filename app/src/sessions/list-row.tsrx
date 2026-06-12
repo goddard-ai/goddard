@@ -143,12 +143,12 @@ export function ListRow(props: {
     <div class={styles.trailing}>
       <time
         class={styles.updated}
-        dateTime={new Date(props.session.updatedAt).toISOString()}
+        dateTime={new Date(props.session.lastSessionActivityAt).toISOString()}
         title={new Intl.DateTimeFormat(undefined, {
           dateStyle: "medium",
           timeStyle: "short",
-        }).format(new Date(props.session.updatedAt))}
-      >{formatTimeLabel(props.session.updatedAt)}</time>
+        }).format(new Date(props.session.lastSessionActivityAt))}
+      >{formatTimeLabel(props.session.lastSessionActivityAt)}</time>
       <GoodTooltip ariaLabel="View changes" content="View changes">
         <button
           class={styles.actionButton}

@@ -49,7 +49,6 @@ export type {
 const sessionDb = {
   sessions: kind("ses", DaemonSession)
     .createdAt()
-    .updatedAt()
     .index("acpSessionId")
     .index("repository")
     .index("token")
@@ -57,13 +56,13 @@ const sessionDb = {
       repository: "asc",
       prNumber: "asc",
     })
-    .multi("updatedAt_id", {
-      updatedAt: "desc",
+    .multi("lastSessionActivityAt_id", {
+      lastSessionActivityAt: "desc",
       id: "desc",
     })
-    .multi("completedHidden_updatedAt_id", {
+    .multi("completedHidden_lastSessionActivityAt_id", {
       completedHidden: "asc",
-      updatedAt: "desc",
+      lastSessionActivityAt: "desc",
       id: "desc",
     }),
 

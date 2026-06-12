@@ -80,8 +80,8 @@ export function filterSessionsByTitle(sessions: readonly DaemonSession[], search
         return right.score - left.score
       }
 
-      if (left.session.updatedAt !== right.session.updatedAt) {
-        return right.session.updatedAt - left.session.updatedAt
+      if (left.session.lastSessionActivityAt !== right.session.lastSessionActivityAt) {
+        return right.session.lastSessionActivityAt - left.session.lastSessionActivityAt
       }
 
       return left.index - right.index
