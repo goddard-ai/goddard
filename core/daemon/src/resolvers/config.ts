@@ -154,7 +154,7 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   }
 
   const agents = config.agents
-  if (isRecord(agents) && "managed" in agents) {
+  if (isObject(agents) && "managed" in agents) {
     throw new Error(
       "`agents.managed` is only supported in the global Goddard config, not repository-local config.",
     )
