@@ -20,8 +20,8 @@
     "@happy-dom/global-registrator": "^20.9.0",
     "@pandacss/dev": "^1.10.0",
     "@preact/signals": "^2.9.0",
-    "@tsrx/bun-plugin-preact": "0.0.48",
-    "@tsrx/preact": "0.1.25",
+    "@tsrx/bun-plugin-preact": "0.0.51",
+    "@tsrx/preact": "0.1.28",
     "@types/hash-sum": "^1.0.2",
     "acp-client": "^0.4.3",
     "ai-sdk-json-schema": "^0.3.1",
@@ -66,10 +66,11 @@
     "@goddard-ai/sprint-branch": "workspace:*",
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@prettier/plugin-oxc": "^0.1.4",
-    "@tsrx/eslint-parser": "0.3.77",
-    "@tsrx/eslint-plugin": "0.3.77",
-    "@tsrx/prettier-plugin": "0.3.77",
-    "@tsrx/typescript-plugin": "0.3.77",
+    "@tsrx/core": "^0.1.28",
+    "@tsrx/eslint-parser": "0.3.80",
+    "@tsrx/eslint-plugin": "0.3.80",
+    "@tsrx/prettier-plugin": "0.3.80",
+    "@tsrx/typescript-plugin": "0.3.80",
     "@types/bun": "^1.3.13",
     "@types/globrex": "^0.1.4",
     "@types/node": "^25.6.0",
@@ -90,8 +91,5 @@
     "typescript": "^6.0.3",
     "unplugin-raw": "^0.7.0"
   },
-  "packageManager": "bun@1.3.11",
-  "patchedDependencies": {
-    "@tsrx/preact@0.1.25": "patches/@tsrx%2Fpreact@0.1.25.patch"
-  }
+  "packageManager": "bun@1.3.11"
 }
