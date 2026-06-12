@@ -1,6 +1,6 @@
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
-import { tsrxSourceParserAdapter } from "sculpted"
+import { sourceSyntax } from "sculpted/tsrx"
 import { sculpted } from "sculpted/vite"
 import { defineConfig } from "vite"
 
@@ -16,7 +16,7 @@ export default defineConfig({
     sculpted({
       projectRoot: import.meta.dirname,
       include: ["src/**/*.{ts,tsx,tsrx}"],
-      sourceSyntax: [tsrxSourceParserAdapter],
+      sourceSyntax,
       panda: {
         cssImportSources: ["@goddard-ai/styled-system/css"],
       },
