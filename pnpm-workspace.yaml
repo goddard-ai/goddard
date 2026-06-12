@@ -32,7 +32,7 @@ catalog:
   tabbable: ^6.4.0
   zod: ^4.3.6
 
-minimumReleaseAge: 20160
+minimumReleaseAge: 20160 # 14 days
 minimumReleaseAgeExclude:
   - "@agentclientprotocol/sdk"
   - "@remix-run/route-pattern"
@@ -45,6 +45,8 @@ minimumReleaseAgeExclude:
   - radashi
   - rouzer
   - sculpted
+
+  # Turbo
   - turbo
   - "@turbo/darwin-64"
   - "@turbo/darwin-arm64"
@@ -52,6 +54,8 @@ minimumReleaseAgeExclude:
   - "@turbo/linux-arm64"
   - "@turbo/windows-64"
   - "@turbo/windows-arm64"
+
+  # TSRX
   - "@tsrx/bun-plugin-preact"
   - "@tsrx/core"
   - "@tsrx/eslint-parser"
