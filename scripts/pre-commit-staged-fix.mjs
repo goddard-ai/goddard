@@ -16,6 +16,49 @@ const run = (command, args) => {
 /** Resolve a file path inside the current worktree's Git metadata directory. */
 const gitPath = (path) => read("git", ["rev-parse", "--git-path", path]).trim()
 
+/** Return the command for a running process, or null when it cannot be inspected. */
+const getProcessCommand = (pid) => {
+  try {
+    return read("ps", ["-o", "command=", "-p", String(pid)]).trim()
+  } catch {
+    return null
+  }
+}
+
+/** Return the parent process ID for a running process, or null when it cannot be inspected. */
+const getParentPid = (pid) => {
+  try {
+    const parentPid = Number(read("ps", ["-o", "ppid=", "-p", String(pid)]).trim())
+    return Number.isFinite(parentPid) && parentPid > 0 ? parentPid : null
+  } catch {
+    return null
+  }
+}
+
+/** Parse whether the format commit message was passed on a git commit command line. */
+const hasInlineFormatCommitSubject = (command) =>
+  /(?:^|\s)(?:-m|--message)(?:=|\s+)(?:"chore: format"|'chore: format'|chore: format)(?:$|\s+-)/.test(
+    command,
+  )
+
+/** Return true when this hook is running for the format-only commit. */
+const isFormatCommit = () => {
+  let pid = process.ppid
+
+  // pre-commit has no message-file argument; inspect ancestors for `git commit -m`.
+  for (let depth = 0; depth < 8 && pid; depth += 1) {
+    const command = getProcessCommand(pid)
+
+    if (command?.includes("git") && command.includes("commit")) {
+      return hasInlineFormatCommitSubject(command)
+    }
+
+    pid = getParentPid(pid)
+  }
+
+  return false
+}
+
 /** Return the staged files that can be fixed in place before commit. */
 const getStagedFiles = () =>
   read("git", ["diff", "--name-only", "--cached", "--diff-filter=ACMR", "-z"])
@@ -88,6 +131,10 @@ const restoreStashAfterFailure = (stateFile, stashRef) => {
     )
     throw error
   }
+}
+
+if (isFormatCommit()) {
+  process.exit(0)
 }
 
 const pendingRestoreFile = gitPath("goddard/pre-commit-stash.json")
