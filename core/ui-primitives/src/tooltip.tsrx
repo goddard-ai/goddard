@@ -47,6 +47,7 @@ export function Tooltip(props: {
       closeOnEscape={true}
       closeOnOutsidePointer={false}
       focusOnOpen={false}
+      group={null}
       offset={props.sideOffset ?? 8}
       {open}
       placement={props.side ?? "top"}

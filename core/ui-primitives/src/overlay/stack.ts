@@ -5,6 +5,7 @@ export type OverlayStackEntry = {
   id: string
   elements: readonly HTMLElement[]
   close?: () => void
+  group?: string | null
 }
 
 type OverlayStackRecord = OverlayStackEntry & {
@@ -18,11 +19,27 @@ export function createOverlayStack() {
 
   function register(entry: OverlayStackEntry) {
     const token = nextToken++
+    const remainingEntries = entries.value.filter((candidate) => candidate.id !== entry.id)
+    // Ancestors stay open so nested popovers can share a group with their parent.
+    const groupedEntriesToClose =
+      entry.group == null
+        ? []
+        : remainingEntries.filter(
+            (candidate) =>
+              candidate.group === entry.group &&
+              candidate.close &&
+              !isAncestorOverlay(candidate, entry),
+          )
+    const groupedTokensToClose = new Set(groupedEntriesToClose.map((candidate) => candidate.token))
 
     entries.value = [
-      ...entries.value.filter((candidate) => candidate.id !== entry.id),
+      ...remainingEntries.filter((candidate) => !groupedTokensToClose.has(candidate.token)),
       { ...entry, token },
     ]
+
+    for (const groupedEntry of [...groupedEntriesToClose].reverse()) {
+      groupedEntry.close?.()
+    }
 
     return () => {
       entries.value = entries.value.filter((candidate) => candidate.token !== token)
@@ -62,6 +79,15 @@ export function createOverlayStack() {
     isTopmost,
     register,
   }
+}
+
+function isAncestorOverlay(candidate: OverlayStackRecord, entry: OverlayStackEntry) {
+  return candidate.elements.some((candidateElement) =>
+    entry.elements.some(
+      (entryElement) =>
+        candidateElement !== entryElement && candidateElement.contains(entryElement),
+    ),
+  )
 }
 
 export const overlayStack = createOverlayStack()

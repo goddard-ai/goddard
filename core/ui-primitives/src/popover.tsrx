@@ -11,7 +11,7 @@ import {
 } from "./overlay/position.ts"
 import { overlayStack } from "./overlay/stack.ts"
 
-export type PopoverCloseReason = "escape" | "outside"
+export type PopoverCloseReason = "escape" | "group" | "outside"
 
 export type PopoverProps = FloatingPositionOptions & {
     open: Signal<boolean>;
@@ -23,6 +23,7 @@ export type PopoverProps = FloatingPositionOptions & {
     closeOnEscape?: boolean;
     closeOnOutsidePointer?: boolean;
     focusOnOpen?: boolean;
+    group?: string | null;
     modalFocus?: boolean;
     initialFocus?: () => HTMLElement | null;
     restoreFocus?: boolean;
@@ -39,8 +40,10 @@ export function Popover(props: PopoverProps) @{
 
   const popoverId = useId()
   const contentRef = useRef<HTMLDivElement | null>(null)
+  const closeReasonRef = useRef<PopoverCloseReason | null>(null)
   const shouldBlockOutsidePointer = props.blockOutsidePointer ?? props.closeOnOutsidePointer ?? true
   const close = (reason: PopoverCloseReason) => {
+    closeReasonRef.current = reason
     props.open.value = false
     props.onOpenChange?.(false, reason)
   }
@@ -63,6 +66,10 @@ export function Popover(props: PopoverProps) @{
       elements: anchorElement instanceof HTMLElement
         ? [anchorElement, contentElement]
         : [contentElement],
+      close() {
+        close("group")
+      },
+      group: resolvePopoverGroup(props.group),
     })
     const stopDismissal = startOverlayDismissal({
       id: popoverId,
@@ -90,7 +97,7 @@ export function Popover(props: PopoverProps) @{
       stopDismissal()
       unregisterOverlay()
 
-      if (props.restoreFocus ?? true) {
+      if ((props.restoreFocus ?? true) && closeReasonRef.current !== "group") {
         restoreFocus(anchorElement instanceof Element ? anchorElement : previouslyFocusedElement)
       }
     }
@@ -125,4 +132,8 @@ export function Popover(props: PopoverProps) @{
       }}
     >{props.children}</div>
   </OverlayPortal>
+}
+
+function resolvePopoverGroup(group: PopoverProps["group"]) {
+  return group === undefined ? "default" : group
 }

@@ -4,7 +4,7 @@ import { render } from "preact"
 import { act } from "preact/test-utils"
 
 import { setOverlayPortalRoots } from "../src/overlay/portal.ts"
-import { Popover } from "../src/popover.tsrx"
+import { Popover, type PopoverCloseReason } from "../src/popover.tsrx"
 
 const menuPortalId = "menu-portal"
 
@@ -58,6 +58,63 @@ function renderPopover(props: { closeOnOutsidePointer?: boolean; restoreFocus?: 
   }
 }
 
+function renderGroupedPopovers(props: { group?: string | null }) {
+  const firstAnchor = document.createElement("button")
+  const secondAnchor = document.createElement("button")
+  const container = document.createElement("div")
+  const menuRoot = document.createElement("div")
+  const firstOpen = signal(true)
+  const secondOpen = signal(true)
+  const closed: PopoverCloseReason[] = []
+
+  menuRoot.id = menuPortalId
+  document.body.append(firstAnchor, secondAnchor, menuRoot, container)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
+
+  function TestHarness() {
+    return (
+      <>
+        <Popover
+          anchor={() => firstAnchor}
+          group={props.group}
+          open={firstOpen}
+          onOpenChange={(_open, reason) => {
+            closed.push(reason)
+          }}
+        >
+          <button>First</button>
+        </Popover>
+        <Popover anchor={() => secondAnchor} group={props.group} open={secondOpen}>
+          <button>Second</button>
+        </Popover>
+      </>
+    )
+  }
+
+  return {
+    closed,
+    container,
+    firstOpen,
+    menuRoot,
+    secondOpen,
+    cleanup() {
+      render(null, container)
+      firstAnchor.remove()
+      secondAnchor.remove()
+      menuRoot.remove()
+      container.remove()
+    },
+    async render() {
+      await act(async () => {
+        render(<TestHarness />, container)
+      })
+      await flushEffects()
+    },
+  }
+}
+
 test("Popover blocks outside pointer interactions when outside dismissal is enabled", async () => {
   const harness = renderPopover({})
 
@@ -92,5 +149,27 @@ test("Popover leaves focus alone when restoreFocus is disabled", async () => {
   expect(document.activeElement).toBe(nextButton)
 
   nextButton.remove()
+  harness.cleanup()
+})
+
+test("Popover closes earlier default-group popovers", async () => {
+  const harness = renderGroupedPopovers({})
+
+  await harness.render()
+
+  expect(harness.firstOpen.value).toBe(false)
+  expect(harness.secondOpen.value).toBe(true)
+  expect(harness.closed).toEqual(["group"])
+  harness.cleanup()
+})
+
+test("Popover allows multiple unmanaged popovers", async () => {
+  const harness = renderGroupedPopovers({ group: null })
+
+  await harness.render()
+
+  expect(harness.firstOpen.value).toBe(true)
+  expect(harness.secondOpen.value).toBe(true)
+  expect(harness.closed).toEqual([])
   harness.cleanup()
 })
