@@ -53,7 +53,7 @@ Use templates as expressions, directly inside JSX layout, or as function bodies.
 }
 ```
 
-Each branch may run local JS statements, then finishes with JSX. The matching branch supplies the output. When `@if` is a component's JSX root, `@else` is optional; if no branch matches, the output defaults to `null`.
+Each branch may run local JS statements, then finishes with JSX. The matching branch supplies the output. `@else` is always optional; if no branch matches, the output defaults to `null`.
 
 ## `@for` / `@empty`
 
@@ -86,7 +86,7 @@ Each iteration may run local JS statements, then finishes with JSX. `break` and 
 }
 ```
 
-`@case` and `@default` use trailing `:`. Stacked `@case` labels share the next block. The selected branch supplies the output; `break` is omitted. When `@switch` is a component's JSX root, `@default` is optional; if no branch matches, the output defaults to `null`.
+`@case` and `@default` use trailing `:`. Stacked `@case` labels share the next block. The selected branch supplies the output; `break` is omitted. `@default` is always optional; if no branch matches, the output defaults to `null`.
 
 ## `@try` / `@pending` / `@catch`
 
