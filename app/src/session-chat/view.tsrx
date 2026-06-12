@@ -489,20 +489,6 @@ function SessionChatComposerDock(props: {
                 </div>
               </GoodTooltip>
             : null}
-          {modeOption
-            ? <SessionModeSelector
-                compact={true}
-                modeOption={{
-                  ...modeOption,
-                  currentValue: draftModeValue.value ?? modeOption.currentValue,
-                }}
-                open={modePickerOpen}
-                shortcut={approvalPresetShortcut}
-                onValueChange={(value) => {
-                  draftModeValue.value = value
-                }}
-              />
-            : null}
           {modelItems.length > 0
             ? <SessionInputSelect
                 compact={true}
@@ -531,6 +517,22 @@ function SessionChatComposerDock(props: {
                   draftThinkingValue.value = value
                 }}
               />
+            : null}
+          {modeOption
+            ? <div class={styles.composerApprovalControl}>
+                <SessionModeSelector
+                  compact={true}
+                  modeOption={{
+                    ...modeOption,
+                    currentValue: draftModeValue.value ?? modeOption.currentValue,
+                  }}
+                  open={modePickerOpen}
+                  shortcut={approvalPresetShortcut}
+                  onValueChange={(value) => {
+                    draftModeValue.value = value
+                  }}
+                />
+              </div>
             : null}
         </div>
       : null

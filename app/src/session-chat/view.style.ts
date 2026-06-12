@@ -179,6 +179,9 @@ export default {
     justifyContent: "start",
     gap: "12px",
   }),
+  composerApprovalControl: css({
+    marginInlineStart: "auto",
+  }),
   composerAgentControl: css({
     display: "inline-grid",
     alignItems: "center",
