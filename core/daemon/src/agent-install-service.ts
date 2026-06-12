@@ -38,8 +38,8 @@ const defaultManagedInstallApi = {
   resolveInstalledAgentProcessSpec,
 } satisfies AcpClientManagedInstallApi
 
-// acp-client requires a finite max age; this expresses last-known-good launch policy.
-const MANAGED_AGENT_LAUNCH_FALLBACK_MAX_AGE_MS = Number.MAX_SAFE_INTEGER
+// acp-client uses milliseconds, so the three-month launch fallback is a 90-day window.
+const MANAGED_AGENT_LAUNCH_FALLBACK_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
 
 /** Returns the profile-scoped acp-client cache root used for managed agent installs. */
 export function getDaemonAgentInstallCacheDir() {

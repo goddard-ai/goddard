@@ -144,7 +144,7 @@ test("agent install service forwards deterministic cache options and launch fall
         cacheDir,
         now: expect.any(Function),
         installIfMissing: true,
-        maxInstalledAgeMs: Number.MAX_SAFE_INTEGER,
+        maxInstalledAgeMs: 90 * 24 * 60 * 60 * 1000,
       },
     ],
   ])
