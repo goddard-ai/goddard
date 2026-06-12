@@ -37,8 +37,8 @@ catalogs:
       specifier: ^1.0.2
       version: 1.0.2
     acp-client:
-      specifier: ^0.5.2
-      version: 0.5.2
+      specifier: ^0.5.3
+      version: 0.5.3
     ai-sdk-json-schema:
       specifier: ^0.3.1
       version: 0.3.1
@@ -126,7 +126,7 @@ importers:
         version: 7.0.0-dev.20260417.1
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       bumpp:
         specifier: ^11.1.0
         version: 11.1.0
@@ -240,7 +240,7 @@ importers:
         version: 6.0.0
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       bun-pty:
         specifier: ^0.4.8
         version: 0.4.8
@@ -507,7 +507,7 @@ importers:
         version: 1.0.2
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       hash-sum:
         specifier: 'catalog:'
         version: 2.0.0
@@ -621,7 +621,7 @@ importers:
         version: link:../ipc
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       rouzer:
         specifier: 'catalog:'
         version: 5.1.1(zod@4.4.3)
@@ -672,7 +672,7 @@ importers:
         version: link:../../features/workforce
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
     devDependencies:
       '@goddard-ai/daemon':
         specifier: workspace:*
@@ -781,7 +781,7 @@ importers:
         version: link:../../core/sdk-plugin
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -859,7 +859,7 @@ importers:
         version: link:../session
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       kindstore:
         specifier: 'catalog:'
         version: 0.4.4(zod@4.4.3)
@@ -991,7 +991,7 @@ importers:
         version: 2.9.0(ai@6.0.193(zod@4.4.3))(zod@4.4.3)
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       ai:
         specifier: ^6.0.158
         version: 6.0.193(zod@4.4.3)
@@ -1067,7 +1067,7 @@ importers:
         version: link:../core/sdk
       acp-client:
         specifier: 'catalog:'
-        version: 0.5.2(zod@4.4.3)
+        version: 0.5.3(zod@4.4.3)
       nanocolors:
         specifier: ^0.2.13
         version: 0.2.13
@@ -3697,8 +3697,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  acp-client@0.5.2:
-    resolution: {integrity: sha512-2K9jmNEk6ZAq0XU4niBGu2K5/mVOe4VI+8EVTGssDNkEhrvYk0IIsYHIqdwyJv1tlejz1/Jf7mn8LPkT+v+xmw==}
+  acp-client@0.5.3:
+    resolution: {integrity: sha512-dnY9pVcxyRePU+ppfEA8Wk2GMcw1AZT2jzOn18MdxgFs7mJ7iutm2FbgrdS3hL1qkhq8C4DgR5Ur5UZO97SqUQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -9260,7 +9260,7 @@ snapshots:
 
   acorn@8.16.0: {}
 
-  acp-client@0.5.2(zod@4.4.3):
+  acp-client@0.5.3(zod@4.4.3):
     dependencies:
       '@agentclientprotocol/sdk': 0.25.0(zod@4.4.3)
       '@ckirby/unbzip2-multistream': 2.1.3
