@@ -1,5 +1,6 @@
 import type { SessionSubpackage } from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
+import { GitFork, Laptop } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
@@ -204,10 +205,12 @@ export function SessionLaunchLocationSelector(props: {
     {
       value: "local",
       label: "Work locally",
+      icon: Laptop,
     },
     {
       value: "worktree",
       label: "New worktree",
+      icon: GitFork,
     },
   ] as const
   const locationShortcut = getShortcutLabel(
@@ -224,12 +227,22 @@ export function SessionLaunchLocationSelector(props: {
     </legend>
     <div class={styles.radioGroup}>
       @for (const option of locationOptions) {
+        const OptionIcon = option.icon
+
         <label
           class={styles.radioOption}
           data-selected={form.draftLocation.value === option.value ? "true" : undefined}
           key={option.value}
         >
-          <span>{option.label}</span>
+          <span>
+            <OptionIcon
+              aria-hidden={true}
+              class={styles.radioOptionIcon}
+              size={16}
+              strokeWidth={2.1}
+            />
+            {option.label}
+          </span>
           <input
             checked={form.draftLocation.value === option.value}
             disabled={option.value === "local" && preview.bare}

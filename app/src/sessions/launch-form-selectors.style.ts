@@ -20,7 +20,7 @@ export default {
   radioField: css({
     border: "0",
     display: "grid",
-    gap: "6px",
+    gap: "5px",
     margin: "0",
     minWidth: "0",
     padding: "0",
@@ -29,16 +29,18 @@ export default {
     alignItems: "center",
     color: "muted",
     display: "flex",
-    fontSize: "0.78rem",
+    fontSize: "0.76rem",
+    fontWeight: "650",
     gap: "8px",
     lineHeight: "1.2",
+    padding: "0",
   }),
   radioGroup: css({
     border: "1px solid {colors.border}",
     borderRadius: "8px",
     display: "grid",
     gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    minHeight: "42px",
+    height: "36px",
     overflow: "hidden",
   }),
   radioOption: css({
@@ -50,8 +52,9 @@ export default {
     gap: "8px",
     justifyContent: "space-between",
     lineHeight: "1.2",
+    minHeight: "0",
     minWidth: "0",
-    padding: "0 12px",
+    padding: "0 10px",
     "& + &": {
       borderLeft: "1px solid {colors.border}",
     },
@@ -59,6 +62,9 @@ export default {
       backgroundColor: `color-mix(in srgb, ${token.var("colors.accent")} 16%, transparent)`,
     },
     "& > span": {
+      alignItems: "center",
+      display: "flex",
+      gap: "8px",
       minWidth: "0",
       overflow: "hidden",
       textOverflow: "ellipsis",
@@ -66,7 +72,12 @@ export default {
     },
     "& > input": {
       flex: "0 0 auto",
+      margin: "0",
     },
+  }),
+  radioOptionIcon: css({
+    color: "muted",
+    flex: "0 0 auto",
   }),
   branchSelector: css({
     display: "grid",
