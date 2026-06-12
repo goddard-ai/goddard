@@ -10,7 +10,9 @@ permissions:
   contents: read
 
 env:
-  BUN_VERSION_FILE: package.json
+  BUN_VERSION: 1.3.13
+  NODE_VERSION: 24
+  PNPM_VERSION: 11.5.1
 
 jobs:
   typecheck:
@@ -24,7 +26,18 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version-file: ${{ env.BUN_VERSION_FILE }}
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Cache turbo build setup
         uses: actions/cache@v5.0.5
@@ -35,10 +48,10 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: bun run typecheck
+        run: pnpm run typecheck
 
   lint:
     runs-on: ubuntu-latest
@@ -51,7 +64,18 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version-file: ${{ env.BUN_VERSION_FILE }}
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Cache turbo build setup
         uses: actions/cache@v5.0.5
@@ -62,10 +86,10 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: bun run lint
+        run: pnpm run lint
 
   test:
     name: Test (${{ matrix.os }})
@@ -85,7 +109,18 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version-file: ${{ env.BUN_VERSION_FILE }}
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
 
       - name: Cache turbo build setup
         uses: actions/cache@v5.0.5
@@ -96,7 +131,7 @@ jobs:
             ${{ runner.os }}-turbo-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: bun run test
+        run: pnpm run test

@@ -25,7 +25,7 @@
 
 <features>
 - New cross-layer product capabilities should normally start as internal feature packages under `features/<name>`.
-- Use `bun run scaffold:feature` for the standard feature package shape.
+- Use `pnpm run scaffold:feature` for the standard feature package shape.
 - Wire only selected feature entrypoints into public composition roots.
 - Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin` and `@goddard-ai/daemon-plugin`, not public packages that bundle them.
 - Feature packages self-declare schemas from their own `schema` entrypoint.
@@ -79,7 +79,7 @@
 - Use snapshots only when serialized output is the contract, or pair them with explicit behavior assertions.
 - When fixing a bug, add a regression test that reproduces the issue when practical.
 - When practical test infrastructure is missing, document the limitation and give concrete manual verification steps.
-- From the repository root, run the full workspace test suite with `bun run test`.
+- From the repository root, run the full workspace test suite with `pnpm run test`.
 - Do not use `bun test` at the repository root; it bypasses workspace package test scripts and monorepo orchestration.
 - Do not test feature-package plugin seams directly. Move complex or critical feature logic outside the plugin entrypoint and test that module directly.
 </testing>

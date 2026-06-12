@@ -222,8 +222,8 @@ When a plugin support package re-exports stable primitives for its layer, the sc
 Use the scaffold from the workspace root:
 
 ```sh
-bun run scaffold:feature
-bun run scaffold:feature --name inbox --layers daemon,sdk,app --schema --daemon-ipc --dry-run
+pnpm run scaffold:feature
+pnpm run scaffold:feature -- --name inbox --layers daemon,sdk,app --schema --daemon-ipc --dry-run
 ```
 
 The implemented scaffold uses `@clack/prompts` for interactive selection and `cmd-ts` for noninteractive CLI parsing. It uses `radashi`'s `dedent` tagged template for generated file content.

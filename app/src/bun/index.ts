@@ -48,7 +48,7 @@ async function getMainWindowUrl() {
       console.log(`HMR enabled: using Vite dev server at ${DEV_SERVER_URL}`)
       return DEV_SERVER_URL
     } catch {
-      console.log("Vite dev server not running. Run `bun run dev` to start the app with Vite.")
+      console.log("Vite dev server not running. Run `pnpm run dev` to start the app with Vite.")
     }
   }
 

@@ -19,7 +19,7 @@
   },
   "scripts": {
     "dev": "bun --watch run src/main.ts",
-    "build": "tsdown --unused && bun run generate-schemas",
+    "build": "tsdown --unused && pnpm run generate-schemas",
     "generate-schemas": "bun run scripts/generate-json-schemas.ts && prettier -w ../schema/json/",
     "generate-acp-registry-fallback": "bun scripts/generate-acp-registry-fallback.ts",
     "build:standalone": "bun run ./scripts/build-standalone.ts",

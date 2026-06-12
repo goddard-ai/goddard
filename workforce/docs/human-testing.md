@@ -42,8 +42,8 @@ If `goddard-daemon` and `goddard-workforce` are already on `PATH`, use them dire
 If they are not on `PATH`, build first:
 
 ```bash
-bun --filter @goddard-ai/daemon run build
-bun --filter @goddard-ai/workforce run build
+pnpm --filter @goddard-ai/daemon run build
+pnpm --filter @goddard-ai/workforce run build
 ```
 
 Then use the local entrypoints:
@@ -362,4 +362,4 @@ That is enough context to turn a manual test result into a bug report quickly.
 
 ## One Practical Warning
 
-Do not use `bun run smoke:workforce` as your only test signal right now. The current manual testing path is more trustworthy for operator validation than the repo-wide smoke script.
+Do not use `pnpm run smoke:workforce` as your only test signal right now. The current manual testing path is more trustworthy for operator validation than the repo-wide smoke script.

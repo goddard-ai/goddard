@@ -622,7 +622,7 @@ const scaffoldCommandArgs = {
   }),
   skipInstall: flag({
     long: "skip-install",
-    description: "Do not run bun install after writing files",
+    description: "Do not run pnpm install after writing files",
     defaultValue: () => false,
   }),
   rootDir: option({
@@ -744,13 +744,13 @@ async function promptForOptions(parsed: ParsedScaffoldArgs) {
 }
 
 function installWorkspaceDependencies(rootDir: string) {
-  const result = spawnSync(process.execPath, ["install"], {
+  const result = spawnSync("pnpm", ["install"], {
     cwd: rootDir,
     stdio: "inherit",
   })
 
   if (result.status !== 0) {
-    throw new Error("bun install failed after feature scaffold.")
+    throw new Error("pnpm install failed after feature scaffold.")
   }
 }
 

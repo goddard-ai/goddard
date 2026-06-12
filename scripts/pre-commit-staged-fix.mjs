@@ -91,7 +91,7 @@ const assertNoPendingRestore = (stateFile) => {
 
     if (pendingRestore.stashSha) {
       throw new Error(
-        `A previous pre-commit stash is still pending restore (${pendingRestore.stashSha}). Run \`bun run postcommit:restore-stash\` before committing again.`,
+        `A previous pre-commit stash is still pending restore (${pendingRestore.stashSha}). Run \`pnpm run postcommit:restore-stash\` before committing again.`,
       )
     }
   } catch (error) {
@@ -127,7 +127,7 @@ const restoreStashAfterFailure = (stateFile, stashRef) => {
     clearPendingRestore(stateFile)
   } catch (error) {
     console.error(
-      `Failed to restore the hidden unstaged changes from ${stashRef}. Git kept the stash entry so the work can be recovered with \`bun run postcommit:restore-stash\`.`,
+      `Failed to restore the hidden unstaged changes from ${stashRef}. Git kept the stash entry so the work can be recovered with \`pnpm run postcommit:restore-stash\`.`,
     )
     throw error
   }
@@ -153,8 +153,15 @@ if (hasUnstagedChanges()) {
 }
 
 try {
-  run("bunx", ["prettier", "--ignore-unknown", "-w", ...stagedFiles])
-  run("bunx", ["oxlint", "--fix", "--quiet", "--no-error-on-unmatched-pattern", ...stagedFiles])
+  run("pnpm", ["exec", "prettier", "--ignore-unknown", "-w", ...stagedFiles])
+  run("pnpm", [
+    "exec",
+    "oxlint",
+    "--fix",
+    "--quiet",
+    "--no-error-on-unmatched-pattern",
+    ...stagedFiles,
+  ])
   run("git", ["add", "--", ...stagedFiles])
 } catch (error) {
   if (pendingStashRef) {

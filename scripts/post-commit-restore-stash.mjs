@@ -80,7 +80,7 @@ if (!stashRef) {
 
 if (hasWorktreeChanges()) {
   console.error(
-    `Refusing to restore ${stashRef} because the index or worktree already has local changes. Commit, stash, or discard those changes, then rerun \`bun run postcommit:restore-stash\`.`,
+    `Refusing to restore ${stashRef} because the index or worktree already has local changes. Commit, stash, or discard those changes, then rerun \`pnpm run postcommit:restore-stash\`.`,
   )
   process.exit(1)
 }
@@ -105,7 +105,7 @@ try {
   }
 
   console.error(
-    `Failed to restore the hidden unstaged changes from ${stashRef}. The failed restore was rolled back, so the stash changes were not left in the index or worktree. Git kept the stash entry intact; resolve the conflict manually and rerun \`bun run postcommit:restore-stash\` if needed.\n\nTo stop the post-commit hook from retrying this stash without deleting it, run:\n  rm "$(git rev-parse --git-path goddard/pre-commit-stash.json)"`,
+    `Failed to restore the hidden unstaged changes from ${stashRef}. The failed restore was rolled back, so the stash changes were not left in the index or worktree. Git kept the stash entry intact; resolve the conflict manually and rerun \`pnpm run postcommit:restore-stash\` if needed.\n\nTo stop the post-commit hook from retrying this stash without deleting it, run:\n  rm "$(git rev-parse --git-path goddard/pre-commit-stash.json)"`,
   )
   process.exit(1)
 }

@@ -7,22 +7,23 @@ Unless stated otherwise, commands below are run from `./app`.
 ## Prerequisites
 
 - Bun
-- Run `bun install`.
+- pnpm
+- Run `pnpm install`.
 
 ## Development
 
-- Run `bun run dev` from the workspace root for the full-stack desktop dev loop.
-- If you run `bun run dev` from `./app`, start `../core/daemon` separately first.
-- Run `bun run build` to produce a packaged local Electrobun build.
-- Run `bun run build:stable` to produce release artifacts in `app/artifacts`.
-- Run `bun run typecheck` to typecheck both the browser code and the Bun host code.
+- Run `pnpm run dev` from the workspace root for the full-stack desktop dev loop.
+- If you run `pnpm run dev` from `./app`, start `../core/daemon` separately first.
+- Run `pnpm run build` to produce a packaged local Electrobun build.
+- Run `pnpm run build:stable` to produce release artifacts in `app/artifacts`.
+- Run `pnpm run typecheck` to typecheck both the browser code and the Bun host code.
 - The Electrobun `preBuild` step stages the standalone Goddard daemon runtime and bundled `serviceman` assets into app resources for packaged builds. Development reuses a separately watched daemon instead of embedding it.
 
 ## Embedded Daemon Runtime
 
 - Outside development, the desktop host ensures the app-managed daemon runtime is installed and healthy before it opens the main window.
 - During development, the Bun host waits for the separately watched daemon to answer IPC `daemon.health` checks before it opens the main window.
-- During development, the workspace `bun run dev` flow starts `core/daemon` in watch mode, then launches Vite plus `electrobun dev --watch`.
+- During development, the workspace `pnpm run dev` flow starts `core/daemon` in watch mode, then launches Vite plus `electrobun dev --watch`.
 - Browser-only changes stay in the Vite HMR loop, Bun host changes relaunch the desktop host, and daemon changes restart the watched daemon without rebuilding embedded app resources.
 - Packaged builds still rerun `preBuild`, rebuild the standalone daemon payload, re-stage the bundled `serviceman` files, and copy the result into Electrobun resources.
 - On launch, the host installs or updates the runtime under `~/.goddard/desktop-runtime`, registers the user-scoped service, waits for the `daemon.health` check to pass, and only then opens the app window.
@@ -31,7 +32,7 @@ Unless stated otherwise, commands below are run from `./app`.
 
 ## Full-Stack QA Flow
 
-- Use `bun run dev` for full-stack QA. Running Vite by itself does not exercise daemon embedding, install or update behavior, or host startup gating.
+- Use `pnpm run dev` for full-stack QA. Running Vite by itself does not exercise daemon embedding, install or update behavior, or host startup gating.
 - Start the backend the daemon should talk to before launching the app. By default the dev daemon expects `http://127.0.0.1:8787`; set `GODDARD_BASE_URL` first if you need a different backend.
 - Make frontend changes in `app/src` and validate them through Vite HMR.
 - Make Bun host changes in `app/src/bun` and let Electrobun watch rebuild and relaunch the desktop app.

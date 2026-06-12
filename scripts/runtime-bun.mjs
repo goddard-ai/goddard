@@ -10,7 +10,7 @@ const runtimeBunPath = join(workspaceDir, "node_modules", ".bin", executableName
 
 if (!existsSync(runtimeBunPath)) {
   console.error(
-    `Workspace Bun runtime is not installed at ${runtimeBunPath}. Run bun install first.`,
+    `Workspace Bun runtime is not installed at ${runtimeBunPath}. Run pnpm install first.`,
   )
   process.exit(1)
 }

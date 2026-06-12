@@ -19,7 +19,7 @@ if (!expectedVersion) {
 }
 
 if (!existsSync(runtimeBunPath)) {
-  fail(`Workspace Bun runtime is not installed at ${runtimeBunPath}. Run bun install first.`)
+  fail(`Workspace Bun runtime is not installed at ${runtimeBunPath}. Run pnpm install first.`)
 }
 
 const installedVersion = run(runtimeBunPath, ["--version"]).trim()

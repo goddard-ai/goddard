@@ -78,7 +78,7 @@ async function ensureDevelopmentDaemonRuntime(daemonUrl: string) {
     await waitForDaemonReady(daemonUrl, 5_000)
   } catch {
     throw new Error(
-      "Development mode expects a running Goddard daemon. Start `bun run dev` from the workspace root, or launch `core/daemon` before starting the app.",
+      "Development mode expects a running Goddard daemon. Start `pnpm run dev` from the workspace root, or launch `core/daemon` before starting the app.",
     )
   }
 }

@@ -131,7 +131,7 @@ field or enum exists.
 Build standalone Bun executables for the daemon and bundled helper tools with:
 
 ```sh
-bun run build:standalone
+pnpm run build:standalone
 ```
 
 The command runs the normal package build first, then emits a platform-specific standalone runtime under `dist/standalone/<target>/` with:

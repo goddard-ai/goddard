@@ -9,8 +9,9 @@ on:
       - "core/ui-primitives/**"
 
 env:
-  BUN_VERSION: 1.3.11
+  BUN_VERSION: 1.3.13
   NODE_VERSION: 24
+  PNPM_VERSION: 11.5.1
 
 jobs:
   build-pack:
@@ -40,6 +41,17 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
       - name: Setup git-cliff
         uses: taiki-e/install-action@v2
         with:
@@ -51,7 +63,7 @@ jobs:
           PACKAGE_DIR: ${{ matrix.path }}
           PACKAGE_RELEASE_NAME: ${{ matrix.name }}
         run: |
-          current_version="$(bun -e "console.log(require('./$PACKAGE_DIR/package.json').version)")"
+          current_version="$(node -e "console.log(require('./$PACKAGE_DIR/package.json').version)")"
           latest_tag="$(git tag --merged HEAD --list "${PACKAGE_RELEASE_NAME}@[0-9]*" --sort=-v:refname | head -n 1)"
 
           if [ -z "$latest_tag" ]; then
@@ -75,11 +87,11 @@ jobs:
 
       - name: Install dependencies
         if: steps.version.outputs.changed == 'true'
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build package
         if: steps.version.outputs.changed == 'true'
-        run: bun run build
+        run: pnpm run build
         working-directory: ${{ matrix.path }}
 
       - name: Configure release git identity
@@ -94,15 +106,15 @@ jobs:
           NEXT_VERSION: ${{ steps.version.outputs.next }}
           PACKAGE_RELEASE_NAME: ${{ matrix.name }}
         run: |
-          bun pm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
+          pnpm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
           git tag "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
         working-directory: ${{ matrix.path }}
 
       - name: Pack package
         if: steps.version.outputs.changed == 'true'
         run: |
-          bun pm pack --quiet --filename "$PWD/package.tgz"
-          if bun -e "const { files } = require('./package.json'); process.exit(Array.isArray(files) && files.includes('dist') ? 0 : 1)"; then
+          pnpm pack --out "$PWD/package.tgz"
+          if node -e "const { files } = require('./package.json'); process.exit(Array.isArray(files) && files.includes('dist') ? 0 : 1)"; then
             tar -tzf package.tgz | grep -q '^package/dist/'
           fi
         working-directory: ${{ matrix.path }}
@@ -137,17 +149,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Download package artifact
         uses: actions/download-artifact@v6
@@ -174,7 +186,7 @@ jobs:
           NEXT_VERSION: ${{ needs.build-pack.outputs.next }}
           PACKAGE_RELEASE_NAME: ${{ matrix.name }}
         run: |
-          bun pm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
+          pnpm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
           git tag "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
         working-directory: ${{ matrix.path }}
 

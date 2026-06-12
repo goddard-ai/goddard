@@ -109,7 +109,7 @@ state directory, and treats an already-stopped session as a successful no-op.
 Run the happy-path smoke test manually with:
 
 ```bash
-bun run --cwd core/review-sync smoke
+pnpm --dir core/review-sync run smoke
 ```
 
 The smoke test creates one temporary Git repository with agent and review

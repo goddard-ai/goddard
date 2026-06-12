@@ -10,4 +10,4 @@ if [ ! -f "$pending_restore_file" ]; then
   exit 0
 fi
 
-bun run postcommit:restore-stash
+pnpm run postcommit:restore-stash

@@ -7,8 +7,8 @@ and are not loaded dynamically at runtime.
 Use the workspace scaffold before adding a new package:
 
 ```sh
-bun run scaffold:feature
-bun run scaffold:feature --name my-feature --layers daemon,sdk --schema --daemon-ipc --dry-run
+pnpm run scaffold:feature
+pnpm run scaffold:feature -- --name my-feature --layers daemon,sdk --schema --daemon-ipc --dry-run
 ```
 
 The scaffold creates only the selected layer entrypoints. It does not register

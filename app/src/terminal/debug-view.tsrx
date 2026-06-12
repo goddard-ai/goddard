@@ -76,7 +76,7 @@ export default function TerminalDebugView(_props: TerminalDebugViewProps) @{
         )
         break
       case "ls":
-        appendChunk("app  core  spec  workforce  package.json  bun.lock\r\n")
+        appendChunk("app  core  spec  workforce  package.json  pnpm-lock.yaml\r\n")
         break
       case "pwd":
         appendChunk("/Users/alec/.codex/worktrees/6e44/goddard-ai\r\n")

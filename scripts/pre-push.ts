@@ -16,7 +16,8 @@ const FULL_CHECK_FILE_GLOBS = [
     `scripts/**/*.${extension}`,
     `*.test.${extension}`,
   ]),
-  "bun.lock",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
   "tsconfig.json",
   "tsconfig.*.json",
   "package.json",
@@ -135,9 +136,9 @@ function shouldRunRepoCheck(changedFiles: string[]) {
   return changedFiles.some((file) => FULL_CHECK_FILE_PATTERNS.some((pattern) => pattern.test(file)))
 }
 
-/** Runs one Bun command and returns whether it succeeded. */
-function runBun(repoRoot: string, args: string[]) {
-  const result = spawnSync(process.execPath, args, {
+/** Runs one pnpm command and returns whether it succeeded. */
+function runPnpm(repoRoot: string, args: string[]) {
+  const result = spawnSync("pnpm", args, {
     cwd: repoRoot,
     stdio: "inherit",
   })
@@ -147,11 +148,14 @@ function runBun(repoRoot: string, args: string[]) {
 
 /** Installs dependencies only when the lockfile changed, then runs static pre-push checks. */
 function runRepoCheck(repoRoot: string, changedFiles: string[]) {
-  if (changedFiles.includes("bun.lock") && !runBun(repoRoot, ["install", "--frozen-lockfile"])) {
+  if (
+    changedFiles.includes("pnpm-lock.yaml") &&
+    !runPnpm(repoRoot, ["install", "--frozen-lockfile"])
+  ) {
     return false
   }
 
-  return runBun(repoRoot, ["run", "check:prepush"])
+  return runPnpm(repoRoot, ["run", "check:prepush"])
 }
 
 /** Runs the pre-push guard and returns a process exit code. */
