@@ -153,6 +153,7 @@ function SessionChatViewContent(props: {
               } @else {
                 <Laptop aria-hidden={true} size={16} strokeWidth={2.1} />
               }
+
               {chat.repositoryLabel}
             </p>
           </div>
@@ -171,6 +172,7 @@ function SessionChatViewContent(props: {
               >{headerActionError.description}</span>
             </div>
           : null}
+
         @if (chat.hasEmptyTranscript) {
           <div class={styles.transcript}>
             <SessionChatStateMessage

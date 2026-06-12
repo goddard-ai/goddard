@@ -267,6 +267,7 @@ export function AppShellAgentSelector(props: {
                   <span class={styles.itemLabel}>{adapter.name}</span>
                   <span class={styles.itemDetail}>
                     {adapter.version}
+
                     @if (adapter.unofficial) {
                       <>· Unofficial</>
                     }

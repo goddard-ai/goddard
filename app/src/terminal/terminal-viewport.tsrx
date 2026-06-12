@@ -56,6 +56,7 @@ export function TerminalViewport(props: {
       @for (const row of props.terminal.viewRows) {
         <div class={styles.row} key={row.key}>
           {row.segments.length === 0 ? " " : null}
+
           @for (const segment of row.segments) {
             <span key={segment.key} style={segment.style}>{segment.text}</span>
           }

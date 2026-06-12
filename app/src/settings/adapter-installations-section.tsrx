@@ -127,6 +127,7 @@ function AdapterInstallationRow(props: {
         {props.adapter.unofficial ? " · Unofficial" : ""}
       </span>
       <span class={styles.adapterDescription}>{props.adapter.description}</span>
+
       @if (props.adapter.website || props.adapter.repository) {
         <span class={styles.adapterLinks}>
           @if (props.adapter.website) {
@@ -148,6 +149,7 @@ function AdapterInstallationRow(props: {
               } @else {
                 <GitBranch aria-hidden={true} size={14} strokeWidth={2.1} />
               }
+
               Repository
             </ExternalLink>
           }
@@ -238,6 +240,7 @@ function AdapterInstallationList() @{
       </section>
       <section class={styles.agentGroup}>
         <h3 class={styles.agentGroupTitle}>Available agents</h3>
+
         @if (availableAdapters.length > 0) {
           <label class={styles.searchField}>
             <span class={styles.srOnly}>Filter available agents</span>
