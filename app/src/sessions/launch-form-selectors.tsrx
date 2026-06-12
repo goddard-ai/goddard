@@ -130,27 +130,25 @@ export function SessionLaunchBranchSelector(props: {
     shortcutRegistry.resolvedBindings[AppCommand.sessionInput.openBranchSelector.id]?.[0],
   )
 
-  <>
-    <div class={styles.grid}>
-      <SessionInputSelect
-        disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
-        filterable={true}
-        items={branchItems}
-        label="Git branch"
-        open={form.getPickerOpen("branch")}
-        placeholder="Choose a branch"
-        shortcut={branchShortcut}
-        value={form.draftBaseBranchName.value}
-        onValueChange={(value) => {
-          form.draftBaseBranchName.value = value
-        }}
-      />
-    </div>
+  <div class={styles.branchSelector}>
+    <SessionInputSelect
+      disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
+      filterable={true}
+      items={branchItems}
+      label="Git branch"
+      open={form.getPickerOpen("branch")}
+      placeholder="Choose a branch"
+      shortcut={branchShortcut}
+      value={form.draftBaseBranchName.value}
+      onValueChange={(value) => {
+        form.draftBaseBranchName.value = value
+      }}
+    />
 
     @if (form.draftLocation.value === "local" && preview?.dirty === true) {
       <p class={styles.warning}>Commit or stash local changes to launch from another branch.</p>
     }
-  </>
+  </div>
 }
 
 export function SessionLaunchLocationSelector(props: {

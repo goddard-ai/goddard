@@ -104,11 +104,6 @@ export function SessionLaunchForm(props: {
       } @pending {
         <SessionLaunchLoadingSelect label="Working directory" />
       }
-      @try {
-        <SessionLaunchLocationSelector {disabled} {form} />
-      } @pending {
-        <SessionLaunchLoadingSelect label="Launch location" />
-      }
     </div>
 
     <SessionInput
@@ -159,10 +154,17 @@ export function SessionLaunchForm(props: {
       }}
     />
 
-    @try {
-      <SessionLaunchBranchSelector {disabled} {form} />
-    } @pending {
-      <SessionLaunchLoadingSelect label="Git branch" />
-    }
+    <div class={selectorStyles.grid}>
+      @try {
+        <SessionLaunchLocationSelector {disabled} {form} />
+      } @pending {
+        <SessionLaunchLoadingSelect label="Launch location" />
+      }
+      @try {
+        <SessionLaunchBranchSelector {disabled} {form} />
+      } @pending {
+        <SessionLaunchLoadingSelect label="Git branch" />
+      }
+    </div>
   </div>
 }

@@ -68,6 +68,11 @@ export default {
       flex: "0 0 auto",
     },
   }),
+  branchSelector: css({
+    display: "grid",
+    gap: "6px",
+    minWidth: "0",
+  }),
   warning: css({
     margin: "0",
     color: "muted",
