@@ -46,7 +46,6 @@ import {
   reconnectSession,
   respondSessionPermission,
   setSessionConfigOption,
-  setSessionModel,
   submitSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
@@ -576,10 +575,15 @@ function SessionChatComposerDock(props: {
 
   async function applyDraftSessionControls() {
     const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
-    const selectedModelId = draftModelId.value ?? currentModelId
     const selectedThinkingValue = draftThinkingValue.value ?? thinkingOption?.currentValue ?? null
+    const shouldApplyMode =
+      modeOption && draftModeValue.value !== null && selectedModeValue !== modeOption.currentValue
+    const shouldApplyThinking =
+      thinkingOption && draftThinkingValue.value !== null &&
+        selectedThinkingValue !== thinkingOption.currentValue
+    const shouldApplyModel = draftModelId.value !== null || shouldApplyThinking
     const selectedConfigOptions =
-      thinkingOption && typeof selectedThinkingValue === "string"
+      thinkingOption && shouldApplyThinking && typeof selectedThinkingValue === "string"
         ? [
             {
               configId: thinkingOption.id,
@@ -588,15 +592,9 @@ function SessionChatComposerDock(props: {
           ]
         : []
     const resolvedSelection = sessionModelConfig.resolveSelection({
-      modelId: selectedModelId,
+      modelId: draftModelId.value,
       configOptions: selectedConfigOptions,
     })
-    const shouldApplyMode =
-      modeOption && draftModeValue.value !== null && selectedModeValue !== modeOption.currentValue
-    const shouldApplyThinking =
-      thinkingOption && draftThinkingValue.value !== null &&
-        selectedThinkingValue !== thinkingOption.currentValue
-    const shouldApplyModel = draftModelId.value !== null || shouldApplyThinking
     let latestSession: DaemonSession | null = null
 
     if (shouldApplyMode && typeof selectedModeValue === "string") {
@@ -608,7 +606,7 @@ function SessionChatComposerDock(props: {
       latestSession = result.session
     }
 
-    if (shouldApplyThinking) {
+    if (shouldApplyModel) {
       for (const configOption of resolvedSelection.initialConfigOptions ?? []) {
         const result = await setSessionConfigOption({
           id: props.chat.session.id,
@@ -617,17 +615,6 @@ function SessionChatComposerDock(props: {
         })
         latestSession = result.session
       }
-    }
-
-    if (
-      shouldApplyModel && resolvedSelection.initialModelId &&
-        resolvedSelection.initialModelId !== props.chat.session.models?.currentModelId
-    ) {
-      const result = await setSessionModel({
-        id: props.chat.session.id,
-        modelId: resolvedSelection.initialModelId,
-      })
-      latestSession = result.session
     }
 
     if (latestSession) {

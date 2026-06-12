@@ -8,6 +8,30 @@ const thinkingLevelLabels = new Map(
   thinkingLevelOrder.map((value) => [value, value[0].toUpperCase() + value.slice(1)]),
 )
 
+type SelectSessionConfigOption = Extract<acp.SessionConfigOption, { type: "select" }>
+
+function isConfigOptionGroup(option: unknown): option is acp.SessionConfigSelectGroup {
+  return (
+    typeof option === "object" &&
+    option !== null &&
+    "options" in option &&
+    Array.isArray(option.options)
+  )
+}
+
+function flattenConfigOptionValues(option: SelectSessionConfigOption) {
+  return option.options.flatMap((entry) => (isConfigOptionGroup(entry) ? entry.options : [entry]))
+}
+
+function findModelConfigOption(configOptions: acp.SessionConfigOption[]) {
+  return (
+    configOptions.find(
+      (option): option is SelectSessionConfigOption =>
+        option.category === "model" && option.type === "select",
+    ) ?? null
+  )
+}
+
 function parseThinkingModelName(name: string) {
   const match = /^(?<baseName>.+?)\s+\((?<thinking>[^()]+)\)$/.exec(name.trim())
   if (!match?.groups) {
@@ -125,11 +149,68 @@ function resolveSessionModelState(models: acp.SessionModelState | null) {
   }
 }
 
+function createConfigOptionLaunchModelConfig(input: { configOptions: acp.SessionConfigOption[] }) {
+  const modelOption = findModelConfigOption(input.configOptions)
+  if (!modelOption) {
+    return null
+  }
+
+  const availableModels = flattenConfigOptionValues(modelOption).map((option) => ({
+    modelId: option.value,
+    name: option.name,
+    description: option.description,
+  }))
+  if (availableModels.length === 0) {
+    return null
+  }
+
+  const currentModelId = availableModels.some((model) => model.modelId === modelOption.currentValue)
+    ? modelOption.currentValue
+    : availableModels[0]!.modelId
+
+  return {
+    models: {
+      currentModelId,
+      availableModels,
+    },
+    configOptions: input.configOptions,
+    resolveSelection(input: {
+      modelId?: string | null
+      configOptions?: InitialSessionConfigOption[] | null
+    }) {
+      const remainingConfigOptions = (input.configOptions ?? []).filter(
+        (option) => option.configId !== modelOption.id,
+      )
+      const selectedModelId = input.modelId ?? undefined
+
+      return {
+        initialModelId: undefined,
+        initialConfigOptions: selectedModelId
+          ? [
+              ...remainingConfigOptions,
+              {
+                configId: modelOption.id,
+                value: selectedModelId,
+              },
+            ]
+          : remainingConfigOptions.length > 0
+            ? remainingConfigOptions
+            : undefined,
+      }
+    },
+  }
+}
+
 /** Derives launch-time model and thinking selectors from one ACP launch preview. */
 export function deriveSessionLaunchModelConfig(input: {
   models: acp.SessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
+  const configOptionModelConfig = createConfigOptionLaunchModelConfig(input)
+  if (configOptionModelConfig) {
+    return configOptionModelConfig
+  }
+
   const models = resolveSessionModelState(input.models)
 
   if (!models || models.availableModels.length === 0) {
