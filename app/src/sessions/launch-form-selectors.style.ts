@@ -82,6 +82,9 @@ export default {
     gap: "12px",
     minWidth: "0",
   }),
+  composerApprovalControl: css({
+    marginInlineStart: "auto",
+  }),
   composerWarning: css({
     margin: "2px 0 0",
     color: "muted",

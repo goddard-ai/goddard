@@ -41,9 +41,11 @@ export function SessionLaunchLoadingSelect(props: { label: string; compact?: boo
 export function SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) @{
   <div class={styles.composerControls}>
     <SessionLaunchLoadingSelect compact={props.compact} label="Agent harness" />
-    <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
     <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
+    <div class={styles.composerApprovalControl}>
+      <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
+    </div>
   </div>
 }
 
@@ -414,19 +416,6 @@ export function SessionLaunchPreviewSelectors(props: {
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
 
-    @if (form.modeOption.value) {
-      <SessionModeSelector
-        compact={props.compact}
-        disabled={props.disabled}
-        modeOption={form.modeOption.value}
-        open={form.getPickerOpen("mode")}
-        shortcut={approvalPresetShortcut}
-        onValueChange={(value) => {
-          form.draftModeValue.value = value
-        }}
-      />
-    }
-
     <SessionInputSelect
       compact={props.compact}
       disabled={props.disabled || modelItems.length === 0}
@@ -461,6 +450,21 @@ export function SessionLaunchPreviewSelectors(props: {
             : value
         }}
       />
+    }
+
+    @if (form.modeOption.value) {
+      <div class={styles.composerApprovalControl}>
+        <SessionModeSelector
+          compact={props.compact}
+          disabled={props.disabled}
+          modeOption={form.modeOption.value}
+          open={form.getPickerOpen("mode")}
+          shortcut={approvalPresetShortcut}
+          onValueChange={(value) => {
+            form.draftModeValue.value = value
+          }}
+        />
+      </div>
     }
   </div>
 }
