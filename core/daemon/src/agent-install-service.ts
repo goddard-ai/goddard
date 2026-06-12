@@ -38,6 +38,9 @@ const defaultManagedInstallApi = {
   resolveInstalledAgentProcessSpec,
 } satisfies AcpClientManagedInstallApi
 
+// acp-client requires a finite max age; this expresses last-known-good launch policy.
+const MANAGED_AGENT_LAUNCH_FALLBACK_MAX_AGE_MS = Number.MAX_SAFE_INTEGER
+
 /** Returns the profile-scoped acp-client cache root used for managed agent installs. */
 export function getDaemonAgentInstallCacheDir() {
   return join(dirname(getDatabasePath()), "acp-client")
@@ -49,7 +52,6 @@ export function createAgentInstallService(
 ): DaemonAgentInstallService {
   const cacheDir = resolve(options.cacheDir ?? getDaemonAgentInstallCacheDir())
   const managedInstallApi = options.managedInstallApi ?? defaultManagedInstallApi
-  const agentTaskTails = new Map<string, Promise<void>>()
 
   function installOptions(extra: AgentInstallOptions = {}): AgentInstallOptions {
     return {
@@ -77,25 +79,6 @@ export function createAgentInstallService(
     return registryEntry.adapter
   }
 
-  function runAgentTask<TResult>(agentId: string, task: () => Promise<TResult>) {
-    // acp-client install/update/launch operations share per-agent cache state; queue them so
-    // overlapping callers cannot observe another operation's result shape or partial writes.
-    const previousTask = agentTaskTails.get(agentId) ?? Promise.resolve()
-    const nextTask = previousTask.catch(() => {}).then(task)
-    const nextTail = nextTask.then(
-      () => {},
-      () => {},
-    )
-    agentTaskTails.set(agentId, nextTail)
-    void nextTail.finally(() => {
-      if (agentTaskTails.get(agentId) === nextTail) {
-        agentTaskTails.delete(agentId)
-      }
-    })
-
-    return nextTask
-  }
-
   return {
     cacheDir,
 
@@ -112,25 +95,22 @@ export function createAgentInstallService(
 
     async ensureAgentInstalled(input) {
       const agent = await resolveAgent(input)
-      return runAgentTask(agent.id, () =>
-        managedInstallApi.ensureAgentInstalled(agent, installOptions()),
-      )
+      return managedInstallApi.ensureAgentInstalled(agent, installOptions())
     },
 
     async updateAgent(input) {
       const agent = await resolveAgent(input)
-      return runAgentTask(agent.id, () => managedInstallApi.updateAgent(agent, installOptions()))
+      return managedInstallApi.updateAgent(agent, installOptions())
     },
 
     async resolveInstalledAgentProcessSpec(input) {
       const agent = await resolveAgent(input)
-      return runAgentTask(agent.id, () =>
-        managedInstallApi.resolveInstalledAgentProcessSpec(
-          agent,
-          installOptions({
-            installIfMissing: input.installIfMissing,
-          }),
-        ),
+      return managedInstallApi.resolveInstalledAgentProcessSpec(
+        agent,
+        installOptions({
+          installIfMissing: input.installIfMissing,
+          maxInstalledAgeMs: MANAGED_AGENT_LAUNCH_FALLBACK_MAX_AGE_MS,
+        }),
       )
     },
   }
