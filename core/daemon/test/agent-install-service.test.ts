@@ -6,6 +6,7 @@ import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { expect, test } from "bun:test"
 
 import { createAgentInstallService } from "../src/agent-install-service.ts"
+import type { ManagedAgentUsageState } from "../src/managed-agent-usage.ts"
 
 function createAgent(id: string): AgentDistribution {
   return {
@@ -55,6 +56,22 @@ function createInstalledAgent(agentId: string) {
     installDir: `/tmp/${agentId}`,
     installedAt: "2026-06-08T00:00:00.000Z",
     updatedAt: "2026-06-08T00:00:00.000Z",
+  }
+}
+
+function createUsageStore(initialState: ManagedAgentUsageState = {}) {
+  let state = initialState
+
+  return {
+    get state() {
+      return state
+    },
+    store: {
+      get: () => state,
+      set: (nextState: ManagedAgentUsageState) => {
+        state = { ...nextState }
+      },
+    },
   }
 }
 
@@ -148,6 +165,46 @@ test("agent install service forwards deterministic cache options and launch fall
       },
     ],
   ])
+})
+
+test("agent install service records usage after resolving a managed launch", async () => {
+  const agent = createAgent("usage-agent")
+  const usageStore = createUsageStore()
+  const service = createAgentInstallService({
+    registryService: createRegistryService({}),
+    cacheDir: await mkdtemp(join(tmpdir(), "goddard-agent-install-service-")),
+    now: () => Date.parse("2026-06-08T00:00:00.000Z"),
+    usageStore: usageStore.store,
+    managedInstallApi: {
+      async getInstalledAgent() {
+        return { status: "missing" }
+      },
+      async listInstalledAgents() {
+        return []
+      },
+      async ensureAgentInstalled(agentInput) {
+        return { agent: createInstalledAgent(agentInput.id), installed: true, updated: false }
+      },
+      async updateAgent(agentInput) {
+        return {
+          agent: createInstalledAgent(agentInput.id),
+          checkedAt: "2026-06-08T00:00:00.000Z",
+          updated: false,
+        }
+      },
+      async resolveInstalledAgentProcessSpec(agentInput) {
+        return { cmd: agentInput.id, args: [] }
+      },
+    },
+  })
+
+  await service.resolveInstalledAgentProcessSpec({ agent, installIfMissing: true })
+
+  expect(usageStore.state).toEqual({
+    "usage-agent": {
+      lastUsedAt: "2026-06-08T00:00:00.000Z",
+    },
+  })
 })
 
 test("agent install service does not gate launch resolution behind background update work", async () => {

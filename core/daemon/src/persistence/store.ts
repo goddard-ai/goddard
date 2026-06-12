@@ -26,6 +26,12 @@ const metadata = {
       configFingerprint: z.string(),
     }),
   ),
+  managedAgentUsage: z.record(
+    z.string(),
+    z.strictObject({
+      lastUsedAt: z.string(),
+    }),
+  ),
 }
 
 const coreDbSchema = {} satisfies KindRegistry

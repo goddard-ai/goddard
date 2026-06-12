@@ -15,6 +15,8 @@ import {
   type AgentInstallOptions,
 } from "acp-client/node"
 
+import { recordManagedAgentUsed, type ManagedAgentUsageStore } from "./managed-agent-usage.ts"
+
 type AcpClientManagedInstallApi = {
   getInstalledAgent: typeof getInstalledAgent
   listInstalledAgents: typeof listInstalledAgents
@@ -27,6 +29,7 @@ type AgentInstallServiceOptions = {
   registryService: ACPRegistryService
   cacheDir?: string
   now?: () => number
+  usageStore?: ManagedAgentUsageStore
   managedInstallApi?: AcpClientManagedInstallApi
 }
 
@@ -105,13 +108,21 @@ export function createAgentInstallService(
 
     async resolveInstalledAgentProcessSpec(input) {
       const agent = await resolveAgent(input)
-      return managedInstallApi.resolveInstalledAgentProcessSpec(
+      const processSpec = await managedInstallApi.resolveInstalledAgentProcessSpec(
         agent,
         installOptions({
           installIfMissing: input.installIfMissing,
           maxInstalledAgeMs: MANAGED_AGENT_LAUNCH_FALLBACK_MAX_AGE_MS,
         }),
       )
+      if (options.usageStore) {
+        recordManagedAgentUsed(
+          options.usageStore,
+          agent.id,
+          new Date(options.now?.() ?? Date.now()).toISOString(),
+        )
+      }
+      return processSpec
     },
   }
 }

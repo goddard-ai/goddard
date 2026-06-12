@@ -11,6 +11,7 @@ import {
   runManagedAgentUpdateChecks,
   type ManagedAgentUpdateCheckState,
 } from "../src/agent-update-scheduler.ts"
+import type { ManagedAgentUsageState } from "../src/managed-agent-usage.ts"
 
 type TestRootConfig = Awaited<ReturnType<DaemonConfigProvider["getRootConfig"]>>["config"]
 
@@ -105,6 +106,22 @@ function createStateStore(initialState: ManagedAgentUpdateCheckState = {}) {
   }
 }
 
+function createUsageStore(initialState: ManagedAgentUsageState = {}) {
+  let state = initialState
+
+  return {
+    get state() {
+      return state
+    },
+    store: {
+      get: () => state,
+      set: (nextState: ManagedAgentUsageState) => {
+        state = { ...nextState }
+      },
+    },
+  }
+}
+
 function createLogger() {
   const events: Array<[string, Record<string, unknown> | undefined]> = []
   const logger: DaemonLogger = {
@@ -122,6 +139,11 @@ function createLogger() {
 test("managed agent update checks update daily managed agents", async () => {
   const updatedAgentIds: string[] = []
   const stateStore = createStateStore()
+  const usageStore = createUsageStore({
+    "managed-agent": {
+      lastUsedAt: "2026-06-07T00:00:00.000Z",
+    },
+  })
 
   await runManagedAgentUpdateChecks({
     configProvider: createConfigProvider({
@@ -146,6 +168,7 @@ test("managed agent update checks update daily managed agents", async () => {
       }
     }),
     updateCheckStore: stateStore.store,
+    usageStore: usageStore.store,
     logger: createLogger().logger,
     now: () => Date.parse("2026-06-08T00:00:00.000Z"),
   })
@@ -158,6 +181,11 @@ test("managed agent update checks update daily managed agents", async () => {
 test("managed agent update checks skip fresh state until config changes", async () => {
   const updatedAgentIds: string[] = []
   const stateStore = createStateStore()
+  const usageStore = createUsageStore({
+    "managed-agent": {
+      lastUsedAt: "2026-06-07T00:00:00.000Z",
+    },
+  })
   const agentInstallService = createAgentInstallService(async ({ agent }) => {
     const agentId = typeof agent === "string" ? agent : agent.id
     updatedAgentIds.push(agentId)
@@ -170,6 +198,7 @@ test("managed agent update checks skip fresh state until config changes", async 
   const baseInput = {
     agentInstallService,
     updateCheckStore: stateStore.store,
+    usageStore: usageStore.store,
     logger: createLogger().logger,
   }
 
@@ -226,8 +255,62 @@ test("managed agent update checks skip fresh state until config changes", async 
   expect(stateStore.state["managed-agent"]?.checkedAt).toBe("2026-06-08T13:00:00.000Z")
 })
 
+test("managed agent update checks skip agents not used recently", async () => {
+  const updatedAgentIds: string[] = []
+  const stateStore = createStateStore()
+  const usageStore = createUsageStore({
+    "recent-agent": {
+      lastUsedAt: "2026-05-10T00:00:00.000Z",
+    },
+    "stale-agent": {
+      lastUsedAt: "2026-04-08T00:00:00.000Z",
+    },
+  })
+
+  await runManagedAgentUpdateChecks({
+    configProvider: createConfigProvider({
+      agents: {
+        managed: {
+          "never-used-agent": {
+            update: "daily",
+          },
+          "recent-agent": {
+            update: "daily",
+          },
+          "stale-agent": {
+            update: "daily",
+          },
+        },
+      },
+    }),
+    agentInstallService: createAgentInstallService(async ({ agent }) => {
+      const agentId = typeof agent === "string" ? agent : agent.id
+      updatedAgentIds.push(agentId)
+      return {
+        agent: createInstalledAgent(agentId),
+        checkedAt: "2026-06-08T00:00:00.000Z",
+        updated: false,
+      }
+    }),
+    updateCheckStore: stateStore.store,
+    usageStore: usageStore.store,
+    logger: createLogger().logger,
+    now: () => Date.parse("2026-06-08T00:00:00.000Z"),
+  })
+
+  expect(updatedAgentIds).toEqual(["recent-agent"])
+  expect(stateStore.state["recent-agent"]?.checkedAt).toBe("2026-06-08T00:00:00.000Z")
+  expect(stateStore.state["never-used-agent"]).toBeUndefined()
+  expect(stateStore.state["stale-agent"]).toBeUndefined()
+})
+
 test("managed agent update checks record and log failed updates", async () => {
   const stateStore = createStateStore()
+  const usageStore = createUsageStore({
+    "managed-agent": {
+      lastUsedAt: "2026-06-07T00:00:00.000Z",
+    },
+  })
   const { logger, events } = createLogger()
 
   await runManagedAgentUpdateChecks({
@@ -244,6 +327,7 @@ test("managed agent update checks record and log failed updates", async () => {
       throw new Error("update failed")
     }),
     updateCheckStore: stateStore.store,
+    usageStore: usageStore.store,
     logger,
     now: () => Date.parse("2026-06-08T00:00:00.000Z"),
   })
@@ -272,6 +356,7 @@ test("managed agent update scheduler clears pending timers on close", () => {
       updated: false,
     })),
     updateCheckStore: createStateStore().store,
+    usageStore: createUsageStore().store,
     logger: createLogger().logger,
     setTimeout: () => {
       const timer = (nextTimerId += 1)

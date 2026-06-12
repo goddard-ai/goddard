@@ -19,6 +19,6 @@ This state is separate from acp-client managed agent installs.
 
 ## Managed Agent Installs
 
-`agents.managed` is daemon policy for acp-client-owned runtime install and update state. Managed agents can be installed before use or updated proactively by the daemon install service, while acp-client owns the persisted install metadata and runnable process-spec resolution.
+`agents.managed` is daemon policy for acp-client-owned runtime install and update state. Managed agents can be installed before use or updated proactively by the daemon install service after use in the last 30 days, while acp-client owns the persisted install metadata and runnable process-spec resolution.
 
 A managed agent can appear in launch listings even when it has no Goddard local adapter-install marker. In that case the adapter entry includes `managedInstall` status from the daemon install service.

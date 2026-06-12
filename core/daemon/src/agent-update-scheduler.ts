@@ -8,6 +8,11 @@ import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { getErrorMessage } from "radashi"
 
+import {
+  isManagedAgentActiveForProactiveUpdate,
+  type ManagedAgentUsageStore,
+} from "./managed-agent-usage.ts"
+
 type ManagedAgentUpdateRootConfig = {
   agents?: AgentsConfig
   registry?: Record<string, AgentDistribution>
@@ -37,6 +42,7 @@ type ManagedAgentUpdateSchedulerOptions = {
   readonly configProvider: DaemonConfigProvider<ManagedAgentUpdateRootConfig>
   readonly agentInstallService: DaemonAgentInstallService
   readonly updateCheckStore: ManagedAgentUpdateCheckStore
+  readonly usageStore: ManagedAgentUsageStore
   readonly logger: DaemonLogger
   readonly now?: () => number
   readonly setTimeout?: ManagedAgentUpdateSetTimeout
@@ -90,11 +96,16 @@ export async function runManagedAgentUpdateChecks(options: ManagedAgentUpdateSch
   const registry = rootConfig.config.registry
   const previousState = options.updateCheckStore.get() ?? {}
   const nextState: ManagedAgentUpdateCheckState = { ...previousState }
+  const usageState = options.usageStore.get() ?? {}
 
   for (const [agentId, managedAgent] of Object.entries(managedAgents).sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
     if (managedAgent.update !== "daily") {
+      continue
+    }
+
+    if (!isManagedAgentActiveForProactiveUpdate(usageState, agentId, nowMs)) {
       continue
     }
 

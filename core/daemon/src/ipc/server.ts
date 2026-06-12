@@ -28,6 +28,7 @@ import {
   isVerboseLogging,
   readSessionIdForLog,
 } from "../logging.ts"
+import type { ManagedAgentUsageStore } from "../managed-agent-usage.ts"
 import {
   getDaemonPluginComposition,
   openComposedDaemonStore,
@@ -60,7 +61,16 @@ export async function startDaemonServer(
   const ownsStore = options.store == null
 
   const registryService = createAcpRegistryService()
-  const agentInstallService = createAgentInstallService({ registryService })
+  const managedAgentUsageStore: ManagedAgentUsageStore = {
+    get: () => store.metadata.get("managedAgentUsage") ?? {},
+    set: (state) => {
+      store.metadata.set("managedAgentUsage", state)
+    },
+  }
+  const agentInstallService = createAgentInstallService({
+    registryService,
+    usageStore: managedAgentUsageStore,
+  })
   const agentUpdateScheduler = createManagedAgentUpdateScheduler({
     configProvider: {
       getRootConfig: configManager.getRootConfig,
@@ -73,6 +83,7 @@ export async function startDaemonServer(
         store.metadata.set("managedAgentUpdateChecks", state)
       },
     },
+    usageStore: managedAgentUsageStore,
     logger,
   })
   let daemonUrl: string | undefined
