@@ -275,6 +275,20 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     return menuBodyRef.current?.querySelector<HTMLElement>("[data-active='true']") ?? null
   }
 
+  function closeWhenFocusLeavesSelect(event: FocusEvent) {
+    const nextFocusTarget = event.relatedTarget
+
+    if (
+      nextFocusTarget instanceof Node &&
+        (triggerElementRef.current?.contains(nextFocusTarget) ||
+          menuBodyRef.current?.contains(nextFocusTarget))
+    ) {
+      return
+    }
+
+    props.open.value = false
+  }
+
   useEffect(() => {
     if (props.open.value && !wasOpenRef.current) {
       promptRestoreRef.current ??= captureFocusedSessionInputPrompt()
@@ -355,6 +369,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             capturePromptFocusBeforeOpen()
             props.open.value = !props.open.value
           }}
+          onBlur={closeWhenFocusLeavesSelect}
           onKeyDown={(event) => {
             if (props.disabled) {
               return
@@ -426,6 +441,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       <div
         ref={menuBodyRef}
         class={styles.menuBody}
+        onBlur={closeWhenFocusLeavesSelect}
         onPointerMove={updatePointerPosition}
         onKeyDown={(event) => {
           if (props.disabled) {
