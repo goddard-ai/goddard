@@ -57,7 +57,7 @@ export function WorkDrawerTranscriptRow(props: {
                 @if (item.kind === "thought") {
                   <article class={styles.workDrawerThought}>
                     <div class={styles.workDrawerItemHeading}>Thought</div>
-                    <div class={styles.workDrawerDetailText}>{item.text}</div>
+                    <p class={styles.workDrawerDetailText}>{item.text}</p>
                   </article>
                 } @else {
                   <article class={styles.workDrawerTool}>

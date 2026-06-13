@@ -365,6 +365,7 @@ export default {
   }),
 
   workDrawerDetailText: css({
+    margin: "0",
     color: "fg.muted",
     fontFamily: '"SF Pro Text", "Segoe UI", sans-serif',
     fontSize: "0.82rem",

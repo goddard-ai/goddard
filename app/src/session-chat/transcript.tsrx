@@ -308,7 +308,7 @@ function ThoughtTranscriptRow(props: {
     <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
       <div class={styles.rowColumn} style={{ width: "100%" }}>
         <article class={styles.thoughtCard}>
-          <div class={styles.workDrawerDetailText}>{props.message.text}</div>
+          <p class={styles.workDrawerDetailText}>{props.message.text}</p>
         </article>
       </div>
     </div>

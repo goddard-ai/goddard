@@ -435,9 +435,22 @@ test("buildSessionChatTranscript keeps active turn work inline in transcript ord
     },
   )
 
-  expect(
-    withoutTurnStopRows(createTranscriptMessages(session, turns)).map((message) => message.kind),
-  ).toEqual(["message", "message", "thought", "toolCall", "thought"])
+  expect(withoutTurnStopRows(createTranscriptMessages(session, turns))).toMatchObject([
+    { kind: "message" },
+    { kind: "message" },
+    {
+      kind: "thought",
+      text: "Checking transcript order.",
+    },
+    {
+      kind: "toolCall",
+      toolCallId: "tool-1",
+    },
+    {
+      kind: "thought",
+      text: "Tool result received.",
+    },
+  ])
 })
 
 test("buildSessionChatTranscript renders turn work before the turn assistant message", () => {
