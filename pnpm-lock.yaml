@@ -1059,14 +1059,14 @@ importers:
         specifier: "catalog:"
         version: 4.4.3
 
-  sdk-agent-loop-poc:
+  playground/agent-loop:
     dependencies:
       "@clack/prompts":
         specifier: "catalog:"
         version: 1.5.0
       "@goddard-ai/sdk":
         specifier: workspace:*
-        version: link:../core/sdk
+        version: link:../../core/sdk
       acp-client:
         specifier: "catalog:"
         version: 0.5.3(zod@4.4.3)
