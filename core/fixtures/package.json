@@ -20,5 +20,10 @@
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "test": "bun test --pass-with-no-tests --dots"
+  },
+  "dependencies": {
+    "@goddard-ai/inbox": "workspace:*",
+    "@goddard-ai/pull-request": "workspace:*",
+    "@goddard-ai/session": "workspace:*"
   }
 }
