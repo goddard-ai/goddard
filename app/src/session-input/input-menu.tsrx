@@ -76,22 +76,23 @@ export function SessionInputMenu(props: {
   onDismiss: () => void;
   suggestions: readonly SessionInputSuggestion[];
 }) @{
+  if (!props.menu) {
+    return null
+  }
+
+  const menu = props.menu!
   const open = useSignal(Boolean(props.menu))
 
   useEffect(() => {
     open.value = Boolean(props.menu)
   }, [open, props.menu])
 
-  if (!props.menu) {
-    return null
-  }
-
   <Popover
     anchor={() => ({
-      x: props.menu?.anchorLeft ?? 16,
-      y: props.menu?.anchorTop ?? 16,
+      x: menu.anchorLeft,
+      y: menu.anchorTop,
     })}
-    ariaLabel={getMenuHeading(props.menu.trigger)}
+    ariaLabel={getMenuHeading(menu.trigger)}
     blockOutsidePointer={false}
     class={inputMenuClass}
     closeOnEscape={true}
@@ -110,12 +111,8 @@ export function SessionInputMenu(props: {
     }}
   >
     <div ref={props.menuRef} class={inputMenuContentClass}>
-      <div class={inputMenuHeaderClass}>{getMenuHeading(props.menu.trigger)}</div>
-      <div
-        class={inputMenuListClass}
-        role="listbox"
-        aria-label={getMenuHeading(props.menu.trigger)}
-      >
+      <div class={inputMenuHeaderClass}>{getMenuHeading(menu.trigger)}</div>
+      <div class={inputMenuListClass} aria-label={getMenuHeading(menu.trigger)} role="listbox">
         @if (props.isLoadingSuggestions) {
           <div class={inputMenuEmptyClass}>
             <span
