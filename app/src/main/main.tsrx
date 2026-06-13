@@ -4,8 +4,8 @@ import { render } from "preact"
 
 import { AppShell } from "~/app-shell.tsrx"
 import { AppStateProvider } from "~/app-state-context.tsrx"
+import { LaunchableStates } from "~/dev/view.tsrx"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
-import { LaunchableStates } from "~/launchable-states/view.tsrx"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
 initializeDesktopHost()

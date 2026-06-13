@@ -47,6 +47,7 @@
   - Do not add optimistic UI or loading indicators for local form submissions.
 - Reuse shared SDK, daemon, schema, and config contracts instead of inventing app-only payloads or storage models.
 - Within `src/`:
+  - Put app-only development tooling, fixtures, and launchable-state wiring under `src/dev/`.
   - Keep feature components and their sigma state modules together inside feature folders. Do not add barrel modules there, and do not create `state/` subfolders.
   - Use all-lowercase kebab-case folder names for UI feature trees.
   - Use all-lowercase kebab-case component filenames and avoid repeating the parent feature name in child component names.

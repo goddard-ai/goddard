@@ -259,12 +259,12 @@ export const blockedSessionWorktreeResponse = {
   id: blockedSession.id,
   acpSessionId: blockedSession.acpSessionId,
   worktree: {
-    branchName: "codex/launchable-states",
+    branchName: "codex/dev-states",
     effectiveCwd: projectPath,
     poweredBy: "goddard",
     repoRoot: projectPath,
     requestedCwd: projectPath,
-    worktreeDir: "/Users/alec/.codex/worktrees/launchable-states/goddard-ai",
+    worktreeDir: "/Users/alec/.codex/worktrees/dev-states/goddard-ai",
   },
 } satisfies GetSessionWorktreeResponse
 
@@ -282,5 +282,5 @@ export const blockedSessionChangesResponse = {
     "+  }",
   ].join("\n"),
   hasChanges: true,
-  workspaceRoot: "/Users/alec/.codex/worktrees/launchable-states/goddard-ai",
+  workspaceRoot: "/Users/alec/.codex/worktrees/dev-states/goddard-ai",
 } satisfies GetSessionChangesResponse
