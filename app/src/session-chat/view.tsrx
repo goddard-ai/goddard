@@ -21,6 +21,7 @@ import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-mo
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
+import { WorktreeOpenButton } from "./worktree-open-button.tsrx"
 import { useShortcutRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { markInboxSessionVisited } from "~/inbox/session-visit.ts"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -332,6 +333,8 @@ function SessionChatHeaderActions(props: {
   }
 
   <>
+    <WorktreeOpenButton sessionId={props.chat.session.id} />
+
     <AppCommandTooltip
       command={AppCommand.sessionChat.skipToPreviousPrompt}
       label="Previous prompt"
