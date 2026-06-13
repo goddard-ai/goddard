@@ -77,7 +77,7 @@ export type SessionTranscriptToolCall = {
   locations: readonly SessionTranscriptToolLocation[]
 }
 
-/** One normalized thought chunk shown inside a turn work drawer. */
+/** One normalized thought chunk shown inline during active turns and inside completed turn drawers. */
 export type SessionTranscriptThought = {
   kind: "thought"
   id: string
@@ -177,6 +177,7 @@ export type SessionTranscriptTurnStop = {
 /** One transcript row shown inside the session chat surface. */
 export type SessionTranscriptItem =
   | SessionTranscriptTextMessage
+  | SessionTranscriptThought
   | SessionTranscriptWorkDrawer
   | SessionTranscriptToolCall
   | SessionTranscriptPermissionRequest

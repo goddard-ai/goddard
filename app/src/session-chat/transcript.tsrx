@@ -23,6 +23,7 @@ import type {
   SessionTranscriptPermissionRequest,
   SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
+  SessionTranscriptThought,
   SessionTranscriptToolCall,
   SessionTranscriptTurnStop,
   SessionTranscriptWorkDrawer,
@@ -54,15 +55,10 @@ export type TranscriptProps = {
 const OLDER_HISTORY_AUTO_LOAD_THRESHOLD = 320
 const PROMPT_NAVIGATION_TOP_GAP = 8
 
-type CoalescedToolTranscriptRow = {
-  kind: "toolGroup";
-  id: string;
-  toolCalls: readonly SessionTranscriptToolCall[];
-}
-
 type RenderTranscriptItem =
   | SessionTranscriptTextMessage
-  | CoalescedToolTranscriptRow
+  | SessionTranscriptThought
+  | SessionTranscriptToolCall
   | SessionTranscriptTurnStop
   | SessionTranscriptPermissionRequest
   | SessionTranscriptPlanUpdate
@@ -82,30 +78,19 @@ type TranscriptViewport = {
 
 function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
   const renderItems: RenderTranscriptItem[] = []
-  let pendingToolCalls: SessionTranscriptToolCall[] = []
-
-  const flushToolCalls = () => {
-    if (pendingToolCalls.length === 0) {
-      return
-    }
-
-    renderItems.push({
-      kind: "toolGroup",
-      id: `${pendingToolCalls[0]!.id}:group:${pendingToolCalls[pendingToolCalls.length - 1]!.id}`,
-      toolCalls: pendingToolCalls,
-    })
-    pendingToolCalls = []
-  }
 
   for (const message of messages) {
     if (message.kind === "toolCall") {
-      pendingToolCalls.push(message)
+      renderItems.push(message)
       continue
     }
 
-    flushToolCalls()
-
     if (message.kind === "turnStop") {
+      renderItems.push(message)
+      continue
+    }
+
+    if (message.kind === "thought") {
       renderItems.push(message)
       continue
     }
@@ -131,8 +116,6 @@ function coalesceTranscriptItems(messages: readonly TranscriptMessage[]) {
 
     renderItems.push(message)
   }
-
-  flushToolCalls()
 
   return renderItems
 }
@@ -248,8 +231,8 @@ function estimateRenderItemSize(item: RenderTranscriptItem | undefined, viewport
   return Math.max(
     1,
     Math.round(
-      item.kind === "toolGroup"
-        ? estimateToolGroupRowHeight(item.toolCalls, viewportWidth)
+      item.kind === "toolCall"
+        ? estimateToolGroupRowHeight([item], viewportWidth)
         : item.kind === "workDrawer"
           ? estimateTranscriptRowHeight(item, viewportWidth)
           : item.kind === "turnStop"
@@ -286,8 +269,10 @@ function TranscriptRow(props: {
 }) {
   const item = props.row.item
   switch (item.kind) {
-    case "toolGroup":
-      return <ToolTranscriptRow groupId={item.id} toolCalls={item.toolCalls} />
+    case "toolCall":
+      return <ToolTranscriptRow groupId={item.id} toolCalls={[item]} />
+    case "thought":
+      return <ThoughtTranscriptRow message={item} />
     case "permissionRequest":
       return <PermissionRequestTranscriptRow
         message={item}
@@ -314,6 +299,20 @@ function TranscriptRow(props: {
     default:
       throw new Error("Unsupported transcript row.")
   }
+}
+
+function ThoughtTranscriptRow(props: {
+  message: SessionTranscriptThought;
+}) @{
+  <article class={styles.row}>
+    <div class={styles.rowInner} style={{ justifyContent: "flex-start" }}>
+      <div class={styles.rowColumn} style={{ width: "100%" }}>
+        <article class={styles.thoughtCard}>
+          <div class={styles.workDrawerDetailText}>{props.message.text}</div>
+        </article>
+      </div>
+    </div>
+  </article>
 }
 
 function ThinkingLabel() @{

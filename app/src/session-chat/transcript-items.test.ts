@@ -372,6 +372,74 @@ test("buildSessionChatTranscript merges tool_call updates into one stable work d
   ])
 })
 
+test("buildSessionChatTranscript keeps active turn work inline in transcript order", () => {
+  const session = createSession(null)
+  const turns = createTurns(
+    [
+      {
+        jsonrpc: "2.0",
+        id: "prompt-1",
+        method: "session/prompt",
+        params: {
+          sessionId: session.acpSessionId,
+          prompt: [{ type: "text", text: "Inspect the transcript implementation." }],
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: session.acpSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Checking transcript order.",
+            },
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: session.acpSessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-1",
+            title: "Read transcript.tsrx",
+            kind: "read",
+            status: "completed",
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: session.acpSessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: "Tool result received.",
+            },
+          },
+        },
+      },
+    ],
+    {
+      completedAt: null,
+      completionKind: null,
+      stopReason: null,
+    },
+  )
+
+  expect(
+    withoutTurnStopRows(createTranscriptMessages(session, turns)).map((message) => message.kind),
+  ).toEqual(["message", "message", "thought", "toolCall", "thought"])
+})
+
 test("buildSessionChatTranscript renders turn work before the turn assistant message", () => {
   const session = createSession(null)
   const turns = createTurns([

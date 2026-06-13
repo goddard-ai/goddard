@@ -3,6 +3,7 @@ import type {
   SessionTranscriptPermissionRequest,
   SessionTranscriptPlanUpdate,
   SessionTranscriptTextMessage,
+  SessionTranscriptThought,
   SessionTranscriptToolContent,
   SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
@@ -175,6 +176,10 @@ function estimatePlanUpdateRowHeight(message: SessionTranscriptPlanUpdate, maxWi
   return META_HEIGHT + BUBBLE_PADDING_Y + approximateLineCount * BODY_LINE_HEIGHT + ROW_GAP + 32
 }
 
+function estimateThoughtRowHeight(message: SessionTranscriptThought, maxWidth: number) {
+  return estimateLineCount(message.text, maxWidth) * BODY_LINE_HEIGHT + ROW_GAP + 16
+}
+
 function estimateWorkDrawerRowHeight(message: SessionTranscriptWorkDrawer, maxWidth: number) {
   let approximateLineCount = 1 + estimateLineCount(message.title, maxWidth)
 
@@ -224,6 +229,10 @@ export function estimateTranscriptRowHeight(message: SessionTranscriptItem, view
 
   if (message.kind === "planUpdate") {
     return estimatePlanUpdateRowHeight(message, textWidth)
+  }
+
+  if (message.kind === "thought") {
+    return estimateThoughtRowHeight(message, textWidth)
   }
 
   if (message.kind === "workDrawer") {

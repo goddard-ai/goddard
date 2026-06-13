@@ -383,6 +383,17 @@ export default {
     whiteSpace: "pre-wrap",
   }),
 
+  thoughtCard: css({
+    display: "grid",
+    width: "min(100%, 760px)",
+    border: "1px solid token(colors.border)",
+    borderRadius: "8px",
+    paddingBlock: "10px",
+    paddingInline: "12px",
+    backgroundColor: "surface",
+    color: "fg.default",
+  }),
+
   permissionCard: css({
     display: "grid",
     gap: "12px",

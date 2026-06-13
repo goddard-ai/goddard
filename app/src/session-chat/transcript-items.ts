@@ -1065,7 +1065,7 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     turn: SessionHistoryTurn,
     turnWorkItems: readonly (SessionTranscriptThought | SessionTranscriptToolCall)[],
   ) {
-    if (turnWorkItems.length === 0) {
+    if (turn.completedAt === null || turnWorkItems.length === 0) {
       return
     }
 
@@ -1152,7 +1152,10 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
   for (const [turnIndex, turn] of input.turns.entries()) {
     const isStreamingTurn = turn.completedAt === null
     const permissionResponsesByRequestId = buildPermissionResponsesByRequestId(turn.messages)
-    const turnWorkItems: Array<SessionTranscriptThought | SessionTranscriptToolCall> = []
+    const turnWorkItems: Array<SessionTranscriptThought | SessionTranscriptToolCall> =
+      isStreamingTurn
+        ? (messages as Array<SessionTranscriptThought | SessionTranscriptToolCall>)
+        : []
     const turnToolRowIndexes = new Map<string, number>()
 
     for (const [messageIndex, message] of turn.messages.entries()) {
