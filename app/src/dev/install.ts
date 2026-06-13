@@ -1,3 +1,4 @@
+import type { Protected } from "preact-sigma"
 import {
   defineLaunchableState,
   mountStateLauncher,
@@ -5,6 +6,12 @@ import {
   type LaunchCleanup,
 } from "state-launcher"
 
+import { getInboxListRequest } from "~/inbox/queries.ts"
+import { queryClient } from "~/lib/query.ts"
+import type { MainTab } from "~/main-tab.ts"
+import { goddardSdk } from "~/sdk.ts"
+import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
+import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import {
   blockedSession,
   blockedSessionChangesResponse,
@@ -15,16 +22,10 @@ import {
   inboxAttentionResponse,
   reviewPullRequestResponse,
 } from "./query-results.ts"
-import { getInboxListRequest } from "~/inbox/queries.ts"
-import { queryClient } from "~/lib/query.ts"
-import type { MainTab } from "~/main-tab.ts"
-import { goddardSdk } from "~/sdk.ts"
-import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
-import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 
 type LaunchableStateDeps = {
-  mainTab: MainTab
-  workbenchTabSet: WorkbenchTabSet
+  mainTab: Protected<MainTab>
+  workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
 let activeInstallCleanup: (() => void) | null = null
@@ -44,11 +45,7 @@ function injectCriticalSessionQueries() {
       [{ limit: SESSION_LIST_LIMIT }],
       criticalSessionsResponse,
     ),
-    queryClient.injectData(
-      goddardSdk.inbox.list,
-      [getInboxListRequest()],
-      inboxAttentionResponse,
-    ),
+    queryClient.injectData(goddardSdk.inbox.list, [getInboxListRequest()], inboxAttentionResponse),
     queryClient.injectData(
       goddardSdk.pr.get,
       [{ id: reviewPullRequestResponse.pullRequest.id }],
@@ -120,11 +117,7 @@ function createLaunchableStates(deps: LaunchableStateDeps) {
     },
   })
 
-  return [
-    inboxAttentionQueue,
-    sessionsCriticalQueue,
-    sessionBlockedWithChanges,
-  ]
+  return [inboxAttentionQueue, sessionsCriticalQueue, sessionBlockedWithChanges]
 }
 
 export function installLaunchableStates(deps: LaunchableStateDeps) {

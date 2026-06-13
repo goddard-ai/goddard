@@ -64,6 +64,7 @@
   },
   "devDependencies": {
     "@babel/plugin-proposal-decorators": "^7.29.0",
+    "@goddard-ai/fixtures": "workspace:*",
     "@happy-dom/global-registrator": "catalog:",
     "@pandacss/dev": "catalog:",
     "@preact/preset-vite": "^2.10.5",
