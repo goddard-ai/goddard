@@ -11,6 +11,7 @@ import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
+import { captureFocusedSessionInputPrompt } from "./prompt-focus.ts"
 import styles from "./select-menu.style.ts"
 
 type SelectItemIconProps = {
@@ -94,6 +95,8 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ignorePointerHoverRef = useRef(false)
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
+  const promptRestoreRef = useRef<(() => void) | null>(null)
+  const wasOpenRef = useRef(props.open.value)
 
   const searchableItems = useMemo(
     () => props.items.map(
@@ -187,6 +190,14 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     props.open.value = false
   }
 
+  function capturePromptFocusBeforeOpen() {
+    if (props.open.value || promptRestoreRef.current) {
+      return
+    }
+
+    promptRestoreRef.current = captureFocusedSessionInputPrompt()
+  }
+
   const navigation = useSearchNavigation({
     activeAttribute: "data-active",
     count: () => filteredItems.length,
@@ -265,6 +276,24 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   }
 
   useEffect(() => {
+    if (props.open.value && !wasOpenRef.current) {
+      promptRestoreRef.current ??= captureFocusedSessionInputPrompt()
+    }
+
+    if (!props.open.value && wasOpenRef.current) {
+      const restorePromptFocus = promptRestoreRef.current
+
+      promptRestoreRef.current = null
+
+      if (restorePromptFocus) {
+        restorePromptFocus()
+      }
+    }
+
+    wasOpenRef.current = props.open.value
+  }, [props.open.value])
+
+  useEffect(() => {
     if (!props.open.value) {
       setQuery("")
       navigation.resetActiveIndex()
@@ -321,7 +350,9 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
           data-compact={props.compact}
           disabled={props.disabled}
           type="button"
+          onPointerDown={capturePromptFocusBeforeOpen}
           onClick={() => {
+            capturePromptFocusBeforeOpen()
             props.open.value = !props.open.value
           }}
           onKeyDown={(event) => {
@@ -331,6 +362,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
             if (event.key === "ArrowDown") {
               event.preventDefault()
+              capturePromptFocusBeforeOpen()
               props.open.value = true
               return
             }

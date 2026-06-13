@@ -19,6 +19,7 @@ import {
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import { SessionInputPlugins, sessionInputInitialConfig } from "./input-lexical.tsrx"
 import { SessionInputMenu } from "./input-menu.tsrx"
+import { registerSessionInputPromptFocus } from "./prompt-focus.ts"
 
 export type SessionInputSuggestion = SessionComposerSuggestionsResponse["suggestions"][number]
 export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
@@ -66,6 +67,7 @@ export function SessionInput(props: {
   const formElementRef = useRef<HTMLFormElement>(null)
   const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
+  const unregisterPromptFocusRef = useRef<(() => void) | null>(null)
   const dismissedMenuRef = useRef<DismissedMenuState | null>(null)
   const [promptBlocks, setPromptBlocks] = useState<SessionInputPromptBlocks>(
     () => props.initialPrompt ?? [],
@@ -246,6 +248,11 @@ export function SessionInput(props: {
   }
 
   function registerEditor(editor: LexicalEditor) {
+    if (editorRef.current !== editor) {
+      unregisterPromptFocusRef.current?.()
+      unregisterPromptFocusRef.current = registerSessionInputPromptFocus(editor)
+    }
+
     editorRef.current = editor
     setSessionInputEditorPrompt(editor, promptBlocks)
 
@@ -253,6 +260,14 @@ export function SessionInput(props: {
       focusEditor()
     }
   }
+
+  useEffect(
+    () => () => {
+      unregisterPromptFocusRef.current?.()
+      unregisterPromptFocusRef.current = null
+    },
+    [],
+  )
 
   function dismissMenuFromEditor() {
     hideMenu({

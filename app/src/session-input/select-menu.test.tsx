@@ -10,6 +10,27 @@ mock.module("lucide-react", () => ({
   LoaderCircle: (props: preact.SVGAttributes<SVGSVGElement>) => <svg {...props} />,
 }))
 
+let captureFocusedPrompt = false
+let captureFocusedPromptCalls = 0
+let restoreFocusedPromptCalls = 0
+
+mock.module("./prompt-focus.ts", () => ({
+  captureFocusedSessionInputPrompt() {
+    captureFocusedPromptCalls += 1
+
+    if (!captureFocusedPrompt) {
+      return null
+    }
+
+    return () => {
+      restoreFocusedPromptCalls += 1
+    }
+  },
+  registerSessionInputPromptFocus() {
+    return () => {}
+  },
+}))
+
 const { SessionInputSelect } = await import("./select-menu.tsrx")
 
 async function flushEffects() {
@@ -19,6 +40,10 @@ async function flushEffects() {
 }
 
 test("SessionInputSelect focuses the active option when a non-searchable menu opens", async () => {
+  captureFocusedPrompt = false
+  captureFocusedPromptCalls = 0
+  restoreFocusedPromptCalls = 0
+
   const container = document.createElement("div")
   const menuRoot = document.createElement("div")
   const open = signal(true)
@@ -52,6 +77,60 @@ test("SessionInputSelect focuses the active option when a non-searchable menu op
 
   expect(activeOption?.textContent).toContain("Beta")
   expect(document.activeElement).toBe(activeOption)
+
+  render(null, container)
+})
+
+test("SessionInputSelect restores a focused prompt after the menu closes", async () => {
+  captureFocusedPrompt = true
+  captureFocusedPromptCalls = 0
+  restoreFocusedPromptCalls = 0
+
+  const container = document.createElement("div")
+  const menuRoot = document.createElement("div")
+  const open = signal(false)
+
+  document.body.append(container, menuRoot)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
+
+  await act(async () => {
+    render(
+      <SessionInputSelect
+        filterable={false}
+        items={[
+          { value: "alpha", label: "Alpha" },
+          { value: "beta", label: "Beta" },
+        ]}
+        label="Mode"
+        open={open}
+        placeholder="Choose mode"
+        value="alpha"
+        onValueChange={() => {}}
+      />,
+      container,
+    )
+  })
+
+  const trigger = container.querySelector<HTMLButtonElement>("button[aria-label='Mode: Alpha']")
+
+  await act(async () => {
+    trigger?.click()
+  })
+  await flushEffects()
+
+  const betaOption = Array.from(menuRoot.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes("Beta"),
+  )
+
+  await act(async () => {
+    betaOption?.click()
+  })
+  await flushEffects()
+
+  expect(captureFocusedPromptCalls).toBe(1)
+  expect(restoreFocusedPromptCalls).toBe(1)
 
   render(null, container)
 })
