@@ -43,6 +43,7 @@ export async function pushLandingDiagnostics(
     reviewCommit,
     targetCommit,
     diagnostics,
+    { requireApprovedReviewMatch: true },
   )
   if (
     state &&
@@ -76,6 +77,7 @@ export async function pushCleanupDiagnostics(
     reviewCommit,
     targetCommit,
     diagnostics,
+    { requireApprovedReviewMatch: false },
   )
   if (
     state &&
@@ -101,6 +103,7 @@ async function pushSharedFinalizedDiagnostics(
   reviewCommit: string | null,
   targetCommit: string | null,
   diagnostics: SprintDiagnostic[],
+  options: { requireApprovedReviewMatch: boolean },
 ) {
   const workingTree = await getWorkingTreeStatus(rootDir)
   if (!workingTree.clean) {
@@ -129,8 +132,10 @@ async function pushSharedFinalizedDiagnostics(
     return
   }
 
-  const approvedCommit = await getBranchHead(rootDir, state.branches.approved)
   const nextCommit = await getBranchHead(rootDir, state.branches.next)
+  const approvedCommit = options.requireApprovedReviewMatch
+    ? await getBranchHead(rootDir, state.branches.approved)
+    : null
 
   if (state.conflict) {
     diagnostics.push({
@@ -161,14 +166,19 @@ async function pushSharedFinalizedDiagnostics(
       message: `Review branch ${state.branches.review} does not exist.`,
     })
   }
-  if (!approvedCommit) {
+  if (options.requireApprovedReviewMatch && !approvedCommit) {
     diagnostics.push({
       severity: "error",
       code: "approved_branch_missing",
       message: `Approved branch ${state.branches.approved} does not exist.`,
     })
   }
-  if (reviewCommit && approvedCommit && reviewCommit !== approvedCommit) {
+  if (
+    options.requireApprovedReviewMatch &&
+    reviewCommit &&
+    approvedCommit &&
+    reviewCommit !== approvedCommit
+  ) {
     diagnostics.push({
       severity: "error",
       code: "review_approved_mismatch",

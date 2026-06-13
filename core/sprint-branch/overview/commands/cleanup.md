@@ -29,10 +29,13 @@
   - The target branch is not advanced by cleanup.
 
 - **Guardrails**
-  - The target branch must contain the finalized review commit.
+  - The target branch must contain the review branch's HEAD commit.
     - With `--force`, this blocker becomes a warning and sprint branches are
       force-deleted.
-  - The sprint must be finalized.
+  - Cleanup does not compare `approved` and `review`, and it does not require
+    the `approved` branch to exist.
+  - The sprint must have no active `review` task, active `next` task, recorded
+    conflict, or active sprint stash.
   - An obsolete `next` branch accepted during finalization remains a warning
     only while its recorded commit still matches the finalized state.
   - The working tree must be clean.

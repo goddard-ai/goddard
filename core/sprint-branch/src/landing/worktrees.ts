@@ -6,7 +6,10 @@ import type { SprintBranchWorktree, WorktreeEntry } from "./types"
 
 /** Lists recorded sprint branches that cleanup can delete after landing. */
 export async function cleanupBranches(rootDir: string, state: SprintBranchState) {
-  const branches = [state.branches.review, state.branches.approved]
+  const branches = [state.branches.review]
+  if (await branchExists(rootDir, state.branches.approved)) {
+    branches.push(state.branches.approved)
+  }
   if (await branchExists(rootDir, state.branches.next)) {
     branches.push(state.branches.next)
   }

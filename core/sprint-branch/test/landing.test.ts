@@ -310,6 +310,31 @@ describe("sprint-branch human landing commands", () => {
     expect(worktreesToDetach).toContain(await fs.realpath(repo))
   })
 
+  test("allows cleanup when target contains review but approved differs", async () => {
+    const repo = await createReviewLandedAheadOfApproved()
+
+    const result = await runCli(repo, ["cleanup", "main", "example", "--dry-run", "--json"])
+    const cleanup = JSON.parse(result.stdout) as HumanCommandOutput
+
+    expect(result.exitCode).toBe(0)
+    expect(cleanup.ok).toBe(true)
+    expect(diagnosticCodes(cleanup)).not.toContain("review_approved_mismatch")
+    expect(cleanup.branchesToDelete).toContain("sprint/example/approved")
+  })
+
+  test("allows cleanup when target contains review and approved is missing", async () => {
+    const repo = await createReviewLandedAheadOfApproved()
+    await git(repo, ["branch", "-D", "sprint/example/approved"])
+
+    const result = await runCli(repo, ["cleanup", "main", "example", "--dry-run", "--json"])
+    const cleanup = JSON.parse(result.stdout) as HumanCommandOutput
+
+    expect(result.exitCode).toBe(0)
+    expect(cleanup.ok).toBe(true)
+    expect(diagnosticCodes(cleanup)).not.toContain("approved_branch_missing")
+    expect(cleanup.branchesToDelete).not.toContain("sprint/example/approved")
+  })
+
   // The interactive cleanup command confirms with a human before calling this operation.
   // Testing the confirmed operation directly keeps the prompt policy intact while still
   // proving cleanup detaches branch worktrees, then removes sprint refs and Git-private
@@ -444,6 +469,20 @@ async function createFinalizedReviewAheadOfMain() {
   await commitAll(repo, "add finalized sprint work")
   await git(repo, ["branch", "-f", "sprint/example/approved", "sprint/example/review"])
   await git(repo, ["checkout", "main"])
+  return repo
+}
+
+async function createReviewLandedAheadOfApproved() {
+  const repo = await createSprintRepo("example", {
+    review: null,
+    next: null,
+    approved: ["010-task-name"],
+  })
+  await git(repo, ["checkout", "sprint/example/review"])
+  await fs.writeFile(path.join(repo, "final.txt"), "finalized\n")
+  await commitAll(repo, "add finalized sprint work")
+  await git(repo, ["checkout", "main"])
+  await git(repo, ["merge", "--ff-only", "sprint/example/review"])
   return repo
 }
 
