@@ -1,5 +1,5 @@
 import path from "node:path"
-import { autocomplete, isCancel } from "@clack/prompts"
+import { autocomplete, autocompleteMultiselect, isCancel } from "@clack/prompts"
 
 import { hasDiagnosticErrors } from "../diagnostics"
 import { getBranchHead } from "../git/refs"
@@ -91,6 +91,67 @@ export async function resolveSprintCandidate(
   }
 
   return promptCandidates.find((candidate) => candidate.sprint === selected) ?? null
+}
+
+/** Resolves one or more sprint states an interactive cleanup command should operate on. */
+export async function resolveCleanupCandidates(
+  rootDir: string,
+  input: HumanCommandInput,
+  currentBranch: string | null,
+  diagnostics: SprintDiagnostic[],
+) {
+  if (input.sprint || input.lastSprint) {
+    const candidate = await resolveSprintCandidate(rootDir, input, currentBranch, diagnostics)
+    return candidate ? [candidate] : []
+  }
+
+  const candidates = await readSprintCandidates(rootDir, true)
+  const inferred = inferCandidate(rootDir, input.cwd, currentBranch, candidates)
+  if (inferred) {
+    return [inferred]
+  }
+
+  const promptCandidates = candidates.filter((candidate) => candidate.state.visibility === "active")
+  if (promptCandidates.length === 0) {
+    diagnostics.push({
+      severity: "error",
+      code: "missing_sprint_state",
+      message: "No active Git metadata sprint-branch/*/state.json files were found.",
+    })
+    return []
+  }
+  if (input.json || !process.stdin.isTTY || !process.stdout.isTTY) {
+    diagnostics.push({
+      severity: "error",
+      code: "sprint_selection_required",
+      message:
+        "No sprint could be inferred from a sprint branch or sprints/<name>. Pass the sprint name as an argument.",
+    })
+    return []
+  }
+
+  const selected = await autocompleteMultiselect({
+    message: "Select sprint(s) to clean up",
+    placeholder: "Type to filter sprints...",
+    required: true,
+    options: promptCandidates.map((candidate) => ({
+      value: candidate.sprint,
+      label: candidate.sprint,
+      hint: candidate.reviewBranch,
+    })),
+  })
+
+  if (isCancel(selected)) {
+    diagnostics.push({
+      severity: "error",
+      code: "sprint_selection_cancelled",
+      message: "Sprint selection cancelled.",
+    })
+    return []
+  }
+
+  const selectedSprints = new Set(selected)
+  return promptCandidates.filter((candidate) => selectedSprints.has(candidate.sprint))
 }
 
 /** Lists available sprint candidates for non-interactive diagnostics. */

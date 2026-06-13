@@ -5,7 +5,7 @@ import type { SprintCleanupReport, SprintLandReport } from "./types"
 export function formatHumanCommandReport(report: SprintLandReport | SprintCleanupReport) {
   const lines = [
     `${report.dryRun ? "Dry run" : report.executed ? "Executed" : "Planned"}: ${report.command}`,
-    `Sprint: ${report.sprint ?? "unknown"}`,
+    `Sprint: ${report.sprints?.length ? report.sprints.join(", ") : (report.sprint ?? "unknown")}`,
     `Target branch: ${report.targetBranch}`,
     `Current branch: ${report.currentBranch ?? "detached HEAD"}`,
     `Review branch: ${report.reviewBranch ?? "unknown"}`,

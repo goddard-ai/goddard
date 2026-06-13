@@ -54,6 +54,7 @@ export type HumanCommandReport = {
   dryRun: boolean
   executed: boolean
   sprint: string | null
+  sprints?: string[]
   targetBranch: string
   currentBranch: string | null
   reviewBranch: string | null

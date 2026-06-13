@@ -8,6 +8,9 @@
     review commit.
   - Uses [standard sprint selection](../sprint-selection.md).
   - The optional `name` argument is this command's explicit sprint selector.
+  - When no sprint can be inferred and cleanup prompts interactively, multiple
+    active sprints may be selected and cleaned up together.
+  - Explicit `name` and `--last` selection still select one sprint.
   - `--force` allows cleanup when the target does not contain the finalized
     review commit.
 
@@ -44,6 +47,7 @@
   - Real execution is not available in JSON or non-interactive mode.
   - Non-interactive JSON output is available for `--dry-run` inspection.
   - `--force` does not bypass the interactive confirmation requirement.
+  - Multi-sprint selection is available only from the interactive prompt.
   - Dry run reports what would be detached or removed without changing
     worktrees, deleting branches, deleting private sprint state, or deleting the
     sprint folder backup.

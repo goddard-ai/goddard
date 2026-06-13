@@ -8,7 +8,11 @@ import { getBranchHead } from "./git/refs"
 import { getCurrentBranch, resolveRepositoryRoot } from "./git/repository"
 import { confirmHumanAction } from "./landing/confirmation"
 import { handleHumanGitError } from "./landing/report"
-import { candidatesForOutput, resolveSprintCandidate } from "./landing/selection"
+import {
+  candidatesForOutput,
+  resolveCleanupCandidates,
+  resolveSprintCandidate,
+} from "./landing/selection"
 import type {
   CleanupInput,
   LandInput,
@@ -143,17 +147,37 @@ export async function runCleanup(input: CleanupInput) {
   const rootDir = await resolveRepositoryRoot(input.cwd)
   const currentBranch = await getCurrentBranch(rootDir)
   const diagnostics: SprintDiagnostic[] = []
-  const candidate = await resolveSprintCandidate(rootDir, input, currentBranch, diagnostics)
-  const state = candidate?.state ?? null
-  const reviewBranch = state?.branches.review ?? null
-  const reviewCommit = reviewBranch ? await getBranchHead(rootDir, reviewBranch) : null
   const targetCommit = await getBranchHead(rootDir, input.target)
-  const branchesToDelete = state ? await cleanupBranches(rootDir, state) : []
-  const stateFileToRemove = state ? sprintStateDisplayPath(state.sprint) : null
-  const backupPathToRemove = state ? sprintBackupDisplayPath(state.sprint) : null
-  const worktreesToDetach = state
-    ? await sprintBranchWorktrees(rootDir, branchesToDelete, diagnostics)
-    : []
+  const candidates = await resolveCleanupCandidates(rootDir, input, currentBranch, diagnostics)
+  const cleanupPlans = await Promise.all(
+    candidates.map(async (candidate) => {
+      const state = candidate.state
+      const branchesToDelete = await cleanupBranches(rootDir, state)
+      const worktreesToDetach = await sprintBranchWorktrees(rootDir, branchesToDelete, diagnostics)
+      const reviewCommit = await getBranchHead(rootDir, state.branches.review)
+      await pushCleanupDiagnostics(
+        rootDir,
+        input,
+        state,
+        reviewCommit,
+        targetCommit,
+        branchesToDelete,
+        diagnostics,
+      )
+      return {
+        state,
+        reviewCommit,
+        branchesToDelete,
+        worktreesToDetach,
+      }
+    }),
+  )
+  dedupeDiagnostics(diagnostics)
+
+  const primaryPlan = cleanupPlans[0] ?? null
+  const selectedSprints = cleanupPlans.map((plan) => plan.state.sprint)
+  const branchesToDelete = cleanupPlans.flatMap((plan) => plan.branchesToDelete)
+  const worktreesToDetach = cleanupPlans.flatMap((plan) => plan.worktreesToDetach)
   const branchDeleteFlag = input.force ? "-D" : "-d"
   const gitOperations = [
     ...worktreesToDetach.map(
@@ -162,36 +186,27 @@ export async function runCleanup(input: CleanupInput) {
     ...branchesToDelete.map((branch) => `git branch ${branchDeleteFlag} ${branch}`),
   ]
 
-  await pushCleanupDiagnostics(
-    rootDir,
-    input,
-    state,
-    reviewCommit,
-    targetCommit,
-    branchesToDelete,
-    diagnostics,
-  )
-
   const report = {
     ok: !hasDiagnosticErrors(diagnostics),
     command: "cleanup" as const,
     dryRun: input.dryRun,
     executed: false,
-    sprint: state?.sprint ?? null,
+    sprint: selectedSprints.length === 1 ? selectedSprints[0] : null,
+    sprints: selectedSprints,
     targetBranch: input.target,
     currentBranch,
-    reviewBranch,
-    reviewCommit,
+    reviewBranch: cleanupPlans.length === 1 ? (primaryPlan?.state.branches.review ?? null) : null,
+    reviewCommit: cleanupPlans.length === 1 ? (primaryPlan?.reviewCommit ?? null) : null,
     gitOperations,
     diagnostics,
-    candidates: candidate ? [] : await candidatesForOutput(rootDir),
+    candidates: candidates.length > 0 ? [] : await candidatesForOutput(rootDir),
     branchesToDelete,
     worktreesToDetach,
-    stateFilesToRemove: stateFileToRemove ? [stateFileToRemove] : [],
-    backupPathsToRemove: backupPathToRemove ? [backupPathToRemove] : [],
+    stateFilesToRemove: cleanupPlans.map((plan) => sprintStateDisplayPath(plan.state.sprint)),
+    backupPathsToRemove: cleanupPlans.map((plan) => sprintBackupDisplayPath(plan.state.sprint)),
   } satisfies SprintCleanupReport
 
-  if (input.dryRun || !report.ok || !state) {
+  if (input.dryRun || !report.ok || cleanupPlans.length === 0) {
     return report
   }
   if (!(await confirmHumanAction(input, diagnostics, "Delete landed sprint branches?"))) {
@@ -203,7 +218,15 @@ export async function runCleanup(input: CleanupInput) {
   }
 
   try {
-    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToDetach, input.force)
+    for (const plan of cleanupPlans) {
+      await executeCleanupOperations(
+        rootDir,
+        plan.state,
+        plan.branchesToDelete,
+        plan.worktreesToDetach,
+        input.force,
+      )
+    }
     return { ...report, executed: true } satisfies SprintCleanupReport
   } catch (error) {
     return handleHumanGitError(report, error)
@@ -245,4 +268,23 @@ function isTargetBranchUsedByAnotherWorktree(error: unknown, targetBranch: strin
     error.args[1] === targetBranch &&
     error.stderr.includes(`'${targetBranch}' is already used by worktree`)
   )
+}
+
+function dedupeDiagnostics(diagnostics: SprintDiagnostic[]) {
+  const seen = new Set<string>()
+  for (let index = 0; index < diagnostics.length; index += 1) {
+    const diagnostic = diagnostics[index]
+    const key = [
+      diagnostic.severity,
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.suggestion ?? "",
+    ].join("\0")
+    if (seen.has(key)) {
+      diagnostics.splice(index, 1)
+      index -= 1
+      continue
+    }
+    seen.add(key)
+  }
 }

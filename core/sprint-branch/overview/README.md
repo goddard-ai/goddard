@@ -66,6 +66,7 @@
   - [`cleanup`](./commands/cleanup.md)
     - Detach sprint branch worktrees, then remove landed sprint branches and
       state.
+    - Interactive prompts can select multiple sprints for cleanup.
     - Audience: humans.
     - Mutates: local sprint branches, sprint branch worktree checkouts, and
       sprint state.
