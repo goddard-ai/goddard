@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/inbox/schema"
+import { createFixtureInboxItem } from "@goddard-ai/fixtures"
 import { expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
@@ -23,21 +23,6 @@ mock.module("lucide-react", () => ({
   MessageSquare: Icon,
   X: Icon,
 }))
-
-function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return {
-    id: input.id ?? `inb_${input.entityId}`,
-    entityId: input.entityId,
-    reason: input.reason ?? "session.turn_ended",
-    status: input.status ?? "unread",
-    priority: input.priority ?? "normal",
-    updatedAt: input.updatedAt ?? Date.now(),
-    readAt: input.readAt ?? null,
-    scope: input.scope ?? "Inbox automation",
-    headline: input.headline ?? "Review the latest result",
-    turnId: input.turnId ?? null,
-  }
-}
 
 function renderInboxList(element: preact.ComponentChildren) {
   const container = document.createElement("div")
@@ -113,7 +98,14 @@ test("InboxList renders loading, error, empty, and populated states from observa
     >
       <InboxList
         filterId="unread"
-        items={[createInboxItem({ entityId: "ses_session_1" })]}
+        items={[
+          createFixtureInboxItem({
+            entityId: "ses_session_1",
+            headline: "Review the latest result",
+            scope: "Inbox automation",
+            updatedAt: Date.now(),
+          }),
+        ]}
         searchQuery=""
         selectedEntityIds={new Set(["ses_session_1"])}
       />

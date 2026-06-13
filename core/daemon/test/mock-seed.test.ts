@@ -40,15 +40,16 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const sessions = await send(client, "session.list", { limit: 10 })
-  expect(sessions.sessions).toHaveLength(8)
+  const sessions = await send(client, "session.list", { limit: 20 })
+  expect(sessions.sessions).toHaveLength(12)
   expect(sessions.sessions.every((session: any) => !session.activeDaemonSession)).toBe(true)
   expect(sessions.sessions.every((session: any) => session.connectionMode !== "live")).toBe(true)
   expect(new Set(sessions.sessions.map((session: any) => session.status))).toEqual(
-    new Set(["archived", "blocked", "cancelled", "done", "error", "idle"]),
+    new Set(["active", "archived", "blocked", "cancelled", "done", "error", "idle"]),
   )
   expect(sessions.sessions.some((session: any) => session.repository === null)).toBe(true)
   expect(sessions.sessions.some((session: any) => session.contextUsage?.used > 190_000)).toBe(true)
+  expect(sessions.sessions.some((session: any) => session.id === "ses_launch_blocked")).toBe(true)
 
   await expect(send(client, "session.connect", { id: "ses_mock_review_boundary" })).rejects.toThrow(
     /archived/i,
@@ -62,15 +63,18 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   })
   expect(history.turns).toHaveLength(2)
 
+  const launchableHistory = await send(client, "session.history", { id: "ses_launch_blocked" })
+  expect(launchableHistory.turns).toHaveLength(1)
+
   const contextLimit = await send(client, "session.get", { id: "ses_mock_context_limit" })
   expect(contextLimit.session.models?.availableModels).toHaveLength(2)
   expect(contextLimit.session.configOptions).toHaveLength(1)
 
   const inbox = await send(client, "inbox.list", {
     statuses: ["unread", "read", "saved", "archived", "replied", "completed"],
-    limit: 10,
+    limit: 20,
   })
-  expect(inbox.items).toHaveLength(10)
+  expect(inbox.items).toHaveLength(13)
   expect(new Set(inbox.items.map((item: any) => item.status))).toEqual(
     new Set(["unread", "read", "saved", "archived", "replied", "completed"]),
   )
@@ -94,6 +98,13 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
     repo: "docs",
     prNumber: 7,
   })
+  const launchablePullRequest = await send(client, "pr.get", { id: "pr_launch_review" })
+  expect(launchablePullRequest.pullRequest).toMatchObject({
+    host: "github",
+    owner: "goddard-ai",
+    repo: "goddard-ai",
+    prNumber: 128,
+  })
 })
 
 test("seed mock reset is mock-profile only and repeated seeding does not duplicate records", async () => {
@@ -109,11 +120,11 @@ test("seed mock reset is mock-profile only and repeated seeding does not duplica
   process.env.GODDARD_DATA_PROFILE = "mock"
   const store = openComposedDaemonStore()
   try {
-    expect(store.sessions.findMany()).toHaveLength(8)
-    expect(store.sessionTurns.findMany()).toHaveLength(7)
-    expect(store.inboxItems.findMany()).toHaveLength(10)
+    expect(store.sessions.findMany()).toHaveLength(12)
+    expect(store.sessionTurns.findMany()).toHaveLength(8)
+    expect(store.inboxItems.findMany()).toHaveLength(13)
     const pullRequests = store.pullRequests.findMany()
-    expect(pullRequests).toHaveLength(5)
+    expect(pullRequests).toHaveLength(6)
     expect(new Set(pullRequests.map((pullRequest) => pullRequest.repo))).toEqual(
       new Set(["developer-tools", "docs", "goddard-ai"]),
     )

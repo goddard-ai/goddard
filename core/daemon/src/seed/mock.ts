@@ -1,6 +1,13 @@
 import { rmSync } from "node:fs"
+import {
+  createBlockedSessionScenario,
+  createInboxAttentionQueueScenario,
+  createSessionTriageQueueScenario,
+} from "@goddard-ai/fixtures"
+import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { getDatabasePath } from "@goddard-ai/paths/node"
-import type { DaemonSession } from "@goddard-ai/session/schema"
+import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
+import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/session/schema"
 
 import { openComposedDaemonStore, type ComposedDaemonStore } from "../plugins.ts"
 
@@ -59,6 +66,69 @@ type MockSeedScenario = {
 }
 
 const cwd = "/mock/goddard-ai"
+
+function createLaunchableStateSeedScenario(): MockSeedScenario {
+  const sessions = createSessionTriageQueueScenario()
+  const inbox = createInboxAttentionQueueScenario({
+    activeSession: sessions.activeSession,
+    blockedSession: sessions.blockedSession,
+  })
+  const blockedSession = createBlockedSessionScenario(sessions.blockedSession)
+
+  return {
+    id: "launchable-state-review",
+    label: "Launchable state review records",
+    sessions: sessions.response.sessions.map(createSeedSessionInput),
+    sessionTurns: blockedSession.historyResponse.turns.map((turn) =>
+      createSeedSessionTurnInput(blockedSession.session.id, turn),
+    ),
+    pullRequests: [createSeedPullRequestInput(inbox.pullRequest)],
+    inboxItems: inbox.response.items.map(createSeedInboxItemInput),
+  }
+}
+
+function createSeedSessionInput(session: DaemonSession): SessionSeedOverrides {
+  const { createdAt: _createdAt, id, updatedAt, ...input } = session
+
+  return {
+    ...input,
+    activeDaemonSession: false,
+    connectionMode: "history",
+    id,
+    supportsLoadSession: false,
+    timestamp: updatedAt,
+  }
+}
+
+function createSeedSessionTurnInput(
+  sessionId: DaemonSession["id"],
+  turn: SessionHistoryTurn,
+): SessionTurnSeedOverrides {
+  return {
+    ...turn,
+    id: `trn_${turn.turnId.replace(/^turn_/, "")}`,
+    sessionId,
+    timestamp: Date.parse(turn.completedAt ?? turn.startedAt),
+  }
+}
+
+function createSeedPullRequestInput(pullRequest: DaemonPullRequest): PullRequestSeedOverrides {
+  const { id, updatedAt, ...input } = pullRequest
+
+  return {
+    ...input,
+    cwd,
+    id,
+    timestamp: updatedAt,
+  }
+}
+
+function createSeedInboxItemInput(item: InboxItem): InboxItemSeedOverrides {
+  return {
+    ...item,
+    timestamp: item.updatedAt,
+  }
+}
 
 function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: string): SessionSeed {
   const status = overrides.status ?? "done"
@@ -160,6 +230,7 @@ function defaultStopReason(status: DaemonSession["status"]): DaemonSession["stop
 }
 
 const scenarios: MockSeedScenario[] = [
+  createLaunchableStateSeedScenario(),
   {
     id: "review-boundary-complete",
     label: "Completed PR-scoped review with readable session history",

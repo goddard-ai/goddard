@@ -1,3 +1,4 @@
+import { createFixtureInboxItem } from "@goddard-ai/fixtures"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
@@ -23,18 +24,12 @@ mock.module("lucide-react", () => ({
 }))
 
 function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return {
-    id: input.id ?? `inb_${input.entityId}`,
-    entityId: input.entityId,
-    reason: input.reason ?? "session.turn_ended",
-    status: input.status ?? "unread",
-    priority: input.priority ?? "normal",
-    updatedAt: input.updatedAt ?? Date.now(),
-    readAt: input.readAt ?? null,
-    scope: input.scope ?? "Inbox automation",
-    headline: input.headline ?? "Review the latest result",
-    turnId: input.turnId ?? null,
-  }
+  return createFixtureInboxItem({
+    headline: "Review the latest result",
+    scope: "Inbox automation",
+    updatedAt: Date.now(),
+    ...input,
+  })
 }
 
 function renderInboxRow(input: {

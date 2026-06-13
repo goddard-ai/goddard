@@ -1,3 +1,4 @@
+import { createFixtureSession } from "@goddard-ai/fixtures"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
@@ -22,7 +23,7 @@ mock.module("lucide-react", () => ({
 }))
 
 function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return {
+  return createFixtureSession({
     id: "ses_session_1",
     acpSessionId: "acp-session-1",
     status: "active",
@@ -54,7 +55,7 @@ function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
     availableCommands: [],
     contextUsage: null,
     ...overrides,
-  }
+  })
 }
 
 function renderListRow(input: {

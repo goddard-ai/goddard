@@ -1,4 +1,4 @@
-import type { InboxItem } from "@goddard-ai/inbox/schema"
+import { createFixtureInboxItem } from "@goddard-ai/fixtures"
 import { expect, test } from "bun:test"
 
 import {
@@ -9,21 +9,16 @@ import {
   replaceInboxSearchStatusFilters,
 } from "./search.ts"
 
-const baseItem = {
+const baseItem = createFixtureInboxItem({
   id: "inb_1",
   entityId: "ses_1",
-  reason: "session.turn_ended",
-  status: "unread",
-  priority: "normal",
   updatedAt: 1_700_000_000_000,
-  readAt: null,
   scope: "Inbox UI",
   headline: "Contract helpers are ready",
-  turnId: null,
-} satisfies InboxItem
+})
 
 test("inbox search fuzzy matches human-visible row text", () => {
-  const pullRequestItem = {
+  const pullRequestItem = createFixtureInboxItem({
     ...baseItem,
     id: "inb_2",
     entityId: "pr_1",
@@ -31,7 +26,7 @@ test("inbox search fuzzy matches human-visible row text", () => {
     status: "saved",
     scope: "Review sync",
     headline: "Pull request opened",
-  } satisfies InboxItem
+  })
 
   const items = prepareInboxSearchItems([baseItem, pullRequestItem])
 
@@ -43,7 +38,7 @@ test("inbox search fuzzy matches human-visible row text", () => {
 })
 
 test("inbox search supports status filters without fuzzy matching filter tokens", () => {
-  const savedPullRequestItem = {
+  const savedPullRequestItem = createFixtureInboxItem({
     ...baseItem,
     id: "inb_2",
     entityId: "pr_1",
@@ -51,13 +46,13 @@ test("inbox search supports status filters without fuzzy matching filter tokens"
     status: "saved",
     scope: "Review sync",
     headline: "Pull request opened",
-  } satisfies InboxItem
-  const completedItem = {
+  })
+  const completedItem = createFixtureInboxItem({
     ...baseItem,
     id: "inb_3",
     status: "completed",
     scope: "Review sync",
-  } satisfies InboxItem
+  })
   const items = prepareInboxSearchItems([baseItem, savedPullRequestItem, completedItem])
   const parsedSearch = parseInboxSearchQuery("is:saved rvw syc")
 

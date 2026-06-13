@@ -1,3 +1,9 @@
+import {
+  createFixtureInboxItem,
+  createFixturePullRequest,
+  createFixtureSession,
+  createSessionHistoryResponse,
+} from "@goddard-ai/fixtures"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
@@ -20,22 +26,16 @@ mock.module("~/sdk.ts", () => ({
 }))
 
 function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return {
-    id: input.id ?? `inb_${input.entityId}`,
-    entityId: input.entityId,
-    reason: input.reason ?? "session.turn_ended",
-    status: input.status ?? "unread",
-    priority: input.priority ?? "normal",
-    updatedAt: input.updatedAt ?? 1_800_000_000_000,
-    readAt: input.readAt ?? null,
-    scope: input.scope ?? "Stability work",
-    headline: input.headline ?? "Needs review",
-    turnId: input.turnId ?? null,
-  }
+  return createFixtureInboxItem({
+    headline: "Needs review",
+    scope: "Stability work",
+    updatedAt: 1_800_000_000_000,
+    ...input,
+  })
 }
 
 function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return {
+  return createFixtureSession({
     id: "ses_session_1",
     acpSessionId: "acp-session-1",
     status: "done",
@@ -67,20 +67,7 @@ function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
     availableCommands: [],
     contextUsage: null,
     ...overrides,
-  }
-}
-
-function createPullRequest(overrides: Partial<DaemonPullRequest> = {}): DaemonPullRequest {
-  return {
-    id: "pr_1",
-    host: "github",
-    owner: "goddard-ai",
-    repo: "goddard",
-    prNumber: 42,
-    cwd: "/repo",
-    updatedAt: 1_800_000_001_000,
-    ...overrides,
-  }
+  })
 }
 
 function resetSdk() {
@@ -102,20 +89,27 @@ function resetSdk() {
   sessionClient.get = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
     session: createSession({ id }),
   }))
-  sessionClient.history = vi.fn(async () => ({
-    id: "ses_session_1",
-    acpSessionId: "acp-session-1",
-    connection: {
-      activeDaemonSession: false,
-      mode: "history",
-      reconnectable: true,
-    },
-    turns: [],
-    nextCursor: null,
-    hasMore: false,
-  }))
+  sessionClient.history = vi.fn(async () =>
+    createSessionHistoryResponse({
+      session: createSession(),
+      overrides: {
+        connection: {
+          activeDaemonSession: false,
+          mode: "history",
+          reconnectable: true,
+        },
+      },
+    }),
+  )
   prClient.get = vi.fn(async ({ id }: { id: DaemonPullRequest["id"] }) => ({
-    pullRequest: createPullRequest({ id }),
+    pullRequest: createFixturePullRequest({
+      id,
+      cwd: "/repo",
+      owner: "goddard-ai",
+      prNumber: 42,
+      repo: "goddard",
+      updatedAt: 1_800_000_001_000,
+    }),
   }))
 }
 

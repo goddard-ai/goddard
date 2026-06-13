@@ -1,9 +1,5 @@
-import type {
-  CreateSessionRequest,
-  DaemonSession,
-  GetSessionHistoryResponse,
-  SessionLifecycleEvent,
-} from "@goddard-ai/sdk"
+import { createFixtureSession, createSessionHistoryResponse } from "@goddard-ai/fixtures"
+import type { CreateSessionRequest, DaemonSession, SessionLifecycleEvent } from "@goddard-ai/sdk"
 import { afterEach, beforeEach, expect, mock, test, vi } from "bun:test"
 
 import { queryClient } from "~/lib/query.ts"
@@ -21,7 +17,7 @@ mock.module("~/sdk.ts", () => ({
 }))
 
 function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return {
+  return createFixtureSession({
     id: "ses_session_1",
     acpSessionId: "acp-session-1",
     status: "active",
@@ -53,22 +49,7 @@ function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
     availableCommands: [],
     contextUsage: null,
     ...overrides,
-  }
-}
-
-function createHistory(sessionId: DaemonSession["id"]): GetSessionHistoryResponse {
-  return {
-    id: sessionId,
-    acpSessionId: "acp-session-1",
-    connection: {
-      activeDaemonSession: true,
-      mode: "live",
-      reconnectable: true,
-    },
-    turns: [],
-    nextCursor: null,
-    hasMore: false,
-  }
+  })
 }
 
 function resetSdk() {
@@ -81,7 +62,9 @@ function resetSdk() {
   sessionClient.get = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
     session: createSession({ id }),
   }))
-  sessionClient.history = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => createHistory(id))
+  sessionClient.history = vi.fn(async ({ id }: { id: DaemonSession["id"] }) =>
+    createSessionHistoryResponse({ session: createSession({ id }) }),
+  )
   sessionClient.prompt = vi.fn(async () => ({ accepted: true }))
   sessionClient.configOption = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({

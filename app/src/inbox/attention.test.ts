@@ -1,3 +1,4 @@
+import { createFixtureInboxItem } from "@goddard-ai/fixtures"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { expect, test } from "bun:test"
 
@@ -8,18 +9,7 @@ import {
 } from "./attention.ts"
 
 function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return {
-    id: input.id ?? `inb_${input.entityId}`,
-    entityId: input.entityId,
-    reason: input.reason ?? "session.turn_ended",
-    status: input.status ?? "unread",
-    priority: input.priority ?? "normal",
-    updatedAt: input.updatedAt ?? 1,
-    readAt: input.readAt ?? null,
-    scope: input.scope ?? null,
-    headline: input.headline ?? null,
-    turnId: input.turnId ?? null,
-  }
+  return createFixtureInboxItem({ updatedAt: 1, scope: null, headline: null, ...input })
 }
 
 test("isUnreadSessionInboxItem matches only unread session items", () => {
