@@ -154,11 +154,12 @@ export async function runCleanup(input: CleanupInput) {
   const worktreesToDetach = state
     ? await sprintBranchWorktrees(rootDir, branchesToDelete, diagnostics)
     : []
+  const branchDeleteFlag = input.force ? "-D" : "-d"
   const gitOperations = [
     ...worktreesToDetach.map(
       (worktree) => `git -C ${JSON.stringify(worktree.path)} checkout --detach`,
     ),
-    ...branchesToDelete.map((branch) => `git branch -d ${branch}`),
+    ...branchesToDelete.map((branch) => `git branch ${branchDeleteFlag} ${branch}`),
   ]
 
   await pushCleanupDiagnostics(
@@ -202,7 +203,7 @@ export async function runCleanup(input: CleanupInput) {
   }
 
   try {
-    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToDetach)
+    await executeCleanupOperations(rootDir, state, branchesToDelete, worktreesToDetach, input.force)
     return { ...report, executed: true } satisfies SprintCleanupReport
   } catch (error) {
     return handleHumanGitError(report, error)
@@ -215,12 +216,13 @@ export async function executeCleanupOperations(
   state: Pick<SprintBranchState, "sprint">,
   branchesToDelete: string[],
   worktreesToDetach: SprintBranchWorktree[],
+  force: boolean,
 ) {
   for (const worktree of worktreesToDetach) {
     await runGit(worktree.path, ["checkout", "--detach"])
   }
   for (const branch of branchesToDelete) {
-    await runGit(rootDir, ["branch", "-d", branch])
+    await runGit(rootDir, ["branch", force ? "-D" : "-d", branch])
   }
   const statePath = await sprintStatePath(rootDir, state.sprint)
   await fs.rm(statePath, { force: true })

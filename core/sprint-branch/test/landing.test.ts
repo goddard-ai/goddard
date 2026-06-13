@@ -344,6 +344,7 @@ describe("sprint-branch human landing commands", () => {
           reason: "branch sprint/example/review",
         },
       ],
+      false,
     )
 
     expect(await stateFileExists(repo, "example")).toBe(false)
@@ -378,6 +379,43 @@ describe("sprint-branch human landing commands", () => {
 
     expect(result.exitCode).toBe(1)
     expect(diagnosticCodes(cleanup)).toContain("target_missing_review")
+  })
+
+  test("forces cleanup when target does not contain review", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+
+    const result = await runCli(repo, [
+      "cleanup",
+      "main",
+      "example",
+      "--force",
+      "--dry-run",
+      "--json",
+    ])
+    const cleanup = JSON.parse(result.stdout) as HumanCommandOutput
+    const diagnostic = cleanup.diagnostics.find((item) => item.code === "target_missing_review")
+
+    expect(result.exitCode).toBe(0)
+    expect(cleanup.ok).toBe(true)
+    expect(diagnostic?.severity).toBe("warning")
+    expect(cleanup.gitOperations).toContain("git branch -D sprint/example/review")
+  })
+
+  test("force-deletes cleanup branches that target does not contain", async () => {
+    const repo = await createFinalizedReviewAheadOfMain()
+    const state = await readState(repo, "example")
+
+    await executeCleanupOperations(
+      repo,
+      state,
+      ["sprint/example/review", "sprint/example/approved"],
+      [],
+      true,
+    )
+
+    expect(await stateFileExists(repo, "example")).toBe(false)
+    expect(await branchExists(repo, "sprint/example/review")).toBe(false)
+    expect(await branchExists(repo, "sprint/example/approved")).toBe(false)
   })
 
   test("refuses non-interactive cleanup mutation", async () => {

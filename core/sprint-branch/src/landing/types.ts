@@ -18,6 +18,7 @@ export type LandInput = HumanCommandInput & {
 /** Inputs needed to remove landed sprint branches and private sprint state. */
 export type CleanupInput = HumanCommandInput & {
   target: string
+  force: boolean
 }
 
 /** One sprint state file that can be landed or cleaned up. */

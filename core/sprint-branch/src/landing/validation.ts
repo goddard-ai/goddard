@@ -84,10 +84,12 @@ export async function pushCleanupDiagnostics(
     !(await isAncestor(rootDir, state.branches.review, input.target))
   ) {
     diagnostics.push({
-      severity: "error",
+      severity: input.force ? "warning" : "error",
       code: "target_missing_review",
       message: `${input.target} does not contain finalized review commit ${reviewCommit.slice(0, 12)}.`,
-      suggestion: `Run sprint-branch land ${input.target} ${state.sprint} before cleanup.`,
+      suggestion: input.force
+        ? "Cleanup will delete sprint branches even though the target does not contain the finalized review."
+        : `Run sprint-branch land ${input.target} ${state.sprint} before cleanup.`,
     })
   }
 }

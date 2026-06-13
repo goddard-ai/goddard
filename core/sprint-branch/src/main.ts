@@ -398,15 +398,20 @@ export async function main(argv: string[]) {
             description: "Sprint name to clean up",
           }),
           lastSprint: lastSprintFlag(),
+          force: flag({
+            long: "force",
+            description: "Delete sprint branches even when target does not contain review",
+          }),
           dryRun: dryRunFlag(),
           json: jsonFlag(),
         },
-        handler: async ({ target, name, lastSprint, dryRun, json }) => {
+        handler: async ({ target, name, lastSprint, force, dryRun, json }) => {
           const report = await runCleanup({
             cwd: process.cwd(),
             target,
             sprint: name,
             lastSprint,
+            force,
             dryRun,
             json,
           })

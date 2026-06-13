@@ -1,4 +1,4 @@
-# `sprint-branch cleanup <target> [name]`
+# `sprint-branch cleanup <target> [name] [--force]`
 
 - **Question it answers**
   - How do we remove sprint-specific local artifacts after landing?
@@ -8,6 +8,8 @@
     review commit.
   - Uses [standard sprint selection](../sprint-selection.md).
   - The optional `name` argument is this command's explicit sprint selector.
+  - `--force` allows cleanup when the target does not contain the finalized
+    review commit.
 
 - **What it removes**
   - Landed sprint branches.
@@ -25,6 +27,8 @@
 
 - **Guardrails**
   - The target branch must contain the finalized review commit.
+    - With `--force`, this blocker becomes a warning and sprint branches are
+      force-deleted.
   - The sprint must be finalized.
   - An obsolete `next` branch accepted during finalization remains a warning
     only while its recorded commit still matches the finalized state.
@@ -39,6 +43,7 @@
   - Real execution is a human operation and requires interactive confirmation.
   - Real execution is not available in JSON or non-interactive mode.
   - Non-interactive JSON output is available for `--dry-run` inspection.
+  - `--force` does not bypass the interactive confirmation requirement.
   - Dry run reports what would be detached or removed without changing
     worktrees, deleting branches, deleting private sprint state, or deleting the
     sprint folder backup.

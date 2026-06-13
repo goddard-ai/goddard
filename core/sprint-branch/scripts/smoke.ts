@@ -238,6 +238,7 @@ async function main() {
       await readState(primary, "example"),
       cleanup.branchesToDelete ?? [],
       cleanupWorktrees,
+      false,
     )
     assert.equal(await currentBranch(agent), "")
     assert.equal(await stateFileExists(primary, "example"), false)
