@@ -1,3 +1,8 @@
+import {
+  createFixtureSession,
+  createSessionHistoryResponse,
+  createSessionHistoryTurn,
+} from "@goddard-ai/fixtures"
 import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
 import { expect, test } from "bun:test"
@@ -5,26 +10,17 @@ import { expect, test } from "bun:test"
 import { SessionChat } from "./model.ts"
 
 function createSession(overrides: Partial<DaemonSession> = {}) {
-  return {
+  return createFixtureSession({
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "acp-session-1",
     status: "active",
-    stopReason: null,
     agent: "pi-acp",
     agentName: "pi",
     cwd: "/repo-a",
-    mcpServers: [],
-    connectionMode: "live",
     supportsLoadSession: false,
-    activeDaemonSession: true,
-    completedHidden: false,
-    token: null,
-    permissions: null,
     title: "New session",
     titleState: "placeholder",
     repository: null,
-    prNumber: null,
-    metadata: null,
     createdAt: 1_743_968_000_000,
     lastSessionActivityAt: 1_743_968_300_000,
     errorMessage: null,
@@ -37,11 +33,11 @@ function createSession(overrides: Partial<DaemonSession> = {}) {
     availableCommands: [],
     contextUsage: null,
     ...overrides,
-  } satisfies DaemonSession
+  })
 }
 
 function createTurn(overrides: Partial<SessionHistoryTurn> = {}) {
-  return {
+  return createSessionHistoryTurn({
     turnId: "turn-1",
     sequence: 1,
     promptRequestId: "prompt-1",
@@ -49,11 +45,8 @@ function createTurn(overrides: Partial<SessionHistoryTurn> = {}) {
     completedAt: "2026-04-14T00:00:01.000Z",
     completionKind: "result",
     stopReason: "end_turn",
-    inboxScope: null,
-    inboxHeadline: null,
-    messages: [],
     ...overrides,
-  } satisfies SessionHistoryTurn
+  })
 }
 
 function createHistory(
@@ -61,16 +54,11 @@ function createHistory(
   overrides: Partial<GetSessionHistoryResponse> = {},
 ): GetSessionHistoryResponse {
   return {
-    id: "ses_session-1" as DaemonSession["id"],
-    acpSessionId: "acp-session-1",
-    connection: {
-      activeDaemonSession: true,
-      mode: "live",
-      reconnectable: true,
-    },
+    ...createSessionHistoryResponse({
+      session: createSession(),
+      turns,
+    }),
     turns,
-    nextCursor: null,
-    hasMore: false,
     ...overrides,
   }
 }

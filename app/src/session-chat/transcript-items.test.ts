@@ -1,29 +1,21 @@
+import { createFixtureSession, createSessionHistoryTurn } from "@goddard-ai/fixtures"
 import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
 import { buildSessionChatTranscript } from "./transcript-items.ts"
 
 function createSession(lastAgentMessage: string | null) {
-  return {
+  return createFixtureSession({
     id: "ses_session-1" as DaemonSession["id"],
     acpSessionId: "ses_session-1-acp",
     status: "active",
-    stopReason: null,
     agent: "pi-acp",
     agentName: "pi",
     cwd: "/repo-a",
-    mcpServers: [],
-    connectionMode: "live",
     supportsLoadSession: false,
-    activeDaemonSession: true,
-    completedHidden: false,
-    token: null,
-    permissions: null,
     title: "New session",
     titleState: "placeholder",
     repository: null,
-    prNumber: null,
-    metadata: null,
     createdAt: 1_743_968_000_000,
     lastSessionActivityAt: 1_743_968_300_000,
     errorMessage: null,
@@ -31,15 +23,11 @@ function createSession(lastAgentMessage: string | null) {
     initiative: null,
     inboxScope: null,
     lastAgentMessage,
-    models: null,
-    configOptions: [],
-    availableCommands: [],
-    contextUsage: null,
-  } satisfies DaemonSession
+  })
 }
 
 function createTurn(overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {}) {
-  return {
+  return createSessionHistoryTurn({
     turnId: "turn-1",
     sequence: 1,
     promptRequestId: "prompt-1",
@@ -47,11 +35,8 @@ function createTurn(overrides: Partial<GetSessionHistoryResponse["turns"][number
     completedAt: "2026-04-14T00:00:01.000Z",
     completionKind: "result",
     stopReason: "end_turn",
-    inboxScope: null,
-    inboxHeadline: null,
-    messages: [],
     ...overrides,
-  } satisfies GetSessionHistoryResponse["turns"][number]
+  })
 }
 
 function createTurns(
