@@ -1,5 +1,3 @@
-import type { ListInboxResponse } from "@goddard-ai/inbox/schema"
-
 import { fixtureInboxItemId, fixturePullRequestId, fixtureSessionId } from "./ids.ts"
 import { createFixtureInboxItem, createListInboxResponse } from "./inbox.ts"
 import { createFixturePullRequest, createGetPullRequestResponse } from "./pull-requests.ts"
@@ -16,7 +14,7 @@ import {
 } from "./sessions.ts"
 import { fixtureNow, fixtureProjectPath, fixtureTimestamp } from "./time.ts"
 
-export const criticalAppStateIds = {
+export const launchableStateIds = {
   sessions: {
     blocked: fixtureSessionId("launch_blocked"),
     active: fixtureSessionId("launch_active"),
@@ -46,7 +44,7 @@ export const criticalAppStateIds = {
 
 export function createSessionTriageQueueScenario() {
   const blockedSession = createFixtureSession({
-    id: criticalAppStateIds.sessions.blocked,
+    id: launchableStateIds.sessions.blocked,
     blockedReason: "Needs approval to edit the shared query cache.",
     contextUsage: {
       size: 200_000,
@@ -60,7 +58,7 @@ export function createSessionTriageQueueScenario() {
     updatedAt: fixtureNow - 4 * 60_000,
   })
   const activeSession = createFixtureSession({
-    id: criticalAppStateIds.sessions.active,
+    id: launchableStateIds.sessions.active,
     contextUsage: {
       size: 200_000,
       used: 96_000,
@@ -72,7 +70,7 @@ export function createSessionTriageQueueScenario() {
     updatedAt: fixtureNow - 16 * 60_000,
   })
   const errorSession = createFixtureSession({
-    id: criticalAppStateIds.sessions.error,
+    id: launchableStateIds.sessions.error,
     errorMessage: "Adapter exited before sending an initialize response.",
     lastAgentMessage: "The runtime failed during launch.",
     status: "error",
@@ -80,7 +78,7 @@ export function createSessionTriageQueueScenario() {
     updatedAt: fixtureNow - 2 * 60 * 60_000,
   })
   const completedSession = createFixtureSession({
-    id: criticalAppStateIds.sessions.completed,
+    id: launchableStateIds.sessions.completed,
     activeDaemonSession: false,
     connectionMode: "history",
     lastAgentMessage: "Query cache tests are passing locally.",
@@ -108,23 +106,28 @@ export function createInboxAttentionQueueScenario(
   } = {},
 ) {
   const blockedSession =
-    input.blockedSession ?? createFixtureSession({ id: criticalAppStateIds.sessions.blocked })
+    input.blockedSession ?? createFixtureSession({ id: launchableStateIds.sessions.blocked })
   const activeSession =
-    input.activeSession ?? createFixtureSession({ id: criticalAppStateIds.sessions.active })
+    input.activeSession ?? createFixtureSession({ id: launchableStateIds.sessions.active })
   const pullRequest =
-    input.pullRequest ?? createFixturePullRequest({ id: criticalAppStateIds.pullRequests.review })
+    input.pullRequest ??
+    createFixturePullRequest({
+      id: launchableStateIds.pullRequests.review,
+      prNumber: 128,
+      updatedAt: fixtureNow - 8 * 60_000,
+    })
   const response = createListInboxResponse([
     createFixtureInboxItem({
-      id: criticalAppStateIds.inbox.blocked,
+      id: launchableStateIds.inbox.blocked,
       entityId: blockedSession.id,
       headline: "Approve the shared query cache edit.",
       reason: "session.blocked",
       scope: "Query cache",
-      turnId: criticalAppStateIds.turns.blocked,
+      turnId: launchableStateIds.turns.blocked,
       updatedAt: fixtureNow - 4 * 60_000,
     }),
     createFixtureInboxItem({
-      id: criticalAppStateIds.inbox.pullRequest,
+      id: launchableStateIds.inbox.pullRequest,
       entityId: pullRequest.id,
       headline: "Review comments landed on the launchable-state PR.",
       readAt: fixtureNow - 8 * 60_000,
@@ -134,18 +137,22 @@ export function createInboxAttentionQueueScenario(
       updatedAt: fixtureNow - 8 * 60_000,
     }),
     createFixtureInboxItem({
-      id: criticalAppStateIds.inbox.active,
+      id: launchableStateIds.inbox.active,
       entityId: activeSession.id,
       headline: "Agent finished a pass and is ready for direction.",
       reason: "session.turn_ended",
       scope: "App shell",
-      turnId: criticalAppStateIds.turns.active,
+      turnId: launchableStateIds.turns.active,
       updatedAt: fixtureNow - 16 * 60_000,
     }),
   ])
 
   return {
-    response: response satisfies ListInboxResponse,
+    activeSession,
+    blockedSession,
+    pullRequest,
+    pullRequestResponse: createGetPullRequestResponse(pullRequest),
+    response,
   }
 }
 
@@ -161,7 +168,7 @@ export function createBlockedSessionScenario(
         inboxScope: "Query cache",
         messages: [
           createSessionPromptMessage({
-            requestId: criticalAppStateIds.requests.blockedPrompt,
+            requestId: launchableStateIds.requests.blockedPrompt,
             session,
             text: "Add launchable states for the critical app review scenarios.",
           }),
@@ -170,15 +177,15 @@ export function createBlockedSessionScenario(
             text: "I can seed the query cache for inbox, session list, and detail views.",
           }),
           createSessionPermissionRequestMessage({
-            requestId: criticalAppStateIds.requests.blockedPermission,
+            requestId: launchableStateIds.requests.blockedPermission,
             session,
             title: "Edit query cache injection",
-            toolCallId: criticalAppStateIds.tools.blockedPermission,
+            toolCallId: launchableStateIds.tools.blockedPermission,
           }),
         ],
-        promptRequestId: criticalAppStateIds.requests.blockedPrompt,
+        promptRequestId: launchableStateIds.requests.blockedPrompt,
         startedAt: fixtureTimestamp,
-        turnId: criticalAppStateIds.turns.blocked,
+        turnId: launchableStateIds.turns.blocked,
       },
     ],
   })
@@ -214,28 +221,5 @@ export function createBlockedSessionScenario(
     historyResponse,
     worktreeResponse,
     changesResponse,
-  }
-}
-
-export function createCriticalAppStatesScenario() {
-  const sessions = createSessionTriageQueueScenario()
-  const pullRequest = createFixturePullRequest({
-    id: criticalAppStateIds.pullRequests.review,
-    prNumber: 128,
-    updatedAt: fixtureNow - 8 * 60_000,
-  })
-
-  return {
-    sessions,
-    inbox: createInboxAttentionQueueScenario({
-      activeSession: sessions.activeSession,
-      blockedSession: sessions.blockedSession,
-      pullRequest,
-    }),
-    pullRequest: {
-      pullRequest,
-      response: createGetPullRequestResponse(pullRequest),
-    },
-    blockedSession: createBlockedSessionScenario(sessions.blockedSession),
   }
 }

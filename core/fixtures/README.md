@@ -36,11 +36,11 @@ const response = createListSessionsResponse([session])
 Curated scenarios compose factories into named states that multiple consumers can share:
 
 ```ts
-import { createCriticalAppStatesScenario } from "@goddard-ai/fixtures"
+import { createSessionTriageQueueScenario } from "@goddard-ai/fixtures"
 
-const scenario = createCriticalAppStatesScenario()
+const scenario = createSessionTriageQueueScenario()
 
-queryClient.injectData(goddardSdk.session.list, [{ limit }], scenario.sessions.response)
+queryClient.injectData(goddardSdk.session.list, [{ limit }], scenario.response)
 ```
 
 The scenario owns the data. The app still owns the query key, navigation target, and launch lifecycle.
@@ -50,16 +50,20 @@ The scenario owns the data. The app still owns the query key, navigation target,
 Seeds may compose fixtures, but seed execution does not live here. A seed adapter should convert fixture records into writes for its own database or store:
 
 ```ts
-import { createCriticalAppStatesScenario } from "@goddard-ai/fixtures"
+import { createInboxAttentionQueueScenario, createSessionTriageQueueScenario } from "@goddard-ai/fixtures"
 
 export async function seedDevDatabase(db: SeedDatabase) {
-  const scenario = createCriticalAppStatesScenario()
+  const sessions = createSessionTriageQueueScenario()
+  const inbox = createInboxAttentionQueueScenario({
+    activeSession: sessions.activeSession,
+    blockedSession: sessions.blockedSession,
+  })
 
-  for (const session of scenario.sessions.response.sessions) {
+  for (const session of sessions.response.sessions) {
     await db.sessions.put(session.id, session)
   }
 
-  for (const item of scenario.inbox.response.items) {
+  for (const item of inbox.response.items) {
     await db.inbox.put(item.id, item)
   }
 }
