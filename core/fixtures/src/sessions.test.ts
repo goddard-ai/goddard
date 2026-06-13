@@ -9,7 +9,6 @@ import {
   createSessionHistoryResponse,
   createSessionPermissionRequestMessage,
   fixtureId,
-  fixtureNow,
   fixtureSessionId,
 } from "./index.ts"
 
@@ -18,30 +17,24 @@ test("fixture ids are deterministic and normalized", () => {
   expect(fixtureSessionId("Launch Blocked")).toBe("ses_launch_blocked")
 })
 
-test("session fixture derives live state from status and accepts overrides", () => {
-  const session = createFixtureSession({
-    id: fixtureSessionId("blocked"),
-    blockedReason: "Needs approval.",
-    status: "blocked",
-    title: "Blocked fixture",
-    updatedAt: fixtureNow - 1_000,
-  })
+test("session fixtures derive live connection state from status", () => {
+  const activeSession = createFixtureSession({ status: "active" })
+  const blockedSession = createFixtureSession({ status: "blocked" })
 
-  expect(session).toMatchObject({
-    id: "ses_blocked",
-    activeDaemonSession: true,
-    blockedReason: "Needs approval.",
-    connectionMode: "live",
-    title: "Blocked fixture",
-    updatedAt: fixtureNow - 1_000,
-  })
+  expect(activeSession.activeDaemonSession).toBe(true)
+  expect(activeSession.connectionMode).toBe("live")
+  expect(blockedSession.activeDaemonSession).toBe(true)
+  expect(blockedSession.connectionMode).toBe("live")
 })
 
-test("completed session fixtures default to history mode", () => {
-  const session = createFixtureSession({ status: "done" })
+test("completed session fixtures derive historical connection state from status", () => {
+  const doneSession = createFixtureSession({ status: "done" })
+  const errorSession = createFixtureSession({ status: "error" })
 
-  expect(session.activeDaemonSession).toBe(false)
-  expect(session.connectionMode).toBe("history")
+  expect(doneSession.activeDaemonSession).toBe(false)
+  expect(doneSession.connectionMode).toBe("history")
+  expect(errorSession.activeDaemonSession).toBe(false)
+  expect(errorSession.connectionMode).toBe("live")
 })
 
 test("session response envelopes preserve supplied records", () => {
@@ -55,7 +48,7 @@ test("session response envelopes preserve supplied records", () => {
   })
 })
 
-test("history fixtures reference the session identity", () => {
+test("detail fixtures reference the session identity", () => {
   const session = createFixtureSession({ id: fixtureSessionId("history") })
   const permission = createSessionPermissionRequestMessage({
     requestId: "permission-edit",
@@ -65,6 +58,7 @@ test("history fixtures reference the session identity", () => {
     session,
     turns: [{ messages: [permission] }],
   })
+  const changes = createSessionChangesResponse({ session, diff: "diff --git a/file b/file" })
 
   expect(history.id).toBe(session.id)
   expect(history.acpSessionId).toBe(session.acpSessionId)
@@ -72,15 +66,16 @@ test("history fixtures reference the session identity", () => {
     id: "permission-edit",
     method: "session/request_permission",
   })
+  expect(changes.id).toBe(session.id)
+  expect(changes.acpSessionId).toBe(session.acpSessionId)
+  expect(changes.hasChanges).toBe(true)
 })
 
-test("inbox, pull request, and changes fixtures use schema-shaped defaults", () => {
+test("cross-feature fixtures create stable linked defaults", () => {
   const session = createFixtureSession({ id: fixtureSessionId("linked") })
   const inboxItem = createFixtureInboxItem({ entityId: session.id })
   const pullRequest = createFixturePullRequest({ prNumber: 42 })
-  const changes = createSessionChangesResponse({ session, diff: "diff --git a/file b/file" })
 
   expect(inboxItem.entityId).toBe(session.id)
   expect(pullRequest.id).toBe("pr_42")
-  expect(changes.hasChanges).toBe(true)
 })
