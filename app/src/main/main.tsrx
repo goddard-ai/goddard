@@ -5,6 +5,7 @@ import { render } from "preact"
 import { AppShell } from "~/app-shell.tsrx"
 import { AppStateProvider } from "~/app-state-context.tsrx"
 import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
+import { LaunchableStates } from "~/launchable-states/view.tsrx"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
 initializeDesktopHost()
@@ -20,6 +21,7 @@ window.__goddardDesktop = desktopHost
 render(
   <>
     <AppStateProvider>
+      {import.meta.env.DEV ? <LaunchableStates /> : null}
       <AppShell />
     </AppStateProvider>
   </>,

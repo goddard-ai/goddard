@@ -22,6 +22,7 @@ type QueryEntry = {
   data: unknown
   error: unknown
   hasData: boolean
+  injectionId: number | null
   promise: Promise<unknown> | null
   queryFn: AnyQueryFunction
   refetchOnWindowReactivate: boolean
@@ -100,6 +101,7 @@ export class QueryClient {
   private entryKeysByFunction = new WeakMap<AnyQueryFunction, Set<string>>()
   private functionIds = new WeakMap<AnyQueryFunction, string>()
   private nextFunctionId = 0
+  private nextInjectionId = 0
 
   /**
    * Returns the stable cache key for one query function and argument tuple.
@@ -164,7 +166,7 @@ export class QueryClient {
     const wasInactive = entry.subscribers.size === 0
     entry.subscribers.add(subscriber)
 
-    if (wasInactive && entry.hasData && !entry.promise) {
+    if (wasInactive && entry.hasData && !entry.promise && !this.isInjected(entry)) {
       void this.fetchEntry(entry, true)
     }
 
@@ -199,12 +201,17 @@ export class QueryClient {
 
   /**
    * Drops one inactive cached query so the next read waits for a fresh first result.
+   * Injected query data stays active until its cleanup runs.
    */
   evict<TQueryFn extends AnyQueryFunction>(queryFn: TQueryFn, args: Parameters<TQueryFn>) {
     const queryKey = this.getQueryKey(queryFn, args)
     const entry = this.entries.get(queryKey)
 
     if (!entry) {
+      return
+    }
+
+    if (this.isInjected(entry)) {
       return
     }
 
@@ -222,13 +229,84 @@ export class QueryClient {
    */
   refetchActiveQueries() {
     for (const entry of this.entries.values()) {
-      if (entry.refetchOnWindowReactivate && entry.subscribers.size > 0 && !entry.promise) {
+      if (
+        entry.refetchOnWindowReactivate &&
+          entry.subscribers.size > 0 &&
+          !entry.promise &&
+          !this.isInjected(entry)
+      ) {
         void this.fetchEntry(entry, entry.hasData)
       }
     }
   }
 
+  /**
+   * Temporarily injects one query result and returns cleanup that restores normal fetching.
+   */
+  injectData<TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+    data: Awaited<ReturnType<TQueryFn>>,
+  ) {
+    const queryKey = this.getQueryKey(queryFn, args)
+    const existingEntry = this.entries.get(queryKey)
+    const entry = existingEntry ?? this.ensureEntry(queryKey, queryFn, args, defaultQueryOptions)
+    const injectionId = ++this.nextInjectionId
+    const previousEntry = {
+      data: entry.data,
+      error: entry.error,
+      hasData: entry.hasData,
+      promise: entry.promise,
+      refetchOnWindowReactivate: entry.refetchOnWindowReactivate,
+      stale: entry.stale,
+    }
+
+    entry.data = data
+    entry.error = null
+    entry.hasData = true
+    entry.injectionId = injectionId
+    entry.promise = null
+    entry.stale = false
+    this.notify(entry)
+
+    return () => {
+      if (entry.injectionId !== injectionId) {
+        return
+      }
+
+      entry.injectionId = null
+
+      if (!existingEntry) {
+        if (entry.subscribers.size === 0) {
+          this.entries.delete(queryKey)
+          this.entryKeysByFunction.get(queryFn)?.delete(queryKey)
+          return
+        }
+
+        entry.data = undefined
+        entry.error = null
+        entry.hasData = false
+        entry.promise = null
+        entry.stale = true
+        this.notify(entry)
+        return
+      }
+
+      entry.data = previousEntry.data
+      entry.error = previousEntry.error
+      entry.hasData = previousEntry.hasData
+      entry.promise = null
+      entry.refetchOnWindowReactivate = previousEntry.refetchOnWindowReactivate
+      entry.stale = previousEntry.promise ? true : previousEntry.stale
+      this.notify(entry)
+    }
+  }
+
   private fetchEntry(entry: QueryEntry, background: boolean) {
+    if (this.isInjected(entry)) {
+      return Promise.resolve(entry.data)
+    }
+
     if (entry.promise) {
       return entry.promise
     }
@@ -303,6 +381,7 @@ export class QueryClient {
       data: undefined,
       error: null,
       hasData: false,
+      injectionId: null,
       promise: null,
       queryFn,
       refetchOnWindowReactivate: options.refetchOnWindowReactivate,
@@ -343,9 +422,13 @@ export class QueryClient {
   private invalidateEntry(entry: QueryEntry) {
     entry.stale = true
 
-    if (entry.subscribers.size > 0 && !entry.promise) {
+    if (entry.subscribers.size > 0 && !entry.promise && !this.isInjected(entry)) {
       void this.fetchEntry(entry, entry.hasData)
     }
+  }
+
+  private isInjected(entry: QueryEntry) {
+    return entry.injectionId !== null
   }
 
   private notify(entry: QueryEntry) {

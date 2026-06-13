@@ -102,6 +102,99 @@ test("QueryClient.evict drops inactive cached data before the next read", async 
   expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("second")
 })
 
+test("QueryClient.injectData returns temporary data without calling the query function", () => {
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(async (_sessionId: string) => "real")
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+  const cleanup = queryClient.injectData(loadSession, ["ses_1"], "injected")
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("injected")
+  expect(loadSession).not.toHaveBeenCalled()
+
+  cleanup()
+})
+
+test("QueryClient.injectData skips automatic refetch until cleanup", async () => {
+  const notifications: string[] = []
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(async (_sessionId: string) => "real")
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+  const cleanup = queryClient.injectData(loadSession, ["ses_1"], "injected")
+
+  queryClient.subscribe(queryKey, () => {
+    notifications.push("update")
+  })
+  queryClient.invalidate(loadSession, ["ses_1"])
+  queryClient.refetchActiveQueries()
+  await Promise.resolve()
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("injected")
+  expect(loadSession).not.toHaveBeenCalled()
+  expect(notifications).toEqual([])
+
+  cleanup()
+  await waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("real")
+})
+
+test("QueryClient.injectData survives manual eviction until cleanup", async () => {
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(async (_sessionId: string) => "real")
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+  const cleanup = queryClient.injectData(loadSession, ["ses_1"], "injected")
+
+  queryClient.evict(loadSession, ["ses_1"])
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("injected")
+
+  cleanup()
+  await waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("real")
+})
+
+test("QueryClient.injectData cleanup restores the previous cached result", async () => {
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(async (_sessionId: string) => "real")
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+
+  await waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("real")
+
+  const cleanup = queryClient.injectData(loadSession, ["ses_1"], "injected")
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("injected")
+
+  cleanup()
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("real")
+})
+
+test("QueryClient.injectData cleanup marks interrupted fetches stale", async () => {
+  let deferred = createDeferred<string>()
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn((_sessionId: string) => deferred.promise)
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+
+  const firstRead = waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  await Promise.resolve()
+
+  const cleanup = queryClient.injectData(loadSession, ["ses_1"], "injected")
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("injected")
+
+  deferred.resolve("ignored")
+  await firstRead
+  cleanup()
+
+  deferred = createDeferred<string>()
+  const secondRead = waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  await Promise.resolve()
+  deferred.resolve("real")
+  await secondRead
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("real")
+})
+
 test("QueryClient.subscribe refetches cached data when a query becomes active again", async () => {
   let deferred = createDeferred<string>()
   const notifications: string[] = []
