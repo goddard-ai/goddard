@@ -24,7 +24,6 @@ import {
 } from "./composer-suggestions.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"
-import { deriveSessionModelState } from "./session-models.ts"
 import { resolveGitRepoRoot, resolveGitWorktreeSource } from "./worktree.ts"
 
 type LaunchPreparationRootConfig = {
@@ -177,7 +176,6 @@ export function createLaunchPreparationFeature(input: {
         branches,
         currentBranch,
         dirty,
-        models: existingLease.models,
         configOptions: existingLease.configOptions,
         slashCommands: getSlashComposerSuggestions(
           existingLease.availableCommands,
@@ -285,7 +283,6 @@ export function createLaunchPreparationFeature(input: {
         initializeResult: client.initialize,
         history,
         availableCommands,
-        models: deriveSessionModelState(session.configOptions),
         configOptions: session.configOptions ?? [],
         repoRoot,
         branches,
@@ -303,7 +300,6 @@ export function createLaunchPreparationFeature(input: {
         branches: lease.branches,
         currentBranch: lease.currentBranch,
         dirty: lease.dirty,
-        models: lease.models,
         configOptions: lease.configOptions,
         slashCommands: getSlashComposerSuggestions(
           lease.availableCommands,

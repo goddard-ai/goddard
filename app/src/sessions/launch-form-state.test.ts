@@ -42,22 +42,26 @@ function createLaunchPreview(
     branches: ["main", "feature/testing"],
     currentBranch: "main",
     dirty: false,
-    models: {
-      currentModelId: "sonnet",
-      availableModels: [
-        {
-          modelId: "sonnet",
-          name: "Sonnet",
-          description: "Balanced model",
-        },
-        {
-          modelId: "opus",
-          name: "Opus",
-          description: "Deep reasoning model",
-        },
-      ],
-    },
     configOptions: [
+      {
+        id: "model",
+        type: "select",
+        name: "Model",
+        category: "model",
+        currentValue: "sonnet",
+        options: [
+          {
+            value: "sonnet",
+            name: "Sonnet",
+            description: "Balanced model",
+          },
+          {
+            value: "opus",
+            name: "Opus",
+            description: "Deep reasoning model",
+          },
+        ],
+      },
       {
         id: "approval",
         type: "select",
@@ -126,7 +130,7 @@ test("SessionLaunchFormState builds a worktree launch request from selected cont
       baseBranchName: "feature/testing",
     },
     mcpServers: [],
-    initialModelId: "opus",
+    initialModelId: undefined,
     initialConfigOptions: [
       {
         configId: "approval",
@@ -136,8 +140,14 @@ test("SessionLaunchFormState builds a worktree launch request from selected cont
         configId: "thought_level",
         value: "high",
       },
+      {
+        configId: "model",
+        value: "opus",
+      },
     ],
     initialPrompt: [{ type: "text", text: "Add stable inbox tests." }],
+    launchLeaseId: undefined,
+    localCheckout: undefined,
   })
 })
 
@@ -206,15 +216,21 @@ test("SessionLaunchFormState falls back to the first valid model when adapter mo
   form.launchPreview.value = createLaunchPreview()
   form.draftModelId.value = "opus"
   form.launchPreview.value = createLaunchPreview({
-    models: {
-      currentModelId: "removed-model",
-      availableModels: [
-        {
-          modelId: "haiku",
-          name: "Haiku",
-        },
-      ],
-    },
+    configOptions: [
+      {
+        id: "model",
+        type: "select",
+        name: "Model",
+        category: "model",
+        currentValue: "removed-model",
+        options: [
+          {
+            value: "haiku",
+            name: "Haiku",
+          },
+        ],
+      },
+    ],
   })
 
   expect(form.draftModelId.value).toBe("haiku")

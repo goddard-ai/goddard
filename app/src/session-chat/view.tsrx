@@ -423,7 +423,6 @@ function SessionChatComposerDock(props: {
   const draftThinkingValue = useSignal<string | null>(null)
   const shortcutRegistry = useShortcutRegistry()
   const sessionModelConfig = deriveSessionLaunchModelConfig({
-    models: props.chat.session.models,
     configOptions: props.chat.session.configOptions,
   })
   const adapterCatalog = useQuery(goddardSdk.adapter.list, {

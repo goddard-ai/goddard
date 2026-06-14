@@ -67,8 +67,14 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   expect(launchableHistory.turns).toHaveLength(1)
 
   const contextLimit = await send(client, "session.get", { id: "ses_mock_context_limit" })
-  expect(contextLimit.session.models?.availableModels).toHaveLength(2)
-  expect(contextLimit.session.configOptions).toHaveLength(1)
+  expect(contextLimit.session.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "model",
+      category: "model",
+      currentValue: "gpt-5.4",
+    }),
+  )
+  expect(contextLimit.session.configOptions).toHaveLength(2)
 
   const inbox = await send(client, "inbox.list", {
     statuses: ["unread", "read", "saved", "archived", "replied", "completed"],

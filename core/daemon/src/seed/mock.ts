@@ -156,7 +156,6 @@ function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: strin
     prNumber: null,
     token: null,
     permissions: null,
-    models: null,
     configOptions: [],
     availableCommands: [
       {
@@ -680,22 +679,26 @@ const scenarios: MockSeedScenario[] = [
         lastAgentMessage: "Context usage is near the configured model limit.",
         initiative: "Summarize a large planning context before continuing.",
         inboxScope: "goddard-ai/goddard-ai",
-        models: {
-          currentModelId: "gpt-5.4",
-          availableModels: [
-            {
-              modelId: "gpt-5.4",
-              name: "GPT-5.4",
-              description: "Balanced frontier model",
-            },
-            {
-              modelId: "gpt-5.4-mini",
-              name: "GPT-5.4 Mini",
-              description: "Faster lower-latency variant",
-            },
-          ],
-        },
         configOptions: [
+          {
+            id: "model",
+            type: "select",
+            name: "Model",
+            category: "model",
+            currentValue: "gpt-5.4",
+            options: [
+              {
+                value: "gpt-5.4",
+                name: "GPT-5.4",
+                description: "Balanced frontier model",
+              },
+              {
+                value: "gpt-5.4-mini",
+                name: "GPT-5.4 Mini",
+                description: "Faster lower-latency variant",
+              },
+            ],
+          },
           {
             id: "thinking",
             type: "select",

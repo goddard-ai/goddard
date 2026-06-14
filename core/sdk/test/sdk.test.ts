@@ -61,6 +61,24 @@ function createMockRouteNode(
   })
 }
 
+function createModelConfigOption(input: {
+  currentValue: string
+  models: Array<{ modelId: string; name: string; description?: string }>
+}): acp.SessionConfigOption {
+  return {
+    id: "model",
+    type: "select",
+    name: "Model",
+    category: "model",
+    currentValue: input.currentValue,
+    options: input.models.map((model) => ({
+      value: model.modelId,
+      name: model.name,
+      description: model.description,
+    })),
+  }
+}
+
 async function* createMockStream(
   name: string,
   input: unknown,
@@ -495,7 +513,6 @@ describe("@goddard-ai/sdk session namespace", () => {
             token: null,
             permissions: null,
             metadata: null,
-            models: null,
             configOptions: [],
             availableCommands: [],
             contextUsage: null,
@@ -613,16 +630,6 @@ describe("@goddard-ai/sdk session namespace", () => {
       branches: ["main", "feature-a"],
       currentBranch: "main",
       dirty: false,
-      models: {
-        currentModelId: "gpt-5.4",
-        availableModels: [
-          {
-            modelId: "gpt-5.4",
-            name: "GPT-5.4",
-            description: "Balanced frontier model",
-          },
-        ],
-      },
       configOptions: [],
       slashCommands: [
         {
@@ -646,16 +653,6 @@ describe("@goddard-ai/sdk session namespace", () => {
       branches: ["main", "feature-a"],
       currentBranch: "main",
       dirty: false,
-      models: {
-        currentModelId: "gpt-5.4",
-        availableModels: [
-          {
-            modelId: "gpt-5.4",
-            name: "GPT-5.4",
-            description: "Balanced frontier model",
-          },
-        ],
-      },
       configOptions: [],
       slashCommands: [
         {
@@ -731,20 +728,21 @@ describe("@goddard-ai/sdk session namespace", () => {
 
   test("deriveSessionLaunchModelConfig defaults invalid current models to the first available model", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
-      models: {
-        currentModelId: "removed-model",
-        availableModels: [
-          {
-            modelId: "gpt-5.4",
-            name: "GPT-5.4",
-          },
-          {
-            modelId: "gpt-5.4-mini",
-            name: "GPT-5.4 Mini",
-          },
-        ],
-      },
-      configOptions: [],
+      configOptions: [
+        createModelConfigOption({
+          currentValue: "removed-model",
+          models: [
+            {
+              modelId: "gpt-5.4",
+              name: "GPT-5.4",
+            },
+            {
+              modelId: "gpt-5.4-mini",
+              name: "GPT-5.4 Mini",
+            },
+          ],
+        }),
+      ],
     })
 
     expect(launchModelConfig.models?.currentModelId).toBe("gpt-5.4")
@@ -752,42 +750,43 @@ describe("@goddard-ai/sdk session namespace", () => {
 
   test("deriveSessionLaunchModelConfig folds thinking suffixes into one selector", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
-      models: {
-        currentModelId: "gpt-5.4-medium",
-        availableModels: [
-          {
-            modelId: "gpt-5.4-low",
-            name: "GPT-5.4 (Low)",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-medium",
-            name: "GPT-5.4 (Medium)",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-high",
-            name: "GPT-5.4 (High)",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-mini-low",
-            name: "GPT-5.4 Mini (Low)",
-            description: "Faster lower-latency variant",
-          },
-          {
-            modelId: "gpt-5.4-mini-medium",
-            name: "GPT-5.4 Mini (Medium)",
-            description: "Faster lower-latency variant",
-          },
-          {
-            modelId: "gpt-5.4-mini-high",
-            name: "GPT-5.4 Mini (High)",
-            description: "Faster lower-latency variant",
-          },
-        ],
-      },
-      configOptions: [],
+      configOptions: [
+        createModelConfigOption({
+          currentValue: "gpt-5.4-medium",
+          models: [
+            {
+              modelId: "gpt-5.4-low",
+              name: "GPT-5.4 (Low)",
+              description: "Balanced frontier model",
+            },
+            {
+              modelId: "gpt-5.4-medium",
+              name: "GPT-5.4 (Medium)",
+              description: "Balanced frontier model",
+            },
+            {
+              modelId: "gpt-5.4-high",
+              name: "GPT-5.4 (High)",
+              description: "Balanced frontier model",
+            },
+            {
+              modelId: "gpt-5.4-mini-low",
+              name: "GPT-5.4 Mini (Low)",
+              description: "Faster lower-latency variant",
+            },
+            {
+              modelId: "gpt-5.4-mini-medium",
+              name: "GPT-5.4 Mini (Medium)",
+              description: "Faster lower-latency variant",
+            },
+            {
+              modelId: "gpt-5.4-mini-high",
+              name: "GPT-5.4 Mini (High)",
+              description: "Faster lower-latency variant",
+            },
+          ],
+        }),
+      ],
     })
 
     expect(launchModelConfig.models).toEqual({
@@ -805,21 +804,19 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
     })
-    expect(launchModelConfig.configOptions).toEqual([
-      {
-        id: "_goddard_derived_thinking_level",
-        type: "select",
-        name: "Thinking level",
-        category: "thought_level",
-        description: "Derived from ACP model names.",
-        currentValue: "medium",
-        options: [
-          { value: "low", name: "Low" },
-          { value: "medium", name: "Medium" },
-          { value: "high", name: "High" },
-        ],
-      },
-    ])
+    expect(launchModelConfig.configOptions).toContainEqual({
+      id: "_goddard_derived_thinking_level",
+      type: "select",
+      name: "Thinking level",
+      category: "thought_level",
+      description: "Derived from ACP model names.",
+      currentValue: "medium",
+      options: [
+        { value: "low", name: "Low" },
+        { value: "medium", name: "Medium" },
+        { value: "high", name: "High" },
+      ],
+    })
     expect(
       launchModelConfig.resolveSelection({
         modelId: launchModelConfig.models?.availableModels[1]?.modelId,
@@ -831,35 +828,41 @@ describe("@goddard-ai/sdk session namespace", () => {
         ],
       }),
     ).toEqual({
-      initialModelId: "gpt-5.4-mini-high",
-      initialConfigOptions: undefined,
+      initialModelId: undefined,
+      initialConfigOptions: [
+        {
+          configId: "model",
+          value: "gpt-5.4-mini-high",
+        },
+      ],
     })
   })
 
   test("deriveSessionLaunchModelConfig folds slash-delimited thinking model ids", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
-      models: {
-        currentModelId: "gpt-5.5/high",
-        availableModels: [
-          {
-            modelId: "gpt-5.5/low",
-            name: "GPT-5.5",
-          },
-          {
-            modelId: "gpt-5.5/high",
-            name: "GPT-5.5",
-          },
-          {
-            modelId: "gpt-5.5-mini/low",
-            name: "GPT-5.5 Mini",
-          },
-          {
-            modelId: "gpt-5.5-mini/high",
-            name: "GPT-5.5 Mini",
-          },
-        ],
-      },
-      configOptions: [],
+      configOptions: [
+        createModelConfigOption({
+          currentValue: "gpt-5.5/high",
+          models: [
+            {
+              modelId: "gpt-5.5/low",
+              name: "GPT-5.5",
+            },
+            {
+              modelId: "gpt-5.5/high",
+              name: "GPT-5.5",
+            },
+            {
+              modelId: "gpt-5.5-mini/low",
+              name: "GPT-5.5 Mini",
+            },
+            {
+              modelId: "gpt-5.5-mini/high",
+              name: "GPT-5.5 Mini",
+            },
+          ],
+        }),
+      ],
     })
 
     expect(launchModelConfig.models).toEqual({
@@ -898,34 +901,39 @@ describe("@goddard-ai/sdk session namespace", () => {
         ],
       }),
     ).toEqual({
-      initialModelId: "gpt-5.5-mini/low",
-      initialConfigOptions: undefined,
+      initialModelId: undefined,
+      initialConfigOptions: [
+        {
+          configId: "model",
+          value: "gpt-5.5-mini/low",
+        },
+      ],
     })
   })
 
   test("deriveSessionLaunchModelConfig folds thinking suffixes with explicit ACP thinking config options", () => {
     const input = {
-      models: {
-        currentModelId: "gpt-5.4-medium",
-        availableModels: [
-          {
-            modelId: "gpt-5.4-low",
-            name: "GPT-5.4 (Low)",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-medium",
-            name: "GPT-5.4 (Medium)",
-            description: "Balanced frontier model",
-          },
-          {
-            modelId: "gpt-5.4-high",
-            name: "GPT-5.4 (High)",
-            description: "Balanced frontier model",
-          },
-        ],
-      },
       configOptions: [
+        createModelConfigOption({
+          currentValue: "gpt-5.4-medium",
+          models: [
+            {
+              modelId: "gpt-5.4-low",
+              name: "GPT-5.4 (Low)",
+              description: "Balanced frontier model",
+            },
+            {
+              modelId: "gpt-5.4-medium",
+              name: "GPT-5.4 (Medium)",
+              description: "Balanced frontier model",
+            },
+            {
+              modelId: "gpt-5.4-high",
+              name: "GPT-5.4 (High)",
+              description: "Balanced frontier model",
+            },
+          ],
+        }),
         {
           id: "thinking",
           type: "select" as const,
@@ -964,11 +972,15 @@ describe("@goddard-ai/sdk session namespace", () => {
         ],
       }),
     ).toEqual({
-      initialModelId: "gpt-5.4-high",
+      initialModelId: undefined,
       initialConfigOptions: [
         {
           configId: "thinking",
           value: "high",
+        },
+        {
+          configId: "model",
+          value: "gpt-5.4-high",
         },
       ],
     })

@@ -665,7 +665,6 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
       allowedPrNumbers: [12],
     },
     metadata: null,
-    models: null,
     configOptions: [],
     availableCommands: [],
     contextUsage: null,
@@ -753,7 +752,6 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
       allowedPrNumbers: [42],
     },
     metadata: null,
-    models: null,
     configOptions: [],
     availableCommands: [],
     contextUsage: null,
@@ -1864,7 +1862,6 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
     token: null,
     permissions: null,
     metadata: null,
-    models: null,
     configOptions: [],
     availableCommands: [
       {
@@ -1962,7 +1959,13 @@ test("session.launchPreview loads adapter capabilities and repository branches f
   expect(preview.branches).toContain("feature-a")
   expect(preview.currentBranch).toBe(currentBranch)
   expect(preview.dirty).toBe(false)
-  expect(preview.models?.currentModelId).toBe("gpt-5.4")
+  expect(preview.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "model",
+      category: "model",
+      currentValue: "gpt-5.4",
+    }),
+  )
   expect(preview.configOptions).toContainEqual(
     expect.objectContaining({
       id: "thinking",
@@ -2278,7 +2281,12 @@ test("session.create applies initial model and thinking configuration before the
     oneShot: true,
   })
 
-  expect(created.session.models?.currentModelId).toBe("gpt-5.4-mini")
+  expect(created.session.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "model",
+      currentValue: "gpt-5.4-mini",
+    }),
+  )
   expect(created.session.configOptions).toContainEqual(
     expect.objectContaining({
       id: "thinking",
@@ -2450,7 +2458,12 @@ test("session.model.set updates active session model", async () => {
     modelId: "gpt-5.4-mini",
   })
 
-  expect(updated.session.models?.currentModelId).toBe("gpt-5.4-mini")
+  expect(updated.session.configOptions).toContainEqual(
+    expect.objectContaining({
+      id: "model",
+      currentValue: "gpt-5.4-mini",
+    }),
+  )
 
   await send(client, "session.shutdown", { id: created.session.id })
 })

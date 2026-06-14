@@ -39,7 +39,6 @@ export function createFixtureSession(overrides: Partial<DaemonSession> = {}): Da
     lastSessionActivityAt: fixtureNow,
     mcpServers: [],
     metadata: null,
-    models: null,
     permissions: null,
     prNumber: null,
     repository: "goddard-ai",

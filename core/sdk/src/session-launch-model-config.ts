@@ -1,8 +1,5 @@
 /** ACP launch-preview model normalization helpers shared by SDK consumers. */
-import type {
-  DaemonSessionModelState,
-  InitialSessionConfigOption,
-} from "@goddard-ai/session/schema"
+import type { InitialSessionConfigOption } from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 const derivedThinkingConfigId = "_goddard_derived_thinking_level"
@@ -77,7 +74,16 @@ function parseThinkingModelId(modelId: string) {
   }
 }
 
-type SessionModelInfo = DaemonSessionModelState["availableModels"][number]
+type SessionModelInfo = {
+  modelId: string
+  name: string
+  description?: string | null
+}
+
+type SessionModelState = {
+  currentModelId: string
+  availableModels: SessionModelInfo[]
+}
 
 function parseThinkingModel(model: SessionModelInfo) {
   const parsedName = parseThinkingModelName(model.name)
@@ -120,26 +126,27 @@ function slugifyModelName(name: string) {
 }
 
 function createPassthroughLaunchModelConfig(input: {
-  models: DaemonSessionModelState | null
+  modelOption: SelectSessionConfigOption | null
+  models: SessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
   return {
     models: resolveSessionModelState(input.models),
     configOptions: input.configOptions,
-    resolveSelection(input: {
+    resolveSelection(selection: {
       modelId?: string | null
       configOptions?: InitialSessionConfigOption[] | null
     }) {
-      return {
-        initialModelId: input.modelId ?? undefined,
-        initialConfigOptions:
-          (input.configOptions?.length ?? 0) > 0 ? [...input.configOptions!] : undefined,
-      }
+      return resolveModelSelection({
+        modelOption: input.modelOption,
+        modelId: selection.modelId,
+        configOptions: selection.configOptions,
+      })
     },
   }
 }
 
-function resolveSessionModelState(models: DaemonSessionModelState | null) {
+function resolveSessionModelState(models: SessionModelState | null) {
   if (!models || models.availableModels.length === 0) {
     return models
   }
@@ -154,8 +161,9 @@ function resolveSessionModelState(models: DaemonSessionModelState | null) {
   }
 }
 
-function createConfigOptionLaunchModelConfig(input: { configOptions: acp.SessionConfigOption[] }) {
-  const modelOption = findModelConfigOption(input.configOptions)
+function createSessionModelStateFromConfigOption(
+  modelOption: SelectSessionConfigOption | null,
+): SessionModelState | null {
   if (!modelOption) {
     return null
   }
@@ -174,52 +182,54 @@ function createConfigOptionLaunchModelConfig(input: { configOptions: acp.Session
     : availableModels[0]!.modelId
 
   return {
-    models: {
-      currentModelId,
-      availableModels,
-    },
-    configOptions: input.configOptions,
-    resolveSelection(input: {
-      modelId?: string | null
-      configOptions?: InitialSessionConfigOption[] | null
-    }) {
-      const remainingConfigOptions = (input.configOptions ?? []).filter(
-        (option) => option.configId !== modelOption.id,
-      )
-      const selectedModelId = input.modelId ?? undefined
+    currentModelId,
+    availableModels,
+  }
+}
 
-      return {
-        initialModelId: undefined,
-        initialConfigOptions: selectedModelId
-          ? [
-              ...remainingConfigOptions,
-              {
-                configId: modelOption.id,
-                value: selectedModelId,
-              },
-            ]
-          : remainingConfigOptions.length > 0
-            ? remainingConfigOptions
-            : undefined,
-      }
-    },
+function resolveModelSelection(input: {
+  modelOption: SelectSessionConfigOption | null
+  modelId?: string | null
+  configOptions?: InitialSessionConfigOption[] | null
+}) {
+  if (!input.modelOption) {
+    return {
+      initialModelId: input.modelId ?? undefined,
+      initialConfigOptions:
+        (input.configOptions?.length ?? 0) > 0 ? [...input.configOptions!] : undefined,
+    }
+  }
+
+  const remainingConfigOptions = (input.configOptions ?? []).filter(
+    (option) => option.configId !== input.modelOption!.id,
+  )
+  const selectedModelId = input.modelId ?? undefined
+
+  return {
+    initialModelId: undefined,
+    initialConfigOptions: selectedModelId
+      ? [
+          ...remainingConfigOptions,
+          {
+            configId: input.modelOption.id,
+            value: selectedModelId,
+          },
+        ]
+      : remainingConfigOptions.length > 0
+        ? remainingConfigOptions
+        : undefined,
   }
 }
 
 /** Derives launch-time model and thinking selectors from one ACP launch preview. */
 export function deriveSessionLaunchModelConfig(input: {
-  models: DaemonSessionModelState | null
   configOptions: acp.SessionConfigOption[]
 }) {
-  const configOptionModelConfig = createConfigOptionLaunchModelConfig(input)
-  if (configOptionModelConfig) {
-    return configOptionModelConfig
-  }
-
-  const models = resolveSessionModelState(input.models)
+  const modelOption = findModelConfigOption(input.configOptions)
+  const models = resolveSessionModelState(createSessionModelStateFromConfigOption(modelOption))
 
   if (!models || models.availableModels.length === 0) {
-    return createPassthroughLaunchModelConfig({ ...input, models })
+    return createPassthroughLaunchModelConfig({ ...input, modelOption, models })
   }
 
   const existingThinkingOption = input.configOptions.find(
@@ -227,7 +237,7 @@ export function deriveSessionLaunchModelConfig(input: {
   )
 
   if (existingThinkingOption && existingThinkingOption.type !== "select") {
-    return createPassthroughLaunchModelConfig({ ...input, models })
+    return createPassthroughLaunchModelConfig({ ...input, modelOption, models })
   }
 
   const parsedModels = models.availableModels.map((model) => {
@@ -236,7 +246,7 @@ export function deriveSessionLaunchModelConfig(input: {
   })
 
   if (parsedModels.some((model) => model === null)) {
-    return createPassthroughLaunchModelConfig({ ...input, models })
+    return createPassthroughLaunchModelConfig({ ...input, modelOption, models })
   }
 
   const groups = new Map<
@@ -269,7 +279,7 @@ export function deriveSessionLaunchModelConfig(input: {
   )
 
   if (groups.size === models.availableModels.length || thinkingOptions.length < 2) {
-    return createPassthroughLaunchModelConfig({ ...input, models })
+    return createPassthroughLaunchModelConfig({ ...input, modelOption, models })
   }
 
   const availableModels = [...groups.values()].map((group) => ({
@@ -323,11 +333,11 @@ export function deriveSessionLaunchModelConfig(input: {
       )
 
       if (!selectedGroup) {
-        return {
-          initialModelId: input.modelId ?? undefined,
-          initialConfigOptions:
-            remainingConfigOptions.length > 0 ? remainingConfigOptions : undefined,
-        }
+        return resolveModelSelection({
+          modelOption,
+          modelId: input.modelId,
+          configOptions: remainingConfigOptions,
+        })
       }
 
       const matchingVariant =
@@ -339,9 +349,14 @@ export function deriveSessionLaunchModelConfig(input: {
       const resolvedVariant = matchingVariant ?? selectedGroup.variants[0]
 
       return {
-        initialModelId: resolvedVariant.model.modelId,
-        initialConfigOptions:
-          remainingConfigOptions.length > 0 ? remainingConfigOptions : undefined,
+        initialModelId: undefined,
+        initialConfigOptions: [
+          ...remainingConfigOptions.filter((option) => option.configId !== modelOption!.id),
+          {
+            configId: modelOption!.id,
+            value: resolvedVariant.model.modelId,
+          },
+        ],
       }
     },
   }

@@ -87,23 +87,6 @@ export const DaemonSessionConfigOptions = z.custom<acp.SessionConfigOption[]>().
 
 export type DaemonSessionConfigOptions = z.output<typeof DaemonSessionConfigOptions>
 
-/** One model option projected from ACP session config options for launch and session UI. */
-export const DaemonSessionModelInfo = z.strictObject({
-  modelId: z.string(),
-  name: z.string(),
-  description: z.string().nullable().optional(),
-})
-
-export type DaemonSessionModelInfo = z.output<typeof DaemonSessionModelInfo>
-
-/** Current model selector state projected from ACP config options. */
-export const DaemonSessionModelState = z.strictObject({
-  currentModelId: z.string(),
-  availableModels: z.array(DaemonSessionModelInfo),
-})
-
-export type DaemonSessionModelState = z.output<typeof DaemonSessionModelState>
-
 /** Latest context window usage reported by the agent for one daemon session. */
 export const DaemonSessionContextUsage = z
   .strictObject({
@@ -146,7 +129,6 @@ export const DaemonSession = z.strictObject({
   token: z.string().nullable().default(null),
   permissions: DaemonSessionPermissions.nullable().default(null),
   metadata: DaemonSessionMetadata.nullable().default(null),
-  models: DaemonSessionModelState.nullable().default(null),
   configOptions: DaemonSessionConfigOptions,
   availableCommands: DaemonSessionAvailableCommands.default([]),
   contextUsage: DaemonSessionContextUsage,
@@ -463,7 +445,6 @@ export type SessionLaunchPreviewResponse = {
   branches: string[]
   currentBranch: string | null
   dirty: boolean
-  models: DaemonSessionModelState | null
   configOptions: acp.SessionConfigOption[]
   slashCommands: SessionComposerSlashCommandSuggestion[]
 }

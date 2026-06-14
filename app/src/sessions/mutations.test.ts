@@ -55,7 +55,6 @@ function resetSdk() {
     branches: ["main"],
     currentBranch: "main",
     dirty: false,
-    models: null,
     configOptions: [],
     slashCommands: [],
   }))

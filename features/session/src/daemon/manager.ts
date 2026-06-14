@@ -40,7 +40,6 @@ import {
   type CreateSessionRequest,
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
-  type DaemonSessionModelState,
   type DaemonSessionStatus,
   type DaemonSessionTurn,
   type GetSessionChangesResponse,
@@ -88,7 +87,6 @@ import { checkoutLocalBranch, createLaunchPreparationFeature } from "./launch-pr
 import { createPromptTurnFeature, injectSystemPrompt } from "./prompt-turns.ts"
 import { createSessionAttentionFeature } from "./session-attention.ts"
 import { createSessionMemory, type ActiveSession } from "./session-memory.ts"
-import { deriveSessionModelState } from "./session-models.ts"
 import {
   agentNameFromInput,
   createReconnectRequest,
@@ -193,17 +191,14 @@ function readTextPrompt(name: string) {
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
 async function applyInitialSessionConfiguration(params: {
   session: AcpSession
-  models: DaemonSessionModelState | null | undefined
   configOptions: acp.SessionConfigOption[] | null | undefined
   request: CreateSessionRequest
 }) {
-  let models = params.models ?? null
   let configOptions = params.configOptions ?? []
 
   if (params.request.initialModelId) {
     const response = await params.session.setModel(params.request.initialModelId)
     configOptions = response.configOptions
-    models = deriveSessionModelState(configOptions)
   }
 
   for (const option of params.request.initialConfigOptions ?? []) {
@@ -215,7 +210,6 @@ async function applyInitialSessionConfiguration(params: {
   }
 
   return {
-    models,
     configOptions,
   }
 }
@@ -313,7 +307,6 @@ type InitializedSession = acp.InitializeResponse & {
   initialPromptStartedAt: string | null
   initialPromptCompletedAt: string | null
   acpSessionId: string
-  models?: DaemonSessionModelState | null
   configOptions?: acp.SessionConfigOption[] | null
   stopReason: acp.PromptResponse["stopReason"] | null
 }
@@ -445,7 +438,6 @@ async function initializeSession(params: {
     let isFirstPrompt = true
     let acpSessionId: string
     let session: AcpSession
-    let models: DaemonSessionModelState | null | undefined
     let configOptions: acp.SessionConfigOption[] | null | undefined
 
     if (params.resumeAcpId !== undefined) {
@@ -468,7 +460,6 @@ async function initializeSession(params: {
       acpSessionId = session.sessionId
       routeAcpSessionId = acpSessionId
       configOptions = session.configOptions
-      models = deriveSessionModelState(configOptions)
 
       if (
         params.request.initialModelId !== undefined ||
@@ -476,12 +467,10 @@ async function initializeSession(params: {
       ) {
         const configuredSession = await applyInitialSessionConfiguration({
           session,
-          models,
           configOptions,
           request: params.request,
         })
 
-        models = configuredSession.models
         configOptions = configuredSession.configOptions
       }
     }
@@ -502,7 +491,6 @@ async function initializeSession(params: {
       session,
       history,
       acpSessionId,
-      models,
       configOptions,
     }
   } catch (error) {
@@ -517,7 +505,6 @@ async function initializeSessionFromLaunchLease(params: {
   request: ResolvedCreateSessionRequest
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
-  let models: DaemonSessionModelState | null | undefined = params.lease.models
   let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
 
   if (
@@ -526,12 +513,10 @@ async function initializeSessionFromLaunchLease(params: {
   ) {
     const configuredSession = await applyInitialSessionConfiguration({
       session: params.lease.session,
-      models,
       configOptions,
       request: params.request,
     })
 
-    models = configuredSession.models
     configOptions = configuredSession.configOptions
   }
 
@@ -551,7 +536,6 @@ async function initializeSessionFromLaunchLease(params: {
     session: params.lease.session,
     history: params.lease.history,
     acpSessionId: params.lease.acpSessionId,
-    models,
     configOptions,
   } satisfies InitializedSession
 }
@@ -2119,7 +2103,6 @@ export function createSessionManager(input: {
 
     const response = await active.session.setModel(params.modelId)
     updateSession(params.id, {
-      models: deriveSessionModelState(response.configOptions),
       configOptions: response.configOptions,
     })
     return getSession(params.id)

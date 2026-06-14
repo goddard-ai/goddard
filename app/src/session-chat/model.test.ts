@@ -28,7 +28,6 @@ function createSession(overrides: Partial<DaemonSession> = {}) {
     initiative: null,
     inboxScope: null,
     lastAgentMessage: null,
-    models: null,
     configOptions: [],
     availableCommands: [],
     contextUsage: null,

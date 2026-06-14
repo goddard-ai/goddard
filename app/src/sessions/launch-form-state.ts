@@ -104,7 +104,6 @@ export const SessionLaunchFormState = createModel(function () {
 
   const launchModelConfig = computed(() =>
     deriveSessionLaunchModelConfig({
-      models: launchPreview.value?.models ?? null,
       configOptions: launchPreview.value?.configOptions ?? [],
     }),
   )
@@ -226,7 +225,6 @@ export const SessionLaunchFormState = createModel(function () {
     }
 
     const resolvedLaunchModelConfig = deriveSessionLaunchModelConfig({
-      models: nextLaunchPreview.models ?? null,
       configOptions: nextLaunchPreview.configOptions,
     })
     const availableBranchNames = new Set(nextLaunchPreview.branches)
