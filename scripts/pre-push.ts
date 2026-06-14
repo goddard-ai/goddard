@@ -150,7 +150,7 @@ function runPnpm(repoRoot: string, args: string[]) {
 function runRepoCheck(repoRoot: string, changedFiles: string[]) {
   if (
     changedFiles.includes("pnpm-lock.yaml") &&
-    !runPnpm(repoRoot, ["install", "--frozen-lockfile"])
+    !runPnpm(repoRoot, ["install", "--frozen-lockfile", "--ignore-scripts"])
   ) {
     return false
   }
