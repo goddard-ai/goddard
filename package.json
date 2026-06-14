@@ -37,6 +37,7 @@
     "scaffold:feature": "bun run ./scripts/scaffold-feature-package.ts",
     "build": "turbo run build",
     "fmt": "turbo run fmt",
+    "codegen": "turbo run codegen",
     "typecheck": "turbo run typecheck --output-logs=errors-only",
     "lint": "turbo run lint --output-logs=errors-only",
     "test": "turbo run test --output-logs=errors-only",
@@ -48,8 +49,8 @@
     "goddard:daemon": "NODE_ENV=development node ./scripts/runtime-bun.mjs run ./core/daemon/src/main.ts",
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
     "check:bun-runtime": "node ./scripts/check-bun-runtime.mjs",
-    "check:prepush": "turbo run typecheck lint --output-logs=errors-only --continue=always",
-    "check": "turbo run typecheck lint test --output-logs=errors-only --continue=always"
+    "check:prepush": "turbo run codegen && turbo run typecheck lint --output-logs=errors-only --continue=always",
+    "check": "turbo run codegen && turbo run typecheck lint test --output-logs=errors-only --continue=always"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",
