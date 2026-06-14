@@ -8,7 +8,6 @@ import { z } from "zod"
 
 import {
   $type,
-  createHookedIpcClient,
   http,
   IpcClientError,
   ndjson,
@@ -260,35 +259,6 @@ describe("core/ipc", () => {
     await expect(client.add({ a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
   })
 
-  test("wraps route clients with request lifecycle hooks", async () => {
-    const events: IpcClientHookEvent[] = []
-    const client = createHookedIpcClient(
-      {
-        math: {
-          add: async (payload: { a: number; b: number }) => ({ sum: payload.a + payload.b }),
-        },
-      },
-      (event) => {
-        events.push(event)
-      },
-    )
-
-    await expect(client.math.add({ a: 2, b: 3 })).resolves.toEqual({ sum: 5 })
-
-    expect(events[0]).toMatchObject({
-      type: "request.start",
-      routeName: "math.add",
-      payload: { a: 2, b: 3 },
-    })
-    expect(events[1]).toMatchObject({
-      type: "request.success",
-      routeName: "math.add",
-      response: { sum: 5 },
-    })
-    expect(events[0]?.opId).toBe(events[1]?.opId)
-    expect(events[1]?.type === "request.success" ? events[1].durationMs >= 0 : false).toBe(true)
-  })
-
   test("createNodeClient accepts request lifecycle hooks", async () => {
     const { address } = await createFixture()
     const events: IpcClientHookEvent[] = []
@@ -304,41 +274,42 @@ describe("core/ipc", () => {
     expect(events[0]).toMatchObject({
       type: "request.start",
       routeName: "ping",
+      method: "GET",
+      pathPattern: "/ping",
     })
     expect(events[1]).toMatchObject({
       type: "request.success",
       routeName: "ping",
       response: { ok: true },
+      status: 200,
     })
   })
 
-  test("wraps route client failures with request lifecycle hooks", async () => {
+  test("request lifecycle hooks observe client-side validation failures", async () => {
+    const { address } = await createFixture()
     const events: IpcClientHookEvent[] = []
-    const client = createHookedIpcClient(
-      {
-        math: {
-          add: async () => {
-            throw new Error("nope")
-          },
-        },
-      },
-      (event) => {
+    const client = createNodeClient(address, routes, {
+      ipcHook: (event) => {
         events.push(event)
       },
-    )
+    })
 
-    await expect(client.math.add()).rejects.toThrow("nope")
+    await expect(client.add({ a: 2, b: "3" } as never)).rejects.toThrow()
 
     expect(events[0]).toMatchObject({
       type: "request.start",
-      routeName: "math.add",
+      routeName: "add",
+      payload: { a: 2, b: "3" },
     })
     expect(events[1]).toMatchObject({
       type: "request.error",
-      routeName: "math.add",
+      routeName: "add",
     })
     expect(events[0]?.opId).toBe(events[1]?.opId)
-    expect(events[1]?.type === "request.error" ? getErrorMessage(events[1].error) : "").toBe("nope")
+    expect(events[1]).not.toHaveProperty("status")
+    expect(events[1]?.type === "request.error" ? getErrorMessage(events[1].error) : "").toContain(
+      "Invalid",
+    )
   })
 
   test("rejects invalid request payloads before they cross the process boundary", async () => {

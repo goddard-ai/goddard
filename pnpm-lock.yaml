@@ -64,8 +64,8 @@ catalogs:
       specifier: ^12.8.0
       version: 12.9.1
     rouzer:
-      specifier: ^5.0.0
-      version: 5.1.1
+      specifier: ^5.2.0
+      version: 5.2.0
     tabbable:
       specifier: ^6.4.0
       version: 6.4.0
@@ -399,7 +399,7 @@ importers:
         version: 12.9.1
       rouzer:
         specifier: "catalog:"
-        version: 5.1.1(zod@4.4.3)
+        version: 5.2.0(zod@4.4.3)
     devDependencies:
       "@cloudflare/workers-types":
         specifier: ^4.20260425.1
@@ -415,7 +415,7 @@ importers:
     dependencies:
       rouzer:
         specifier: "catalog:"
-        version: 5.1.1(zod@4.4.3)
+        version: 5.2.0(zod@4.4.3)
 
   core/config:
     dependencies:
@@ -614,7 +614,7 @@ importers:
     dependencies:
       rouzer:
         specifier: "catalog:"
-        version: 5.1.1(zod@4.4.3)
+        version: 5.2.0(zod@4.4.3)
       zod:
         specifier: "catalog:"
         version: 4.4.3
@@ -647,7 +647,7 @@ importers:
         version: 0.5.3(zod@4.4.3)
       rouzer:
         specifier: "catalog:"
-        version: 5.1.1(zod@4.4.3)
+        version: 5.2.0(zod@4.4.3)
       zod:
         specifier: "catalog:"
         version: 4.4.3
@@ -9071,10 +9071,10 @@ packages:
       }
     engines: { node: ">= 18" }
 
-  rouzer@5.1.1:
+  rouzer@5.2.0:
     resolution:
       {
-        integrity: sha512-nHbPaM8fAKI3HVFoRxe5U+k44LQW+eWZBonHJYsr+D/qSiuywe9EXnJm88e2Gsrtg8JdNci5J4cgqQTCOR/JKQ==,
+        integrity: sha512-EpNFZ1me98+69WGdc3LidAJg1SkmMO1jQ/Q5bl1kDKnqLz85SlAhKJ6SDdu3mRtXUSrDupy/8WPOGEoKWaOuXg==,
       }
     peerDependencies:
       zod: ">=4"
@@ -14945,7 +14945,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  rouzer@5.1.1(zod@4.4.3):
+  rouzer@5.2.0(zod@4.4.3):
     dependencies:
       "@hattip/core": 0.0.49
       "@remix-run/route-pattern": 0.21.1
