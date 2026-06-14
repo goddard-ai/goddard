@@ -72,10 +72,10 @@ export const worktrunkPlugin: WorktreePlugin = {
     return null
   },
 
-  async cleanup(worktreeDir: string, branchName: string) {
+  async cleanup(options) {
     try {
-      const result = await runCommand("wt", ["remove", branchName], {
-        cwd: path.dirname(worktreeDir) || "/",
+      const result = await runCommand("wt", ["remove", options.branchName], {
+        cwd: path.dirname(options.worktreeDir) || "/",
         stdin: "ignore",
       })
 

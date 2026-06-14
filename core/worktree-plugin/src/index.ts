@@ -26,6 +26,26 @@ export interface WorktreeSetupOptions {
 }
 
 /**
+ * Options passed to a plugin when cleaning up a worktree.
+ */
+export interface WorktreeCleanupOptions {
+  /**
+   * The current working directory of the original repository.
+   */
+  cwd: string
+
+  /**
+   * The directory path of the worktree to clean up.
+   */
+  worktreeDir: string
+
+  /**
+   * The branch associated with the worktree.
+   */
+  branchName: string
+}
+
+/**
  * A plugin that defines how linked git worktrees should be managed.
  */
 export interface WorktreePlugin {
@@ -47,5 +67,5 @@ export interface WorktreePlugin {
   /**
    * Cleans up an existing worktree.
    */
-  cleanup(worktreeDir: string, branchName: string): Promise<boolean>
+  cleanup(options: WorktreeCleanupOptions): Promise<boolean>
 }

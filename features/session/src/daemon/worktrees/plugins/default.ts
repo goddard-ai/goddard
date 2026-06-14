@@ -4,7 +4,11 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
+import type {
+  WorktreeCleanupOptions,
+  WorktreePlugin,
+  WorktreeSetupOptions,
+} from "@goddard-ai/worktree-plugin"
 
 import { runCommand } from "../process.ts"
 
@@ -96,15 +100,19 @@ export const defaultPlugin: WorktreePlugin = {
     return worktreeDir
   },
 
-  async cleanup(worktreeDir: string, _branchName: string) {
+  async cleanup(options: WorktreeCleanupOptions) {
     try {
-      const wtResult = await runCommand("git", ["worktree", "remove", "--force", worktreeDir], {
-        cwd: worktreeDir,
-        stdin: "ignore",
-      })
+      const wtResult = await runCommand(
+        "git",
+        ["worktree", "remove", "--force", options.worktreeDir],
+        {
+          cwd: options.cwd,
+          stdin: "ignore",
+        },
+      )
 
       if (wtResult.status !== 0) {
-        await rm(worktreeDir, { recursive: true, force: true })
+        await rm(options.worktreeDir, { recursive: true, force: true })
       }
       return true
     } catch {

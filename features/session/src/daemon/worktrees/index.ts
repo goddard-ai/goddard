@@ -149,15 +149,21 @@ export async function createWorktree(options: CreateWorktreeOptions) {
  */
 export async function deleteWorktree(options: DeleteWorktreeOptions) {
   const plugin = await resolveDeleteWorktreePlugin(options)
-  if (await plugin.cleanup(options.worktreeDir, options.branchName)) {
+  if (
+    await plugin.cleanup({
+      cwd: options.cwd,
+      worktreeDir: options.worktreeDir,
+      branchName: options.branchName,
+    })
+  ) {
     return true
   }
 
-  if (plugin === defaultPlugin) {
-    return false
-  }
-
-  return defaultPlugin.cleanup(options.worktreeDir, options.branchName)
+  return await defaultPlugin.cleanup({
+    cwd: options.cwd,
+    worktreeDir: options.worktreeDir,
+    branchName: options.branchName,
+  })
 }
 
 /**
