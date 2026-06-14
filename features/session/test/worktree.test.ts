@@ -143,7 +143,13 @@ test("default plugin uses the global worktree directory when the repository has 
   expect(existsSync(created!)).toBe(true)
   expect(await resolveGitCommonDir(repoDir)).toBe(await resolveGitCommonDir(created!))
 
-  expect(await defaultPlugin.cleanup(created!, "feature-1")).toBe(true)
+  expect(
+    await defaultPlugin.cleanup({
+      cwd: repoDir,
+      worktreeDir: created!,
+      branchName: "feature-1",
+    }),
+  ).toBe(true)
   expect(existsSync(created!)).toBe(false)
 })
 

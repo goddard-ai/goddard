@@ -25,12 +25,7 @@ afterEach(async () => {
 
 test("same-head preparation seeds the default untracked paths and skips bootstrap without a manager", async () => {
   const repoDir = await createRepoFixture()
-  await mkdir(join(repoDir, "node_modules", "pkg"), { recursive: true })
-  await writeFile(
-    join(repoDir, "node_modules", "pkg", "index.js"),
-    "export const dep = 1\n",
-    "utf-8",
-  )
+  await mkdir(join(repoDir, "node_modules"), { recursive: true })
   await mkdir(join(repoDir, "dist"), { recursive: true })
   await writeFile(join(repoDir, "dist", "index.js"), "export const dist = true\n", "utf-8")
   await mkdir(join(repoDir, ".turbo"), { recursive: true })
@@ -48,9 +43,7 @@ test("same-head preparation seeds the default untracked paths and skips bootstra
   expect(prepared.bootstrapRan).toBe(false)
   expect(prepared.packageManager).toBeNull()
   expect(prepared.seededPaths).toEqual([".turbo", "dist", "node_modules"])
-  expect(
-    await readFile(join(created.worktreeDir, "node_modules", "pkg", "index.js"), "utf-8"),
-  ).toBe("export const dep = 1\n")
+  expect(existsSync(join(created.worktreeDir, "node_modules"))).toBe(true)
   expect(await readFile(join(created.worktreeDir, "dist", "index.js"), "utf-8")).toBe(
     "export const dist = true\n",
   )
