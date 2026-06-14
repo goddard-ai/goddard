@@ -41,11 +41,13 @@ import {
   type DaemonSession,
   type DaemonSessionDiagnosticEvent,
   type DaemonSessionStatus,
+  type DaemonSessionTurnChange,
   type DaemonSessionTurn,
   type GetSessionChangesResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryRequest,
   type GetSessionHistoryResponse,
+  type GetSessionTurnDiffResponse,
   type GetSessionWorktreeResponse,
   type InitialPromptOption,
   type ListSessionsRequest,
@@ -109,6 +111,11 @@ import {
 import { discoverSessionSubpackages } from "./subpackages.ts"
 import { backfillSessionTitle, prepareSessionTitle } from "./title.ts"
 import {
+  buildSessionTurnChangeRecord,
+  captureSessionTurnGitBaseline,
+  type SessionTurnGitBaseline,
+} from "./turn-changes.ts"
+import {
   createInitializedHistoryTurn,
   getContextUsageFromMessage,
   getLatestAvailableCommands,
@@ -156,6 +163,7 @@ const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
 type SessionDoc = DaemonSession
+type SessionTurnChangeDoc = DaemonSessionTurnChange
 /** Identifies seeded display fixtures that were never owned by a live daemon process. */
 function isMockHistoricalSession(session: SessionDoc) {
   return (
@@ -306,6 +314,7 @@ type InitializedSession = acp.InitializeResponse & {
   initialPromptRequestId: SessionTurnPromptRequestId | null
   initialPromptStartedAt: string | null
   initialPromptCompletedAt: string | null
+  initialPromptGitBaseline: SessionTurnGitBaseline | null
   acpSessionId: string
   configOptions?: acp.SessionConfigOption[] | null
   stopReason: acp.PromptResponse["stopReason"] | null
@@ -318,6 +327,7 @@ async function runLaunchInitialPrompt(params: {
   request: ResolvedCreateSessionRequest
   isFirstPrompt: boolean
   history: acp.AnyMessage[]
+  captureInitialPromptGitBaseline?: () => Promise<SessionTurnGitBaseline | null>
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
   let status: DaemonSessionStatus = "active"
@@ -325,11 +335,13 @@ async function runLaunchInitialPrompt(params: {
   let initialPromptRequestId: SessionTurnPromptRequestId | null = null
   let initialPromptStartedAt: string | null = null
   let initialPromptCompletedAt: string | null = null
+  let initialPromptGitBaseline: SessionTurnGitBaseline | null = null
   let stopReason: acp.PromptResponse["stopReason"] | null = null
 
   if (params.request.initialPrompt !== undefined) {
     initialPromptRequestId = randomUUID()
     initialPromptStartedAt = new Date().toISOString()
+    initialPromptGitBaseline = (await params.captureInitialPromptGitBaseline?.()) ?? null
     const initialMessage = {
       jsonrpc: "2.0",
       id: initialPromptRequestId,
@@ -376,6 +388,7 @@ async function runLaunchInitialPrompt(params: {
     initialPromptRequestId,
     initialPromptStartedAt,
     initialPromptCompletedAt,
+    initialPromptGitBaseline,
     stopReason,
   }
 }
@@ -386,6 +399,7 @@ async function initializeSession(params: {
   output: AgentOutputStream
   request: ResolvedCreateSessionRequest
   resumeAcpId?: string
+  captureInitialPromptGitBaseline?: () => Promise<SessionTurnGitBaseline | null>
   onMessageWrite?: (message: acp.AnyMessage) => void
   findActiveSession?: (acpSessionId: string) => ActiveSession | null
   handleSessionUpdate?: (active: ActiveSession, params: acp.SessionNotification) => Promise<void>
@@ -481,6 +495,7 @@ async function initializeSession(params: {
       request: params.request,
       isFirstPrompt,
       history,
+      captureInitialPromptGitBaseline: params.captureInitialPromptGitBaseline,
       onMessageWrite: params.onMessageWrite,
     })
 
@@ -503,6 +518,7 @@ async function initializeSession(params: {
 async function initializeSessionFromLaunchLease(params: {
   lease: LaunchLease
   request: ResolvedCreateSessionRequest
+  captureInitialPromptGitBaseline?: () => Promise<SessionTurnGitBaseline | null>
   onMessageWrite?: (message: acp.AnyMessage) => void
 }) {
   let configOptions: acp.SessionConfigOption[] | null | undefined = params.lease.configOptions
@@ -526,6 +542,7 @@ async function initializeSessionFromLaunchLease(params: {
     request: params.request,
     isFirstPrompt: true,
     history: params.lease.history,
+    captureInitialPromptGitBaseline: params.captureInitialPromptGitBaseline,
     onMessageWrite: params.onMessageWrite,
   })
 
@@ -1210,6 +1227,7 @@ export function createSessionManager(input: {
       exitCleanup: null,
       nextTurnSequence: params.nextTurnSequence,
       activeTurn: null,
+      activeTurnGitBaseline: null,
       isFirstPrompt: params.initialized.isFirstPrompt,
       systemPrompt: params.systemPrompt,
       lastPermissionRequest: null,
@@ -1490,6 +1508,7 @@ export function createSessionManager(input: {
             localCheckout: undefined,
             metadata: sessionMetadata,
           },
+          captureInitialPromptGitBaseline: async () => captureSessionTurnGitBaseline(cwd),
           onMessageWrite,
         })
         initializedClient = initialized.client
@@ -1520,6 +1539,7 @@ export function createSessionManager(input: {
             metadata: sessionMetadata,
           },
           resumeAcpId: existingSession?.acpSessionId,
+          captureInitialPromptGitBaseline: async () => captureSessionTurnGitBaseline(cwd),
           onMessageWrite,
           findActiveSession: (acpSessionId) =>
             activeSessionsByAcpSessionId.get(acpSessionId) ?? null,
@@ -1538,6 +1558,17 @@ export function createSessionManager(input: {
         initialized,
         sequence: existingArtifacts.nextTurnSequence,
       })
+      const initialTurnChange = initialTurn
+        ? await buildSessionTurnChangeRecord({
+            sessionId: id,
+            turnId: initialTurn.turnId,
+            sequence: initialTurn.sequence,
+            promptRequestId: initialTurn.promptRequestId,
+            startedAt: initialTurn.startedAt,
+            completedAt: initialTurn.completedAt,
+            baseline: initialized.initialPromptGitBaseline,
+          })
+        : null
       const nextTurnSequence = initialTurn
         ? initialTurn.sequence + 1
         : existingArtifacts.nextTurnSequence
@@ -1562,6 +1593,7 @@ export function createSessionManager(input: {
         id,
         existingSession,
         initialTurn,
+        initialTurnChange,
         existingWorktreeRecord: existingArtifacts.worktreeRecord,
         worktree,
         sessionRecord,
@@ -1676,6 +1708,11 @@ export function createSessionManager(input: {
           }) ?? null
         if (draftRecord) {
           await Promise.resolve(db.sessionTurnDrafts.delete(draftRecord.id)).catch(() => {})
+        }
+        for (const changeRecord of db.sessionTurnChanges.findMany({
+          where: { sessionId: id },
+        })) {
+          await Promise.resolve(db.sessionTurnChanges.delete(changeRecord.id)).catch(() => {})
         }
         const diagnosticsRecord =
           db.sessionDiagnostics.first({
@@ -1796,6 +1833,23 @@ export function createSessionManager(input: {
     return draftRecord
   }
 
+  function readSessionTurnChange(sessionId: SessionId, turnId: string) {
+    return (
+      db.sessionTurnChanges.first({
+        where: { sessionId, turnId },
+      }) ?? null
+    ) satisfies SessionTurnChangeDoc | null
+  }
+
+  function toSessionTurnChangeSummary(record: SessionTurnChangeDoc) {
+    return {
+      repoRoot: record.repoRoot,
+      startedDirty: record.startedDirty,
+      warnings: [...record.warnings],
+      changedFiles: [...record.changedFiles],
+    }
+  }
+
   async function getHistory(params: GetSessionHistoryRequest): Promise<GetSessionHistoryResponse> {
     await ready
     const session = await getSession(params.id)
@@ -1816,7 +1870,15 @@ export function createSessionManager(input: {
       throw new IpcClientError("Invalid session history cursor")
     }
 
-    const turns = [...page.items].reverse().map(toSessionHistoryTurnFromRecord)
+    const turns = [...page.items].reverse().map((turnRecord) => {
+      const turn = toSessionHistoryTurnFromRecord(turnRecord)
+      const changeRecord = readSessionTurnChange(params.id, turn.turnId)
+
+      return {
+        ...turn,
+        changeSummary: changeRecord ? toSessionTurnChangeSummary(changeRecord) : null,
+      }
+    })
     if (!params.cursor) {
       const active = activeSessions.get(params.id)
 
@@ -1865,6 +1927,28 @@ export function createSessionManager(input: {
       workspaceRoot: changes.workspaceRoot,
       diff: changes.diff,
       hasChanges: changes.hasChanges,
+    }
+  }
+
+  async function getTurnDiff(id: SessionId, turnId: string): Promise<GetSessionTurnDiffResponse> {
+    await ready
+    const session = await getSession(id)
+    const changeRecord = readSessionTurnChange(id, turnId)
+
+    if (!changeRecord) {
+      throw new IpcClientError(`Session turn diff ${turnId} not found`)
+    }
+
+    return {
+      id: session.id,
+      acpSessionId: session.acpSessionId,
+      turnId,
+      sequence: changeRecord.sequence,
+      repoRoot: changeRecord.repoRoot,
+      startedDirty: changeRecord.startedDirty,
+      warnings: [...changeRecord.warnings],
+      changedFiles: [...changeRecord.changedFiles],
+      patch: changeRecord.patch,
     }
   }
 
@@ -2211,6 +2295,7 @@ export function createSessionManager(input: {
     getSession,
     getHistory,
     getChanges,
+    getTurnDiff,
     getComposerSuggestions,
     getDraftSuggestions,
     getLaunchPreview,

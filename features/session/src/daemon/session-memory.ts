@@ -10,6 +10,7 @@ import type {
 } from "../schema.ts"
 import type { AgentProcessHandle } from "./agent-process.ts"
 import type { ActiveTurnBuffer, SessionTurnPromptRequestId } from "./turn-history.ts"
+import type { SessionTurnGitBaseline } from "./turn-changes.ts"
 
 type SessionId = DaemonSession["id"]
 
@@ -54,6 +55,7 @@ export type ActiveSession = {
   exitCleanup: Promise<void> | null
   nextTurnSequence: number
   activeTurn: ActiveTurnBuffer<DaemonSessionTurnDraft["id"]> | null
+  activeTurnGitBaseline: SessionTurnGitBaseline | null
   isFirstPrompt: boolean
   systemPrompt: string
   lastPermissionRequest: PermissionRequest | null

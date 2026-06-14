@@ -7,6 +7,7 @@ import type {
   CreateSessionRequest,
   DaemonSession,
   DaemonSessionMetadata,
+  DaemonSessionTurnChange,
   DaemonSessionTurnDraft,
   DaemonWorktree,
   SessionConnection,
@@ -244,6 +245,7 @@ export function persistLaunchedSession(
     id: SessionId
     existingSession: SessionDoc | null
     initialTurn: SessionHistoryTurn | null
+    initialTurnChange: Omit<DaemonSessionTurnChange, "id"> | null
     existingWorktreeRecord: SessionWorktreeDoc | null
     worktree: PreparedSessionWorktree | null
     sessionRecord: ReturnType<typeof createSessionRecordUpdate>
@@ -251,6 +253,9 @@ export function persistLaunchedSession(
 ) {
   if (params.initialTurn) {
     db.sessionTurns.create(toCompletedTurnInput(params.id, params.initialTurn))
+  }
+  if (params.initialTurnChange) {
+    db.sessionTurnChanges.create(params.initialTurnChange)
   }
 
   if (params.worktree) {

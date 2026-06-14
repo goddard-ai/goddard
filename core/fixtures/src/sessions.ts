@@ -157,6 +157,7 @@ export function createSessionHistoryTurn(
   } = {},
 ): SessionHistoryTurn {
   return {
+    changeSummary: null,
     completedAt: null,
     completionKind: null,
     inboxHeadline: null,

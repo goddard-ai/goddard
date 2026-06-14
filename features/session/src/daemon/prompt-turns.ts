@@ -21,6 +21,7 @@ import type { SessionEventEmitter } from "./manager.ts"
 import type { ActiveSession, QueuedPromptEntry, SessionMemory } from "./session-memory.ts"
 import { resolveLatestStoredTurnSequence } from "./session-records.ts"
 import type { createSessionTitleRuntime } from "./session-titles-runtime.ts"
+import { captureSessionTurnGitBaseline } from "./turn-changes.ts"
 import { appendSessionHistoryMessage, type ActiveTurnBuffer } from "./turn-history.ts"
 
 type SessionId = DaemonSession["id"]
@@ -301,15 +302,14 @@ export function createPromptTurnFeature(input: {
         active.acpSessionId,
         responseMessage,
       )
-      updateSessionFromPromptResponse(active, entry.requestId, response)
-      entry.resolve?.(response)
-
       if (active.blockingPromptRequestId === entry.requestId) {
         active.blockingPromptRequestId = null
       }
 
       publishSessionMessage(active, responseMessage)
       input.activeTurns.finalizeActiveTurn(active, responseMessage)
+      updateSessionFromPromptResponse(active, entry.requestId, response)
+      entry.resolve?.(response)
       await handleSteerBoundary(active, responseMessage)
       await processPromptQueue(active)
     } catch (error) {
@@ -392,6 +392,7 @@ export function createPromptTurnFeature(input: {
       touchedAttentionEntity: false,
     }
     active.activeTurn = activeTurn
+    active.activeTurnGitBaseline = null
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 
@@ -399,6 +400,9 @@ export function createPromptTurnFeature(input: {
     input.idleShutdown.refreshIdleShutdownState(active.id, "turn_started")
 
     try {
+      active.activeTurnGitBaseline = await captureSessionTurnGitBaseline(
+        input.db.sessions.get(active.id)?.cwd ?? process.cwd(),
+      )
       input.emitDiagnostic(
         active.id,
         "session_turn_started",
@@ -423,6 +427,7 @@ export function createPromptTurnFeature(input: {
       }
       input.activeTurns.clearTurnDraftFlushTimer(active.activeTurn)
       active.activeTurn = null
+      active.activeTurnGitBaseline = null
       if (active.blockingPromptRequestId === nextPrompt.requestId) {
         active.blockingPromptRequestId = null
       }
