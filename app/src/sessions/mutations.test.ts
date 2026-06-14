@@ -29,6 +29,71 @@ function resetSdk() {
   sessionClient.history = vi.fn(async ({ id }: { id: DaemonSession["id"] }) =>
     createSessionHistoryResponse({ session: createFixtureSession({ id }) }),
   )
+  sessionClient.worktree = {
+    get: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
+      id,
+      acpSessionId: "acp-session-1",
+      worktree: {
+        repoRoot: "/repo",
+        requestedCwd: "/repo",
+        effectiveCwd: "/repo/.worktrees/session",
+        worktreeDir: "/repo/.worktrees/session",
+        branchName: "goddard/example",
+        mergeTargetBranch: "main",
+        poweredBy: "default",
+      },
+    })),
+    mergeReadiness: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
+      id,
+      acpSessionId: "acp-session-1",
+      readiness: {
+        status: "ready",
+        mergeTargetBranch: "main",
+        worktreeHeadOid: "abc123",
+        worktreeHeadBranch: "goddard/example",
+        targetBranchHeadOid: "def456",
+        aheadCount: 1,
+        syncMounted: false,
+        willAutoUnmountSync: false,
+      },
+    })),
+    mergeTargetBranch: {
+      set: vi.fn(
+        async ({
+          id,
+          mergeTargetBranch,
+        }: {
+          id: DaemonSession["id"]
+          mergeTargetBranch: string | null
+        }) => ({
+          id,
+          acpSessionId: "acp-session-1",
+          mergeTargetBranch,
+          readiness: {
+            status: mergeTargetBranch ? "ready" : "merge_target_branch_required",
+            mergeTargetBranch,
+            worktreeHeadOid: "abc123",
+            worktreeHeadBranch: "goddard/example",
+            targetBranchHeadOid: mergeTargetBranch ? "def456" : null,
+            aheadCount: mergeTargetBranch ? 1 : 0,
+            syncMounted: false,
+            willAutoUnmountSync: false,
+          },
+        }),
+      ),
+    },
+    merge: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
+      id,
+      acpSessionId: "acp-session-1",
+      merged: true,
+      targetBranch: "main",
+      sourceHeadOid: "abc123",
+      previousTargetHeadOid: "def456",
+      nextTargetHeadOid: "abc123",
+      syncUnmounted: false,
+      warnings: [],
+    })),
+  }
   sessionClient.prompt = vi.fn(async () => ({ accepted: true }))
   sessionClient.configOption = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
@@ -129,6 +194,8 @@ async function activateSessionViewQueries(sessionId: DaemonSession["id"]) {
   await activateCachedQuery(sessionClient.list, [{ limit: SESSION_LIST_LIMIT }])
   await activateCachedQuery(sessionClient.get, [{ id: sessionId }])
   await activateCachedQuery(sessionClient.history, [{ id: sessionId }])
+  await activateCachedQuery(sessionClient.worktree.get, [{ id: sessionId }])
+  await activateCachedQuery(sessionClient.worktree.mergeReadiness, [{ id: sessionId }])
 }
 
 async function expectSessionViewsRefreshed() {
@@ -136,7 +203,9 @@ async function expectSessionViewsRefreshed() {
     () =>
       sessionClient.list.mock.calls.length === 1 &&
       sessionClient.get.mock.calls.length === 1 &&
-      sessionClient.history.mock.calls.length === 1,
+      sessionClient.history.mock.calls.length === 1 &&
+      sessionClient.worktree.get.mock.calls.length === 1 &&
+      sessionClient.worktree.mergeReadiness.mock.calls.length === 1,
   )
 }
 
@@ -179,8 +248,10 @@ test("createSession refreshes session lists and launch previews", async () => {
 test("session mutations refresh list, detail, and transcript queries", async () => {
   const {
     cancelSessionTurn,
+    mergeSessionWorktree,
     reconnectSession,
     respondSessionPermission,
+    setSessionWorktreeMergeTargetBranch,
     setSessionConfigOption,
     setSessionModel,
     submitSessionPrompt,
@@ -258,12 +329,30 @@ test("session mutations refresh list, detail, and transcript queries", async () 
       run: () => cancelSessionTurn(sessionId),
       assert: () => expect(sessionClient.cancel).toHaveBeenCalledWith({ id: sessionId }),
     },
+    {
+      run: () =>
+        setSessionWorktreeMergeTargetBranch({
+          id: sessionId,
+          mergeTargetBranch: "release/1.x",
+        }),
+      assert: () =>
+        expect(sessionClient.worktree.mergeTargetBranch.set).toHaveBeenCalledWith({
+          id: sessionId,
+          mergeTargetBranch: "release/1.x",
+        }),
+    },
+    {
+      run: () => mergeSessionWorktree({ id: sessionId }),
+      assert: () => expect(sessionClient.worktree.merge).toHaveBeenCalledWith({ id: sessionId }),
+    },
   ]
 
   for (const item of cases) {
     sessionClient.list.mockClear()
     sessionClient.get.mockClear()
     sessionClient.history.mockClear()
+    sessionClient.worktree.get.mockClear()
+    sessionClient.worktree.mergeReadiness.mockClear()
 
     await item.run()
     await expectSessionViewsRefreshed()
@@ -284,6 +373,8 @@ test("completeSession uses the inbox completion mutation and refreshes session p
       sessionClient.list.mock.calls.length === 1 &&
       sessionClient.get.mock.calls.length === 1 &&
       sessionClient.history.mock.calls.length === 1 &&
+      sessionClient.worktree.get.mock.calls.length === 1 &&
+      sessionClient.worktree.mergeReadiness.mock.calls.length === 1 &&
       inboxClient.list.mock.calls.length === 1,
   )
 
@@ -348,6 +439,8 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
   sessionClient.list.mockClear()
   sessionClient.get.mockClear()
   sessionClient.history.mockClear()
+  sessionClient.worktree.get.mockClear()
+  sessionClient.worktree.mergeReadiness.mockClear()
 
   pushEvent({
     kind: "sessionUpdated",

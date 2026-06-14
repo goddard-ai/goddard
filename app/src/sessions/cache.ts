@@ -12,6 +12,8 @@ export function invalidateSessionLists() {
 export function invalidateSessionDetail(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.get, [{ id: sessionId }])
   queryClient.invalidate(goddardSdk.session.history, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.worktree.get, [{ id: sessionId }])
+  queryClient.invalidate(goddardSdk.session.worktree.mergeReadiness, [{ id: sessionId }])
 }
 
 /** Invalidates session reads that can change after a session lifecycle mutation. */

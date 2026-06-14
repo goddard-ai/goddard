@@ -64,6 +64,7 @@
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
+    "@goddard-ai/review-sync": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/worktree-plugin": "workspace:*",

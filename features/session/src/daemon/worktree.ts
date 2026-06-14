@@ -44,7 +44,7 @@ export async function reuseExistingWorktree(
     )
   }
 
-  const headRef = await resolveExistingWorktreeHeadRef(worktree.worktreeDir)
+  const headRef = await resolveGitHeadRef(worktree.worktreeDir)
   if (headRef) {
     worktree.branchName = headRef
   }
@@ -116,6 +116,34 @@ export async function resolveGitWorktreeSource(cwd: string) {
 }
 
 /**
+ * Resolves the currently attached branch for one existing worktree folder when HEAD is not detached.
+ */
+export async function resolveGitHeadRef(cwd: string) {
+  const resolvedCwd = resolve(realpathSync.native(cwd))
+  const gitWorktreeCheck = await runGit(resolvedCwd, ["rev-parse", "--git-dir"])
+  if (!gitWorktreeCheck.success) {
+    throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
+  }
+
+  const { success, stdout } = await runGit(resolvedCwd, [
+    "symbolic-ref",
+    "--quiet",
+    "--short",
+    "HEAD",
+  ])
+  if (!success) {
+    return null
+  }
+
+  const headRef = stdout.trim()
+  if (!headRef) {
+    return null
+  }
+
+  return headRef
+}
+
+/**
  * Converts persisted worktree metadata into the logging wrapper used by session launch.
  */
 export function toPreparedSessionWorktree(state: SessionWorktreeState): PreparedSessionWorktree {
@@ -159,34 +187,6 @@ export async function inspectWorktreeCompletionState(
     dirty: status.stdout.trim().length > 0,
     unmergedCommits: Number(ahead.stdout.trim()) > 0,
   }
-}
-
-/**
- * Resolves the currently attached branch for one existing worktree folder when HEAD is not detached.
- */
-async function resolveExistingWorktreeHeadRef(cwd: string) {
-  const resolvedCwd = resolve(realpathSync.native(cwd))
-  const gitWorktreeCheck = await runGit(resolvedCwd, ["rev-parse", "--git-dir"])
-  if (!gitWorktreeCheck.success) {
-    throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
-  }
-
-  const { success, stdout } = await runGit(resolvedCwd, [
-    "symbolic-ref",
-    "--quiet",
-    "--short",
-    "HEAD",
-  ])
-  if (!success) {
-    return null
-  }
-
-  const headRef = stdout.trim()
-  if (!headRef) {
-    return null
-  }
-
-  return headRef
 }
 
 /**
