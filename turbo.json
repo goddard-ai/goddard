@@ -5,9 +5,17 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "panda:codegen": {
-      "inputs": ["panda.config.ts", "src/panda-css/global.css.ts", "package.json"],
-      "outputs": ["styled-system/**"]
+    "codegen": {
+      "inputs": [
+        "panda.config.ts",
+        "src/panda-css/global.css.ts",
+        "src/icons/**/*.svg",
+        "plugins/svg-icon-build-plugin.ts",
+        "plugins/svg-icon-data.template.ts",
+        "scripts/generate-svg-icon-data.ts",
+        "package.json"
+      ],
+      "outputs": ["styled-system/**", "src/lib/svg-icon-data.ts"]
     },
     "typecheck": {
       "inputs": [
