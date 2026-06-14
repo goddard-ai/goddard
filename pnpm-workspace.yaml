@@ -45,6 +45,7 @@ minimumReleaseAgeExclude:
   - radashi
   - rouzer
   - sculpted
+  - state-launcher
 
   # Turbo
   - turbo

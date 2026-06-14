@@ -88,7 +88,7 @@ function createLaunchableStateSeedScenario(): MockSeedScenario {
 }
 
 function createSeedSessionInput(session: DaemonSession): SessionSeedOverrides {
-  const { createdAt: _createdAt, id, updatedAt, ...input } = session
+  const { createdAt: _createdAt, id, lastSessionActivityAt, ...input } = session
 
   return {
     ...input,
@@ -96,7 +96,7 @@ function createSeedSessionInput(session: DaemonSession): SessionSeedOverrides {
     connectionMode: "history",
     id,
     supportsLoadSession: false,
-    timestamp: updatedAt,
+    timestamp: lastSessionActivityAt,
   }
 }
 

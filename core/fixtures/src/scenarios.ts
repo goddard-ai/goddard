@@ -53,9 +53,9 @@ export function createSessionTriageQueueScenario() {
     inboxScope: "Query cache",
     lastAgentMessage:
       "I found the right seam, but need approval before changing shared cache behavior.",
+    lastSessionActivityAt: fixtureNow - 4 * 60_000,
     status: "blocked",
     title: "Add query injection for launchable states",
-    updatedAt: fixtureNow - 4 * 60_000,
   })
   const activeSession = createFixtureSession({
     id: launchableStateIds.sessions.active,
@@ -65,27 +65,27 @@ export function createSessionTriageQueueScenario() {
     },
     initiative: "Stabilize the app shell",
     lastAgentMessage: "Running focused checks around workbench tab restoration.",
+    lastSessionActivityAt: fixtureNow - 16 * 60_000,
     status: "active",
     title: "Investigate tab restore race",
-    updatedAt: fixtureNow - 16 * 60_000,
   })
   const errorSession = createFixtureSession({
     id: launchableStateIds.sessions.error,
     errorMessage: "Adapter exited before sending an initialize response.",
     lastAgentMessage: "The runtime failed during launch.",
+    lastSessionActivityAt: fixtureNow - 2 * 60 * 60_000,
     status: "error",
     title: "Launch failed in agent adapter",
-    updatedAt: fixtureNow - 2 * 60 * 60_000,
   })
   const completedSession = createFixtureSession({
     id: launchableStateIds.sessions.completed,
     activeDaemonSession: false,
     connectionMode: "history",
     lastAgentMessage: "Query cache tests are passing locally.",
+    lastSessionActivityAt: fixtureNow - 5 * 60 * 60_000,
     status: "done",
     stopReason: "end_turn",
     title: "Finish launchable-state spike",
-    updatedAt: fixtureNow - 5 * 60 * 60_000,
   })
   const sessions = [blockedSession, activeSession, errorSession, completedSession]
 

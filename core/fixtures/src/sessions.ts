@@ -36,6 +36,7 @@ export function createFixtureSession(overrides: Partial<DaemonSession> = {}): Da
     inboxScope: null,
     initiative: null,
     lastAgentMessage: null,
+    lastSessionActivityAt: fixtureNow,
     mcpServers: [],
     metadata: null,
     models: null,
@@ -48,7 +49,6 @@ export function createFixtureSession(overrides: Partial<DaemonSession> = {}): Da
     title: "Fixture session",
     titleState: "generated",
     token: null,
-    updatedAt: fixtureNow,
     ...overrides,
   }
 }

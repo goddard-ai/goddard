@@ -124,11 +124,7 @@ test("SessionsList renders loading, error, empty, and row states from observable
         openSessionChanges() {},
       }}
     >
-      <SessionsList
-        activeSessionId="ses_session_1"
-        searchQuery=""
-        sessions={[createFixtureSession()]}
-      />
+      <SessionsList searchQuery="" sessions={[createFixtureSession()]} />
     </SessionsPageMutations>,
     container,
   )
