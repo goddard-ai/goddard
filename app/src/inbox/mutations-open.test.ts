@@ -15,10 +15,12 @@ import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 const inboxClient: any = {}
 const sessionClient: any = {}
 const prClient: any = {}
+const adapterClient: any = {}
 const cleanups: Array<() => void> = []
 
 mock.module("~/sdk.ts", () => ({
   goddardSdk: {
+    adapter: adapterClient,
     inbox: inboxClient,
     pr: prClient,
     session: sessionClient,
@@ -56,8 +58,16 @@ function resetSdk() {
       },
     }),
   )
+  sessionClient.worktree = {
+    get: vi.fn(async () => ({
+      worktree: null,
+    })),
+  }
   prClient.get = vi.fn(async ({ id }: { id: DaemonPullRequest["id"] }) => ({
     pullRequest: createFixturePullRequest({ id }),
+  }))
+  adapterClient.list = vi.fn(async () => ({
+    adapters: [],
   }))
 }
 
@@ -168,6 +178,16 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   expect(sessionClient.get).toHaveBeenCalledWith({
     id: "ses_session_1",
   })
+  expect(sessionClient.history).toHaveBeenCalledWith({
+    id: "ses_session_1",
+  })
+  expect(sessionClient.worktree.get).toHaveBeenCalledWith({
+    id: "ses_session_1",
+  })
+  expect(adapterClient.list).toHaveBeenCalledWith({
+    cwd: "/repo",
+    includeUninstalled: true,
+  })
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
     id: "session:ses_session_1",
     kind: "sessionChat",
@@ -177,6 +197,69 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
       sessionId: "ses_session_1",
       sessionTitle: "Fixture session",
     },
+  })
+})
+
+test("prepareInboxItemWorkbenchTarget warms session tabs without opening them", async () => {
+  const { prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  const target = await prepareInboxItemWorkbenchTarget(
+    createFixtureInboxItem({ entityId: "ses_prepared" }),
+  )
+
+  expect(target).toMatchObject({
+    entityId: "ses_prepared",
+    itemId: "inb_ses_prepared",
+    tab: {
+      kind: "sessionChat",
+      props: {
+        relatedFilesystemPath: "/Users/alec/Projects/goddard-ai",
+        sessionId: "ses_prepared",
+        sessionTitle: "Fixture session",
+      },
+    },
+  })
+  expect(sessionClient.get).toHaveBeenCalledWith({
+    id: "ses_prepared",
+  })
+  expect(sessionClient.history).toHaveBeenCalledWith({
+    id: "ses_prepared",
+  })
+  expect(sessionClient.worktree.get).toHaveBeenCalledWith({
+    id: "ses_prepared",
+  })
+  expect(adapterClient.list).toHaveBeenCalledWith({
+    cwd: "/Users/alec/Projects/goddard-ai",
+    includeUninstalled: true,
+  })
+  expect(workbenchTabSet.activeClosableTab).toBeNull()
+})
+
+test("openInboxItemInWorkbench reuses a matching prepared session target", async () => {
+  const { openInboxItemInWorkbench, prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const item = createFixtureInboxItem({ entityId: "ses_reused" })
+  const preparedTarget = await prepareInboxItemWorkbenchTarget(item)
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  sessionClient.get.mockClear()
+  sessionClient.history.mockClear()
+  sessionClient.worktree.get.mockClear()
+  adapterClient.list.mockClear()
+
+  await openInboxItemInWorkbench({
+    item,
+    preparedTarget,
+    workbenchTabSet,
+  })
+
+  expect(sessionClient.get).not.toHaveBeenCalled()
+  expect(sessionClient.history).not.toHaveBeenCalled()
+  expect(sessionClient.worktree.get).not.toHaveBeenCalled()
+  expect(adapterClient.list).not.toHaveBeenCalled()
+  expect(workbenchTabSet.activeClosableTab).toMatchObject({
+    id: "session:ses_reused",
+    kind: "sessionChat",
   })
 })
 
@@ -205,4 +288,33 @@ test("openInboxItemInWorkbench opens pull request rows as pull request tabs", as
       pullRequestTitle: "goddard-ai/goddard-ai #128",
     },
   })
+})
+
+test("prepareInboxItemWorkbenchTarget warms pull request tabs without opening them", async () => {
+  const { prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  const target = await prepareInboxItemWorkbenchTarget(
+    createFixtureInboxItem({
+      entityId: "pr_prepared",
+      reason: "pull_request.created",
+    }),
+  )
+
+  expect(target).toMatchObject({
+    entityId: "pr_prepared",
+    itemId: "inb_pr_prepared",
+    tab: {
+      kind: "pullRequest",
+      props: {
+        relatedFilesystemPath: "/Users/alec/Projects/goddard-ai",
+        pullRequestId: "pr_prepared",
+        pullRequestTitle: "goddard-ai/goddard-ai #128",
+      },
+    },
+  })
+  expect(prClient.get).toHaveBeenCalledWith({
+    id: "pr_prepared",
+  })
+  expect(workbenchTabSet.activeClosableTab).toBeNull()
 })
