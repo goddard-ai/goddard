@@ -25,8 +25,6 @@ import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/confi
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
   createAcpClient,
-  getAcpMessageResult,
-  isAcpRequest,
   type AcpClient,
   type AcpSession,
   type AgentInputStream,
@@ -38,7 +36,6 @@ import { clamp, getErrorMessage, unique } from "radashi"
 import type { SessionDb } from "../daemon.ts"
 import {
   parseSessionIdleShutdownDurationMs,
-  type AbortedSessionPrompt,
   type CancelSessionResponse,
   type CreateSessionRequest,
   type DaemonSession,
@@ -46,8 +43,6 @@ import {
   type DaemonSessionModelState,
   type DaemonSessionStatus,
   type DaemonSessionTurn,
-  type DaemonSessionTurnDraft,
-  type DaemonWorktree,
   type GetSessionChangesResponse,
   type GetSessionDiagnosticsResponse,
   type GetSessionHistoryRequest,
@@ -61,7 +56,6 @@ import {
   type SessionComposerSuggestionsRequest,
   type SessionComposerSuggestionsResponse,
   type SessionDraftSuggestionsRequest,
-  type SessionHistoryTurn,
   type SessionLaunchPreviewRequest,
   type SessionLaunchPreviewResponse,
   type SessionLifecycleEvent,
@@ -76,6 +70,7 @@ import {
   type SubpackagesConfig,
   type WorktreesConfig,
 } from "../schema.ts"
+import { createActiveTurnStore } from "./active-turns.ts"
 import {
   spawnAgentProcess,
   waitForAgentProcessExit,
@@ -85,11 +80,15 @@ import { readSessionChanges } from "./changes.ts"
 import {
   getDraftComposerSuggestions,
   getSlashComposerSuggestions,
-  MAX_COMPOSER_SUGGESTION_LIMIT,
   normalizeComposerSuggestionLimit,
 } from "./composer-suggestions.ts"
-import { createLaunchLeaseKey, createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
-import { resolveSessionAttentionMetadata } from "./metadata.ts"
+import { createIdleShutdownController } from "./idle-shutdown.ts"
+import { createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
+import { checkoutLocalBranch, createLaunchPreparationFeature } from "./launch-preparation.ts"
+import { createPromptTurnFeature, injectSystemPrompt } from "./prompt-turns.ts"
+import { createSessionAttentionFeature } from "./session-attention.ts"
+import { createSessionMemory, type ActiveSession } from "./session-memory.ts"
+import { deriveSessionModelState } from "./session-models.ts"
 import {
   agentNameFromInput,
   createReconnectRequest,
@@ -99,29 +98,26 @@ import {
   parseRepoScope,
   persistLaunchedSession,
   resolveExistingSessionArtifacts,
-  resolveLatestStoredTurnSequence,
   toConnectionState,
   type ResolvedCreateSessionRequest,
   type SessionConnectionMode,
 } from "./session-records.ts"
-import { discoverSessionSubpackages } from "./subpackages.ts"
-import { loadDaemonTextModel } from "./text-model-resolver.ts"
-import { backfillSessionTitle, generateSessionTitle, prepareSessionTitle } from "./title.ts"
+import { createSessionTitleRuntime } from "./session-titles-runtime.ts"
 import {
-  appendSessionHistoryMessage,
+  createSessionWorktreeFeature,
+  toSessionWorktreeLifecycleState,
+  type SessionWorktreeLifecycleState,
+} from "./session-worktrees.ts"
+import { discoverSessionSubpackages } from "./subpackages.ts"
+import { backfillSessionTitle, prepareSessionTitle } from "./title.ts"
+import {
   createInitializedHistoryTurn,
-  getAvailableCommandsFromMessage,
   getContextUsageFromMessage,
   getLatestAvailableCommands,
   getLatestContextUsage,
-  isTurnTerminalMessage,
-  shouldFlushTurnDraftImmediately,
-  toCompletedTurnInput,
   toSessionHistoryTurnFromActiveTurn,
   toSessionHistoryTurnFromDraft,
   toSessionHistoryTurnFromRecord,
-  toTurnDraftInput,
-  type ActiveTurnBuffer,
   type SessionTurnPromptRequestId,
 } from "./turn-history.ts"
 import {
@@ -129,8 +125,6 @@ import {
   resolvePullRequestWorktreeBranchName,
 } from "./worktree-branch.ts"
 import {
-  inspectWorktreeCompletionState,
-  resolveGitRepoRoot,
   resolveGitWorktreeSource,
   reuseExistingWorktree,
   toPreparedSessionWorktree,
@@ -143,6 +137,8 @@ import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
 export { resolveUnmanagedAgentProcessSpec } from "./agent-process.ts"
+export { injectSystemPrompt } from "./prompt-turns.ts"
+export type { SessionWorktreeLifecycleState } from "./session-worktrees.ts"
 
 /** The current version of `@goddard-ai/daemon` */
 declare const __VERSION__: string
@@ -162,9 +158,6 @@ const DEFAULT_IDLE_SESSION_SHUTDOWN_TIMEOUT_MS = 15 * 60 * 1000
 
 /** Daemon session document shape used when reading sessions back from kindstore. */
 type SessionDoc = DaemonSession
-type SessionTurnDraftDoc = DaemonSessionTurnDraft
-type SessionWorktreeDoc = DaemonWorktree
-
 /** Identifies seeded display fixtures that were never owned by a live daemon process. */
 function isMockHistoricalSession(session: SessionDoc) {
   return (
@@ -185,11 +178,6 @@ type SessionManagerRootConfig = {
   registry?: Record<string, AgentDistribution>
 }
 
-type SessionTitleGeneratorConfig = NonNullable<SessionTitlesConfig["generator"]>
-
-const QUEUED_PROMPT_ABORTED_ERROR_CODE = -32800
-const QUEUED_PROMPT_ABORTED_ERROR_MESSAGE =
-  "Queued prompt aborted before dispatch by session cancellation."
 const CMD_DECLARE_INITIATIVE_PROMPT = readTextPrompt("cmd-declare-initiative.md")
 const CMD_REPORT_BLOCKER_PROMPT = readTextPrompt("cmd-report-blocker.md")
 const FOREGROUND_PROMPT = readTextPrompt("foreground.md")
@@ -200,102 +188,6 @@ function readTextPrompt(name: string) {
   return readFileSync(new URL(`./prompts/${name}`, import.meta.url), {
     encoding: "utf-8",
   })
-}
-
-/** Lists local git branches for one launch dialog in git's refname order. */
-async function listLaunchBranches(cwd: string) {
-  const source = await resolveGitWorktreeSource(cwd)
-
-  if (!source) {
-    return { branches: [], currentBranch: null }
-  }
-
-  const result = Bun.spawn(
-    ["git", "for-each-ref", "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)", "refs/heads"],
-    {
-      cwd: source.path,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    },
-  )
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  if (result.exitCode !== 0) {
-    return { branches: [], currentBranch: null }
-  }
-
-  const branches: string[] = []
-  let currentBranch: string | null = null
-
-  for (const rawLine of stdout.split("\n")) {
-    const line = rawLine.trim()
-    if (!line) {
-      continue
-    }
-
-    const current = line.startsWith("*")
-    const name = current ? line.slice(1) : line
-    if (current) {
-      currentBranch = name
-    }
-
-    branches.push(name)
-  }
-
-  return {
-    branches,
-    currentBranch,
-  }
-}
-
-/** Returns true when branch switching in the requested local checkout would risk user work. */
-async function inspectLaunchCheckoutDirty(cwd: string): Promise<boolean> {
-  const repoRoot = await resolveGitRepoRoot(cwd)
-
-  if (!repoRoot) {
-    return false
-  }
-
-  const result = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=normal"], {
-    cwd: repoRoot,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  return result.exitCode === 0 && stdout.trim().length > 0
-}
-
-/** Switches the user's local checkout before launching the first prompt. */
-async function checkoutLocalBranch(params: { cwd: string; branchName: string }) {
-  const repoRoot = await resolveGitRepoRoot(params.cwd)
-
-  if (!repoRoot) {
-    throw new IpcClientError("Cannot checkout a branch outside a git repository.")
-  }
-
-  if (await inspectLaunchCheckoutDirty(repoRoot)) {
-    throw new IpcClientError("Cannot checkout a branch while the local checkout has changes.")
-  }
-
-  const result = Bun.spawn(["git", "checkout", params.branchName], {
-    cwd: repoRoot,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "pipe",
-  })
-  const stderr = result.stderr ? await new Response(result.stderr).text() : ""
-  await result.exited
-
-  if (result.exitCode !== 0) {
-    throw new IpcClientError(
-      `Cannot checkout branch ${params.branchName}: ${stderr.trim() || "git checkout failed"}`,
-    )
-  }
 }
 
 /** Applies launch-time ACP model and config-option choices before the first prompt runs. */
@@ -328,101 +220,6 @@ async function applyInitialSessionConfiguration(params: {
   }
 }
 
-type SelectSessionConfigOption = Extract<acp.SessionConfigOption, { type: "select" }>
-
-function isSelectConfigOption(
-  option: acp.SessionConfigOption,
-): option is SelectSessionConfigOption {
-  return option.type === "select"
-}
-
-function flattenSelectOptions(options: acp.SessionConfigSelectOptions) {
-  return options.flatMap((option) => ("group" in option ? option.options : [option]))
-}
-
-/** Projects ACP's config-option model selector into Goddard's persisted UI model state. */
-function deriveSessionModelState(
-  configOptions: acp.SessionConfigOption[],
-): DaemonSessionModelState | null {
-  const modelOption = configOptions.find(
-    (option): option is SelectSessionConfigOption =>
-      option.category === "model" && isSelectConfigOption(option),
-  )
-  if (!modelOption) {
-    return null
-  }
-
-  return {
-    currentModelId: modelOption.currentValue,
-    availableModels: flattenSelectOptions(modelOption.options).map((model) => ({
-      modelId: model.value,
-      name: model.name,
-      description: model.description,
-    })),
-  }
-}
-
-/** Represents the most recent permission request awaiting a client decision. */
-type PermissionRequest = {
-  id: string
-  params: acp.RequestPermissionRequest
-  resolve: (response: acp.RequestPermissionResponse) => void
-}
-
-/** Captures prompt requests so their responses can drive status transitions. */
-type PromptRequestMessage = acp.AnyMessage & {
-  params: acp.PromptRequest
-}
-
-/** Narrows one agent notification to a structured session update payload. */
-type SessionUpdateMessage = acp.AnyMessage & {
-  params: acp.SessionNotification
-}
-
-/** Queue-backed prompt request owned by the daemon until it is sent or aborted. */
-type QueuedPromptEntry = {
-  requestId: string | number
-  prompt: acp.ContentBlock[]
-  source: "client" | "daemon"
-  resolve?: (response: acp.PromptResponse) => void
-  reject?: (error: Error) => void
-}
-
-/** Deferred steer request waiting for a safe boundary before dispatch. */
-type PendingSteerRequest = {
-  requestId: string
-  cancelledRequestId: string | number
-  prompt: acp.ContentBlock[]
-  abortedQueue: AbortedSessionPrompt[]
-  waitingForBoundary: boolean
-  resolve: (response: SteerSessionResponse) => void
-  reject: (error: Error) => void
-}
-
-/** Holds the live runtime state for a daemon-owned session process. */
-type ActiveSession = {
-  id: SessionId
-  acpSessionId: string
-  logger: DaemonLogger
-  token: string
-  supportsLoadSession: boolean
-  process: AgentProcessHandle
-  client: AcpClient
-  session: AcpSession
-  status: DaemonSessionStatus
-  exitCleanup: Promise<void> | null
-  nextTurnSequence: number
-  activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> | null
-  isFirstPrompt: boolean
-  systemPrompt: string
-  lastPermissionRequest: PermissionRequest | null
-  promptQueue: QueuedPromptEntry[]
-  blockingPromptRequestId: string | number | null
-  pendingSteer: PendingSteerRequest | null
-  idleShutdownTimeoutMs: number
-  idleShutdownTimer: ReturnType<typeof setTimeout> | null
-}
-
 /** Shared session-launch options resolved by the daemon before an agent process starts. */
 export interface SessionLaunchParams {
   request: CreateSessionRequest
@@ -443,27 +240,6 @@ export interface LoadSessionParams extends SessionLaunchParams {
 /** Exposes the inferred daemon operations for creating, connecting to, and controlling sessions. */
 export type SessionManager = ReturnType<typeof createSessionManager>
 
-/** Ensures the daemon's system prompt is prepended to the first user prompt sent to an agent. */
-export function injectSystemPrompt(
-  request: acp.PromptRequest,
-  systemPrompt: string,
-): acp.PromptRequest {
-  if (systemPrompt.length === 0) {
-    return request
-  }
-
-  return {
-    ...request,
-    prompt: [
-      {
-        type: "text",
-        text: `<system-prompt name="goddard">${systemPrompt}</system-prompt>`,
-      },
-      ...request.prompt,
-    ],
-  }
-}
-
 function createInitialPromptRequest(params: {
   sessionId: string
   prompt: InitialPromptOption
@@ -479,22 +255,6 @@ function createInitialPromptRequest(params: {
   return params.isFirstPrompt
     ? injectSystemPrompt(promptRequest, params.systemPrompt)
     : promptRequest
-}
-
-/** Maps client-originated ACP messages to any immediate session status changes they imply. */
-function sessionStatusFromClientMessage(
-  message: acp.AnyMessage,
-  status: DaemonSessionStatus,
-): DaemonSessionStatus | null {
-  if (status !== "active") {
-    return null
-  }
-
-  if (isAcpRequest(message, acp.AGENT_METHODS.session_cancel)) {
-    return "cancelled"
-  }
-
-  return null
 }
 
 /** Treats abrupt termination signals as session errors instead of normal shutdowns. */
@@ -905,36 +665,6 @@ async function resolveSessionRequestAgent(
   }
 }
 
-/** Logs ACP messages in a structured form without dumping full payloads verbatim. */
-function logAgentMessage(
-  diagnosticLogger: DaemonLogger,
-  createPayloadPreview: DaemonLogService["createPayloadPreview"],
-  event: "agent.message_read" | "agent.message_write",
-  sessionId: SessionId,
-  acpSessionId: string | undefined,
-  message: acp.AnyMessage,
-): void {
-  diagnosticLogger.log(event, {
-    sessionId,
-    acpSessionId,
-    direction: event === "agent.message_read" ? "read" : "write",
-    hasId: "id" in message && message.id != null,
-    method: "method" in message ? message.method : undefined,
-    message: createPayloadPreview(message),
-  })
-}
-
-/** Normalizes one queued prompt back into the client-facing aborted-queue payload. */
-function toAbortedQueuedPrompt(entry: {
-  requestId: string | number
-  prompt: acp.ContentBlock[]
-}): AbortedSessionPrompt {
-  return {
-    requestId: entry.requestId,
-    prompt: [...entry.prompt],
-  }
-}
-
 /** Rejects any in-flight prompt waits when a daemon session is torn down. */
 function rejectPendingPrompts(active: ActiveSession, error: Error): void {
   for (const queued of active.promptQueue) {
@@ -959,17 +689,6 @@ export type SessionAttentionEvent = {
   scope: AttentionScope
   headline: AttentionHeadline
   turnId: string | null
-}
-
-/** Worktree lifecycle data exposed to daemon plugins without exposing session persistence. */
-export type SessionWorktreeLifecycleState = {
-  sessionId: SessionId
-  repoRoot: string
-  requestedCwd: string
-  effectiveCwd: string
-  worktreeDir: string
-  branchName: string
-  poweredBy: string
 }
 
 export type SessionWorktreeLifecycleEvent = {
@@ -1054,15 +773,71 @@ export function createSessionManager(input: {
 }) {
   const db = input.db
   const logger = input.log.createLogger()
-  const activeSessions = new Map<SessionId, ActiveSession>()
-  const activeSessionsByAcpSessionId = new Map<string, ActiveSession>()
+  const memory = createSessionMemory()
+  const activeSessions = memory.activeSessions
+  const activeSessionsByAcpSessionId = memory.activeSessionsByAcpSessionId
   const launchLeaseStore = createLaunchLeaseStore({ logger })
-  const sessionSubscriberCounts = new Map<SessionId, number>()
-  const pendingSessionTitlePreparations = new Map<SessionId, Promise<void>>()
-  const pendingSessionTitleGenerations = new Map<SessionId, Promise<void>>()
   const worktreePluginManager = createWorktreePluginManager({
     configProvider: input.configProvider,
     logger,
+  })
+  const idleShutdown = createIdleShutdownController({
+    memory,
+    logger,
+    emitDiagnostic,
+    shutdownSession,
+  })
+  const activeTurns = createActiveTurnStore({
+    db,
+    emitDiagnostic,
+    publishSessionUpdated,
+    refreshIdleShutdownState: idleShutdown.refreshIdleShutdownState,
+    updateSessionAvailableCommands,
+    updateSessionContextUsage,
+  })
+  const sessionTitles = createSessionTitleRuntime({
+    db,
+    memory,
+    configProvider: input.configProvider,
+    emitDiagnostic,
+    updateSession,
+  })
+  const sessionAttention = createSessionAttentionFeature({
+    db,
+    memory,
+    events: input.events,
+    updateSessionActivity,
+  })
+  const sessionWorktrees = createSessionWorktreeFeature({
+    db,
+    memory,
+    events: input.events,
+    updateSessionActivity,
+  })
+  const promptTurns = createPromptTurnFeature({
+    db,
+    memory,
+    log: input.log,
+    events: input.events,
+    emitMessage: input.emitMessage,
+    activeTurns,
+    idleShutdown,
+    sessionTitles,
+    emitDiagnostic,
+    publishSessionUpdated,
+    updateSessionActivity,
+  })
+  const launchPreparation = createLaunchPreparationFeature({
+    memory,
+    launchLeaseStore,
+    configProvider: input.configProvider,
+    getDaemonUrl: input.getDaemonUrl,
+    createAgentEnvironment: input.createAgentEnvironment,
+    registryService: input.registryService,
+    agentInstallService: input.agentInstallService,
+    getPackageVersion,
+    handlePermissionRequest: promptTurns.handlePermissionRequest,
+    handleSessionUpdate: promptTurns.handleSessionUpdate,
   })
   const ready = reconcilePersistedSessions()
 
@@ -1182,77 +957,6 @@ export function createSessionManager(input: {
     return record
   }
 
-  function resolveCurrentTurnId(id: SessionId) {
-    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
-    if (activeTurn) {
-      return activeTurn.turnId
-    }
-
-    return (
-      db.sessionTurns.first({
-        where: { sessionId: id },
-        orderBy: {
-          sessionId: "asc",
-          sequence: "desc",
-        },
-      })?.turnId ?? null
-    )
-  }
-
-  function applyInboxMetadataToCurrentTurn(
-    id: SessionId,
-    metadata: { scope: AttentionScope; headline: AttentionHeadline },
-  ) {
-    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
-    if (activeTurn) {
-      activeTurn.inboxScope = metadata.scope
-      activeTurn.inboxHeadline = metadata.headline
-      return
-    }
-
-    const latestTurn =
-      db.sessionTurns.first({
-        where: { sessionId: id },
-        orderBy: {
-          sessionId: "asc",
-          sequence: "desc",
-        },
-      }) ?? null
-    if (latestTurn) {
-      db.sessionTurns.update(latestTurn.id, {
-        inboxScope: metadata.scope,
-        inboxHeadline: metadata.headline,
-      })
-    }
-  }
-
-  function resolveAndPersistInboxMetadata(input: {
-    session: SessionDoc
-    metadata?: AttentionMetadataInput & { fallbackHeadline?: string }
-    blockedReason?: string | null
-  }) {
-    const resolved = resolveSessionAttentionMetadata({
-      session: {
-        ...input.session,
-        blockedReason: input.blockedReason ?? input.session.blockedReason,
-      },
-      scope: input.metadata?.scope,
-      headline: input.metadata?.headline,
-      fallbackHeadline: input.metadata?.fallbackHeadline,
-    })
-    applyInboxMetadataToCurrentTurn(input.session.id, resolved)
-    return resolved
-  }
-
-  function clearTurnDraftFlushTimer(activeTurn: ActiveTurnBuffer | null) {
-    if (!activeTurn?.flushTimer) {
-      return
-    }
-
-    clearTimeout(activeTurn.flushTimer)
-    activeTurn.flushTimer = null
-  }
-
   function updateSessionAvailableCommands(
     sessionId: SessionId,
     availableCommands: acp.AvailableCommand[],
@@ -1278,174 +982,6 @@ export function createSessionManager(input: {
     })
     publishSessionUpdated(sessionId, ["contextUsage"])
     return true
-  }
-
-  function flushActiveTurnDraft(active: ActiveSession, reason: string) {
-    const activeTurn = active.activeTurn
-    if (!activeTurn) {
-      return
-    }
-
-    clearTurnDraftFlushTimer(activeTurn)
-    const existingDraft =
-      (activeTurn.draftId && db.sessionTurnDrafts.get(activeTurn.draftId)) ||
-      db.sessionTurnDrafts.first({
-        where: { sessionId: active.id },
-      }) ||
-      null
-    const draftInput = toTurnDraftInput(active.id, activeTurn)
-
-    if (existingDraft) {
-      activeTurn.draftId = existingDraft.id
-      db.sessionTurnDrafts.put(existingDraft.id, draftInput)
-    } else {
-      activeTurn.draftId = db.sessionTurnDrafts.create(draftInput).id
-    }
-
-    emitDiagnostic(
-      active.id,
-      "session_turn_draft_flushed",
-      {
-        reason,
-        turnId: activeTurn.turnId,
-        sequence: activeTurn.sequence,
-        messageCount: activeTurn.messages.length,
-      },
-      active.logger,
-    )
-  }
-
-  function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
-    const activeTurn = active.activeTurn
-    if (!activeTurn) {
-      return
-    }
-
-    if (immediate) {
-      flushActiveTurnDraft(active, reason)
-      return
-    }
-
-    clearTurnDraftFlushTimer(activeTurn)
-    activeTurn.flushTimer = setTimeout(() => {
-      try {
-        flushActiveTurnDraft(active, reason)
-      } catch {}
-    }, 100)
-  }
-
-  function persistTurnDraftAsInterruptedTurn(
-    sessionId: SessionId,
-    draftRecord: SessionTurnDraftDoc,
-    diagnosticLogger: DaemonLogger,
-  ) {
-    const existingTurn =
-      db.sessionTurns.first({
-        where: { sessionId, sequence: draftRecord.sequence },
-      }) ?? null
-
-    if (existingTurn?.turnId === draftRecord.turnId) {
-      db.sessionTurnDrafts.delete(draftRecord.id)
-      return existingTurn
-    }
-
-    const turn = toSessionHistoryTurnFromDraft(draftRecord)
-    const createdTurn = existingTurn
-      ? db.sessionTurns.put(existingTurn.id, toCompletedTurnInput(sessionId, turn))
-      : db.sessionTurns.create(toCompletedTurnInput(sessionId, turn))
-
-    db.sessionTurnDrafts.delete(draftRecord.id)
-    emitDiagnostic(
-      sessionId,
-      "session_turn_draft_promoted",
-      {
-        turnId: draftRecord.turnId,
-        sequence: draftRecord.sequence,
-      },
-      diagnosticLogger,
-    )
-    return createdTurn
-  }
-
-  function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
-    const availableCommands = getAvailableCommandsFromMessage(message)
-    if (availableCommands) {
-      updateSessionAvailableCommands(active.id, availableCommands)
-    }
-
-    if (updateSessionContextUsage(active.id, message)) {
-      return
-    }
-
-    const activeTurn = active.activeTurn
-    if (!activeTurn) {
-      return
-    }
-
-    appendSessionHistoryMessage(activeTurn.messages, message)
-    scheduleActiveTurnDraftFlush(
-      active,
-      shouldFlushTurnDraftImmediately(activeTurn, message) ? "boundary" : "stream",
-      shouldFlushTurnDraftImmediately(activeTurn, message),
-    )
-  }
-
-  function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
-    const activeTurn = active.activeTurn
-    if (!activeTurn || !isTurnTerminalMessage(activeTurn, message)) {
-      return
-    }
-
-    const completionKind = "error" in message ? "error" : "result"
-    const stopReason =
-      completionKind === "result"
-        ? (getAcpMessageResult<acp.PromptResponse>(message)?.stopReason ?? null)
-        : null
-    const completedTurn: SessionHistoryTurn = {
-      turnId: activeTurn.turnId,
-      sequence: activeTurn.sequence,
-      promptRequestId: activeTurn.promptRequestId,
-      startedAt: activeTurn.startedAt,
-      completedAt: new Date().toISOString(),
-      completionKind,
-      stopReason,
-      inboxScope: activeTurn.inboxScope ?? null,
-      inboxHeadline: activeTurn.inboxHeadline ?? null,
-      messages: [...activeTurn.messages],
-    }
-
-    flushActiveTurnDraft(active, "completion")
-    db.batch(() => {
-      db.sessionTurns.create(toCompletedTurnInput(active.id, completedTurn))
-      if (activeTurn.draftId) {
-        db.sessionTurnDrafts.delete(activeTurn.draftId)
-      } else {
-        const draftRecord =
-          db.sessionTurnDrafts.first({
-            where: { sessionId: active.id },
-          }) ?? null
-        if (draftRecord) {
-          db.sessionTurnDrafts.delete(draftRecord.id)
-        }
-      }
-    })
-    clearTurnDraftFlushTimer(activeTurn)
-    active.activeTurn = null
-    active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
-    publishSessionUpdated(active.id, ["activeTurn"])
-    refreshIdleShutdownState(active.id, "turn_completed")
-    emitDiagnostic(
-      active.id,
-      "session_turn_persisted",
-      {
-        turnId: completedTurn.turnId,
-        sequence: completedTurn.sequence,
-        completionKind: completedTurn.completionKind,
-        stopReason: completedTurn.stopReason ?? undefined,
-        messageCount: completedTurn.messages.length,
-      },
-      active.logger,
-    )
   }
 
   function hasPersistedTurnHistory(sessionId: SessionId) {
@@ -1488,159 +1024,6 @@ export function createSessionManager(input: {
     })
   }
 
-  /** Starts one detached title-generation task for a session whose fallback title is already persisted. */
-  function queueSessionTitleGeneration(params: {
-    id: SessionId
-    generatorConfig: SessionTitleGeneratorConfig
-    fallbackTitle: string
-    promptText: string
-    diagnosticLogger?: DaemonLogger
-  }) {
-    if (pendingSessionTitleGenerations.has(params.id)) {
-      return
-    }
-
-    const task = (async () => {
-      const sessionRecord = db.sessions.get(params.id) ?? null
-      if (!sessionRecord || sessionRecord.titleState !== "pending") {
-        return
-      }
-
-      emitDiagnostic(
-        params.id,
-        "session_title_generation_started",
-        {
-          provider: params.generatorConfig.provider,
-          model: params.generatorConfig.model,
-        },
-        params.diagnosticLogger,
-      )
-
-      try {
-        const loadedTextModel = await loadDaemonTextModel(params.generatorConfig)
-        const generatedTitle = await generateSessionTitle({
-          model: loadedTextModel.model,
-          promptText: params.promptText,
-        })
-        if (!generatedTitle) {
-          throw new Error("Generated session title was empty or invalid.")
-        }
-
-        updateSession(
-          params.id,
-          {
-            title: generatedTitle,
-            titleState: "generated",
-          },
-          undefined,
-          params.diagnosticLogger,
-        )
-        emitDiagnostic(
-          params.id,
-          "session_title_generated",
-          {
-            provider: loadedTextModel.descriptor.provider,
-            model: loadedTextModel.descriptor.model,
-            title: generatedTitle,
-          },
-          params.diagnosticLogger,
-        )
-      } catch (error) {
-        updateSession(
-          params.id,
-          {
-            title: params.fallbackTitle,
-            titleState: "failed",
-          },
-          undefined,
-          params.diagnosticLogger,
-        )
-        emitDiagnostic(
-          params.id,
-          "session_title_generation_failed",
-          {
-            provider: params.generatorConfig.provider,
-            model: params.generatorConfig.model,
-            errorMessage: getErrorMessage(error),
-          },
-          params.diagnosticLogger,
-        )
-      }
-    })().finally(() => {
-      pendingSessionTitleGenerations.delete(params.id)
-    })
-
-    pendingSessionTitleGenerations.set(params.id, task)
-  }
-
-  /** Initializes the first prompt-derived title for placeholder sessions without blocking prompt flow. */
-  function queueSessionTitlePreparation(params: {
-    id: SessionId
-    prompt: string | acp.ContentBlock[]
-    diagnosticLogger?: DaemonLogger
-  }) {
-    const sessionRecord = db.sessions.get(params.id) ?? null
-    if (
-      !sessionRecord ||
-      sessionRecord.titleState !== "placeholder" ||
-      pendingSessionTitlePreparations.has(params.id)
-    ) {
-      return
-    }
-
-    const task = (async () => {
-      let generatorConfig = input.configProvider.getLastKnownRootConfig(sessionRecord.cwd)?.config
-        .sessionTitles?.generator
-
-      if (!generatorConfig) {
-        try {
-          generatorConfig = (await input.configProvider.getRootConfig(sessionRecord.cwd)).config
-            .sessionTitles?.generator
-        } catch {}
-      }
-
-      const preparedTitle = prepareSessionTitle(params.prompt, generatorConfig)
-      if (preparedTitle.titleState === "placeholder" || !preparedTitle.promptText) {
-        return
-      }
-
-      updateSession(
-        params.id,
-        {
-          title: preparedTitle.title,
-          titleState: preparedTitle.titleState,
-        },
-        undefined,
-        params.diagnosticLogger,
-      )
-
-      if (preparedTitle.titleState === "pending" && preparedTitle.generatorConfig) {
-        queueSessionTitleGeneration({
-          id: params.id,
-          generatorConfig: preparedTitle.generatorConfig,
-          fallbackTitle: preparedTitle.title,
-          promptText: preparedTitle.promptText,
-          diagnosticLogger: params.diagnosticLogger,
-        })
-      }
-    })()
-      .catch((error) => {
-        emitDiagnostic(
-          params.id,
-          "session_title_generation_failed",
-          {
-            errorMessage: getErrorMessage(error),
-          },
-          params.diagnosticLogger,
-        )
-      })
-      .finally(() => {
-        pendingSessionTitlePreparations.delete(params.id)
-      })
-
-    pendingSessionTitlePreparations.set(params.id, task)
-  }
-
   function setConnectionMode(
     sessionId: SessionId,
     mode: SessionConnectionMode,
@@ -1658,138 +1041,16 @@ export function createSessionManager(input: {
     publishSessionUpdated(sessionId, ["connection"])
   }
 
-  function toSessionWorktreeValue(record: SessionWorktreeDoc) {
-    const { id: _id, sessionId: _sessionId, ...worktree } = record
-    return worktree
-  }
-
-  function toSessionWorktreeLifecycleState(
-    record: SessionWorktreeDoc | SessionWorktreeState,
-    sessionId: SessionId,
-  ): SessionWorktreeLifecycleState {
-    return {
-      sessionId,
-      repoRoot: record.repoRoot,
-      requestedCwd: record.requestedCwd,
-      effectiveCwd: record.effectiveCwd,
-      worktreeDir: record.worktreeDir,
-      branchName: record.branchName,
-      poweredBy: record.poweredBy,
-    }
-  }
-
-  async function resolvePersistedWorktreeRecord(id: SessionId) {
-    return (
-      db.worktrees.first({
-        where: { sessionId: id },
-      }) ?? null
-    )
-  }
-
-  /** Returns how many `session.streamMessages` stream subscribers are attached to one session id. */
-  function getSessionSubscriberCount(id: SessionId): number {
-    return sessionSubscriberCounts.get(id) ?? 0
-  }
-
-  /** Checks whether one live session is quiescent enough for idle auto-shutdown. */
-  function shouldStartIdleShutdownTimer(active: ActiveSession): boolean {
-    return (
-      active.supportsLoadSession &&
-      getSessionSubscriberCount(active.id) === 0 &&
-      active.activeTurn === null &&
-      active.blockingPromptRequestId === null &&
-      active.promptQueue.length === 0 &&
-      active.pendingSteer === null &&
-      active.lastPermissionRequest === null
-    )
-  }
-
-  /** Cancels one pending idle auto-shutdown timer and records the reason for that cancellation. */
-  function cancelIdleShutdownTimer(active: ActiveSession, reason: string) {
-    if (!active.idleShutdownTimer) {
-      return
-    }
-
-    clearTimeout(active.idleShutdownTimer)
-    active.idleShutdownTimer = null
-    emitDiagnostic(
-      active.id,
-      "session_idle_shutdown_timer_cancelled",
-      { reason, timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
-  }
-
-  /** Re-checks whether one active session should have an idle auto-shutdown timer armed right now. */
-  function refreshIdleShutdownState(id: SessionId, reason: string) {
-    const active = activeSessions.get(id)
-    if (!active) {
-      return
-    }
-
-    if (!shouldStartIdleShutdownTimer(active)) {
-      cancelIdleShutdownTimer(active, reason)
-      return
-    }
-
-    if (active.idleShutdownTimer) {
-      return
-    }
-
-    emitDiagnostic(
-      active.id,
-      "session_idle_shutdown_timer_started",
-      { reason, timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
-    active.idleShutdownTimer = setTimeout(() => {
-      void handleIdleShutdownTimerExpired(active.id).catch((error) => {
-        logger.log("session_idle_shutdown_timer_failed", {
-          sessionId: active.id,
-          errorMessage: getErrorMessage(error),
-        })
-      })
-    }, active.idleShutdownTimeoutMs)
-  }
-
-  /** Shuts down one loadable idle session when its auto-shutdown timer expires without any reconnect. */
-  async function handleIdleShutdownTimerExpired(id: SessionId): Promise<void> {
-    const active = activeSessions.get(id)
-    if (!active) {
-      return
-    }
-
-    active.idleShutdownTimer = null
-    if (!shouldStartIdleShutdownTimer(active)) {
-      return
-    }
-
-    emitDiagnostic(
-      id,
-      "session_idle_shutdown_timer_expired",
-      { timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
-    await shutdownSession(id)
-  }
-
   /** Records one new `session.streamMessages` subscriber so idle shutdown waits for attached clients. */
   async function sessionSubscriberConnected(id: SessionId): Promise<void> {
     await ready
-    sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
-    refreshIdleShutdownState(id, "subscriber_connected")
+    idleShutdown.sessionSubscriberConnected(id)
   }
 
   /** Records one departing `session.streamMessages` subscriber and starts the timer when none remain. */
   async function sessionSubscriberDisconnected(id: SessionId): Promise<void> {
     await ready
-    const current = getSessionSubscriberCount(id)
-    if (current <= 1) {
-      sessionSubscriberCounts.delete(id)
-    } else {
-      sessionSubscriberCounts.set(id, current - 1)
-    }
-    refreshIdleShutdownState(id, "subscriber_disconnected")
+    idleShutdown.sessionSubscriberDisconnected(id)
   }
 
   async function reconcilePersistedSessions(): Promise<void> {
@@ -1852,7 +1113,7 @@ export function createSessionManager(input: {
           }
         }
         if (draftRecord) {
-          persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
+          activeTurns.persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
         }
 
         if (
@@ -1895,452 +1156,6 @@ export function createSessionManager(input: {
         }
       }),
     )
-  }
-
-  function normalizePrompt(prompt: string | acp.ContentBlock[]): acp.ContentBlock[] {
-    return typeof prompt === "string" ? [{ type: "text", text: prompt }] : [...prompt]
-  }
-
-  function publishSessionMessage(
-    active: ActiveSession,
-    message: acp.AnyMessage,
-    options: {
-      persistTurnMessage?: boolean
-    } = {},
-  ) {
-    if (options.persistTurnMessage !== false) {
-      appendTurnScopedMessage(active, message)
-    }
-    input.emitMessage(active.id, message)
-  }
-
-  function publishClientMessage(
-    active: ActiveSession,
-    message: acp.AnyMessage,
-    options: {
-      updateStatus?: boolean
-      persistTurnMessage?: boolean
-      onBeforePublish?: (message: acp.AnyMessage) => Promise<void> | void
-    } = {},
-  ): void {
-    if (options.updateStatus !== false) {
-      const nextStatus = sessionStatusFromClientMessage(message, active.status)
-      if (nextStatus) {
-        updateSessionActivity(
-          active.id,
-          { status: nextStatus },
-          {
-            reason: "client_message",
-            method: "method" in message ? message.method : undefined,
-            messageId: "id" in message ? message.id : undefined,
-          },
-        )
-      }
-    }
-
-    logAgentMessage(
-      active.logger,
-      input.log.createPayloadPreview,
-      "agent.message_write",
-      active.id,
-      active.acpSessionId,
-      message,
-    )
-    emitDiagnostic(
-      active.id,
-      "session_message_sent",
-      {
-        hasId: "id" in message && message.id != null,
-        method: "method" in message ? message.method : undefined,
-      },
-      active.logger,
-    )
-    void options.onBeforePublish?.(message)
-    publishSessionMessage(active, message, {
-      persistTurnMessage: options.persistTurnMessage,
-    })
-  }
-
-  async function handleSessionUpdate(
-    active: ActiveSession,
-    params: acp.SessionNotification,
-  ): Promise<void> {
-    const message = {
-      jsonrpc: "2.0",
-      method: acp.CLIENT_METHODS.session_update,
-      params,
-    } satisfies acp.AnyMessage
-
-    logAgentMessage(
-      active.logger,
-      input.log.createPayloadPreview,
-      "agent.message_read",
-      active.id,
-      active.acpSessionId,
-      message,
-    )
-    publishSessionMessage(active, message)
-    await handleSteerBoundary(active, message)
-  }
-
-  async function handlePermissionRequest(
-    active: ActiveSession,
-    params: acp.RequestPermissionRequest,
-  ): Promise<acp.RequestPermissionResponse> {
-    const requestId =
-      active.blockingPromptRequestId === null
-        ? `permission-${randomUUID()}`
-        : `permission-${String(active.blockingPromptRequestId)}`
-
-    return await new Promise<acp.RequestPermissionResponse>((resolve) => {
-      active.lastPermissionRequest = {
-        id: requestId,
-        params,
-        resolve,
-      }
-      publishSessionUpdated(active.id, ["permission"])
-      refreshIdleShutdownState(active.id, "permission_request_started")
-      const message = {
-        jsonrpc: "2.0",
-        id: requestId,
-        method: acp.CLIENT_METHODS.session_request_permission,
-        params,
-      } satisfies acp.AnyMessage
-
-      logAgentMessage(
-        active.logger,
-        input.log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        message,
-      )
-      publishSessionMessage(active, message)
-    })
-  }
-
-  function updateSessionFromPromptResponse(
-    active: ActiveSession,
-    requestId: string | number,
-    response: acp.PromptResponse,
-  ) {
-    const stopReason = response.stopReason ?? null
-    const nextStatus = stopReason === "end_turn" ? "done" : null
-
-    if (nextStatus || stopReason) {
-      updateSessionActivity(
-        active.id,
-        {
-          ...(nextStatus && { status: nextStatus }),
-          ...(stopReason && { stopReason }),
-        },
-        {
-          reason: "agent_message",
-          requestMethod: acp.AGENT_METHODS.session_prompt,
-          responseId: requestId,
-          stopReason: stopReason ?? undefined,
-        },
-      )
-    }
-  }
-
-  async function completePrompt(
-    active: ActiveSession,
-    entry: QueuedPromptEntry,
-    message: acp.AnyMessage & { params: acp.PromptRequest },
-  ) {
-    try {
-      const response = await active.session.prompt(message.params.prompt)
-      const responseMessage = {
-        jsonrpc: "2.0",
-        id: entry.requestId,
-        result: response,
-      } satisfies acp.AnyMessage
-
-      logAgentMessage(
-        active.logger,
-        input.log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        responseMessage,
-      )
-      updateSessionFromPromptResponse(active, entry.requestId, response)
-      entry.resolve?.(response)
-
-      if (active.blockingPromptRequestId === entry.requestId) {
-        active.blockingPromptRequestId = null
-      }
-
-      publishSessionMessage(active, responseMessage)
-      finalizeActiveTurn(active, responseMessage)
-      await handleSteerBoundary(active, responseMessage)
-      await processPromptQueue(active)
-    } catch (error) {
-      const responseMessage = {
-        jsonrpc: "2.0",
-        id: entry.requestId,
-        error: {
-          code: -32603,
-          message: getErrorMessage(error),
-        },
-      } satisfies acp.AnyMessage
-
-      logAgentMessage(
-        active.logger,
-        input.log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        responseMessage,
-      )
-      entry.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
-      if (active.blockingPromptRequestId === entry.requestId) {
-        active.blockingPromptRequestId = null
-      }
-      publishSessionMessage(active, responseMessage)
-      finalizeActiveTurn(active, responseMessage)
-      await handleSteerBoundary(active, responseMessage)
-      await processPromptQueue(active)
-    }
-  }
-
-  async function processPromptQueue(active: ActiveSession): Promise<void> {
-    if (active.blockingPromptRequestId !== null || active.pendingSteer?.waitingForBoundary) {
-      return
-    }
-
-    const nextPrompt = active.promptQueue.shift()
-    if (!nextPrompt) {
-      return
-    }
-    publishSessionUpdated(active.id, ["queue"])
-
-    const promptRequest = {
-      sessionId: active.acpSessionId,
-      prompt: [...nextPrompt.prompt],
-    }
-    const message = {
-      jsonrpc: "2.0",
-      id: nextPrompt.requestId,
-      method: acp.AGENT_METHODS.session_prompt,
-      params:
-        active.isFirstPrompt === true
-          ? injectSystemPrompt(promptRequest, active.systemPrompt)
-          : promptRequest,
-    } satisfies acp.AnyMessage & {
-      id: string | number
-      method: string
-      params: acp.PromptRequest
-    }
-    active.isFirstPrompt = false
-    const existingDraft =
-      db.sessionTurnDrafts.first({
-        where: { sessionId: active.id },
-      }) ?? null
-    if (existingDraft) {
-      persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
-      active.nextTurnSequence = resolveLatestStoredTurnSequence(db, active.id) + 1
-    }
-
-    const activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> = {
-      turnId: randomUUID(),
-      sequence: active.nextTurnSequence,
-      promptRequestId: nextPrompt.requestId,
-      startedAt: new Date().toISOString(),
-      messages: [],
-      inboxScope: null,
-      inboxHeadline: null,
-      flushTimer: null,
-      draftId: null,
-      touchedAttentionEntity: false,
-    }
-    active.activeTurn = activeTurn
-    // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
-    active.blockingPromptRequestId = nextPrompt.requestId
-
-    publishSessionUpdated(active.id, ["activeTurn"])
-    refreshIdleShutdownState(active.id, "turn_started")
-
-    try {
-      emitDiagnostic(
-        active.id,
-        "session_turn_started",
-        {
-          turnId: activeTurn.turnId,
-          sequence: activeTurn.sequence,
-          promptRequestId: activeTurn.promptRequestId,
-        },
-        active.logger,
-      )
-      publishClientMessage(active, message, {
-        persistTurnMessage: false,
-        onBeforePublish: async (resolvedMessage) => {
-          appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
-          flushActiveTurnDraft(active, "start")
-        },
-      })
-      void completePrompt(active, nextPrompt, message)
-    } catch (error) {
-      if (activeTurn.draftId) {
-        db.sessionTurnDrafts.delete(activeTurn.draftId)
-      }
-      clearTurnDraftFlushTimer(active.activeTurn)
-      active.activeTurn = null
-      if (active.blockingPromptRequestId === nextPrompt.requestId) {
-        active.blockingPromptRequestId = null
-      }
-      publishSessionUpdated(active.id, ["activeTurn"])
-      refreshIdleShutdownState(active.id, "turn_start_failed")
-      nextPrompt.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
-      throw error
-    }
-  }
-
-  async function abortQueuedPrompts(
-    active: ActiveSession,
-    reason: string,
-    options: {
-      includePendingSteer?: boolean
-    } = {},
-  ): Promise<AbortedSessionPrompt[]> {
-    const abortedQueue: AbortedSessionPrompt[] = []
-
-    if (options.includePendingSteer && active.pendingSteer) {
-      const pendingSteer = active.pendingSteer
-      active.pendingSteer = null
-      abortedQueue.push(
-        toAbortedQueuedPrompt({
-          requestId: pendingSteer.requestId,
-          prompt: pendingSteer.prompt,
-        }),
-      )
-      pendingSteer.reject(new IpcClientError(reason))
-    }
-
-    while (active.promptQueue.length > 0) {
-      const queuedPrompt = active.promptQueue.shift()!
-      abortedQueue.push(toAbortedQueuedPrompt(queuedPrompt))
-      if (queuedPrompt.source === "client") {
-        // Raw ACP callers need a terminal JSON-RPC response because this prompt never reached the agent.
-        publishSessionMessage(active, {
-          jsonrpc: "2.0",
-          id: queuedPrompt.requestId,
-          error: {
-            code: QUEUED_PROMPT_ABORTED_ERROR_CODE,
-            message: QUEUED_PROMPT_ABORTED_ERROR_MESSAGE,
-          },
-        })
-        continue
-      }
-
-      queuedPrompt.reject?.(new IpcClientError(reason))
-    }
-
-    publishSessionUpdated(active.id, ["queue"])
-    refreshIdleShutdownState(active.id, "queued_prompts_aborted")
-    return abortedQueue
-  }
-
-  async function sendInternalCancel(
-    active: ActiveSession,
-    options: {
-      updateStatus: boolean
-    },
-  ): Promise<boolean> {
-    if (active.blockingPromptRequestId === null) {
-      return false
-    }
-
-    publishClientMessage(
-      active,
-      {
-        jsonrpc: "2.0",
-        method: acp.AGENT_METHODS.session_cancel,
-        params: {
-          sessionId: active.acpSessionId,
-        },
-      },
-      { updateStatus: options.updateStatus },
-    )
-    await active.session.cancel()
-
-    return true
-  }
-
-  async function cancelSessionTurn(
-    id: SessionId,
-    options: {
-      includePendingSteer?: boolean
-      updateStatus: boolean
-    } = { updateStatus: true },
-  ): Promise<CancelSessionResponse> {
-    await ready
-    const active = activeSessions.get(id)
-    if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
-    }
-
-    const abortedQueue = await abortQueuedPrompts(
-      active,
-      `Queued prompts were aborted for session ${id}.`,
-      {
-        includePendingSteer: options.includePendingSteer ?? true,
-      },
-    )
-    const activeTurnCancelled = await sendInternalCancel(active, {
-      updateStatus: options.updateStatus,
-    })
-
-    emitDiagnostic(id, "session_turn_cancelled", {
-      activeTurnCancelled,
-      abortedQueueLength: abortedQueue.length,
-    })
-
-    return {
-      id,
-      activeTurnCancelled,
-      abortedQueue,
-    }
-  }
-
-  async function handleSteerBoundary(
-    active: ActiveSession,
-    message: acp.AnyMessage,
-  ): Promise<void> {
-    const steer = active.pendingSteer
-    if (!steer?.waitingForBoundary) {
-      return
-    }
-
-    const reachedBoundary = isAcpRequest<SessionUpdateMessage>(
-      message,
-      acp.CLIENT_METHODS.session_update,
-    )
-      ? message.params.update.sessionUpdate === "tool_call" ||
-        message.params.update.sessionUpdate === "tool_call_update"
-      : "id" in message && message.id != null && message.id === steer.cancelledRequestId
-    if (!reachedBoundary) {
-      return
-    }
-
-    steer.waitingForBoundary = false
-    if (active.blockingPromptRequestId === steer.cancelledRequestId) {
-      active.blockingPromptRequestId = null
-    }
-
-    active.pendingSteer = null
-    try {
-      const response = await promptSession(active.id, steer.prompt)
-      steer.resolve({
-        id: active.id,
-        abortedQueue: steer.abortedQueue,
-        response,
-      })
-    } catch (error) {
-      refreshIdleShutdownState(active.id, "steer_cleared")
-      steer.reject(error instanceof Error ? error : new Error(getErrorMessage(error)))
-    }
   }
 
   async function completeOneShotLaunch(params: {
@@ -2423,9 +1238,9 @@ export function createSessionManager(input: {
 
     const handleExit = async (code: number | null, signal: NodeJS.Signals | null) => {
       try {
-        flushActiveTurnDraft(activeSession, "agent_process_exit")
+        activeTurns.flushActiveTurnDraft(activeSession, "agent_process_exit")
       } catch {}
-      cancelIdleShutdownTimer(activeSession, "agent_process_exit")
+      idleShutdown.cancelIdleShutdownTimer(activeSession, "agent_process_exit")
       activeSessions.delete(activeSession.id)
       activeSessionsByAcpSessionId.delete(activeSession.acpSessionId)
       rejectPendingPrompts(
@@ -2434,7 +1249,7 @@ export function createSessionManager(input: {
       )
       await activeSession.client.close().catch(() => {})
 
-      const worktreeRecord = await resolvePersistedWorktreeRecord(activeSession.id)
+      const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(activeSession.id)
       try {
         await input.events.emit("session.stopping", {
           sessionId: activeSession.id,
@@ -2508,7 +1323,7 @@ export function createSessionManager(input: {
 
     activeSessions.set(activeSession.id, activeSession)
     activeSessionsByAcpSessionId.set(activeSession.acpSessionId, activeSession)
-    refreshIdleShutdownState(activeSession.id, "session_activated")
+    idleShutdown.refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
       throw new IpcClientError("Session not found")
@@ -2724,8 +1539,8 @@ export function createSessionManager(input: {
           onMessageWrite,
           findActiveSession: (acpSessionId) =>
             activeSessionsByAcpSessionId.get(acpSessionId) ?? null,
-          handleSessionUpdate,
-          handlePermissionRequest,
+          handleSessionUpdate: promptTurns.handleSessionUpdate,
+          handlePermissionRequest: promptTurns.handlePermissionRequest,
         })
         initializedClient = initialized.client
       }
@@ -2790,7 +1605,7 @@ export function createSessionManager(input: {
         preparedTitle.generatorConfig &&
         preparedTitle.promptText
       ) {
-        queueSessionTitleGeneration({
+        sessionTitles.queueSessionTitleGeneration({
           id,
           generatorConfig: preparedTitle.generatorConfig,
           fallbackTitle: preparedTitle.title,
@@ -2829,7 +1644,7 @@ export function createSessionManager(input: {
         idleShutdownTimeoutMs: resolveIdleSessionShutdownTimeoutMs(resolvedConfig),
       })
       if (deferredInitialPrompt !== undefined) {
-        void promptSession(id, deferredInitialPrompt).catch((error) => {
+        void promptTurns.promptSession(id, deferredInitialPrompt).catch((error) => {
           emitDiagnostic(
             id,
             "session_initial_prompt_failed",
@@ -3054,7 +1869,7 @@ export function createSessionManager(input: {
   async function getChanges(id: SessionId): Promise<GetSessionChangesResponse> {
     await ready
     const session = await getSession(id)
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+    const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
     const changes = await readSessionChanges({
       cwd: session.cwd,
       worktree: worktreeRecord,
@@ -3122,176 +1937,7 @@ export function createSessionManager(input: {
     params: SessionLaunchPreviewRequest,
   ): Promise<SessionLaunchPreviewResponse> {
     await ready
-
-    const key = createLaunchLeaseKey(params)
-    const [source, launchBranches, dirty] = await Promise.all([
-      resolveGitWorktreeSource(params.cwd),
-      listLaunchBranches(params.cwd),
-      inspectLaunchCheckoutDirty(params.cwd),
-    ])
-    const repoRoot = source?.path ?? null
-    const bare = source?.bare ?? false
-    const { branches, currentBranch } = launchBranches
-    const existingLease = launchLeaseStore.findByKey(key)
-    if (existingLease) {
-      launchLeaseStore.reactivate(existingLease)
-      existingLease.repoRoot = repoRoot
-      existingLease.branches = branches
-      existingLease.currentBranch = currentBranch
-      existingLease.dirty = dirty
-      return {
-        launchLeaseId: existingLease.id,
-        repoRoot,
-        bare,
-        branches,
-        currentBranch,
-        dirty,
-        models: existingLease.models,
-        configOptions: existingLease.configOptions,
-        slashCommands: getSlashComposerSuggestions(
-          existingLease.availableCommands,
-          "",
-          MAX_COMPOSER_SUGGESTION_LIMIT,
-        ),
-      }
-    }
-
-    const resolvedConfig = await input.configProvider
-      .getRootConfig(params.cwd)
-      .then((root) => root.config)
-    const resolvedRegistry = resolvedConfig?.registry
-    const launchLeaseId = randomUUID()
-    const token = randomBytes(32).toString("hex")
-    const agentProcess = await spawnAgentProcess({
-      daemonUrl: input.getDaemonUrl(),
-      token,
-      agent: params.agent,
-      cwd: params.cwd,
-      createAgentEnvironment: input.createAgentEnvironment,
-      envPolicy: resolvedConfig?.sessions?.envPolicy,
-      registryService: input.registryService,
-      agentInstallService: input.agentInstallService,
-      registry: resolvedRegistry,
-      managedAgents: resolvedConfig?.agents?.managed,
-    })
-    let availableCommands: acp.AvailableCommand[] = []
-    let acpSessionId: string | null = null
-    let client: Awaited<ReturnType<typeof createAcpClient>> | null = null
-    let resolveAvailableCommands: (() => void) | null = null
-    const history: acp.AnyMessage[] = []
-    const availableCommandsReady = new Promise<void>((resolve) => {
-      resolveAvailableCommands = resolve
-    })
-
-    try {
-      client = await createAcpClient({
-        stdin: agentProcess.stdin,
-        stdout: agentProcess.stdout,
-        clientInfo: {
-          name: "npm:@goddard-ai/daemon",
-          version: getPackageVersion(),
-        },
-        handler: {
-          async requestPermission(permissionParams) {
-            const active =
-              activeSessionsByAcpSessionId.get(permissionParams.sessionId) ??
-              (acpSessionId ? (activeSessionsByAcpSessionId.get(acpSessionId) ?? null) : null)
-            if (active) {
-              return await handlePermissionRequest(active, permissionParams)
-            }
-
-            return { outcome: { outcome: "cancelled" } }
-          },
-          async sessionUpdate(params) {
-            const active =
-              activeSessionsByAcpSessionId.get(params.sessionId) ??
-              (acpSessionId ? (activeSessionsByAcpSessionId.get(acpSessionId) ?? null) : null)
-            if (active) {
-              await handleSessionUpdate(active, params)
-              return
-            }
-
-            history.push({
-              jsonrpc: "2.0",
-              method: acp.CLIENT_METHODS.session_update,
-              params,
-            })
-            if (params.update.sessionUpdate === "available_commands_update") {
-              availableCommands = params.update.availableCommands
-              resolveAvailableCommands?.()
-              resolveAvailableCommands = null
-            }
-          },
-        },
-      })
-      const session = await client.newSession({
-        cwd: params.cwd,
-        mcpServers: [],
-      })
-      acpSessionId = session.sessionId
-
-      await Promise.race([
-        availableCommandsReady,
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, 120)
-        }),
-      ])
-
-      const lease: LaunchLease = {
-        id: launchLeaseId,
-        key,
-        agent: params.agent,
-        cwd: params.cwd,
-        token,
-        acpSessionId,
-        agentProcess,
-        client,
-        session,
-        initializeResult: client.initialize,
-        history,
-        availableCommands,
-        models: deriveSessionModelState(session.configOptions),
-        configOptions: session.configOptions,
-        repoRoot,
-        branches,
-        currentBranch,
-        dirty,
-        releaseTimer: null,
-        closing: null,
-      }
-      launchLeaseStore.register(lease)
-
-      return {
-        launchLeaseId: lease.id,
-        repoRoot: lease.repoRoot,
-        bare,
-        branches: lease.branches,
-        currentBranch: lease.currentBranch,
-        dirty: lease.dirty,
-        models: lease.models,
-        configOptions: lease.configOptions,
-        slashCommands: getSlashComposerSuggestions(
-          lease.availableCommands,
-          "",
-          MAX_COMPOSER_SUGGESTION_LIMIT,
-        ),
-      }
-    } catch (error) {
-      if (acpSessionId && client) {
-        try {
-          await client.closeSession({
-            sessionId: acpSessionId,
-          })
-        } catch {
-          // The launch lease failed before it could be returned to a caller.
-        }
-      }
-
-      await client?.close().catch(() => {})
-      await treeKill(agentProcess).catch(() => {})
-      await waitForAgentProcessExit(agentProcess).catch(() => {})
-      throw error
-    }
+    return launchPreparation.getLaunchPreview(params)
   }
 
   async function releaseLaunchLease(
@@ -3342,41 +1988,22 @@ export function createSessionManager(input: {
 
   async function getWorktree(id: SessionId): Promise<GetSessionWorktreeResponse> {
     await ready
-    const session = await getSession(id)
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-
-    return {
-      id: session.id,
-      acpSessionId: session.acpSessionId,
-      worktree: worktreeRecord ? toSessionWorktreeValue(worktreeRecord) : null,
-    }
+    return sessionWorktrees.getWorktree(id)
   }
 
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
     await ready
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-    if (!worktreeRecord) {
-      throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
-    }
-
-    return toSessionWorktreeLifecycleState(worktreeRecord, id)
+    return sessionWorktrees.requireWorktree(id)
   }
 
   async function listWorktrees(): Promise<SessionWorktreeLifecycleState[]> {
     await ready
-    return db.worktrees
-      .findMany()
-      .map((record: DaemonWorktree) => toSessionWorktreeLifecycleState(record, record.sessionId))
+    return sessionWorktrees.listWorktrees()
   }
 
   async function findWorktreeByDir(worktreeDir: string) {
     await ready
-    const record =
-      db.worktrees
-        .findMany()
-        .find((worktreeRecord: DaemonWorktree) => worktreeRecord.worktreeDir === worktreeDir) ??
-      null
-    return record ? toSessionWorktreeLifecycleState(record, record.sessionId) : null
+    return sessionWorktrees.findWorktreeByDir(worktreeDir)
   }
 
   function isActive(id: SessionId) {
@@ -3385,15 +2012,7 @@ export function createSessionManager(input: {
 
   async function declareInitiative(id: SessionId, title: string) {
     await ready
-    requireSessionDocument(id)
-    updateSessionActivity(id, {
-      status: "active",
-      completedHidden: false,
-      initiative: title,
-      blockedReason: null,
-    })
-
-    return getSession(id)
+    return sessionAttention.declareInitiative(id, title)
   }
 
   async function reportBlocker(
@@ -3402,61 +2021,12 @@ export function createSessionManager(input: {
     metadata: AttentionMetadataInput = {},
   ) {
     await ready
-    const session = requireSessionDocument(id)
-    const resolved = resolveAndPersistInboxMetadata({
-      session,
-      metadata: {
-        ...metadata,
-        fallbackHeadline: reason,
-      },
-      blockedReason: reason,
-    })
-    updateSessionActivity(id, {
-      status: "blocked",
-      completedHidden: false,
-      blockedReason: reason,
-      inboxScope: resolved.scope,
-    })
-    await input.events.emit("session.blocked", {
-      sessionId: id,
-      reason,
-      scope: resolved.scope,
-      headline: resolved.headline,
-      turnId: resolveCurrentTurnId(id),
-    })
-
-    return getSession(id)
+    return sessionAttention.reportBlocker(id, reason, metadata)
   }
 
   async function reportTurnEnded(id: SessionId, metadata: AttentionMetadataInput = {}) {
     await ready
-    const session = requireSessionDocument(id)
-    const resolved = resolveAndPersistInboxMetadata({
-      session,
-      metadata: {
-        ...metadata,
-        fallbackHeadline: session.lastAgentMessage ?? session.initiative ?? session.title,
-      },
-    })
-    updateSessionActivity(id, {
-      status: "done",
-      completedHidden: false,
-      initiative: null,
-      blockedReason: null,
-      inboxScope: resolved.scope,
-    })
-
-    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
-    if (activeTurn?.touchedAttentionEntity !== true) {
-      await input.events.emit("session.turn.ended", {
-        sessionId: id,
-        scope: resolved.scope,
-        headline: resolved.headline,
-        turnId: resolveCurrentTurnId(id),
-      })
-    }
-
-    return getSession(id)
+    return sessionAttention.reportTurnEnded(id, metadata)
   }
 
   async function recordTurnAttentionActivity(
@@ -3464,33 +2034,12 @@ export function createSessionManager(input: {
     metadata: AttentionMetadataInput & { fallbackHeadline?: string } = {},
   ) {
     await ready
-    const session = requireSessionDocument(id)
-    const resolved = resolveAndPersistInboxMetadata({
-      session,
-      metadata,
-    })
-    const activeTurn = activeSessions.get(id)?.activeTurn ?? null
-    if (activeTurn) {
-      activeTurn.touchedAttentionEntity = true
-    }
-    updateSessionActivity(id, {
-      inboxScope: resolved.scope,
-    })
-
-    return {
-      scope: resolved.scope,
-      headline: resolved.headline,
-      turnId: resolveCurrentTurnId(id),
-    }
+    return sessionAttention.recordTurnAttentionActivity(id, metadata)
   }
 
   async function recordSessionResult(id: SessionId, message: string) {
     await ready
-    requireSessionDocument(id)
-    updateSessionActivity(id, {
-      status: "done",
-      lastAgentMessage: message,
-    })
+    await sessionAttention.recordSessionResult(id, message)
   }
 
   async function resolveTokenScope(token: string) {
@@ -3528,108 +2077,23 @@ export function createSessionManager(input: {
 
   async function completeSession(id: SessionId) {
     await ready
-    requireSessionDocument(id)
-    const active = activeSessions.get(id) ?? null
-    if (active?.activeTurn) {
-      throw new IpcClientError("Cannot complete a session while the agent has an active turn")
-    }
+    return sessionWorktrees.completeSession(id)
+  }
 
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
-    if (worktreeRecord) {
-      let completionState: Awaited<ReturnType<typeof inspectWorktreeCompletionState>>
-      try {
-        completionState = await inspectWorktreeCompletionState(worktreeRecord)
-      } catch {
-        throw new IpcClientError(
-          "Cannot complete a worktree session because its git state could not be inspected",
-        )
-      }
-
-      if (completionState.dirty) {
-        throw new IpcClientError(
-          "Cannot complete a worktree session while its working tree has uncommitted changes",
-        )
-      }
-
-      if (completionState.unmergedCommits) {
-        throw new IpcClientError(
-          "Cannot complete a worktree session while it has commits that have not been merged into the primary checkout",
-        )
-      }
-    }
-
-    updateSessionActivity(id, {
-      completedHidden: true,
-    })
-    await input.events.emit("session.completed", {
-      sessionId: id,
-    })
-    return requireSessionDocument(id)
+  async function cancelSessionTurn(
+    id: SessionId,
+    options: {
+      includePendingSteer?: boolean
+      updateStatus: boolean
+    } = { updateStatus: true },
+  ): Promise<CancelSessionResponse> {
+    await ready
+    return promptTurns.cancelSessionTurn(id, options)
   }
 
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     await ready
-    const active = activeSessions.get(id)
-    if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
-    }
-
-    if (isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)) {
-      if ("id" in message === false || message.id == null) {
-        throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
-      }
-
-      queueSessionTitlePreparation({
-        id: active.id,
-        prompt: message.params.prompt,
-        diagnosticLogger: active.logger,
-      })
-      active.promptQueue.push({
-        requestId: message.id,
-        prompt: [...message.params.prompt],
-        source: "client",
-      })
-      publishSessionUpdated(active.id, ["queue"])
-      updateSessionActivity(id, {
-        completedHidden: false,
-      })
-      await input.events.emit("session.replied", {
-        sessionId: id,
-      })
-      refreshIdleShutdownState(active.id, "prompt_enqueued")
-      emitDiagnostic(active.id, "session_prompt_enqueued", {
-        requestId: message.id,
-        queueLength: active.promptQueue.length,
-      })
-      await processPromptQueue(active)
-      return
-    }
-
-    if (isAcpRequest(message, acp.AGENT_METHODS.session_cancel)) {
-      await abortQueuedPrompts(active, `Queued prompts were aborted for session ${id}.`, {
-        includePendingSteer: true,
-      })
-      publishClientMessage(active, message)
-      await active.session.cancel()
-      return
-    }
-
-    if (
-      active.lastPermissionRequest &&
-      "id" in message &&
-      message.id === active.lastPermissionRequest.id &&
-      "result" in message
-    ) {
-      const permissionRequest = active.lastPermissionRequest
-      active.lastPermissionRequest = null
-      publishSessionUpdated(active.id, ["permission"])
-      refreshIdleShutdownState(active.id, "permission_request_resolved")
-      publishClientMessage(active, message)
-      permissionRequest.resolve(message.result as acp.RequestPermissionResponse)
-      return
-    }
-
-    throw new IpcClientError(`Unsupported ACP session message for active session ${id}`)
+    await promptTurns.sendMessage(id, message)
   }
 
   async function setSessionConfigOption(params: SetSessionConfigOptionRequest) {
@@ -3666,41 +2130,7 @@ export function createSessionManager(input: {
     prompt: string | acp.ContentBlock[],
   ): Promise<acp.PromptResponse> {
     await ready
-    const active = activeSessions.get(id)
-    if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
-    }
-
-    queueSessionTitlePreparation({
-      id: active.id,
-      prompt,
-      diagnosticLogger: active.logger,
-    })
-    const requestId = randomUUID()
-    const response = new Promise<acp.PromptResponse>((resolve, reject) => {
-      active.promptQueue.push({
-        requestId,
-        prompt: normalizePrompt(prompt),
-        source: "daemon",
-        resolve,
-        reject,
-      })
-    })
-
-    updateSessionActivity(active.id, {})
-    publishSessionUpdated(active.id, ["queue"])
-    refreshIdleShutdownState(active.id, "prompt_enqueued")
-    emitDiagnostic(
-      active.id,
-      "session_prompt_enqueued",
-      {
-        requestId,
-        queueLength: active.promptQueue.length,
-      },
-      active.logger,
-    )
-    await processPromptQueue(active)
-    return await response
+    return promptTurns.promptSession(id, prompt)
   }
 
   async function steerSession(
@@ -3708,50 +2138,7 @@ export function createSessionManager(input: {
     prompt: string | acp.ContentBlock[],
   ): Promise<SteerSessionResponse> {
     await ready
-    const active = activeSessions.get(id)
-    if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
-    }
-
-    const requestId = randomUUID()
-    const abortedQueue = await abortQueuedPrompts(
-      active,
-      `Queued prompts were aborted for session ${id}.`,
-      {
-        includePendingSteer: true,
-      },
-    )
-
-    if (active.blockingPromptRequestId === null) {
-      const response = await promptSession(id, prompt)
-      return {
-        id,
-        abortedQueue,
-        response,
-      }
-    }
-
-    return await new Promise<SteerSessionResponse>((resolve, reject) => {
-      // Keep tracking the cancelled prompt id so steering can wait for that turn's tool/final boundary.
-      active.pendingSteer = {
-        requestId,
-        cancelledRequestId: active.blockingPromptRequestId!,
-        prompt: normalizePrompt(prompt),
-        abortedQueue,
-        waitingForBoundary: true,
-        resolve,
-        reject,
-      }
-      updateSessionActivity(active.id, {})
-      refreshIdleShutdownState(active.id, "steer_started")
-
-      void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
-        if (active.pendingSteer?.requestId === requestId) {
-          active.pendingSteer = null
-        }
-        reject(error instanceof Error ? error : new Error(getErrorMessage(error)))
-      })
-    })
+    return promptTurns.steerSession(id, prompt)
   }
 
   async function shutdownSession(id: SessionId): Promise<boolean> {
@@ -3761,9 +2148,9 @@ export function createSessionManager(input: {
       return false
     }
 
-    cancelIdleShutdownTimer(active, "session_shutdown")
+    idleShutdown.cancelIdleShutdownTimer(active, "session_shutdown")
     emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
-    const worktreeRecord = await resolvePersistedWorktreeRecord(id)
+    const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
     try {
       await input.events.emit("session.stopping", {
         sessionId: id,
@@ -3805,8 +2192,8 @@ export function createSessionManager(input: {
     await launchLeaseStore.closeAll("daemon_shutdown")
 
     for (const session of activeSessions.values()) {
-      cancelIdleShutdownTimer(session, "daemon_shutdown")
-      const worktreeRecord = await resolvePersistedWorktreeRecord(session.id)
+      idleShutdown.cancelIdleShutdownTimer(session, "daemon_shutdown")
+      const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(session.id)
       try {
         await input.events.emit("session.stopping", {
           sessionId: session.id,
