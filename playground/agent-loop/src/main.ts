@@ -5,7 +5,11 @@ import { resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import { parseArgs } from "node:util"
 import { isCancel, text } from "@clack/prompts"
-import type { AgentSession, DaemonSession } from "@goddard-ai/sdk"
+import {
+  deriveSessionLaunchModelConfig,
+  type AgentSession,
+  type DaemonSession,
+} from "@goddard-ai/sdk"
 import { GoddardSdk } from "@goddard-ai/sdk/node"
 import { dim, green, red, yellow } from "nanocolors"
 
@@ -165,16 +169,17 @@ function writeStatus(output: NodeJS.WritableStream, message: string) {
   output.write(`${dim("›")} ${message}\n`)
 }
 
-/** Returns a human-readable active model label when the agent reports model state. */
-function findCurrentModelLabel(session: Pick<DaemonSession, "models">) {
-  const currentModelId = session.models?.currentModelId
+/** Returns a human-readable active model label when the agent reports model config options. */
+function findCurrentModelLabel(session: Pick<DaemonSession, "configOptions">) {
+  const models = deriveSessionLaunchModelConfig({
+    configOptions: session.configOptions,
+  }).models
+  const currentModelId = models?.currentModelId
   if (!currentModelId) {
     return null
   }
 
-  const currentModel = session.models?.availableModels.find(
-    (model) => model.modelId === currentModelId,
-  )
+  const currentModel = models.availableModels.find((model) => model.modelId === currentModelId)
   if (!currentModel?.name || currentModel.name === currentModelId) {
     return currentModelId
   }
@@ -185,7 +190,7 @@ function findCurrentModelLabel(session: Pick<DaemonSession, "models">) {
 /** Writes daemon-resolved defaults when the caller omitted agent or model choices. */
 function writeResolvedDefaults(input: {
   options: Pick<CliOptions, "agent" | "model">
-  session: Pick<DaemonSession, "agentName" | "models">
+  session: Pick<DaemonSession, "agentName" | "configOptions">
   output: NodeJS.WritableStream
 }) {
   let wroteDefault = false
