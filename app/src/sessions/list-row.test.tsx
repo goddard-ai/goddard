@@ -22,42 +22,6 @@ mock.module("lucide-react", () => ({
   XCircle: Icon,
 }))
 
-function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return createFixtureSession({
-    id: "ses_session_1",
-    acpSessionId: "acp-session-1",
-    status: "active",
-    stopReason: null,
-    agent: "codex",
-    agentName: "Codex",
-    cwd: "/repo",
-    mcpServers: [],
-    connectionMode: "live",
-    supportsLoadSession: true,
-    activeDaemonSession: true,
-    completedHidden: false,
-    token: null,
-    permissions: null,
-    title: "Stabilize app sessions",
-    titleState: "generated",
-    repository: "goddard-ai",
-    prNumber: null,
-    metadata: null,
-    createdAt: 1_800_000_000_000,
-    lastSessionActivityAt: Date.now(),
-    errorMessage: null,
-    blockedReason: null,
-    initiative: null,
-    inboxScope: null,
-    lastAgentMessage: null,
-    models: null,
-    configOptions: [],
-    availableCommands: [],
-    contextUsage: null,
-    ...overrides,
-  })
-}
-
 function renderListRow(input: {
   openSession?: (sessionId: DaemonSession["id"]) => void
   openSessionChanges?: (sessionId: DaemonSession["id"]) => void
@@ -66,7 +30,7 @@ function renderListRow(input: {
   const container = document.createElement("div")
   const openSession = input.openSession ?? vi.fn()
   const openSessionChanges = input.openSessionChanges ?? vi.fn()
-  const session = input.session ?? createSession()
+  const session = input.session ?? createFixtureSession()
 
   document.body.append(container)
   render(
@@ -117,7 +81,7 @@ test("ListRow opens session changes without also opening the session", async () 
   const openSessionChanges = vi.fn()
   const harness = renderListRow({ openSession, openSessionChanges })
   const changesButton = harness.container.querySelector(
-    "button[aria-label='View changes for Stabilize app sessions']",
+    "button[aria-label='View changes for Fixture session']",
   ) as HTMLButtonElement
 
   await act(async () => {
@@ -160,13 +124,15 @@ test("SessionsList renders loading, error, empty, and row states from observable
         openSessionChanges() {},
       }}
     >
-      <SessionsList searchQuery="" sessions={[createSession()]} />
+      <SessionsList
+        activeSessionId="ses_session_1"
+        searchQuery=""
+        sessions={[createFixtureSession()]}
+      />
     </SessionsPageMutations>,
     container,
   )
-  expect(container.querySelector(".session-list-row")?.textContent).toContain(
-    "Stabilize app sessions",
-  )
+  expect(container.querySelector(".session-list-row")?.textContent).toContain("Fixture session")
 
   render(null, container)
   container.remove()

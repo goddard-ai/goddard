@@ -25,51 +25,6 @@ mock.module("~/sdk.ts", () => ({
   },
 }))
 
-function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return createFixtureInboxItem({
-    headline: "Needs review",
-    scope: "Stability work",
-    updatedAt: 1_800_000_000_000,
-    ...input,
-  })
-}
-
-function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return createFixtureSession({
-    id: "ses_session_1",
-    acpSessionId: "acp-session-1",
-    status: "done",
-    stopReason: "end_turn",
-    agent: "codex",
-    agentName: "Codex",
-    cwd: "/repo",
-    mcpServers: [],
-    connectionMode: "history",
-    supportsLoadSession: true,
-    activeDaemonSession: false,
-    completedHidden: false,
-    token: null,
-    permissions: null,
-    title: "Review inbox routing",
-    titleState: "generated",
-    repository: "goddard-ai",
-    prNumber: null,
-    metadata: null,
-    createdAt: 1_800_000_000_000,
-    lastSessionActivityAt: 1_800_000_001_000,
-    errorMessage: null,
-    blockedReason: null,
-    initiative: null,
-    inboxScope: null,
-    lastAgentMessage: null,
-    models: null,
-    configOptions: [],
-    availableCommands: [],
-    contextUsage: null,
-    ...overrides,
-  })
-}
-
 function resetSdk() {
   inboxClient.list = vi.fn(async () => ({
     items: [],
@@ -77,21 +32,23 @@ function resetSdk() {
     hasMore: false,
   }))
   inboxClient.update = vi.fn(async ({ entityId }: { entityId: InboxItem["entityId"] }) => ({
-    item: createInboxItem({ entityId, status: "read" }),
+    item: createFixtureInboxItem({ entityId, status: "read" }),
   }))
   inboxClient.bulkUpdate = vi.fn(async ({ entityIds }: { entityIds: InboxItem["entityId"][] }) => ({
-    items: entityIds.map((entityId) => createInboxItem({ entityId, status: "read" })),
+    items: entityIds.map((entityId) =>
+      createFixtureInboxItem({ entityId, status: "read" }),
+    ),
     missingEntityIds: [],
   }))
   inboxClient.completeSession = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-    item: createInboxItem({ entityId: id, status: "completed" }),
+    item: createFixtureInboxItem({ entityId: id, status: "completed" }),
   }))
   sessionClient.get = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-    session: createSession({ id }),
+    session: createFixtureSession({ id }),
   }))
   sessionClient.history = vi.fn(async () =>
     createSessionHistoryResponse({
-      session: createSession(),
+      session: createFixtureSession(),
       overrides: {
         connection: {
           activeDaemonSession: false,
@@ -102,14 +59,7 @@ function resetSdk() {
     }),
   )
   prClient.get = vi.fn(async ({ id }: { id: DaemonPullRequest["id"] }) => ({
-    pullRequest: createFixturePullRequest({
-      id,
-      cwd: "/repo",
-      owner: "goddard-ai",
-      prNumber: 42,
-      repo: "goddard",
-      updatedAt: 1_800_000_001_000,
-    }),
+    pullRequest: createFixturePullRequest({ id }),
   }))
 }
 
@@ -213,7 +163,7 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   const workbenchTabSet = new WorkbenchTabSet()
 
   await openInboxItemInWorkbench({
-    item: createInboxItem({ entityId: "ses_session_1" }),
+    item: createFixtureInboxItem({ entityId: "ses_session_1" }),
     workbenchTabSet,
   })
 
@@ -223,11 +173,11 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
     id: "session:ses_session_1",
     kind: "sessionChat",
-    title: "Review inbox routing",
+    title: "Fixture session",
     props: {
-      relatedFilesystemPath: "/repo",
+      relatedFilesystemPath: "/Users/alec/Projects/goddard-ai",
       sessionId: "ses_session_1",
-      sessionTitle: "Review inbox routing",
+      sessionTitle: "Fixture session",
     },
   })
 })
@@ -237,7 +187,7 @@ test("openInboxItemInWorkbench opens pull request rows as pull request tabs", as
   const workbenchTabSet = new WorkbenchTabSet()
 
   await openInboxItemInWorkbench({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
       entityId: "pr_1",
       reason: "pull_request.created",
     }),
@@ -250,11 +200,11 @@ test("openInboxItemInWorkbench opens pull request rows as pull request tabs", as
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
     id: "pull-request:pr_1",
     kind: "pullRequest",
-    title: "goddard-ai/goddard #42",
+    title: "goddard-ai/goddard-ai #128",
     props: {
-      relatedFilesystemPath: "/repo",
+      relatedFilesystemPath: "/Users/alec/Projects/goddard-ai",
       pullRequestId: "pr_1",
-      pullRequestTitle: "goddard-ai/goddard #42",
+      pullRequestTitle: "goddard-ai/goddard-ai #128",
     },
   })
 })

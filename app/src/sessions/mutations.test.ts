@@ -16,69 +16,33 @@ mock.module("~/sdk.ts", () => ({
   },
 }))
 
-function createSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
-  return createFixtureSession({
-    id: "ses_session_1",
-    acpSessionId: "acp-session-1",
-    status: "active",
-    stopReason: null,
-    agent: "codex",
-    agentName: "Codex",
-    cwd: "/repo",
-    mcpServers: [],
-    connectionMode: "live",
-    supportsLoadSession: true,
-    activeDaemonSession: true,
-    completedHidden: false,
-    token: null,
-    permissions: null,
-    title: "Stabilize sessions",
-    titleState: "generated",
-    repository: "goddard-ai",
-    prNumber: null,
-    metadata: null,
-    createdAt: 1_800_000_000_000,
-    lastSessionActivityAt: 1_800_000_001_000,
-    errorMessage: null,
-    blockedReason: null,
-    initiative: null,
-    inboxScope: null,
-    lastAgentMessage: null,
-    models: null,
-    configOptions: [],
-    availableCommands: [],
-    contextUsage: null,
-    ...overrides,
-  })
-}
-
 function resetSdk() {
-  sessionClient.create = vi.fn(async () => ({ session: createSession() }))
+  sessionClient.create = vi.fn(async () => ({ session: createFixtureSession() }))
   sessionClient.list = vi.fn(async () => ({
-    sessions: [createSession()],
+    sessions: [createFixtureSession()],
     nextCursor: null,
     hasMore: false,
   }))
   sessionClient.get = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-    session: createSession({ id }),
+    session: createFixtureSession({ id }),
   }))
   sessionClient.history = vi.fn(async ({ id }: { id: DaemonSession["id"] }) =>
-    createSessionHistoryResponse({ session: createSession({ id }) }),
+    createSessionHistoryResponse({ session: createFixtureSession({ id }) }),
   )
   sessionClient.prompt = vi.fn(async () => ({ accepted: true }))
   sessionClient.configOption = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-      session: createSession({ id }),
+      session: createFixtureSession({ id }),
     })),
   }
   sessionClient.model = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-      session: createSession({ id }),
+      session: createFixtureSession({ id }),
     })),
   }
   sessionClient.respondPermission = vi.fn(async () => ({ accepted: true }))
   sessionClient.connect = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
-    session: createSession({ id }),
+    session: createFixtureSession({ id }),
   }))
   sessionClient.cancel = vi.fn(async () => ({
     activeTurnCancelled: true,
@@ -110,7 +74,7 @@ function resetSdk() {
   }))
   inboxClient.completeSession = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
     item: null,
-    session: createSession({ id }),
+    session: createFixtureSession({ id }),
   }))
 }
 
@@ -202,7 +166,7 @@ test("createSession refreshes session lists and launch previews", async () => {
   await activateCachedQuery(sessionClient.launchPreview, [{ agent: "codex", cwd: "/repo" }])
 
   await expect(runCreateSession(input)).resolves.toEqual({
-    session: createSession(),
+    session: createFixtureSession(),
   })
   await waitFor(
     () =>
@@ -388,7 +352,7 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
 
   pushEvent({
     kind: "sessionUpdated",
-    session: createSession({ id: sessionId }),
+    session: createFixtureSession({ id: sessionId }),
     changed: ["status"],
   })
   await expectSessionViewsRefreshed()

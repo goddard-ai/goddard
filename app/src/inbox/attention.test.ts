@@ -1,5 +1,4 @@
 import { createFixtureInboxItem } from "@goddard-ai/fixtures"
-import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { expect, test } from "bun:test"
 
 import {
@@ -8,29 +7,37 @@ import {
   isUnreadSessionInboxItem,
 } from "./attention.ts"
 
-function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return createFixtureInboxItem({ updatedAt: 1, scope: null, headline: null, ...input })
-}
+const inboxItemDefaults = { updatedAt: 1, scope: null, headline: null }
 
 test("isUnreadSessionInboxItem matches only unread session items", () => {
-  expect(isUnreadSessionInboxItem(createInboxItem({ entityId: "ses_unread" }))).toBe(true)
-  expect(isUnreadSessionInboxItem(createInboxItem({ entityId: "ses_read", status: "read" }))).toBe(
-    false,
-  )
-  expect(isUnreadSessionInboxItem(createInboxItem({ entityId: "pr_unread" }))).toBe(false)
+  expect(
+    isUnreadSessionInboxItem(
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_unread" }),
+    ),
+  ).toBe(true)
+  expect(
+    isUnreadSessionInboxItem(
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_read", status: "read" }),
+    ),
+  ).toBe(false)
+  expect(
+    isUnreadSessionInboxItem(
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "pr_unread" }),
+    ),
+  ).toBe(false)
 })
 
 test("hasUnreadSessionInboxItems detects unread session attention", () => {
   expect(
     hasUnreadSessionInboxItems([
-      createInboxItem({ entityId: "pr_unread" }),
-      createInboxItem({ entityId: "ses_read", status: "read" }),
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "pr_unread" }),
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_read", status: "read" }),
     ]),
   ).toBe(false)
   expect(
     hasUnreadSessionInboxItems([
-      createInboxItem({ entityId: "pr_unread" }),
-      createInboxItem({ entityId: "ses_unread" }),
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "pr_unread" }),
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_unread" }),
     ]),
   ).toBe(true)
 })
@@ -38,19 +45,25 @@ test("hasUnreadSessionInboxItems detects unread session attention", () => {
 test("getNextUnreadInboxAttentionItem returns null with no unread items", () => {
   expect(
     getNextUnreadInboxAttentionItem([
-      createInboxItem({ entityId: "ses_read", status: "read" }),
-      createInboxItem({ entityId: "ses_archived", status: "archived" }),
+      createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_read", status: "read" }),
+      createFixtureInboxItem({
+        ...inboxItemDefaults,
+        entityId: "ses_archived",
+        status: "archived",
+      }),
     ]),
   ).toBeNull()
 })
 
 test("getNextUnreadInboxAttentionItem prefers normal priority over low priority", () => {
-  const lowPriorityFresh = createInboxItem({
+  const lowPriorityFresh = createFixtureInboxItem({
+    ...inboxItemDefaults,
     entityId: "ses_low",
     priority: "low",
     updatedAt: 20,
   })
-  const normalPriorityStale = createInboxItem({
+  const normalPriorityStale = createFixtureInboxItem({
+    ...inboxItemDefaults,
     entityId: "ses_normal",
     priority: "normal",
     updatedAt: 10,
@@ -62,8 +75,16 @@ test("getNextUnreadInboxAttentionItem prefers normal priority over low priority"
 })
 
 test("getNextUnreadInboxAttentionItem uses updatedAt freshness within equal priority", () => {
-  const stale = createInboxItem({ entityId: "ses_stale", updatedAt: 10 })
-  const fresh = createInboxItem({ entityId: "pr_fresh", updatedAt: 20 })
+  const stale = createFixtureInboxItem({
+    ...inboxItemDefaults,
+    entityId: "ses_stale",
+    updatedAt: 10,
+  })
+  const fresh = createFixtureInboxItem({
+    ...inboxItemDefaults,
+    entityId: "pr_fresh",
+    updatedAt: 20,
+  })
 
   expect(getNextUnreadInboxAttentionItem([stale, fresh])).toBe(fresh)
 })

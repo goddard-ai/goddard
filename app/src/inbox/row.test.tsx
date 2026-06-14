@@ -23,13 +23,10 @@ mock.module("lucide-react", () => ({
   MessageSquare: Icon,
 }))
 
-function createInboxItem(input: Partial<InboxItem> & Pick<InboxItem, "entityId">): InboxItem {
-  return createFixtureInboxItem({
-    headline: "Review the latest result",
-    scope: "Inbox automation",
-    updatedAt: Date.now(),
-    ...input,
-  })
+const inboxItemDefaults = {
+  headline: "Review the latest result",
+  scope: "Inbox automation",
+  updatedAt: Date.now(),
 }
 
 function renderInboxRow(input: {
@@ -38,7 +35,8 @@ function renderInboxRow(input: {
   onSelectionChange?: (isSelected: boolean) => void
 }) {
   const container = document.createElement("div")
-  const item = input.item ?? createInboxItem({ entityId: "ses_session_1" })
+  const item =
+    input.item ?? createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_session_1" })
   const mutations = {
     bulkUpdateInboxItems: vi.fn(),
     completeSessionInboxItem: vi.fn(async () => {}),
@@ -99,7 +97,8 @@ test("InboxRow opens rows and toggles selection through observable controls", as
 
 test("InboxRow action buttons submit focused row mutations without opening the row", async () => {
   const harness = renderInboxRow({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
+      ...inboxItemDefaults,
       entityId: "ses_session_1",
       status: "unread",
       priority: "normal",
@@ -140,7 +139,8 @@ test("InboxRow action buttons submit focused row mutations without opening the r
 
 test("InboxRow uses entity-specific completion only for session rows", async () => {
   const sessionHarness = renderInboxRow({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
+      ...inboxItemDefaults,
       entityId: "ses_session_1",
       status: "read",
     }),
@@ -159,7 +159,8 @@ test("InboxRow uses entity-specific completion only for session rows", async () 
   sessionHarness.container.remove()
 
   const pullRequestHarness = renderInboxRow({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
+      ...inboxItemDefaults,
       entityId: "pr_1",
       reason: "pull_request.created",
     }),
@@ -173,7 +174,8 @@ test("InboxRow uses entity-specific completion only for session rows", async () 
 
 test("InboxRow disables already-applied saved and archived actions", () => {
   const savedHarness = renderInboxRow({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
+      ...inboxItemDefaults,
       entityId: "ses_saved",
       status: "saved",
     }),
@@ -185,7 +187,8 @@ test("InboxRow disables already-applied saved and archived actions", () => {
   savedHarness.container.remove()
 
   const archivedHarness = renderInboxRow({
-    item: createInboxItem({
+    item: createFixtureInboxItem({
+      ...inboxItemDefaults,
       entityId: "ses_archived",
       status: "archived",
     }),
