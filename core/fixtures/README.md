@@ -50,7 +50,10 @@ The scenario owns the data. The app still owns the query key, navigation target,
 Seeds may compose fixtures, but seed execution does not live here. A seed adapter should convert fixture records into writes for its own database or store:
 
 ```ts
-import { createInboxAttentionQueueScenario, createSessionTriageQueueScenario } from "@goddard-ai/fixtures"
+import {
+  createInboxAttentionQueueScenario,
+  createSessionTriageQueueScenario,
+} from "@goddard-ai/fixtures"
 
 export async function seedDevDatabase(db: SeedDatabase) {
   const sessions = createSessionTriageQueueScenario()

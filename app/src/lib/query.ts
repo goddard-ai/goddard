@@ -231,9 +231,9 @@ export class QueryClient {
     for (const entry of this.entries.values()) {
       if (
         entry.refetchOnWindowReactivate &&
-          entry.subscribers.size > 0 &&
-          !entry.promise &&
-          !this.isInjected(entry)
+        entry.subscribers.size > 0 &&
+        !entry.promise &&
+        !this.isInjected(entry)
       ) {
         void this.fetchEntry(entry, entry.hasData)
       }
