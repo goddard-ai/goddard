@@ -12,6 +12,9 @@ type QueryInput = AnyQueryFunction | DisabledQuery
 type QueryOptions = {
   refetchOnWindowReactivate?: boolean
 }
+type QueryPrefetchOptions = QueryOptions & {
+  force?: boolean
+}
 
 type QueryRequest<TQueryFn extends QueryInput = QueryInput> = QueryOptions & {
   params: TQueryFn extends AnyQueryFunction ? Parameters<TQueryFn> : null
@@ -156,6 +159,36 @@ export class QueryClient {
     }
 
     return snapshot.data!
+  }
+
+  /**
+   * Warms one query entry without subscribing UI, sharing the same cache used by query hooks.
+   */
+  async prefetch<TQueryFn extends AnyQueryFunction>(
+    queryFn: TQueryFn,
+    args: Parameters<TQueryFn>,
+    options: QueryPrefetchOptions = {},
+  ) {
+    const queryKey = this.getQueryKey(queryFn, args)
+    const entry = this.ensureEntry(queryKey, queryFn, args, {
+      ...defaultQueryOptions,
+      refetchOnWindowReactivate:
+        options.refetchOnWindowReactivate ?? defaultQueryOptions.refetchOnWindowReactivate,
+    })
+    entry.refetchOnWindowReactivate =
+      options.refetchOnWindowReactivate ?? entry.refetchOnWindowReactivate
+
+    if (options.force) {
+      entry.stale = true
+    }
+
+    if (entry.stale || (!entry.hasData && !entry.promise)) {
+      await this.fetchEntry(entry, entry.hasData)
+    } else if (entry.promise) {
+      await entry.promise
+    }
+
+    return entry.data as Awaited<ReturnType<TQueryFn>>
   }
 
   /**

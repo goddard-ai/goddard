@@ -39,6 +39,49 @@ test("QueryClient.read suspends until the first result is cached", async () => {
   expect(queryClient.read(queryKey, loadSessionCount, ["/repo-a"])).toBe(7)
 })
 
+test("QueryClient.prefetch warms data for later reads", async () => {
+  const queryClient = new QueryClient()
+  const loadSessionCount = vi.fn(async (projectPath: string) => projectPath.length)
+  const queryKey = queryClient.getQueryKey(loadSessionCount, ["/repo-a"])
+
+  await expect(queryClient.prefetch(loadSessionCount, ["/repo-a"])).resolves.toBe(7)
+
+  expect(queryClient.read(queryKey, loadSessionCount, ["/repo-a"])).toBe(7)
+  expect(loadSessionCount).toHaveBeenCalledTimes(1)
+})
+
+test("QueryClient.prefetch reuses an in-flight read", async () => {
+  const deferred = createDeferred<string>()
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn((_sessionId: string) => deferred.promise)
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+  const firstLoad = waitForSuspendedRead(() => queryClient.read(queryKey, loadSession, ["ses_1"]))
+  const prefetch = queryClient.prefetch(loadSession, ["ses_1"])
+
+  await Promise.resolve()
+  deferred.resolve("first")
+
+  await expect(prefetch).resolves.toBe("first")
+  await firstLoad
+  expect(loadSession).toHaveBeenCalledTimes(1)
+})
+
+test("QueryClient.prefetch can force-refresh inactive cached data", async () => {
+  const queryClient = new QueryClient()
+  const loadSession = vi.fn(async (_sessionId: string) => "first")
+  const queryKey = queryClient.getQueryKey(loadSession, ["ses_1"])
+
+  await expect(queryClient.prefetch(loadSession, ["ses_1"])).resolves.toBe("first")
+
+  loadSession.mockResolvedValueOnce("second")
+  await expect(queryClient.prefetch(loadSession, ["ses_1"], { force: true })).resolves.toBe(
+    "second",
+  )
+
+  expect(queryClient.read(queryKey, loadSession, ["ses_1"])).toBe("second")
+  expect(loadSession).toHaveBeenCalledTimes(2)
+})
+
 test("QueryClient.invalidate keeps stale data visible until the refetch resolves", async () => {
   let deferred = createDeferred<string>()
   const notifications: string[] = []
