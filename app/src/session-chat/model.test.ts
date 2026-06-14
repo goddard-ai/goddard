@@ -99,6 +99,20 @@ function agentChunk(text: string) {
   } satisfies acp.AnyMessage
 }
 
+function thoughtChunk(text: string) {
+  return {
+    jsonrpc: "2.0",
+    method: acp.CLIENT_METHODS.session_update,
+    params: {
+      sessionId: "acp-session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text },
+      },
+    },
+  } satisfies acp.AnyMessage
+}
+
 function promptResult(id = "prompt-1") {
   return {
     jsonrpc: "2.0",
@@ -391,7 +405,7 @@ test("SessionChat receiveMessage batches chunks and flushes before boundary mess
 
   await wait(40)
 
-  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].messages).toHaveLength(2)
   expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
     content: [{ type: "text", text: "Still working" }],
   })
@@ -406,6 +420,58 @@ test("SessionChat receiveMessage batches chunks and flushes before boundary mess
   expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
     content: [{ type: "text", text: "Still working." }],
   })
+})
+
+test("SessionChat batches thought chunks separately from agent message chunks", async () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.receiveMessage(thoughtChunk("Inspecting "))
+  chat.receiveMessage(thoughtChunk("state."))
+  chat.receiveMessage(agentChunk("Done"))
+
+  await wait(40)
+
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(
+    chat.transcriptMessages.flatMap((message) =>
+      message.kind === "thought" ? [message.text] : [],
+    ),
+  ).toEqual(["Inspecting state."])
+  expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
+    content: [{ type: "text", text: "Done" }],
+  })
+})
+
+test("SessionChat flushes queued thought chunks before tool call boundaries", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.receiveMessage(thoughtChunk("Before "))
+  chat.receiveMessage(thoughtChunk("tool."))
+  chat.receiveMessage(toolCallMessage("completed"))
+  chat.receiveMessage(thoughtChunk("After tool."))
+  chat.flushReceivedMessages()
+
+  expect(
+    chat.transcriptMessages.flatMap((message) =>
+      message.kind === "thought" ? [message.text] : [],
+    ),
+  ).toEqual(["Before tool.", "After tool."])
 })
 
 test("SessionChat does not repeat streamed text after history refreshes with coalesced chunks", () => {

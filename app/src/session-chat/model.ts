@@ -106,6 +106,8 @@ type QueuedSessionChatMessage = {
   receivedAt: string
 }
 
+type TextAgentChunkKind = "agent_message_chunk" | "agent_thought_chunk"
+
 const liveChunkBatchIntervalMs = 33
 
 function isRequestOrNotificationMessage(
@@ -175,28 +177,52 @@ function getSessionUpdate(message: acp.AnyMessage) {
   return params.update
 }
 
-function isTextAgentMessageChunk(message: acp.AnyMessage) {
+function getSessionUpdateSessionId(message: acp.AnyMessage) {
+  if (
+    !isRequestOrNotificationMessage(message) ||
+    message.method !== acp.CLIENT_METHODS.session_update
+  ) {
+    return null
+  }
+
+  const params = message.params as acp.SessionNotification
+  return params.sessionId
+}
+
+function getTextAgentChunkKind(message: acp.AnyMessage): TextAgentChunkKind | null {
   const update = getSessionUpdate(message)
 
-  return update?.sessionUpdate === "agent_message_chunk" && update.content.type === "text"
+  return (update?.sessionUpdate === "agent_message_chunk" ||
+    update?.sessionUpdate === "agent_thought_chunk") &&
+    update.content.type === "text"
+    ? update.sessionUpdate
+    : null
+}
+
+function isTextAgentChunk(message: acp.AnyMessage) {
+  return getTextAgentChunkKind(message) !== null
 }
 
 function getTextAgentMessageChunkText(message: acp.AnyMessage) {
+  return getTextAgentChunkText(message, "agent_message_chunk")
+}
+
+function getTextAgentChunkText(message: acp.AnyMessage, chunkKind: TextAgentChunkKind) {
   const update = getSessionUpdate(message)
 
-  return update?.sessionUpdate === "agent_message_chunk" && update.content.type === "text"
+  return update?.sessionUpdate === chunkKind && update.content.type === "text"
     ? update.content.text
     : null
 }
 
-function createAgentMessageChunk(sessionId: string, text: string) {
+function createTextAgentChunk(sessionId: string, chunkKind: TextAgentChunkKind, text: string) {
   return {
     jsonrpc: "2.0",
     method: acp.CLIENT_METHODS.session_update,
     params: {
       sessionId,
       update: {
-        sessionUpdate: "agent_message_chunk",
+        sessionUpdate: chunkKind,
         content: { type: "text", text },
       },
     },
@@ -361,6 +387,42 @@ function getActiveTurn(turns: readonly SessionChatTurn[]) {
 
 function getTurnAgentText(turn: Pick<SessionHistoryTurn, "messages">) {
   return turn.messages.map((message) => getTextAgentMessageChunkText(message) ?? "").join("")
+}
+
+function coalesceQueuedTextAgentChunks(messages: QueuedSessionChatMessage[]) {
+  const coalescedMessages: QueuedSessionChatMessage[] = []
+
+  for (const queuedMessage of messages) {
+    const chunkKind = getTextAgentChunkKind(queuedMessage.message)
+    const previousMessage = coalescedMessages.at(-1)
+    const previousChunkKind = previousMessage
+      ? getTextAgentChunkKind(previousMessage.message)
+      : null
+
+    if (chunkKind !== null && previousChunkKind === chunkKind && previousMessage) {
+      const sessionId = getSessionUpdateSessionId(queuedMessage.message)
+      const previousSessionId = getSessionUpdateSessionId(previousMessage.message)
+
+      if (!sessionId || sessionId !== previousSessionId) {
+        coalescedMessages.push(queuedMessage)
+        continue
+      }
+
+      previousMessage.message = createTextAgentChunk(
+        sessionId,
+        chunkKind,
+        `${getTextAgentChunkText(previousMessage.message, chunkKind) ?? ""}${
+          getTextAgentChunkText(queuedMessage.message, chunkKind) ?? ""
+        }`,
+      )
+      previousMessage.receivedAt = queuedMessage.receivedAt
+      continue
+    }
+
+    coalescedMessages.push(queuedMessage)
+  }
+
+  return coalescedMessages
 }
 
 function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
@@ -552,8 +614,9 @@ export class SessionChat extends Sigma<SessionChatState> {
       }
 
       localMessages.push({
-        message: createAgentMessageChunk(
+        message: createTextAgentChunk(
           this.session.acpSessionId,
+          "agent_message_chunk",
           existingAgentText.slice(refreshedAgentText.length),
         ),
         receivedAt: turn.completedAt ?? turn.startedAt,
@@ -628,7 +691,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       return
     }
 
-    if (isTextAgentMessageChunk(message)) {
+    if (isTextAgentChunk(message)) {
       this.#queuedChunks.push({ message, receivedAt })
       this.#scheduleQueuedChunkFlush()
       return
@@ -728,7 +791,7 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   #takeQueuedChunks() {
     this.#cancelQueuedChunkFlush()
-    return this.#queuedChunks.splice(0, this.#queuedChunks.length)
+    return coalesceQueuedTextAgentChunks(this.#queuedChunks.splice(0, this.#queuedChunks.length))
   }
 
   #scheduleQueuedChunkFlush() {
