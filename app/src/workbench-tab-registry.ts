@@ -10,6 +10,7 @@ type WorkbenchTabDefinition<TProps extends object = any> = {
   getTitle: (props: TProps) => string
   icon: SvgIconName
   getRelatedFilesystemPath?: (props: TProps) => string | null | undefined
+  preload?: () => Promise<unknown>
   restoreScroll?: boolean
 }
 
@@ -21,10 +22,19 @@ function PlaceholderWorkbenchTab() {
   return null
 }
 
+function lazyWorkbenchTab<TComponent extends LooseWorkbenchTabComponent>(
+  load: () => Promise<{ default: TComponent }>,
+) {
+  return {
+    component: lazy(load) as TComponent,
+    preload: load,
+  }
+}
+
 /** Runtime registry for every non-primary workbench tab component. */
 export const workbenchTabKinds = {
   inbox: {
-    component: lazy(() => import("~/inbox/page.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/inbox/page.tsrx")),
     getId: (props: { projectPath?: string }) =>
       props.projectPath
         ? `project-inbox:${encodeURIComponent(props.projectPath)}`
@@ -35,13 +45,13 @@ export const workbenchTabKinds = {
     getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   projects: {
-    component: lazy(() => import("~/projects/projects-page.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/projects/projects-page.tsrx")),
     getId: () => "surface:projects",
     getTitle: () => "Projects",
     icon: "tabs/projects",
   },
   sessions: {
-    component: lazy(() => import("~/sessions/page.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/sessions/page.tsrx")),
     getId: (props: { projectPath?: string }) =>
       props.projectPath
         ? `project-sessions:${encodeURIComponent(props.projectPath)}`
@@ -76,19 +86,19 @@ export const workbenchTabKinds = {
     icon: "tabs/roadmap",
   },
   settings: {
-    component: lazy(() => import("~/settings/page.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/settings/page.tsrx")),
     getId: () => "surface:settings",
     getTitle: () => "Settings",
     icon: "settings",
   },
   keyboardShortcuts: {
-    component: lazy(() => import("~/shortcuts/view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/shortcuts/view.tsrx")),
     getId: () => "workbench:keyboard-shortcuts",
     getTitle: () => "Keyboard Shortcuts",
     icon: "settings",
   },
   project: {
-    component: lazy(() => import("~/projects/project-page.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/projects/project-page.tsrx")),
     getId: (props: { projectPath: string }) => `project:${encodeURIComponent(props.projectPath)}`,
     getTitle: (props: { projectName?: string; projectPath: string }) =>
       props.projectName ?? props.projectPath,
@@ -96,7 +106,7 @@ export const workbenchTabKinds = {
     getRelatedFilesystemPath: (props: { projectPath: string }) => props.projectPath,
   },
   sessionChat: {
-    component: lazy(() => import("~/session-chat/view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/session-chat/view.tsrx")),
     getId: (props: { sessionId: string }) => `session:${props.sessionId}`,
     getTitle: (props: { sessionTitle?: string }) => props.sessionTitle ?? "Session",
     icon: "tabs/sessions",
@@ -105,13 +115,13 @@ export const workbenchTabKinds = {
     restoreScroll: false,
   },
   sessionChanges: {
-    component: lazy(() => import("~/session-changes/view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/session-changes/view.tsrx")),
     getId: (props: { sessionId: string }) => `session-changes:${props.sessionId}`,
     getTitle: (props: { sessionTitle: string }) => `Changes · ${props.sessionTitle}`,
     icon: "tabs/changes",
   },
   pullRequest: {
-    component: lazy(() => import("~/pull-requests/view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/pull-requests/view.tsrx")),
     getId: (props: { pullRequestId: string }) => `pull-request:${props.pullRequestId}`,
     getTitle: (props: { pullRequestTitle?: string }) => props.pullRequestTitle ?? "Pull Request",
     icon: "tabs/pull-request",
@@ -119,13 +129,13 @@ export const workbenchTabKinds = {
       props.relatedFilesystemPath,
   },
   inboxDebug: {
-    component: lazy(() => import("~/inbox/debug-view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/inbox/debug-view.tsrx")),
     getId: () => "debug:inbox",
     getTitle: () => "Inbox Debug",
     icon: "tabs/inbox",
   },
   terminalDebug: {
-    component: lazy(() => import("~/terminal/debug-view.tsrx")),
+    ...lazyWorkbenchTab(() => import("~/terminal/debug-view.tsrx")),
     getId: () => "debug:terminal",
     getTitle: () => "Terminal Debug",
     icon: "tabs/sessions",
@@ -190,6 +200,15 @@ export function getWorkbenchTabComponent(
   kind: WorkbenchRegisteredTabKind,
 ): LooseWorkbenchTabComponent {
   return workbenchTabKinds[kind].component
+}
+
+/** Starts loading the component module for one workbench tab kind when it is lazy. */
+export async function preloadWorkbenchTabComponent(kind: WorkbenchRegisteredTabKind) {
+  const tabKind = workbenchTabKinds[kind]
+
+  if ("preload" in tabKind) {
+    await tabKind.preload()
+  }
 }
 
 /** Returns the SVG icon registered for one workbench tab kind. */
