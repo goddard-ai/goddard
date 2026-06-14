@@ -24,6 +24,7 @@ const launchInputClasses: SessionInputClasses = {
   form: composerInputStyles.form,
   editorFrame: composerInputStyles.editorFrame,
   contentEditable: composerInputStyles.contentEditable,
+  completionOverlay: composerInputStyles.completionOverlay,
   placeholder: composerInputStyles.placeholder,
   footer: composerInputStyles.footer,
   footerControls: composerInputStyles.footerControls,

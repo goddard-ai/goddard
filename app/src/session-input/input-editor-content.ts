@@ -163,6 +163,7 @@ function createComposerChipFromPromptBlock(block: SessionInputPromptBlocks[numbe
 export function setSessionInputEditorPrompt(
   editor: LexicalEditor,
   blocks: SessionInputPromptBlocks,
+  options?: { selectEnd?: boolean },
 ) {
   editor.update(
     () => {
@@ -192,6 +193,10 @@ export function setSessionInputEditorPrompt(
         if (chip) {
           paragraph.append($createComposerChipNode(chip), $createTextNode(" "))
         }
+      }
+
+      if (options?.selectEnd) {
+        paragraph.selectEnd()
       }
     },
     { discrete: true },

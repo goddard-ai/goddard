@@ -70,11 +70,14 @@ function readPastedWebLink(event: Event) {
 }
 
 export function SessionInputPlugins(props: {
+  completionVisible: boolean;
   menu: SessionInputMenuState | null;
   onEditorReady: (editor: LexicalEditor) => void;
+  onAcceptCompletion: () => void;
   onDismissMenu: () => void;
   onHighlightNext: () => void;
   onHighlightPrevious: () => void;
+  onInputStateChange: () => void;
   onMenuChange: (menu: SessionInputMenuState | null) => void;
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void;
   onEscape?: () => void;
@@ -89,6 +92,8 @@ export function SessionInputPlugins(props: {
 
   useEffect(() => {
     return editor.registerUpdateListener(({ editorState }) => {
+      queueMicrotask(props.onInputStateChange)
+
       const detectedMenu = editorState.read(() => detectSessionInputMenuState())
 
       if (!detectedMenu) {
@@ -160,12 +165,18 @@ export function SessionInputPlugins(props: {
     const unregisterTab = editor.registerCommand(
       KEY_TAB_COMMAND,
       (event) => {
-        if (!props.menu) {
+        if (props.menu) {
+          event?.preventDefault()
+          props.onAcceptMenu()
+          return true
+        }
+
+        if (!props.completionVisible) {
           return false
         }
 
         event?.preventDefault()
-        props.onAcceptMenu()
+        props.onAcceptCompletion()
         return true
       },
       COMMAND_PRIORITY_HIGH,

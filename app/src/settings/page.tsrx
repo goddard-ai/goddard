@@ -6,6 +6,10 @@ import {
   AppearanceSettingsSection,
 } from "~/appearance/appearance-settings-section.tsrx"
 import {
+  savedPromptsSettingsSectionMetadata,
+  SavedPromptsSettingsSection,
+} from "~/saved-prompts/settings-section.tsrx"
+import {
   adapterInstallationsSettingsSectionMetadata,
   AdapterInstallationsSettingsSection,
 } from "./adapter-installations-section.tsrx"
@@ -20,6 +24,10 @@ const settingsSections = [
   {
     ...adapterInstallationsSettingsSectionMetadata,
     href: `#${adapterInstallationsSettingsSectionMetadata.id}`,
+  },
+  {
+    ...savedPromptsSettingsSectionMetadata,
+    href: `#${savedPromptsSettingsSectionMetadata.id}`,
   },
 ]
 
@@ -53,6 +61,8 @@ export default function SettingsPage() @{
           <AppearanceSettingsSection key={section.id} />
         } @else if (section.id === adapterInstallationsSettingsSectionMetadata.id) {
           <AdapterInstallationsSettingsSection key={section.id} />
+        } @else if (section.id === savedPromptsSettingsSectionMetadata.id) {
+          <SavedPromptsSettingsSection key={section.id} />
         } @else {
           <></>
         }
