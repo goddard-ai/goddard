@@ -35,9 +35,7 @@ function resetSdk() {
     item: createFixtureInboxItem({ entityId, status: "read" }),
   }))
   inboxClient.bulkUpdate = vi.fn(async ({ entityIds }: { entityIds: InboxItem["entityId"][] }) => ({
-    items: entityIds.map((entityId) =>
-      createFixtureInboxItem({ entityId, status: "read" }),
-    ),
+    items: entityIds.map((entityId) => createFixtureInboxItem({ entityId, status: "read" })),
     missingEntityIds: [],
   }))
   inboxClient.completeSession = vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({

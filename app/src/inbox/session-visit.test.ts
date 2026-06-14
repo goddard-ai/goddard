@@ -12,8 +12,6 @@ mock.module("~/sdk.ts", () => ({
   },
 }))
 
-const inboxItemDefaults = { updatedAt: 1, scope: null, headline: null }
-
 async function loadSessionVisitModule() {
   const module = await import("./session-visit.ts")
   module.resetInboxSessionVisitStateForTest()
@@ -24,7 +22,6 @@ async function loadSessionVisitModule() {
   })
   inboxClient.update.mockImplementation(async ({ entityId }) => ({
     item: createFixtureInboxItem({
-      ...inboxItemDefaults,
       entityId,
       status: "read",
       readAt: 2,
@@ -52,9 +49,7 @@ async function waitFor(check: () => boolean) {
 test("markInboxSessionVisited marks an existing unread session item read", async () => {
   const { handleInboxItemsLoaded, markInboxSessionVisited } = await loadSessionVisitModule()
 
-  handleInboxItemsLoaded([
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_unread", status: "unread" }),
-  ])
+  handleInboxItemsLoaded([createFixtureInboxItem({ entityId: "ses_unread", status: "unread" })])
   markInboxSessionVisited("ses_unread")
   await waitFor(() => inboxClient.update.mock.calls.length === 1)
 
@@ -68,9 +63,7 @@ test("handleInboxItemsLoaded marks unread visited session items read when they a
   const { handleInboxItemsLoaded, markInboxSessionVisited } = await loadSessionVisitModule()
 
   markInboxSessionVisited("ses_late")
-  handleInboxItemsLoaded([
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_late", status: "unread" }),
-  ])
+  handleInboxItemsLoaded([createFixtureInboxItem({ entityId: "ses_late", status: "unread" })])
   await waitFor(() => inboxClient.update.mock.calls.length === 1)
 
   expect(inboxClient.update).toHaveBeenCalledWith({
@@ -83,8 +76,8 @@ test("markInboxSessionVisited ignores pull request and already-read items", asyn
   const { handleInboxItemsLoaded, markInboxSessionVisited } = await loadSessionVisitModule()
 
   handleInboxItemsLoaded([
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "pr_1", status: "unread" }),
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_read", status: "read" }),
+    createFixtureInboxItem({ entityId: "pr_1", status: "unread" }),
+    createFixtureInboxItem({ entityId: "ses_read", status: "read" }),
   ])
   markInboxSessionVisited("pr_1")
   markInboxSessionVisited("ses_read")
@@ -101,7 +94,6 @@ test("markInboxSessionVisited avoids duplicate read updates while pending", asyn
       resolveUpdate = resolve
     }).then(() => ({
       item: createFixtureInboxItem({
-        ...inboxItemDefaults,
         entityId,
         status: "read",
         readAt: 2,
@@ -110,9 +102,7 @@ test("markInboxSessionVisited avoids duplicate read updates while pending", asyn
     })),
   )
 
-  handleInboxItemsLoaded([
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_pending", status: "unread" }),
-  ])
+  handleInboxItemsLoaded([createFixtureInboxItem({ entityId: "ses_pending", status: "unread" })])
   markInboxSessionVisited("ses_pending")
   markInboxSessionVisited("ses_pending")
   await Promise.resolve()
@@ -128,9 +118,7 @@ test("markInboxSessionVisited does not locally mark read after a failed update",
   const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
   inboxClient.update.mockRejectedValueOnce(new Error("daemon unavailable"))
 
-  handleInboxItemsLoaded([
-    createFixtureInboxItem({ ...inboxItemDefaults, entityId: "ses_retry", status: "unread" }),
-  ])
+  handleInboxItemsLoaded([createFixtureInboxItem({ entityId: "ses_retry", status: "unread" })])
   markInboxSessionVisited("ses_retry")
   await waitFor(() => inboxClient.update.mock.calls.length === 1)
   markInboxSessionVisited("ses_retry")
