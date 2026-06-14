@@ -8,8 +8,10 @@ import {
   $getSelection,
   $insertNodes,
   $isElementNode,
+  $isLineBreakNode,
   $isRangeSelection,
   $isTextNode,
+  TextNode,
   type LexicalEditor,
   type LexicalNode,
 } from "lexical"
@@ -19,6 +21,10 @@ import {
   $isComposerChipNode,
   type ComposerChipData,
 } from "~/session-chat/composer-chip-node.tsrx"
+import {
+  $createComposerShellPromptNode,
+  ComposerShellPromptNode,
+} from "~/session-chat/composer-shell-prompt-node.tsrx"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputPromptBlocks, SessionInputSuggestion } from "./input.tsrx"
 
@@ -109,6 +115,33 @@ function suggestionToChip(suggestion: SessionInputSuggestion): ComposerChipData 
   suggestion satisfies never
 }
 
+export function normalizeSessionInputShellPromptTextNode(node: TextNode) {
+  const text = node.getTextContent()
+
+  if (!text.startsWith("$ ")) {
+    return
+  }
+
+  const previousSibling = node.getPreviousSibling()
+
+  if (previousSibling !== null && !$isLineBreakNode(previousSibling)) {
+    return
+  }
+
+  node.spliceText(0, 2, "", false)
+  node.insertBefore($createComposerShellPromptNode())
+}
+
+export function normalizeSessionInputShellPromptNode(node: ComposerShellPromptNode) {
+  const previousSibling = node.getPreviousSibling()
+
+  if (previousSibling === null || $isLineBreakNode(previousSibling)) {
+    return
+  }
+
+  node.replace($createTextNode("$ "))
+}
+
 export function clearSessionInputEditor(editor: LexicalEditor) {
   editor.update(
     () => {
@@ -159,6 +192,44 @@ function createComposerChipFromPromptBlock(block: SessionInputPromptBlocks[numbe
   return chip
 }
 
+function appendPromptTextToParagraph(
+  paragraph: ReturnType<typeof $createParagraphNode>,
+  text: string,
+) {
+  let insideShellBlock = false
+
+  // Round-trip shell drafts through the lexical shell prompt instead of showing raw fences.
+  for (const line of text.split("\n")) {
+    if (!insideShellBlock && line === "```shell") {
+      insideShellBlock = true
+      continue
+    }
+
+    if (insideShellBlock && line === "```") {
+      insideShellBlock = false
+      continue
+    }
+
+    if (paragraph.getChildrenSize() > 0) {
+      paragraph.append($createLineBreakNode())
+    }
+
+    if (insideShellBlock) {
+      paragraph.append($createComposerShellPromptNode())
+
+      if (line.length > 0) {
+        paragraph.append($createTextNode(line))
+      }
+
+      continue
+    }
+
+    if (line.length > 0) {
+      paragraph.append($createTextNode(line))
+    }
+  }
+}
+
 /** Rehydrates one saved prompt block draft so a dismissed launch dialog can show it again. */
 export function setSessionInputEditorPrompt(
   editor: LexicalEditor,
@@ -174,16 +245,7 @@ export function setSessionInputEditorPrompt(
 
       for (const block of blocks) {
         if (block.type === "text") {
-          for (const [index, textSegment] of block.text.split("\n").entries()) {
-            if (index > 0) {
-              paragraph.append($createLineBreakNode())
-            }
-
-            if (textSegment.length > 0) {
-              paragraph.append($createTextNode(textSegment))
-            }
-          }
-
+          appendPromptTextToParagraph(paragraph, block.text)
           continue
         }
 

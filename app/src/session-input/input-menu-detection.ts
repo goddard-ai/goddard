@@ -11,6 +11,7 @@ import {
   type NodeKey,
 } from "lexical"
 
+import { $isComposerShellPromptNode } from "~/session-chat/composer-shell-prompt-node.tsrx"
 import type { SessionInputTrigger } from "./input.tsrx"
 
 export type SessionInputMenuState = {
@@ -79,6 +80,24 @@ function readTextBeforeCaret(nodeKey: NodeKey, offset: number) {
   return null
 }
 
+function isShellPromptLine(node: LexicalNode) {
+  let sibling = node.getPreviousSibling()
+
+  while (sibling) {
+    if ($isComposerShellPromptNode(sibling)) {
+      return true
+    }
+
+    if ($isLineBreakNode(sibling)) {
+      return false
+    }
+
+    sibling = sibling.getPreviousSibling()
+  }
+
+  return false
+}
+
 export function detectSessionInputMenuState() {
   const selection = $getSelection()
 
@@ -89,6 +108,10 @@ export function detectSessionInputMenuState() {
   const anchorNode = selection.anchor.getNode()
 
   if (!$isTextNode(anchorNode)) {
+    return null
+  }
+
+  if (isShellPromptLine(anchorNode)) {
     return null
   }
 

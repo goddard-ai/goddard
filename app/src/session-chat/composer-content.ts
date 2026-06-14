@@ -16,9 +16,11 @@ import {
 import {
   $createComposerChipNode,
   $isComposerChipNode,
+  chipTextFallback,
   type ComposerChipData,
   type ComposerChipNode,
 } from "./composer-chip-node.tsrx"
+import { $isComposerShellPromptNode } from "./composer-shell-prompt-node.tsrx"
 
 type ComposerPromptBlock = Exclude<SessionPromptRequest["prompt"], string>[number]
 type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
@@ -43,9 +45,27 @@ type ComposerContentPart =
       text: string
     }
   | {
+      type: "shell_prompt"
+    }
+  | {
       type: "chip"
       chip: ComposerChipData
     }
+
+type ComposerLineSegment =
+  | {
+      type: "text"
+      text: string
+    }
+  | {
+      type: "chip"
+      chip: ComposerChipData
+    }
+
+type ComposerLine = {
+  shellPrompt: boolean
+  segments: ComposerLineSegment[]
+}
 
 const LIST_INDENT = "    "
 
@@ -137,6 +157,13 @@ function appendNodeParts(node: LexicalNode, parts: ComposerContentPart[]) {
     return
   }
 
+  if ($isComposerShellPromptNode(node)) {
+    parts.push({
+      type: "shell_prompt",
+    })
+    return
+  }
+
   if ($isTextNode(node)) {
     parts.push({
       type: "text",
@@ -191,6 +218,109 @@ function readComposerParts(editorState: EditorState) {
   return parts
 }
 
+function buildComposerLines(parts: ComposerContentPart[]) {
+  const lines: ComposerLine[] = [{ shellPrompt: false, segments: [] }]
+
+  function currentLine() {
+    return lines[lines.length - 1]!
+  }
+
+  function pushText(text: string) {
+    const segments = currentLine().segments
+    const previousSegment = segments.at(-1)
+
+    if (previousSegment?.type === "text") {
+      previousSegment.text += text
+      return
+    }
+
+    segments.push({
+      type: "text",
+      text,
+    })
+  }
+
+  for (const part of parts) {
+    if (part.type === "text") {
+      const fragments = part.text.split("\n")
+
+      for (const [index, fragment] of fragments.entries()) {
+        if (fragment.length > 0) {
+          pushText(fragment)
+        }
+
+        if (index < fragments.length - 1) {
+          lines.push({
+            shellPrompt: false,
+            segments: [],
+          })
+        }
+      }
+
+      continue
+    }
+
+    if (part.type === "shell_prompt") {
+      const line = currentLine()
+
+      if (!line.shellPrompt && line.segments.length === 0) {
+        line.shellPrompt = true
+        continue
+      }
+
+      pushText("$ ")
+      continue
+    }
+
+    currentLine().segments.push(part)
+  }
+
+  return lines
+}
+
+function serializeRegularLine(
+  line: ComposerLine,
+  appendText: (text: string) => void,
+  flushText: () => void,
+  blocks: ComposerPromptBlock[],
+) {
+  for (const segment of line.segments) {
+    if (segment.type === "text") {
+      appendText(segment.text)
+      continue
+    }
+
+    if (segment.chip.kind === "slash_command") {
+      appendText(`/${segment.chip.label}`)
+      continue
+    }
+
+    flushText()
+    blocks.push(serializeChip(segment.chip))
+  }
+}
+
+function serializeShellLine(line: ComposerLine) {
+  return line.segments
+    .map((segment) => (segment.type === "text" ? segment.text : chipTextFallback(segment.chip)))
+    .join("")
+}
+
+function trimEmptyShellLines(lines: string[]) {
+  let start = 0
+  let end = lines.length
+
+  while (start < end && lines[start]!.trim().length === 0) {
+    start += 1
+  }
+
+  while (end > start && lines[end - 1]!.trim().length === 0) {
+    end -= 1
+  }
+
+  return lines.slice(start, end)
+}
+
 /** Serializes one chip payload into the ACP block expected by the daemon prompt contract. */
 function serializeChip(chip: ComposerChipData) {
   if (chip.kind === "slash_command") {
@@ -229,35 +359,62 @@ export function serializeComposerEditorState(editorState: EditorState): Composer
   const blocks: ComposerPromptBlock[] = []
   let textBuffer = ""
 
-  for (const part of readComposerParts(editorState)) {
-    if (part.type === "text") {
-      textBuffer += part.text
-      continue
-    }
-
-    if (part.chip.kind === "slash_command") {
-      textBuffer += `/${part.chip.label}`
-      continue
-    }
-
-    if (textBuffer.length > 0) {
-      blocks.push({
-        type: "text",
-        text: textBuffer,
-      })
-      textBuffer = ""
-    }
-
-    blocks.push(serializeChip(part.chip))
+  function appendText(text: string) {
+    textBuffer += text
   }
 
-  if (textBuffer.length > 0) {
+  function flushText() {
+    if (textBuffer.length === 0) {
+      return
+    }
+
     blocks.push({
       type: "text",
       text: textBuffer,
     })
+    textBuffer = ""
   }
 
+  const lines = buildComposerLines(readComposerParts(editorState))
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!
+
+    if (!line.shellPrompt) {
+      serializeRegularLine(line, appendText, flushText, blocks)
+
+      if (index < lines.length - 1) {
+        appendText("\n")
+      }
+
+      continue
+    }
+
+    const shellLines: string[] = []
+
+    while (index < lines.length && lines[index]!.shellPrompt) {
+      shellLines.push(serializeShellLine(lines[index]!))
+      index += 1
+    }
+
+    const normalizedShellLines = trimEmptyShellLines(shellLines)
+
+    if (normalizedShellLines.length > 0) {
+      flushText()
+      blocks.push({
+        type: "text",
+        text: `\`\`\`shell\n${normalizedShellLines.join("\n")}\n\`\`\``,
+      })
+    }
+
+    if (index < lines.length) {
+      appendText("\n")
+    }
+
+    index -= 1
+  }
+
+  flushText()
   return mergeTextBlocks(blocks)
 }
 

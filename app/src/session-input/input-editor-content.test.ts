@@ -1,12 +1,25 @@
 import { expect, test } from "bun:test"
-import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from "lexical"
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  $isElementNode,
+  createEditor,
+} from "lexical"
 
 import { $createComposerChipNode, ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
-import { deleteSessionInputChipBeforeCaret } from "./input-editor-content.ts"
+import {
+  $isComposerShellPromptNode,
+  ComposerShellPromptNode,
+} from "~/session-chat/composer-shell-prompt-node.tsrx"
+import {
+  deleteSessionInputChipBeforeCaret,
+  setSessionInputEditorPrompt,
+} from "./input-editor-content.ts"
 
 function buildEditor(deleteChip: () => void) {
   const editor = createEditor({
-    nodes: [ComposerChipNode],
+    nodes: [ComposerChipNode, ComposerShellPromptNode],
     onError(error) {
       throw error
     },
@@ -87,5 +100,38 @@ test("session input backspace deletion ignores non-adjacent text carets", () => 
 
   editor.getEditorState().read(() => {
     expect($getRoot().getTextContent()).toBe("@input.ts after")
+  })
+})
+
+test("session input prompt rehydrates shell fences into shell prompt nodes", () => {
+  const editor = createEditor({
+    nodes: [ComposerChipNode, ComposerShellPromptNode],
+    onError(error) {
+      throw error
+    },
+  })
+
+  setSessionInputEditorPrompt(editor, [
+    {
+      type: "text",
+      text: "Run these commands:\n```shell\nbun test\nbun run lint\n```\nThen summarize the failures.",
+    },
+  ])
+
+  editor.getEditorState().read(() => {
+    const paragraph = $getRoot().getFirstChild()
+
+    expect($getRoot().getTextContent()).toBe(
+      "Run these commands:\n$ bun test\n$ bun run lint\nThen summarize the failures.",
+    )
+
+    expect($isElementNode(paragraph)).toBe(true)
+
+    if (!$isElementNode(paragraph)) {
+      return
+    }
+
+    expect($isComposerShellPromptNode(paragraph.getChildAtIndex(2))).toBe(true)
+    expect($isComposerShellPromptNode(paragraph.getChildAtIndex(5))).toBe(true)
   })
 })

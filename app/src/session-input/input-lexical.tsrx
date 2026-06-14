@@ -15,14 +15,18 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
   PASTE_COMMAND,
+  TextNode,
 } from "lexical"
 import { useEffect } from "preact/hooks"
 
 import { ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
+import { ComposerShellPromptNode } from "~/session-chat/composer-shell-prompt-node.tsrx"
 import { serializeComposerEditorState } from "~/session-chat/composer-content.ts"
 import {
   deleteSessionInputChipBeforeCaret,
   insertSessionInputWebLink,
+  normalizeSessionInputShellPromptNode,
+  normalizeSessionInputShellPromptTextNode,
 } from "./input-editor-content.ts"
 import {
   detectSessionInputMenuState,
@@ -36,7 +40,7 @@ const sessionInputMarkdownTransformers = [UNORDERED_LIST, ORDERED_LIST]
 
 export const sessionInputInitialConfig = {
   namespace: "session-input",
-  nodes: [ComposerChipNode, ListNode, ListItemNode],
+  nodes: [ComposerChipNode, ComposerShellPromptNode, ListNode, ListItemNode],
   onError(error: Error) {
     throw error
   },
@@ -106,6 +110,22 @@ export function SessionInputPlugins(props: {
       })
     })
   }, [editor, props])
+
+  useEffect(() => {
+    const unregisterTextTransform = editor.registerNodeTransform(
+      TextNode,
+      normalizeSessionInputShellPromptTextNode,
+    )
+    const unregisterShellPromptTransform = editor.registerNodeTransform(
+      ComposerShellPromptNode,
+      normalizeSessionInputShellPromptNode,
+    )
+
+    return () => {
+      unregisterTextTransform()
+      unregisterShellPromptTransform()
+    }
+  }, [editor])
 
   useEffect(() => {
     const unregisterEnter = editor.registerCommand(

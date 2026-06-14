@@ -2,6 +2,7 @@ import type { SessionPromptRequest } from "@goddard-ai/sdk"
 import { $createListItemNode, $createListNode, ListItemNode, ListNode } from "@lexical/list"
 import { expect, test } from "bun:test"
 import {
+  $createLineBreakNode,
   $createParagraphNode,
   $createTextNode,
   $getRoot,
@@ -15,12 +16,16 @@ import {
   promptBlocksToTranscriptContent,
   serializeComposerEditorState,
 } from "./composer-content.ts"
+import {
+  $createComposerShellPromptNode,
+  ComposerShellPromptNode,
+} from "./composer-shell-prompt-node.tsrx"
 
 type ComposerPromptBlock = Exclude<SessionPromptRequest["prompt"], string>[number]
 
 function buildEditorState(build: () => void): EditorState {
   const editor = createEditor({
-    nodes: [ComposerChipNode, ListNode, ListItemNode],
+    nodes: [ComposerChipNode, ComposerShellPromptNode, ListNode, ListItemNode],
     onError(error) {
       throw error
     },
@@ -130,6 +135,41 @@ test("serializeComposerEditorState preserves rendered list markers", () => {
       text: "- first\n- second\n3. third\n4. fourth",
     },
   ] satisfies ComposerPromptBlock[])
+})
+
+test("serializeComposerEditorState wraps consecutive shell lines in a fenced shell block", () => {
+  const editorState = buildEditorState(() => {
+    const paragraph = $createParagraphNode()
+    paragraph.append(
+      $createTextNode("Run these commands:"),
+      $createLineBreakNode(),
+      $createComposerShellPromptNode(),
+      $createTextNode("bun test"),
+      $createLineBreakNode(),
+      $createComposerShellPromptNode(),
+      $createTextNode("bun run lint"),
+      $createLineBreakNode(),
+      $createTextNode("Then summarize the failures."),
+    )
+    $getRoot().append(paragraph)
+  })
+
+  expect(serializeComposerEditorState(editorState)).toEqual([
+    {
+      type: "text",
+      text: "Run these commands:\n```shell\nbun test\nbun run lint\n```\nThen summarize the failures.",
+    },
+  ] satisfies ComposerPromptBlock[])
+})
+
+test("serializeComposerEditorState ignores an empty shell prompt line", () => {
+  const editorState = buildEditorState(() => {
+    const paragraph = $createParagraphNode()
+    paragraph.append($createComposerShellPromptNode())
+    $getRoot().append(paragraph)
+  })
+
+  expect(serializeComposerEditorState(editorState)).toEqual([])
 })
 
 test("promptBlocksToTranscriptContent preserves resource links instead of flattening them", () => {
