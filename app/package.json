@@ -5,17 +5,16 @@
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "scripts": {
-    "prepare": "pnpm run panda:codegen && bun run ./scripts/generate-svg-icon-data.ts",
+    "codegen": "panda codegen && bun run ./scripts/generate-svg-icon-data.ts",
     "dev": "pnpm install --frozen-lockfile && bun run ./scripts/dev.ts",
-    "build": "pnpm run panda:codegen && vite build && electrobun build",
+    "build": "pnpm run codegen && vite build && electrobun build",
     "build:canary": "pnpm run build -- --env=canary",
     "build:stable": "pnpm run build -- --env=stable",
     "icons:generate": "bun run ./scripts/generate-iconset.ts",
-    "panda:codegen": "panda codegen",
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "test": "bun test --dots",
-    "typecheck": "pnpm run panda:codegen && tsrx-tsc --noEmit"
+    "typecheck": "tsrx-tsc --noEmit"
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^1.8.1",
