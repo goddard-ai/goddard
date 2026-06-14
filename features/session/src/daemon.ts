@@ -25,7 +25,6 @@ import {
   StaticSessionParams,
   SubpackagesConfig,
   WorktreesConfig,
-  type SendSessionMessageRequest,
   type SessionId,
   type SessionLifecycleEvent,
   type SessionMessageEvent,
@@ -278,7 +277,10 @@ export const sessionPlugin = definePlugin({
           cancel: async ({ body: { id } }) => sessionManager.cancelSessionTurn(id),
           steer: async ({ body: { id, prompt } }) => sessionManager.steerSession(id, prompt),
           send: async ({ body: { id, message } }) => {
-            await sessionManager.sendMessage(id, message as SendSessionMessageRequest["message"])
+            await sessionManager.sendMessage(
+              id,
+              message as Parameters<typeof sessionManager.sendMessage>[1],
+            )
             return { accepted: true as const }
           },
           configOption: {
