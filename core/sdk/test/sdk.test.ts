@@ -1,3 +1,4 @@
+import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
 import * as acp from "acp-client/protocol"
 import { describe, expect, test, vi } from "bun:test"
 
@@ -59,24 +60,6 @@ function createMockRouteNode(
       return createMockRouteNode([...path, String(property)], subscribe, send)
     },
   })
-}
-
-function createModelConfigOption(input: {
-  currentValue: string
-  models: Array<{ modelId: string; name: string; description?: string }>
-}): acp.SessionConfigOption {
-  return {
-    id: "model",
-    type: "select",
-    name: "Model",
-    category: "model",
-    currentValue: input.currentValue,
-    options: input.models.map((model) => ({
-      value: model.modelId,
-      name: model.name,
-      description: model.description,
-    })),
-  }
 }
 
 async function* createMockStream(
@@ -729,7 +712,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   test("deriveSessionLaunchModelConfig defaults invalid current models to the first available model", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
       configOptions: [
-        createModelConfigOption({
+        createFixtureModelConfigOption({
           currentValue: "removed-model",
           models: [
             {
@@ -751,7 +734,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   test("deriveSessionLaunchModelConfig folds thinking suffixes into one selector", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
       configOptions: [
-        createModelConfigOption({
+        createFixtureModelConfigOption({
           currentValue: "gpt-5.4-medium",
           models: [
             {
@@ -841,7 +824,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   test("deriveSessionLaunchModelConfig folds slash-delimited thinking model ids", () => {
     const launchModelConfig = deriveSessionLaunchModelConfig({
       configOptions: [
-        createModelConfigOption({
+        createFixtureModelConfigOption({
           currentValue: "gpt-5.5/high",
           models: [
             {
@@ -914,7 +897,7 @@ describe("@goddard-ai/sdk session namespace", () => {
   test("deriveSessionLaunchModelConfig folds thinking suffixes with explicit ACP thinking config options", () => {
     const input = {
       configOptions: [
-        createModelConfigOption({
+        createFixtureModelConfigOption({
           currentValue: "gpt-5.4-medium",
           models: [
             {

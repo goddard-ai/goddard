@@ -700,6 +700,9 @@ importers:
       "@goddard-ai/daemon":
         specifier: workspace:*
         version: link:../daemon
+      "@goddard-ai/fixtures":
+        specifier: workspace:*
+        version: link:../fixtures
 
   core/sdk-plugin:
     dependencies:

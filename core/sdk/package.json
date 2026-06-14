@@ -45,6 +45,7 @@
     "acp-client": "catalog:"
   },
   "devDependencies": {
-    "@goddard-ai/daemon": "workspace:*"
+    "@goddard-ai/daemon": "workspace:*",
+    "@goddard-ai/fixtures": "workspace:*"
   }
 }

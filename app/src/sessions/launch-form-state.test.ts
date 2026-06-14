@@ -1,3 +1,4 @@
+import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
 import type { ListAdaptersResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
@@ -43,25 +44,21 @@ function createLaunchPreview(
     currentBranch: "main",
     dirty: false,
     configOptions: [
-      {
-        id: "model",
-        type: "select",
-        name: "Model",
-        category: "model",
+      createFixtureModelConfigOption({
         currentValue: "sonnet",
-        options: [
+        models: [
           {
-            value: "sonnet",
+            modelId: "sonnet",
             name: "Sonnet",
             description: "Balanced model",
           },
           {
-            value: "opus",
+            modelId: "opus",
             name: "Opus",
             description: "Deep reasoning model",
           },
         ],
-      },
+      }),
       {
         id: "approval",
         type: "select",
@@ -217,19 +214,15 @@ test("SessionLaunchFormState falls back to the first valid model when adapter mo
   form.draftModelId.value = "opus"
   form.launchPreview.value = createLaunchPreview({
     configOptions: [
-      {
-        id: "model",
-        type: "select",
-        name: "Model",
-        category: "model",
+      createFixtureModelConfigOption({
         currentValue: "removed-model",
-        options: [
+        models: [
           {
-            value: "haiku",
+            modelId: "haiku",
             name: "Haiku",
           },
         ],
-      },
+      }),
     ],
   })
 

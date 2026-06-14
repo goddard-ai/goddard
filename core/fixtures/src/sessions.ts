@@ -7,10 +7,31 @@ import type {
   ListSessionsResponse,
   SessionHistoryMessage,
   SessionHistoryTurn,
+  SessionLaunchPreviewResponse,
 } from "@goddard-ai/session/schema"
 
 import { fixtureId, fixtureSessionId } from "./ids.ts"
 import { fixtureNow, fixtureProjectPath, fixtureTimestamp } from "./time.ts"
+
+type ModelConfigOption = SessionLaunchPreviewResponse["configOptions"][number]
+
+export function createFixtureModelConfigOption(input: {
+  currentValue: string
+  models: Array<{ modelId: string; name: string; description?: string }>
+}): ModelConfigOption {
+  return {
+    id: "model",
+    type: "select",
+    name: "Model",
+    category: "model",
+    currentValue: input.currentValue,
+    options: input.models.map((model) => ({
+      value: model.modelId,
+      name: model.name,
+      description: model.description,
+    })),
+  }
+}
 
 export function createFixtureSession(overrides: Partial<DaemonSession> = {}): DaemonSession {
   const id = overrides.id ?? fixtureSessionId("session_1")
