@@ -2,13 +2,15 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { ChevronRight, Folder } from "lucide-react"
+import { useEffect, useRef } from "preact/hooks"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { getNextUnreadInboxAttentionItem, hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
-import { openInboxItemInWorkbench } from "~/inbox/open.ts"
+import { NextInboxWorkbenchPreloader } from "~/inbox/next-preload.ts"
+import { openInboxItemInWorkbench, prepareInboxItemWorkbenchTarget } from "~/inbox/open.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -298,6 +300,10 @@ function AppShellNextInboxAttentionShortcutFallback() @{
 function AppShellNextInboxAttentionButton(props: {
   workbenchTabSet: ReturnType<typeof useWorkbenchTabSet>;
 }) @{
+  const preloaderRef = useRef<NextInboxWorkbenchPreloader | null>(null)
+  preloaderRef.current ??= new NextInboxWorkbenchPreloader({
+    prepareTarget: prepareInboxItemWorkbenchTarget,
+  })
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
       { statuses: ["unread"], limit: 100 },
@@ -305,9 +311,18 @@ function AppShellNextInboxAttentionButton(props: {
   })
   const nextItem = getNextUnreadInboxAttentionItem(items)
 
+  useEffect(() => {
+    preloaderRef.current?.prepare(nextItem)
+  }, [nextItem?.entityId, nextItem?.id, nextItem?.updatedAt])
+
   async function openNextInboxItem(item: InboxItem) {
     try {
-      await openInboxItemInWorkbench({ item, workbenchTabSet: props.workbenchTabSet })
+      const preparedTarget = await preloaderRef.current?.resolve(item) ?? null
+      await openInboxItemInWorkbench({
+        item,
+        preparedTarget,
+        workbenchTabSet: props.workbenchTabSet,
+      })
     } catch (error) {
       console.error("Failed to open next inbox item.", error)
       appToaster.create({
