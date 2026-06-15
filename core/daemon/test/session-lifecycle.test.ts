@@ -8,11 +8,15 @@ import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
-import type {
-  DaemonSessionDiagnosticEvent,
-  GetSessionHistoryResponse,
+import {
+  DaemonSessionTurn,
+  DaemonSessionTurnDraft,
+  type DaemonSessionDiagnosticEvent,
+  type GetSessionHistoryResponse,
+  type SessionId,
 } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
+import { kind, kindstore } from "kindstore"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import type { BackendClient } from "../src/backend.ts"
@@ -76,6 +80,143 @@ afterAll(async () => {
 
   if (sharedHomeDir) {
     await removeTemporaryPath(sharedHomeDir)
+  }
+})
+
+test("daemon store repairs duplicate session turn rows before adding unique constraints", async () => {
+  const storeDir = await mkdtemp(join(tmpdir(), "goddard-session-constraints-"))
+  cleanup.push(() => removeTemporaryPath(storeDir))
+  const filename = join(storeDir, "goddard.db")
+  const sessionId = "ses_prepare_constraints" as SessionId
+  const legacyDb = kindstore({
+    filename,
+    schema: {
+      sessionTurns: kind("trn", DaemonSessionTurn)
+        .index("sessionId", { type: "text" })
+        .index("sequence", { type: "integer" })
+        .multi("sessionId_sequence", {
+          sessionId: "asc",
+          sequence: "desc",
+        }),
+      sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
+        .index("sessionId", { type: "text" })
+        .index("sequence", { type: "integer" })
+        .multi("sessionId_sequence", {
+          sessionId: "asc",
+          sequence: "desc",
+        }),
+    },
+  })
+
+  legacyDb.sessionTurns.create({
+    sessionId,
+    turnId: "turn-sequence-1-incomplete",
+    sequence: 1,
+    promptRequestId: "prompt-1-old",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    completedAt: null,
+    completionKind: null,
+    stopReason: null,
+    inboxScope: null,
+    inboxHeadline: null,
+    messages: [],
+  })
+  legacyDb.sessionTurns.create({
+    sessionId,
+    turnId: "turn-sequence-1-complete",
+    sequence: 1,
+    promptRequestId: "prompt-1-new",
+    startedAt: "2026-04-14T00:00:01.000Z",
+    completedAt: "2026-04-14T00:00:03.000Z",
+    completionKind: "result",
+    stopReason: "end_turn",
+    inboxScope: null,
+    inboxHeadline: null,
+    messages: [
+      {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { value: "retained" },
+      },
+    ],
+  })
+  legacyDb.sessionTurns.create({
+    sessionId,
+    turnId: "turn-sequence-2",
+    sequence: 2,
+    promptRequestId: "prompt-2",
+    startedAt: "2026-04-14T00:00:04.000Z",
+    completedAt: "2026-04-14T00:00:05.000Z",
+    completionKind: "result",
+    stopReason: "end_turn",
+    inboxScope: null,
+    inboxHeadline: null,
+    messages: [],
+  })
+  legacyDb.sessionTurnDrafts.create({
+    sessionId,
+    turnId: "draft-old",
+    sequence: 1,
+    promptRequestId: "prompt-draft-old",
+    startedAt: "2026-04-14T00:00:00.000Z",
+    updatedAt: "2026-04-14T00:00:01.000Z",
+    messages: [],
+  })
+  legacyDb.sessionTurnDrafts.create({
+    sessionId,
+    turnId: "draft-new",
+    sequence: 2,
+    promptRequestId: "prompt-draft-new",
+    startedAt: "2026-04-14T00:00:02.000Z",
+    updatedAt: "2026-04-14T00:00:03.000Z",
+    messages: [],
+  })
+  legacyDb.close()
+
+  const migratedDb = resetComposedDaemonStore({ filename })
+  try {
+    expect(
+      migratedDb.sessionTurns.findMany({
+        where: { sessionId },
+        orderBy: { sequence: "asc" },
+      }),
+    ).toMatchObject([
+      { turnId: "turn-sequence-1-complete", sequence: 1 },
+      { turnId: "turn-sequence-2", sequence: 2 },
+    ])
+    expect(
+      migratedDb.sessionTurnDrafts.findMany({
+        where: { sessionId },
+      }),
+    ).toMatchObject([{ turnId: "draft-new", sequence: 2 }])
+    expect(() =>
+      migratedDb.sessionTurns.create({
+        sessionId,
+        turnId: "turn-sequence-1-rejected",
+        sequence: 1,
+        promptRequestId: "prompt-1-rejected",
+        startedAt: "2026-04-14T00:00:06.000Z",
+        completedAt: "2026-04-14T00:00:07.000Z",
+        completionKind: "result",
+        stopReason: "end_turn",
+        inboxScope: null,
+        inboxHeadline: null,
+        messages: [],
+      }),
+    ).toThrow()
+    expect(() =>
+      migratedDb.sessionTurnDrafts.create({
+        sessionId,
+        turnId: "draft-rejected",
+        sequence: 3,
+        promptRequestId: "prompt-draft-rejected",
+        startedAt: "2026-04-14T00:00:04.000Z",
+        updatedAt: "2026-04-14T00:00:05.000Z",
+        messages: [],
+      }),
+    ).toThrow()
+  } finally {
+    migratedDb.close()
   }
 })
 

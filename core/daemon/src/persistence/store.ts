@@ -38,7 +38,7 @@ const coreDbSchema = {} satisfies KindRegistry
 
 type DaemonDbDefinition<TSchema extends KindRegistry> = {
   readonly schema: TSchema
-  readonly migrate?: (planner: SchemaMigrationPlanner) => void
+  readonly migrate?: (planner: SchemaMigrationPlanner<InferKinds<TSchema>>) => void
 }
 
 /** Daemon store handle opened against a concrete plugin-contributed schema. */

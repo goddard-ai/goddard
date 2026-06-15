@@ -3,12 +3,12 @@ import {
   type HttpRouteTree as BackendRouteTree,
 } from "@goddard-ai/backend-plugin"
 import { composeIpcRoutes, type HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
+import type { SchemaMigrationPlanner } from "kindstore"
 
 import type {
   Composition,
   ConfigDefinition,
   DaemonLogContextDefinition,
-  DbMigrationDefinition,
   DbSchemaDefinition,
   EventDefinitions,
   JsonSchemaArtifactDefinition,
@@ -40,7 +40,7 @@ export function composePlugins<const TPlugins extends readonly Plugin[]>(plugins
   const jsonSchemas: JsonSchemaArtifactDefinition[] = []
   const jsonSchemaNames = new Set<string>()
   const logContexts: DaemonLogContextDefinition[] = []
-  const dbMigrations: DbMigrationDefinition[] = []
+  const dbMigrations: Array<(planner: SchemaMigrationPlanner<any>) => void> = []
 
   for (const plugin of orderedPlugins) {
     if (plugin.config) {

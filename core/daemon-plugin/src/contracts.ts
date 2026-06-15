@@ -61,12 +61,14 @@ export type JsonSchemaArtifactDefinition = {
 export type DbSchemaDefinition = KindRegistry
 
 /** Feature-owned structural kindstore migration applied by the daemon composition root. */
-export type DbMigrationDefinition = (planner: SchemaMigrationPlanner) => void
+export type DbMigrationDefinition<TSchema extends DbSchemaDefinition = DbSchemaDefinition> = (
+  planner: SchemaMigrationPlanner<TSchema>,
+) => void
 
 /** Feature-owned kindstore schema and structural migrations. */
 export type DbDefinition<TSchema extends DbSchemaDefinition = DbSchemaDefinition> = {
   readonly schema: TSchema
-  readonly migrate?: DbMigrationDefinition
+  readonly migrate?: DbMigrationDefinition<TSchema>
 }
 
 /** Scoped kindstore surface available to one daemon plugin during setup. */

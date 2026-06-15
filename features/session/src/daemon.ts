@@ -81,13 +81,17 @@ const sessionDb = {
   sessionTurns: kind("trn", DaemonSessionTurn)
     .index("sessionId", { type: "text" })
     .index("sequence", { type: "integer" })
-    .multi("sessionId_sequence", {
-      sessionId: "asc",
-      sequence: "desc",
-    }),
+    .multi(
+      "sessionId_sequence",
+      {
+        sessionId: "asc",
+        sequence: "desc",
+      },
+      { unique: true },
+    ),
 
   sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
-    .index("sessionId", { type: "text" })
+    .index("sessionId", { type: "text", unique: true })
     .index("sequence", { type: "integer" })
     .multi("sessionId_sequence", {
       sessionId: "asc",
@@ -99,6 +103,67 @@ const sessionDb = {
   }),
 
   worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
+}
+
+type SessionTurnRetentionRecord = {
+  id: string
+  completedAt: string | null
+  messages: readonly unknown[]
+  startedAt: string
+}
+
+type SessionTurnDraftRetentionRecord = {
+  id: string
+  sequence: number
+  startedAt: string
+  updatedAt: string
+  messages: readonly unknown[]
+}
+
+function compareSessionTurnRetention(
+  left: SessionTurnRetentionRecord,
+  right: SessionTurnRetentionRecord,
+) {
+  return (
+    compareNullableTextDesc(left.completedAt, right.completedAt) ||
+    compareNumberDesc(left.messages.length, right.messages.length) ||
+    compareTextDesc(left.startedAt, right.startedAt) ||
+    left.id.localeCompare(right.id)
+  )
+}
+
+function compareSessionTurnDraftRetention(
+  left: SessionTurnDraftRetentionRecord,
+  right: SessionTurnDraftRetentionRecord,
+) {
+  return (
+    compareTextDesc(left.updatedAt, right.updatedAt) ||
+    compareNumberDesc(left.sequence, right.sequence) ||
+    compareNumberDesc(left.messages.length, right.messages.length) ||
+    compareTextDesc(left.startedAt, right.startedAt) ||
+    left.id.localeCompare(right.id)
+  )
+}
+
+function compareNullableTextDesc(left: string | null, right: string | null) {
+  if (left === right) {
+    return 0
+  }
+  if (left === null) {
+    return 1
+  }
+  if (right === null) {
+    return -1
+  }
+  return compareTextDesc(left, right)
+}
+
+function compareTextDesc(left: string, right: string) {
+  return right.localeCompare(left)
+}
+
+function compareNumberDesc(left: number, right: number) {
+  return right - left
 }
 
 export const sessionPlugin = definePlugin({
@@ -128,6 +193,56 @@ export const sessionPlugin = definePlugin({
   },
   db: {
     schema: sessionDb,
+    migrate(m) {
+      m.prepareConstraints("2026-06-dedupe-session-turns", ({ db }) => {
+        const turns = db.sessionTurns.findMany()
+        const retainedTurns = new Map<string, (typeof turns)[number]>()
+
+        for (const turn of turns) {
+          const key = `${turn.sessionId}\0${turn.sequence}`
+          const retained = retainedTurns.get(key)
+          if (
+            !retained ||
+            compareSessionTurnRetention(
+              turn as SessionTurnRetentionRecord,
+              retained as SessionTurnRetentionRecord,
+            ) < 0
+          ) {
+            retainedTurns.set(key, turn)
+          }
+        }
+
+        for (const turn of turns) {
+          if (retainedTurns.get(`${turn.sessionId}\0${turn.sequence}`)?.id !== turn.id) {
+            db.sessionTurns.delete(turn.id)
+          }
+        }
+      })
+
+      m.prepareConstraints("2026-06-dedupe-session-turn-drafts", ({ db }) => {
+        const drafts = db.sessionTurnDrafts.findMany()
+        const retainedDrafts = new Map<string, (typeof drafts)[number]>()
+
+        for (const draft of drafts) {
+          const retained = retainedDrafts.get(draft.sessionId)
+          if (
+            !retained ||
+            compareSessionTurnDraftRetention(
+              draft as SessionTurnDraftRetentionRecord,
+              retained as SessionTurnDraftRetentionRecord,
+            ) < 0
+          ) {
+            retainedDrafts.set(draft.sessionId, draft)
+          }
+        }
+
+        for (const draft of drafts) {
+          if (retainedDrafts.get(draft.sessionId)?.id !== draft.id) {
+            db.sessionTurnDrafts.delete(draft.id)
+          }
+        }
+      })
+    },
   },
   events: {
     "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
