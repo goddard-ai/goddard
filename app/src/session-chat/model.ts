@@ -86,8 +86,6 @@ export type SessionChatState = {
   liveTurns: SessionChatTurn[]
   nextCursor: string | null
   session: DaemonSession
-  summary: SessionChatSummary
-  turns: SessionChatTurn[]
 }
 
 type ApplySessionChatMessageOptions = {
@@ -619,14 +617,6 @@ export class SessionChat extends Sigma<SessionChatState> {
       liveTurns: [],
       nextCursor: input.history.nextCursor,
       session: input.session,
-      summary: {
-        activeTurnId: null,
-        contextUsage: null,
-        pendingPermissionRequest: null,
-        showThinkingLabel: false,
-        status: "idle",
-      },
-      turns: [],
     })
 
     this.syncLoadedData(input)
@@ -634,6 +624,58 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   get hasEmptyTranscript() {
     return this.turns.length === 0 && !this.session.lastAgentMessage
+  }
+
+  get summary() {
+    const turns = this.turns
+    const activeTurn = getActiveTurn(turns)
+    const permissionRequest = findPendingPermissionRequest(turns)
+    const status = resolveSessionChatStatus(this.session, turns, permissionRequest)
+
+    return {
+      activeTurnId: activeTurn?.turnId ?? null,
+      contextUsage: this.session.contextUsage,
+      pendingPermissionRequest: permissionRequest,
+      showThinkingLabel: shouldShowThinkingLabel({ activeTurn, permissionRequest, status }),
+      status,
+    } satisfies SessionChatSummary
+  }
+
+  get turns() {
+    const turns = this.historyTurns.map((turn) => this.#normalizeTurn(turn, turn.source))
+
+    for (const liveTurn of this.liveTurns) {
+      const historyTurnIndex = turns.findIndex(
+        (turn) => turn.promptRequestId === liveTurn.promptRequestId,
+      )
+
+      if (historyTurnIndex < 0) {
+        turns.push(this.#normalizeTurn(liveTurn, "live"))
+        continue
+      }
+
+      const historyTurn = turns[historyTurnIndex]
+      const mergedTurn = this.#normalizeTurn(
+        {
+          ...historyTurn,
+          completedAt: liveTurn.completedAt ?? historyTurn.completedAt,
+          completionKind: liveTurn.completionKind ?? historyTurn.completionKind,
+          stopReason: liveTurn.stopReason ?? historyTurn.stopReason,
+          messages: [...historyTurn.messages],
+        },
+        "merged",
+      )
+
+      for (const message of liveTurn.messages) {
+        this.#insertTurnMessage(mergedTurn, message)
+      }
+
+      this.#rebuildTurnEvents(mergedTurn)
+      mergedTurn.status = resolveTurnStatus(mergedTurn)
+      turns[historyTurnIndex] = mergedTurn
+    }
+
+    return turns.sort((left, right) => left.sequence - right.sequence)
   }
 
   get transcriptMessages() {
@@ -710,8 +752,6 @@ export class SessionChat extends Sigma<SessionChatState> {
     for (const localMessage of localMessages) {
       this.#mergeMessage(localMessage.message, localMessage.receivedAt)
     }
-
-    this.#refreshTranscriptState()
   }
 
   /** Loads the next older history page and merges it ahead of the current transcript. */
@@ -747,8 +787,6 @@ export class SessionChat extends Sigma<SessionChatState> {
         this.#mergeHistoryTurn(turn)
       }
     }
-
-    this.#refreshTranscriptState()
   }
   /** Applies one daemon-published ACP message through the live chunk batching queue. */
   receiveMessage(message: acp.AnyMessage) {
@@ -757,7 +795,6 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     if (contextUsage) {
       this.session.contextUsage = contextUsage
-      this.#refreshTranscriptState()
       return
     }
 
@@ -777,7 +814,6 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     if (contextUsage) {
       this.session.contextUsage = contextUsage
-      this.#refreshTranscriptState()
       return
     }
 
@@ -797,7 +833,6 @@ export class SessionChat extends Sigma<SessionChatState> {
   /** Applies a freshly returned session record without replacing the merged transcript. */
   syncSession(session: Immutable<DaemonSession>) {
     this.session = castDraft(session)
-    this.#refreshTranscriptState()
   }
 
   /** Control whether the session is completed. */
@@ -806,8 +841,6 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
-    this.#syncTurns()
-
     if (hasTurnMessage(this.turns, message)) {
       return
     }
@@ -851,8 +884,6 @@ export class SessionChat extends Sigma<SessionChatState> {
     for (const { message, receivedAt } of messages) {
       this.#mergeMessage(message, receivedAt)
     }
-
-    this.#refreshTranscriptState()
   }
 
   #cancelQueuedChunkFlush() {
@@ -1067,63 +1098,6 @@ export class SessionChat extends Sigma<SessionChatState> {
           stopReason: extractStopReason(message),
         })
       }
-    }
-  }
-
-  #refreshTranscriptState() {
-    this.#syncTurns()
-    this.#syncSummary()
-  }
-
-  #syncTurns() {
-    const turns = this.historyTurns.map((turn) => this.#normalizeTurn(turn, turn.source))
-
-    for (const liveTurn of this.liveTurns) {
-      const historyTurnIndex = turns.findIndex(
-        (turn) => turn.promptRequestId === liveTurn.promptRequestId,
-      )
-
-      if (historyTurnIndex < 0) {
-        turns.push(this.#normalizeTurn(liveTurn, "live"))
-        continue
-      }
-
-      const historyTurn = turns[historyTurnIndex]
-      const mergedTurn = this.#normalizeTurn(
-        {
-          ...historyTurn,
-          completedAt: liveTurn.completedAt ?? historyTurn.completedAt,
-          completionKind: liveTurn.completionKind ?? historyTurn.completionKind,
-          stopReason: liveTurn.stopReason ?? historyTurn.stopReason,
-          messages: [...historyTurn.messages],
-        },
-        "merged",
-      )
-
-      for (const message of liveTurn.messages) {
-        this.#insertTurnMessage(mergedTurn, message)
-      }
-
-      this.#rebuildTurnEvents(mergedTurn)
-      mergedTurn.status = resolveTurnStatus(mergedTurn)
-      turns[historyTurnIndex] = mergedTurn
-    }
-
-    turns.sort((left, right) => left.sequence - right.sequence)
-    this.turns = turns
-  }
-
-  #syncSummary() {
-    const activeTurn = getActiveTurn(this.turns)
-    const permissionRequest = findPendingPermissionRequest(this.turns)
-    const status = resolveSessionChatStatus(this.session, this.turns, permissionRequest)
-
-    this.summary = {
-      activeTurnId: activeTurn?.turnId ?? null,
-      contextUsage: this.session.contextUsage,
-      pendingPermissionRequest: permissionRequest,
-      showThinkingLabel: shouldShowThinkingLabel({ activeTurn, permissionRequest, status }),
-      status,
     }
   }
 
