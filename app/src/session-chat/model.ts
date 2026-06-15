@@ -642,7 +642,7 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   get turns() {
-    const turns = this.historyTurns.map((turn) => this.#normalizeTurn(turn, turn.source))
+    const turns = [...this.historyTurns]
 
     for (const liveTurn of this.liveTurns) {
       const historyTurnIndex = turns.findIndex(
@@ -650,7 +650,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       )
 
       if (historyTurnIndex < 0) {
-        turns.push(this.#normalizeTurn(liveTurn, "live"))
+        turns.push(liveTurn)
         continue
       }
 
