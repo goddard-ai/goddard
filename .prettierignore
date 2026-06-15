@@ -2,3 +2,4 @@
 **/.agents/
 **/dist/
 core/schema/src/acp-adapters.ts
+pnpm-lock.yaml
