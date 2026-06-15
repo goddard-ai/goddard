@@ -674,6 +674,38 @@ test("SessionChat does not acknowledge repeated thought text across a tool bound
   ).toEqual(["Checking state.", "Checking state."])
 })
 
+test("SessionChat keeps duplicate id-less tool updates by sequence", () => {
+  const repeatedToolUpdate = toolCallUpdateMessage("completed")
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(liveMessage(repeatedToolUpdate, 1), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  chat.applyMessageNow(liveMessage(repeatedToolUpdate, 2), {
+    receivedAt: "2026-04-14T00:00:03.000Z",
+  })
+
+  expect(chat.turns[0].messageRanges).toEqual([
+    { sequence: 0, sequenceStart: 0 },
+    { sequence: 1, sequenceStart: 1 },
+    { sequence: 2, sequenceStart: 2 },
+  ])
+  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].events.map((event) => event.kind)).toEqual([
+    "prompt",
+    "sessionUpdate",
+    "sessionUpdate",
+  ])
+})
+
 test("SessionChat does not repeat streamed text after history refreshes with coalesced chunks", () => {
   const chat = createChat({
     history: createHistory([

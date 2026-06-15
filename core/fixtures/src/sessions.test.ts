@@ -63,8 +63,12 @@ test("detail fixtures reference the session identity", () => {
   expect(history.id).toBe(session.id)
   expect(history.acpSessionId).toBe(session.acpSessionId)
   expect(history.turns[0]?.messages[0]).toMatchObject({
-    id: "permission-edit",
-    method: "session/request_permission",
+    sequence: 0,
+    sequenceStart: 0,
+    message: {
+      id: "permission-edit",
+      method: "session/request_permission",
+    },
   })
   expect(changes.id).toBe(session.id)
   expect(changes.acpSessionId).toBe(session.acpSessionId)
