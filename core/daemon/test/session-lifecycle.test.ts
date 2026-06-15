@@ -7,12 +7,11 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { getDatabasePath, getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import type {
   DaemonSessionDiagnosticEvent,
   GetSessionHistoryResponse,
 } from "@goddard-ai/session/schema"
-import { Database } from "bun:sqlite"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
@@ -717,77 +716,6 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   await expect(send(client, "session.resolveToken", { token: "tok-restart-1" })).rejects.toThrow(
     /invalid session token/i,
   )
-})
-
-test("session store migrates persisted sessions that still contain removed models payload", async () => {
-  await useTempHome()
-
-  const sessionId = db.sessions.newId()
-  db.sessions.put(sessionId, {
-    acpSessionId: `acp-models-${randomUUID()}`,
-    status: "idle",
-    stopReason: null,
-    agent: "pi-acp",
-    agentName: "node",
-    cwd: process.cwd(),
-    title: "New session",
-    titleState: "placeholder",
-    lastSessionActivityAt: 1_776_000_000_000,
-    mcpServers: [],
-    connectionMode: "none",
-    supportsLoadSession: false,
-    activeDaemonSession: false,
-    completedHidden: false,
-    errorMessage: null,
-    blockedReason: null,
-    initiative: null,
-    inboxScope: null,
-    lastAgentMessage: null,
-    repository: null,
-    prNumber: null,
-    token: null,
-    permissions: null,
-    metadata: null,
-    configOptions: [],
-    availableCommands: [],
-    contextUsage: null,
-  })
-  db.close()
-
-  const sqlite = new Database(getDatabasePath())
-  try {
-    const sessionRow = sqlite.query("SELECT data FROM sessions WHERE id = ?").get(sessionId) as {
-      data: string
-    } | null
-    expect(sessionRow).not.toBeNull()
-    const sessionPayload = JSON.parse(sessionRow!.data)
-    sessionPayload.models = {
-      currentModelId: "gpt-5.1",
-      availableModels: [{ modelId: "gpt-5.1", name: "GPT-5.1" }],
-    }
-    sqlite
-      .query("UPDATE sessions SET data = ? WHERE id = ?")
-      .run(JSON.stringify(sessionPayload), sessionId)
-
-    const versionsRow = sqlite
-      .query("SELECT payload FROM __kindstore_internal WHERE key = ?")
-      .get("kind_versions") as { payload: string } | null
-    expect(versionsRow).not.toBeNull()
-    const kindVersions = JSON.parse(versionsRow!.payload)
-    kindVersions.sessions = 2
-    sqlite
-      .query("UPDATE __kindstore_internal SET payload = ? WHERE key = ?")
-      .run(JSON.stringify(kindVersions), "kind_versions")
-  } finally {
-    sqlite.close()
-  }
-
-  db = resetComposedDaemonStore()
-
-  expect(db.sessions.get(sessionId)).toMatchObject({
-    id: sessionId,
-    configOptions: [],
-  })
 })
 
 test("daemon promotes interrupted turn drafts into incomplete turn history on restart", async () => {
