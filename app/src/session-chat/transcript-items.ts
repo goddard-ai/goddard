@@ -1,4 +1,5 @@
-import type { DaemonSession, SessionHistoryMessage, SessionHistoryTurn } from "@goddard-ai/sdk"
+import type { DaemonSession, SessionHistoryTurn as SdkSessionHistoryTurn } from "@goddard-ai/sdk"
+import type * as acp from "acp-client/protocol"
 import hashSum from "hash-sum"
 import { isObject } from "radashi"
 
@@ -24,6 +25,11 @@ import type {
   SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
 import { promptBlocksToTranscriptContent } from "./composer-content.ts"
+
+type SessionHistoryMessage = acp.AnyMessage
+type SessionHistoryTurn = Omit<SdkSessionHistoryTurn, "messages"> & {
+  messages: SessionHistoryMessage[]
+}
 
 type ParsedToolCallUpdate = {
   updateKind: "tool_call" | "tool_call_update"
@@ -1038,6 +1044,15 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
     text: string,
   ) {
     if (text.length === 0) {
+      return
+    }
+
+    const previousItem = turnWorkItems.at(-1)
+    if (previousItem?.kind === "thought") {
+      turnWorkItems[turnWorkItems.length - 1] = {
+        ...previousItem,
+        text: `${previousItem.text}${text}`,
+      }
       return
     }
 

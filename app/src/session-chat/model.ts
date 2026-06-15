@@ -1,6 +1,11 @@
-import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
+import type {
+  DaemonSession,
+  GetSessionHistoryResponse,
+  SessionHistoryTurn,
+  SessionMessageEvent,
+  SessionTurnMessage,
+} from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
-import hashSum from "hash-sum"
 import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"
 import { isObject } from "radashi"
@@ -57,8 +62,10 @@ export type SessionChatTurnEvent =
     }
 
 /** One normalized session chat turn merged from history and live daemon messages. */
-export type SessionChatTurn = SessionHistoryTurn & {
+export type SessionChatTurn = Omit<SessionHistoryTurn, "messages"> & {
   events: SessionChatTurnEvent[]
+  messageRanges: SessionTurnMessageRange[]
+  messages: acp.AnyMessage[]
   source: "history" | "live" | "merged"
   status: SessionChatTurnStatus
 }
@@ -103,8 +110,11 @@ type SessionPermissionRequest = Extract<SessionChatTurnEvent, { kind: "permissio
 
 type QueuedSessionChatMessage = {
   message: acp.AnyMessage
+  range: SessionTurnMessageRange
   receivedAt: string
 }
+
+type SessionTurnMessageRange = Pick<SessionTurnMessage, "sequence" | "sequenceStart">
 
 type TextAgentChunkKind = "agent_message_chunk" | "agent_thought_chunk"
 
@@ -177,18 +187,6 @@ function getSessionUpdate(message: acp.AnyMessage) {
   return params.update
 }
 
-function getSessionUpdateSessionId(message: acp.AnyMessage) {
-  if (
-    !isRequestOrNotificationMessage(message) ||
-    message.method !== acp.CLIENT_METHODS.session_update
-  ) {
-    return null
-  }
-
-  const params = message.params as acp.SessionNotification
-  return params.sessionId
-}
-
 function getTextAgentChunkKind(message: acp.AnyMessage): TextAgentChunkKind | null {
   const update = getSessionUpdate(message)
 
@@ -203,30 +201,55 @@ function isTextAgentChunk(message: acp.AnyMessage) {
   return getTextAgentChunkKind(message) !== null
 }
 
-function getTextAgentChunkText(message: acp.AnyMessage, chunkKind: TextAgentChunkKind) {
-  const update = getSessionUpdate(message)
-
-  return update?.sessionUpdate === chunkKind && update.content.type === "text"
-    ? update.content.text
-    : null
+function isSessionTurnMessage(message: SessionMessageEvent): message is SessionTurnMessage {
+  return (
+    isObject(message) &&
+    typeof (message as Record<string, unknown>).sequence === "number" &&
+    typeof (message as Record<string, unknown>).sequenceStart === "number" &&
+    "message" in message
+  )
 }
 
-function createTextAgentChunk(sessionId: string, chunkKind: TextAgentChunkKind, text: string) {
-  return {
-    jsonrpc: "2.0",
-    method: acp.CLIENT_METHODS.session_update,
-    params: {
-      sessionId,
-      update: {
-        sessionUpdate: chunkKind,
-        content: { type: "text", text },
+function unwrapSessionMessageEvent(message: SessionMessageEvent) {
+  if (isSessionTurnMessage(message)) {
+    return {
+      message: message.message,
+      range: {
+        sequence: message.sequence,
+        sequenceStart: message.sequenceStart,
       },
-    },
-  } satisfies acp.AnyMessage
+    }
+  }
+
+  return {
+    message,
+    range: null,
+  }
 }
 
-function buildMessageFingerprint(message: acp.AnyMessage) {
-  return hashSum(message)
+function messageRangeCoversSequence(range: SessionTurnMessageRange, sequence: number) {
+  return sequence >= range.sequenceStart && sequence <= range.sequence
+}
+
+function turnAcknowledgesMessageRange(
+  turn: SessionChatTurn | SessionHistoryTurn,
+  range: SessionTurnMessageRange,
+) {
+  const ranges =
+    "messageRanges" in turn
+      ? turn.messageRanges
+      : turn.messages.map((message) => ({
+          sequence: message.sequence,
+          sequenceStart: message.sequenceStart,
+        }))
+
+  for (let sequence = range.sequenceStart; sequence <= range.sequence; sequence += 1) {
+    if (!ranges.some((existingRange) => messageRangeCoversSequence(existingRange, sequence))) {
+      return false
+    }
+  }
+
+  return true
 }
 
 function getTurnMessageRank(
@@ -381,132 +404,18 @@ function getActiveTurn(turns: readonly SessionChatTurn[]) {
   return turn?.completedAt === null ? turn : null
 }
 
-function coalesceQueuedTextAgentChunks(messages: QueuedSessionChatMessage[]) {
-  const coalescedMessages: QueuedSessionChatMessage[] = []
-
-  for (const queuedMessage of messages) {
-    const chunkKind = getTextAgentChunkKind(queuedMessage.message)
-    const previousMessage = coalescedMessages.at(-1)
-    const previousChunkKind = previousMessage
-      ? getTextAgentChunkKind(previousMessage.message)
-      : null
-
-    if (chunkKind !== null && previousChunkKind === chunkKind && previousMessage) {
-      const sessionId = getSessionUpdateSessionId(queuedMessage.message)
-      const previousSessionId = getSessionUpdateSessionId(previousMessage.message)
-
-      if (!sessionId || sessionId !== previousSessionId) {
-        coalescedMessages.push(queuedMessage)
-        continue
-      }
-
-      previousMessage.message = createTextAgentChunk(
-        sessionId,
-        chunkKind,
-        `${getTextAgentChunkText(previousMessage.message, chunkKind) ?? ""}${
-          getTextAgentChunkText(queuedMessage.message, chunkKind) ?? ""
-        }`,
-      )
-      previousMessage.receivedAt = queuedMessage.receivedAt
-      continue
-    }
-
-    coalescedMessages.push(queuedMessage)
-  }
-
-  return coalescedMessages
-}
-
-function turnContainsMessage(turn: SessionChatTurn, message: acp.AnyMessage) {
-  if (getMessageId(message) === null) {
-    return false
-  }
-
-  const fingerprint = buildMessageFingerprint(message)
-
-  return turn.messages.some(
-    (existingMessage) => buildMessageFingerprint(existingMessage) === fingerprint,
-  )
-}
-
-function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
-  if (getMessageId(message) === null) {
-    return false
-  }
-
-  return turns.some((turn) => turnContainsMessage(turn, message))
-}
-
-function messageFingerprintMatches(left: acp.AnyMessage, right: acp.AnyMessage) {
-  return buildMessageFingerprint(left) === buildMessageFingerprint(right)
-}
-
-function buildAcknowledgedTextByChunkKind(messages: readonly acp.AnyMessage[]) {
-  const textByChunkKind = new Map<TextAgentChunkKind, string>()
-
-  for (const message of messages) {
-    const chunkKind = getTextAgentChunkKind(message)
-
-    if (!chunkKind) {
-      continue
-    }
-
-    textByChunkKind.set(
-      chunkKind,
-      `${textByChunkKind.get(chunkKind) ?? ""}${getTextAgentChunkText(message, chunkKind) ?? ""}`,
-    )
-  }
-
-  return textByChunkKind
-}
-
 function collectMessagesUnacknowledgedByRefresh(
-  existingMessages: readonly acp.AnyMessage[],
-  refreshedMessages: readonly acp.AnyMessage[],
+  existingMessages: readonly QueuedSessionChatMessage[],
+  refreshedTurn: SessionChatTurn | SessionHistoryTurn | null,
 ) {
-  const missingMessages: acp.AnyMessage[] = []
-  const acknowledgedTextByChunkKind = buildAcknowledgedTextByChunkKind(refreshedMessages)
-  let refreshedSearchStart = 0
+  const missingMessages: QueuedSessionChatMessage[] = []
 
-  for (const message of existingMessages) {
-    const chunkKind = getTextAgentChunkKind(message)
-
-    if (chunkKind !== null) {
-      const text = getTextAgentChunkText(message, chunkKind) ?? ""
-      const acknowledgedText = acknowledgedTextByChunkKind.get(chunkKind) ?? ""
-
-      if (acknowledgedText.startsWith(text)) {
-        acknowledgedTextByChunkKind.set(chunkKind, acknowledgedText.slice(text.length))
-        continue
-      }
-
-      if (text.startsWith(acknowledgedText)) {
-        const sessionId = getSessionUpdateSessionId(message)
-        const unacknowledgedText = text.slice(acknowledgedText.length)
-        acknowledgedTextByChunkKind.set(chunkKind, "")
-
-        if (sessionId && unacknowledgedText.length > 0) {
-          missingMessages.push(createTextAgentChunk(sessionId, chunkKind, unacknowledgedText))
-        }
-        continue
-      }
-
-      acknowledgedTextByChunkKind.set(chunkKind, "")
-      missingMessages.push(message)
+  for (const existingMessage of existingMessages) {
+    if (refreshedTurn && turnAcknowledgesMessageRange(refreshedTurn, existingMessage.range)) {
       continue
     }
 
-    const refreshedIndex = refreshedMessages.findIndex(
-      (refreshedMessage, index) =>
-        index >= refreshedSearchStart && messageFingerprintMatches(refreshedMessage, message),
-    )
-
-    if (refreshedIndex >= 0) {
-      refreshedSearchStart = refreshedIndex + 1
-      continue
-    }
-
-    missingMessages.push(message)
+    missingMessages.push(existingMessage)
   }
 
   return missingMessages
@@ -661,13 +570,14 @@ export class SessionChat extends Sigma<SessionChatState> {
           completedAt: liveTurn.completedAt ?? historyTurn.completedAt,
           completionKind: liveTurn.completionKind ?? historyTurn.completionKind,
           stopReason: liveTurn.stopReason ?? historyTurn.stopReason,
+          messageRanges: [...historyTurn.messageRanges],
           messages: [...historyTurn.messages],
         },
         "merged",
       )
 
-      for (const message of liveTurn.messages) {
-        this.#insertTurnMessage(mergedTurn, message)
+      for (const [messageIndex, message] of liveTurn.messages.entries()) {
+        this.#insertTurnMessage(mergedTurn, message, liveTurn.messageRanges[messageIndex])
       }
 
       this.#rebuildTurnEvents(mergedTurn)
@@ -711,7 +621,7 @@ export class SessionChat extends Sigma<SessionChatState> {
     )
     const preservedHasMore = this.hasMore
     const preservedNextCursor = this.nextCursor
-    const localMessages: { message: acp.AnyMessage; receivedAt: string }[] = []
+    const localMessages: QueuedSessionChatMessage[] = []
 
     for (const turn of previousTurns) {
       if (turn.source === "history") {
@@ -723,14 +633,24 @@ export class SessionChat extends Sigma<SessionChatState> {
         refreshedTurnsByPromptRequestId.get(turn.promptRequestId) ??
         null
 
+      const existingMessages = turn.messages.flatMap((message, index) => {
+        const range = turn.messageRanges[index]
+        return range
+          ? [
+              {
+                message,
+                range,
+                receivedAt: turn.completedAt ?? turn.startedAt,
+              },
+            ]
+          : []
+      })
+
       for (const message of collectMessagesUnacknowledgedByRefresh(
-        turn.messages,
-        refreshedTurn?.messages ?? [],
+        existingMessages,
+        refreshedTurn,
       )) {
-        localMessages.push({
-          message,
-          receivedAt: turn.completedAt ?? turn.startedAt,
-        })
+        localMessages.push(message)
       }
     }
 
@@ -750,7 +670,9 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
 
     for (const localMessage of localMessages) {
-      this.#mergeMessage(localMessage.message, localMessage.receivedAt)
+      this.#mergeMessage(localMessage.message, localMessage.range, localMessage.receivedAt, {
+        skipAcknowledgementCheck: true,
+      })
     }
   }
 
@@ -789,35 +711,45 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
   }
   /** Applies one daemon-published ACP message through the live chunk batching queue. */
-  receiveMessage(message: acp.AnyMessage) {
+  receiveMessage(message: SessionMessageEvent) {
     const receivedAt = new Date().toISOString()
-    const contextUsage = getMessageContextUsage(message)
+    const unwrapped = unwrapSessionMessageEvent(message)
+    const contextUsage = getMessageContextUsage(unwrapped.message)
 
     if (contextUsage) {
       this.session.contextUsage = contextUsage
       return
     }
 
-    if (isTextAgentChunk(message)) {
-      this.#queuedChunks.push({ message, receivedAt })
+    if (!unwrapped.range) {
+      throw new Error("Session turn message is missing sequence metadata.")
+    }
+
+    if (isTextAgentChunk(unwrapped.message)) {
+      this.#queuedChunks.push({ ...unwrapped, receivedAt })
       this.#scheduleQueuedChunkFlush()
       return
     }
 
-    this.#applyMessages([...this.#takeQueuedChunks(), { message, receivedAt }])
+    this.#applyMessages([...this.#takeQueuedChunks(), { ...unwrapped, receivedAt }])
   }
 
   /** Applies one ACP message immediately, bypassing live chunk batching. */
-  applyMessageNow(message: acp.AnyMessage, options: ApplySessionChatMessageOptions = {}) {
+  applyMessageNow(message: SessionMessageEvent, options: ApplySessionChatMessageOptions = {}) {
     const receivedAt = options.receivedAt ?? new Date().toISOString()
-    const contextUsage = getMessageContextUsage(message)
+    const unwrapped = unwrapSessionMessageEvent(message)
+    const contextUsage = getMessageContextUsage(unwrapped.message)
 
     if (contextUsage) {
       this.session.contextUsage = contextUsage
       return
     }
 
-    this.#applyMessages([{ message, receivedAt }])
+    if (!unwrapped.range) {
+      throw new Error("Session turn message is missing sequence metadata.")
+    }
+
+    this.#applyMessages([{ ...unwrapped, receivedAt }])
   }
 
   /** Flushes queued live text chunks into chat state. */
@@ -840,8 +772,16 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.session.completedHidden = completedHidden
   }
 
-  #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
-    if (hasTurnMessage(this.turns, message)) {
+  #mergeMessage(
+    message: acp.AnyMessage,
+    range: SessionTurnMessageRange,
+    receivedAt: string,
+    options: { skipAcknowledgementCheck?: boolean } = {},
+  ) {
+    if (
+      options.skipAcknowledgementCheck !== true &&
+      this.turns.some((turn) => turnAcknowledgesMessageRange(turn, range))
+    ) {
       return
     }
 
@@ -873,7 +813,7 @@ export class SessionChat extends Sigma<SessionChatState> {
       this.liveTurns.push(turn)
     }
 
-    this.#applyMessageToTurn(turn, message, receivedAt)
+    this.#applyMessageToTurn(turn, message, range, receivedAt)
   }
 
   #applyMessages(messages: readonly QueuedSessionChatMessage[]) {
@@ -881,8 +821,8 @@ export class SessionChat extends Sigma<SessionChatState> {
       return
     }
 
-    for (const { message, receivedAt } of messages) {
-      this.#mergeMessage(message, receivedAt)
+    for (const { message, range, receivedAt } of messages) {
+      this.#mergeMessage(message, range, receivedAt)
     }
   }
 
@@ -897,7 +837,7 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   #takeQueuedChunks() {
     this.#cancelQueuedChunkFlush()
-    return coalesceQueuedTextAgentChunks(this.#queuedChunks.splice(0, this.#queuedChunks.length))
+    return this.#queuedChunks.splice(0, this.#queuedChunks.length)
   }
 
   #scheduleQueuedChunkFlush() {
@@ -915,14 +855,19 @@ export class SessionChat extends Sigma<SessionChatState> {
     this.#queuedChunks.length = 0
   }
 
-  #applyMessageToTurn(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
-    this.#insertTurnMessage(turn, message)
+  #applyMessageToTurn(
+    turn: SessionChatTurn,
+    message: acp.AnyMessage,
+    range: SessionTurnMessageRange,
+    receivedAt: string,
+  ) {
+    this.#insertTurnMessage(turn, message, range)
     this.#completeTurnWithMessage(turn, message, receivedAt)
     this.#rebuildTurnEvents(turn)
     turn.status = resolveTurnStatus(turn)
   }
 
-  #mergeHistoryTurn(turn: SessionHistoryTurn) {
+  #mergeHistoryTurn(turn: SessionHistoryTurn | SessionChatTurn) {
     const existingTurn = this.historyTurns.find((currentTurn) => currentTurn.turnId === turn.turnId)
 
     if (!existingTurn) {
@@ -939,31 +884,50 @@ export class SessionChat extends Sigma<SessionChatState> {
     existingTurn.inboxScope ??= turn.inboxScope
     existingTurn.inboxHeadline ??= turn.inboxHeadline
 
-    for (const message of turn.messages) {
-      this.#insertTurnMessage(existingTurn, message)
+    if ("messageRanges" in turn) {
+      for (const [messageIndex, message] of turn.messages.entries()) {
+        this.#insertTurnMessage(existingTurn, message, turn.messageRanges[messageIndex])
+      }
+    } else {
+      for (const message of turn.messages) {
+        this.#insertTurnMessage(existingTurn, message.message, {
+          sequence: message.sequence,
+          sequenceStart: message.sequenceStart,
+        })
+      }
     }
 
     this.#rebuildTurnEvents(existingTurn)
     existingTurn.status = resolveTurnStatus(existingTurn)
   }
 
-  #insertTurnMessage(turn: SessionChatTurn, message: acp.AnyMessage) {
-    const fingerprint = getMessageId(message) === null ? null : buildMessageFingerprint(message)
-
-    if (fingerprint !== null) {
-      for (const existingMessage of turn.messages) {
-        if (buildMessageFingerprint(existingMessage) === fingerprint) {
-          return
-        }
-      }
+  #insertTurnMessage(
+    turn: SessionChatTurn,
+    message: acp.AnyMessage,
+    range: SessionTurnMessageRange,
+  ) {
+    if (turnAcknowledgesMessageRange(turn, range)) {
+      return
     }
 
-    turn.messages.push(message)
-    turn.messages.sort(
-      (left, right) =>
-        getTurnMessageRank(left, turn.promptRequestId) -
-        getTurnMessageRank(right, turn.promptRequestId),
-    )
+    const entries = turn.messages.map((existingMessage, index) => ({
+      message: existingMessage,
+      range: turn.messageRanges[index],
+    }))
+    entries.push({ message, range })
+    entries.sort((left, right) => {
+      const sequenceDelta = left.range.sequenceStart - right.range.sequenceStart
+      if (sequenceDelta !== 0) {
+        return sequenceDelta
+      }
+
+      return (
+        getTurnMessageRank(left.message, turn.promptRequestId) -
+        getTurnMessageRank(right.message, turn.promptRequestId)
+      )
+    })
+    turn.messages = entries.map((entry) => entry.message)
+    turn.messageRanges = entries.map((entry) => entry.range)
   }
 
   #completeTurnWithMessage(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
@@ -985,11 +949,26 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
   }
 
-  #normalizeTurn(turn: SessionHistoryTurn, source: SessionChatTurn["source"]) {
+  #normalizeTurn(
+    turn:
+      | SessionHistoryTurn
+      | SessionChatTurn
+      | Omit<SessionChatTurn, "events" | "source" | "status">,
+    source: SessionChatTurn["source"],
+  ) {
     const events: SessionChatTurnEvent[] = []
+    const hasRawMessages = "messageRanges" in turn
     const normalized = {
       ...turn,
-      messages: [...turn.messages],
+      messageRanges: hasRawMessages
+        ? [...turn.messageRanges]
+        : turn.messages.map((message) => ({
+            sequence: message.sequence,
+            sequenceStart: message.sequenceStart,
+          })),
+      messages: hasRawMessages
+        ? [...turn.messages]
+        : turn.messages.map((message) => message.message),
       events,
       source,
       status: resolveTurnStatus(turn),
@@ -1017,6 +996,7 @@ export class SessionChat extends Sigma<SessionChatState> {
         stopReason: null,
         inboxScope: null,
         inboxHeadline: null,
+        messageRanges: [],
         messages: [],
       },
       "live",

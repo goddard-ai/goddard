@@ -3,7 +3,12 @@ import {
   createSessionHistoryResponse,
   createSessionHistoryTurn,
 } from "@goddard-ai/fixtures"
-import type { DaemonSession, GetSessionHistoryResponse, SessionHistoryTurn } from "@goddard-ai/sdk"
+import type {
+  DaemonSession,
+  GetSessionHistoryResponse,
+  SessionHistoryTurn,
+  SessionTurnMessage,
+} from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
 import { expect, test } from "bun:test"
 
@@ -35,7 +40,44 @@ function createSession(overrides: Partial<DaemonSession> = {}) {
   })
 }
 
-function createTurn(overrides: Partial<SessionHistoryTurn> = {}) {
+function isTurnMessage(
+  message: acp.AnyMessage | SessionTurnMessage,
+): message is SessionTurnMessage {
+  return "message" in message && "sequence" in message && "sequenceStart" in message
+}
+
+function turnMessage(message: acp.AnyMessage, sequence: number): SessionTurnMessage {
+  return turnMessageRange(message, sequence, sequence)
+}
+
+function turnMessageRange(
+  message: acp.AnyMessage,
+  sequenceStart: number,
+  sequence: number,
+): SessionTurnMessage {
+  return {
+    sequence,
+    sequenceStart,
+    message,
+  }
+}
+
+function liveMessage(message: acp.AnyMessage, sequence: number) {
+  return turnMessage(message, sequence)
+}
+
+function turnMessages(messages: readonly (acp.AnyMessage | SessionTurnMessage)[]) {
+  return messages.map((message, index) =>
+    isTurnMessage(message) ? message : turnMessage(message, index),
+  )
+}
+
+function createTurn(
+  overrides: Partial<Omit<SessionHistoryTurn, "messages">> & {
+    messages?: readonly (acp.AnyMessage | SessionTurnMessage)[]
+  } = {},
+) {
+  const { messages, ...turnOverrides } = overrides
   return createSessionHistoryTurn({
     turnId: "turn-1",
     sequence: 1,
@@ -44,7 +86,8 @@ function createTurn(overrides: Partial<SessionHistoryTurn> = {}) {
     completedAt: "2026-04-14T00:00:01.000Z",
     completionKind: "result",
     stopReason: "end_turn",
-    ...overrides,
+    ...turnOverrides,
+    ...(messages && { messages: turnMessages(messages) }),
   })
 }
 
@@ -351,10 +394,10 @@ test("SessionChat preserves loaded older history across refreshed latest history
 test("SessionChat creates one live turn and ignores repeated messages", () => {
   const chat = createChat({})
 
-  chat.applyMessageNow(promptMessage("prompt-live"), {
+  chat.applyMessageNow(liveMessage(promptMessage("prompt-live"), 0), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessageNow(promptMessage("prompt-live"), {
+  chat.applyMessageNow(liveMessage(promptMessage("prompt-live"), 0), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
 
@@ -379,13 +422,13 @@ test("SessionChat merges live updates into an active history turn", () => {
     ]),
   })
 
-  chat.applyMessageNow(agentChunk("Working"), {
+  chat.applyMessageNow(liveMessage(agentChunk("Working"), 1), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessageNow(agentChunk("Working"), {
+  chat.applyMessageNow(liveMessage(agentChunk("Working"), 2), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  chat.applyMessageNow(promptResult(), {
+  chat.applyMessageNow(liveMessage(promptResult(), 3), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
 
@@ -418,20 +461,20 @@ test("SessionChat receiveMessage batches chunks and flushes before boundary mess
     ]),
   })
 
-  chat.receiveMessage(agentChunk("Still "))
-  chat.receiveMessage(agentChunk("working"))
+  chat.receiveMessage(liveMessage(agentChunk("Still "), 1))
+  chat.receiveMessage(liveMessage(agentChunk("working"), 2))
 
   expect(chat.turns[0].messages).toHaveLength(1)
 
   await wait(40)
 
-  expect(chat.turns[0].messages).toHaveLength(2)
+  expect(chat.turns[0].messages).toHaveLength(3)
   expect(chat.transcriptMessages.find((message) => message.id === "turn-1:agent")).toMatchObject({
     content: [{ type: "text", text: "Still working" }],
   })
 
-  chat.receiveMessage(agentChunk("."))
-  chat.receiveMessage(promptResult())
+  chat.receiveMessage(liveMessage(agentChunk("."), 3))
+  chat.receiveMessage(liveMessage(promptResult(), 4))
 
   expect(chat.turns[0]).toMatchObject({
     completedAt: expect.any(String),
@@ -453,13 +496,13 @@ test("SessionChat batches thought chunks separately from agent message chunks", 
     ]),
   })
 
-  chat.receiveMessage(thoughtChunk("Inspecting "))
-  chat.receiveMessage(thoughtChunk("state."))
-  chat.receiveMessage(agentChunk("Done"))
+  chat.receiveMessage(liveMessage(thoughtChunk("Inspecting "), 1))
+  chat.receiveMessage(liveMessage(thoughtChunk("state."), 2))
+  chat.receiveMessage(liveMessage(agentChunk("Done"), 3))
 
   await wait(40)
 
-  expect(chat.turns[0].messages).toHaveLength(3)
+  expect(chat.turns[0].messages).toHaveLength(4)
   expect(
     chat.transcriptMessages.flatMap((message) =>
       message.kind === "thought" ? [message.text] : [],
@@ -481,10 +524,10 @@ test("SessionChat flushes queued thought chunks before tool call boundaries", ()
     ]),
   })
 
-  chat.receiveMessage(thoughtChunk("Before "))
-  chat.receiveMessage(thoughtChunk("tool."))
-  chat.receiveMessage(toolCallMessage("completed"))
-  chat.receiveMessage(thoughtChunk("After tool."))
+  chat.receiveMessage(liveMessage(thoughtChunk("Before "), 1))
+  chat.receiveMessage(liveMessage(thoughtChunk("tool."), 2))
+  chat.receiveMessage(liveMessage(toolCallMessage("completed"), 3))
+  chat.receiveMessage(liveMessage(thoughtChunk("After tool."), 4))
   chat.flushReceivedMessages()
 
   expect(
@@ -510,13 +553,13 @@ test("SessionChat preserves live work when refreshed history lags an active turn
     ]),
   })
 
-  chat.applyMessageNow(thoughtChunk("Before tool."), {
+  chat.applyMessageNow(liveMessage(thoughtChunk("Before tool."), 1), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessageNow(toolCallMessage("completed"), {
+  chat.applyMessageNow(liveMessage(toolCallMessage("completed"), 2), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  chat.applyMessageNow(thoughtChunk("After tool."), {
+  chat.applyMessageNow(liveMessage(thoughtChunk("After tool."), 3), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
 
@@ -556,13 +599,13 @@ test("SessionChat preserves live work tail when refreshed history contains earli
     ]),
   })
 
-  chat.applyMessageNow(beforeThought, {
+  chat.applyMessageNow(liveMessage(beforeThought, 1), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessageNow(toolCallMessage("completed"), {
+  chat.applyMessageNow(liveMessage(toolCallMessage("completed"), 2), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  chat.applyMessageNow(thoughtChunk("After tool."), {
+  chat.applyMessageNow(liveMessage(thoughtChunk("After tool."), 3), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
 
@@ -584,6 +627,53 @@ test("SessionChat preserves live work tail when refreshed history contains earli
   ])
 })
 
+test("SessionChat does not acknowledge repeated thought text across a tool boundary", () => {
+  const repeatedThought = thoughtChunk("Checking state.")
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(liveMessage(repeatedThought, 1), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  chat.applyMessageNow(liveMessage(toolCallMessage("completed"), 2), {
+    receivedAt: "2026-04-14T00:00:03.000Z",
+  })
+  chat.applyMessageNow(liveMessage(thoughtChunk("Checking state."), 3), {
+    receivedAt: "2026-04-14T00:00:04.000Z",
+  })
+
+  chat.syncLoadedData({
+    session: createSession(),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage(), repeatedThought],
+      }),
+    ]),
+  })
+
+  expect(chat.turns[0].messageRanges).toEqual([
+    { sequence: 0, sequenceStart: 0 },
+    { sequence: 1, sequenceStart: 1 },
+    { sequence: 2, sequenceStart: 2 },
+    { sequence: 3, sequenceStart: 3 },
+  ])
+  expect(chat.turns[0].messages).toHaveLength(4)
+  expect(
+    chat.transcriptMessages.flatMap((message) =>
+      message.kind === "thought" ? [message.text] : [],
+    ),
+  ).toEqual(["Checking state.", "Checking state."])
+})
+
 test("SessionChat does not repeat streamed text after history refreshes with coalesced chunks", () => {
   const chat = createChat({
     history: createHistory([
@@ -595,21 +685,20 @@ test("SessionChat does not repeat streamed text after history refreshes with coa
     ]),
   })
 
-  chat.applyMessageNow(agentChunk("Still "), {
+  chat.applyMessageNow(liveMessage(agentChunk("Still "), 1), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
-  chat.applyMessageNow(agentChunk("working"), {
+  chat.applyMessageNow(liveMessage(agentChunk("working"), 2), {
     receivedAt: "2026-04-14T00:00:03.000Z",
   })
-  chat.applyMessageNow(agentChunk(" now"), {
+  chat.applyMessageNow(liveMessage(agentChunk(" now"), 3), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
-
   const refreshedHistory = createHistory([
     createTurn({
       completedAt: null,
       completionKind: null,
-      messages: [promptMessage(), agentChunk("Still working")],
+      messages: [promptMessage(), turnMessageRange(agentChunk("Still working"), 1, 2)],
     }),
   ])
 
@@ -632,10 +721,10 @@ test("SessionChat does not repeat streamed text after history refreshes with coa
 test("SessionChat keeps prompt and terminal messages deterministic when updates arrive out of order", () => {
   const chat = createChat({})
 
-  chat.applyMessageNow(promptResult("prompt-late"), {
+  chat.applyMessageNow(liveMessage(promptResult("prompt-late"), 1), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
-  chat.applyMessageNow(promptMessage("prompt-late"), {
+  chat.applyMessageNow(liveMessage(promptMessage("prompt-late"), 0), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
 
@@ -648,12 +737,12 @@ test("SessionChat keeps prompt and terminal messages deterministic when updates 
 test("SessionChat returns to ready status after a live turn completes", () => {
   const chat = createChat({})
 
-  chat.applyMessageNow(promptMessage("prompt-ready"), {
+  chat.applyMessageNow(liveMessage(promptMessage("prompt-ready"), 0), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
   expect(chat.summary.status).toBe("running")
 
-  chat.applyMessageNow(promptResult("prompt-ready"), {
+  chat.applyMessageNow(liveMessage(promptResult("prompt-ready"), 1), {
     receivedAt: "2026-04-14T00:00:04.000Z",
   })
   expect(chat.summary.status).toBe("idle")
@@ -728,8 +817,8 @@ test("SessionChat exposes pending permission and plan events", () => {
     },
   } satisfies acp.AnyMessage
 
-  chat.applyMessageNow(permissionRequest)
-  chat.applyMessageNow(planUpdate)
+  chat.applyMessageNow(liveMessage(permissionRequest, 1))
+  chat.applyMessageNow(liveMessage(planUpdate, 2))
 
   expect(chat.summary.status).toBe("blocked")
   expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
@@ -753,15 +842,15 @@ test("SessionChat shows thinking while a turn is running outside tool calls", ()
 
   expect(chat.summary.showThinkingLabel).toBe(true)
 
-  chat.applyMessageNow(toolCallMessage("in_progress"))
+  chat.applyMessageNow(liveMessage(toolCallMessage("in_progress"), 1))
 
   expect(chat.summary.showThinkingLabel).toBe(false)
 
-  chat.applyMessageNow(toolCallUpdateMessage("completed"))
+  chat.applyMessageNow(liveMessage(toolCallUpdateMessage("completed"), 2))
 
   expect(chat.summary.showThinkingLabel).toBe(true)
 
-  chat.applyMessageNow(promptResult())
+  chat.applyMessageNow(liveMessage(promptResult(), 3))
 
   expect(chat.summary.showThinkingLabel).toBe(false)
 })
@@ -777,7 +866,7 @@ test("SessionChat hides thinking while blocked on permission", () => {
     ]),
   })
 
-  chat.applyMessageNow(permissionRequestMessage())
+  chat.applyMessageNow(liveMessage(permissionRequestMessage(), 1))
 
   expect(chat.summary.status).toBe("blocked")
   expect(chat.summary.showThinkingLabel).toBe(false)
@@ -796,11 +885,11 @@ test("SessionChat clears pending permission after the matching response", () => 
   const permissionRequest = permissionRequestMessage()
   const permissionResponse = permissionResponseMessage()
 
-  chat.applyMessageNow(permissionRequest)
+  chat.applyMessageNow(liveMessage(permissionRequest, 1))
   expect(chat.summary.status).toBe("blocked")
   expect(chat.summary.pendingPermissionRequest?.requestId).toBe("permission-1")
 
-  chat.applyMessageNow(permissionResponse)
+  chat.applyMessageNow(liveMessage(permissionResponse, 2))
 
   expect(chat.summary.pendingPermissionRequest).toBeNull()
   expect(chat.summary.status).toBe("running")
@@ -824,8 +913,8 @@ test("SessionChat does not duplicate a permission response after refreshed histo
     ]),
   })
 
-  chat.applyMessageNow(permissionRequest)
-  chat.applyMessageNow(permissionResponse)
+  chat.applyMessageNow(liveMessage(permissionRequest, 1))
+  chat.applyMessageNow(liveMessage(permissionResponse, 2))
   chat.syncLoadedData({
     session: createSession(),
     history: createHistory([
@@ -857,7 +946,7 @@ test("SessionChat preserves live messages that are not in refreshed history yet"
     ]),
   })
 
-  chat.applyMessageNow(agentChunk("Still working"), {
+  chat.applyMessageNow(liveMessage(agentChunk("Still working"), 1), {
     receivedAt: "2026-04-14T00:00:02.000Z",
   })
   chat.syncLoadedData({

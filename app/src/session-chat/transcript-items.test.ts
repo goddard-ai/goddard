@@ -1,8 +1,11 @@
-import { createFixtureSession, createSessionHistoryTurn } from "@goddard-ai/fixtures"
-import type { DaemonSession, GetSessionHistoryResponse } from "@goddard-ai/sdk"
+import { createFixtureSession } from "@goddard-ai/fixtures"
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { expect, test } from "bun:test"
 
 import { buildSessionChatTranscript } from "./transcript-items.ts"
+
+type TranscriptTurn = Parameters<typeof buildSessionChatTranscript>[0]["turns"][number]
+type TranscriptMessage = TranscriptTurn["messages"][number]
 
 function createSession(lastAgentMessage: string | null) {
   return createFixtureSession({
@@ -26,24 +29,27 @@ function createSession(lastAgentMessage: string | null) {
   })
 }
 
-function createTurn(overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {}) {
-  return createSessionHistoryTurn({
-    turnId: "turn-1",
-    sequence: 1,
-    promptRequestId: "prompt-1",
-    startedAt: "2026-04-14T00:00:00.000Z",
+function createTurn(overrides: Partial<TranscriptTurn> = {}): TranscriptTurn {
+  return {
     completedAt: "2026-04-14T00:00:01.000Z",
     completionKind: "result",
+    inboxHeadline: null,
+    inboxScope: null,
+    messages: [],
+    promptRequestId: "prompt-1",
+    sequence: 1,
+    startedAt: "2026-04-14T00:00:00.000Z",
     stopReason: "end_turn",
+    turnId: "turn-1",
     ...overrides,
-  })
+  }
 }
 
 function createTurns(
-  messages: GetSessionHistoryResponse["turns"][number]["messages"],
-  overrides: Partial<GetSessionHistoryResponse["turns"][number]> = {},
-): GetSessionHistoryResponse["turns"] {
-  return [createTurn({ messages, ...overrides })]
+  messages: readonly TranscriptMessage[],
+  overrides: Partial<TranscriptTurn> = {},
+): TranscriptTurn[] {
+  return [createTurn({ messages: [...messages], ...overrides })]
 }
 
 function createPermissionRequestMessage(
@@ -78,7 +84,7 @@ function createPermissionRequestMessage(
         rawInput: input.rawInput,
       },
     },
-  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+  } satisfies TranscriptMessage
 }
 
 function createPermissionSelectedResponseMessage(requestId: string, optionId: string) {
@@ -91,7 +97,7 @@ function createPermissionSelectedResponseMessage(requestId: string, optionId: st
         optionId,
       },
     },
-  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+  } satisfies TranscriptMessage
 }
 
 function createPermissionFailedResponseMessage(requestId: string) {
@@ -102,7 +108,7 @@ function createPermissionFailedResponseMessage(requestId: string) {
       code: -32_000,
       message: "Permission response failed",
     },
-  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+  } satisfies TranscriptMessage
 }
 
 function createPlanUpdateMessage(
@@ -122,13 +128,10 @@ function createPlanUpdateMessage(
         entries,
       },
     },
-  } satisfies GetSessionHistoryResponse["turns"][number]["messages"][number]
+  } satisfies TranscriptMessage
 }
 
-function createTranscriptMessages(
-  session: DaemonSession,
-  turns: GetSessionHistoryResponse["turns"],
-) {
+function createTranscriptMessages(session: DaemonSession, turns: readonly TranscriptTurn[]) {
   return buildSessionChatTranscript({ session, turns })
 }
 
