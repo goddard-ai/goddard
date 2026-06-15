@@ -820,7 +820,7 @@ test("buildSessionChatTranscript ignores routed session/update payloads without 
   ])
 })
 
-test("buildSessionChatTranscript groups thought chunks in the turn work drawer", () => {
+test("buildSessionChatTranscript renders daemon-normalized thought chunks in the turn work drawer", () => {
   const session = createSession(null)
   const turns = createTurns(
     [
@@ -842,21 +842,7 @@ test("buildSessionChatTranscript groups thought chunks in the turn work drawer",
             sessionUpdate: "agent_thought_chunk",
             content: {
               type: "text",
-              text: "Read the request. ",
-            },
-          },
-        },
-      },
-      {
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: {
-          sessionId: session.acpSessionId,
-          update: {
-            sessionUpdate: "agent_thought_chunk",
-            content: {
-              type: "text",
-              text: "Checked the transcript model.",
+              text: "Read the request and checked the transcript model.",
             },
           },
         },
@@ -903,7 +889,7 @@ test("buildSessionChatTranscript groups thought chunks in the turn work drawer",
             id: "turn-1:thought:1",
             authorName: "pi",
             timestampLabel: "Thought",
-            text: "Read the request. Checked the transcript model.",
+            text: "Read the request and checked the transcript model.",
           },
         ],
       },

@@ -1041,16 +1041,6 @@ export function buildSessionChatTranscript(input: SessionChatTranscriptInput) {
       return
     }
 
-    const lastItem = turnWorkItems.at(-1)
-
-    if (lastItem?.kind === "thought") {
-      turnWorkItems[turnWorkItems.length - 1] = {
-        ...lastItem,
-        text: `${lastItem.text}${text}`,
-      }
-      return
-    }
-
     turnWorkItems.push(
       createThoughtRow({
         id: `${turnId}:thought:${messageIndex}`,
