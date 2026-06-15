@@ -78,6 +78,7 @@
 - Mock only at external boundaries to control nondeterminism, cost, or unavailable systems.
 - Use snapshots only when serialized output is the contract, or pair them with explicit behavior assertions.
 - When fixing a bug, add a regression test that reproduces the issue when practical.
+- Kindstore migrations do not require dedicated regression tests.
 - When practical test infrastructure is missing, document the limitation and give concrete manual verification steps.
 - From the repository root, run the full workspace test suite with `pnpm run test`.
 - Do not use `bun test` at the repository root; it bypasses workspace package test scripts and monorepo orchestration.
