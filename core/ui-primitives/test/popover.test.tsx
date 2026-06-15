@@ -173,3 +173,16 @@ test("Popover allows multiple unmanaged popovers", async () => {
   expect(harness.closed).toEqual([])
   harness.cleanup()
 })
+
+test("Escape closes only the topmost unmanaged popover", async () => {
+  const harness = renderGroupedPopovers({ group: null })
+
+  await harness.render()
+
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  await harness.render()
+
+  expect(harness.firstOpen.value).toBe(true)
+  expect(harness.secondOpen.value).toBe(false)
+  harness.cleanup()
+})

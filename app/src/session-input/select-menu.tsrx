@@ -277,12 +277,12 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
   function closeWhenFocusLeavesSelect(event: FocusEvent) {
     const nextFocusTarget = event.relatedTarget
-
-    if (
+    const staysInside =
       nextFocusTarget instanceof Node &&
         (triggerElementRef.current?.contains(nextFocusTarget) ||
           menuBodyRef.current?.contains(nextFocusTarget))
-    ) {
+
+    if (staysInside) {
       return
     }
 
@@ -449,6 +449,12 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
           }
 
           if (props.filterable && event.target === filterInputRef.current) {
+            if (event.key === "Escape") {
+              event.preventDefault()
+              event.stopPropagation()
+              props.open.value = false
+            }
+
             return
           }
 

@@ -46,6 +46,12 @@ function renderModal(props: {
   }
 
   return {
+    cleanup() {
+      render(null, container)
+      trigger.remove()
+      dialogRoot.remove()
+      container.remove()
+    },
     container,
     dialogRoot,
     open,
@@ -71,6 +77,7 @@ test("Modal focuses initial control and restores focus when Escape closes", asyn
 
   expect(harness.open.value).toBe(false)
   expect(document.activeElement).toBe(harness.trigger)
+  harness.cleanup()
 })
 
 test("Modal does not close on outside pointer by default", async () => {
@@ -82,6 +89,7 @@ test("Modal does not close on outside pointer by default", async () => {
   await flushEffects()
 
   expect(harness.open.value).toBe(true)
+  harness.cleanup()
 })
 
 test("Modal can block close attempts for confirmation flows", async () => {
@@ -95,4 +103,5 @@ test("Modal can block close attempts for confirmation flows", async () => {
 
   expect(onBeforeClose).toHaveBeenCalledWith("escape")
   expect(harness.open.value).toBe(true)
+  harness.cleanup()
 })

@@ -21,8 +21,13 @@ export function startOverlayDismissal(options: OverlayDismissalOptions) {
       return
     }
 
+    if (!overlayStack.isTopmost(options.id)) {
+      return
+    }
+
     event.preventDefault()
-    closeIfTopmost("escape")
+    event.stopImmediatePropagation()
+    options.close("escape")
   }
 
   function handlePointerDown(event: PointerEvent) {

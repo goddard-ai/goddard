@@ -1,6 +1,16 @@
-import { $getSelection, $setSelection, type BaseSelection, type LexicalEditor } from "lexical"
+import {
+  $createRangeSelectionFromDom,
+  $getSelection,
+  $setSelection,
+  type BaseSelection,
+  type LexicalEditor,
+} from "lexical"
 
 type PromptFocusRestore = () => void
+type PromptFocusSnapshot = {
+  lexicalSelection: BaseSelection | null
+  domRange: Range | null
+}
 
 const sessionInputEditors = new Set<LexicalEditor>()
 
@@ -22,12 +32,11 @@ export function captureFocusedSessionInputPrompt(): PromptFocusRestore | null {
       continue
     }
 
-    const selection = editor.getEditorState().read(() => $getSelection()?.clone() ?? null)
+    const snapshot = capturePromptFocusSnapshot(editor, rootElement)
 
     return () => {
       queueMicrotask(() => {
-        restorePromptSelection(editor, selection)
-        editor.focus()
+        restorePromptFocus(editor, snapshot)
       })
     }
   }
@@ -35,12 +44,54 @@ export function captureFocusedSessionInputPrompt(): PromptFocusRestore | null {
   return null
 }
 
-function restorePromptSelection(editor: LexicalEditor, selection: BaseSelection | null) {
-  if (!selection) {
-    return
+function capturePromptFocusSnapshot(
+  editor: LexicalEditor,
+  rootElement: HTMLElement,
+): PromptFocusSnapshot {
+  const selection = window.getSelection()
+  const domRange =
+    selection &&
+    selection.rangeCount > 0 &&
+    rootElement.contains(selection.anchorNode) &&
+    rootElement.contains(selection.focusNode)
+      ? selection.getRangeAt(0).cloneRange()
+      : null
+
+  return {
+    lexicalSelection: editor.getEditorState().read(() => $getSelection()?.clone() ?? null),
+    domRange,
+  }
+}
+
+function restorePromptFocus(editor: LexicalEditor, snapshot: PromptFocusSnapshot) {
+  const restoreDomRange = () => {
+    if (!snapshot.domRange) {
+      return
+    }
+
+    const selection = window.getSelection()
+
+    if (!selection) {
+      return
+    }
+
+    selection.removeAllRanges()
+    selection.addRange(snapshot.domRange)
   }
 
-  editor.update(() => {
-    $setSelection(selection.clone())
+  editor.focus(() => {
+    if (snapshot.domRange) {
+      editor.update(() => {
+        restoreDomRange()
+        $setSelection($createRangeSelectionFromDom(window.getSelection(), editor))
+      })
+      return
+    }
+
+    if (snapshot.lexicalSelection) {
+      editor.update(() => {
+        $setSelection(snapshot.lexicalSelection?.clone() ?? null)
+      })
+    }
   })
 }
