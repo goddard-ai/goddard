@@ -82,6 +82,8 @@ export type SessionChatContextUsage = {
 export type SessionChatState = {
   connection: GetSessionHistoryResponse["connection"]
   hasMore: boolean
+  historyTurns: SessionChatTurn[]
+  liveTurns: SessionChatTurn[]
   nextCursor: string | null
   session: DaemonSession
   summary: SessionChatSummary
@@ -201,10 +203,6 @@ function getTextAgentChunkKind(message: acp.AnyMessage): TextAgentChunkKind | nu
 
 function isTextAgentChunk(message: acp.AnyMessage) {
   return getTextAgentChunkKind(message) !== null
-}
-
-function getTextAgentMessageChunkText(message: acp.AnyMessage) {
-  return getTextAgentChunkText(message, "agent_message_chunk")
 }
 
 function getTextAgentChunkText(message: acp.AnyMessage, chunkKind: TextAgentChunkKind) {
@@ -385,10 +383,6 @@ function getActiveTurn(turns: readonly SessionChatTurn[]) {
   return turn?.completedAt === null ? turn : null
 }
 
-function getTurnAgentText(turn: Pick<SessionHistoryTurn, "messages">) {
-  return turn.messages.map((message) => getTextAgentMessageChunkText(message) ?? "").join("")
-}
-
 function coalesceQueuedTextAgentChunks(messages: QueuedSessionChatMessage[]) {
   const coalescedMessages: QueuedSessionChatMessage[] = []
 
@@ -425,33 +419,82 @@ function coalesceQueuedTextAgentChunks(messages: QueuedSessionChatMessage[]) {
   return coalescedMessages
 }
 
-function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
+function turnContainsMessage(turn: SessionChatTurn, message: acp.AnyMessage) {
   if (getMessageId(message) === null) {
     return false
   }
 
   const fingerprint = buildMessageFingerprint(message)
 
-  return turns.some((turn) =>
-    turn.messages.some(
-      (existingMessage) => buildMessageFingerprint(existingMessage) === fingerprint,
-    ),
+  return turn.messages.some(
+    (existingMessage) => buildMessageFingerprint(existingMessage) === fingerprint,
   )
+}
+
+function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessage) {
+  if (getMessageId(message) === null) {
+    return false
+  }
+
+  return turns.some((turn) => turnContainsMessage(turn, message))
 }
 
 function messageFingerprintMatches(left: acp.AnyMessage, right: acp.AnyMessage) {
   return buildMessageFingerprint(left) === buildMessageFingerprint(right)
 }
 
-function collectMessagesMissingFromRefresh(
+function buildAcknowledgedTextByChunkKind(messages: readonly acp.AnyMessage[]) {
+  const textByChunkKind = new Map<TextAgentChunkKind, string>()
+
+  for (const message of messages) {
+    const chunkKind = getTextAgentChunkKind(message)
+
+    if (!chunkKind) {
+      continue
+    }
+
+    textByChunkKind.set(
+      chunkKind,
+      `${textByChunkKind.get(chunkKind) ?? ""}${getTextAgentChunkText(message, chunkKind) ?? ""}`,
+    )
+  }
+
+  return textByChunkKind
+}
+
+function collectMessagesUnacknowledgedByRefresh(
   existingMessages: readonly acp.AnyMessage[],
   refreshedMessages: readonly acp.AnyMessage[],
 ) {
   const missingMessages: acp.AnyMessage[] = []
+  const acknowledgedTextByChunkKind = buildAcknowledgedTextByChunkKind(refreshedMessages)
   let refreshedSearchStart = 0
 
   for (const message of existingMessages) {
-    if (getTextAgentMessageChunkText(message) !== null) {
+    const chunkKind = getTextAgentChunkKind(message)
+
+    if (chunkKind !== null) {
+      const text = getTextAgentChunkText(message, chunkKind) ?? ""
+      const acknowledgedText = acknowledgedTextByChunkKind.get(chunkKind) ?? ""
+
+      if (acknowledgedText.startsWith(text)) {
+        acknowledgedTextByChunkKind.set(chunkKind, acknowledgedText.slice(text.length))
+        continue
+      }
+
+      if (text.startsWith(acknowledgedText)) {
+        const sessionId = getSessionUpdateSessionId(message)
+        const unacknowledgedText = text.slice(acknowledgedText.length)
+        acknowledgedTextByChunkKind.set(chunkKind, "")
+
+        if (sessionId && unacknowledgedText.length > 0) {
+          missingMessages.push(createTextAgentChunk(sessionId, chunkKind, unacknowledgedText))
+        }
+        continue
+      }
+
+      acknowledgedTextByChunkKind.set(chunkKind, "")
+      missingMessages.push(message)
       continue
     }
 
@@ -572,6 +615,8 @@ export class SessionChat extends Sigma<SessionChatState> {
     super({
       connection: input.history.connection,
       hasMore: input.history.hasMore,
+      historyTurns: [],
+      liveTurns: [],
       nextCursor: input.history.nextCursor,
       session: input.session,
       summary: {
@@ -610,8 +655,12 @@ export class SessionChat extends Sigma<SessionChatState> {
   syncLoadedData(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
     this.flushReceivedMessages()
 
+    const previousTurns = [...this.turns]
     const refreshedTurnsById = new Map(input.history.turns.map((turn) => [turn.turnId, turn]))
-    const preservedLoadedTurns = this.turns.filter(
+    const refreshedTurnsByPromptRequestId = new Map(
+      input.history.turns.map((turn) => [turn.promptRequestId, turn]),
+    )
+    const preservedLoadedTurns = this.historyTurns.filter(
       (turn) => turn.source !== "live" && !refreshedTurnsById.has(turn.turnId),
     )
     const refreshedTurnIds = new Set(input.history.turns.map((turn) => turn.turnId))
@@ -622,56 +671,33 @@ export class SessionChat extends Sigma<SessionChatState> {
     const preservedNextCursor = this.nextCursor
     const localMessages: { message: acp.AnyMessage; receivedAt: string }[] = []
 
-    for (const turn of this.turns) {
-      if (turn.source === "live") {
-        for (const message of turn.messages) {
-          localMessages.push({
-            message,
-            receivedAt: turn.completedAt ?? turn.startedAt,
-          })
-        }
+    for (const turn of previousTurns) {
+      if (turn.source === "history") {
         continue
       }
 
-      const refreshedTurn = refreshedTurnsById.get(turn.turnId)
-      if (!refreshedTurn || turn.source !== "merged") {
-        continue
-      }
+      const refreshedTurn =
+        refreshedTurnsById.get(turn.turnId) ??
+        refreshedTurnsByPromptRequestId.get(turn.promptRequestId) ??
+        null
 
-      for (const message of collectMessagesMissingFromRefresh(
+      for (const message of collectMessagesUnacknowledgedByRefresh(
         turn.messages,
-        refreshedTurn.messages,
+        refreshedTurn?.messages ?? [],
       )) {
         localMessages.push({
           message,
           receivedAt: turn.completedAt ?? turn.startedAt,
         })
       }
-
-      const existingAgentText = getTurnAgentText(turn)
-      const refreshedAgentText = getTurnAgentText(refreshedTurn)
-      if (
-        !existingAgentText.startsWith(refreshedAgentText) ||
-        existingAgentText.length === refreshedAgentText.length
-      ) {
-        continue
-      }
-
-      localMessages.push({
-        message: createTextAgentChunk(
-          this.session.acpSessionId,
-          "agent_message_chunk",
-          existingAgentText.slice(refreshedAgentText.length),
-        ),
-        receivedAt: turn.completedAt ?? turn.startedAt,
-      })
     }
 
     this.connection = input.history.connection
     this.hasMore = hasPreservedOlderTurns ? preservedHasMore : input.history.hasMore
     this.nextCursor = hasPreservedOlderTurns ? preservedNextCursor : input.history.nextCursor
     this.session = input.session
-    this.turns.length = 0
+    this.historyTurns.length = 0
+    this.liveTurns.length = 0
 
     for (const turn of preservedLoadedTurns) {
       this.#mergeHistoryTurn(turn)
@@ -704,13 +730,13 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   /** Merges one older history page ahead of the currently loaded transcript. */
   prependOlderHistory(history: GetSessionHistoryResponse) {
-    const currentTurns = [...this.turns]
+    const currentTurns = [...this.historyTurns]
     const olderTurnIds = new Set(history.turns.map((turn) => turn.turnId))
 
     this.connection = history.connection
     this.hasMore = history.hasMore
     this.nextCursor = history.nextCursor
-    this.turns.length = 0
+    this.historyTurns.length = 0
 
     for (const turn of history.turns) {
       this.#mergeHistoryTurn(turn)
@@ -780,6 +806,8 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #mergeMessage(message: acp.AnyMessage, receivedAt: string) {
+    this.#syncTurns()
+
     if (hasTurnMessage(this.turns, message)) {
       return
     }
@@ -790,26 +818,29 @@ export class SessionChat extends Sigma<SessionChatState> {
       messageId !== null && (getMessageResult(message) || getMessageError(message))
         ? findTurnWithPendingPermissionRequest(this.turns, messageId)
         : null
-    const existingTurn =
-      permissionTurn ??
-      (promptRequestId === null
-        ? getActiveTurn(this.turns)
-        : (this.turns.find((turn) => turn.promptRequestId === promptRequestId) ?? null))
+    const activeTurn = getActiveTurn(this.turns)
+    const targetPromptRequestId =
+      permissionTurn?.promptRequestId ??
+      promptRequestId ??
+      activeTurn?.promptRequestId ??
+      `unattributed:${resolveNextLiveSequence(this.turns)}`
+    const existingLiveTurn =
+      this.liveTurns.find((turn) => turn.promptRequestId === targetPromptRequestId) ?? null
+    const targetHistoryTurn =
+      this.historyTurns.find((turn) => turn.promptRequestId === targetPromptRequestId) ?? null
+    const turn =
+      existingLiveTurn ??
+      this.#createLiveTurn(
+        targetPromptRequestId,
+        receivedAt,
+        targetHistoryTurn?.sequence ?? resolveNextLiveSequence(this.turns),
+      )
 
-    if (existingTurn) {
-      this.#applyMessageToTurn(existingTurn, message, receivedAt)
-      return
+    if (!existingLiveTurn) {
+      this.liveTurns.push(turn)
     }
 
-    const sequence = resolveNextLiveSequence(this.turns)
-    const turn = this.#createLiveTurn(
-      promptRequestId ?? `unattributed:${sequence}`,
-      receivedAt,
-      sequence,
-    )
-
     this.#applyMessageToTurn(turn, message, receivedAt)
-    this.turns.push(turn)
   }
 
   #applyMessages(messages: readonly QueuedSessionChatMessage[]) {
@@ -854,10 +885,6 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #applyMessageToTurn(turn: SessionChatTurn, message: acp.AnyMessage, receivedAt: string) {
-    if (turn.source === "history") {
-      turn.source = "merged"
-    }
-
     this.#insertTurnMessage(turn, message)
     this.#completeTurnWithMessage(turn, message, receivedAt)
     this.#rebuildTurnEvents(turn)
@@ -865,15 +892,11 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #mergeHistoryTurn(turn: SessionHistoryTurn) {
-    const existingTurn = this.turns.find((currentTurn) => currentTurn.turnId === turn.turnId)
+    const existingTurn = this.historyTurns.find((currentTurn) => currentTurn.turnId === turn.turnId)
 
     if (!existingTurn) {
-      this.turns.push(this.#normalizeTurn(turn, "history"))
+      this.historyTurns.push(this.#normalizeTurn(turn, "history"))
       return
-    }
-
-    if (existingTurn.source === "live") {
-      existingTurn.source = "merged"
     }
 
     existingTurn.sequence = turn.sequence
@@ -1048,7 +1071,46 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   #refreshTranscriptState() {
+    this.#syncTurns()
     this.#syncSummary()
+  }
+
+  #syncTurns() {
+    const turns = this.historyTurns.map((turn) => this.#normalizeTurn(turn, turn.source))
+
+    for (const liveTurn of this.liveTurns) {
+      const historyTurnIndex = turns.findIndex(
+        (turn) => turn.promptRequestId === liveTurn.promptRequestId,
+      )
+
+      if (historyTurnIndex < 0) {
+        turns.push(this.#normalizeTurn(liveTurn, "live"))
+        continue
+      }
+
+      const historyTurn = turns[historyTurnIndex]
+      const mergedTurn = this.#normalizeTurn(
+        {
+          ...historyTurn,
+          completedAt: liveTurn.completedAt ?? historyTurn.completedAt,
+          completionKind: liveTurn.completionKind ?? historyTurn.completionKind,
+          stopReason: liveTurn.stopReason ?? historyTurn.stopReason,
+          messages: [...historyTurn.messages],
+        },
+        "merged",
+      )
+
+      for (const message of liveTurn.messages) {
+        this.#insertTurnMessage(mergedTurn, message)
+      }
+
+      this.#rebuildTurnEvents(mergedTurn)
+      mergedTurn.status = resolveTurnStatus(mergedTurn)
+      turns[historyTurnIndex] = mergedTurn
+    }
+
+    turns.sort((left, right) => left.sequence - right.sequence)
+    this.turns = turns
   }
 
   #syncSummary() {
