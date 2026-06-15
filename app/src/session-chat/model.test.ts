@@ -203,6 +203,26 @@ function toolCallUpdateMessage(status: "pending" | "in_progress" | "completed" |
   } satisfies acp.AnyMessage
 }
 
+function transcriptWorkOrder(chat: SessionChat) {
+  return chat.transcriptMessages.flatMap((message) => {
+    if (message.kind === "thought") {
+      return [`thought:${message.text}`]
+    }
+
+    if (message.kind === "toolCall") {
+      return [`tool:${message.toolCallId}:${message.status}`]
+    }
+
+    if (message.kind === "workDrawer") {
+      return message.items.map((item) =>
+        item.kind === "thought" ? `thought:${item.text}` : `tool:${item.toolCallId}:${item.status}`,
+      )
+    }
+
+    return []
+  })
+}
+
 test("SessionChat preserves history turn order and normalizes statuses", () => {
   const chat = createChat({
     session: createSession({ status: "done", activeDaemonSession: false }),
@@ -472,6 +492,96 @@ test("SessionChat flushes queued thought chunks before tool call boundaries", ()
       message.kind === "thought" ? [message.text] : [],
     ),
   ).toEqual(["Before tool.", "After tool."])
+  expect(transcriptWorkOrder(chat)).toEqual([
+    "thought:Before tool.",
+    "tool:tool-1:completed",
+    "thought:After tool.",
+  ])
+})
+
+test("SessionChat preserves live work when refreshed history lags an active turn", () => {
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(thoughtChunk("Before tool."), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  chat.applyMessageNow(toolCallMessage("completed"), {
+    receivedAt: "2026-04-14T00:00:03.000Z",
+  })
+  chat.applyMessageNow(thoughtChunk("After tool."), {
+    receivedAt: "2026-04-14T00:00:04.000Z",
+  })
+
+  expect(transcriptWorkOrder(chat)).toEqual([
+    "thought:Before tool.",
+    "tool:tool-1:completed",
+    "thought:After tool.",
+  ])
+
+  chat.syncLoadedData({
+    session: createSession(),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  expect(transcriptWorkOrder(chat)).toEqual([
+    "thought:Before tool.",
+    "tool:tool-1:completed",
+    "thought:After tool.",
+  ])
+})
+
+test("SessionChat preserves live work tail when refreshed history contains earlier work", () => {
+  const beforeThought = thoughtChunk("Before tool.")
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage()],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(beforeThought, {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+  chat.applyMessageNow(toolCallMessage("completed"), {
+    receivedAt: "2026-04-14T00:00:03.000Z",
+  })
+  chat.applyMessageNow(thoughtChunk("After tool."), {
+    receivedAt: "2026-04-14T00:00:04.000Z",
+  })
+
+  chat.syncLoadedData({
+    session: createSession(),
+    history: createHistory([
+      createTurn({
+        completedAt: null,
+        completionKind: null,
+        messages: [promptMessage(), beforeThought],
+      }),
+    ]),
+  })
+
+  expect(transcriptWorkOrder(chat)).toEqual([
+    "thought:Before tool.",
+    "tool:tool-1:completed",
+    "thought:After tool.",
+  ])
 })
 
 test("SessionChat does not repeat streamed text after history refreshes with coalesced chunks", () => {

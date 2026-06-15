@@ -439,6 +439,38 @@ function hasTurnMessage(turns: readonly SessionChatTurn[], message: acp.AnyMessa
   )
 }
 
+function messageFingerprintMatches(left: acp.AnyMessage, right: acp.AnyMessage) {
+  return buildMessageFingerprint(left) === buildMessageFingerprint(right)
+}
+
+function collectMessagesMissingFromRefresh(
+  existingMessages: readonly acp.AnyMessage[],
+  refreshedMessages: readonly acp.AnyMessage[],
+) {
+  const missingMessages: acp.AnyMessage[] = []
+  let refreshedSearchStart = 0
+
+  for (const message of existingMessages) {
+    if (getTextAgentMessageChunkText(message) !== null) {
+      continue
+    }
+
+    const refreshedIndex = refreshedMessages.findIndex(
+      (refreshedMessage, index) =>
+        index >= refreshedSearchStart && messageFingerprintMatches(refreshedMessage, message),
+    )
+
+    if (refreshedIndex >= 0) {
+      refreshedSearchStart = refreshedIndex + 1
+      continue
+    }
+
+    missingMessages.push(message)
+  }
+
+  return missingMessages
+}
+
 /** Finds the turn waiting on one ACP permission request id so its response stays in-row. */
 function findTurnWithPendingPermissionRequest(
   turns: readonly SessionChatTurn[],
@@ -576,6 +608,8 @@ export class SessionChat extends Sigma<SessionChatState> {
 
   /** Applies refreshed query data while preserving loaded older pages and local live messages. */
   syncLoadedData(input: { history: GetSessionHistoryResponse; session: DaemonSession }) {
+    this.flushReceivedMessages()
+
     const refreshedTurnsById = new Map(input.history.turns.map((turn) => [turn.turnId, turn]))
     const preservedLoadedTurns = this.turns.filter(
       (turn) => turn.source !== "live" && !refreshedTurnsById.has(turn.turnId),
@@ -602,6 +636,16 @@ export class SessionChat extends Sigma<SessionChatState> {
       const refreshedTurn = refreshedTurnsById.get(turn.turnId)
       if (!refreshedTurn || turn.source !== "merged") {
         continue
+      }
+
+      for (const message of collectMessagesMissingFromRefresh(
+        turn.messages,
+        refreshedTurn.messages,
+      )) {
+        localMessages.push({
+          message,
+          receivedAt: turn.completedAt ?? turn.startedAt,
+        })
       }
 
       const existingAgentText = getTurnAgentText(turn)
