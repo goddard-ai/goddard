@@ -135,6 +135,60 @@ test("SessionInputSelect restores a focused prompt after the menu closes", async
   render(null, container)
 })
 
+test("SessionInputSelect restores the trigger after selection when no prompt was focused", async () => {
+  captureFocusedPrompt = false
+  captureFocusedPromptCalls = 0
+  restoreFocusedPromptCalls = 0
+
+  const container = document.createElement("div")
+  const menuRoot = document.createElement("div")
+  const open = signal(false)
+
+  document.body.append(container, menuRoot)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
+
+  await act(async () => {
+    render(
+      <SessionInputSelect
+        filterable={false}
+        items={[
+          { value: "alpha", label: "Alpha" },
+          { value: "beta", label: "Beta" },
+        ]}
+        label="Mode"
+        open={open}
+        placeholder="Choose mode"
+        value="alpha"
+        onValueChange={() => {}}
+      />,
+      container,
+    )
+  })
+
+  const trigger = container.querySelector<HTMLButtonElement>("button[aria-label='Mode: Alpha']")
+
+  await act(async () => {
+    trigger?.click()
+  })
+  await flushEffects()
+
+  const betaOption = Array.from(menuRoot.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes("Beta"),
+  )
+
+  await act(async () => {
+    betaOption?.click()
+  })
+  await flushEffects()
+
+  expect(document.activeElement).toBe(trigger)
+  expect(restoreFocusedPromptCalls).toBe(0)
+
+  render(null, container)
+})
+
 test("SessionInputSelect hides when focus leaves the menu", async () => {
   captureFocusedPrompt = false
   captureFocusedPromptCalls = 0
@@ -176,8 +230,10 @@ test("SessionInputSelect hides when focus leaves the menu", async () => {
   await act(async () => {
     outsideButton.focus()
   })
+  await flushEffects()
 
   expect(open.value).toBe(false)
+  expect(document.activeElement).toBe(outsideButton)
 
   render(null, container)
   menuRoot.remove()

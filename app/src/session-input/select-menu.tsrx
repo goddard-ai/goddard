@@ -26,6 +26,16 @@ type SelectItemIcon = preact.FunctionComponent<SelectItemIconProps>
 const selectorMenuMinimumFuzzyScore = 0.12
 const selectorMenuTypeaheadTimeoutMs = 700
 
+type SelectCloseReason =
+  | "disabled"
+  | "escape"
+  | "focus-leave"
+  | "group"
+  | "outside"
+  | "programmatic"
+  | "selection"
+  | "trigger"
+
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
   value: string;
@@ -86,7 +96,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
   useEffect(() => {
     if (props.disabled) {
-      props.open.value = false
+      closeSelect("disabled")
     }
   }, [props.disabled, props.open])
 
@@ -96,7 +106,16 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const ignorePointerHoverRef = useRef(false)
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
   const promptRestoreRef = useRef<(() => void) | null>(null)
+  const closeReasonRef = useRef<SelectCloseReason | null>(null)
   const wasOpenRef = useRef(props.open.value)
+
+  function closeSelect(reason: SelectCloseReason) {
+    if (props.open.value) {
+      closeReasonRef.current = reason
+    }
+
+    props.open.value = false
+  }
 
   const searchableItems = useMemo(
     () => props.items.map(
@@ -187,7 +206,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     }
 
     props.onValueChange(item.value)
-    props.open.value = false
+    closeSelect("selection")
   }
 
   function capturePromptFocusBeforeOpen() {
@@ -205,7 +224,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       commitSelection(filteredItems[index] ?? null)
     },
     onEscape() {
-      props.open.value = false
+      closeSelect("escape")
     },
     onQueryChange(nextQuery) {
       setQuery(nextQuery)
@@ -286,7 +305,12 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       return
     }
 
-    props.open.value = false
+    closeSelect("focus-leave")
+  }
+
+  function shouldRestoreTriggerFocus(reason: SelectCloseReason) {
+    return reason !== "disabled" && reason !== "focus-leave" && reason !== "group" &&
+      reason !== "outside"
   }
 
   useEffect(() => {
@@ -296,11 +320,15 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
 
     if (!props.open.value && wasOpenRef.current) {
       const restorePromptFocus = promptRestoreRef.current
+      const closeReason = closeReasonRef.current ?? "programmatic"
 
       promptRestoreRef.current = null
+      closeReasonRef.current = null
 
       if (restorePromptFocus) {
         restorePromptFocus()
+      } else if (shouldRestoreTriggerFocus(closeReason)) {
+        triggerElementRef.current?.focus()
       }
     }
 
@@ -367,7 +395,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
           onPointerDown={capturePromptFocusBeforeOpen}
           onClick={() => {
             capturePromptFocusBeforeOpen()
-            props.open.value = !props.open.value
+            if (props.open.value) {
+              closeSelect("trigger")
+            } else {
+              props.open.value = true
+            }
           }}
           onBlur={closeWhenFocusLeavesSelect}
           onKeyDown={(event) => {
@@ -385,7 +417,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             if (event.key === "Escape" && props.open.value) {
               event.preventDefault()
               event.stopPropagation()
-              props.open.value = false
+              closeSelect("escape")
             }
           }}
         >
@@ -436,7 +468,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       offset={8}
       open={props.open}
       placement="bottom-start"
+      restoreFocus={false}
       strategy="fixed"
+      onOpenChange={(_open, reason) => {
+        closeReasonRef.current = reason
+      }}
     >
       <div
         ref={menuBodyRef}
@@ -452,7 +488,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             if (event.key === "Escape") {
               event.preventDefault()
               event.stopPropagation()
-              props.open.value = false
+              closeSelect("escape")
             }
 
             return
@@ -480,7 +516,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             case "Escape":
               event.preventDefault()
               event.stopPropagation()
-              props.open.value = false
+              closeSelect("escape")
           }
         }}
       >
