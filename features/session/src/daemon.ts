@@ -64,13 +64,17 @@ const sessionDb = {
       lastSessionActivityAt: "desc",
       id: "desc",
     })
-    .migrate(2, {
+    .migrate(3, {
       1: (value, context) => {
         const { updatedAt, ...session } = value
         return {
           ...session,
           lastSessionActivityAt: typeof updatedAt === "number" ? updatedAt : context.now,
         }
+      },
+      2: (value) => {
+        const { models: _models, ...session } = value
+        return session
       },
     }),
 
