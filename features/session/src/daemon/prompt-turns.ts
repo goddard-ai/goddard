@@ -22,7 +22,11 @@ import type { SessionEventEmitter } from "./manager.ts"
 import type { ActiveSession, QueuedPromptEntry, SessionMemory } from "./session-memory.ts"
 import { resolveLatestStoredTurnSequence } from "./session-records.ts"
 import type { createSessionTitleRuntime } from "./session-titles-runtime.ts"
-import { appendSessionHistoryMessage, type ActiveTurnBuffer } from "./turn-history.ts"
+import {
+  appendSessionHistoryMessage,
+  isContextUsageUpdateMessage,
+  type ActiveTurnBuffer,
+} from "./turn-history.ts"
 
 type SessionId = DaemonSession["id"]
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
@@ -150,11 +154,18 @@ export function createPromptTurnFeature(input: {
       options.persistTurnMessage !== false
         ? input.activeTurns.appendTurnScopedMessage(active, message)
         : null
-    if (options.persistTurnMessage !== false) {
-      input.emitMessage(active.id, options.messageEvent ?? turnMessage ?? message)
+    const messageEvent = options.messageEvent ?? turnMessage
+    if (messageEvent) {
+      input.emitMessage(active.id, messageEvent)
       return
     }
-    input.emitMessage(active.id, options.messageEvent ?? message)
+
+    if (isContextUsageUpdateMessage(message)) {
+      input.emitMessage(active.id, message)
+      return
+    }
+
+    throw new Error("Session stream message is missing turn sequence metadata.")
   }
 
   function publishClientMessage(

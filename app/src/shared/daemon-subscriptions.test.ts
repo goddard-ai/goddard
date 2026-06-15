@@ -3,6 +3,19 @@ import { expect, test } from "bun:test"
 
 import { createDaemonSubscriptionCoordinator } from "./daemon-subscriptions.ts"
 
+const usageUpdate = {
+  jsonrpc: "2.0",
+  method: "session/update",
+  params: {
+    sessionId: "acp-session-1",
+    update: {
+      sessionUpdate: "usage_update",
+      size: 128_000,
+      used: 64_000,
+    },
+  },
+} satisfies SessionMessageEvent
+
 test("daemon subscription coordinator resets once before the first subscription and routes payloads", async () => {
   const calls: string[] = []
   const coordinator = createDaemonSubscriptionCoordinator({
@@ -33,7 +46,7 @@ test("daemon subscription coordinator resets once before the first subscription 
   coordinator.dispatchEvent({
     subscriptionId: "sub-1",
     name: "session.streamMessages",
-    payload: { jsonrpc: "2.0", method: "session/update", params: {} },
+    payload: usageUpdate,
   })
 
   unsubscribe()
@@ -44,7 +57,7 @@ test("daemon subscription coordinator resets once before the first subscription 
     "subscribe:7:sub-1:session.streamMessages",
     "unsubscribe:sub-1",
   ])
-  expect(received).toEqual([{ jsonrpc: "2.0", method: "session/update", params: {} }])
+  expect(received).toEqual([usageUpdate])
 })
 
 test("daemon subscription coordinator removes callbacks when subscribe fails", async () => {
@@ -73,7 +86,7 @@ test("daemon subscription coordinator removes callbacks when subscribe fails", a
   coordinator.dispatchEvent({
     subscriptionId: "sub-fail",
     name: "session.streamMessages",
-    payload: { jsonrpc: "2.0", method: "session/update", params: {} },
+    payload: usageUpdate,
   })
 })
 

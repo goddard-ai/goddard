@@ -585,8 +585,21 @@ export function sessionTurnMessageCoversSequence(
   return sequence >= message.sequenceStart && sequence <= message.sequence
 }
 
+/** Non-history ACP usage update emitted on the live message stream. */
+export type SessionUsageUpdateMessage = {
+  jsonrpc: "2.0"
+  method: typeof acp.CLIENT_METHODS.session_update
+  params: acp.SessionNotification & {
+    update: acp.SessionUpdate & {
+      sessionUpdate: "usage_update"
+      size: number
+      used: number
+    }
+  }
+}
+
 /** Stream payload emitted for one daemon-managed ACP session message. */
-export const SessionMessageEvent = z.custom<acp.AnyMessage | SessionTurnMessage>()
+export const SessionMessageEvent = z.custom<SessionUsageUpdateMessage | SessionTurnMessage>()
 
 export type SessionMessageEvent = z.infer<typeof SessionMessageEvent>
 

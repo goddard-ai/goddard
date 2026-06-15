@@ -8,6 +8,7 @@ import type {
   GetSessionHistoryResponse,
   SessionHistoryTurn,
   SessionTurnMessage,
+  SessionUsageUpdateMessage,
 } from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
 import { expect, test } from "bun:test"
@@ -197,7 +198,7 @@ function permissionResponseMessage() {
   } satisfies acp.AnyMessage
 }
 
-function usageUpdate(size: number, used: number) {
+function usageUpdate(size: number, used: number): SessionUsageUpdateMessage {
   return {
     jsonrpc: "2.0",
     method: acp.CLIENT_METHODS.session_update,
@@ -206,7 +207,7 @@ function usageUpdate(size: number, used: number) {
       update: {
         size,
         used,
-        sessionUpdate: "usage_update",
+        sessionUpdate: "usage_update" as const,
       },
     },
   } satisfies acp.AnyMessage

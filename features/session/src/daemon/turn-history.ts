@@ -4,7 +4,13 @@ import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/atten
 import * as acp from "acp-client/protocol"
 import { isObject } from "radashi"
 
-import type { DaemonSession, SessionHistoryTurn, SessionId, SessionTurnMessage } from "../schema.ts"
+import type {
+  DaemonSession,
+  SessionHistoryTurn,
+  SessionId,
+  SessionTurnMessage,
+  SessionUsageUpdateMessage,
+} from "../schema.ts"
 
 /** Stable request id used to identify one persisted prompt turn. */
 export type SessionTurnPromptRequestId = string | number
@@ -187,7 +193,9 @@ export function appendSessionHistoryMessage(
 }
 
 /** Returns true when one ACP message is a context usage update, including malformed payloads. */
-export function isContextUsageUpdateMessage(message: acp.AnyMessage) {
+export function isContextUsageUpdateMessage(
+  message: acp.AnyMessage,
+): message is SessionUsageUpdateMessage {
   if (
     !isObject(message) ||
     "method" in message === false ||
