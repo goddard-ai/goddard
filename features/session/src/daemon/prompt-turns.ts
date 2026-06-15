@@ -13,6 +13,7 @@ import type {
   DaemonSessionStatus,
   DaemonSessionTurnDraft,
   SessionLifecycleField,
+  SessionMessageEvent,
   SteerSessionResponse,
 } from "../schema.ts"
 import type { createActiveTurnStore } from "./active-turns.ts"
@@ -117,7 +118,7 @@ export function createPromptTurnFeature(input: {
   memory: SessionMemory
   log: DaemonLogService
   events: SessionEventEmitter
-  emitMessage: (id: SessionId, message: acp.AnyMessage) => void
+  emitMessage: (id: SessionId, message: SessionMessageEvent) => void
   activeTurns: ReturnType<typeof createActiveTurnStore>
   idleShutdown: ReturnType<typeof createIdleShutdownController>
   sessionTitles: ReturnType<typeof createSessionTitleRuntime>
@@ -142,12 +143,18 @@ export function createPromptTurnFeature(input: {
     message: acp.AnyMessage,
     options: {
       persistTurnMessage?: boolean
+      messageEvent?: SessionMessageEvent
     } = {},
   ) {
+    const turnMessage =
+      options.persistTurnMessage !== false
+        ? input.activeTurns.appendTurnScopedMessage(active, message)
+        : null
     if (options.persistTurnMessage !== false) {
-      input.activeTurns.appendTurnScopedMessage(active, message)
+      input.emitMessage(active.id, options.messageEvent ?? turnMessage ?? message)
+      return
     }
-    input.emitMessage(active.id, message)
+    input.emitMessage(active.id, options.messageEvent ?? message)
   }
 
   function publishClientMessage(
@@ -156,7 +163,7 @@ export function createPromptTurnFeature(input: {
     options: {
       updateStatus?: boolean
       persistTurnMessage?: boolean
-      onBeforePublish?: (message: acp.AnyMessage) => Promise<void> | void
+      onBeforePublish?: (message: acp.AnyMessage) => SessionMessageEvent | void
     } = {},
   ): void {
     if (options.updateStatus !== false) {
@@ -191,9 +198,10 @@ export function createPromptTurnFeature(input: {
       },
       active.logger,
     )
-    void options.onBeforePublish?.(message)
+    const messageEvent = options.onBeforePublish?.(message) ?? undefined
     publishSessionMessage(active, message, {
       persistTurnMessage: options.persistTurnMessage,
+      messageEvent,
     })
   }
 
@@ -411,9 +419,10 @@ export function createPromptTurnFeature(input: {
       )
       publishClientMessage(active, message, {
         persistTurnMessage: false,
-        onBeforePublish: async (resolvedMessage) => {
-          appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
+        onBeforePublish: (resolvedMessage) => {
+          const turnMessage = appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
           input.activeTurns.flushActiveTurnDraft(active, "start")
+          return turnMessage ?? undefined
         },
       })
       void completePrompt(active, nextPrompt, message)

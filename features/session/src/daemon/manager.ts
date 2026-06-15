@@ -59,6 +59,7 @@ import {
   type SessionLaunchPreviewResponse,
   type SessionLifecycleEvent,
   type SessionLifecycleField,
+  type SessionMessageEvent,
   type SessionsConfig,
   type SessionSubpackagesRequest,
   type SessionSubpackagesResponse,
@@ -113,6 +114,7 @@ import {
   getContextUsageFromMessage,
   getLatestAvailableCommands,
   getLatestContextUsage,
+  getSessionTurnMessagePayload,
   toSessionHistoryTurnFromActiveTurn,
   toSessionHistoryTurnFromDraft,
   toSessionHistoryTurnFromRecord,
@@ -745,7 +747,7 @@ export function createSessionManager(input: {
   db: SessionDb
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
-  emitMessage: (id: SessionId, message: acp.AnyMessage) => void
+  emitMessage: (id: SessionId, message: SessionMessageEvent) => void
   emitLifecycleEvent: (event: SessionLifecycleEvent) => void
   events: SessionEventEmitter
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
@@ -1080,8 +1082,10 @@ export function createSessionManager(input: {
                 (left: DaemonSessionTurn, right: DaemonSessionTurn) =>
                   left.sequence - right.sequence,
               )
-              .flatMap((turn: DaemonSessionTurn) => turn.messages),
-            ...(draftRecord?.messages ?? []),
+              .flatMap((turn: DaemonSessionTurn) =>
+                turn.messages.map(getSessionTurnMessagePayload),
+              ),
+            ...(draftRecord?.messages.map(getSessionTurnMessagePayload) ?? []),
           ],
         })
         if (titleBackfill) {

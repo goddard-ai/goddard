@@ -155,12 +155,16 @@ export function createActiveTurnStore(input: {
       return
     }
 
-    appendSessionHistoryMessage(activeTurn.messages, message)
+    const turnMessage = appendSessionHistoryMessage(activeTurn.messages, message)
+    if (!turnMessage) {
+      return null
+    }
     scheduleActiveTurnDraftFlush(
       active,
       shouldFlushTurnDraftImmediately(activeTurn, message) ? "boundary" : "stream",
       shouldFlushTurnDraftImmediately(activeTurn, message),
     )
+    return turnMessage
   }
 
   function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {

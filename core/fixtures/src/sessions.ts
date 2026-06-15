@@ -94,31 +94,43 @@ export function createGetSessionResponse(
 export function createSessionPromptMessage(input: {
   session: DaemonSession
   requestId?: string
+  sequence?: number
   text?: string
 }): SessionHistoryMessage {
+  const sequence = input.sequence ?? 0
   return {
-    jsonrpc: "2.0",
-    id: input.requestId ?? fixtureId("req", input.session.id),
-    method: "session/prompt",
-    params: {
-      prompt: [{ text: input.text ?? "Review the current fixture state.", type: "text" }],
-      sessionId: input.session.acpSessionId,
+    sequence,
+    sequenceStart: sequence,
+    message: {
+      jsonrpc: "2.0",
+      id: input.requestId ?? fixtureId("req", input.session.id),
+      method: "session/prompt",
+      params: {
+        prompt: [{ text: input.text ?? "Review the current fixture state.", type: "text" }],
+        sessionId: input.session.acpSessionId,
+      },
     },
   } satisfies SessionHistoryMessage
 }
 
 export function createSessionAgentChunkMessage(input: {
   session: DaemonSession
+  sequence?: number
   text?: string
 }): SessionHistoryMessage {
+  const sequence = input.sequence ?? 0
   return {
-    jsonrpc: "2.0",
-    method: "session/update",
-    params: {
-      sessionId: input.session.acpSessionId,
-      update: {
-        content: { text: input.text ?? "Fixture agent update.", type: "text" },
-        sessionUpdate: "agent_message_chunk",
+    sequence,
+    sequenceStart: sequence,
+    message: {
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: {
+        sessionId: input.session.acpSessionId,
+        update: {
+          content: { text: input.text ?? "Fixture agent update.", type: "text" },
+          sessionUpdate: "agent_message_chunk",
+        },
       },
     },
   } satisfies SessionHistoryMessage
@@ -127,25 +139,31 @@ export function createSessionAgentChunkMessage(input: {
 export function createSessionPermissionRequestMessage(input: {
   session: DaemonSession
   requestId?: string
+  sequence?: number
   toolCallId?: string
   title?: string
 }): SessionHistoryMessage {
+  const sequence = input.sequence ?? 0
   return {
-    jsonrpc: "2.0",
-    id: input.requestId ?? fixtureId("req", "permission"),
-    method: "session/request_permission",
-    params: {
-      options: [
-        { kind: "allow_once", name: "Allow once", optionId: "allow_once" },
-        { kind: "reject_once", name: "Reject", optionId: "reject" },
-      ],
-      sessionId: input.session.acpSessionId,
-      toolCall: {
-        kind: "edit",
-        locations: [{ line: 1, path: "app/src/lib/query.ts" }],
-        status: "pending",
-        title: input.title ?? "Edit fixture-backed state",
-        toolCallId: input.toolCallId ?? fixtureId("tool", "permission"),
+    sequence,
+    sequenceStart: sequence,
+    message: {
+      jsonrpc: "2.0",
+      id: input.requestId ?? fixtureId("req", "permission"),
+      method: "session/request_permission",
+      params: {
+        options: [
+          { kind: "allow_once", name: "Allow once", optionId: "allow_once" },
+          { kind: "reject_once", name: "Reject", optionId: "reject" },
+        ],
+        sessionId: input.session.acpSessionId,
+        toolCall: {
+          kind: "edit",
+          locations: [{ line: 1, path: "app/src/lib/query.ts" }],
+          status: "pending",
+          title: input.title ?? "Edit fixture-backed state",
+          toolCallId: input.toolCallId ?? fixtureId("tool", "permission"),
+        },
       },
     },
   } satisfies SessionHistoryMessage

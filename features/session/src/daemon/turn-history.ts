@@ -4,7 +4,7 @@ import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/atten
 import * as acp from "acp-client/protocol"
 import { isObject } from "radashi"
 
-import type { DaemonSession, SessionHistoryTurn, SessionId } from "../schema.ts"
+import type { DaemonSession, SessionHistoryTurn, SessionId, SessionTurnMessage } from "../schema.ts"
 
 /** Stable request id used to identify one persisted prompt turn. */
 export type SessionTurnPromptRequestId = string | number
@@ -15,7 +15,7 @@ export type ActiveTurnBuffer<TDraftId extends string = string> = {
   sequence: number
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
-  messages: acp.AnyMessage[]
+  messages: SessionTurnMessage[]
   inboxScope?: AttentionScope | null
   inboxHeadline?: AttentionHeadline | null
   flushTimer: ReturnType<typeof setTimeout> | null
@@ -31,7 +31,7 @@ export type SessionTurnDraftInput = {
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
   updatedAt: string
-  messages: acp.AnyMessage[]
+  messages: SessionTurnMessage[]
 }
 
 /** Durable completed-turn payload written into `sessionTurns`. */
@@ -46,7 +46,7 @@ export type CompletedSessionTurnInput = {
   stopReason: DaemonSession["stopReason"]
   inboxScope?: AttentionScope | null
   inboxHeadline?: AttentionHeadline | null
-  messages: acp.AnyMessage[]
+  messages: SessionTurnMessage[]
 }
 
 /** Stored turn shape shared by completed turns and in-progress turn projections. */
@@ -65,7 +65,7 @@ type SessionTurnDraftRecord = {
   sequence: number
   promptRequestId: SessionTurnPromptRequestId
   startedAt: string
-  messages: acp.AnyMessage[]
+  messages: SessionTurnMessage[]
   inboxScope?: AttentionScope | null
   inboxHeadline?: AttentionHeadline | null
 }
@@ -89,19 +89,25 @@ type StreamedTextChunkParts = {
   }
 }
 
+/** Extracts the raw ACP payload from a possibly sequenced turn message. */
+export function getSessionTurnMessagePayload(message: acp.AnyMessage | SessionTurnMessage) {
+  return isObject(message) && "message" in message ? message.message : message
+}
+
 /** Extracts one mergeable streamed text chunk from ACP session history. */
-function getStreamedTextChunkParts(message: acp.AnyMessage) {
+function getStreamedTextChunkParts(message: acp.AnyMessage | SessionTurnMessage) {
+  const payload = getSessionTurnMessagePayload(message)
   if (
-    !isObject(message) ||
-    "method" in message === false ||
-    message.method !== acp.CLIENT_METHODS.session_update
+    !isObject(payload) ||
+    "method" in payload === false ||
+    payload.method !== acp.CLIENT_METHODS.session_update
   ) {
     return null
   }
 
   const params =
-    "params" in message && isObject(message.params)
-      ? (message.params as Record<string, unknown>)
+    "params" in payload && isObject(payload.params)
+      ? (payload.params as Record<string, unknown>)
       : null
   if (!params) {
     return null
@@ -133,36 +139,51 @@ function getStreamedTextChunkParts(message: acp.AnyMessage) {
 }
 
 /** Appends one ACP history entry while folding adjacent streamed agent text chunks together. */
-export function appendSessionHistoryMessage(history: acp.AnyMessage[], message: acp.AnyMessage) {
+export function appendSessionHistoryMessage(
+  history: SessionTurnMessage[],
+  message: acp.AnyMessage,
+) {
   if (isContextUsageUpdateMessage(message)) {
-    return
+    return null
   }
 
   const previousChunk = history.length > 0 ? getStreamedTextChunkParts(history.at(-1)!) : null
   const nextChunk = getStreamedTextChunkParts(message)
+  const sequence = (history.at(-1)?.sequence ?? -1) + 1
+  const nextTurnMessage = {
+    sequence,
+    sequenceStart: sequence,
+    message,
+  } satisfies SessionTurnMessage
 
   if (
     previousChunk &&
     nextChunk &&
     previousChunk.update.sessionUpdate === nextChunk.update.sessionUpdate
   ) {
+    const previousMessage = history.at(-1)!
     history[history.length - 1] = {
-      ...message,
-      params: {
-        ...nextChunk.params,
-        update: {
-          ...nextChunk.update,
-          content: {
-            ...nextChunk.content,
-            text: `${previousChunk.content.text}${nextChunk.content.text}`,
+      ...previousMessage,
+      sequence,
+      message: {
+        ...message,
+        params: {
+          ...nextChunk.params,
+          update: {
+            ...nextChunk.update,
+            content: {
+              ...nextChunk.content,
+              text: `${previousChunk.content.text}${nextChunk.content.text}`,
+            },
           },
         },
       },
     }
-    return
+    return nextTurnMessage
   }
 
-  history.push(message)
+  history.push(nextTurnMessage)
+  return nextTurnMessage
 }
 
 /** Returns true when one ACP message is a context usage update, including malformed payloads. */
@@ -229,7 +250,7 @@ export function getLatestContextUsage(messages: readonly acp.AnyMessage[]) {
 
 /** Rebuilds one history stream using the daemon's chunk-coalescing persistence rules. */
 export function coalesceSessionHistoryMessages(messages: readonly acp.AnyMessage[]) {
-  const history: acp.AnyMessage[] = []
+  const history: SessionTurnMessage[] = []
 
   for (const message of messages) {
     appendSessionHistoryMessage(history, message)

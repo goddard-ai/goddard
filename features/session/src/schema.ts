@@ -163,7 +163,7 @@ export const DaemonSessionTurn = z.strictObject({
   stopReason: DaemonSessionStopReason.nullable().default(null),
   inboxScope: z.string().nullable().optional().default(null),
   inboxHeadline: z.string().nullable().optional().default(null),
-  messages: z.custom<acp.AnyMessage[]>(),
+  messages: z.custom<SessionTurnMessage[]>(),
 })
 
 export type DaemonSessionTurn = z.output<typeof DaemonSessionTurn> & {
@@ -180,7 +180,7 @@ export const DaemonSessionTurnDraft = z.strictObject({
   promptRequestId: DaemonSessionTurnPromptRequestId,
   startedAt: z.string(),
   updatedAt: z.string(),
-  messages: z.custom<acp.AnyMessage[]>(),
+  messages: z.custom<SessionTurnMessage[]>(),
 })
 
 export type DaemonSessionTurnDraft = z.output<typeof DaemonSessionTurnDraft> & {
@@ -684,7 +684,7 @@ export const SessionHistoryTurn = z.strictObject({
   stopReason: DaemonSessionStopReason.nullable(),
   inboxScope: z.string().nullable().optional().default(null),
   inboxHeadline: z.string().nullable().optional().default(null),
-  messages: z.custom<acp.AnyMessage[]>(),
+  messages: z.custom<SessionTurnMessage[]>(),
 })
 
 /** One persisted or in-progress prompt turn returned by the session history API. */
@@ -698,7 +698,7 @@ export interface SessionHistoryTurn {
   stopReason: z.output<typeof DaemonSessionStopReason> | null
   inboxScope: string | null
   inboxHeadline: string | null
-  messages: acp.AnyMessage[]
+  messages: SessionTurnMessage[]
 }
 
 /** One ACP message carried inside a session history turn. */
