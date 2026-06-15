@@ -1,1 +1,9 @@
-../dist/bin/workforce-tool.mjs
+#!/bin/sh
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+repo_dir="$(CDPATH= cd -- "$script_dir/../../.." && pwd)"
+bun_runtime="${GODDARD_BUN_RUNTIME:-bun}"
+if [ -z "${GODDARD_BUN_RUNTIME:-}" ] && [ -x "$repo_dir/node_modules/.bin/bun" ]; then
+  bun_runtime="$repo_dir/node_modules/.bin/bun"
+fi
+
+exec "$bun_runtime" run "$repo_dir/core/daemon/src/bin/workforce-tool.ts" "$@"
