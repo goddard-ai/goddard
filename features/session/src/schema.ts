@@ -560,10 +560,35 @@ export type CompleteSessionResponse = {
   session: DaemonSession
 }
 
-/** Stream payload emitted for one daemon-managed ACP session message. */
-export const SessionMessageEvent = z.custom<acp.AnyMessage>()
+/** One raw ACP message annotated with its stable sequence position inside a turn. */
+export const SessionTurnMessage = z.strictObject({
+  sequence: z.number().int().nonnegative(),
+  sequenceStart: z.number().int().nonnegative(),
+  message: z.custom<acp.AnyMessage>(),
+})
 
-export type SessionMessageEvent = z.infer<typeof SessionMessageEvent>
+/** One raw ACP message annotated with its stable sequence position inside a turn. */
+export interface SessionTurnMessage {
+  /** Highest raw message sequence covered by this payload. */
+  sequence: number
+  /** Lowest raw message sequence covered by this payload. */
+  sequenceStart: number
+  /** Original ACP message payload carried at this turn position. */
+  message: acp.AnyMessage
+}
+
+/** Returns true when a sequenced turn message covers one raw turn-message sequence. */
+export function sessionTurnMessageCoversSequence(
+  message: Pick<SessionTurnMessage, "sequence" | "sequenceStart">,
+  sequence: number,
+) {
+  return sequence >= message.sequenceStart && sequence <= message.sequence
+}
+
+/** Stream payload emitted for one daemon-managed ACP session message. */
+export const SessionMessageEvent = z.custom<acp.AnyMessage | SessionTurnMessage>()
+
+export type SessionMessageEvent = acp.AnyMessage | SessionTurnMessage
 
 /** Session record or runtime area affected by one app-wide lifecycle event. */
 export const SessionLifecycleField = z.enum([
