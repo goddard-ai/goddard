@@ -1,3 +1,4 @@
+import { $isListItemNode } from "@lexical/list"
 import {
   $getSelection,
   $isElementNode,
@@ -40,4 +41,24 @@ export function isSessionInputCaretAtPromptEnd() {
   }
 
   return focus.offset === focusNode.getChildrenSize() && !hasFollowingNode(focusNode)
+}
+
+export function isSessionInputCaretInsideList() {
+  const selection = $getSelection()
+
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+    return false
+  }
+
+  let currentNode: LexicalNode | null = selection.focus.getNode()
+
+  while (currentNode) {
+    if ($isListItemNode(currentNode)) {
+      return true
+    }
+
+    currentNode = currentNode.getParent()
+  }
+
+  return false
 }

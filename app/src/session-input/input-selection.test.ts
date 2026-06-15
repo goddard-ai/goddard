@@ -1,25 +1,39 @@
+import { $createListItemNode, $createListNode, ListItemNode, ListNode } from "@lexical/list"
 import { expect, test } from "bun:test"
 import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from "lexical"
 
-import { isSessionInputCaretAtPromptEnd } from "./input-selection.ts"
+import { isSessionInputCaretAtPromptEnd, isSessionInputCaretInsideList } from "./input-selection.ts"
 
-function readPromptEndSelection(build: () => void) {
+function readPromptSelection<T>(build: () => void, read: () => T): T {
   const editor = createEditor({
+    nodes: [ListNode, ListItemNode],
     onError(error) {
       throw error
     },
   })
-  let isAtEnd = false
+  let result: T | undefined
 
   editor.update(
     () => {
       build()
-      isAtEnd = isSessionInputCaretAtPromptEnd()
+      result = read()
     },
     { discrete: true },
   )
 
-  return isAtEnd
+  if (result === undefined) {
+    throw new Error("Expected prompt selection read to run.")
+  }
+
+  return result
+}
+
+function readPromptEndSelection(build: () => void) {
+  return readPromptSelection(build, isSessionInputCaretAtPromptEnd)
+}
+
+function readPromptListSelection(build: () => void) {
+  return readPromptSelection(build, isSessionInputCaretInsideList)
 }
 
 test("session input caret end detection accepts a collapsed caret at the prompt end", () => {
@@ -55,6 +69,32 @@ test("session input caret end detection rejects a collapsed caret before later b
       $getRoot().append(firstParagraph)
       $getRoot().append($createParagraphNode())
       firstText.select(5, 5)
+    }),
+  ).toBe(false)
+})
+
+test("session input list detection accepts a collapsed caret inside a list item", () => {
+  expect(
+    readPromptListSelection(() => {
+      const list = $createListNode("bullet")
+      const item = $createListItemNode()
+      const text = $createTextNode("item")
+      item.append(text)
+      list.append(item)
+      $getRoot().append(list)
+      text.select(4, 4)
+    }),
+  ).toBe(true)
+})
+
+test("session input list detection rejects a collapsed caret outside a list", () => {
+  expect(
+    readPromptListSelection(() => {
+      const paragraph = $createParagraphNode()
+      const text = $createTextNode("plain")
+      paragraph.append(text)
+      $getRoot().append(paragraph)
+      text.select(5, 5)
     }),
   ).toBe(false)
 })

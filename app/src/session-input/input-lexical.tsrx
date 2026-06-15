@@ -29,7 +29,7 @@ import {
   getSessionInputMenuAnchorPosition,
   type SessionInputMenuState,
 } from "./input-menu-detection.ts"
-import { isSessionInputCaretAtPromptEnd } from "./input-selection.ts"
+import { isSessionInputCaretAtPromptEnd, isSessionInputCaretInsideList } from "./input-selection.ts"
 import type { SessionInputPromptBlocks } from "./input.tsrx"
 
 const sessionInputMarkdownTransformers = [UNORDERED_LIST, ORDERED_LIST]
@@ -121,8 +121,10 @@ export function SessionInputPlugins(props: {
           return false
         }
 
-        if (!event?.metaKey && !event?.ctrlKey && !isSessionInputCaretAtPromptEnd()) {
-          return false
+        if (!event?.metaKey && !event?.ctrlKey) {
+          if (isSessionInputCaretInsideList() || !isSessionInputCaretAtPromptEnd()) {
+            return false
+          }
         }
 
         event?.preventDefault()
