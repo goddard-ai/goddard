@@ -588,7 +588,7 @@ export function sessionTurnMessageCoversSequence(
 /** Stream payload emitted for one daemon-managed ACP session message. */
 export const SessionMessageEvent = z.custom<acp.AnyMessage | SessionTurnMessage>()
 
-export type SessionMessageEvent = acp.AnyMessage | SessionTurnMessage
+export type SessionMessageEvent = z.infer<typeof SessionMessageEvent>
 
 /** Session record or runtime area affected by one app-wide lifecycle event. */
 export const SessionLifecycleField = z.enum([
