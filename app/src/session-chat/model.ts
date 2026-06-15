@@ -4,6 +4,7 @@ import type {
   SessionHistoryTurn,
   SessionMessageEvent,
   SessionTurnMessage,
+  SessionUsageUpdateMessage,
 } from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
 import { castDraft } from "immer"
@@ -202,29 +203,14 @@ function isTextAgentChunk(message: acp.AnyMessage) {
 }
 
 function isSessionTurnMessage(message: SessionMessageEvent): message is SessionTurnMessage {
-  return (
-    isObject(message) &&
-    typeof (message as Record<string, unknown>).sequence === "number" &&
-    typeof (message as Record<string, unknown>).sequenceStart === "number" &&
-    "message" in message
-  )
+  return "message" in message
 }
 
-function unwrapSessionMessageEvent(message: SessionMessageEvent) {
-  if (isSessionTurnMessage(message)) {
-    return {
-      message: message.message,
-      range: {
-        sequence: message.sequence,
-        sequenceStart: message.sequenceStart,
-      },
-    }
-  }
-
+function getSessionTurnMessageRange(message: SessionTurnMessage) {
   return {
-    message,
-    range: null,
-  }
+    sequence: message.sequence,
+    sequenceStart: message.sequenceStart,
+  } satisfies SessionTurnMessageRange
 }
 
 function messageRangeCoversSequence(range: SessionTurnMessageRange, sequence: number) {
@@ -295,20 +281,10 @@ function parsePlanEvent(update: acp.SessionUpdate) {
   return update.sessionUpdate === "plan" ? update : null
 }
 
-function parseContextUsage(update: acp.SessionUpdate): SessionChatContextUsage | null {
-  if (
-    update.sessionUpdate !== "usage_update" ||
-    !Number.isFinite(update.size) ||
-    !Number.isFinite(update.used) ||
-    update.size <= 0 ||
-    update.used < 0
-  ) {
-    return null
-  }
-
+function getContextUsageFromUsageUpdate(message: SessionUsageUpdateMessage) {
   return {
-    size: update.size,
-    used: update.used,
+    size: message.params.update.size,
+    used: message.params.update.used,
   }
 }
 
@@ -361,11 +337,6 @@ function shouldShowThinkingLabel(input: {
     input.permissionRequest === null &&
     !hasActiveToolCall(input.activeTurn)
   )
-}
-
-function getMessageContextUsage(message: acp.AnyMessage) {
-  const update = getSessionUpdate(message)
-  return update ? parseContextUsage(update) : null
 }
 
 function getPermissionRequest(message: acp.AnyMessage) {
@@ -711,45 +682,45 @@ export class SessionChat extends Sigma<SessionChatState> {
     }
   }
   /** Applies one daemon-published ACP message through the live chunk batching queue. */
-  receiveMessage(message: SessionMessageEvent) {
+  receiveMessage(event: SessionMessageEvent) {
     const receivedAt = new Date().toISOString()
-    const unwrapped = unwrapSessionMessageEvent(message)
-    const contextUsage = getMessageContextUsage(unwrapped.message)
 
-    if (contextUsage) {
-      this.session.contextUsage = contextUsage
+    if (!isSessionTurnMessage(event)) {
+      this.session.contextUsage = getContextUsageFromUsageUpdate(event)
       return
     }
 
-    if (!unwrapped.range) {
-      throw new Error("Session turn message is missing sequence metadata.")
+    const queuedMessage = {
+      message: event.message,
+      range: getSessionTurnMessageRange(event),
+      receivedAt,
     }
 
-    if (isTextAgentChunk(unwrapped.message)) {
-      this.#queuedChunks.push({ ...unwrapped, receivedAt })
+    if (isTextAgentChunk(event.message)) {
+      this.#queuedChunks.push(queuedMessage)
       this.#scheduleQueuedChunkFlush()
       return
     }
 
-    this.#applyMessages([...this.#takeQueuedChunks(), { ...unwrapped, receivedAt }])
+    this.#applyMessages([...this.#takeQueuedChunks(), queuedMessage])
   }
 
   /** Applies one ACP message immediately, bypassing live chunk batching. */
-  applyMessageNow(message: SessionMessageEvent, options: ApplySessionChatMessageOptions = {}) {
+  applyMessageNow(event: SessionMessageEvent, options: ApplySessionChatMessageOptions = {}) {
     const receivedAt = options.receivedAt ?? new Date().toISOString()
-    const unwrapped = unwrapSessionMessageEvent(message)
-    const contextUsage = getMessageContextUsage(unwrapped.message)
 
-    if (contextUsage) {
-      this.session.contextUsage = contextUsage
+    if (!isSessionTurnMessage(event)) {
+      this.session.contextUsage = getContextUsageFromUsageUpdate(event)
       return
     }
 
-    if (!unwrapped.range) {
-      throw new Error("Session turn message is missing sequence metadata.")
-    }
-
-    this.#applyMessages([{ ...unwrapped, receivedAt }])
+    this.#applyMessages([
+      {
+        message: event.message,
+        range: getSessionTurnMessageRange(event),
+        receivedAt,
+      },
+    ])
   }
 
   /** Flushes queued live text chunks into chat state. */
