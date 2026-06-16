@@ -14,11 +14,13 @@ import {
   type DaemonSessionDiagnosticEvent,
   type GetSessionHistoryResponse,
   type SessionId,
+  type SessionTurnMessage,
 } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
 import { kind, kindstore } from "kindstore"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
+import { getSessionTurnMessagePayload } from "../../../features/session/src/daemon/turn-history.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -51,7 +53,7 @@ function findSessionPromptRequest(history: GetSessionHistoryResponse) {
     .map((message) =>
       matchAcpRequest<{
         prompt?: Array<{ type?: string; text?: string }>
-      }>(message, "session/prompt"),
+      }>(getSessionTurnMessagePayload(message), "session/prompt"),
     )
     .find((request) => request?.prompt)
 }
@@ -132,13 +134,11 @@ test("daemon store repairs duplicate session turn rows before adding unique cons
     stopReason: "end_turn",
     inboxScope: null,
     inboxHeadline: null,
-    messages: [
-      {
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: { value: "retained" },
-      },
-    ],
+    messages: sessionTurnMessages({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: { value: "retained" },
+    }),
   })
   legacyDb.sessionTurns.create({
     sessionId,
@@ -664,8 +664,10 @@ test("daemon stores usage updates on the session instead of durable turn history
     history.turns.some((turn) =>
       turn.messages.some((message) => {
         return (
-          matchAcpRequest<{ update?: { sessionUpdate?: string } }>(message, "session/update")
-            ?.update?.sessionUpdate === "usage_update"
+          matchAcpRequest<{ update?: { sessionUpdate?: string } }>(
+            getSessionTurnMessagePayload(message),
+            "session/update",
+          )?.update?.sessionUpdate === "usage_update"
         )
       }),
     ),
@@ -822,13 +824,11 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     stopReason: "end_turn",
     inboxScope: null,
     inboxHeadline: null,
-    messages: [
-      {
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: { value: "persisted" },
-      },
-    ],
+    messages: sessionTurnMessages({
+      jsonrpc: "2.0",
+      method: "session/update",
+      params: { value: "persisted" },
+    }),
   })
   db.sessionDiagnostics.create({
     sessionId,
@@ -904,7 +904,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     promptRequestId: "prompt-draft-1",
     startedAt: "2026-04-14T00:00:00.000Z",
     updatedAt: "2026-04-14T00:00:00.050Z",
-    messages: [
+    messages: sessionTurnMessages(
       buildPromptMessage(acpSessionId, "prompt-draft-1", "Continue the review."),
       {
         jsonrpc: "2.0",
@@ -917,7 +917,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
           },
         },
       },
-    ],
+    ),
   })
   db.sessionDiagnostics.create({
     sessionId,
@@ -2888,6 +2888,14 @@ function buildPromptMessage(sessionId: string, id: string, text: string) {
       prompt: [{ type: "text", text }],
     },
   }
+}
+
+function sessionTurnMessages(...messages: AcpMessage[]): SessionTurnMessage[] {
+  return messages.map((message, sequence) => ({
+    sequence,
+    sequenceStart: sequence,
+    message,
+  }))
 }
 
 async function listSessionIds(client: DaemonIpcClient) {

@@ -7,7 +7,11 @@ import {
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
-import type { DaemonSession, SessionHistoryTurn } from "@goddard-ai/session/schema"
+import type {
+  DaemonSession,
+  SessionHistoryTurn,
+  SessionTurnMessage,
+} from "@goddard-ai/session/schema"
 
 import { openComposedDaemonStore, type ComposedDaemonStore } from "../plugins.ts"
 
@@ -31,11 +35,14 @@ type SessionTurnSeed = Parameters<ComposedDaemonStore["sessionTurns"]["put"]>[1]
   timestamp: number
 }
 
+type SessionTurnSeedMessage = SessionTurnMessage | SessionTurnMessage["message"]
+
 type SessionTurnSeedOverrides = Pick<
   SessionTurnSeed,
-  "id" | "messages" | "sequence" | "sessionId" | "timestamp" | "turnId"
-> &
-  Partial<
+  "id" | "sequence" | "sessionId" | "timestamp" | "turnId"
+> & {
+  messages: SessionTurnSeedMessage[]
+} & Partial<
     Omit<SessionTurnSeed, "id" | "messages" | "sequence" | "sessionId" | "timestamp" | "turnId">
   >
 
@@ -178,6 +185,8 @@ function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: strin
 }
 
 function createTurnSeed(overrides: SessionTurnSeedOverrides): SessionTurnSeed {
+  const { messages, ...input } = overrides
+
   return {
     promptRequestId: overrides.turnId.replace(/^turn_/, "prompt_"),
     startedAt: new Date(overrides.timestamp - 30_000).toISOString(),
@@ -186,8 +195,33 @@ function createTurnSeed(overrides: SessionTurnSeedOverrides): SessionTurnSeed {
     stopReason: "end_turn",
     inboxScope: null,
     inboxHeadline: null,
-    ...overrides,
+    ...input,
+    messages: normalizeSessionTurnMessages(messages),
   }
+}
+
+function normalizeSessionTurnMessages(messages: SessionTurnSeedMessage[]): SessionTurnMessage[] {
+  return messages.map((message, sequence) => {
+    if (isSessionTurnMessage(message)) {
+      return message
+    }
+
+    return {
+      sequence,
+      sequenceStart: sequence,
+      message,
+    }
+  })
+}
+
+function isSessionTurnMessage(message: SessionTurnSeedMessage): message is SessionTurnMessage {
+  return (
+    typeof message === "object" &&
+    message !== null &&
+    "message" in message &&
+    "sequence" in message &&
+    "sequenceStart" in message
+  )
 }
 
 function createPullRequestSeed(overrides: PullRequestSeedOverrides): PullRequestSeed {
