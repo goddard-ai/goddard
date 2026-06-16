@@ -127,6 +127,10 @@ function isRequestOrNotificationMessage(
   return "method" in message
 }
 
+function isSessionChatMessage(message: unknown): message is acp.AnyMessage {
+  return isObject(message)
+}
+
 function isRequestMessage(
   message: acp.AnyMessage,
 ): message is Extract<acp.AnyMessage, { method: string; id: MessageId | null }> {
@@ -861,6 +865,10 @@ export class SessionChat extends Sigma<SessionChatState> {
       }
     } else {
       for (const message of turn.messages) {
+        if (!isSessionChatMessage(message.message)) {
+          continue
+        }
+
         this.#insertTurnMessage(existingTurn, message.message, {
           sequence: message.sequence,
           sequenceStart: message.sequenceStart,
@@ -929,17 +937,28 @@ export class SessionChat extends Sigma<SessionChatState> {
   ) {
     const events: SessionChatTurnEvent[] = []
     const hasRawMessages = "messageRanges" in turn
+    const entries = hasRawMessages
+      ? turn.messages.flatMap((message, index) => {
+          const range = turn.messageRanges[index]
+          return isSessionChatMessage(message) && range ? [{ message, range }] : []
+        })
+      : turn.messages.flatMap((message) =>
+          isSessionChatMessage(message.message)
+            ? [
+                {
+                  message: message.message,
+                  range: {
+                    sequence: message.sequence,
+                    sequenceStart: message.sequenceStart,
+                  },
+                },
+              ]
+            : [],
+        )
     const normalized = {
       ...turn,
-      messageRanges: hasRawMessages
-        ? [...turn.messageRanges]
-        : turn.messages.map((message) => ({
-            sequence: message.sequence,
-            sequenceStart: message.sequenceStart,
-          })),
-      messages: hasRawMessages
-        ? [...turn.messages]
-        : turn.messages.map((message) => message.message),
+      messageRanges: entries.map((entry) => entry.range),
+      messages: entries.map((entry) => entry.message),
       events,
       source,
       status: resolveTurnStatus(turn),

@@ -286,6 +286,24 @@ test("SessionChat preserves history turn order and normalizes statuses", () => {
   })
 })
 
+test("SessionChat ignores history entries with missing ACP messages", () => {
+  const malformedMessage = {
+    sequence: 0,
+    sequenceStart: 0,
+    message: undefined,
+  } as unknown as SessionTurnMessage
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        messages: [malformedMessage, turnMessage(promptMessage(), 1)],
+      }),
+    ]),
+  })
+
+  expect(chat.turns[0].messages).toEqual([promptMessage()])
+  expect(chat.turns[0].messageRanges).toEqual([{ sequence: 1, sequenceStart: 1 }])
+})
+
 test("SessionChat prepends older history pages and advances pagination", () => {
   const chat = createChat({
     history: createHistory(
