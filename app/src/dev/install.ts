@@ -30,6 +30,25 @@ type LaunchableStateDeps = {
 
 let activeInstallCleanup: (() => void) | null = null
 
+function isLaunchableStateShortcut(event: KeyboardEvent) {
+  return (
+    event.key.toLowerCase() === "l" &&
+    event.altKey &&
+    event.shiftKey &&
+    (event.metaKey || event.ctrlKey) &&
+    !event.repeat
+  )
+}
+
+function focusLaunchableStateLauncher() {
+  requestAnimationFrame(() => {
+    document
+      .querySelector<HTMLElement>("[data-state-launcher-host]")
+      ?.shadowRoot?.querySelector<HTMLInputElement>('input[type="search"]')
+      ?.focus()
+  })
+}
+
 function composeCleanups(cleanups: LaunchCleanup[]) {
   return async () => {
     for (let index = cleanups.length - 1; index >= 0; index -= 1) {
@@ -138,11 +157,25 @@ export function installLaunchableStates(deps: LaunchableStateDeps) {
   const commands = createLaunchableStates(deps)
   const unregisterStates = registerLaunchableState(commands)
   const launcher = mountStateLauncher({
+    initiallyOpen: false,
     position: "bottom-right",
     title: "App states",
   })
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (!isLaunchableStateShortcut(event)) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+    launcher.toggle()
+    focusLaunchableStateLauncher()
+  }
+
+  document.addEventListener("keydown", handleKeyDown, true)
 
   activeInstallCleanup = () => {
+    document.removeEventListener("keydown", handleKeyDown, true)
     unregisterStates()
     launcher.unmount()
     activeInstallCleanup = null
