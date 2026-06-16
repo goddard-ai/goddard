@@ -360,7 +360,7 @@ test(
   { timeout: 10000 },
 )
 
-test("daemon run defaults to concise pretty terminal logs", async () => {
+test("daemon run defaults to compact terminal logs", async () => {
   const { output, result: exitCode } = await captureStdout(() =>
     runDaemon({
       baseUrl: "",

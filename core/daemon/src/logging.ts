@@ -19,7 +19,7 @@ const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 export type LogWriter = (line: string) => void
 
 /** Supported terminal output modes for daemon logs. */
-export type LogMode = "json" | "pretty" | "verbose"
+export type LogMode = "compact" | "json" | "verbose"
 
 /** Shared daemon logger surface used across daemon runtime code. */
 export type DaemonLogger = {
@@ -47,7 +47,7 @@ type LogEntry = {
   event: string
 } & Record<string, unknown>
 
-let logMode: LogMode = "pretty"
+let logMode: LogMode = "compact"
 let logWriter: LogWriter = defaultWriteLine
 
 /** Configures the shared daemon log writer and output mode for the current process. */
@@ -169,8 +169,8 @@ function readPluginLogContexts() {
 }
 
 function formatLogEntry(entry: LogEntry, mode: LogMode): string {
-  if (mode === "pretty") {
-    return formatPrettyLogEntry(entry)
+  if (mode === "compact") {
+    return formatCompactLogEntry(entry)
   }
 
   if (mode === "verbose") {
@@ -180,7 +180,7 @@ function formatLogEntry(entry: LogEntry, mode: LogMode): string {
   return JSON.stringify(entry)
 }
 
-function formatPrettyLogEntry(entry: LogEntry): string {
+function formatCompactLogEntry(entry: LogEntry): string {
   const fields = Object.entries(entry).filter(([key]) => isMetadataField(key) === false)
   const inlineFields = fields.flatMap(([key, value]) => formatInlineFields(key, value))
 

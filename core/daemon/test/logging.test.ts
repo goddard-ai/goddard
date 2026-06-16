@@ -9,10 +9,10 @@ function stripAnsi(value: string): string {
   return value.replace(ansiColorPattern, "")
 }
 
-test("pretty logging flattens plain object fields one level", () => {
+test("compact logging flattens plain object fields one level", () => {
   const output: string[] = []
   const restoreLogging = configureLogging({
-    mode: "pretty",
+    mode: "compact",
     writeLine: (line) => {
       output.push(line)
     },

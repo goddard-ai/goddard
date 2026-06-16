@@ -53,7 +53,7 @@ function resolveLogMode(options: { json: boolean; verbose: boolean }) {
     return "json" as const
   }
 
-  return "pretty" as const
+  return "compact" as const
 }
 
 /** Persists the selected daemon data profile before runtime modules initialize the store. */

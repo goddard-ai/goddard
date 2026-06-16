@@ -34,7 +34,7 @@ export type RunInput = {
 export async function runDaemon(input: RunInput): Promise<number> {
   const logWriter = await createDaemonLogWriter()
   const restoreLogging = configureLogging({
-    mode: input.logMode ?? "pretty",
+    mode: input.logMode ?? "compact",
     writeLine: logWriter.writeLine,
   })
   const logger = createLogger()
