@@ -1,12 +1,12 @@
 /** Runtime context and output helpers for CLI-compatible command execution. */
-import { createCliGitHost } from "./git.ts"
+import { createReviewSyncGitHost } from "./git.ts"
 import type { ReviewSyncResult, RuntimeContext } from "./types.ts"
 
 /** Normalizes the command cwd into the context passed through internal operations. */
 export function createRuntimeContext(cwd: string) {
   return {
     cwd,
-    gitHost: createCliGitHost(),
+    gitHost: createReviewSyncGitHost(),
   } satisfies RuntimeContext
 }
 
