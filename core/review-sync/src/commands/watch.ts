@@ -1373,15 +1373,31 @@ function resolveWatchDebounceMs(input: WatchReviewSyncInput) {
   return input.watchDebounceMs ?? defaultWatchDebounceMs
 }
 
-async function notifyWatchReady(input: WatchReviewSyncInput) {
-  if (!input.onWatchReady) {
-    return
+type WatchEventQueue = ReturnType<typeof createWatchEventQueue>
+
+/** Waits until filesystem events have been quiet long enough for Git to settle. */
+async function waitForWatchQuietPeriod(
+  events: WatchEventQueue,
+  signal: AbortSignal | undefined,
+  watchDebounceMs: number,
+) {
+  while (!isAbortSignalAborted(signal)) {
+    const changed = await events.waitForEventOrTimeout(watchDebounceMs)
+    if (!changed) {
+      return true
+    }
   }
 
-  await new Promise((resolvePromise) => {
-    setTimeout(resolvePromise, resolveWatchDebounceMs(input))
-  })
-  await input.onWatchReady()
+  return false
+}
+
+function resolveWatchDebounceMs(input: WatchReviewSyncInput) {
+  return input.watchDebounceMs ?? defaultWatchDebounceMs
+}
+
+/** Checks an abort signal without causing TypeScript to over-narrow loop state. */
+function isAbortSignalAborted(signal: AbortSignal | undefined) {
+  return signal?.aborted === true
 }
 
 /** Translates process termination signals into conventional command exit codes. */
