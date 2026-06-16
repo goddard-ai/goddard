@@ -5,13 +5,42 @@ import { access, realpath } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 
 import { UserError } from "./errors.ts"
-import type {
-  CommandResult,
-  GitHost,
-  GitRunOptions,
-  RuntimeContext,
-  WorktreeInfo,
-} from "./types.ts"
+import type { RuntimeContext } from "./types.ts"
+
+/** Parsed Git worktree-list entry used for branch ownership validation. */
+export type WorktreeInfo = {
+  path: string
+  branch: string | null
+}
+
+/** Captured subprocess result used by Git command wrappers. */
+export type CommandResult = {
+  status: number
+  stdout: string
+  stderr: string
+}
+
+/** Options for running a raw Git command through the configured host. */
+export type GitRunOptions = {
+  allowFailure?: boolean
+  stdin?: string | "ignore"
+  env?: Record<string, string | undefined>
+}
+
+/** Internal Git access boundary used by review-sync operations. */
+export type GitHost = {
+  run: (cwd: string, args: string[], options?: GitRunOptions) => Promise<CommandResult>
+  resolveRequiredRepoRoot: (cwd: string) => Promise<string>
+  resolveRequiredGitCommonDir: (cwd: string) => Promise<string>
+  resolveRequiredGitDir: (cwd: string) => Promise<string>
+  resolveCurrentBranch: (cwd: string) => Promise<string | null>
+  branchExists: (cwd: string, branch: string) => Promise<boolean>
+  isWorktreeClean: (cwd: string) => Promise<boolean>
+  resolveRef: (cwd: string, refName: string) => Promise<string | null>
+  updateRef: (cwd: string, refName: string, oid: string) => Promise<void>
+  deleteRef: (cwd: string, refName: string) => Promise<void>
+  listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
+}
 
 /** Creates the default Git host backed by Git CLI subprocesses. */
 export function createCliGitHost() {
