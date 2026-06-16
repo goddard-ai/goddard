@@ -152,6 +152,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
   const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events, emitVerbose)
+  await input.onWatchReady?.()
   let keepWatching = true
   let watchError: unknown
 
