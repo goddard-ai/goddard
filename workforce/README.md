@@ -1,5 +1,8 @@
 # Goddard Workforce
 
+Experimental: this package is an unstable operator CLI for workforce runtimes.
+Its tests are temporarily disabled while the package remains experimental.
+
 Goddard Workforce is Goddard's repository-scoped multi-agent orchestration system.
 
 It gives one repository:

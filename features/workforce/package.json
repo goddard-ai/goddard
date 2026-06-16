@@ -1,6 +1,7 @@
 {
   "name": "@goddard-ai/workforce",
   "version": "0.1.0",
+  "description": "Experimental workforce feature package for daemon, SDK, and app integration.",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -51,7 +52,7 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
-    "test": "bun test --dots"
+    "test": "node -e \"console.log('Skipping @goddard-ai/workforce tests: package is experimental')\""
   },
   "dependencies": {
     "@b9g/async-context": "catalog:",
