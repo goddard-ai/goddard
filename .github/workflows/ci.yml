@@ -134,4 +134,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: pnpm run test
+        run: pnpm run codegen && pnpm run test
