@@ -1,5 +1,6 @@
 import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
 import { kind } from "kindstore"
+import { isObject } from "radashi"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import {
@@ -28,6 +29,7 @@ import {
   type SessionId,
   type SessionLifecycleEvent,
   type SessionMessageEvent,
+  type SessionTurnMessage,
 } from "./schema.ts"
 
 type RoutedSessionMessageEvent = {
@@ -88,7 +90,13 @@ const sessionDb = {
         sequence: "desc",
       },
       { unique: true },
-    ),
+    )
+    .migrate(2, {
+      1: (turn) => ({
+        ...turn,
+        messages: sanitizeSessionTurnMessages(turn.messages),
+      }),
+    }),
 
   sessionTurnDrafts: kind("drf", DaemonSessionTurnDraft)
     .index("sessionId", { type: "text", unique: true })
@@ -96,6 +104,12 @@ const sessionDb = {
     .multi("sessionId_sequence", {
       sessionId: "asc",
       sequence: "desc",
+    })
+    .migrate(2, {
+      1: (draft) => ({
+        ...draft,
+        messages: sanitizeSessionTurnMessages(draft.messages),
+      }),
     }),
 
   sessionDiagnostics: kind("dgn", DaemonSessionDiagnostics).index("sessionId", {
@@ -118,6 +132,40 @@ type SessionTurnDraftRetentionRecord = {
   startedAt: string
   updatedAt: string
   messages: readonly unknown[]
+}
+
+function sanitizeSessionTurnMessages(messages: unknown) {
+  if (!Array.isArray(messages)) {
+    return []
+  }
+
+  return messages.flatMap((message): SessionTurnMessage[] => {
+    if (!isObject(message)) {
+      return []
+    }
+
+    const record = message as Record<string, unknown>
+
+    if (
+      !Number.isInteger(record.sequence) ||
+      !Number.isInteger(record.sequenceStart) ||
+      !isObject(record.message)
+    ) {
+      return []
+    }
+
+    const sequence = record.sequence as number
+    const sequenceStart = record.sequenceStart as number
+    const payload = record.message as SessionTurnMessage["message"]
+
+    return [
+      {
+        sequence,
+        sequenceStart,
+        message: payload,
+      } satisfies SessionTurnMessage,
+    ]
+  })
 }
 
 function compareSessionTurnRetention(

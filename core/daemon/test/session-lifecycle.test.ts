@@ -94,6 +94,11 @@ test("daemon store repairs duplicate session turn rows before adding unique cons
   cleanup.push(() => removeTemporaryPath(storeDir))
   const filename = join(storeDir, "goddard.db")
   const sessionId = "ses_prepare_constraints" as SessionId
+  const malformedTurnMessage = {
+    sequence: 1,
+    sequenceStart: 1,
+    message: undefined,
+  } as unknown as SessionTurnMessage
   const legacyDb = kindstore({
     filename,
     schema: {
@@ -138,11 +143,14 @@ test("daemon store repairs duplicate session turn rows before adding unique cons
     stopReason: "end_turn",
     inboxScope: null,
     inboxHeadline: null,
-    messages: sessionTurnMessages({
-      jsonrpc: "2.0",
-      method: "session/update",
-      params: { value: "retained" },
-    }),
+    messages: [
+      ...sessionTurnMessages({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { value: "retained" },
+      }),
+      malformedTurnMessage,
+    ],
   })
   legacyDb.sessionTurns.create({
     sessionId,
@@ -173,26 +181,40 @@ test("daemon store repairs duplicate session turn rows before adding unique cons
     promptRequestId: "prompt-draft-new",
     startedAt: "2026-04-14T00:00:02.000Z",
     updatedAt: "2026-04-14T00:00:03.000Z",
-    messages: [],
+    messages: [
+      ...sessionTurnMessages({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { value: "draft-retained" },
+      }),
+      malformedTurnMessage,
+    ],
   })
   legacyDb.close()
 
   const migratedDb = resetComposedDaemonStore({ filename })
   try {
-    expect(
-      migratedDb.sessionTurns.findMany({
-        where: { sessionId },
-        orderBy: { sequence: "asc" },
-      }),
-    ).toMatchObject([
+    const migratedTurns = migratedDb.sessionTurns.findMany({
+      where: { sessionId },
+      orderBy: { sequence: "asc" },
+    })
+    const migratedDrafts = migratedDb.sessionTurnDrafts.findMany({
+      where: { sessionId },
+    })
+
+    expect(migratedTurns).toMatchObject([
       { turnId: "turn-sequence-1-complete", sequence: 1 },
       { turnId: "turn-sequence-2", sequence: 2 },
     ])
-    expect(
-      migratedDb.sessionTurnDrafts.findMany({
-        where: { sessionId },
-      }),
-    ).toMatchObject([{ turnId: "draft-new", sequence: 2 }])
+    expect(migratedTurns[0].messages).toHaveLength(1)
+    expect(migratedTurns[0].messages[0]?.message).toMatchObject({
+      params: { value: "retained" },
+    })
+    expect(migratedDrafts).toMatchObject([{ turnId: "draft-new", sequence: 2 }])
+    expect(migratedDrafts[0].messages).toHaveLength(1)
+    expect(migratedDrafts[0].messages[0]?.message).toMatchObject({
+      params: { value: "draft-retained" },
+    })
     expect(() =>
       migratedDb.sessionTurns.create({
         sessionId,
