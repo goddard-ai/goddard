@@ -2,9 +2,16 @@ import { rmSync } from "node:fs"
 import * as fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { getErrorMessage } from "radashi"
 
 import { removeTemporaryPath } from "../../test-support/windows-fixtures.ts"
-import { sprintStatePath, type SprintBranchState } from "../src"
+import {
+  GitCommandError,
+  SprintInferenceError,
+  sprintStatePath,
+  type SprintBranchState,
+} from "../src"
+import { main as runSprintBranchMain } from "../src/main"
 
 const cliPath = path.join(import.meta.dir, "..", "src", "main.ts")
 const tempRepos: string[] = []
@@ -151,14 +158,59 @@ export async function workingTreePorcelain(repo: string) {
 }
 
 export async function runCli(cwd: string, args: string[]) {
-  const subprocess = spawnCli(cwd, args)
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(subprocess.stdout).text(),
-    new Response(subprocess.stderr).text(),
-    subprocess.exited,
-  ])
+  const previousCwd = process.cwd()
+  const previousExitCode = process.exitCode
+  const previousNoColor = process.env.NO_COLOR
+  const previousNotifications = process.env.SPRINT_BRANCH_DISABLE_NOTIFICATIONS
+  const previousConsoleLog = console.log
+  const previousConsoleError = console.error
+  let stdout = ""
+  let stderr = ""
 
-  return { stdout, stderr, exitCode }
+  // main() still uses process globals, so isolate the in-process invocation.
+  process.chdir(cwd)
+  process.exitCode = 0
+  process.env.NO_COLOR = "1"
+  process.env.SPRINT_BRANCH_DISABLE_NOTIFICATIONS = "1"
+  console.log = (...values: unknown[]) => {
+    stdout += `${values.map(String).join(" ")}\n`
+  }
+  console.error = (...values: unknown[]) => {
+    stderr += `${values.map(String).join(" ")}\n`
+  }
+
+  try {
+    try {
+      await runSprintBranchMain(args)
+    } catch (error) {
+      if (error instanceof SprintInferenceError) {
+        console.error(error.message)
+        for (const diagnostic of error.diagnostics) {
+          console.error(`[${diagnostic.severity}] ${diagnostic.message}`)
+          if (diagnostic.suggestion) {
+            console.error(`suggestion: ${diagnostic.suggestion}`)
+          }
+        }
+        process.exitCode = 1
+      } else if (error instanceof GitCommandError) {
+        console.error(`git ${error.args.join(" ")} failed`)
+        console.error(error.stderr || error.message)
+        process.exitCode = 1
+      } else {
+        console.error(getErrorMessage(error))
+        process.exitCode = 1
+      }
+    }
+    const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0
+    return { stdout, stderr, exitCode }
+  } finally {
+    process.chdir(previousCwd)
+    process.exitCode = previousExitCode ?? 0
+    restoreEnv("NO_COLOR", previousNoColor)
+    restoreEnv("SPRINT_BRANCH_DISABLE_NOTIFICATIONS", previousNotifications)
+    console.log = previousConsoleLog
+    console.error = previousConsoleError
+  }
 }
 
 /** Starts the sprint-branch CLI without waiting for long-running commands to finish. */
@@ -173,6 +225,15 @@ export function spawnCli(cwd: string, args: string[]) {
       SPRINT_BRANCH_DISABLE_NOTIFICATIONS: "1",
     },
   })
+}
+
+function restoreEnv(name: string, value: string | undefined) {
+  if (value === undefined) {
+    delete process.env[name]
+    return
+  }
+
+  process.env[name] = value
 }
 
 export async function git(cwd: string, args: string[]) {
