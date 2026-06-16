@@ -68,21 +68,21 @@ test("watch syncs a review commit that records already-rendered content", async 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
-  const started = createDeferred<void>()
+  const ready = createDeferred<void>()
   const firstSync = createDeferred<ReviewSyncResult>()
   const secondSync = createDeferred<ReviewSyncResult>()
-  let startedResolved = false
+  let readyResolved = false
   let firstSyncResolved = false
   let secondSyncResolved = false
   let syncCount = 0
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
     signal: controller.signal,
+    onWatchReady: () => {
+      readyResolved = true
+      ready.resolve()
+    },
     onResult: (result) => {
-      if (result.command === "watch") {
-        startedResolved = true
-        started.resolve()
-      }
       if (result.command === "sync" && result.status === "ok") {
         syncCount += 1
         if (syncCount === 1) {
@@ -99,14 +99,13 @@ test("watch syncs a review commit that records already-rendered content", async 
 
   try {
     await Promise.race([
-      started.promise,
+      ready.promise,
       watch.then((result) => {
-        if (!startedResolved) {
-          throw new Error(`watch stopped before starting: ${result.message}`)
+        if (!readyResolved) {
+          throw new Error(`watch stopped before readiness: ${result.message}`)
         }
       }),
     ])
-    await sleep(100)
 
     await writeText(join(fixture.reviewDir, "shared.txt"), "human edit before commit\n")
 
@@ -191,18 +190,18 @@ test("watch preserves a cherry-picked review commit after accepting its patch", 
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
-  const started = createDeferred<void>()
+  const ready = createDeferred<void>()
   const sync = createDeferred<ReviewSyncResult>()
-  let startedResolved = false
+  let readyResolved = false
   let syncResolved = false
   const watch = watchReviewSession({
     cwd: fixture.reviewDir,
     signal: controller.signal,
+    onWatchReady: () => {
+      readyResolved = true
+      ready.resolve()
+    },
     onResult: (result) => {
-      if (result.command === "watch") {
-        startedResolved = true
-        started.resolve()
-      }
       if (result.command === "sync" && result.status === "ok") {
         syncResolved = true
         sync.resolve(result)
@@ -212,14 +211,13 @@ test("watch preserves a cherry-picked review commit after accepting its patch", 
 
   try {
     await Promise.race([
-      started.promise,
+      ready.promise,
       watch.then((result) => {
-        if (!startedResolved) {
-          throw new Error(`watch stopped before starting: ${result.message}`)
+        if (!readyResolved) {
+          throw new Error(`watch stopped before readiness: ${result.message}`)
         }
       }),
     ])
-    await sleep(100)
     await runGit(fixture.reviewDir, ["cherry-pick", pickedCommit])
     const cherryPickedHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
 

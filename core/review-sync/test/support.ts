@@ -45,19 +45,19 @@ export async function runWatchUntilNextSync(
   const controller = new AbortController()
   const timeoutReason = "watch test timeout"
   const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
-  const started = createDeferred<void>()
-  let startedResolved = false
+  const ready = createDeferred<void>()
+  let readyResolved = false
   const results: ReviewSyncResult[] = []
   const watch = watchReviewSession({
     cwd,
     agentBranch,
     signal: controller.signal,
+    onWatchReady: () => {
+      readyResolved = true
+      ready.resolve()
+    },
     onResult: (result) => {
       results.push(result)
-      if (result.command === "watch") {
-        startedResolved = true
-        started.resolve()
-      }
       if (result.command === "sync" && result.status === "ok") {
         controller.abort()
       }
@@ -66,15 +66,13 @@ export async function runWatchUntilNextSync(
 
   try {
     await Promise.race([
-      started.promise,
+      ready.promise,
       watch.then((result) => {
-        if (!startedResolved) {
-          throw new Error(`watch stopped before starting: ${result.message}`)
+        if (!readyResolved) {
+          throw new Error(`watch stopped before readiness: ${result.message}`)
         }
       }),
     ])
-    // macOS can deliver a one-shot write before fs.watch has fully armed.
-    await sleep(100)
     await mutate()
     const stopped = await watch
     if (controller.signal.reason === timeoutReason) {
