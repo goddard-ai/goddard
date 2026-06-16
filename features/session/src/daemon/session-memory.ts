@@ -25,6 +25,8 @@ export type QueuedPromptEntry = {
   requestId: string | number
   prompt: acp.ContentBlock[]
   source: "client" | "daemon"
+  /** Sequence assigned when the prompt leaves the queue, used for late detached responses. */
+  turnSequence?: number
   resolve?: (response: acp.PromptResponse) => void
   reject?: (error: Error) => void
 }

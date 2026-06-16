@@ -14,6 +14,7 @@ import type {
   DaemonSessionTurnDraft,
   SessionLifecycleField,
   SessionMessageEvent,
+  SessionTurnMessage,
   SteerSessionResponse,
 } from "../schema.ts"
 import type { createActiveTurnStore } from "./active-turns.ts"
@@ -234,7 +235,11 @@ export function createPromptTurnFeature(input: {
       active.acpSessionId,
       message,
     )
-    publishSessionMessage(active, message)
+    publishSessionMessage(active, message, {
+      messageEvent: active.activeTurn
+        ? undefined
+        : createDetachedSessionMessageEvent(active, message),
+    })
     await handleSteerBoundary(active, message)
   }
 
@@ -299,6 +304,31 @@ export function createPromptTurnFeature(input: {
     }
   }
 
+  function createDetachedSessionMessageEvent(
+    active: ActiveSession,
+    message: acp.AnyMessage,
+    sequence = active.nextTurnSequence,
+  ): SessionTurnMessage {
+    // Steered prompts can receive late updates after their turn buffer has moved to the replacement.
+    return {
+      sequence,
+      sequenceStart: sequence,
+      message,
+    }
+  }
+
+  function createDetachedPromptResponseEvent(
+    active: ActiveSession,
+    entry: QueuedPromptEntry,
+    message: acp.AnyMessage,
+  ): SessionTurnMessage | undefined {
+    if (active.activeTurn?.promptRequestId === entry.requestId) {
+      return undefined
+    }
+
+    return createDetachedSessionMessageEvent(active, message, entry.turnSequence)
+  }
+
   async function completePrompt(
     active: ActiveSession,
     entry: QueuedPromptEntry,
@@ -320,15 +350,20 @@ export function createPromptTurnFeature(input: {
         active.acpSessionId,
         responseMessage,
       )
-      updateSessionFromPromptResponse(active, entry.requestId, response)
+      const detachedEvent = createDetachedPromptResponseEvent(active, entry, responseMessage)
+      if (!detachedEvent) {
+        updateSessionFromPromptResponse(active, entry.requestId, response)
+      }
       entry.resolve?.(response)
 
       if (active.blockingPromptRequestId === entry.requestId) {
         active.blockingPromptRequestId = null
       }
 
-      publishSessionMessage(active, responseMessage)
-      input.activeTurns.finalizeActiveTurn(active, responseMessage)
+      publishSessionMessage(active, responseMessage, { messageEvent: detachedEvent })
+      if (!detachedEvent) {
+        input.activeTurns.finalizeActiveTurn(active, responseMessage)
+      }
       await handleSteerBoundary(active, responseMessage)
       await processPromptQueue(active)
     } catch (error) {
@@ -353,8 +388,11 @@ export function createPromptTurnFeature(input: {
       if (active.blockingPromptRequestId === entry.requestId) {
         active.blockingPromptRequestId = null
       }
-      publishSessionMessage(active, responseMessage)
-      input.activeTurns.finalizeActiveTurn(active, responseMessage)
+      const detachedEvent = createDetachedPromptResponseEvent(active, entry, responseMessage)
+      publishSessionMessage(active, responseMessage, { messageEvent: detachedEvent })
+      if (!detachedEvent) {
+        input.activeTurns.finalizeActiveTurn(active, responseMessage)
+      }
       await handleSteerBoundary(active, responseMessage)
       await processPromptQueue(active)
     }
@@ -411,6 +449,7 @@ export function createPromptTurnFeature(input: {
       touchedAttentionEntity: false,
     }
     active.activeTurn = activeTurn
+    nextPrompt.turnSequence = activeTurn.sequence
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 

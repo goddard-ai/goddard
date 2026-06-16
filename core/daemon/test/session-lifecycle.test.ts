@@ -58,6 +58,10 @@ function findSessionPromptRequest(history: GetSessionHistoryResponse) {
     .find((request) => request?.prompt)
 }
 
+function readStreamMessagePayload(payload: unknown) {
+  return getSessionTurnMessagePayload(payload as AcpMessage | SessionTurnMessage)
+}
+
 afterEach(async () => {
   if (originalPath === undefined) {
     delete process.env.PATH
@@ -324,7 +328,7 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         method?: string
         params?: { update?: { content?: { text?: string } } }
         result?: { stopReason?: string }
@@ -532,7 +536,7 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         method?: string
         params?: {
           update?: {
@@ -571,20 +575,24 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
   const chunkMessages = history.turns
     .flatMap((turn: any) => turn.messages)
     .filter((message: any) => {
+      const payload = getSessionTurnMessagePayload(message)
       return (
-        typeof message === "object" &&
-        message !== null &&
-        "method" in message &&
-        message.method === "session/update" &&
-        "params" in message &&
-        typeof message.params === "object" &&
-        message.params !== null &&
-        "update" in message.params &&
-        typeof message.params.update === "object" &&
-        message.params.update !== null &&
-        "sessionUpdate" in message.params.update &&
-        message.params.update.sessionUpdate === "agent_message_chunk"
+        typeof payload === "object" &&
+        payload !== null &&
+        "method" in payload &&
+        payload.method === "session/update" &&
+        "params" in payload &&
+        typeof payload.params === "object" &&
+        payload.params !== null &&
+        "update" in payload.params &&
+        typeof payload.params.update === "object" &&
+        payload.params.update !== null &&
+        "sessionUpdate" in payload.params.update &&
+        payload.params.update.sessionUpdate === "agent_message_chunk"
       )
+    })
+    .map((message: any) => {
+      return getSessionTurnMessagePayload(message)
     })
 
   expect(chunkMessages).toHaveLength(1)
@@ -629,7 +637,7 @@ test("daemon stores usage updates on the session instead of durable turn history
         update?: {
           sessionUpdate?: string
         }
-      }>(payload, "session/update")?.update
+      }>(readStreamMessagePayload(payload), "session/update")?.update
 
       if (update?.sessionUpdate === "usage_update") {
         liveUsageUpdates.push(update)
@@ -974,14 +982,14 @@ test("multiple clients can observe the same live session stream independently", 
     clientA,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientAMessages.push(payload)
+      clientAMessages.push(readStreamMessagePayload(payload))
     },
   )
   const unsubscribeB = await subscribe(
     clientB,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientBMessages.push(payload)
+      clientBMessages.push(readStreamMessagePayload(payload))
     },
   )
 
@@ -1159,14 +1167,14 @@ test("idle auto-shutdown waits for the last session.streamMessages subscriber to
     clientA,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientAMessages.push(payload)
+      clientAMessages.push(readStreamMessagePayload(payload))
     },
   )
   const unsubscribeB = await subscribe(
     clientB,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      clientBMessages.push(payload)
+      clientBMessages.push(readStreamMessagePayload(payload))
     },
   )
 
@@ -1372,7 +1380,7 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         method?: string
         params?: { update?: { content?: { text?: string } } }
         error?: { message?: string }
@@ -1439,7 +1447,7 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         id?: string
         method?: string
         params?: { update?: { content?: { text?: string } } }
@@ -1528,7 +1536,7 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         id?: string
         method?: string
         params?: {
@@ -1619,7 +1627,7 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
     client,
     { name: "session.streamMessages", filter: { id: created.session.id } },
     (payload) => {
-      const message = payload as {
+      const message = readStreamMessagePayload(payload) as {
         id?: string
         method?: string
         params?: {
@@ -2446,7 +2454,7 @@ test("session.create applies initial model and thinking configuration before the
             sessionUpdate?: string
             content?: { type?: string; text?: string }
           }
-        }>(message, "session/update")?.update
+        }>(getSessionTurnMessagePayload(message), "session/update")?.update
         return (
           update?.sessionUpdate === "agent_message_chunk" &&
           update.content?.type === "text" &&
@@ -2516,7 +2524,7 @@ test("session.create returns before an interactive initial prompt completes", as
             sessionUpdate?: string
             content?: { type?: string; text?: string }
           }
-        }>(message, "session/update")?.update
+        }>(getSessionTurnMessagePayload(message), "session/update")?.update
         return (
           update?.sessionUpdate === "agent_message_chunk" &&
           update.content?.type === "text" &&
