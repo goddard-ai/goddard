@@ -152,7 +152,6 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
   const warningState = { pendingHumanPatchWarningSent: false }
   const events = createWatchEventQueue(input.signal)
   const watchers = await createReviewSyncWatchers(session, context, events, emitVerbose)
-  await input.onWatchReady?.()
   let keepWatching = true
   let watchError: unknown
 
@@ -1393,6 +1392,17 @@ async function waitForWatchQuietPeriod(
 
 function resolveWatchDebounceMs(input: WatchReviewSyncInput) {
   return input.watchDebounceMs ?? defaultWatchDebounceMs
+}
+
+async function notifyWatchReady(input: WatchReviewSyncInput) {
+  if (!input.onWatchReady) {
+    return
+  }
+
+  await new Promise((resolvePromise) => {
+    setTimeout(resolvePromise, resolveWatchDebounceMs(input))
+  })
+  await input.onWatchReady()
 }
 
 /** Checks an abort signal without causing TypeScript to over-narrow loop state. */
