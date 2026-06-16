@@ -1,4 +1,5 @@
 import { supervise } from "procband"
+import { concat } from "radashi"
 
 async function main() {
   process.env.NODE_ENV = "development"
@@ -7,7 +8,10 @@ async function main() {
   const daemon = supervise({
     name: "daemon",
     command: "bun",
-    args: ["--watch", "run", "daemon/src/main.ts", "run", "--verbose"],
+    args: concat(
+      ["--watch", "run", "daemon/src/main.ts", "run"],
+      process.argv.includes("--verbose") ? "--verbose" : undefined,
+    ),
     cwd: "core",
   })
 
