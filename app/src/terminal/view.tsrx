@@ -5,7 +5,7 @@ import { TerminalViewport } from "./terminal-viewport.tsrx"
 import { getTerminalTab, type TerminalTabPayload } from "./tab.ts"
 import styles from "./view.style.ts"
 
-export component TerminalView(props: TerminalTabPayload) {
+export function TerminalView(props: TerminalTabPayload) @{
   const terminal = useSigma(() => getTerminalTab(props), [props.terminalId])
   const viewport = useSigma(() => terminal.terminal, [terminal])
   const canWrite = terminal.status === "running"
@@ -32,7 +32,9 @@ export component TerminalView(props: TerminalTabPayload) {
     <section class={styles.toolbar} aria-label="Terminal controls">
       <div class={styles.titleGroup}>
         <h1 class={styles.title}>{terminal.title}</h1>
-        <div class={styles.meta}>{terminal.cwd ?? "daemon default shell directory"}</div>
+        <div class={styles.meta}>
+          {terminal.cwd ?? "daemon default shell directory"}
+        </div>
       </div>
       <div class={styles.controls}>
         <span class={styles.chip}>{terminal.status}</span>
@@ -46,9 +48,7 @@ export component TerminalView(props: TerminalTabPayload) {
               console.error("Failed to restart terminal.", error)
             })
           }}
-        >
-          {"Restart"}
-        </button>
+        >{"Restart"}</button>
         <button
           class={styles.button}
           disabled={!canClose}
@@ -58,13 +58,11 @@ export component TerminalView(props: TerminalTabPayload) {
               console.error("Failed to close terminal.", error)
             })
           }}
-        >
-          {"Close"}
-        </button>
+        >{"Close"}</button>
       </div>
     </section>
 
-    if (terminal.statusMessage) {
+    @if (terminal.statusMessage) {
       <div class={styles.error}>{terminal.statusMessage}</div>
     }
 

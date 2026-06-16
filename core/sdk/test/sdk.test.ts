@@ -1287,10 +1287,7 @@ describe("@goddard-ai/sdk terminal namespace", () => {
     send.mockResolvedValueOnce({ success: true })
     send.mockResolvedValueOnce({ success: true })
     subscribe.mockImplementationOnce(
-      async (
-        target: Parameters<GoddardClient["subscribe"]>[0],
-        handler: Parameters<GoddardClient["subscribe"]>[1],
-      ) => {
+      async (target: unknown, handler: (payload: unknown) => void) => {
         expect(target).toEqual({
           name: "terminal.event",
           filter: { connectionId: "term-conn-1" },

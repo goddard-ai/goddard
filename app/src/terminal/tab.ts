@@ -1,7 +1,7 @@
 import type {
   TerminalDaemonEvent,
   TerminalRuntimeMetadata as TerminalMetadata,
-} from "@goddard-ai/schema/daemon"
+} from "@goddard-ai/schema/daemon/terminals"
 import type { GoddardTerminalConnection, GoddardTerminalNamespace } from "@goddard-ai/sdk"
 import { listen, Sigma } from "preact-sigma"
 import { getErrorMessage } from "radashi"
@@ -301,7 +301,7 @@ const terminalTabs = new Map<string, TerminalTab>()
 
 listen(workbenchTabLifecycle, "closed", ({ tab }) => {
   if (tab.kind === "terminal") {
-    disposeTerminalTab(tab.payload.terminalId)
+    disposeTerminalTab(tab.props.terminalId)
   }
 })
 
