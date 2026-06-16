@@ -43,6 +43,25 @@ export type GitHost = {
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
+type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
+type FfiPointer = Parameters<Libgit2Symbols["git_repository_free"]>[0]
+
+const libgit2PathCandidates = [
+  process.env.LIBGIT2_PATH,
+  `libgit2.${suffix}`,
+  `/opt/homebrew/lib/libgit2.${suffix}`,
+  `/usr/local/lib/libgit2.${suffix}`,
+].filter((path) => typeof path === "string")
+
+/** Creates the Git host selected for this process. */
+export function createReviewSyncGitHost() {
+  if (process.env.REVIEW_SYNC_GIT_HOST === "libgit2") {
+    return createLibgit2GitHost(createCliGitHost())
+  }
+
+  return createCliGitHost()
+}
+
 /** Creates the default Git host backed by Git CLI subprocesses. */
 export function createCliGitHost() {
   const run = async (cwd: string, args: string[], options: GitRunOptions = {}) => {
@@ -122,6 +141,191 @@ export function createCliGitHost() {
       return await parseGitWorktrees(result.stdout)
     },
   } satisfies GitHost
+}
+
+/** Creates an experimental Git host that uses libgit2 for read-heavy lookups. */
+export function createLibgit2GitHost(fallback: GitHost) {
+  const libgit2 = loadLibgit2()
+  const initStatus = libgit2.symbols.git_libgit2_init()
+  if (initStatus < 0) {
+    throw new Error(`git_libgit2_init failed with status ${initStatus}`)
+  }
+
+  return {
+    ...fallback,
+    resolveRequiredRepoRoot: async (cwd) =>
+      withLibgit2Repository(libgit2.symbols, cwd, async (repo) => {
+        const workdir = libgit2.symbols.git_repository_workdir(repo)
+        if (!workdir) {
+          throw new UserError(`Not a Git worktree: ${cwd}`)
+        }
+        return await normalizePath(String(workdir))
+      }),
+    resolveRequiredGitCommonDir: async (cwd) =>
+      withLibgit2Repository(libgit2.symbols, cwd, async (repo) => {
+        const commonDir = libgit2.symbols.git_repository_commondir(repo)
+        if (!commonDir) {
+          throw new Error(`libgit2 could not resolve Git common dir for ${cwd}`)
+        }
+        return await normalizePath(String(commonDir))
+      }),
+    resolveRequiredGitDir: async (cwd) =>
+      withLibgit2Repository(libgit2.symbols, cwd, async (repo) => {
+        const gitDir = libgit2.symbols.git_repository_path(repo)
+        if (!gitDir) {
+          throw new Error(`libgit2 could not resolve Git dir for ${cwd}`)
+        }
+        return await normalizePath(String(gitDir))
+      }),
+    resolveCurrentBranch: async (cwd) =>
+      withLibgit2Repository(libgit2.symbols, cwd, (repo) => {
+        const out = pointerStorage()
+        const status = libgit2.symbols.git_repository_head(ptr(out), repo)
+        if (status !== 0) {
+          return null
+        }
+
+        const head = readPointer(out)
+        try {
+          const name = libgit2.symbols.git_reference_name(head)
+          const branchRef = name ? String(name) : ""
+          return branchRef.startsWith("refs/heads/") ? branchRef.slice("refs/heads/".length) : null
+        } finally {
+          libgit2.symbols.git_reference_free(head)
+        }
+      }),
+    branchExists: async (cwd, branch) =>
+      withLibgit2Repository(
+        libgit2.symbols,
+        cwd,
+        (repo) =>
+          libgit2.symbols.git_reference_name_to_id(
+            ptr(new Uint8Array(20)),
+            repo,
+            ptr(cString(`refs/heads/${branch}`)),
+          ) === 0,
+      ),
+    resolveRef: async (cwd, refName) =>
+      withLibgit2Repository(libgit2.symbols, cwd, (repo) => {
+        const out = pointerStorage()
+        const status = libgit2.symbols.git_revparse_single(ptr(out), repo, ptr(cString(refName)))
+        if (status !== 0) {
+          return null
+        }
+
+        const object = readPointer(out)
+        try {
+          const oid = libgit2.symbols.git_object_id(object)
+          if (!oid) {
+            return null
+          }
+          return String(libgit2.symbols.git_oid_tostr_s(oid))
+        } finally {
+          libgit2.symbols.git_object_free(object)
+        }
+      }),
+  } satisfies GitHost
+}
+
+function loadLibgit2() {
+  const errors: string[] = []
+  for (const candidate of libgit2PathCandidates) {
+    try {
+      return dlopen(candidate, {
+        git_libgit2_init: {
+          args: [],
+          returns: FFIType.i32,
+        },
+        git_repository_open_ext: {
+          args: [FFIType.ptr, FFIType.cstring, FFIType.u32, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_repository_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_repository_path: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_repository_workdir: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_repository_commondir: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_repository_head: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_reference_name: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_reference_name_to_id: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_reference_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_revparse_single: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_object_id: {
+          args: [FFIType.ptr],
+          returns: FFIType.ptr,
+        },
+        git_object_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_oid_tostr_s: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+      })
+    } catch (error) {
+      errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  throw new Error(`Unable to load libgit2. Tried: ${errors.join("; ")}`)
+}
+
+function pointerStorage() {
+  return new BigUint64Array(1)
+}
+
+function readPointer(storage: BigUint64Array) {
+  return Number(storage[0]) as FfiPointer
+}
+
+function cString(value: string) {
+  return Buffer.from(`${value}\0`)
+}
+
+async function withLibgit2Repository<T>(
+  libgit2: Libgit2Symbols,
+  cwd: string,
+  operation: (repo: FfiPointer) => T | Promise<T>,
+) {
+  const out = pointerStorage()
+  const status = libgit2.git_repository_open_ext(ptr(out), ptr(cString(cwd)), 0, 0)
+  if (status !== 0) {
+    throw new UserError(`Not a Git worktree: ${cwd}`)
+  }
+
+  const repo = readPointer(out)
+  try {
+    return await operation(repo)
+  } finally {
+    libgit2.git_repository_free(repo)
+  }
 }
 
 /** Runs one Git command and returns captured stdout/stderr. */
