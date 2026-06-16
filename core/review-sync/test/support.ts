@@ -53,6 +53,7 @@ export async function runWatchUntilNextSync(
     cwd,
     agentBranch,
     signal: controller.signal,
+    watchDebounceMs: WATCH_TEST_DEBOUNCE_MS,
     onWatchReady: () => {
       readyResolved = true
       ready.resolve()
