@@ -351,8 +351,8 @@ importers:
         specifier: ^0.3.4
         version: 0.3.4(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3)
       state-launcher:
-        specifier: 0.2.0
-        version: 0.2.0(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7)
+        specifier: 0.2.1
+        version: 0.2.1(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7)
       vite:
         specifier: ^8.0.10
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)(yaml@2.9.0)
@@ -6117,8 +6117,8 @@ packages:
     resolution: {integrity: sha512-H6D7134xi6qONvh7ZHKgviXf+rd3vhGBSvebPZCaUkd8zvQ+7PtDw6CljPTe4cXWNf2IKZGNqw6VJXSb9IgBpA==}
     engines: {node: '>=20.0.0'}
 
-  state-launcher@0.2.0:
-    resolution: {integrity: sha512-ADl7FaN4L6uSnBGkdIPsETgNlNiu78WbMM+ToM2jtmFtRYv6FfxPMjvmBq873vawgQgw8Jbr3I/69qGY83Ll1Q==}
+  state-launcher@0.2.1:
+    resolution: {integrity: sha512-S9iObCs8XOUD1xr9rOx+A3GlD1hzHunhq1umXjVhHlcs3pfdM19Svi1KZlEQJQ1533TgPKA7tjHZxaU3lj3dIA==}
     peerDependencies:
       preact: '*'
 
@@ -11641,7 +11641,7 @@ snapshots:
 
   stack-trace@1.0.0: {}
 
-  state-launcher@0.2.0(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7):
+  state-launcher@0.2.1(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7):
     dependencies:
       '@preact/signals': 2.9.1(preact@11.0.0-beta.1)
       fuzzysort2: 0.1.1

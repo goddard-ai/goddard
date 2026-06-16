@@ -40,15 +40,6 @@ function isLaunchableStateShortcut(event: KeyboardEvent) {
   )
 }
 
-function focusLaunchableStateLauncher() {
-  requestAnimationFrame(() => {
-    document
-      .querySelector<HTMLElement>("[data-state-launcher-host]")
-      ?.shadowRoot?.querySelector<HTMLInputElement>('input[type="search"]')
-      ?.focus()
-  })
-}
-
 function composeCleanups(cleanups: LaunchCleanup[]) {
   return async () => {
     for (let index = cleanups.length - 1; index >= 0; index -= 1) {
@@ -169,7 +160,6 @@ export function installLaunchableStates(deps: LaunchableStateDeps) {
     event.preventDefault()
     event.stopPropagation()
     launcher.toggle()
-    focusLaunchableStateLauncher()
   }
 
   document.addEventListener("keydown", handleKeyDown, true)
