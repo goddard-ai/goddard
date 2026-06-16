@@ -66,7 +66,7 @@ test("CLI pages and expands logs from the canonical database", async () => {
 })
 
 async function runCli(args: string[], home: string) {
-  const process = Bun.spawn(["bun", "run", "./src/cli.ts", ...args], {
+  const subprocess = Bun.spawn([process.execPath, "run", "./src/cli.ts", ...args], {
     cwd: new URL("..", import.meta.url).pathname,
     env: {
       ...Bun.env,
@@ -76,9 +76,9 @@ async function runCli(args: string[], home: string) {
     stderr: "pipe",
   })
   const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
   ])
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
