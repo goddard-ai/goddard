@@ -89,7 +89,6 @@ export type WatchReviewSyncInput = ReviewSyncWorktreeInput & {
   verbose?: boolean
   onResult?: (result: ReviewSyncResult) => void | Promise<void>
   onWatchReady?: () => void | Promise<void>
-  watchDebounceMs?: number
   waitForSyncReady?: (reason: WatchSyncReadyReason) => boolean | void | Promise<boolean | void>
 }
 
