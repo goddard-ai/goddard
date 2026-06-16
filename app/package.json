@@ -25,6 +25,7 @@
     "@goddard-ai/daemon-client": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/logs": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:*",

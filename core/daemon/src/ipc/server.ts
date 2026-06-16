@@ -170,7 +170,8 @@ export async function startDaemonServer(
     onRequestReceived: ({ name, payload }) => {
       logger.log("ipc.request_received", {
         requestName: name,
-        payload: createPayloadPreview(payload),
+        method: name,
+        payload,
       })
     },
     onResponseSent: ({ name, response, durationMs }) => {
@@ -182,13 +183,15 @@ export async function startDaemonServer(
 
       logger.log("ipc.response_sent", {
         requestName: name,
+        method: name,
         durationMs,
-        response: createPayloadPreview(response),
+        response,
       })
     },
     onRequestFailed: ({ name, error, durationMs }) => {
       logger.log("ipc.request_failed", {
         requestName: name,
+        method: name,
         durationMs,
         errorMessage: getErrorMessage(error),
       })

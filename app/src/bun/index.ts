@@ -103,7 +103,7 @@ function installWindowLayoutPersistence(window: BrowserWindow<typeof appRpc>) {
 
 installApplicationMenu(getMainWindow)
 
-await installAppLogCapture()
+installAppLogCapture()
 await ensureDaemonRuntime()
 const mainWindowUrl = await getMainWindowUrl()
 const windowLayout = readWindowLayoutSnapshot(await loadAppStateSnapshot())

@@ -1,5 +1,10 @@
 import { inspect } from "node:util"
 import { AsyncContext } from "@b9g/async-context"
+import {
+  createLogger as createCoreLogger,
+  type Logger as CoreLogger,
+  type LogStore,
+} from "@goddard-ai/logs"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import kleur from "kleur"
 import { omit } from "radashi"
@@ -49,18 +54,32 @@ type LogEntry = {
 
 let logMode: LogMode = "compact"
 let logWriter: LogWriter = defaultWriteLine
+let durableLogger: CoreLogger | undefined
 
 /** Configures the shared daemon log writer and output mode for the current process. */
-export function configureLogging(options: { writeLine?: LogWriter; mode?: LogMode }): () => void {
+export function configureLogging(options: {
+  writeLine?: LogWriter
+  mode?: LogMode
+  store?: LogStore
+}): () => void {
   const previousMode = logMode
   const previousWriter = logWriter
+  const previousDurableLogger = durableLogger
 
   logMode = options.mode ?? logMode
   logWriter = options.writeLine ?? stdoutWriteLine
+  durableLogger = options.store
+    ? createCoreLogger({
+        scope: "daemon",
+        store: options.store,
+        pid: process.pid,
+      })
+    : undefined
 
   return () => {
     logMode = previousMode
     logWriter = previousWriter
+    durableLogger = previousDurableLogger
   }
 }
 
@@ -80,7 +99,8 @@ export function createLogger(
           ...fields,
         }
         const resolvedWriter = writeLine === defaultWriteLine ? logWriter : writeLine
-        resolvedWriter(formatLogEntry(entry, logMode))
+        resolvedWriter(formatLogEntry(createFormattedLogEntry(entry), logMode))
+        durableLogger?.info(event, readLogProperties(entry))
       }
 
       if (boundSnapshot) {
@@ -207,6 +227,19 @@ function formatTimestamp(value: string): string {
 
 function isMetadataField(key: string): boolean {
   return key === "scope" || key === "at" || key === "event"
+}
+
+function readLogProperties(entry: LogEntry) {
+  return Object.fromEntries(Object.entries(entry).filter(([key]) => isMetadataField(key) === false))
+}
+
+function createFormattedLogEntry(entry: LogEntry): LogEntry {
+  return Object.fromEntries(
+    Object.entries(entry).map(([key, value]) => [
+      key,
+      isMetadataField(key) ? value : sanitizeValue(value, 512, key),
+    ]),
+  ) as LogEntry
 }
 
 function formatInlineFields(key: string, value: unknown): string[] {

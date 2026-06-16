@@ -4,6 +4,12 @@ export const GODDARD_DIRECTORY_NAME = ".goddard"
 /** Directory name used for Goddard-managed OS cache contents. */
 export const GODDARD_CACHE_DIRECTORY_NAME = "goddard"
 
+/** Directory name used for Goddard-managed OS log contents. */
+export const GODDARD_LOG_DIRECTORY_NAME = "Goddard"
+
+/** Filename used for the shared app and daemon SQLite log store. */
+export const GODDARD_LOG_DATABASE_FILENAME = "logs.sqlite"
+
 /** Directory name used under the OS temp root for agent-readable runtime logs. */
 export const GODDARD_TEMP_DIRECTORY_NAME = "goddard"
 

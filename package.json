@@ -47,6 +47,7 @@
     "smoke:workforce": "node ./scripts/smoke-workforce.mjs",
     "acp": "bun run ./scripts/acp-session.ts",
     "goddard:daemon": "NODE_ENV=development node ./scripts/runtime-bun.mjs run ./core/daemon/src/main.ts",
+    "goddard:logs": "bun run ./core/logs/src/cli.ts",
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
     "check:bun-runtime": "node ./scripts/check-bun-runtime.mjs",
     "check:prepush": "turbo run codegen && turbo run typecheck lint --output-logs=errors-only --continue=always",

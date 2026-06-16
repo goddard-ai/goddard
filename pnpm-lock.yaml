@@ -199,6 +199,9 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../core/ipc
+      '@goddard-ai/logs':
+        specifier: workspace:*
+        version: link:../core/logs
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../core/paths
@@ -459,6 +462,9 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../ipc
+      '@goddard-ai/logs':
+        specifier: workspace:*
+        version: link:../logs
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
@@ -620,6 +626,15 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
+
+  core/logs:
+    dependencies:
+      '@goddard-ai/paths':
+        specifier: workspace:*
+        version: link:../paths
       radashi:
         specifier: 'catalog:'
         version: 12.9.1

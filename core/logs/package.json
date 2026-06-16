@@ -1,0 +1,36 @@
+{
+  "name": "@goddard-ai/logs",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "bun": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./cli": {
+      "types": {
+        "source": "./src/cli.ts",
+        "default": "./dist/cli.d.mts"
+      },
+      "bun": "./src/cli.ts",
+      "import": "./dist/cli.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "@goddard-ai/paths": "workspace:*",
+    "radashi": "catalog:"
+  }
+}

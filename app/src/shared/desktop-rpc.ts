@@ -52,6 +52,7 @@ export type AppLogInput = {
   source: "host" | "renderer"
   level: "debug" | "error" | "info" | "log" | "warn"
   message: string
+  webviewId?: number
 }
 
 /** Compact git checkout summary shown on project-scoped dashboard surfaces. */

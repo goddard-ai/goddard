@@ -2,16 +2,26 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { getAppStatePath, getDatabasePath, getGoddardTempLogDir } from "../src/node/index.ts"
+import {
+  getAppStatePath,
+  getDatabasePath,
+  getGoddardLogDatabasePath,
+  getGoddardLogDir,
+  getGoddardTempLogDir,
+} from "../src/node/index.ts"
 
 const originalHome = process.env.HOME
 const originalNodeEnv = process.env.NODE_ENV
 const originalDataProfile = process.env.GODDARD_DATA_PROFILE
+const originalLocalAppData = process.env.LOCALAPPDATA
+const originalXdgStateHome = process.env.XDG_STATE_HOME
 
 afterEach(() => {
   restoreEnv("HOME", originalHome)
   restoreEnv("NODE_ENV", originalNodeEnv)
   restoreEnv("GODDARD_DATA_PROFILE", originalDataProfile)
+  restoreEnv("LOCALAPPDATA", originalLocalAppData)
+  restoreEnv("XDG_STATE_HOME", originalXdgStateHome)
 })
 
 test("getDatabasePath keeps the production path by default", () => {
@@ -52,6 +62,24 @@ test("getAppStatePath stores app-owned state under the user directory", () => {
 
 test("getGoddardTempLogDir stores process logs under a well-known temp directory", () => {
   expect(getGoddardTempLogDir()).toBe(join(tmpdir(), "goddard", "logs"))
+})
+
+test("getGoddardLogDatabasePath stores diagnostic logs under the OS log directory", () => {
+  process.env.HOME = "/tmp/goddard-home"
+  delete process.env.LOCALAPPDATA
+  delete process.env.XDG_STATE_HOME
+
+  if (process.platform === "darwin") {
+    expect(getGoddardLogDir()).toBe(join("/tmp/goddard-home", "Library", "Logs", "Goddard"))
+  } else if (process.platform === "win32") {
+    expect(getGoddardLogDir()).toBe(
+      join("/tmp/goddard-home", "AppData", "Local", "Goddard", "Logs"),
+    )
+  } else {
+    expect(getGoddardLogDir()).toBe(join("/tmp/goddard-home", ".local", "state", "goddard", "log"))
+  }
+
+  expect(getGoddardLogDatabasePath()).toBe(join(getGoddardLogDir(), "logs.sqlite"))
 })
 
 function restoreEnv(key: string, value: string | undefined) {

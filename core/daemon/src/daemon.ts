@@ -1,7 +1,4 @@
-import { createWriteStream } from "node:fs"
-import { mkdir } from "node:fs/promises"
-import { join } from "node:path"
-import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
+import { createLogStore, subtractHours } from "@goddard-ai/logs"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
@@ -32,10 +29,13 @@ export type RunInput = {
 
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
 export async function runDaemon(input: RunInput): Promise<number> {
-  const logWriter = await createDaemonLogWriter()
+  const logStore = createLogStore()
   const restoreLogging = configureLogging({
     mode: input.logMode ?? "compact",
-    writeLine: logWriter.writeLine,
+    writeLine: (line) => {
+      process.stdout.write(`${line}\n`)
+    },
+    store: logStore,
   })
   const logger = createLogger()
   const enableIpc = input.enableIpc ?? true
@@ -56,6 +56,15 @@ export async function runDaemon(input: RunInput): Promise<number> {
       port: runtime.port,
       agentBinDir: runtime.agentBinDir,
     })
+    void Promise.resolve()
+      .then(() => {
+        logStore.retainSince(subtractHours(new Date(), 24))
+      })
+      .catch((error) => {
+        logger.log("logs.retention_failed", {
+          errorMessage: getErrorMessage(error),
+        })
+      })
 
     if (enableIpc === false && enableStream === false) {
       logger.log("daemon.no_features_enabled", {})
@@ -197,24 +206,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
       store.close()
     }
     restoreLogging()
-    logWriter.close()
-  }
-}
-
-/** Creates the daemon process log sink shared by terminal output and temp-file inspection. */
-async function createDaemonLogWriter() {
-  const logDir = getGoddardTempLogDir()
-  await mkdir(logDir, { recursive: true })
-  const stream = createWriteStream(join(logDir, "daemon.log"), { flags: "a" })
-
-  return {
-    writeLine(line: string) {
-      process.stdout.write(`${line}\n`)
-      stream.write(`${line}\n`)
-    },
-    close() {
-      stream.end()
-    },
+    logStore.close()
   }
 }
 

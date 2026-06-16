@@ -170,6 +170,7 @@ async function writeRendererLog(level: AppLogInput["level"], message: string) {
       source: "renderer",
       level,
       message,
+      webviewId: window.__electrobunWebviewId,
     })
     .catch(() => {})
 }

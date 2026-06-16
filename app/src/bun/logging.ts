@@ -1,21 +1,29 @@
-import { createWriteStream } from "node:fs"
-import { mkdir } from "node:fs/promises"
-import { join } from "node:path"
-import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
+import { createLogger, createLogStore, type Logger } from "@goddard-ai/logs"
 
 import type { AppLogInput } from "~/shared/desktop-rpc.ts"
 
 const consoleMethods: AppLogInput["level"][] = ["debug", "error", "info", "log", "warn"]
-let appLogStream: Promise<ReturnType<typeof createWriteStream>> | undefined
+let appLogger: Logger | undefined
 
-/** Tees Bun-host console output into the well-known temp log directory for agent inspection. */
-export async function installAppLogCapture() {
-  await getAppLogStream()
+/** Returns the process-global app logger used by the Bun host. */
+export function getAppLogger() {
+  appLogger ??= createLogger({
+    scope: "app",
+    store: createLogStore(),
+    pid: process.pid,
+  })
+
+  return appLogger
+}
+
+/** Captures Bun-host console output into the shared SQLite log store for agent inspection. */
+export function installAppLogCapture() {
+  getAppLogger()
 
   for (const method of consoleMethods) {
     const original = console[method].bind(console)
     console[method] = (...args: unknown[]) => {
-      void writeAppLog({
+      writeAppLog({
         source: "host",
         level: method,
         message: args.map(formatConsoleValue).join(" "),
@@ -25,21 +33,12 @@ export async function installAppLogCapture() {
   }
 }
 
-/** Appends one normalized app log record into the temp app log file. */
-export async function writeAppLog(input: AppLogInput) {
-  const stream = await getAppLogStream()
-  stream.write(`${JSON.stringify({ scope: "app", at: new Date().toISOString(), ...input })}\n`)
-}
-
-async function getAppLogStream() {
-  appLogStream ??= openAppLogStream()
-  return await appLogStream
-}
-
-async function openAppLogStream() {
-  const logDir = getGoddardTempLogDir()
-  await mkdir(logDir, { recursive: true })
-  return createWriteStream(join(logDir, "app.log"), { flags: "a" })
+/** Appends one normalized app log record into the shared SQLite log store. */
+export function writeAppLog(input: AppLogInput) {
+  getAppLogger()[input.level](input.message, {
+    source: input.source,
+    webviewId: input.webviewId,
+  })
 }
 
 function formatConsoleValue(value: unknown) {

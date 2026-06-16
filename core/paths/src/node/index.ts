@@ -9,6 +9,8 @@ import {
   GODDARD_DATABASE_FILENAME,
   GODDARD_DEVELOPMENT_DATA_DIRECTORY,
   GODDARD_DIRECTORY_NAME,
+  GODDARD_LOG_DATABASE_FILENAME,
+  GODDARD_LOG_DIRECTORY_NAME,
   GODDARD_MANAGED_PR_LOCATIONS_FILENAME,
   GODDARD_MOCK_DATA_DIRECTORY,
   GODDARD_SESSION_PERMISSIONS_FILENAME,
@@ -58,6 +60,32 @@ export function getGoddardCacheDir(): string {
     process.env.XDG_CACHE_HOME || join(resolveHomeDir(), ".cache"),
     GODDARD_CACHE_DIRECTORY_NAME,
   )
+}
+
+/** Returns the user-scoped OS log directory used for Goddard diagnostic logs. */
+export function getGoddardLogDir(): string {
+  if (process.platform === "darwin") {
+    return join(resolveHomeDir(), "Library", "Logs", GODDARD_LOG_DIRECTORY_NAME)
+  }
+
+  if (process.platform === "win32") {
+    return join(
+      process.env.LOCALAPPDATA || join(resolveHomeDir(), "AppData", "Local"),
+      "Goddard",
+      "Logs",
+    )
+  }
+
+  return join(
+    process.env.XDG_STATE_HOME || join(resolveHomeDir(), ".local", "state"),
+    "goddard",
+    "log",
+  )
+}
+
+/** Returns the shared SQLite database path for app and daemon diagnostic logs. */
+export function getGoddardLogDatabasePath(): string {
+  return join(getGoddardLogDir(), GODDARD_LOG_DATABASE_FILENAME)
 }
 
 /** Returns the well-known temporary directory that holds agent-readable Goddard logs. */
