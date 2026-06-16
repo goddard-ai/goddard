@@ -27,6 +27,7 @@ type StoredSessionState = {
 }
 
 export const WATCH_TEST_TIMEOUT_MS = 60_000
+export const WATCH_TEST_DEBOUNCE_MS = 10
 const fixtureCleanup: string[] = []
 export const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
 export { sleep }
@@ -52,6 +53,7 @@ export async function runWatchUntilNextSync(
     cwd,
     agentBranch,
     signal: controller.signal,
+    watchDebounceMs: WATCH_TEST_DEBOUNCE_MS,
     onWatchReady: () => {
       readyResolved = true
       ready.resolve()
