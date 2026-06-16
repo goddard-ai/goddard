@@ -48,7 +48,7 @@ import { resumeSession } from "./resume.ts"
 import { startLoadedReviewSyncSession, startReviewSyncWithSession } from "./start.ts"
 import { syncLoadedReviewSyncSession } from "./sync.ts"
 
-const watchDebounceMs = 100
+const defaultWatchDebounceMs = 100
 
 /** Session identifiers attached to verbose watch diagnostics when available. */
 type WatchVerboseSession = Pick<SessionState, "sessionId" | "reviewBranch">
@@ -194,7 +194,7 @@ export async function watchReviewSession(input: WatchReviewSyncInput) {
     }
 
     while (keepWatching && (await events.waitForEvent())) {
-      if (!(await waitForWatchQuietPeriod(events, input.signal))) {
+      if (!(await waitForWatchQuietPeriod(events, input.signal, resolveWatchDebounceMs(input)))) {
         break
       }
       if (isAbortSignalAborted(input.signal)) {
@@ -557,7 +557,12 @@ async function resolveAgentBranchSessionForWatch(
             preparedReviewBranch = lastBranchRefPreparation.reviewBranch
           }
           if (lastBranchRefPreparation.generatedEvents) {
-            await discardSelfGeneratedWatchEvents(events, input.signal, emitVerbose)
+            await discardSelfGeneratedWatchEvents(
+              events,
+              input.signal,
+              emitVerbose,
+              resolveWatchDebounceMs(input),
+            )
           }
         }
 
@@ -585,7 +590,7 @@ async function resolveAgentBranchSessionForWatch(
 
         if (
           !(await events.waitForEvent()) ||
-          !(await waitForWatchQuietPeriod(events, input.signal))
+          !(await waitForWatchQuietPeriod(events, input.signal, resolveWatchDebounceMs(input)))
         ) {
           break
         }
@@ -769,12 +774,13 @@ async function discardSelfGeneratedWatchEvents(
   events: WatchEventQueue,
   signal: AbortSignal | undefined,
   emitVerbose: WatchVerboseEmitter,
+  watchDebounceMs: number,
 ) {
   if (!(await events.waitForEventOrTimeout(watchDebounceMs))) {
     return
   }
 
-  await waitForWatchQuietPeriod(events, signal)
+  await waitForWatchQuietPeriod(events, signal, watchDebounceMs)
   const discarded = events.drainEvents()
   if (discarded.length === 0) {
     return
@@ -1028,7 +1034,10 @@ async function waitForExpectedAgentCheckout(
       return false
     }
 
-    if (!(await events.waitForEvent()) || !(await waitForWatchQuietPeriod(events, input.signal))) {
+    if (
+      !(await events.waitForEvent()) ||
+      !(await waitForWatchQuietPeriod(events, input.signal, resolveWatchDebounceMs(input)))
+    ) {
       return false
     }
     await emitQueuedWatchEvents(emitVerbose, events, session)
@@ -1443,7 +1452,11 @@ function createWatchEventQueue(signal: AbortSignal | undefined) {
 type WatchEventQueue = ReturnType<typeof createWatchEventQueue>
 
 /** Waits until filesystem events have been quiet long enough for Git to settle. */
-async function waitForWatchQuietPeriod(events: WatchEventQueue, signal: AbortSignal | undefined) {
+async function waitForWatchQuietPeriod(
+  events: WatchEventQueue,
+  signal: AbortSignal | undefined,
+  watchDebounceMs: number,
+) {
   while (!isAbortSignalAborted(signal)) {
     const changed = await events.waitForEventOrTimeout(watchDebounceMs)
     if (!changed) {
@@ -1452,6 +1465,10 @@ async function waitForWatchQuietPeriod(events: WatchEventQueue, signal: AbortSig
   }
 
   return false
+}
+
+function resolveWatchDebounceMs(input: WatchReviewSyncInput) {
+  return input.watchDebounceMs ?? defaultWatchDebounceMs
 }
 
 /** Checks an abort signal without causing TypeScript to over-narrow loop state. */
