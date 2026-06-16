@@ -5,97 +5,138 @@ import { access, realpath } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 
 import { UserError } from "./errors.ts"
-import type { CommandResult, RuntimeContext, WorktreeInfo } from "./types.ts"
+import type {
+  CommandResult,
+  GitHost,
+  GitRunOptions,
+  RuntimeContext,
+  WorktreeInfo,
+} from "./types.ts"
+
+/** Creates the default Git host backed by Git CLI subprocesses. */
+export function createCliGitHost() {
+  const run = async (cwd: string, args: string[], options: GitRunOptions = {}) => {
+    const result = await runCommand("git", args, {
+      cwd,
+      stdin: options.stdin,
+      env: {
+        ...process.env,
+        ...options.env,
+      },
+    })
+
+    if (result.status !== 0 && options.allowFailure !== true) {
+      throw new Error(
+        `git ${args.join(" ")} failed in ${cwd}: ${
+          result.stderr.trim() || result.stdout.trim() || "unknown Git error"
+        }`,
+      )
+    }
+
+    return result
+  }
+
+  return {
+    run,
+    resolveRequiredRepoRoot: async (cwd) => {
+      const result = await run(cwd, ["rev-parse", "--show-toplevel"], {
+        allowFailure: true,
+      })
+      if (result.status !== 0 || !result.stdout.trim()) {
+        throw new UserError(`Not a Git worktree: ${cwd}`)
+      }
+      return await normalizePath(result.stdout.trim())
+    },
+    resolveRequiredGitCommonDir: async (cwd) => {
+      const result = await run(cwd, ["rev-parse", "--git-common-dir"])
+      const value = result.stdout.trim()
+      return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
+    },
+    resolveRequiredGitDir: async (cwd) => {
+      const result = await run(cwd, ["rev-parse", "--git-dir"])
+      const value = result.stdout.trim()
+      return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
+    },
+    resolveCurrentBranch: async (cwd) => {
+      const result = await run(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+        allowFailure: true,
+      })
+      return result.status === 0 ? result.stdout.trim() || null : null
+    },
+    branchExists: async (cwd, branch) => {
+      const result = await run(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
+        allowFailure: true,
+      })
+      return result.status === 0
+    },
+    isWorktreeClean: async (cwd) => {
+      const result = await run(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
+      return !result.stdout.trim()
+    },
+    resolveRef: async (cwd, refName) => {
+      const result = await run(cwd, ["rev-parse", "--verify", "-q", refName], {
+        allowFailure: true,
+      })
+      return result.status === 0 ? result.stdout.trim() || null : null
+    },
+    updateRef: async (cwd, refName, oid) => {
+      await run(cwd, ["update-ref", refName, oid])
+    },
+    deleteRef: async (cwd, refName) => {
+      await run(cwd, ["update-ref", "-d", refName], {
+        allowFailure: true,
+      })
+    },
+    listWorktrees: async (cwd) => {
+      const result = await run(cwd, ["worktree", "list", "--porcelain"])
+      return await parseGitWorktrees(result.stdout)
+    },
+  } satisfies GitHost
+}
 
 /** Runs one Git command and returns captured stdout/stderr. */
 export async function git(
   cwd: string,
   args: string[],
-  _context: RuntimeContext,
-  options: {
-    allowFailure?: boolean
-    stdin?: string | "ignore"
-    env?: Record<string, string | undefined>
-  } = {},
+  context: RuntimeContext,
+  options: GitRunOptions = {},
 ) {
-  const result = await runCommand("git", args, {
-    cwd,
-    stdin: options.stdin,
-    env: {
-      ...process.env,
-      ...options.env,
-    },
-  })
-
-  if (result.status !== 0 && options.allowFailure !== true) {
-    throw new Error(
-      `git ${args.join(" ")} failed in ${cwd}: ${
-        result.stderr.trim() || result.stdout.trim() || "unknown Git error"
-      }`,
-    )
-  }
-
-  return result
+  return await context.gitHost.run(cwd, args, options)
 }
 
 /** Resolves the repository root for a path or raises a user-facing error. */
 export async function resolveRequiredRepoRoot(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["rev-parse", "--show-toplevel"], context, {
-    allowFailure: true,
-  })
-  if (result.status !== 0 || !result.stdout.trim()) {
-    throw new UserError(`Not a Git worktree: ${cwd}`)
-  }
-  return await normalizePath(result.stdout.trim())
+  return await context.gitHost.resolveRequiredRepoRoot(cwd)
 }
 
 /** Resolves one worktree's Git common directory as an absolute path. */
 export async function resolveRequiredGitCommonDir(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["rev-parse", "--git-common-dir"], context)
-  const value = result.stdout.trim()
-  return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
+  return await context.gitHost.resolveRequiredGitCommonDir(cwd)
 }
 
 /** Resolves one worktree's per-worktree Git metadata directory as an absolute path. */
 export async function resolveRequiredGitDir(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["rev-parse", "--git-dir"], context)
-  const value = result.stdout.trim()
-  return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
+  return await context.gitHost.resolveRequiredGitDir(cwd)
 }
 
 /** Returns the attached branch name, or null for detached HEAD. */
 export async function resolveCurrentBranch(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
-    allowFailure: true,
-  })
-  return result.status === 0 ? result.stdout.trim() || null : null
+  return await context.gitHost.resolveCurrentBranch(cwd)
 }
 
 /** Checks whether a local branch already exists. */
 export async function branchExists(cwd: string, branch: string, context: RuntimeContext) {
-  const result = await git(
-    cwd,
-    ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-    context,
-    {
-      allowFailure: true,
-    },
-  )
-  return result.status === 0
+  return await context.gitHost.branchExists(cwd, branch)
 }
 
 /** Checks whether a worktree has tracked, unstaged, staged, or untracked non-ignored changes. */
 export async function isWorktreeClean(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["status", "--porcelain=v1", "--untracked-files=all"], context)
-  return !result.stdout.trim()
+  return await context.gitHost.isWorktreeClean(cwd)
 }
 
 /** Reads one ref and returns null when it does not exist. */
 export async function resolveRef(cwd: string, refName: string, context: RuntimeContext) {
-  const result = await git(cwd, ["rev-parse", "--verify", "-q", refName], context, {
-    allowFailure: true,
-  })
-  return result.status === 0 ? result.stdout.trim() || null : null
+  return await context.gitHost.resolveRef(cwd, refName)
 }
 
 /** Updates or creates one hidden ref. */
@@ -105,14 +146,12 @@ export async function updateRef(
   oid: string,
   context: RuntimeContext,
 ) {
-  await git(cwd, ["update-ref", refName, oid], context)
+  await context.gitHost.updateRef(cwd, refName, oid)
 }
 
 /** Deletes one hidden ref, allowing retry after a previous cleanup removed it. */
 export async function deleteRef(cwd: string, refName: string, context: RuntimeContext) {
-  await git(cwd, ["update-ref", "-d", refName], context, {
-    allowFailure: true,
-  })
+  await context.gitHost.deleteRef(cwd, refName)
 }
 
 /** Ensures a review branch is not checked out outside the configured review worktree. */
@@ -216,11 +255,14 @@ export function isProcessAlive(pid: number) {
 
 /** Parses Git's porcelain worktree list into path and branch records. */
 export async function listGitWorktrees(cwd: string, context: RuntimeContext) {
-  const result = await git(cwd, ["worktree", "list", "--porcelain"], context)
+  return await context.gitHost.listWorktrees(cwd)
+}
+
+async function parseGitWorktrees(stdout: string) {
   const worktrees: WorktreeInfo[] = []
   let current: Partial<WorktreeInfo> = {}
 
-  for (const line of result.stdout.split("\n")) {
+  for (const line of stdout.split("\n")) {
     if (!line.trim()) {
       if (current.path) {
         worktrees.push({
