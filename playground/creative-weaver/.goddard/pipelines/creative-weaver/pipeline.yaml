@@ -1,0 +1,49 @@
+id: creative-weaver
+version: 0.1.0
+name: Creative Weaver
+description: Linear fiction pipeline that pairs architectural scene planning with deterministic chaos sampling.
+inputs:
+  premise:
+    type: string
+  emotion:
+    type: string
+  seed:
+    type: integer
+  targetWords:
+    type: integer
+steps:
+  - id: architect
+    kind: agent
+    name: Architect
+    systemPromptFile: ./prompts/architect.md
+    input:
+      premise: $.inputs.premise
+      emotion: $.inputs.emotion
+      targetWords: $.inputs.targetWords
+  - id: chaos-weaver
+    kind: script
+    name: Chaos Weaver
+    transformer: creative-weaver.build-payload
+    input:
+      premise: $.inputs.premise
+      emotion: $.inputs.emotion
+      seed: $.inputs.seed
+      targetWords: $.inputs.targetWords
+      architect: $.steps.architect.output
+  - id: artisan
+    kind: agent
+    name: Artisan
+    systemPromptFile: ./prompts/artisan.md
+    input:
+      prompt: $.steps.chaos-weaver.output.artisanPrompt
+      ledger: $.steps.chaos-weaver.output.ledger
+      chaos: $.steps.chaos-weaver.output.chaos
+      architect: $.steps.architect.output
+  - id: editor
+    kind: agent
+    name: Editor
+    systemPromptFile: ./prompts/editor.md
+    input:
+      draft: $.steps.artisan.output.message
+      ledger: $.steps.chaos-weaver.output.ledger
+      chaos: $.steps.chaos-weaver.output.chaos

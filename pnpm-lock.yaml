@@ -580,6 +580,9 @@ importers:
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
+      '@goddard-ai/creative-weaver':
+        specifier: workspace:*
+        version: link:../../playground/creative-weaver
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../daemon-plugin
