@@ -923,6 +923,9 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      kindstore:
+        specifier: 'catalog:'
+        version: 0.4.5(zod@4.4.3)
       yaml:
         specifier: 2.9.0
         version: 2.9.0

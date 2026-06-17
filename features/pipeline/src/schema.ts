@@ -154,6 +154,18 @@ export type ListPipelineDefinitionDiagnosticsResponse = {
   diagnostics: PipelineDefinitionDiagnostic[]
 }
 
+export const PipelineRunId = z.custom<`plr_${string}`>(
+  (value): value is `plr_${string}` => typeof value === "string" && value.startsWith("plr_"),
+)
+
+export type PipelineRunId = z.infer<typeof PipelineRunId>
+
+export const PipelineStepRunId = z.custom<`pls_${string}`>(
+  (value): value is `pls_${string}` => typeof value === "string" && value.startsWith("pls_"),
+)
+
+export type PipelineStepRunId = z.infer<typeof PipelineStepRunId>
+
 export const PipelineRunStatus = z.enum([
   "queued",
   "running",
@@ -165,6 +177,14 @@ export const PipelineRunStatus = z.enum([
 
 export type PipelineRunStatus = z.infer<typeof PipelineRunStatus>
 
+export const PipelineRunOrigin = z.enum(["app", "sdk", "cli", "automation"])
+
+export type PipelineRunOrigin = z.infer<typeof PipelineRunOrigin>
+
+export const PipelineRunVisibility = z.enum(["visible", "hidden"])
+
+export type PipelineRunVisibility = z.infer<typeof PipelineRunVisibility>
+
 export const PipelineStepRunStatus = z.enum([
   "queued",
   "running",
@@ -175,3 +195,108 @@ export const PipelineStepRunStatus = z.enum([
 ])
 
 export type PipelineStepRunStatus = z.infer<typeof PipelineStepRunStatus>
+
+export const PipelineRunInputs = z.record(z.string().min(1), z.unknown())
+
+export type PipelineRunInputs = z.infer<typeof PipelineRunInputs>
+
+export const PipelineRunOutputs = z.record(z.string().min(1), z.unknown()).nullable()
+
+export type PipelineRunOutputs = z.infer<typeof PipelineRunOutputs>
+
+export const PipelineStepRunData = z.unknown().nullable()
+
+export type PipelineStepRunData = z.infer<typeof PipelineStepRunData>
+
+export const PipelineRunDefinitionSnapshot = z.strictObject({
+  definition: PipelineDefinition,
+  source: PipelineDefinitionSource,
+  path: z.string().min(1).optional(),
+})
+
+export type PipelineRunDefinitionSnapshot = z.infer<typeof PipelineRunDefinitionSnapshot>
+
+export const DaemonPipelineRun = z.strictObject({
+  pipelineId: z.string().min(1),
+  pipelineVersion: z.string().min(1),
+  status: PipelineRunStatus,
+  origin: PipelineRunOrigin,
+  visibility: PipelineRunVisibility,
+  inputs: PipelineRunInputs,
+  outputs: PipelineRunOutputs,
+  error: z.string().nullable(),
+  definitionSnapshot: PipelineRunDefinitionSnapshot,
+  startedAt: z.number().int().nullable(),
+  completedAt: z.number().int().nullable(),
+  updatedAt: z.number().int(),
+})
+
+export type DaemonPipelineRun = z.infer<typeof DaemonPipelineRun> & {
+  id: PipelineRunId
+  createdAt: number
+}
+
+export const DaemonPipelineStepRun = z.strictObject({
+  pipelineRunId: PipelineRunId,
+  stepId: z.string().min(1),
+  stepIndex: z.number().int().nonnegative(),
+  kind: z.enum(["script", "agent", "approval"]),
+  status: PipelineStepRunStatus,
+  input: PipelineRunInputs,
+  output: PipelineStepRunData,
+  error: z.string().nullable(),
+  startedAt: z.number().int().nullable(),
+  completedAt: z.number().int().nullable(),
+  updatedAt: z.number().int(),
+})
+
+export type DaemonPipelineStepRun = z.infer<typeof DaemonPipelineStepRun> & {
+  id: PipelineStepRunId
+  createdAt: number
+}
+
+export const SpawnPipelineRunRequest = z.strictObject({
+  cwd: z.string().min(1),
+  pipelineId: z.string().min(1),
+  pipelineVersion: z.string().min(1).optional(),
+  inputs: PipelineRunInputs,
+  origin: PipelineRunOrigin.default("sdk"),
+  visibility: PipelineRunVisibility.default("visible"),
+})
+
+export type SpawnPipelineRunRequest = z.infer<typeof SpawnPipelineRunRequest>
+
+export const GetPipelineRunRequest = z.strictObject({
+  id: PipelineRunId,
+})
+
+export type GetPipelineRunRequest = z.infer<typeof GetPipelineRunRequest>
+
+export const ListPipelineRunsRequest = z.strictObject({
+  pipelineId: z.string().min(1).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+  cursor: z.string().optional().nullable(),
+})
+
+export type ListPipelineRunsRequest = z.infer<typeof ListPipelineRunsRequest>
+
+export const CancelPipelineRunRequest = GetPipelineRunRequest
+
+export type CancelPipelineRunRequest = z.infer<typeof CancelPipelineRunRequest>
+
+export type PipelineRunWithSteps = {
+  run: DaemonPipelineRun
+  steps: DaemonPipelineStepRun[]
+}
+
+export type SpawnPipelineRunResponse = PipelineRunWithSteps
+
+export type GetPipelineRunResponse = PipelineRunWithSteps
+
+export type ListPipelineRunsResponse = {
+  runs: DaemonPipelineRun[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+export type CancelPipelineRunResponse = PipelineRunWithSteps
