@@ -589,6 +589,9 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
+      '@goddard-ai/pipeline':
+        specifier: workspace:*
+        version: link:../../features/pipeline
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -914,6 +917,12 @@ importers:
 
   features/pipeline:
     dependencies:
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
       yaml:
         specifier: 2.9.0
         version: 2.9.0

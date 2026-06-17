@@ -4,6 +4,7 @@ import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composePlugins } from "@goddard-ai/daemon-plugin"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
+import { pipelinePlugin } from "@goddard-ai/pipeline/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -18,6 +19,7 @@ const defaultDaemonPlugins = [
   pullRequestPlugin,
   reviewSessionPlugin,
   loopPlugin,
+  pipelinePlugin,
   workforcePlugin,
 ] as const
 

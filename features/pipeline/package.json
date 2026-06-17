@@ -20,6 +20,22 @@
       },
       "bun": "./src/loader.ts",
       "import": "./dist/loader.mjs"
+    },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon.ts",
+        "default": "./dist/daemon.d.mts"
+      },
+      "bun": "./src/daemon.ts",
+      "import": "./dist/daemon.mjs"
+    },
+    "./daemon-ipc": {
+      "types": {
+        "source": "./src/daemon-ipc.ts",
+        "default": "./dist/daemon-ipc.d.mts"
+      },
+      "bun": "./src/daemon-ipc.ts",
+      "import": "./dist/daemon-ipc.mjs"
     }
   },
   "scripts": {
@@ -30,6 +46,8 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
+    "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/ipc": "workspace:*",
     "yaml": "2.9.0",
     "zod": "catalog:"
   },

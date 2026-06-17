@@ -119,6 +119,41 @@ export const PipelineDefinition = z
 
 export type PipelineDefinition = z.infer<typeof PipelineDefinition>
 
+export const PipelineDefinitionSource = z.enum(["project", "user", "code", "plugin"])
+
+export type PipelineDefinitionSource = z.infer<typeof PipelineDefinitionSource>
+
+export const RegisteredPipelineDefinition = z.strictObject({
+  source: PipelineDefinitionSource,
+  path: z.string().min(1).optional(),
+  definition: PipelineDefinition,
+})
+
+export type RegisteredPipelineDefinition = z.infer<typeof RegisteredPipelineDefinition>
+
+export const PipelineDefinitionDiagnostic = z.strictObject({
+  source: PipelineDefinitionSource,
+  path: z.string().min(1).optional(),
+  message: z.string().min(1),
+})
+
+export type PipelineDefinitionDiagnostic = z.infer<typeof PipelineDefinitionDiagnostic>
+
+export const ListPipelineDefinitionsRequest = z.strictObject({
+  cwd: z.string().min(1),
+})
+
+export type ListPipelineDefinitionsRequest = z.infer<typeof ListPipelineDefinitionsRequest>
+
+export type ListPipelineDefinitionsResponse = {
+  definitions: RegisteredPipelineDefinition[]
+  diagnostics: PipelineDefinitionDiagnostic[]
+}
+
+export type ListPipelineDefinitionDiagnosticsResponse = {
+  diagnostics: PipelineDefinitionDiagnostic[]
+}
+
 export const PipelineRunStatus = z.enum([
   "queued",
   "running",

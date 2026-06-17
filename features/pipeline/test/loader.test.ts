@@ -126,6 +126,7 @@ test("loadProjectPipelineDefinitions reports duplicate ids", async () => {
   expect(result.definitions).toHaveLength(1)
   expect(result.diagnostics).toEqual([
     {
+      source: "project",
       path: duplicatePath,
       message: 'Duplicate Pipeline definition id "creative-weaver".',
     },

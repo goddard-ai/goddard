@@ -2,12 +2,11 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { parse } from "yaml"
 
-import { PipelineDefinition, type PipelineStepDefinition } from "./schema.ts"
-
-export type PipelineDefinitionDiagnostic = {
-  path: string
-  message: string
-}
+import {
+  PipelineDefinition,
+  type PipelineDefinitionDiagnostic,
+  type PipelineStepDefinition,
+} from "./schema.ts"
 
 export type LoadedPipelineDefinition = {
   path: string
@@ -22,6 +21,11 @@ export type LoadProjectPipelineDefinitionsResult = {
 
 type CandidateDefinitionFile = {
   path: string
+}
+
+type LoadedPipelineDefinitionFile = {
+  definition: PipelineDefinition | null
+  diagnostics: PipelineDefinitionDiagnostic[]
 }
 
 const pipelinesDirectory = ".goddard/pipelines"
@@ -44,6 +48,7 @@ export async function loadProjectPipelineDefinitions(rootDir: string) {
 
     if (seenDefinitionIds.has(loaded.definition.id)) {
       diagnostics.push({
+        source: "project" as const,
         path: candidate.path,
         message: `Duplicate Pipeline definition id "${loaded.definition.id}".`,
       })
@@ -97,7 +102,7 @@ async function readDirectoryEntries(directory: string) {
   }
 }
 
-async function loadPipelineDefinitionFile(path: string) {
+async function loadPipelineDefinitionFile(path: string): Promise<LoadedPipelineDefinitionFile> {
   const diagnostics: PipelineDefinitionDiagnostic[] = []
   let raw: string
 
@@ -109,6 +114,7 @@ async function loadPipelineDefinitionFile(path: string) {
         definition: null,
         diagnostics: [
           {
+            source: "project",
             path,
             message: "Pipeline definition file not found.",
           },
@@ -125,6 +131,7 @@ async function loadPipelineDefinitionFile(path: string) {
     parsed = parse(raw)
   } catch (error) {
     diagnostics.push({
+      source: "project",
       path,
       message: `Invalid YAML: ${getErrorMessage(error)}`,
     })
@@ -137,6 +144,7 @@ async function loadPipelineDefinitionFile(path: string) {
   if (!result.success) {
     diagnostics.push(
       ...result.error.issues.map((issue) => ({
+        source: "project" as const,
         path,
         message:
           issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message,
@@ -149,6 +157,7 @@ async function loadPipelineDefinitionFile(path: string) {
   if (missingPromptFiles.length > 0) {
     diagnostics.push(
       ...missingPromptFiles.map((promptPath) => ({
+        source: "project" as const,
         path,
         message: `Prompt file not found: ${promptPath}`,
       })),
