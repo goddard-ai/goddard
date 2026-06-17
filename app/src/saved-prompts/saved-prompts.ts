@@ -7,14 +7,27 @@ export type SavedPromptRecord = {
   savedAt: number
 }
 
+export type SubmittedPromptRecord = {
+  text: string
+  submittedAts: number[]
+}
+
 /** Public state for saved transcript prompts. */
 export type SavedPromptsState = {
   promptsById: Record<string, SavedPromptRecord>
   orderedPromptIds: string[]
+  submittedPromptsByText: Record<string, SubmittedPromptRecord>
 }
+
+const AUTO_SAVE_PROMPT_REPEAT_COUNT = 3
+const AUTO_SAVE_PROMPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 function normalizePromptText(text: string) {
   return text.trim()
+}
+
+function createSubmittedPromptKey(text: string) {
+  return JSON.stringify([text])
 }
 
 function createSavedPromptId() {
@@ -31,6 +44,7 @@ export class SavedPrompts extends Sigma<SavedPromptsState> {
     super({
       promptsById: {},
       orderedPromptIds: [],
+      submittedPromptsByText: {},
     })
   }
 
@@ -93,6 +107,47 @@ export class SavedPrompts extends Sigma<SavedPromptsState> {
     }
 
     return this.save(text)
+  }
+
+  recordSubmission(text: string, submittedAt = Date.now()) {
+    const normalizedText = normalizePromptText(text)
+
+    if (!normalizedText) {
+      return null
+    }
+
+    const promptKey = createSubmittedPromptKey(normalizedText)
+    const repeatWindowStart = submittedAt - AUTO_SAVE_PROMPT_WINDOW_MS
+    const submittedPromptsByText: Record<string, SubmittedPromptRecord> = {}
+
+    for (const [existingPromptKey, prompt] of Object.entries(this.submittedPromptsByText ?? {})) {
+      const submittedAts = prompt.submittedAts.filter(
+        (previousSubmittedAt) => previousSubmittedAt >= repeatWindowStart,
+      )
+
+      if (submittedAts.length > 0) {
+        submittedPromptsByText[existingPromptKey] = {
+          text: prompt.text,
+          submittedAts,
+        }
+      }
+    }
+
+    const submittedAts = [...(submittedPromptsByText[promptKey]?.submittedAts ?? []), submittedAt]
+
+    this.submittedPromptsByText = {
+      ...submittedPromptsByText,
+      [promptKey]: {
+        text: normalizedText,
+        submittedAts,
+      },
+    }
+
+    if (submittedAts.length >= AUTO_SAVE_PROMPT_REPEAT_COUNT && !this.isSaved(normalizedText)) {
+      return this.save(normalizedText)
+    }
+
+    return this.findByText(normalizedText)
   }
 
   findCompletion(prefix: string) {

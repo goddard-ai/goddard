@@ -252,6 +252,7 @@ export function SessionInput(props: {
       return
     }
 
+    const submittedPromptText = getPlainPromptText(promptBlocks)
     setIsSubmitting(true)
 
     try {
@@ -260,6 +261,10 @@ export function SessionInput(props: {
       return
     } finally {
       setIsSubmitting(false)
+    }
+
+    if (submittedPromptText) {
+      savedPrompts.recordSubmission(submittedPromptText)
     }
 
     dismissedMenuRef.current = null
