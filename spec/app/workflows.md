@@ -9,6 +9,7 @@ The app supports workflows across sessions, reviews, specs, tasks, roadmap conte
 
 ## Capabilities
 - **Session Steering**: Initiate, monitor, and provide real-time feedback to AI agents executing tasks.
+- **Pipeline Runs**: Spawn and inspect reusable linear handoff workflows as ordered step progress, separate from ordinary chat sessions.
 - **Human Attention Inbox**: Triage sessions and pull requests that need review, response, or explicit completion.
 - **Pull Request Review**: Triage, review, and correlate AI-generated pull requests directly with their originating sessions.
 - **Specification Management**: Browse and refine repository specifications to align human intent with AI execution.
@@ -16,10 +17,12 @@ The app supports workflows across sessions, reviews, specs, tasks, roadmap conte
 - **Global Discovery**: Search across all domains from a single entry point.
 - The app exposes real-time state for active sessions, tasks, pull requests, and proposals.
 - The app surfaces daemon-owned inbox state without creating a separate app-owned source of truth.
+- The app surfaces Pipeline runs as their own workflow state and does not show Pipeline-created internal sessions in the primary Sessions list by default.
 - The app allows humans to monitor, review, and adjust AI execution without dropping context.
 
 ## Lifecycle
 - **Session Lifecycle View**: `Idle -> Active -> Blocked (Awaiting Input) -> Completed`
+- **Pipeline Run Lifecycle View**: `Queued -> Running -> Waiting -> Succeeded | Failed | Cancelled`
 
 ## Boundaries
 - Day-to-day workflows belong here rather than in a broad terminal-first surface.
