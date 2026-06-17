@@ -1,5 +1,7 @@
 # Inbox Statuses
 
+> Inbox rows track the current workflow state for daemon-owned work, not a history of notifications. This page defines the statuses a user or client may see and how later daemon activity can change them.
+
 - **Core idea**
   - Inbox status is the user's workflow state for the current daemon-owned entity.
   - Later daemon attention can reopen rows when the entity needs attention again.

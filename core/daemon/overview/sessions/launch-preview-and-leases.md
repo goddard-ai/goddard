@@ -1,5 +1,7 @@
 # Launch Preview and Leases
 
+> Launch preview lets a client inspect agent and repository capabilities before creating a durable daemon session. This page explains how previews and leases support launch dialogs without committing abandoned choices.
+
 - **Core idea**
   - Launch preview lets a client inspect launch-time capabilities before committing to a durable daemon session.
   - A launch lease can keep prepared live launch state available while the user finishes a launch decision.

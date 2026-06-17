@@ -1,5 +1,7 @@
 # Adapters
 
+> Adapters describe ACP agents that can be shown or selected when starting daemon-managed sessions. This page explains how the daemon presents catalog entries, local enablement, and launch visibility.
+
 - **Core idea**
   - Adapters describe launchable ACP agents for daemon-managed sessions.
   - The adapter catalog answers which agents can be shown or selected in a global or project launch context.

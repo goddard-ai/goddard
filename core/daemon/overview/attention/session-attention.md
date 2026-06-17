@@ -1,5 +1,7 @@
 # Session Attention
 
+> A daemon-managed session can ask for human attention when agent work blocks or reaches a useful stopping point. This page explains how those reports update the inbox and how short metadata helps clients present them clearly.
+
 - **Core idea**
   - A daemon-managed session can refresh inbox attention when it needs human awareness or help.
   - Session attention is current workflow state, not a second visible chat response.

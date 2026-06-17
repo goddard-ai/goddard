@@ -1,5 +1,7 @@
 # Attention
 
+> Goddard uses the daemon to keep a local view of work that currently needs a human's attention. This section explains the inbox model and the session or pull request events that can refresh attention.
+
 - **Purpose**
   - This folder explains how the daemon surfaces work that needs human attention.
   - It separates inbox concepts from session and pull request attention sources.

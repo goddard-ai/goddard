@@ -1,5 +1,7 @@
 # Launch
 
+> Starting the daemon chooses the backend, local control port, agent wrapper location, data profile, and enabled runtime surfaces for that process. This page explains those launch choices as user-visible behavior.
+
 - **What launch answers**
   - Which backend the daemon talks to.
   - Which local port exposes daemon control.

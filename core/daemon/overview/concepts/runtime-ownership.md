@@ -1,5 +1,7 @@
 # Runtime Ownership
 
+> The daemon is the source of truth for live automation state, while clients request changes and observe results through daemon contracts. This page explains the ownership boundary that keeps sessions and runtimes from splitting across clients.
+
 - **Core idea**
   - The daemon is the local lifecycle authority for daemon-managed automation.
   - Clients can start, inspect, steer, and stop work through daemon contracts.

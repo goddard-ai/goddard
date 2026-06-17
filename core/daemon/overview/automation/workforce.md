@@ -1,5 +1,7 @@
 # Workforce
 
+> Workforce is Goddard's daemon-owned coordination model for multiple agents working in one repository. This page explains the runtime, queue, ownership, validation, and recovery rules at a conceptual level.
+
 - **Core idea**
   - Workforce is daemon-owned multi-agent delegation for one repository workspace.
   - The daemon owns lifecycle, queue projection, validation, recovery, and event streaming.

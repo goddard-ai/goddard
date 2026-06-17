@@ -1,5 +1,7 @@
 # Data Profiles
 
+> A daemon data profile chooses which local store the daemon reads and writes during one process lifetime. This page explains how normal, development, and mock profiles stay separate.
+
 - **Core idea**
   - A data profile chooses which local daemon store the process uses.
   - Profiles isolate normal use, development use, and deterministic mock data.

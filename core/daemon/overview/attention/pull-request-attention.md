@@ -1,5 +1,7 @@
 # Pull Request Attention
 
+> Managed pull requests can appear in the daemon-local inbox when daemon activity makes them relevant to the user. This page explains how pull request attention follows the daemon's local entity rather than raw hosting-service identifiers.
+
 - **Core idea**
   - Managed pull requests can produce daemon-local inbox attention.
   - Attention follows the daemon-managed pull request entity rather than external service ids.

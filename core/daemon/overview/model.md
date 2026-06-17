@@ -1,5 +1,7 @@
 # Daemon Model
 
+> The daemon is the local process that owns the lifecycle of Goddard automation, including sessions, background runtimes, and local state. This page defines the main parts of that responsibility before the feature-specific pages describe individual workflows.
+
 - **Core idea**
   - The daemon is the local lifecycle authority for Goddard automation.
   - It runs as a local background process and exposes a daemon server for approved local clients.

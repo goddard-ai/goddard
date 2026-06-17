@@ -1,5 +1,7 @@
 # Mock Data
 
+> The mock data profile gives app and SDK developers deterministic local daemon data that behaves like normal daemon data to clients. This page explains what gets seeded, what stays isolated, and what mock data is not meant to prove.
+
 - **Core idea**
   - The mock data profile provides deterministic local-only daemon data for app and SDK development.
   - It is isolated from production and development daemon data.

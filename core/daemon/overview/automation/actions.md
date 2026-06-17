@@ -1,5 +1,7 @@
 # Actions
 
+> A named action is reusable automation that starts a daemon-managed session for one focused run. This page explains what changes when an action is run and how action configuration feeds into the created session.
+
 - **Core idea**
   - An action is a reusable one-shot execution definition.
   - Running a named action creates a daemon-managed session for that action.

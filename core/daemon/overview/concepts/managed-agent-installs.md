@@ -1,5 +1,7 @@
 # Managed Agent Installs
 
+> Managed agent installs let user-owned daemon policy decide when an ACP agent may be installed or updated for launch. This page explains that authority boundary and how managed install status appears to launch flows.
+
 - **Core idea**
   - Managed agent installs let user-owned daemon policy control when an ACP agent may be installed or updated.
   - They keep install and update authority explicit while letting launch flows show managed agent status.

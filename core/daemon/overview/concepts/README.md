@@ -1,5 +1,7 @@
 # Daemon Concepts
 
+> The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, adapters, and auth. This section defines those concepts independently so feature pages can stay focused.
+
 - **Purpose**
   - This folder gives user-findable names to daemon concepts that cut across feature areas.
   - These pages explain ownership boundaries and visible behavior, not internal implementation.

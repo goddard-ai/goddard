@@ -1,5 +1,7 @@
 # Automation
 
+> Some Goddard automation starts from named definitions or multi-agent coordination instead of a user typing into one live session. This section explains those daemon-owned automation surfaces and how clients observe or control them.
+
 - **Purpose**
   - This folder explains daemon-owned automation surfaces that create or coordinate agent work beyond direct interactive sessions.
 

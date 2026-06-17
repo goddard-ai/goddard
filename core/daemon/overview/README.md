@@ -1,5 +1,7 @@
 # Daemon Overview
 
+> The daemon is Goddard's local background process for running and coordinating agent work. These pages explain the behavior users and clients can rely on, with enough context to enter from any topic.
+
 - **Purpose**
   - This directory describes what `@goddard-ai/daemon` supports at a conceptual level.
   - It is written for agents and humans who need to understand daemon-owned behavior without reading source code.

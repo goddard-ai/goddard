@@ -1,5 +1,7 @@
 # Sessions
 
+> A daemon session is one Goddard agent conversation or task with local identity, status, history, diagnostics, and optional workspace isolation. This section breaks session behavior into pages that can be read independently.
+
 - **Purpose**
   - This folder explains daemon-managed sessions as user-visible concepts.
   - It separates launch, access, live control, history, and worktree behavior so users can find the concept they need directly.

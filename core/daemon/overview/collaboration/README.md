@@ -1,5 +1,7 @@
 # Collaboration
 
+> The daemon connects agent work to human review workflows, pull request activity, and agent-reported status. This section groups the collaboration behavior that sits between live sessions, review surfaces, and external pull requests.
+
 - **Purpose**
   - This folder covers daemon features that connect agent work to human review, pull requests, and agent-reported status.
 

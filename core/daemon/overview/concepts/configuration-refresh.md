@@ -1,5 +1,7 @@
 # Configuration Refresh
 
+> The daemon watches persisted Goddard configuration while it runs, but active work keeps the configuration it already resolved. This page explains when valid config changes affect future work and what happens when edits are invalid.
+
 - **Core idea**
   - The daemon owns persisted root-config loading and refresh for long-running local automation.
   - Valid config changes affect future work after the daemon accepts the updated snapshot.

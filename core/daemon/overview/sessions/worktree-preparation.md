@@ -1,5 +1,7 @@
 # Worktree Preparation
 
+> Fresh isolated session worktrees can be prepared before an agent starts so routine setup does not have to be repeated manually. This page explains seeding, package-manager bootstrap, and the safety limits around repository-local preparation.
+
 - **Core idea**
   - Fresh isolated session worktrees can be prepared before the agent starts.
   - Preparation reduces repeated setup work without making copied artifacts the source of truth.

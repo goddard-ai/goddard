@@ -1,5 +1,7 @@
 # Workforce Requests
 
+> Workforce requests are queued units of delegated agent work inside one repository workforce. This page explains how requests enter the queue, change over time, and advance only through daemon-owned validation.
+
 - **Core idea**
   - A workforce request is one queued unit of delegated work for a workforce agent.
   - Requests are recorded through the daemon so queue projection and ownership validation stay centralized.

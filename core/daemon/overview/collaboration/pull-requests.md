@@ -1,5 +1,7 @@
 # Pull Requests
 
+> Daemon-managed sessions can submit pull requests and send replies through a local daemon contract. This page explains how those operations preserve session, repository, security, and attention context.
+
 - **Core idea**
   - The daemon owns the local pull request contract used by daemon-managed sessions and clients.
   - Pull request operations preserve session, repository, and attention context.

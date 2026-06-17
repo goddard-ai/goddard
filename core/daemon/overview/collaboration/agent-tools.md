@@ -1,5 +1,7 @@
 # Agent Tools
 
+> Daemon-launched agents receive local command tools that report structured workflow events back to Goddard. This page explains those tools as daemon controls for initiatives, blockers, turn endings, pull requests, and workforce delegation.
+
 - **Core idea**
   - Daemon-launched agents receive command-line tools that report structured status and collaboration events back to the daemon.
   - These tools are hidden workflow controls, not replacements for the agent's user-facing response.

@@ -1,5 +1,7 @@
 # Pull Request Feedback
 
+> Pull request feedback handling lets the local daemon react to supported review comments or reviews for the authenticated user. This page explains how feedback becomes queued local work without turning the daemon into a general review UI.
+
 - **Core idea**
   - Pull request feedback handling is background daemon automation for supported review events.
   - It lets real-time comments or reviews trigger focused local handling without requiring a human to monitor a live event stream.

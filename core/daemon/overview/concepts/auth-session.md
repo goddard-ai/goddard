@@ -1,5 +1,7 @@
 # Auth Session
 
+> The daemon keeps a local authentication session that daemon clients can read or clear. This page explains device-flow login, identity reads, logout, and why clients should not assume a separate auth state.
+
 - **Core idea**
   - The daemon owns the local auth session visible to daemon clients.
   - Clients read or clear that state through the daemon rather than assuming a separate identity.
