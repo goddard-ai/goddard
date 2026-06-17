@@ -1,5 +1,6 @@
 import type { InboxEntityId, InboxItem } from "@goddard-ai/inbox/schema"
 
+import { text } from "~/language/text.ts"
 import { inboxFilterDefinitions, type InboxFilterId } from "./filters.ts"
 import { InboxRow } from "./row.tsrx"
 import styles from "./page.style.ts"
@@ -19,15 +20,15 @@ export function InboxList(props: {
   const hasSearchQuery = props.searchQuery.trim().length > 0
 
   if (props.listStatus === "loading" && props.items.length === 0) {
-    return <div class={styles.loading}>Loading inbox...</div>
+    return <div class={styles.loading}>{text.loadingInbox}</div>
   }
 
   if (props.listStatus === "error" && props.items.length === 0) {
     return <div class={styles.error}>
       <div class={styles.messageContent}>
-        <h2 class={styles.messageTitle}>Couldn't load inbox</h2>
+        <h2 class={styles.messageTitle}>{text.couldntLoadInbox}</h2>
         <p class={styles.messageBody}>
-          {props.errorMessage ?? "The daemon-backed inbox request failed."}
+          {props.errorMessage ?? text.theDaemonBackedInboxRequestFailed}
         </p>
       </div>
     </div>
@@ -37,18 +38,18 @@ export function InboxList(props: {
     return <div class={styles.empty}>
       <div class={styles.messageContent}>
         <h2 class={styles.messageTitle}>
-          {hasSearchQuery ? "No matching inbox items" : filter.emptyTitle}
+          {hasSearchQuery ? text.noMatchingInboxItems : filter.emptyTitle}
         </h2>
         <p class={styles.messageBody}>
           {hasSearchQuery
-            ? "Try a shorter search or a status filter like is:unread."
+            ? text.tryAShorterSearchOrAStatusFilterLikeIsUnread
             : filter.emptyDescription}
         </p>
       </div>
     </div>
   }
 
-  <ul class={styles.list} aria-label={`${filter.label} inbox items`}>
+  <ul class={styles.list} aria-label={`${filter.label} ${text.inboxItems}`}>
     @for (const item of props.items; index index) {
       const onSelectionChange =
         props.onItemSelectionChange

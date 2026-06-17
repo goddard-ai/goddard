@@ -6,6 +6,7 @@ import { useEffect } from "preact/hooks"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
+import { text } from "~/language/text.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -33,7 +34,7 @@ export function SessionLaunchLoadingSelect(props: { label: string; compact?: boo
     label={props.label}
     loading={true}
     {open}
-    placeholder="Loading options..."
+    placeholder={text.loadingOptions}
     value={null}
     onValueChange={() => {}}
   />
@@ -41,11 +42,11 @@ export function SessionLaunchLoadingSelect(props: { label: string; compact?: boo
 
 export function SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) @{
   <div class={styles.composerControls}>
-    <SessionLaunchLoadingSelect compact={props.compact} label="Agent harness" />
-    <SessionLaunchLoadingSelect compact={props.compact} label="Model" />
-    <SessionLaunchLoadingSelect compact={props.compact} label="Thinking level" />
+    <SessionLaunchLoadingSelect compact={props.compact} label={text.agentHarness} />
+    <SessionLaunchLoadingSelect compact={props.compact} label={text.model} />
+    <SessionLaunchLoadingSelect compact={props.compact} label={text.thinkingLevel} />
     <div class={styles.composerApprovalControl}>
-      <SessionLaunchLoadingSelect compact={props.compact} label="Approval preset" />
+      <SessionLaunchLoadingSelect compact={props.compact} label={text.approvalPreset} />
     </div>
   </div>
 }
@@ -64,7 +65,7 @@ export function AgentHarnessSelector(props: {
     (adapter) => ({
       value: adapter.id,
       label: adapter.name,
-      detail: `${adapter.version}${adapter.unofficial ? " · Unofficial" : ""}`,
+      detail: `${adapter.version}${adapter.unofficial ? ` · ${text.unofficial}` : ""}`,
       icon: adapter.icon,
       searchText: `${adapter.id}\n${adapter.description ?? ""}`,
     }),
@@ -83,9 +84,9 @@ export function AgentHarnessSelector(props: {
     filterable={true}
     iconOnlyTrigger={props.compact}
     {items}
-    label="Agent harness"
+    label={text.agentHarness}
     open={form.getPickerOpen("adapter")}
-    placeholder="Select an agent harness"
+    placeholder={text.selectAgentHarness}
     shortcut={adapterShortcut}
     value={form.draftAdapterId.value}
     onValueChange={(value) => {
@@ -121,7 +122,7 @@ export function SessionLaunchBranchSelector(props: {
       (branch) => ({
         value: branch,
         label: branch,
-        detail: branch === preview.currentBranch ? "Current branch" : null,
+        detail: branch === preview.currentBranch ? text.currentBranch : null,
       }),
     ) ??
       []
@@ -136,9 +137,9 @@ export function SessionLaunchBranchSelector(props: {
       disabled={props.disabled || branchItems.length === 0 || localCheckoutUnavailable}
       filterable={true}
       items={branchItems}
-      label="Git branch"
+      label={text.gitBranch}
       open={form.getPickerOpen("branch")}
-      placeholder="Choose a branch"
+      placeholder={text.chooseABranch}
       shortcut={branchShortcut}
       value={form.draftBaseBranchName.value}
       onValueChange={(value) => {
@@ -147,7 +148,7 @@ export function SessionLaunchBranchSelector(props: {
     />
 
     @if (form.draftLocation.value === "local" && preview?.dirty === true) {
-      <p class={styles.warning}>Commit or stash local changes to launch from another branch.</p>
+      <p class={styles.warning}>{text.commitOrStashLocalChangesToLaunchFromAnotherBranch}</p>
     }
   </div>
 }
@@ -204,12 +205,12 @@ export function SessionLaunchLocationSelector(props: {
   const locationOptions = [
     {
       value: "local",
-      label: "Work locally",
+      label: text.workLocally,
       icon: Laptop,
     },
     {
       value: "worktree",
-      label: "New worktree",
+      label: text.newWorktree,
       icon: GitFork,
     },
   ] as const
@@ -219,7 +220,7 @@ export function SessionLaunchLocationSelector(props: {
 
   <fieldset class={styles.radioField} disabled={props.disabled || !form.draftProjectPath.value}>
     <legend class={styles.radioLegend}>
-      <span>Launch location</span>
+      <span>{text.launchLocation}</span>
 
       @if (locationShortcut) {
         <GoodKeyboardShortcut expression={locationShortcut} />
@@ -264,7 +265,7 @@ function buildSubpackageItems(projectPath: string, subpackages: readonly Session
   return [
     {
       value: projectPath,
-      label: "Project root",
+      label: text.projectRoot,
       detail: projectPath,
       searchText: projectPath,
     },
@@ -321,9 +322,9 @@ export function SessionSubpackageSelector(props: {
     disabled={props.disabled || !projectPath}
     filterable={true}
     {items}
-    label="Working directory"
+    label={text.workingDirectory}
     open={form.getPickerOpen("subpackage")}
-    placeholder="Project root"
+    placeholder={text.projectRoot}
     shortcut={subpackageShortcut}
     value={selectedValue}
     onValueChange={(value) => {
@@ -372,11 +373,11 @@ export function SessionLaunchPreviewSelectors(props: {
       ? [
           {
             value: "true",
-            label: "On",
+            label: text.on,
           },
           {
             value: "false",
-            label: "Off",
+            label: text.off,
           },
         ]
       : form.thinkingOption.value?.type === "select"
@@ -432,9 +433,9 @@ export function SessionLaunchPreviewSelectors(props: {
       disabled={props.disabled || modelItems.length === 0}
       filterable={true}
       items={modelItems}
-      label="Model"
+      label={text.model}
       open={form.getPickerOpen("model")}
-      placeholder="Use the agent harness default model"
+      placeholder={text.useTheAgentHarnessDefaultModel}
       shortcut={modelShortcut}
       value={form.draftModelId.value}
       onValueChange={(value) => {
@@ -448,9 +449,9 @@ export function SessionLaunchPreviewSelectors(props: {
         disabled={props.disabled || thinkingItems.length === 0}
         filterable={false}
         items={thinkingItems}
-        label="Thinking level"
+        label={text.thinkingLevel}
         open={form.getPickerOpen("thinking")}
-        placeholder="Use the agent harness default"
+        placeholder={text.useTheAgentHarnessDefault}
         shortcut={thinkingShortcut}
         value={typeof form.draftThinkingValue.value === "boolean"
           ? String(form.draftThinkingValue.value)

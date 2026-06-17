@@ -4,6 +4,7 @@ import { useSignal } from "@preact/signals"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
+import { text } from "~/language/text.ts"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsrx"
 import {
@@ -123,11 +124,11 @@ export function SessionInputMenu(props: {
               })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              Loading suggestions...
+              {text.loadingSuggestions}
             </span>
           </div>
         } @else if (props.suggestions.length === 0) {
-          <div class={inputMenuEmptyClass}>No matches for this trigger yet.</div>
+          <div class={inputMenuEmptyClass}>{text.noMatchesForThisTriggerYet}</div>
         } @else {
           @for (const suggestion of props.suggestions; index index) {
             <button

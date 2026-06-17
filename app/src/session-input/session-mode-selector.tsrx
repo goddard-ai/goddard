@@ -1,5 +1,6 @@
 import type { Signal } from "@preact/signals"
 
+import { text } from "~/language/text.ts"
 import { flattenConfigOptionValues, type SelectSessionConfigOption } from "./config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "./select-menu.tsrx"
 
@@ -16,8 +17,8 @@ export function SessionModeSelector(props: {
     compact={props.compact}
     option={props.modeOption}
     open={props.open}
-    label="Approval preset"
-    placeholder="Use the agent harness default"
+    label={text.approvalPreset}
+    placeholder={text.useTheAgentHarnessDefault}
     shortcut={props.shortcut}
     onValueChange={props.onValueChange}
   />
@@ -50,9 +51,9 @@ export function SessionConfigOptionSelector(props: {
     disabled={props.disabled || optionItems.length === 0}
     filterable={false}
     items={optionItems}
-    label={props.option?.name ?? props.label ?? "Session option"}
+    label={props.option?.name ?? props.label ?? text.sessionOption}
     open={props.open}
-    placeholder={props.placeholder ?? "Use the agent harness default"}
+    placeholder={props.placeholder ?? text.useTheAgentHarnessDefault}
     shortcut={props.shortcut}
     value={props.option?.currentValue ?? null}
     onValueChange={props.onValueChange}

@@ -5,6 +5,7 @@ import { useEffect, useId } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { text } from "~/language/text.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { goddardSdk } from "~/sdk.ts"
@@ -59,7 +60,7 @@ export default function SessionLaunchDialog(props: {
     isLaunching.value = true
     const toastId = appToaster.create({
       description: form.effectiveCwd.value,
-      title: "Launching session",
+      title: text.launchingSession,
       type: "loading",
     })
 
@@ -87,14 +88,14 @@ export default function SessionLaunchDialog(props: {
       appToaster.update(toastId, {
         description: sessionTitle,
         duration: 2800,
-        title: "Session launched",
+        title: text.sessionLaunched,
         type: "success",
       })
     } catch (error) {
       console.error("Failed to create session.", error)
       appToaster.update(toastId, {
-        description: "The session could not be created.",
-        title: "Session launch failed",
+        description: text.theSessionCouldNotBeCreated,
+        title: text.sessionLaunchFailed,
         type: "error",
       })
     } finally {
@@ -193,13 +194,13 @@ export default function SessionLaunchDialog(props: {
     contentClass={styles.content}
   >
     <header class={styles.header}>
-      <h2 id={titleId} class={styles.title}>Launch session</h2>
-      <p class={styles.description}>
-        Choose the project, agent harness, launch options, and initial prompt.
-      </p>
+      <h2 id={titleId} class={styles.title}>{text.launchSession}</h2>
+      <p
+        class={styles.description}
+      >{text.chooseTheProjectAgentHarnessLaunchOptionsAndInitialPrompt}</p>
     </header>
     <button
-      aria-label="Close launch session dialog"
+      aria-label={text.closeLaunchSessionDialog}
       class={styles.closeButton}
       type="button"
       onClick={() => {

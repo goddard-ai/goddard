@@ -27,6 +27,7 @@ import { markInboxSessionVisited } from "~/inbox/session-visit.ts"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
+import { text } from "~/language/text.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { useQueries, useQuery } from "~/lib/query.ts"
@@ -266,12 +267,12 @@ function SessionChatHeaderActions(props: {
       props.chat.session.completedHidden
   const completeActionLabel =
     props.chat.session.completedHidden
-      ? "Session completed"
+      ? text.sessionCompleted
       : props.chat.session.activeDaemonSession
-        ? "Complete unavailable while agent is active"
+        ? text.completeSessionUnavailableWhileAgentIsActive
         : activeHeaderAction === "complete"
-          ? "Completing session"
-          : "Complete session"
+          ? text.completingSession
+          : text.completeSession
 
   const completeCurrentSession = async () => {
     if (props.chat.session.activeDaemonSession || props.chat.session.completedHidden) {
@@ -285,7 +286,7 @@ function SessionChatHeaderActions(props: {
       } catch (error) {
         console.error("Failed to complete session.", error)
         throw {
-          title: "Complete failed",
+          title: text.completeFailed,
           description: formatSessionRequestError(error),
         }
       }
@@ -315,8 +316,8 @@ function SessionChatHeaderActions(props: {
 
         if (!result.activeTurnCancelled && result.abortedQueue.length === 0) {
           throw {
-            title: "Stop skipped",
-            description: "The daemon did not find an active turn to stop.",
+            title: text.stopSkipped,
+            description: text.theDaemonDidNotFindAnActiveTurnToStop,
           }
         }
 
@@ -328,7 +329,7 @@ function SessionChatHeaderActions(props: {
 
         console.error("Failed to stop session turn.", error)
         throw {
-          title: "Stop failed",
+          title: text.stopFailed,
           description: formatSessionRequestError(error),
         }
       }
@@ -338,10 +339,10 @@ function SessionChatHeaderActions(props: {
   <>
     <AppCommandTooltip
       command={AppCommand.sessionChat.skipToPreviousPrompt}
-      label="Previous prompt"
+      label={text.previousPrompt}
     >
       <button
-        aria-label="Scroll to previous user prompt"
+        aria-label={text.scrollToPreviousUserPrompt}
         class={styles.headerActionButton}
         disabled={!props.canNavigatePrompts}
         type="button"
@@ -353,9 +354,9 @@ function SessionChatHeaderActions(props: {
       </button>
     </AppCommandTooltip>
 
-    <AppCommandTooltip command={AppCommand.sessionChat.skipToNextPrompt} label="Next prompt">
+    <AppCommandTooltip command={AppCommand.sessionChat.skipToNextPrompt} label={text.nextPrompt}>
       <button
-        aria-label="Scroll to next user prompt"
+        aria-label={text.scrollToNextUserPrompt}
         class={styles.headerActionButton}
         disabled={!props.canNavigatePrompts}
         type="button"
@@ -369,7 +370,7 @@ function SessionChatHeaderActions(props: {
 
     <AppCommandTooltip command={AppCommand.sessionChat.viewChanges}>
       <button
-        aria-label="View session changes"
+        aria-label={text.viewSessionChanges}
         class={styles.headerActionButton}
         type="button"
         onClick={() => {
@@ -396,9 +397,9 @@ function SessionChatHeaderActions(props: {
     </AppCommandTooltip>
 
     {canCancelTurn
-      ? <GoodTooltip ariaLabel="Stop active turn" content="Stop active turn">
+      ? <GoodTooltip ariaLabel={text.stopActiveTurn} content={text.stopActiveTurn}>
           <button
-            aria-label="Stop active turn"
+            aria-label={text.stopActiveTurn}
             class={styles.headerActionButton}
             data-tone="danger"
             disabled={activeHeaderAction !== null}
@@ -498,9 +499,9 @@ function SessionChatComposerDock(props: {
                 compact={true}
                 filterable={true}
                 items={modelItems}
-                label="Model"
+                label={text.model}
                 open={modelPickerOpen}
-                placeholder="Use the agent harness default model"
+                placeholder={text.useTheAgentHarnessDefaultModel}
                 shortcut={modelShortcut}
                 value={draftModelId.value ?? currentModelId}
                 onValueChange={(value) => {
@@ -635,10 +636,10 @@ function SessionChatComposerDock(props: {
   <footer class={styles.composerDock}>
     {submitError
       ? <div class={styles.composerError} role="alert">
-          <strong class={styles.composerErrorTitle}>Prompt wasn't sent</strong>
-          <span class={styles.composerErrorDescription}>
-            Your draft is still here. Try again when the session is available.
-          </span>
+          <strong class={styles.composerErrorTitle}>{text.promptWasntSent}</strong>
+          <span
+            class={styles.composerErrorDescription}
+          >{text.yourDraftIsStillHereTryAgainWhenTheSessionIsAvailable}</span>
         </div>
       : null}
 

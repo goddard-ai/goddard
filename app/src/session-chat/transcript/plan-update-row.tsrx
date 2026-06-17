@@ -1,5 +1,6 @@
 import { CheckCircle2, Circle, ListChecks, LoaderCircle } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import type { SessionTranscriptPlanEntry, SessionTranscriptPlanUpdate } from "~/sessions/models.ts"
 import styles from "./transcript.style.ts"
 
@@ -62,7 +63,7 @@ export function PlanUpdateTranscriptRow(props: {
         </header>
 
         @if (props.message.entries.length === 0) {
-          <div class={styles.planEmpty}>The agent cleared its plan.</div>
+          <div class={styles.planEmpty}>{text.theAgentClearedItsPlan}</div>
         } @else {
           <ol class={styles.planEntryList}>
             @for (const entry of props.message.entries; index index) {

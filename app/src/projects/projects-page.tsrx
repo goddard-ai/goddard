@@ -6,6 +6,7 @@ import { useEffect, useId, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
+import { text } from "~/language/text.ts"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { openProjectTab, ProjectsPageMutations } from "./mutations.ts"
@@ -58,10 +59,8 @@ export default function ProjectsPage() @{
       <section class={styles.panel}>
         <header class={styles.sectionHeader}>
           <div class={styles.sectionCopy}>
-            <h1 class={styles.title}>Projects</h1>
-            <p class={styles.body}>
-              Keep an explicit set of local roots available to the workbench.
-            </p>
+            <h1 class={styles.title}>{text.projects}</h1>
+            <p class={styles.body}>{text.keepAnExplicitSetOfLocalRootsAvailableToTheWorkbench}</p>
           </div>
           <button
             class={cx(styles.buttonBase, styles.primaryButton)}
@@ -71,17 +70,17 @@ export default function ProjectsPage() @{
             }}
           >
             <Plus size={16} strokeWidth={2.2} />
-            Add project
+            {text.addProject}
           </button>
         </header>
 
         @if (projects.length === 0) {
           <div class={styles.empty}>
             <div class={styles.emptyCopy}>
-              <h2 class={styles.title}>No projects yet</h2>
-              <p class={styles.body}>
-                Add a local directory to establish the app's explicit working set.
-              </p>
+              <h2 class={styles.title}>{text.noProjectsYet}</h2>
+              <p
+                class={styles.body}
+              >{text.addALocalDirectoryToEstablishTheAppsExplicitWorkingSet}</p>
               <div>
                 <button
                   class={cx(styles.buttonBase, styles.primaryButton)}
@@ -91,7 +90,7 @@ export default function ProjectsPage() @{
                   }}
                 >
                   <Plus size={16} strokeWidth={2.2} />
-                  Add project
+                  {text.addProject}
                 </button>
               </div>
             </div>
@@ -103,11 +102,11 @@ export default function ProjectsPage() @{
       <aside class={styles.panel}>
         <div class={styles.asideBody}>
           <div class={styles.intro}>
-            <h2 class={styles.subheading}>Project details</h2>
+            <h2 class={styles.subheading}>{text.projectDetails}</h2>
             <p class={styles.body}>
               {selectedProject
-                ? "Selected project metadata for the current workspace."
-                : "Select a project to inspect its configured path and display name."}
+                ? text.selectedProjectMetadataForTheCurrentWorkspace
+                : text.selectAProjectToInspectItsConfiguredPathAndDisplayName}
             </p>
           </div>
 
@@ -115,8 +114,8 @@ export default function ProjectsPage() @{
             <>
               <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
               <div class={styles.cardList}>
-                <InfoCard label="Path" value={selectedProject.path} />
-                <InfoCard label="Display name" value={selectedProject.name} />
+                <InfoCard label={text.path} value={selectedProject.path} />
+                <InfoCard label={text.displayName} value={selectedProject.name} />
               </div>
             </>
           }
@@ -166,7 +165,7 @@ function ProjectListRow(props: {
         <h3 class={styles.rowTitle}>{props.project.name}</h3>
 
         @if (props.isSelected) {
-          <span class={styles.selectedBadge}>Selected</span>
+          <span class={styles.selectedBadge}>{text.selected}</span>
         }
       </div>
       <p class={styles.path}>{props.project.path}</p>
@@ -181,7 +180,7 @@ function ProjectListRow(props: {
         }}
       >
         <ArrowUpRight size={15} strokeWidth={2.2} />
-        Open tab
+        {text.openTab}
       </button>
       <button
         class={cx(styles.buttonBase, styles.dangerButton)}
@@ -192,7 +191,7 @@ function ProjectListRow(props: {
         }}
       >
         <Trash2 size={15} strokeWidth={2.1} />
-        Remove
+        {text.remove}
       </button>
     </div>
   </article>
@@ -303,10 +302,11 @@ function AddProjectDialog(props: {
     >
       <header class={styles.dialogHeader}>
         <div class={styles.dialogHeaderCopy}>
-          <h2 id={titleId} class={styles.dialogTitle}>Add project</h2>
-          <p id={descriptionId} class={styles.body}>
-            Choose one local root and optionally adjust the display name.
-          </p>
+          <h2 id={titleId} class={styles.dialogTitle}>{text.addProject}</h2>
+          <p
+            id={descriptionId}
+            class={styles.body}
+          >{text.chooseOneLocalRootAndOptionallyAdjustTheDisplayName}</p>
         </div>
         <button
           class={styles.closeButton}
@@ -319,7 +319,7 @@ function AddProjectDialog(props: {
         </button>
       </header>
       <label class={styles.field}>
-        <span class={styles.label}>Project path</span>
+        <span class={styles.label}>{text.projectPath}</span>
         <input
           ref={pathInputRef}
           class={styles.textInput}
@@ -340,14 +340,14 @@ function AddProjectDialog(props: {
           }}
         >
           <FolderSearch2 size={15} strokeWidth={2.1} />
-          Browse
+          {text.browse}
         </button>
       </div>
       <label class={styles.field}>
-        <span class={styles.label}>Display name</span>
+        <span class={styles.label}>{text.displayName}</span>
         <input
           class={styles.textInput}
-          placeholder="Derived from folder name"
+          placeholder={text.derivedFromFolderName}
           type="text"
           value={draftName.value}
           onInput={(event) => {
@@ -362,7 +362,7 @@ function AddProjectDialog(props: {
           onClick={() => {
             props.open.value = false
           }}
-        >Cancel</button>
+        >{text.cancel}</button>
         <button
           class={cx(styles.buttonBase, styles.primaryButton)}
           disabled={!canAddProject}
@@ -372,7 +372,7 @@ function AddProjectDialog(props: {
           }}
         >
           <Plus size={15} strokeWidth={2.2} />
-          Add project
+          {text.addProject}
         </button>
       </div>
     </form>

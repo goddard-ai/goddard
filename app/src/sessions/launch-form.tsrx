@@ -4,6 +4,7 @@ import { Folder } from "lucide-react"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
 import { getShortcutLabel } from "~/commands/shortcut-label.ts"
+import { text } from "~/language/text.ts"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
 import composerInputStyles from "~/session-input/composer-layout.style.ts"
@@ -86,9 +87,9 @@ export function SessionLaunchForm(props: {
           disabled={disabled || props.projects.length === 0}
           filterable={true}
           items={projectItems}
-          label="Project"
+          label={text.project}
           open={form.getPickerOpen("project")}
-          placeholder="Select a project"
+          placeholder={text.selectAProject}
           shortcut={projectShortcut}
           value={form.draftProjectPath.value}
           onValueChange={(value) => {
@@ -103,7 +104,7 @@ export function SessionLaunchForm(props: {
       @try {
         <SessionSubpackageSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label="Working directory" />
+        <SessionLaunchLoadingSelect label={text.workingDirectory} />
       }
     </div>
 
@@ -141,8 +142,8 @@ export function SessionLaunchForm(props: {
       }}
       onEscape={props.onEscape}
       iconOnlySubmit={true}
-      placeholder="Describe the first thing this session should do."
-      submitLabel="Launch session"
+      placeholder={text.describeTheFirstThingThisSessionShouldDo}
+      submitLabel={text.launchSession}
       onSubmit={async () => {
         await props.onSubmit()
       }}
@@ -152,12 +153,12 @@ export function SessionLaunchForm(props: {
       @try {
         <SessionLaunchLocationSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label="Launch location" />
+        <SessionLaunchLoadingSelect label={text.launchLocation} />
       }
       @try {
         <SessionLaunchBranchSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label="Git branch" />
+        <SessionLaunchLoadingSelect label={text.gitBranch} />
       }
     </div>
   </div>

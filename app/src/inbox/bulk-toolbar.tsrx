@@ -1,5 +1,6 @@
 import { Archive, ArrowDown, ArrowUp, Bookmark, Mail, MailOpen, X } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import styles from "./page.style.ts"
 
@@ -39,53 +40,53 @@ export function InboxBulkToolbar(props: {
     return null
   }
 
-  <div class={styles.bulkToolbar} aria-label="Selected inbox item actions" role="toolbar">
-    <span class={styles.bulkCount}>{`${props.selectedCount} selected`}</span>
+  <div class={styles.bulkToolbar} aria-label={text.selectedInboxItemActions} role="toolbar">
+    <span class={styles.bulkCount}>{`${props.selectedCount} ${text.selectedCount}`}</span>
     <div class={styles.bulkActionGroup}>
       <InboxBulkToolbarButton
-        ariaLabel="Mark selected read"
+        ariaLabel={text.markSelectedRead}
         icon={MailOpen}
         onPress={() => {
           props.onMarkRead()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Mark selected unread"
+        ariaLabel={text.markSelectedUnread}
         icon={Mail}
         onPress={() => {
           props.onMarkUnread()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Save selected"
+        ariaLabel={text.saveSelected}
         icon={Bookmark}
         onPress={() => {
           props.onSave()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Set selected low priority"
+        ariaLabel={text.setSelectedLowPriority}
         icon={ArrowDown}
         onPress={() => {
           props.onSetLowPriority()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Set selected normal priority"
+        ariaLabel={text.setSelectedNormalPriority}
         icon={ArrowUp}
         onPress={() => {
           props.onSetNormalPriority()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Archive selected"
+        ariaLabel={text.archiveSelected}
         icon={Archive}
         onPress={() => {
           props.onArchive()
         }}
       />
       <InboxBulkToolbarButton
-        ariaLabel="Clear selection"
+        ariaLabel={text.clearSelection}
         icon={X}
         onPress={() => {
           props.onClear()

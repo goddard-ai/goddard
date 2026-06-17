@@ -1,37 +1,38 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
 
+import { text } from "~/language/text.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { DebugMenuSurfaces, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
 const fileMenu = {
-  label: "File",
+  label: text.file,
   closeWindow: {
-    label: "Close Window",
+    label: text.closeWindow,
     action: "file:close-window",
     accelerator: "CommandOrControl+Shift+W",
   },
   closeTab: {
-    label: "Close Tab",
+    label: text.closeTab,
     action: "file:close-tab",
     accelerator: "CommandOrControl+W",
   },
 } as const
 
 const viewMenu = {
-  label: "View",
+  label: text.view,
   commandPalette: {
-    label: "Command Palette",
+    label: text.commandPalette,
     action: "view:command-palette",
   },
   reload: {
-    label: "Reload",
+    label: text.reload,
     action: "view:reload",
     accelerator: "CommandOrControl+R",
   },
   inspectElement: {
-    label: "Inspect Element",
+    label: text.inspectElement,
     action: "view:inspect-element",
     accelerator: "Alt+CommandOrControl+I",
   },
@@ -71,7 +72,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
       ),
     },
     {
-      label: "Edit",
+      label: text.edit,
       submenu: [
         { role: "undo" },
         { role: "redo" },
@@ -90,7 +91,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
         viewMenu.commandPalette,
         viewMenu.reload,
         {
-          label: "Developer",
+          label: text.developer,
           submenu: [viewMenu.inspectElement],
         },
       ],
@@ -99,7 +100,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
 
   if (debugMenu.length > 0) {
     menu.push({
-      label: "Debug",
+      label: text.debug,
       submenu: debugMenu,
     })
   }

@@ -15,6 +15,7 @@ import {
   prepareInboxItemWorkbenchTarget,
   warmPreparedInboxWorkbenchTargetOnIdle,
 } from "~/inbox/open.ts"
+import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -123,7 +124,7 @@ export function AppShellChrome() @{
             <AppShellAgentSelector shortcutActive={topBarSelectorShortcutActive} />
           } @pending {
             <button
-              aria-label="Loading agent harness selector"
+              aria-label={text.loadingAgentHarnessSelector}
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
@@ -133,7 +134,7 @@ export function AppShellChrome() @{
             console.error("Agent harness selector render failed.", error)
 
             <button
-              aria-label="Retry agent harness selector"
+              aria-label={text.retryAgentHarnessSelector}
               class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
@@ -152,9 +153,11 @@ export function AppShellChrome() @{
             useErrorBoundaryReset(retry)
             console.error("Project switcher render failed.", error)
 
-            <button class={cx(styles.switcherFallback, noDragClass)} type="button" onClick={retry}>
-              Project switcher unavailable
-            </button>
+            <button
+              class={cx(styles.switcherFallback, noDragClass)}
+              type="button"
+              onClick={retry}
+            >{text.projectSwitcherUnavailable}</button>
           }
         </div>
         <div class={styles.switcherRightControl}>
@@ -162,7 +165,7 @@ export function AppShellChrome() @{
             <AppShellSubfolderSelector shortcutActive={topBarSelectorShortcutActive} />
           } @pending {
             <button
-              aria-label="Loading project subfolder selector"
+              aria-label={text.loadingProjectSubfolderSelector}
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
@@ -174,7 +177,7 @@ export function AppShellChrome() @{
             console.error("Project subfolder selector render failed.", error)
 
             <button
-              aria-label="Retry project subfolder selector"
+              aria-label={text.retryProjectSubfolderSelector}
               class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
@@ -199,7 +202,7 @@ export function AppShellChrome() @{
           />
         </div>
         <button
-          aria-label="Settings"
+          aria-label={text.settings}
           class={cx(styles.actionButton, styles.settingsButton, noDragClass)}
           type="button"
           onClick={() => {
@@ -210,7 +213,7 @@ export function AppShellChrome() @{
         </button>
       </div>
     </header>
-    <nav aria-label="Primary" class={styles.nav}>
+    <nav aria-label={text.primary} class={styles.nav}>
       @try {
         <AppShellSidebarQueryContent
           items={mainTab.items}
@@ -331,9 +334,9 @@ function AppShellNextInboxAttentionButton(props: {
     } catch (error) {
       console.error("Failed to open next inbox item.", error)
       appToaster.create({
-        description: "The linked daemon entity could not be loaded.",
+        description: text.theLinkedDaemonEntityCouldNotBeLoaded,
         duration: 3200,
-        title: "Couldn't open next item",
+        title: text.couldntOpenNextItem,
         type: "error",
       })
     }
@@ -349,19 +352,19 @@ function AppShellNextInboxAttentionButton(props: {
     <AppCommandTooltip
       command={AppCommand.navigation.openNextUnreadInboxItem}
       group="app-shell-next-attention"
-      label="Next"
+      label={text.next}
       side="bottom"
       sideOffset={8}
     >
       <button
-        aria-label="Open next unread inbox item"
+        aria-label={text.openNextUnreadInboxItem}
         class={cx(styles.nextAttentionButton, noDragClass)}
         type="button"
         onClick={() => {
           void openNextInboxItem(nextItem)
         }}
       >
-        <span>Next</span>
+        <span>{text.next}</span>
         <ChevronRight aria-hidden={true} size={14} strokeWidth={2.2} />
       </button>
     </AppCommandTooltip>

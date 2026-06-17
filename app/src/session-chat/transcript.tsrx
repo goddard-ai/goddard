@@ -3,6 +3,7 @@ import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual"
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks"
 import { useListener, type SigmaTarget } from "preact-sigma"
 
+import { text } from "~/language/text.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
 import { estimateTranscriptRowHeight } from "./transcript/layout.ts"
 import styles, {
@@ -317,7 +318,7 @@ function ThoughtTranscriptRow(props: {
 
 function ThinkingLabel() @{
   <div class={styles.thinkingLabelRow} aria-live="polite">
-    <span class={styles.thinkingLabel}>Thinking...</span>
+    <span class={styles.thinkingLabel}>{text.thinking}</span>
   </div>
 }
 
@@ -635,7 +636,7 @@ export function Transcript(props: TranscriptProps) @{
   <div class={cx(styles.transcriptViewport, props.class)}>
     <div ref={rootRef} style={{ minHeight: "100%" }}>
       @if (viewport.width <= 0) {
-        <div class={styles.loadingState}>Preparing transcript layout...</div>
+        <div class={styles.loadingState}>{text.preparingTranscriptLayout}</div>
       } @else {
         <div
           ref={spacerRef}

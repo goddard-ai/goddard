@@ -1,6 +1,7 @@
 import type { PullRequestId } from "@goddard-ai/pull-request/schema"
 import { ExternalLink as ExternalLinkIcon, GitPullRequest } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
@@ -36,8 +37,8 @@ function PullRequestStateMessage(props: {
 function PullRequestLoadingState() @{
   <main class={styles.root}>
     <PullRequestStateMessage
-      description="Loading the daemon-managed pull request record."
-      title="Loading pull request"
+      description={text.loadingTheDaemonManagedPullRequestRecord}
+      title={text.loadingPullRequest}
     />
   </main>
 }
@@ -64,19 +65,19 @@ export default function PullRequestView(props: {
             <GitPullRequest size={18} strokeWidth={2.1} />
             {title}
           </h1>
-          <p class={styles.description}>Daemon-managed pull request linked from the inbox.</p>
+          <p class={styles.description}>{text.daemonManagedPullRequestLinkedFromTheInbox}</p>
         </div>
         <ExternalLink class={styles.externalLink} href={url}>
           <ExternalLinkIcon size={15} strokeWidth={2.1} />
-          Open on GitHub
+          {text.openOnGitHub}
         </ExternalLink>
       </header>
-      <section class={styles.detailGrid} aria-label="Pull request details">
-        <InfoCard label="Host" value={pullRequest.host} />
-        <InfoCard label="Owner" value={pullRequest.owner} />
-        <InfoCard label="Repository" value={pullRequest.repo} />
-        <InfoCard label="Pull request" value={`#${pullRequest.prNumber}`} />
-        <InfoCard label="Workspace" value={pullRequest.cwd} />
+      <section class={styles.detailGrid} aria-label={text.pullRequestDetails}>
+        <InfoCard label={text.host} value={pullRequest.host} />
+        <InfoCard label={text.owner} value={pullRequest.owner} />
+        <InfoCard label={text.repository} value={pullRequest.repo} />
+        <InfoCard label={text.pullRequest} value={`#${pullRequest.prNumber}`} />
+        <InfoCard label={text.workspace} value={pullRequest.cwd} />
       </section>
     </main>
   } @pending {
@@ -90,10 +91,10 @@ export default function PullRequestView(props: {
 
     <main class={styles.root}>
       <PullRequestStateMessage
-        actionLabel="Try again"
-        description="The daemon-backed pull request record could not be loaded."
+        actionLabel={text.tryAgain}
+        description={text.theDaemonBackedPullRequestRecordCouldNotBeLoaded}
         onAction={resetPullRequestBoundary}
-        title="Couldn't load pull request"
+        title={text.couldntLoadPullRequest}
       />
     </main>
   }

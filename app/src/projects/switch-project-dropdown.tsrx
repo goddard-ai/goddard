@@ -7,6 +7,7 @@ import { useRef } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
+import { text } from "~/language/text.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
@@ -135,7 +136,7 @@ export function SwitchProjectDropdown() @{
       ref={triggerElementRef}
       aria-expanded={isOpen.value ? "true" : "false"}
       aria-haspopup="dialog"
-      aria-label="Switch project"
+      aria-label={text.switchProject}
       class={cx(styles.trigger, noDragClass)}
       type="button"
       onClick={() => {
@@ -149,13 +150,13 @@ export function SwitchProjectDropdown() @{
       }}
     >
       <span class={styles.triggerLabel}>
-        {activeProject?.name ?? "Open project"}
+        {activeProject?.name ?? text.openProject}
       </span>
     </button>
 
     <Popover
       anchor={() => triggerElementRef.current}
-      ariaLabel="Switch project"
+      ariaLabel={text.switchProject}
       class={styles.content}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
@@ -169,7 +170,7 @@ export function SwitchProjectDropdown() @{
       strategy="fixed"
     >
       <label class={styles.searchField}>
-        <span class={styles.srOnly}>Search projects</span>
+        <span class={styles.srOnly}>{text.searchProjects}</span>
         <Search aria-hidden={true} size={16} strokeWidth={2.1} />
         <input
           ref={(element) => {
@@ -185,7 +186,7 @@ export function SwitchProjectDropdown() @{
             }
           }}
           class={styles.searchInput}
-          placeholder="Search projects"
+          placeholder={text.searchProjects}
           value={search.value}
         />
       </label>
@@ -205,10 +206,10 @@ export function SwitchProjectDropdown() @{
                 <span class={styles.itemBody}>
                   @if (item.kind === "open-folder") {
                     <>
-                      <span class={styles.itemTitle}>Open folder…</span>
-                      <span class={styles.itemDetail}>
-                        Add a local project from your filesystem.
-                      </span>
+                      <span class={styles.itemTitle}>{text.openFolderEllipsis}</span>
+                      <span
+                        class={styles.itemDetail}
+                      >{text.addALocalProjectFromYourFilesystem}</span>
                     </>
                   } @else {
                     <>
@@ -219,14 +220,14 @@ export function SwitchProjectDropdown() @{
                 </span>
 
                 @if (item.kind === "project" && activeProject?.path === item.project.path) {
-                  <span class={styles.activeBadge}>Active</span>
+                  <span class={styles.activeBadge}>{text.active}</span>
                 }
               </button>
             </li>
           }
         </ul>
       } @else {
-        <p class={styles.empty}>No matching projects.</p>
+        <p class={styles.empty}>{text.noMatchingProjects}</p>
       }
     </Popover>
   </>

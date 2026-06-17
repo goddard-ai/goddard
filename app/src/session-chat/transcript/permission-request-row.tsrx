@@ -5,6 +5,7 @@ import type {
   SessionTranscriptPermissionOption,
   SessionTranscriptPermissionRequest,
 } from "~/sessions/models.ts"
+import { text } from "~/language/text.ts"
 import styles from "./transcript.style.ts"
 
 function getPermissionStatusIcon(status: SessionTranscriptPermissionRequest["status"]) {
@@ -110,7 +111,7 @@ function PermissionTargets(props: {
   <div class={styles.permissionDetailGrid}>
     @if (props.message.locations.length > 0) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>Target</div>
+        <div class={styles.permissionDetailLabel}>{text.target}</div>
 
         @for (const location of props.message.locations; index index) {
           <div
@@ -125,7 +126,7 @@ function PermissionTargets(props: {
     }
     @if (props.message.context) {
       <div class={styles.permissionDetailBlock}>
-        <div class={styles.permissionDetailLabel}>Context</div>
+        <div class={styles.permissionDetailLabel}>{text.context}</div>
         <div class={styles.permissionDetailText}>{props.message.context}</div>
       </div>
     }

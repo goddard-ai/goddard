@@ -7,6 +7,7 @@ import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { text } from "~/language/text.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -77,7 +78,7 @@ export function AppShellSubfolderSelector(props: {
 
   const items: AppShellSubfolderItem[] = [
     {
-      label: "Project root",
+      label: text.projectRoot,
       path: projectPath,
       detail: projectPath,
     },
@@ -171,8 +172,8 @@ export function AppShellSubfolderSelector(props: {
       aria-expanded={open.value}
       aria-haspopup="menu"
       aria-label={selectedSubfolderLabel
-        ? `Working directory: ${selectedSubfolderLabel}`
-        : "Project root"}
+        ? `${text.workingDirectory}: ${selectedSubfolderLabel}`
+        : text.projectRoot}
       class={cx(styles.trigger, noDragClass)}
       data-icon-only={selectedSubfolderLabel ? undefined : "true"}
       type="button"
@@ -213,7 +214,7 @@ export function AppShellSubfolderSelector(props: {
       <input
         ref={filterInputRef}
         class={styles.filter}
-        placeholder="Type to filter"
+        placeholder={text.typeToFilter}
         value={search.value}
         onInput={(event) => {
           search.value = event.currentTarget.value
@@ -242,7 +243,7 @@ export function AppShellSubfolderSelector(props: {
       />
 
       @if (filteredItems.length === 0) {
-        <div class={styles.empty}>No matching directories.</div>
+        <div class={styles.empty}>{text.noMatchingDirectories}</div>
       } @else {
         <ul class={styles.list}>
           @for (const item of filteredItems) {
