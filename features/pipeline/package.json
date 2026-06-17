@@ -48,6 +48,7 @@
   "dependencies": {
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/session": "workspace:*",
     "kindstore": "catalog:",
     "yaml": "2.9.0",
     "zod": "catalog:"

@@ -1,4 +1,5 @@
 import { definePlugin, event } from "@goddard-ai/daemon-plugin"
+import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { kind } from "kindstore"
 
 import { pipelineIpcRoutes } from "./daemon-ipc.ts"
@@ -7,7 +8,7 @@ import { createPipelineDefinitionRegistry } from "./daemon/registry.ts"
 import { DaemonPipelineRun, DaemonPipelineStepRun } from "./schema.ts"
 
 export { createPipelineRunManager } from "./daemon/manager.ts"
-export type { PipelineScriptTransformer } from "./daemon/manager.ts"
+export type { PipelineScriptTransformer, PipelineSessionService } from "./daemon/manager.ts"
 export { createPipelineDefinitionRegistry } from "./daemon/registry.ts"
 
 const pipelineDb = {
@@ -33,6 +34,7 @@ const pipelineDb = {
 
 export const pipelinePlugin = definePlugin({
   name: "pipeline",
+  consumes: [sessionPlugin],
   events: {
     "pipeline.run.updated": event<{ runId: string; status: string }>(),
     "pipeline.step.updated": event<{ runId: string; stepId: string; status: string }>(),
@@ -41,11 +43,12 @@ export const pipelinePlugin = definePlugin({
     schema: pipelineDb,
   },
   ipcRoutes: pipelineIpcRoutes,
-  setup({ db, events }) {
+  setup({ db, events, session }) {
     const registry = createPipelineDefinitionRegistry()
     const runs = createPipelineRunManager({
       db,
       registry,
+      session,
       publishEvent: (event) => {
         if (event.name === "pipeline.run.updated") {
           void events.emit(event.name, event.payload)

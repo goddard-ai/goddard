@@ -1,10 +1,13 @@
+import { readFile } from "node:fs/promises"
 import { IpcClientError } from "@goddard-ai/ipc"
+import type { CreateSessionRequest, DaemonSession } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
 import type { PipelineDb } from "../daemon.ts"
 import type {
   DaemonPipelineRun,
   DaemonPipelineStepRun,
+  PipelineAgentStepDefinition,
   PipelineDefinition,
   PipelineRunId,
   PipelineRunStatus,
@@ -26,6 +29,11 @@ export type PipelineScriptTransformer = (input: {
   step: PipelineScriptStepDefinition
 }) => unknown | Promise<unknown>
 
+export type PipelineSessionService = {
+  newSession: (params: { request: CreateSessionRequest }) => Promise<DaemonSession>
+  shutdownSession: (id: DaemonSession["id"]) => Promise<boolean>
+}
+
 type PipelineEventPayloads = {
   "pipeline.run.updated": { runId: string; status: string }
   "pipeline.step.updated": { runId: string; stepId: string; status: string }
@@ -44,6 +52,7 @@ const terminalStepStatuses = new Set<PipelineStepRunStatus>(["succeeded", "faile
 export type PipelineRunManagerInput = {
   db: PipelineDb
   registry: PipelineDefinitionRegistry
+  session?: PipelineSessionService
   transformers?: Record<string, PipelineScriptTransformer>
   publishEvent?: PipelineEventPublisher
   now?: () => number
@@ -65,6 +74,7 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
         const runInput: PipelineRunInput = {
           pipelineId: registered.definition.id,
           pipelineVersion: registered.definition.version,
+          cwd: request.cwd,
           status: "queued",
           origin: request.origin,
           visibility: request.visibility,
@@ -93,6 +103,8 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
             input: {},
             output: null,
             error: null,
+            sessionId: null,
+            stopReason: null,
             startedAt: null,
             completedAt: null,
             updatedAt: timestamp,
@@ -145,7 +157,7 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
       }
     },
 
-    cancelRun(id: PipelineRunId): PipelineRunWithSteps {
+    async cancelRun(id: PipelineRunId): Promise<PipelineRunWithSteps> {
       const current = input.db.pipelineRuns.get(id)
       if (!current) {
         throw new IpcClientError("Pipeline run not found")
@@ -157,6 +169,13 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
 
       const timestamp = now()
       let run: DaemonPipelineRun | null = null
+      const activeAgentSessionIds = listStepRuns(input.db, id).flatMap((stepRun) =>
+        stepRun.kind === "agent" &&
+        stepRun.sessionId !== null &&
+        !terminalStepStatuses.has(stepRun.status)
+          ? [stepRun.sessionId]
+          : [],
+      )
 
       input.db.batch(() => {
         run =
@@ -181,6 +200,10 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
 
       if (!run) {
         throw new IpcClientError("Pipeline run not found")
+      }
+
+      for (const sessionId of activeAgentSessionIds) {
+        await input.session?.shutdownSession(sessionId)
       }
 
       return {
@@ -247,20 +270,49 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
         }
 
         if (stepDefinition.kind === "agent") {
-          input.db.batch(() => {
-            updateStep(input, nextStepRun.id, {
-              status: "waiting",
-              input: mappedInput,
-              startedAt: now(),
-              updatedAt: now(),
-            })
-            updateRun(input, id, {
-              status: "waiting",
-              startedAt: current.run.startedAt ?? now(),
-              updatedAt: now(),
-            })
+          if (!input.session) {
+            return failRun(
+              input,
+              id,
+              nextStepRun,
+              "Pipeline agent session service is not configured",
+              mappedInput,
+            )
+          }
+
+          updateRun(input, id, {
+            status: "running",
+            startedAt: current.run.startedAt ?? now(),
+            updatedAt: now(),
           })
-          return this.getRun(id)
+          updateStep(input, nextStepRun.id, {
+            status: "running",
+            input: mappedInput,
+            startedAt: now(),
+            updatedAt: now(),
+          })
+
+          try {
+            const output = await runAgentStep(
+              input.session,
+              current.run,
+              stepDefinition,
+              mappedInput,
+            )
+            updateStep(input, nextStepRun.id, {
+              status: "succeeded",
+              output,
+              error: null,
+              sessionId: output.sessionId,
+              stopReason: output.stopReason,
+              completedAt: now(),
+              updatedAt: now(),
+            })
+          } catch (error) {
+            return failRun(input, id, nextStepRun, getErrorMessage(error), mappedInput)
+          }
+
+          continue
         }
 
         const transformer = input.transformers?.[stepDefinition.transformer]
@@ -350,6 +402,8 @@ export function createPipelineRunManager(input: PipelineRunManagerInput) {
             input: {},
             output: null,
             error: null,
+            sessionId: null,
+            stopReason: null,
             startedAt: null,
             completedAt: null,
             updatedAt: now(),
@@ -465,6 +519,56 @@ function updateStep(
   })
 
   return step
+}
+
+async function runAgentStep(
+  session: PipelineSessionService,
+  run: DaemonPipelineRun,
+  step: PipelineAgentStepDefinition,
+  mappedInput: Record<string, unknown>,
+) {
+  const systemPrompt = await resolveAgentSystemPrompt(step)
+  const agentSession = await session.newSession({
+    request: {
+      cwd: run.cwd,
+      mcpServers: [],
+      systemPrompt,
+      initialModelId: step.model,
+      initialPrompt: renderAgentInitialPrompt(mappedInput),
+      oneShot: true,
+      origin: "pipeline",
+      visibility: "hidden",
+      metadata: {
+        pipelineRunId: run.id,
+        pipelineId: run.pipelineId,
+        pipelineVersion: run.pipelineVersion,
+        pipelineStepId: step.id,
+      },
+    },
+  })
+
+  return {
+    sessionId: agentSession.id,
+    stopReason: agentSession.stopReason,
+    message: agentSession.lastAgentMessage,
+    status: agentSession.status,
+  }
+}
+
+async function resolveAgentSystemPrompt(step: PipelineAgentStepDefinition) {
+  if (step.systemPrompt !== undefined) {
+    return step.systemPrompt
+  }
+
+  if (step.systemPromptFile !== undefined) {
+    return readFile(step.systemPromptFile, "utf-8")
+  }
+
+  throw new IpcClientError("Pipeline agent step is missing system prompt instructions")
+}
+
+function renderAgentInitialPrompt(mappedInput: Record<string, unknown>) {
+  return `Pipeline step input:\n\n${JSON.stringify(mappedInput, null, 2)}`
 }
 
 function failRun(

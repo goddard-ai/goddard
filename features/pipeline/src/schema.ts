@@ -166,6 +166,12 @@ export const PipelineStepRunId = z.custom<`pls_${string}`>(
 
 export type PipelineStepRunId = z.infer<typeof PipelineStepRunId>
 
+export const PipelineAgentSessionId = z.custom<`ses_${string}`>(
+  (value): value is `ses_${string}` => typeof value === "string" && value.startsWith("ses_"),
+)
+
+export type PipelineAgentSessionId = z.infer<typeof PipelineAgentSessionId>
+
 export const PipelineRunStatus = z.enum([
   "queued",
   "running",
@@ -219,6 +225,7 @@ export type PipelineRunDefinitionSnapshot = z.infer<typeof PipelineRunDefinition
 export const DaemonPipelineRun = z.strictObject({
   pipelineId: z.string().min(1),
   pipelineVersion: z.string().min(1),
+  cwd: z.string().min(1),
   status: PipelineRunStatus,
   origin: PipelineRunOrigin,
   visibility: PipelineRunVisibility,
@@ -245,6 +252,8 @@ export const DaemonPipelineStepRun = z.strictObject({
   input: PipelineRunInputs,
   output: PipelineStepRunData,
   error: z.string().nullable(),
+  sessionId: PipelineAgentSessionId.nullable(),
+  stopReason: z.string().nullable(),
   startedAt: z.number().int().nullable(),
   completedAt: z.number().int().nullable(),
   updatedAt: z.number().int(),

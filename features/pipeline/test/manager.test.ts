@@ -5,6 +5,7 @@ import {
   createPipelineRunManager,
   pipelinePlugin,
   type PipelineScriptTransformer,
+  type PipelineSessionService,
 } from "../src/daemon.ts"
 import type { PipelineDefinitionRegistry } from "../src/daemon/registry.ts"
 import {
@@ -82,12 +83,14 @@ function createManager(
   input: {
     definitions?: PipelineDefinition[]
     now?: () => number
+    session?: PipelineSessionService
     transformers?: Record<string, PipelineScriptTransformer>
   } = {},
 ) {
   return createPipelineRunManager({
     db: store,
     registry: registry(...(input.definitions ?? [definition()])),
+    session: input.session,
     transformers: input.transformers,
     now: input.now,
   })
@@ -206,7 +209,7 @@ test("cancelRun marks queued runs cancelled and unstarted steps skipped", async 
   )
 
   time = 2000
-  const result = manager.cancelRun(created.run.id)
+  const result = await manager.cancelRun(created.run.id)
 
   expect(result.run).toMatchObject({
     status: "cancelled",
@@ -386,10 +389,187 @@ test("cancelRun prevents queued future steps from executing", async () => {
     }),
   )
 
-  manager.cancelRun(created.run.id)
+  await manager.cancelRun(created.run.id)
   const cancelled = await manager.advanceRun(created.run.id)
 
   expect(cancelled.run.status).toBe("cancelled")
   expect(cancelled.steps.map((step) => step.status)).toEqual(["skipped", "skipped"])
   expect(ran).toBe(false)
+})
+
+test("advanceRun executes agent steps through hidden pipeline sessions", async () => {
+  const requests: Array<Parameters<PipelineSessionService["newSession"]>[0]["request"]> = []
+  const agentDefinition = definition("0.1.0", [
+    {
+      id: "agent",
+      kind: "agent",
+      name: "Agent",
+      systemPrompt: "Write one paragraph.",
+      model: "gpt-test",
+      input: { premise: "$.inputs.premise" },
+    },
+  ])
+  const manager = createManager({
+    definitions: [agentDefinition],
+    session: {
+      async newSession({ request }) {
+        requests.push(request)
+        return {
+          id: "ses_pipeline",
+          acpSessionId: "acp_pipeline",
+          status: "done",
+          stopReason: "end_turn",
+          agent: null,
+          agentName: "Test Agent",
+          cwd: request.cwd,
+          title: "Pipeline Agent",
+          titleState: "placeholder",
+          lastSessionActivityAt: 1,
+          mcpServers: [],
+          connectionMode: "none",
+          supportsLoadSession: false,
+          activeDaemonSession: false,
+          completedHidden: false,
+          origin: "pipeline",
+          visibility: "hidden",
+          errorMessage: null,
+          blockedReason: null,
+          initiative: null,
+          inboxScope: null,
+          lastAgentMessage: "finished prose",
+          repository: null,
+          prNumber: null,
+          token: null,
+          permissions: null,
+          metadata: request.metadata ?? null,
+          configOptions: [],
+          availableCommands: [],
+          contextUsage: null,
+          createdAt: 1,
+        }
+      },
+      async shutdownSession() {
+        return true
+      },
+    },
+  })
+  const created = await manager.spawnRun(
+    SpawnPipelineRunRequest.parse({
+      cwd: "/repo",
+      pipelineId: "creative-weaver",
+      inputs: { premise: "winter pier" },
+    }),
+  )
+
+  const result = await manager.advanceRun(created.run.id)
+
+  expect(result.run.status).toBe("succeeded")
+  expect(result.steps[0]).toMatchObject({
+    status: "succeeded",
+    sessionId: "ses_pipeline",
+    stopReason: "end_turn",
+    output: {
+      sessionId: "ses_pipeline",
+      stopReason: "end_turn",
+      message: "finished prose",
+      status: "done",
+    },
+  })
+  expect(requests[0]).toMatchObject({
+    cwd: "/repo",
+    systemPrompt: "Write one paragraph.",
+    initialModelId: "gpt-test",
+    oneShot: true,
+    origin: "pipeline",
+    visibility: "hidden",
+    metadata: {
+      pipelineRunId: created.run.id,
+      pipelineStepId: "agent",
+    },
+  })
+  expect(requests[0]?.initialPrompt).toContain('"premise": "winter pier"')
+})
+
+test("advanceRun records agent step failures", async () => {
+  const agentDefinition = definition("0.1.0", [
+    {
+      id: "agent",
+      kind: "agent",
+      name: "Agent",
+      systemPrompt: "Write one paragraph.",
+      input: { premise: "$.inputs.premise" },
+    },
+  ])
+  const manager = createManager({
+    definitions: [agentDefinition],
+    session: {
+      async newSession() {
+        throw new Error("agent crashed")
+      },
+      async shutdownSession() {
+        return true
+      },
+    },
+  })
+  const created = await manager.spawnRun(
+    SpawnPipelineRunRequest.parse({
+      cwd: "/repo",
+      pipelineId: "creative-weaver",
+      inputs: { premise: "winter pier" },
+    }),
+  )
+
+  const result = await manager.advanceRun(created.run.id)
+
+  expect(result.run).toMatchObject({
+    status: "failed",
+    error: "agent crashed",
+  })
+  expect(result.steps[0]).toMatchObject({
+    status: "failed",
+    error: "agent crashed",
+  })
+})
+
+test("cancelRun shuts down active agent sessions when possible", async () => {
+  const shutdowns: string[] = []
+  const manager = createManager({
+    session: {
+      async newSession() {
+        throw new Error("not used")
+      },
+      async shutdownSession(id) {
+        shutdowns.push(id)
+        return true
+      },
+    },
+  })
+  const created = await manager.spawnRun(
+    SpawnPipelineRunRequest.parse({
+      cwd: "/repo",
+      pipelineId: "creative-weaver",
+      inputs: { premise: "winter pier" },
+    }),
+  )
+  const agentStep = store.pipelineStepRuns.create({
+    pipelineRunId: created.run.id,
+    stepId: "agent",
+    stepIndex: 2,
+    kind: "agent",
+    status: "running",
+    input: {},
+    output: null,
+    error: null,
+    sessionId: "ses_active",
+    stopReason: null,
+    startedAt: 1,
+    completedAt: null,
+    updatedAt: 1,
+  })
+  store.pipelineRuns.update(created.run.id, { status: "running" })
+
+  await manager.cancelRun(created.run.id)
+
+  expect(shutdowns).toEqual(["ses_active"])
+  expect(store.pipelineStepRuns.get(agentStep.id)?.status).toBe("skipped")
 })
