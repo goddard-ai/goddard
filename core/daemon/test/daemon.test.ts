@@ -608,7 +608,7 @@ async function startBackendHarness(
     },
     sendEvent(event: unknown) {
       const frame = `data: ${JSON.stringify({ event })}\n\n`
-      for (const stream of [...streams]) {
+      for (const stream of streams) {
         stream.write(frame)
       }
     },
