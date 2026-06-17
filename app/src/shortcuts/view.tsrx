@@ -8,6 +8,7 @@ import { shortcutPersistenceErrors } from "~/app-state-persistence.ts"
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { appCommandGroupList, appCommandList } from "~/commands/app-command.ts"
 import { Menu, MenuItem } from "@goddard-ai/ui-primitives"
+import { text } from "~/language/text.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { getShortcutBindingExpression, getShortcutBindingWhen } from "~/shared/shortcut-keymap.ts"
@@ -265,14 +266,14 @@ export default function KeyboardShortcutsView(props: { class?: string }) @{
 
   <section class={cx(styles.page, props.class)}>
     <label class={styles.searchField}>
-      <span class={styles.srOnly}>Search shortcuts</span>
+      <span class={styles.srOnly}>{text.searchShortcuts}</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
       <input
         ref={searchInputRef}
         class={styles.searchInput}
         placeholder={isRecordingSearchEnabled
-          ? "Type a key binding"
-          : "Search commands, shortcuts, or when clauses"}
+          ? text.typeAKeyBinding
+          : text.searchCommandsShortcutsOrWhenClauses}
         readOnly={isRecordingSearchEnabled}
         value={searchText}
         onInput={(event) => {
@@ -288,8 +289,8 @@ export default function KeyboardShortcutsView(props: { class?: string }) @{
       />
       <button
         aria-label={isRecordingSearchEnabled
-          ? "Stop recording key binding search"
-          : "Record key binding search"}
+          ? text.stopRecordingKeyBindingSearch
+          : text.recordKeyBindingSearch}
         aria-pressed={isRecordingSearchEnabled}
         class={cx(styles.recordButton, isRecordingSearchEnabled && styles.recordButtonActive)}
         type="button"
@@ -329,15 +330,15 @@ export default function KeyboardShortcutsView(props: { class?: string }) @{
               style={{
                 width: "44%",
               }}
-            >Command</th>
+            >{text.command}</th>
             <th
               class={styles.headerCell}
               scope="col"
               style={{
                 width: "23%",
               }}
-            >Shortcut</th>
-            <th class={styles.headerCell} scope="col">When</th>
+            >{text.shortcut}</th>
+            <th class={styles.headerCell} scope="col">{text.when}</th>
           </tr>
         </thead>
         <tbody>
@@ -358,7 +359,7 @@ export default function KeyboardShortcutsView(props: { class?: string }) @{
           } @else {
             <tr>
               <td class={styles.cell} colSpan={3}>
-                <div class={styles.empty}>No matching shortcuts.</div>
+                <div class={styles.empty}>{text.noMatchingShortcuts}</div>
               </td>
             </tr>
           }
@@ -519,7 +520,9 @@ function KeyboardShortcutRow(props: {
         @if (row.shortcut) {
           <GoodKeyboardShortcut expression={row.shortcut} />
         } @else {
-          <>Add shortcut</>
+          <>
+            {text.addShortcut}
+          </>
         }
       </button>
 
@@ -548,7 +551,7 @@ function KeyboardShortcutRow(props: {
               whenClause: row.whenClause,
             })
           }}
-        >Add shortcut</MenuItem>
+        >{text.addShortcut}</MenuItem>
 
         <MenuItem
           class={styles.menuItem}
@@ -560,7 +563,7 @@ function KeyboardShortcutRow(props: {
 
             props.onOpenCaptureDialog(row)
           }}
-        >Change shortcut</MenuItem>
+        >{text.changeShortcut}</MenuItem>
 
         <MenuItem
           class={cx(styles.menuItem, styles.menuItemDanger)}
@@ -573,7 +576,7 @@ function KeyboardShortcutRow(props: {
             props.setEditingWhenRowKey(null)
             void props.shortcutRegistry.removeCommandBinding(row.commandId, row.bindingIndex)
           }}
-        >Remove shortcut</MenuItem>
+        >{text.removeShortcut}</MenuItem>
 
         <MenuItem
           class={styles.menuItem}
@@ -588,7 +591,7 @@ function KeyboardShortcutRow(props: {
             props.setSearchText(formatShortcutSearch(row.shortcut))
             props.searchInputRef.current?.focus()
           }}
-        >Show commands with same shortcut</MenuItem>
+        >{text.showCommandsWithSameShortcut}</MenuItem>
       </Menu>
     </td>
     <td class={styles.cell}>

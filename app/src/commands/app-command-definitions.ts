@@ -23,6 +23,7 @@ import {
   Settings,
 } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { defineAppCommands } from "./app-command.ts"
 
 /** App command definitions surfaced to shortcut bindings and the command menu. */
@@ -31,7 +32,7 @@ export const AppCommand = defineAppCommands({
     group: "workbench",
     commands: {
       closeActiveTab: {
-        label: "Close Active Tab",
+        label: text.closeActiveTab,
         icon: PanelTopClose,
         when: "workbench.hasClosableActiveTab",
       },
@@ -41,55 +42,55 @@ export const AppCommand = defineAppCommands({
     group: "navigation",
     commands: {
       openProposeTaskDialog: {
-        label: "Open Propose Task Dialog",
+        label: text.openProposeTaskDialog,
         icon: Lightbulb,
       },
       openNewSessionDialog: {
-        label: "Open New Session Dialog",
+        label: text.openNewSessionDialog,
         icon: MessageSquarePlus,
       },
       openSwitchProject: {
-        label: "Switch Project",
+        label: text.switchProject,
         icon: FolderOpen,
       },
       openCommandPalette: {
-        label: "Open Command Menu",
+        label: text.openCommandMenu,
         icon: Command,
       },
       openKeyboardShortcuts: {
-        label: "Open Keyboard Shortcuts",
+        label: text.openKeyboardShortcuts,
         icon: Keyboard,
       },
       openInbox: {
-        label: "Open Inbox",
+        label: text.openInbox,
         icon: Inbox,
       },
       openNextUnreadInboxItem: {
-        label: "Open Next Unread Inbox Item",
+        label: text.openNextUnreadInboxItemTitle,
         icon: ListChecks,
       },
       openSessions: {
-        label: "Open Sessions",
+        label: text.openSessions,
         icon: MessageSquarePlus,
       },
       openSearch: {
-        label: "Open Search",
+        label: text.openSearch,
         icon: Search,
       },
       openSpecs: {
-        label: "Open Specs",
+        label: text.openSpecs,
         icon: Folder,
       },
       openTasks: {
-        label: "Open Tasks",
+        label: text.openTasks,
         icon: ListTodo,
       },
       openRoadmap: {
-        label: "Open Roadmap",
+        label: text.openRoadmap,
         icon: Map,
       },
       openSettings: {
-        label: "Open Settings",
+        label: text.openSettings,
         icon: Settings,
       },
     },
@@ -98,23 +99,23 @@ export const AppCommand = defineAppCommands({
     group: "navigation",
     commands: {
       selectUnreadFilter: {
-        label: "Select Unread Inbox Filter",
+        label: text.selectUnreadInboxFilter,
         icon: Inbox,
       },
       selectSavedFilter: {
-        label: "Select Saved Inbox Filter",
+        label: text.selectSavedInboxFilter,
         icon: Inbox,
       },
       selectRepliedFilter: {
-        label: "Select Replied Inbox Filter",
+        label: text.selectRepliedInboxFilter,
         icon: Inbox,
       },
       selectCompletedFilter: {
-        label: "Select Completed Inbox Filter",
+        label: text.selectCompletedInboxFilter,
         icon: Inbox,
       },
       selectArchivedFilter: {
-        label: "Select Archived Inbox Filter",
+        label: text.selectArchivedInboxFilter,
         icon: Inbox,
       },
     },
@@ -123,9 +124,9 @@ export const AppCommand = defineAppCommands({
     group: "projects",
     commands: {
       openFolder: {
-        label: "Open Folder",
+        label: text.openFolder,
         icon: FolderOpen,
-        description: "Open a project from your filesystem.",
+        description: text.openAProjectFromYourFilesystem,
       },
     },
   },
@@ -133,47 +134,47 @@ export const AppCommand = defineAppCommands({
     group: "session",
     commands: {
       openProjectSelector: {
-        label: "Open Project Selector",
+        label: text.openProjectSelector,
         icon: FolderOpen,
       },
       openSubpackageSelector: {
-        label: "Open Working Directory Selector",
+        label: text.openSubpackageSelector,
         icon: Folder,
       },
       openAdapterSelector: {
-        label: "Open Agent Harness Selector",
+        label: text.openAgentHarnessSelector,
         icon: Bot,
       },
       openLocationSelector: {
-        label: "Cycle Launch Location",
+        label: text.cycleLaunchLocation,
         icon: MapPin,
       },
       openBranchSelector: {
-        label: "Open Branch Selector",
+        label: text.openBranchSelector,
         icon: GitBranch,
       },
       openApprovalPresetSelector: {
-        label: "Open Approval Preset Selector",
+        label: text.openApprovalPresetSelector,
         icon: Brain,
       },
       openModelSelector: {
-        label: "Open Model Selector",
+        label: text.openModelSelector,
         icon: Brain,
       },
       openThinkingLevelSelector: {
-        label: "Open Thinking Level Selector",
+        label: text.openThinkingLevelSelector,
         icon: Brain,
       },
       decreaseThinkingLevel: {
-        label: "Decrease Thinking Level",
+        label: text.decreaseThinkingLevel,
         icon: Brain,
       },
       increaseThinkingLevel: {
-        label: "Increase Thinking Level",
+        label: text.increaseThinkingLevel,
         icon: Brain,
       },
       submit: {
-        label: "Submit",
+        label: text.submit,
         icon: SendHorizontal,
       },
     },
@@ -182,19 +183,19 @@ export const AppCommand = defineAppCommands({
     group: "session",
     commands: {
       viewChanges: {
-        label: "View Changes",
+        label: text.viewChanges,
         icon: FileDiff,
       },
       completeSession: {
-        label: "Complete Session",
+        label: text.completeSession,
         icon: CheckCircle2,
       },
       skipToPreviousPrompt: {
-        label: "Skip to Previous Prompt",
+        label: text.skipToPreviousPrompt,
         icon: ChevronUp,
       },
       skipToNextPrompt: {
-        label: "Skip to Next Prompt",
+        label: text.skipToNextPrompt,
         icon: ChevronDown,
       },
     },

@@ -1,5 +1,6 @@
 import { Search } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import styles from "./list-toolbar.style.ts"
 
 export function ListToolbar(props: {
@@ -7,12 +8,12 @@ export function ListToolbar(props: {
   searchQuery: string;
 }) @{
   <label class={styles.searchField}>
-    <span class={styles.srOnly}>Search session titles</span>
+    <span class={styles.srOnly}>{text.searchSessionTitles}</span>
     <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
     <input
       ref={props.inputRef}
       class={styles.searchInput}
-      placeholder="Search session titles"
+      placeholder={text.searchSessionTitles}
       type="search"
       value={props.searchQuery}
     />

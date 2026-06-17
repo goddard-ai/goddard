@@ -13,6 +13,7 @@ import {
   MessageSquare,
 } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
@@ -77,11 +78,11 @@ export function InboxRow(props: {
   const readStatus =
     props.item.status === "unread" ? "read" : "unread"
   const readLabel =
-    props.item.status === "unread" ? "Mark read" : "Mark unread"
+    props.item.status === "unread" ? text.markRead : text.markUnread
   const priority =
     props.item.priority === "low" ? "normal" : "low"
   const priorityActionLabel =
-    props.item.priority === "low" ? "Set normal priority" : "Set low priority"
+    props.item.priority === "low" ? text.setNormalPriority : text.setLowPriority
   const hasPendingAction = pendingAction !== null
   const isArchived = props.item.status === "archived"
   const isCompleted = props.item.status === "completed"
@@ -100,7 +101,7 @@ export function InboxRow(props: {
     } catch (error) {
       console.error(`Failed to run inbox row action: ${label}`, error)
       appToaster.create({
-        description: "The daemon-backed inbox row could not be updated.",
+        description: text.theDaemonBackedInboxRowCouldNotBeUpdated,
         duration: 3200,
         title: `Couldn't ${label.toLowerCase()}`,
         type: "error",
@@ -193,13 +194,13 @@ export function InboxRow(props: {
         }}
       />
       <InboxRowActionButton
-        ariaLabel={isSaved ? "Saved" : "Save"}
+        ariaLabel={isSaved ? text.saved : text.save}
         disabled={hasPendingAction || isSaved}
         icon={Bookmark}
         isActive={isSaved}
         onPress={() => {
           void performRowAction(
-            "Save",
+            text.save,
             () => mutations.updateInboxItem({
               entityId: props.item.entityId,
               status: "saved",
@@ -225,13 +226,13 @@ export function InboxRow(props: {
 
       @if (sessionItem) {
         <InboxRowActionButton
-          ariaLabel={isCompleted ? "Completed" : "Complete"}
+          ariaLabel={isCompleted ? text.completed : text.complete}
           disabled={hasPendingAction || isCompleted}
           icon={CheckCircle2}
           isActive={isCompleted}
           onPress={() => {
             void performRowAction(
-              "Complete",
+              text.complete,
               () => mutations.completeSessionInboxItem({
                 id: sessionItem.entityId,
               }),
@@ -241,13 +242,13 @@ export function InboxRow(props: {
       }
 
       <InboxRowActionButton
-        ariaLabel={isArchived ? "Archived" : "Archive"}
+        ariaLabel={isArchived ? text.archived : text.archive}
         disabled={hasPendingAction || isArchived}
         icon={Archive}
         isActive={isArchived}
         onPress={() => {
           void performRowAction(
-            "Archive",
+            text.archive,
             () => mutations.updateInboxItem({
               entityId: props.item.entityId,
               status: "archived",

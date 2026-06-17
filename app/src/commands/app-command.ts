@@ -4,6 +4,7 @@ import { SigmaTarget, useListener } from "preact-sigma"
 import { useLayoutEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
+import { text } from "~/language/text.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { AppCommand } from "./app-command-definitions.ts"
 import { getActiveCommandLayerId, useCommandLayer } from "./command-layer.tsrx"
@@ -18,19 +19,19 @@ const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandI
 export const appCommandGroups = {
   navigation: {
     id: "navigation",
-    label: "Navigation",
+    label: text.navigation,
   },
   workbench: {
     id: "workbench",
-    label: "Workbench",
+    label: text.workbench,
   },
   projects: {
     id: "projects",
-    label: "Projects",
+    label: text.projects,
   },
   session: {
     id: "session",
-    label: "Session",
+    label: text.session,
   },
 } as const
 

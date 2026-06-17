@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
@@ -64,43 +65,43 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
       return {
         icon: LoaderCircle,
         color: token.var("colors.accentStrong"),
-        label: "Running",
+        label: text.running,
       }
     case "blocked":
       return {
         icon: PauseCircle,
         color: token.var("colors.text"),
-        label: "Blocked",
+        label: text.blocked,
       }
     case "done":
       return {
         icon: CheckCircle2,
         color: token.var("colors.text"),
-        label: "Completed",
+        label: text.completed,
       }
     case "error":
       return {
         icon: AlertCircle,
         color: token.var("colors.danger"),
-        label: "Error",
+        label: text.error,
       }
     case "cancelled":
       return {
         icon: XCircle,
         color: token.var("colors.muted"),
-        label: "Cancelled",
+        label: text.cancelled,
       }
     case "archived":
       return {
         icon: CheckCircle2,
         color: token.var("colors.muted"),
-        label: "Archived",
+        label: text.archived,
       }
     default:
       return {
         icon: CircleDot,
         color: token.var("colors.muted"),
-        label: "Idle",
+        label: text.idle,
       }
   }
 }

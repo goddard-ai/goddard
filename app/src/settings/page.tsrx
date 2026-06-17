@@ -5,6 +5,7 @@ import {
   appearanceSettingsSectionMetadata,
   AppearanceSettingsSection,
 } from "~/appearance/appearance-settings-section.tsrx"
+import { text } from "~/language/text.ts"
 import {
   adapterInstallationsSettingsSectionMetadata,
   AdapterInstallationsSettingsSection,
@@ -34,11 +35,11 @@ export default function SettingsPage() @{
 
   <main class={styles.page}>
     <label class={styles.searchField}>
-      <span class={styles.srOnly}>Search settings</span>
+      <span class={styles.srOnly}>{text.searchSettings}</span>
       <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
       <input
         class={styles.searchInput}
-        placeholder="Search settings"
+        placeholder={text.searchSettings}
         role="searchbox"
         type="search"
         value={searchQuery}
@@ -60,15 +61,15 @@ export default function SettingsPage() @{
 
       @if (visibleSections.length === 0) {
         <section class={styles.emptyState} aria-live="polite">
-          <h2 class={styles.emptyTitle}>No settings found</h2>
-          <p class={styles.emptyText}>Try a different search term.</p>
+          <h2 class={styles.emptyTitle}>{text.noMatchingSettings}</h2>
+          <p class={styles.emptyText}>{text.tryADifferentSearchTerm}</p>
         </section>
       }
     </div>
 
     @if (visibleSections.length > 1) {
-      <aside class={styles.sidebar} aria-label="Settings sections">
-        <h2 class={styles.sidebarTitle}>Settings</h2>
+      <aside class={styles.sidebar} aria-label={text.settingsSections}>
+        <h2 class={styles.sidebarTitle}>{text.settings}</h2>
         <ul class={styles.sidebarList}>
           @for (const section of visibleSections) {
             <li key={section.href}>

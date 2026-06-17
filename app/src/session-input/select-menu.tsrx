@@ -6,8 +6,9 @@ import * as fuzzysort from "fuzzysort2"
 import { ChevronDown, LoaderCircle } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
-import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
+import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
+import { text } from "~/language/text.ts"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
@@ -372,10 +373,12 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             @if (props.shortcut) {
               <>
                 <GoodKeyboardShortcut expression={props.shortcut} />
-                {" opens menu"}
+                {` ${text.opensMenu}`}
               </>
             } @else {
-              <>No shortcut assigned</>
+              <>
+                {text.noShortcutAssigned}
+              </>
             }
           </span>
         </span>
@@ -536,7 +539,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             }}
             class={styles.menuFilter}
             disabled={props.disabled}
-            placeholder="Type to filter"
+            placeholder={text.typeToFilter}
             value={query}
           />
         }
@@ -550,11 +553,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
               })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              Loading options...
+              {text.loadingOptions}
             </span>
           </div>
         } @else if (filteredItems.length === 0) {
-          <div class={styles.menuEmpty}>No matching options.</div>
+          <div class={styles.menuEmpty}>{text.noMatchingOptions}</div>
         } @else {
           <ul class={styles.menuList}>
             @for (const item of filteredItems; index index) {

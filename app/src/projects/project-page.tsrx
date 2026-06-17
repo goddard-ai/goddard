@@ -22,6 +22,7 @@ import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getProjectGitStatus } from "~/desktop-host.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "~/inbox/text.ts"
+import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
@@ -88,7 +89,7 @@ function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.errorMessage) {
     return {
       icon: AlertCircle,
-      label: "Git status unavailable",
+      label: text.gitStatusUnavailable,
       tone: "danger",
     }
   }
@@ -96,7 +97,7 @@ function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.ahead > 0 && summary.behind > 0) {
     return {
       icon: ArrowUpDown,
-      label: `Ahead ${summary.ahead}, behind ${summary.behind}`,
+      label: `${text.ahead} ${summary.ahead}, ${text.behind} ${summary.behind}`,
       tone: "attention",
     }
   }
@@ -104,7 +105,7 @@ function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.ahead > 0) {
     return {
       icon: ArrowUp,
-      label: `Ahead ${summary.ahead}`,
+      label: `${text.ahead} ${summary.ahead}`,
       tone: "attention",
     }
   }
@@ -112,7 +113,7 @@ function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.behind > 0) {
     return {
       icon: ArrowDown,
-      label: `Behind ${summary.behind}`,
+      label: `${text.behind} ${summary.behind}`,
       tone: "attention",
     }
   }
@@ -120,7 +121,7 @@ function getCheckoutStatePresentation(summary: ProjectGitCheckoutSummary) {
   if (summary.hasChanges) {
     return {
       icon: FileDiff,
-      label: "Working tree has changes",
+      label: text.workingTreeHasChanges,
       tone: "attention",
     }
   }
@@ -152,10 +153,10 @@ function getCheckoutDetail(summary: ProjectGitCheckoutSummary) {
 
 function getCheckoutMainLabel(summary: ProjectGitCheckoutSummary) {
   if (summary.errorMessage) {
-    return "Git status unavailable"
+    return text.gitStatusUnavailable
   }
 
-  const details: string[] = [summary.branch ? summary.branch : "Detached HEAD"]
+  const details: string[] = [summary.branch ? summary.branch : text.detachedHead]
 
   if (summary.head) {
     details.push(summary.head)
@@ -209,10 +210,10 @@ export default function ProjectPage(props: { projectName?: string; projectPath: 
   if (!project) {
     return <div class={styles.page}>
       <section class={styles.panel}>
-        <h1 class={styles.title}>Project unavailable</h1>
-        <p class={styles.body}>
-          The project record for this tab is no longer in the machine-wide project registry.
-        </p>
+        <h1 class={styles.title}>{text.projectUnavailable}</h1>
+        <p
+          class={styles.body}
+        >{text.theProjectRecordForThisTabIsNoLongerInTheMachineWideProjectRegistry}</p>
       </section>
     </div>
   }
@@ -220,7 +221,7 @@ export default function ProjectPage(props: { projectName?: string; projectPath: 
   <div class={styles.page}>
     <header class={styles.header}>
       <div>
-        <span class={styles.eyebrow}>Project dashboard</span>
+        <span class={styles.eyebrow}>{text.projectDashboard}</span>
         <h1 class={styles.title}>{project.name}</h1>
         <p class={styles.path}>{project.path}</p>
       </div>
@@ -232,17 +233,17 @@ export default function ProjectPage(props: { projectName?: string; projectPath: 
       <ProjectDashboardSections {project} />
     } @pending {
       <section class={styles.panel}>
-        <p class={styles.body}>Loading project dashboard.</p>
+        <p class={styles.body}>{text.loadingProjectDashboard}</p>
       </section>
     } @catch (error, retry) {
       useErrorBoundaryReset(retry)
 
       <section class={styles.panel}>
-        <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
+        <h2 class={styles.sectionTitle}>{text.couldntLoadProjectDashboard}</h2>
         <p class={styles.body}>
-          {error instanceof Error ? error.message : "The project dashboard data request failed."}
+          {error instanceof Error ? error.message : text.theProjectDashboardDataRequestFailed}
         </p>
-        <button class={styles.secondaryButton} type="button" onClick={retry}>Retry</button>
+        <button class={styles.secondaryButton} type="button" onClick={retry}>{text.retry}</button>
       </section>
     }
   </div>
@@ -283,7 +284,7 @@ function ProjectLaunchSection(props: { project: ProjectRecord }) @{
     isLaunching.value = true
     const toastId = appToaster.create({
       description: form.effectiveCwd.value,
-      title: "Launching session",
+      title: text.launchingSession,
       type: "loading",
     })
 
@@ -311,14 +312,14 @@ function ProjectLaunchSection(props: { project: ProjectRecord }) @{
       appToaster.update(toastId, {
         description: sessionTitle,
         duration: 2800,
-        title: "Session launched",
+        title: text.sessionLaunched,
         type: "success",
       })
     } catch (error) {
       console.error("Failed to create session.", error)
       appToaster.update(toastId, {
-        description: "The session could not be created.",
-        title: "Session launch failed",
+        description: text.theSessionCouldNotBeCreated,
+        title: text.sessionLaunchFailed,
         type: "error",
       })
     } finally {
@@ -452,10 +453,10 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
     <div class={styles.grid}>
       <div class={styles.column}>
         <section class={styles.panel}>
-          <SectionHeading icon={Inbox} title="Related inbox" count={relatedInboxItems.length} />
+          <SectionHeading icon={Inbox} title={text.relatedInbox} count={relatedInboxItems.length} />
 
           @if (relatedInboxItems.length === 0) {
-            <EmptyState text="No unread or read inbox messages are linked to this project." />
+            <EmptyState text={text.noUnreadOrReadInboxMessagesAreLinkedToThisProject} />
           } @else {
             <div class={styles.list}>
               @for (const item of relatedInboxItems) {
@@ -474,12 +475,12 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
         <section class={styles.panel}>
           <SectionHeading
             icon={MessageSquare}
-            title="Recent sessions"
+            title={text.recentSessions}
             count={recentSessions.length}
           />
 
           @if (recentSessions.length === 0) {
-            <EmptyState text="No recent sessions are linked to this project." />
+            <EmptyState text={text.noRecentSessionsAreLinkedToThisProject} />
           } @else {
             <div class={styles.sessionList}>
               @for (const item of recentSessions) {
@@ -527,7 +528,7 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
       <section class={styles.panel}>
         <SectionHeading
           icon={GitBranch}
-          title="Git checkouts"
+          title={text.gitCheckouts}
           count={goddardWorktrees.length + 1}
         />
         <div class={styles.list}>
@@ -547,17 +548,17 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
     </div>
   } @pending {
     <section class={styles.panel}>
-      <p class={styles.body}>Loading project dashboard.</p>
+      <p class={styles.body}>{text.loadingProjectDashboard}</p>
     </section>
   } @catch (error, retry) {
     useErrorBoundaryReset(retry)
 
     <section class={styles.panel}>
-      <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
+      <h2 class={styles.sectionTitle}>{text.couldntLoadProjectDashboard}</h2>
       <p class={styles.body}>
-        {error instanceof Error ? error.message : "The project dashboard data request failed."}
+        {error instanceof Error ? error.message : text.theProjectDashboardDataRequestFailed}
       </p>
-      <button class={styles.secondaryButton} type="button" onClick={retry}>Retry</button>
+      <button class={styles.secondaryButton} type="button" onClick={retry}>{text.retry}</button>
     </section>
   }
 }
@@ -587,7 +588,7 @@ function CheckoutRow(props: {
   const KindIcon =
     props.kind === "primary" ? Laptop : GitFork
   const kindLabel =
-    props.kind === "primary" ? "Primary checkout" : "Worktree"
+    props.kind === "primary" ? text.primaryCheckout : text.worktree
   const checkoutState = getCheckoutStatePresentation(props.summary)
   const CheckoutStateIcon = checkoutState?.icon
 
@@ -618,7 +619,7 @@ function CheckoutRow(props: {
 
     @if (props.kind === "worktree") {
       <div class={styles.checkoutActions}>
-        <GoodTooltip content="View changes">
+        <GoodTooltip content={text.viewChanges}>
           <button
             aria-label={`View changes for ${props.summary.path}`}
             class={styles.iconButton}
@@ -632,7 +633,7 @@ function CheckoutRow(props: {
         </GoodTooltip>
 
         @if (props.showArchive) {
-          <GoodTooltip content="Archive">
+          <GoodTooltip content={text.archive}>
             <button
               aria-label={`Archive ${props.summary.path}`}
               class={styles.iconButton}

@@ -1,5 +1,6 @@
 import { RefreshCcw, Search } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./filters.ts"
 import { getInboxSearchActiveFilterIds } from "./search.ts"
 import styles from "./page.style.ts"
@@ -17,8 +18,8 @@ export function InboxToolbar(props: {
 
   <div class={styles.toolbar}>
     <div class={styles.headingGroup}>
-      <h1 class={styles.heading}>Inbox</h1>
-      <div class={styles.filterGroup} aria-label="Inbox filters">
+      <h1 class={styles.heading}>{text.inbox}</h1>
+      <div class={styles.filterGroup} aria-label={text.inboxFilters}>
         @for (const id of inboxFilterOrder) {
           const filter = inboxFilterDefinitions[id]
           const isSelected =
@@ -39,12 +40,12 @@ export function InboxToolbar(props: {
     </div>
     <div class={styles.toolbarControls}>
       <label class={styles.searchField}>
-        <span class={styles.srOnly}>Search inbox items</span>
+        <span class={styles.srOnly}>{text.searchInboxItems}</span>
         <Search aria-hidden={true} class={styles.searchIcon} size={16} strokeWidth={2.1} />
         <input
           ref={props.inputRef}
           class={styles.searchInput}
-          placeholder="Search inbox"
+          placeholder={text.searchInbox}
           type="search"
           value={props.searchQuery}
           onInput={(event) => {
@@ -54,8 +55,8 @@ export function InboxToolbar(props: {
       </label>
       <button
         class={styles.iconButton}
-        aria-label="Refresh inbox"
-        title="Refresh inbox"
+        aria-label={text.refreshInbox}
+        title={text.refreshInbox}
         type="button"
         onClick={() => {
           props.onRefresh()

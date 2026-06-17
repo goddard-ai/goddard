@@ -3,6 +3,7 @@ import type * as acp from "acp-client/protocol"
 import hashSum from "hash-sum"
 import { isObject } from "radashi"
 
+import { text } from "~/language/text.ts"
 import type {
   SessionTranscriptContentBlock,
   SessionTranscriptItem,
@@ -819,7 +820,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "interrupted",
-      title: "Interrupted",
+      title: text.interrupted,
       reason: session.errorMessage ?? "No turn completion was recorded",
       timestamp: null,
     } satisfies SessionTranscriptTurnStop
@@ -830,7 +831,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "failed",
-      title: "Failed",
+      title: text.failed,
       reason: extractTurnFailureReason(turn, session),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop
@@ -841,7 +842,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "cancelled",
-      title: "Cancelled",
+      title: text.cancelled,
       reason: formatStopReason(turn.stopReason),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop
@@ -852,7 +853,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "stopped",
-      title: "Stopped",
+      title: text.stopped,
       reason: formatStopReason(turn.stopReason),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop

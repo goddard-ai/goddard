@@ -1,5 +1,7 @@
 import type { InboxStatus } from "@goddard-ai/inbox/schema"
 
+import { text } from "~/language/text.ts"
+
 export const DEFAULT_INBOX_FILTER_ID = "unread"
 
 export const allInboxStatuses = [
@@ -13,35 +15,34 @@ export const allInboxStatuses = [
 
 export const inboxFilterDefinitions = {
   unread: {
-    label: "Unread",
+    label: text.unread,
     statuses: ["unread", "read"],
-    emptyTitle: "No unread inbox items",
-    emptyDescription:
-      "Unread and acknowledged items that remain in the active queue will appear here.",
+    emptyTitle: text.noUnreadInboxItems,
+    emptyDescription: text.unreadAndAcknowledgedItemsThatRemainInTheActiveQueueWillAppearHere,
   },
   saved: {
-    label: "Saved",
+    label: text.saved,
     statuses: ["saved"],
-    emptyTitle: "No saved inbox items",
-    emptyDescription: "Items you park for later will appear here.",
+    emptyTitle: text.noSavedInboxItems,
+    emptyDescription: text.itemsYouParkForLaterWillAppearHere,
   },
   replied: {
-    label: "Replied",
+    label: text.replied,
     statuses: ["replied"],
-    emptyTitle: "No replied inbox items",
-    emptyDescription: "Items handed back to an agent through a reply will appear here.",
+    emptyTitle: text.noRepliedInboxItems,
+    emptyDescription: text.itemsHandedBackToAnAgentThroughAReplyWillAppearHere,
   },
   completed: {
-    label: "Completed",
+    label: text.completed,
     statuses: ["completed"],
-    emptyTitle: "No completed inbox items",
-    emptyDescription: "Entity-specific completed items will appear here.",
+    emptyTitle: text.noCompletedInboxItems,
+    emptyDescription: text.entitySpecificCompletedItemsWillAppearHere,
   },
   archived: {
-    label: "Archived",
+    label: text.archived,
     statuses: ["archived"],
-    emptyTitle: "No archived inbox items",
-    emptyDescription: "Items hidden from the active workflow will appear here.",
+    emptyTitle: text.noArchivedInboxItems,
+    emptyDescription: text.itemsHiddenFromTheActiveWorkflowWillAppearHere,
   },
 } as const satisfies Record<
   string,

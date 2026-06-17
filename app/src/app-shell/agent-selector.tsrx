@@ -6,6 +6,7 @@ import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { text } from "~/language/text.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -172,7 +173,9 @@ export function AppShellAgentSelector(props: {
       ref={triggerElementRef}
       aria-expanded={open.value}
       aria-haspopup="menu"
-      aria-label={selectedAgent ? `Agent harness: ${selectedAgent.name}` : "Select agent harness"}
+      aria-label={selectedAgent
+        ? `${text.agentHarness}: ${selectedAgent.name}`
+        : text.selectAgentHarness}
       class={cx(styles.trigger, noDragClass)}
       type="button"
       onClick={() => {
@@ -208,7 +211,7 @@ export function AppShellAgentSelector(props: {
       <input
         ref={filterInputRef}
         class={styles.filter}
-        placeholder="Type to filter"
+        placeholder={text.typeToFilter}
         value={search.value}
         onInput={(event) => {
           search.value = event.currentTarget.value
@@ -237,7 +240,7 @@ export function AppShellAgentSelector(props: {
       />
 
       @if (filteredAdapters.length === 0) {
-        <div class={styles.empty}>No matching agents.</div>
+        <div class={styles.empty}>{text.noMatchingAgents}</div>
       } @else {
         <ul class={styles.list}>
           @for (const adapter of filteredAdapters) {
@@ -269,7 +272,10 @@ export function AppShellAgentSelector(props: {
                     {adapter.version}
 
                     @if (adapter.unofficial) {
-                      <>· Unofficial</>
+                      <>
+                        ·
+                        {text.unofficial}
+                      </>
                     }
                   </span>
                 </span>

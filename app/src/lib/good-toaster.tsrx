@@ -2,6 +2,7 @@ import { signal } from "@preact/signals"
 import { OverlayPortal } from "@goddard-ai/ui-primitives"
 import { LoaderCircle, X } from "lucide-react"
 
+import { text } from "~/language/text.ts"
 import styles from "./good-toaster.style.ts"
 
 type ToastType = "success" | "info" | "error" | "loading"
@@ -157,7 +158,7 @@ export function GoodToaster() @{
             }
           </div>
           <button
-            aria-label="Dismiss notification"
+            aria-label={text.dismissNotification}
             class={styles.closeButton}
             type="button"
             onClick={() => {

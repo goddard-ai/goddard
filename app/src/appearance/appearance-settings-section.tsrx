@@ -1,4 +1,5 @@
 import { useAppearance } from "~/app-state-context.tsrx"
+import { text } from "~/language/text.ts"
 import {
   SettingsChoiceBody,
   SettingsChoiceDescription,
@@ -20,9 +21,9 @@ import styles from "./appearance-settings-section.style.ts"
 import type { AppearanceMode } from "./theme.ts"
 
 export const appearanceSettingsSectionMetadata = {
-  description: "Choose how the workbench resolves theme and contrast.",
+  description: text.chooseHowTheWorkbenchResolvesThemeAndContrast,
   id: "settings-appearance",
-  title: "Appearance",
+  title: text.appearance,
 }
 
 const themeModeOptions: readonly {
@@ -32,18 +33,18 @@ const themeModeOptions: readonly {
 }[] = [
   {
     mode: "system",
-    label: "System",
-    description: "Follow the operating system appearance.",
+    label: text.system,
+    description: text.followTheOperatingSystemAppearance,
   },
   {
     mode: "light",
-    label: "Light",
-    description: "Use the light built-in palette.",
+    label: text.light,
+    description: text.useTheLightBuiltInPalette,
   },
   {
     mode: "dark",
-    label: "Dark",
-    description: "Use the dark built-in palette.",
+    label: text.dark,
+    description: text.useTheDarkBuiltInPalette,
   },
 ]
 
@@ -61,9 +62,9 @@ export function AppearanceSettingsSection() @{
       <SettingsSectionDescription>{appearanceSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>Color mode</SettingsLegend>
+      <SettingsLegend>{text.colorMode}</SettingsLegend>
       <SettingsHelperText>
-        Current effective theme:
+        {text.currentEffectiveTheme}
         {" "}
         {appearance.effectiveTheme}
       </SettingsHelperText>
@@ -93,18 +94,16 @@ export function AppearanceSettingsSection() @{
       </SettingsChoiceList>
     </SettingsFieldset>
     <SettingsFieldset>
-      <SettingsLegend>Contrast</SettingsLegend>
-      <SettingsHelperText>
-        Tightens muted text and border separation across the app.
-      </SettingsHelperText>
+      <SettingsLegend>{text.contrast}</SettingsLegend>
+      <SettingsHelperText>{text.tightensMutedTextAndBorderSeparationAcrossTheApp}</SettingsHelperText>
       <SettingsControlRowLabel
         class={styles.controlRow}
         data-selected={appearance.highContrast ? "true" : undefined}
       >
         <SettingsChoiceBody>
-          <SettingsChoiceTitle>High contrast</SettingsChoiceTitle>
+          <SettingsChoiceTitle>{text.highContrast}</SettingsChoiceTitle>
           <SettingsChoiceDescription>
-            {appearance.highContrast ? "Enabled" : "Disabled"}
+            {appearance.highContrast ? text.enabled : text.disabled}
           </SettingsChoiceDescription>
         </SettingsChoiceBody>
         <SettingsChoiceInput
