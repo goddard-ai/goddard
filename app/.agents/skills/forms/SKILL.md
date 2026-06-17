@@ -1,5 +1,5 @@
 ---
-name: app-forms
+name: forms
 description: Build or refactor Goddard app forms, including flat Zod-backed DOM forms, feature-local form models, dialog form composition, async fields, pending UI, and submit payloads.
 ---
 

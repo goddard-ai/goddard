@@ -19,17 +19,12 @@ Agents started at the repository root may not discover `app/.agents/skills/` aut
 
 - `app/.agents/skills/comark/SKILL.md`: Comark Markdown parsing, component syntax, AST transforms, streaming, React rendering, custom components, server/client rendering splits, or built-in plugins.
 - `app/.agents/skills/electrobun/SKILL.md`: Electrobun desktop behavior, Bun main-process code, windows/views, typed RPC, Electroview, webviews, menus, tray, dialogs, sessions, shortcuts, builds, or shutdown.
+- `app/.agents/skills/forms/SKILL.md`: app forms, dialog forms, form models, async fields, pending UI, and submit payloads.
+- `app/.agents/skills/implementation-patterns/SKILL.md`: app state ownership, contextual mutations, hooks, async work, cross-domain coordination, surface composition, TSRX organization, and alignment.
 - `app/.agents/skills/lexical/SKILL.md`: Lexical editors, custom nodes, commands, transforms, listeners, selections, serialization, NodeState, extensions, or React integrations.
 - `app/.agents/skills/panda-css/SKILL.md`: Panda CSS styling, setup, extraction, recipes, tokens, presets, utilities, `panda.config.*`, or `styled-system`.
 - `app/.agents/skills/panda-ui/SKILL.md`: Compact product UI composition in app surfaces that already use Panda CSS.
 - `app/.agents/skills/preact-sigma/SKILL.md`: Code that imports `preact-sigma` or needs the relevant package docs and examples.
 - `app/.agents/skills/react-virtual/SKILL.md`: TanStack React Virtual lists, window scrollers, grids, tables, sticky rows, infinite loading, measurement, or scroll positioning.
 - `app/.agents/skills/tsrx/SKILL.md`: Writing, editing, or reviewing `.tsrx` files.
-
-## Repository App Skills
-
-These app-oriented skills live under the repository-level `.agents/skills/` directory:
-
-- `.agents/skills/app-forms/SKILL.md`: app forms, dialog forms, form models, async fields, pending UI, and submit payloads.
-- `.agents/skills/app-implementation-patterns/SKILL.md`: app state ownership, contextual mutations, hooks, async work, cross-domain coordination, surface composition, TSRX organization, and alignment.
-- `.agents/skills/app-tsrx-pages/SKILL.md`: page-like TSRX components, page skeletons, TSRX control flow, query data contexts, page models, task helpers, and loading/error UI.
+- `app/.agents/skills/tsrx-pages/SKILL.md`: page-like TSRX components, page skeletons, TSRX control flow, query data contexts, page models, task helpers, and loading/error UI.

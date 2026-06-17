@@ -1,5 +1,5 @@
 ---
-name: app-implementation-patterns
+name: implementation-patterns
 description: Apply Goddard app implementation patterns for state ownership, contextual mutations, hooks, async work, cross-domain coordination, surface composition, TSRX organization, and spec alignment.
 ---
 

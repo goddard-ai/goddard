@@ -1,5 +1,5 @@
 ---
-name: app-tsrx-pages
+name: tsrx-pages
 description: Refine Goddard app page-like TSRX components, including page skeletons, TSRX control flow, query data contexts, page models, task helpers, loading/error UI, and domain model coordination.
 ---
 
