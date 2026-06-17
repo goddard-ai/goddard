@@ -1,9 +1,3 @@
-<workspace-agent-notes>
-- These instructions apply repo-wide unless a deeper `AGENTS.md` adds or narrows them.
-- Before editing a subtree, read this file and any nearest local `AGENTS.md`.
-- Keep changes narrowly scoped to the task.
-</workspace-agent-notes>
-
 <critical-rules>
 - Do not overwrite or revert unrelated user changes.
 - Do not edit `spec/` unless explicitly asked.
