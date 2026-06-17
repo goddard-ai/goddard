@@ -36,6 +36,14 @@
       },
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
+    },
+    "./sdk": {
+      "types": {
+        "source": "./src/sdk.ts",
+        "default": "./dist/sdk.d.mts"
+      },
+      "bun": "./src/sdk.ts",
+      "import": "./dist/sdk.mjs"
     }
   },
   "scripts": {
@@ -48,6 +56,7 @@
   "dependencies": {
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
     "kindstore": "catalog:",
     "yaml": "2.9.0",

@@ -694,6 +694,9 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
+      '@goddard-ai/pipeline':
+        specifier: workspace:*
+        version: link:../../features/pipeline
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -923,6 +926,9 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
       '@goddard-ai/session':
         specifier: workspace:*
         version: link:../session

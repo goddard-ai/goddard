@@ -3,6 +3,7 @@ import { adapterSdkPlugin } from "@goddard-ai/adapter/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
+import { pipelineSdkPlugin } from "@goddard-ai/pipeline/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
@@ -26,6 +27,7 @@ const sdkPlugins = composeSdkPlugins([
   authSdkPlugin,
   inboxSdkPlugin,
   loopSdkPlugin,
+  pipelineSdkPlugin,
   pullRequestSdkPlugin,
   reviewSessionSdkPlugin,
   sessionSdkPlugin,
@@ -87,6 +89,7 @@ export class GoddardSdk {
   readonly reviewSession: FeatureSdkNamespaces["reviewSession"]
   readonly action: FeatureSdkNamespaces["action"]
   readonly loop: FeatureSdkNamespaces["loop"]
+  readonly pipeline: FeatureSdkNamespaces["pipeline"]
   readonly workforce: FeatureSdkNamespaces["workforce"]
 
   constructor(options: GoddardClientOptions) {
@@ -104,6 +107,7 @@ export class GoddardSdk {
     this.reviewSession = features.reviewSession
     this.action = features.action
     this.loop = features.loop
+    this.pipeline = features.pipeline
     this.workforce = features.workforce
   }
 }

@@ -118,7 +118,75 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "reviewSession")).toBe(true)
     expect(Object.hasOwn(sdk, "action")).toBe(true)
     expect(Object.hasOwn(sdk, "loop")).toBe(true)
+    expect(Object.hasOwn(sdk, "pipeline")).toBe(true)
     expect(Object.hasOwn(sdk, "workforce")).toBe(true)
+  })
+
+  test("pipeline.spawnRun forwards to pipeline.spawnRun", async () => {
+    const { sdk, send } = createSdkWithClient()
+
+    send.mockResolvedValueOnce({
+      run: {
+        id: "plr_1",
+        createdAt: 1,
+        pipelineId: "creative-weaver",
+        pipelineVersion: "0.1.0",
+        cwd: "/repo",
+        status: "queued",
+        origin: "sdk",
+        visibility: "visible",
+        inputs: { premise: "A lighthouse" },
+        outputs: null,
+        error: null,
+        definitionSnapshot: {
+          source: "project",
+          definition: {
+            id: "creative-weaver",
+            version: "0.1.0",
+            name: "Creative Weaver",
+            inputs: { premise: { type: "string" } },
+            steps: [
+              {
+                id: "draft",
+                kind: "script",
+                name: "Draft",
+                transformer: "test.draft",
+                input: { premise: "$.inputs.premise" },
+              },
+            ],
+          },
+        },
+        startedAt: null,
+        completedAt: null,
+        updatedAt: 1,
+      },
+      steps: [],
+    })
+
+    await expect(
+      sdk.pipeline.spawnRun({
+        cwd: "/repo",
+        pipelineId: "creative-weaver",
+        inputs: { premise: "A lighthouse" },
+        origin: "sdk",
+        visibility: "visible",
+      }),
+    ).resolves.toMatchObject({
+      run: {
+        id: "plr_1",
+        pipelineId: "creative-weaver",
+        status: "queued",
+      },
+      steps: [],
+    })
+
+    expect(send).toHaveBeenCalledWith("pipeline.spawnRun", {
+      cwd: "/repo",
+      pipelineId: "creative-weaver",
+      inputs: { premise: "A lighthouse" },
+      origin: "sdk",
+      visibility: "visible",
+    })
   })
 
   test("inbox.streamItems streams daemon inbox item updates", async () => {
