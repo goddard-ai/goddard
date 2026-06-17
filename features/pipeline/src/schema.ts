@@ -284,6 +284,18 @@ export const CancelPipelineRunRequest = GetPipelineRunRequest
 
 export type CancelPipelineRunRequest = z.infer<typeof CancelPipelineRunRequest>
 
+export const AdvancePipelineRunRequest = GetPipelineRunRequest
+
+export type AdvancePipelineRunRequest = z.infer<typeof AdvancePipelineRunRequest>
+
+export const ApprovePipelineRunRequest = GetPipelineRunRequest
+
+export type ApprovePipelineRunRequest = z.infer<typeof ApprovePipelineRunRequest>
+
+export const RetryPipelineRunRequest = GetPipelineRunRequest
+
+export type RetryPipelineRunRequest = z.infer<typeof RetryPipelineRunRequest>
+
 export type PipelineRunWithSteps = {
   run: DaemonPipelineRun
   steps: DaemonPipelineStepRun[]
@@ -300,3 +312,9 @@ export type ListPipelineRunsResponse = {
 }
 
 export type CancelPipelineRunResponse = PipelineRunWithSteps
+
+export type AdvancePipelineRunResponse = PipelineRunWithSteps
+
+export type ApprovePipelineRunResponse = PipelineRunWithSteps
+
+export type RetryPipelineRunResponse = PipelineRunWithSteps

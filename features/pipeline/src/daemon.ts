@@ -1,4 +1,4 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, event } from "@goddard-ai/daemon-plugin"
 import { kind } from "kindstore"
 
 import { pipelineIpcRoutes } from "./daemon-ipc.ts"
@@ -7,6 +7,7 @@ import { createPipelineDefinitionRegistry } from "./daemon/registry.ts"
 import { DaemonPipelineRun, DaemonPipelineStepRun } from "./schema.ts"
 
 export { createPipelineRunManager } from "./daemon/manager.ts"
+export type { PipelineScriptTransformer } from "./daemon/manager.ts"
 export { createPipelineDefinitionRegistry } from "./daemon/registry.ts"
 
 const pipelineDb = {
@@ -32,13 +33,28 @@ const pipelineDb = {
 
 export const pipelinePlugin = definePlugin({
   name: "pipeline",
+  events: {
+    "pipeline.run.updated": event<{ runId: string; status: string }>(),
+    "pipeline.step.updated": event<{ runId: string; stepId: string; status: string }>(),
+  },
   db: {
     schema: pipelineDb,
   },
   ipcRoutes: pipelineIpcRoutes,
-  setup({ db }) {
+  setup({ db, events }) {
     const registry = createPipelineDefinitionRegistry()
-    const runs = createPipelineRunManager({ db, registry })
+    const runs = createPipelineRunManager({
+      db,
+      registry,
+      publishEvent: (event) => {
+        if (event.name === "pipeline.run.updated") {
+          void events.emit(event.name, event.payload)
+          return
+        }
+
+        void events.emit(event.name, event.payload)
+      },
+    })
 
     return {
       ipcHandlers: {
@@ -49,6 +65,9 @@ export const pipelinePlugin = definePlugin({
           getRun: async ({ body: { id } }) => runs.getRun(id),
           listRuns: async ({ body }) => runs.listRuns(body),
           cancelRun: async ({ body: { id } }) => runs.cancelRun(id),
+          advanceRun: async ({ body: { id } }) => runs.advanceRun(id),
+          approveRun: async ({ body: { id } }) => runs.approveRun(id),
+          retryRun: async ({ body: { id } }) => runs.retryRun(id),
         },
       },
     }

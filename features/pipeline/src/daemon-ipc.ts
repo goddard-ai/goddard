@@ -1,16 +1,22 @@
 import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 
 import {
+  AdvancePipelineRunRequest,
+  ApprovePipelineRunRequest,
   CancelPipelineRunRequest,
   GetPipelineRunRequest,
   ListPipelineDefinitionsRequest,
   ListPipelineRunsRequest,
+  RetryPipelineRunRequest,
   SpawnPipelineRunRequest,
+  type AdvancePipelineRunResponse,
+  type ApprovePipelineRunResponse,
   type CancelPipelineRunResponse,
   type GetPipelineRunResponse,
   type ListPipelineDefinitionDiagnosticsResponse,
   type ListPipelineDefinitionsResponse,
   type ListPipelineRunsResponse,
+  type RetryPipelineRunResponse,
   type SpawnPipelineRunResponse,
 } from "./schema.ts"
 
@@ -45,6 +51,21 @@ export const pipelineIpcRoutes = defineIpcRoutes({
     cancelRun: http.post("runs/cancel", {
       body: CancelPipelineRunRequest,
       response: $type<CancelPipelineRunResponse>(),
+    }),
+    /** Advances a run until it succeeds, fails, waits, or needs agent execution. */
+    advanceRun: http.post("runs/advance", {
+      body: AdvancePipelineRunRequest,
+      response: $type<AdvancePipelineRunResponse>(),
+    }),
+    /** Approves the current waiting approval step and continues the run. */
+    approveRun: http.post("runs/approve", {
+      body: ApprovePipelineRunRequest,
+      response: $type<ApprovePipelineRunResponse>(),
+    }),
+    /** Resets a failed script step and later queued steps, then advances the run. */
+    retryRun: http.post("runs/retry", {
+      body: RetryPipelineRunRequest,
+      response: $type<RetryPipelineRunResponse>(),
     }),
   }),
 })
