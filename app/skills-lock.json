@@ -1,11 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "ark-ui": {
-      "source": "/Users/alec/dev/skills",
-      "sourceType": "local",
-      "computedHash": "d425aedfda02c66ed9bbf90192e852eb713b9e1cd6c7814733f926e40e34f811"
-    },
     "comark": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
@@ -61,21 +56,6 @@
       "sourceType": "github",
       "skillPath": "skills/tsrx/SKILL.md",
       "computedHash": "f391747a3984d0189015792eec2b070ec4dc20bb61fb26835c52571d541ed851"
-    },
-    "tsrx-preact": {
-      "source": "/Users/alec/dev/skills",
-      "sourceType": "local",
-      "computedHash": "e3df6d35e969a119cd2d0c3d10fcd3613493948fb1c76249301309a4556f7511"
-    },
-    "tsrx-react": {
-      "source": "/Users/alec/dev/skills/packages/tsrx-react",
-      "sourceType": "local",
-      "computedHash": "444462090b9127c657002ad035a0e2cf9aaaa9b701a2571f07d9e2bec37d53e4"
-    },
-    "zero-native": {
-      "source": "/Users/alec/dev/skills",
-      "sourceType": "local",
-      "computedHash": "f33183c94bbea2494bb1e76dac0561e231714e538eabb4acd4c3bea38b0b0d40"
     }
   }
 }

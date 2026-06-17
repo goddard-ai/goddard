@@ -17,18 +17,14 @@ Read this ruleset before editing anything under `app/`.
 
 Agents started at the repository root may not discover `app/.agents/skills/` automatically. When app work touches one of these areas, read the matching skill directly:
 
-- `app/.agents/skills/ark-ui/SKILL.md`: Ark UI component choice, anatomy, accessibility, `asChild`, portals, presence, styling attributes, fields, collections, lists, trees, overlays, or forms.
 - `app/.agents/skills/comark/SKILL.md`: Comark Markdown parsing, component syntax, AST transforms, streaming, React rendering, custom components, server/client rendering splits, or built-in plugins.
 - `app/.agents/skills/electrobun/SKILL.md`: Electrobun desktop behavior, Bun main-process code, windows/views, typed RPC, Electroview, webviews, menus, tray, dialogs, sessions, shortcuts, builds, or shutdown.
-- `app/.agents/skills/goddard-app-feature-planner/SKILL.md`: Drafting, updating, splitting, or reviewing app feature plans.
-- `app/.agents/skills/goddard-app-sprint-planner/SKILL.md`: Sequencing or revising app implementation sprints.
 - `app/.agents/skills/lexical/SKILL.md`: Lexical editors, custom nodes, commands, transforms, listeners, selections, serialization, NodeState, extensions, or React integrations.
 - `app/.agents/skills/panda-css/SKILL.md`: Panda CSS styling, setup, extraction, recipes, tokens, presets, utilities, `panda.config.*`, or `styled-system`.
 - `app/.agents/skills/panda-ui/SKILL.md`: Compact product UI composition in app surfaces that already use Panda CSS.
 - `app/.agents/skills/preact-sigma/SKILL.md`: Code that imports `preact-sigma` or needs the relevant package docs and examples.
 - `app/.agents/skills/react-virtual/SKILL.md`: TanStack React Virtual lists, window scrollers, grids, tables, sticky rows, infinite loading, measurement, or scroll positioning.
 - `app/.agents/skills/tsrx/SKILL.md`: Writing, editing, or reviewing `.tsrx` files.
-- `app/.agents/skills/zero-native/SKILL.md`: zero-native Zig desktop apps, manifests, frontend sources, bridge commands, security policy, windows, dialogs, automation, or distribution.
 
 ## Repository App Skills
 

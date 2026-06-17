@@ -1,4 +1,0 @@
-interface:
-  display_name: "zero-native"
-  short_description: "Build Zig desktop apps with web UI"
-  default_prompt: "Use $zero-native to build, debug, or package a zero-native desktop app."
