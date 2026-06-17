@@ -1,0 +1,142 @@
+import { z } from "zod"
+
+const identifier = z
+  .string()
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "Use kebab-case starting with a letter.")
+
+const stepReferencePattern = /^\$\.steps\.([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.output(?:\.|$)/
+
+export const PipelineStepInputMapping = z.record(
+  z.string().min(1),
+  z
+    .string()
+    .min(1)
+    .regex(/^\$\.(inputs|steps)\./, "Step input mappings must reference pipeline data."),
+)
+
+export type PipelineStepInputMapping = z.infer<typeof PipelineStepInputMapping>
+
+const PipelineStepBase = z.strictObject({
+  id: identifier,
+  name: z.string().min(1),
+  input: PipelineStepInputMapping.default({}),
+})
+
+export const PipelineScriptStepDefinition = PipelineStepBase.extend({
+  kind: z.literal("script"),
+  transformer: z.string().min(1),
+})
+
+export type PipelineScriptStepDefinition = z.infer<typeof PipelineScriptStepDefinition>
+
+export const PipelineAgentStepDefinition = PipelineStepBase.extend({
+  kind: z.literal("agent"),
+  systemPrompt: z.string().min(1).optional(),
+  systemPromptFile: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+}).superRefine((step, context) => {
+  if (step.systemPrompt || step.systemPromptFile) {
+    return
+  }
+
+  context.addIssue({
+    code: "custom",
+    message: "Agent steps require systemPrompt or systemPromptFile.",
+    path: ["systemPrompt"],
+  })
+})
+
+export type PipelineAgentStepDefinition = z.infer<typeof PipelineAgentStepDefinition>
+
+export const PipelineApprovalStepDefinition = PipelineStepBase.extend({
+  kind: z.literal("approval"),
+  prompt: z.string().min(1).optional(),
+})
+
+export type PipelineApprovalStepDefinition = z.infer<typeof PipelineApprovalStepDefinition>
+
+export const PipelineStepDefinition = z.discriminatedUnion("kind", [
+  PipelineScriptStepDefinition,
+  PipelineAgentStepDefinition,
+  PipelineApprovalStepDefinition,
+])
+
+export type PipelineStepDefinition = z.infer<typeof PipelineStepDefinition>
+
+export const PipelineDefinition = z
+  .strictObject({
+    id: identifier,
+    version: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    inputs: z.record(z.string().min(1), z.unknown()),
+    steps: z.array(PipelineStepDefinition).min(1),
+    outputs: z.record(z.string().min(1), z.unknown()).optional(),
+  })
+  .superRefine((definition, context) => {
+    const previousStepIds = new Set<string>()
+    const seenStepIds = new Set<string>()
+
+    definition.steps.forEach((step, stepIndex) => {
+      if (seenStepIds.has(step.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate step id "${step.id}".`,
+          path: ["steps", stepIndex, "id"],
+        })
+      }
+
+      seenStepIds.add(step.id)
+
+      for (const [inputName, reference] of Object.entries(step.input)) {
+        if (reference.startsWith("$.inputs.")) {
+          continue
+        }
+
+        const stepReference = reference.match(stepReferencePattern)
+        if (!stepReference) {
+          context.addIssue({
+            code: "custom",
+            message: `Step input "${inputName}" must reference a step output.`,
+            path: ["steps", stepIndex, "input", inputName],
+          })
+          continue
+        }
+
+        const referencedStepId = stepReference[1]
+        if (!previousStepIds.has(referencedStepId)) {
+          context.addIssue({
+            code: "custom",
+            message: `Step input "${inputName}" may only reference earlier step outputs.`,
+            path: ["steps", stepIndex, "input", inputName],
+          })
+        }
+      }
+
+      previousStepIds.add(step.id)
+    })
+  })
+
+export type PipelineDefinition = z.infer<typeof PipelineDefinition>
+
+export const PipelineRunStatus = z.enum([
+  "queued",
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
+
+export type PipelineRunStatus = z.infer<typeof PipelineRunStatus>
+
+export const PipelineStepRunStatus = z.enum([
+  "queued",
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "skipped",
+])
+
+export type PipelineStepRunStatus = z.infer<typeof PipelineStepRunStatus>

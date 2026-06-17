@@ -912,6 +912,12 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
+  features/pipeline:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
   features/pull-request:
     dependencies:
       '@goddard-ai/auth':

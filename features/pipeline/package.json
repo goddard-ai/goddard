@@ -1,0 +1,27 @@
+{
+  "name": "@goddard-ai/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./schema": {
+      "types": {
+        "source": "./src/schema.ts",
+        "default": "./dist/schema.d.mts"
+      },
+      "bun": "./src/schema.ts",
+      "import": "./dist/schema.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
+    "test": "bun test --pass-with-no-tests --dots"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  }
+}
