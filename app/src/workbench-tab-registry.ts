@@ -25,9 +25,14 @@ function PlaceholderWorkbenchTab() {
 export const workbenchTabKinds = {
   inbox: {
     component: lazy(() => import("~/inbox/page.tsrx")),
-    getId: () => "surface:inbox",
-    getTitle: () => "Inbox",
+    getId: (props: { projectPath?: string }) =>
+      props.projectPath
+        ? `project-inbox:${encodeURIComponent(props.projectPath)}`
+        : "surface:inbox",
+    getTitle: (props: { projectName?: string }) =>
+      props.projectName ? `Inbox · ${props.projectName}` : "Inbox",
     icon: inboxAppPlugin.workbenchTab.icon,
+    getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   projects: {
     component: lazy(() => import("~/projects/projects-page.tsrx")),
@@ -37,9 +42,14 @@ export const workbenchTabKinds = {
   },
   sessions: {
     component: lazy(() => import("~/sessions/page.tsrx")),
-    getId: () => "surface:sessions",
-    getTitle: () => "Sessions",
+    getId: (props: { projectPath?: string }) =>
+      props.projectPath
+        ? `project-sessions:${encodeURIComponent(props.projectPath)}`
+        : "surface:sessions",
+    getTitle: (props: { projectName?: string }) =>
+      props.projectName ? `Sessions · ${props.projectName}` : "Sessions",
     icon: "tabs/sessions",
+    getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   search: {
     component: PlaceholderWorkbenchTab,

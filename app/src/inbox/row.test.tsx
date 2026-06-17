@@ -26,6 +26,7 @@ mock.module("lucide-react", () => ({
 function renderInboxRow(input: {
   item?: InboxItem
   isSelected?: boolean
+  showProjectName?: boolean
   onSelectionChange?: (isSelected: boolean) => void
 }) {
   const container = document.createElement("div")
@@ -43,6 +44,7 @@ function renderInboxRow(input: {
       <InboxRow
         item={item}
         isSelected={input.isSelected}
+        showProjectName={input.showProjectName}
         onSelectionChange={input.onSelectionChange}
       />
     </InboxPageMutations>,
@@ -67,6 +69,10 @@ function findButton(container: HTMLElement, label: string) {
   return button
 }
 
+function countTextMatches(value: string, pattern: RegExp) {
+  return value.match(pattern)?.length ?? 0
+}
+
 test("InboxRow opens rows and toggles selection through observable controls", async () => {
   const onSelectionChange = vi.fn()
   const harness = renderInboxRow({
@@ -89,6 +95,29 @@ test("InboxRow opens rows and toggles selection through observable controls", as
 
   render(null, harness.container)
   harness.container.remove()
+})
+
+test("InboxRow can hide repeated project context for project-scoped lists", () => {
+  const globalHarness = renderInboxRow({})
+  const globalSessionLabelCount = countTextMatches(
+    globalHarness.container.textContent ?? "",
+    /Session/g,
+  )
+
+  expect(globalSessionLabelCount).toBeGreaterThan(0)
+
+  render(null, globalHarness.container)
+  globalHarness.container.remove()
+
+  const scopedHarness = renderInboxRow({ showProjectName: false })
+
+  expect(countTextMatches(scopedHarness.container.textContent ?? "", /Session/g)).toBe(
+    globalSessionLabelCount - 1,
+  )
+  expect(scopedHarness.container.textContent).toContain("Review the latest agent update.")
+
+  render(null, scopedHarness.container)
+  scopedHarness.container.remove()
 })
 
 test("InboxRow action buttons submit focused row mutations without opening the row", async () => {

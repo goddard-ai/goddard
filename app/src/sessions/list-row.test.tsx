@@ -26,6 +26,7 @@ function renderListRow(input: {
   openSession?: (sessionId: DaemonSession["id"]) => void
   openSessionChanges?: (sessionId: DaemonSession["id"]) => void
   session?: DaemonSession
+  showProjectName?: boolean
 }) {
   const container = document.createElement("div")
   const openSession = input.openSession ?? vi.fn()
@@ -40,7 +41,7 @@ function renderListRow(input: {
         openSessionChanges,
       }}
     >
-      <ListRow session={session} />
+      <ListRow session={session} showProjectName={input.showProjectName} />
     </SessionsPageMutations>,
     container,
   )
@@ -74,6 +75,32 @@ test("ListRow opens a session by pointer and keyboard activation", async () => {
 
   render(null, harness.container)
   harness.container.remove()
+})
+
+test("ListRow can hide repeated project context for project-scoped lists", () => {
+  const globalHarness = renderListRow({
+    session: createFixtureSession({
+      repository: "goddard-ai",
+    }),
+  })
+
+  expect(globalHarness.container.textContent).toContain("goddard-ai")
+
+  render(null, globalHarness.container)
+  globalHarness.container.remove()
+
+  const scopedHarness = renderListRow({
+    session: createFixtureSession({
+      repository: "goddard-ai",
+    }),
+    showProjectName: false,
+  })
+
+  expect(scopedHarness.container.textContent).not.toContain("goddard-ai")
+  expect(scopedHarness.container.textContent).toContain("Fixture session")
+
+  render(null, scopedHarness.container)
+  scopedHarness.container.remove()
 })
 
 test("ListRow opens session changes without also opening the session", async () => {

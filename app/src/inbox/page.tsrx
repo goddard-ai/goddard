@@ -54,6 +54,7 @@ function InboxQueryContent(props: {
   realtimeErrorMessage: string | null;
   searchQuery: string;
   selectedEntityIds: ReadonlySet<InboxEntityId>;
+  showProjectNames: boolean;
   onBulkAction: (label: string, input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) => void;
   onClearSelectedItems: () => void;
   onFilterSelect: (id: InboxFilterId) => void;
@@ -126,6 +127,7 @@ function InboxQueryContent(props: {
         items={visibleItems}
         selectedEntityIds={props.selectedEntityIds}
         searchQuery={props.searchQuery}
+        showProjectNames={props.showProjectNames}
         onItemSelectionChange={props.onItemSelectionChange}
       />
     </div>
@@ -177,7 +179,7 @@ function InboxPageControls(props: {
   </>
 }
 
-export default function InboxPage() @{
+export default function InboxPage(props: { projectName?: string; projectPath?: string }) @{
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
@@ -352,6 +354,7 @@ export default function InboxPage() @{
           {realtimeErrorMessage}
           {searchQuery}
           {selectedEntityIds}
+          showProjectNames={!props.projectPath}
           onBulkAction={runBulkActionFromControls}
           onClearSelectedItems={clearSelectedInboxItems}
           onFilterSelect={selectInboxFilter}
@@ -387,6 +390,7 @@ export default function InboxPage() @{
               listStatus="loading"
               {searchQuery}
               {selectedEntityIds}
+              showProjectNames={!props.projectPath}
               onItemSelectionChange={setInboxItemSelected}
             />
           </div>
@@ -423,6 +427,7 @@ export default function InboxPage() @{
               listStatus="error"
               {searchQuery}
               {selectedEntityIds}
+              showProjectNames={!props.projectPath}
               onItemSelectionChange={setInboxItemSelected}
             />
           </div>

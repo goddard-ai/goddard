@@ -12,6 +12,7 @@ export function InboxList(props: {
   listStatus?: "idle" | "loading" | "ready" | "error";
   selectedEntityIds?: ReadonlySet<InboxEntityId>;
   searchQuery: string;
+  showProjectNames?: boolean;
   onItemSelectionChange?: (item: InboxItem, isSelected: boolean) => void;
 }) @{
   const filter = inboxFilterDefinitions[props.filterId]
@@ -61,6 +62,7 @@ export function InboxList(props: {
           itemRef={props.itemRef?.(index)}
           {item}
           isSelected={props.selectedEntityIds?.has(item.entityId) ?? false}
+          showProjectName={props.showProjectNames}
           {onSelectionChange}
         />
       </li>

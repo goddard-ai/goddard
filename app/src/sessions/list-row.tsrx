@@ -108,6 +108,7 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
 export function ListRow(props: {
   itemRef?: (element: HTMLElement | null) => void | (() => void);
   session: DaemonSession;
+  showProjectName?: boolean;
 }) @{
   const status = getSessionStatusPresentation(props.session.status)
   const StatusIcon = status.icon
@@ -135,10 +136,14 @@ export function ListRow(props: {
       />
       <span class={styles.srOnly}>{status.label}</span>
     </span>
-    <span
-      class={styles.repository}
-      title={props.session.repository?.trim() || props.session.cwd}
-    >{getSessionRepositoryLabel(props.session)}</span>
+
+    @if (props.showProjectName ?? true) {
+      <span
+        class={styles.repository}
+        title={props.session.repository?.trim() || props.session.cwd}
+      >{getSessionRepositoryLabel(props.session)}</span>
+    }
+
     <h2 class={styles.title}>{sessionTitle}</h2>
     <div class={styles.trailing}>
       <time

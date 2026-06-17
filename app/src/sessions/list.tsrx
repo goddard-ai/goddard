@@ -9,6 +9,7 @@ export function SessionsList(props: {
   listStatus?: "idle" | "loading" | "ready" | "error";
   searchQuery: string;
   sessions: readonly DaemonSession[];
+  showProjectNames?: boolean;
 }) @{
   if (props.listStatus === "loading" && props.sessions.length === 0) {
     return <div class={styles.loading}>Loading sessions...</div>
@@ -43,7 +44,11 @@ export function SessionsList(props: {
   <ul class={styles.list}>
     @for (const session of props.sessions; index index) {
       <li key={session.id}>
-        <ListRow itemRef={props.itemRef?.(index)} {session} />
+        <ListRow
+          itemRef={props.itemRef?.(index)}
+          {session}
+          showProjectName={props.showProjectNames}
+        />
       </li>
     }
   </ul>

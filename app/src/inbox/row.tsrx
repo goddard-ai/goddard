@@ -66,6 +66,7 @@ export function InboxRow(props: {
   itemRef?: (element: HTMLElement | null) => void | (() => void);
   item: InboxItem;
   isSelected?: boolean;
+  showProjectName?: boolean;
   onSelectionChange?: (isSelected: boolean) => void;
 }) @{
   const mutations = useMutations(InboxPageMutations)
@@ -143,7 +144,10 @@ export function InboxRow(props: {
       </span>
       <div class={styles.rowMain}>
         <div class={styles.rowMeta}>
-          <span class={styles.entityLabel}>{getInboxEntityLabel(props.item.entityId)}</span>
+          @if (props.showProjectName ?? true) {
+            <span class={styles.entityLabel}>{getInboxEntityLabel(props.item.entityId)}</span>
+          }
+
           <span class={styles.reasonLabel}>{reasonLabel}</span>
         </div>
         <div class={styles.rowCopy}>
