@@ -16,7 +16,7 @@
   - A mounted review session can optionally begin its runtime immediately.
 
 - **Run**
-  - Running a review session asks review-sync to perform a sync cycle for the mounted session worktree.
+  - Running asks review-sync to perform a sync cycle for the mounted session worktree.
   - The result reflects review-sync outcomes such as accepted work, rejected human patch, paused state, or error state.
 
 - **Unmount**
@@ -25,10 +25,7 @@
 
 - **Recovery**
   - Daemon reconciliation can clean up mounted review sessions when the associated daemon session worktree no longer has live session ownership.
-  - Review-sync guardrails still apply:
-    - the recorded agent worktree must remain on the expected agent branch
-    - the review worktree must remain on the expected review branch
-    - ambiguous or conflicted states are blocked instead of guessed through
+  - Review-sync guardrails still apply to agent and review worktree branches.
 
 - **Boundaries**
   - Review sessions do not replace the `review-sync` conceptual contract.

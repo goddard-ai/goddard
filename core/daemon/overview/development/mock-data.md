@@ -26,4 +26,4 @@
   - Mock data is not production seed data.
   - Mock data is not a schema exhaustiveness test.
   - Future fixtures should be added only when they exercise a named user-visible screen state or workflow.
-  - App and SDK callers should consume mock data through the normal daemon IPC surface rather than special test-only paths.
+  - App and SDK callers should consume mock data through the normal daemon control surface rather than special test-only paths.

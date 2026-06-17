@@ -1,0 +1,24 @@
+# Session Attention
+
+- **Core idea**
+  - A daemon-managed session can refresh inbox attention when it needs human awareness or help.
+  - Session attention is current workflow state, not a second visible chat response.
+
+- **Blockers**
+  - A session reports a blocker when it cannot make useful progress without help.
+  - Reporting a blocker marks or refreshes the session's inbox row as needing attention.
+  - The detailed reason belongs in the daemon report so clients can show useful context.
+
+- **Turn-ended updates**
+  - A session can report that a turn reached a meaningful stopping point.
+  - This creates or refreshes attention when no other entity already claimed responsibility for the turn's attention.
+
+- **Metadata**
+  - Scope is a short, semi-stable label for the current work area.
+  - Headline is a short update about what changed or why attention matters now.
+  - The preferred mental model is `{scope} - {headline}`.
+
+- **Boundaries**
+  - Hidden attention metadata is not part of the visible user-facing chat response.
+  - Completing the session's inbox concern is separate from shutting down the session.
+  - A user reply can move a row to `replied` without making the session complete.

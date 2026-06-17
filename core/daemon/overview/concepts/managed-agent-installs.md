@@ -1,0 +1,24 @@
+# Managed Agent Installs
+
+- **Core idea**
+  - Managed agent installs let user-owned daemon policy control when an ACP agent may be installed or updated.
+  - They keep install and update authority explicit while letting launch flows show managed agent status.
+
+- **What the daemon decides**
+  - Whether a managed agent may be installed before use.
+  - Whether proactive update behavior applies after recent use.
+  - Whether managed install state should be surfaced in launch listings.
+
+- **What the ACP client layer owns**
+  - Managed install metadata.
+  - Update checks.
+  - Runnable process resolution for managed agents.
+
+- **Launch visibility**
+  - A managed agent can appear in launch listings even without a Goddard adapter-install marker.
+  - The entry should expose managed install status so users understand whether the agent is installed, installable, or pending update.
+
+- **Boundaries**
+  - Managed install policy is user-owned.
+  - Managed agents do not use the same Goddard-owned binary cache path as unmanaged archive-backed or raw-binary targets.
+  - Managed install status does not mean a session has already been created.

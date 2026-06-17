@@ -9,11 +9,9 @@
   - `declare-initiative`
     - Records the current outcome-oriented initiative for the session.
     - Does not create an inbox row by itself.
-    - Helps daemon and client surfaces understand what the agent is now trying to accomplish.
   - `report-blocker`
     - Reports that the session is blocked and needs human assistance.
     - Marks or refreshes the session's inbox attention as unread.
-    - Accepts concise inbox metadata so the row can be scanned without reading the whole transcript.
   - `end-turn`
     - Reports that a meaningful turn boundary was reached when no other entity already claimed attention.
     - Can refresh the session inbox row with scope and headline metadata.
@@ -22,11 +20,9 @@
   - `submit-pr`
     - Submits a pull request through the daemon pull request contract.
     - Uses the current daemon session token and current working directory to preserve session and repository context.
-    - Can create a managed pull request record and related inbox attention.
   - `reply-pr`
     - Sends a reply through the daemon pull request contract.
-    - Uses the current session token so the reply is tied back to the daemon-managed session context.
-    - Can refresh the managed pull request's attention state.
+    - Uses the current session token so the reply is tied back to daemon-managed session context.
 
 - **Workforce tools**
   - `request`
@@ -46,6 +42,6 @@
 
 - **Guardrails**
   - Tools that need session authority require the session token injected by the daemon.
-  - Workforce tools require the workforce root context injected for workforce sessions.
+  - Workforce tools require workforce root context for workforce sessions.
   - Long or multi-line messages should be passed through files so shell quoting does not corrupt the reported content.
   - Hidden inbox metadata should stay concise and should not duplicate the visible user-facing response.
