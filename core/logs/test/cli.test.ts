@@ -66,9 +66,7 @@ test("CLI pages and expands logs from the canonical database", async () => {
 })
 
 async function runCli(args: string[], home: string) {
-  // Windows pnpm installs can report a Bun process.execPath that does not exist.
-  const bunPath = Bun.env.GODDARD_BUN_PATH ?? process.execPath
-  const subprocess = Bun.spawn([bunPath, "run", "./src/cli.ts", ...args], {
+  const subprocess = Bun.spawn(["bun", "run", "./src/cli.ts", ...args], {
     cwd: new URL("..", import.meta.url).pathname,
     env: {
       ...Bun.env,

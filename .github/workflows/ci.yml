@@ -157,6 +157,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test
-        env:
-          GODDARD_BUN_PATH: ${{ steps.setup-bun.outputs.bun-path }}
         run: pnpm run codegen && pnpm run test
