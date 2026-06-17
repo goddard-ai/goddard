@@ -1,6 +1,7 @@
 dist
 node_modules
 .turbo
+.lildocs
 /research
 /roadmap
 /website
