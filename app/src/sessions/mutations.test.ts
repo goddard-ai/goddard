@@ -173,7 +173,11 @@ test("createSession refreshes session lists and launch previews", async () => {
       sessionClient.launchPreview.mock.calls.length === 1,
   )
 
-  expect(sessionClient.create).toHaveBeenCalledWith(input)
+  expect(sessionClient.create).toHaveBeenCalledWith({
+    ...input,
+    origin: "app",
+    visibility: "visible",
+  })
 })
 
 test("session mutations refresh list, detail, and transcript queries", async () => {

@@ -1724,9 +1724,15 @@ export function createSessionManager(input: {
 
     try {
       page = db.sessions.findPage({
-        where: {
-          completedHidden: false,
-        },
+        where:
+          params.visibility === "all"
+            ? {
+                completedHidden: false,
+              }
+            : {
+                visibility: "visible",
+                completedHidden: false,
+              },
         orderBy: {
           lastSessionActivityAt: "desc",
           id: "desc",

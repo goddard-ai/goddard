@@ -13,6 +13,7 @@ import { ListToolbar } from "./list-toolbar.tsrx"
 import { SessionsList } from "./list.tsrx"
 import styles from "./page.style.ts"
 import { filterSessionsByTitle } from "./title-search.ts"
+import { filterPrimarySessions } from "./visibility.ts"
 
 export default function SessionsPage() @{
   const workbenchTabSet = useWorkbenchTabSet()
@@ -21,7 +22,8 @@ export default function SessionsPage() @{
     params: [{ limit: SESSION_LIST_LIMIT }],
   })
   const [searchQuery, setSearchQuery] = useState("")
-  const visibleSessions = filterSessionsByTitle(sessions, searchQuery)
+  const primarySessions = filterPrimarySessions(sessions)
+  const visibleSessions = filterSessionsByTitle(primarySessions, searchQuery)
   const visibleSessionIds = visibleSessions.map((session) => session.id).join("\n")
 
   const navigation = useSearchNavigation({

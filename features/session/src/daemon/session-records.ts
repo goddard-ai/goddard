@@ -152,6 +152,8 @@ export function createReconnectRequest(session: SessionDoc): CreateSessionReques
     systemPrompt: "",
     repository: session.repository ?? undefined,
     prNumber: session.prNumber ?? undefined,
+    origin: session.origin,
+    visibility: session.visibility,
     metadata: session.metadata ?? undefined,
   }
 }
@@ -175,6 +177,19 @@ export function parseRepoScope(params: { repository?: string; prNumber?: number 
     repo: repo ?? "",
     allowedPrNumbers: prNumber === null ? [] : [prNumber],
   }
+}
+
+export function resolveSessionOriginVisibility(params: {
+  existingSession: Pick<SessionDoc, "origin" | "visibility"> | null
+  request: Pick<ResolvedCreateSessionRequest, "origin" | "visibility">
+}) {
+  const origin = params.request.origin ?? params.existingSession?.origin ?? "sdk"
+  const visibility =
+    params.request.visibility ??
+    params.existingSession?.visibility ??
+    (origin === "app" ? "visible" : "hidden")
+
+  return { origin, visibility }
 }
 
 /** Builds the persisted daemon session record written after ACP session initialization completes. */
@@ -205,6 +220,10 @@ export function createSessionRecordUpdate(params: {
 }) {
   const connectionMode: SessionConnectionMode =
     params.exitAfterInitialPrompt && !params.supportsLoadSession ? "history" : "live"
+  const { origin, visibility } = resolveSessionOriginVisibility({
+    existingSession: params.existingSession,
+    request: params.request,
+  })
 
   return {
     acpSessionId: params.initialized.acpSessionId,
@@ -221,6 +240,8 @@ export function createSessionRecordUpdate(params: {
     supportsLoadSession: params.supportsLoadSession,
     activeDaemonSession: !params.exitAfterInitialPrompt,
     completedHidden: false,
+    origin,
+    visibility,
     repository: params.scope.repository,
     prNumber: params.scope.prNumber,
     token: params.token,

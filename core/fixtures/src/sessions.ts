@@ -60,6 +60,7 @@ export function createFixtureSession(overrides: Partial<DaemonSession> = {}): Da
     lastSessionActivityAt: fixtureNow,
     mcpServers: [],
     metadata: null,
+    origin: "app",
     permissions: null,
     prNumber: null,
     repository: "goddard-ai",
@@ -69,6 +70,7 @@ export function createFixtureSession(overrides: Partial<DaemonSession> = {}): Da
     title: "Fixture session",
     titleState: "generated",
     token: null,
+    visibility: "visible",
     ...overrides,
   }
 }

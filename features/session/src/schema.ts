@@ -58,6 +58,21 @@ export const DaemonSessionTitleState = z.enum([
 
 export type DaemonSessionTitleState = z.output<typeof DaemonSessionTitleState>
 
+export const DaemonSessionOrigin = z.enum([
+  "app",
+  "sdk",
+  "cli",
+  "playground",
+  "automation",
+  "pipeline",
+])
+
+export type DaemonSessionOrigin = z.output<typeof DaemonSessionOrigin>
+
+export const DaemonSessionVisibility = z.enum(["visible", "hidden"])
+
+export type DaemonSessionVisibility = z.output<typeof DaemonSessionVisibility>
+
 /**
  * Durable PR permission scope persisted with one daemon-managed session.
  */
@@ -119,6 +134,8 @@ export const DaemonSession = z.strictObject({
   supportsLoadSession: z.boolean().default(false),
   activeDaemonSession: z.boolean().default(false),
   completedHidden: z.boolean().default(false),
+  origin: DaemonSessionOrigin.default("app"),
+  visibility: DaemonSessionVisibility.default("visible"),
   errorMessage: z.string().nullable().default(null),
   blockedReason: z.string().nullable().default(null),
   initiative: z.string().nullable().default(null),
@@ -276,6 +293,8 @@ export const CreateSessionRequest = z.strictObject({
   env: z.record(z.string(), z.string()).optional(),
   repository: z.string().optional(),
   prNumber: z.number().int().optional(),
+  origin: DaemonSessionOrigin.optional(),
+  visibility: DaemonSessionVisibility.optional(),
   metadata: DaemonSessionMetadata.optional(),
   initialPrompt: InitialPromptOption.optional(),
   oneShot: z.boolean().optional(),
@@ -287,6 +306,7 @@ export type CreateSessionRequest = z.infer<typeof CreateSessionRequest>
 export const ListSessionsRequest = z.strictObject({
   limit: z.number().int().positive().optional(),
   cursor: z.string().optional(),
+  visibility: z.enum(["visible", "all"]).optional(),
 })
 
 export type ListSessionsRequest = z.infer<typeof ListSessionsRequest>
@@ -615,6 +635,7 @@ export const SessionLifecycleField = z.enum([
   "lastAgentMessage",
   "lastSessionActivity",
   "completedHidden",
+  "visibility",
 ])
 
 export type SessionLifecycleField = z.infer<typeof SessionLifecycleField>
