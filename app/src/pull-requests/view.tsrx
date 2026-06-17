@@ -1,7 +1,7 @@
 import type { PullRequestId } from "@goddard-ai/pull-request/schema"
 import { ExternalLink as ExternalLinkIcon, GitPullRequest } from "lucide-react"
-import { useState } from "preact/hooks"
 
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -47,8 +47,6 @@ export default function PullRequestView(props: {
   pullRequestId: PullRequestId;
   pullRequestTitle?: string;
 }) @{
-  const [, setRetryVersion] = useState(0)
-
   @try {
     const { pullRequest } = useQuery(goddardSdk.pr.get, { params: [{ id: props.pullRequestId }] })
     const title = getPullRequestDisplayTitle(pullRequest)
@@ -83,15 +81,18 @@ export default function PullRequestView(props: {
     </main>
   } @pending {
     <PullRequestLoadingState />
-  } @catch (_error) {
+  } @catch (_error, retry) {
+    const resetPullRequestBoundary = () => {
+      retryPullRequestLoad(props.pullRequestId)
+      retry()
+    }
+    useErrorBoundaryReset(resetPullRequestBoundary)
+
     <main class={styles.root}>
       <PullRequestStateMessage
         actionLabel="Try again"
         description="The daemon-backed pull request record could not be loaded."
-        onAction={() => {
-          retryPullRequestLoad(props.pullRequestId)
-          setRetryVersion((version) => version + 1)
-        }}
+        onAction={resetPullRequestBoundary}
         title="Couldn't load pull request"
       />
     </main>

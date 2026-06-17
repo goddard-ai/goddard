@@ -27,6 +27,7 @@ import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { getPreferredShortcutLabel, getShortcutLabel } from "~/commands/shortcut-label.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { useQueries, useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
@@ -221,13 +222,16 @@ function SessionChatViewContent(props: {
         title="Loading session"
       />
     } @catch (_error, retry) {
+      const resetSessionChatBoundary = () => {
+        invalidateSessionDetail(props.sessionId)
+        retry()
+      }
+      useErrorBoundaryReset(resetSessionChatBoundary)
+
       <SessionChatStateMessage
         actionLabel="Try again"
         description="The daemon-backed session or history request failed."
-        onAction={() => {
-          invalidateSessionDetail(props.sessionId)
-          retry()
-        }}
+        onAction={resetSessionChatBoundary}
         title="Couldn't load session"
       />
     }

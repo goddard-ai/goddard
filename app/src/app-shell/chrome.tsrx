@@ -9,6 +9,7 @@ import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { getNextUnreadInboxAttentionItem, hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
 import { openInboxItemInWorkbench } from "~/inbox/open.ts"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
 import { useQuery } from "~/lib/query.ts"
@@ -122,6 +123,7 @@ export function AppShellChrome() @{
               type="button"
             />
           } @catch (error, retry) {
+            useErrorBoundaryReset(retry)
             console.error("Agent harness selector render failed.", error)
 
             <button
@@ -141,6 +143,7 @@ export function AppShellChrome() @{
           @try {
             <SwitchProjectDropdown />
           } @catch (error, retry) {
+            useErrorBoundaryReset(retry)
             console.error("Project switcher render failed.", error)
 
             <button class={cx(styles.switcherFallback, noDragClass)} type="button" onClick={retry}>
@@ -161,6 +164,7 @@ export function AppShellChrome() @{
               <Folder aria-hidden={true} size={16} strokeWidth={2.1} />
             </button>
           } @catch (error, retry) {
+            useErrorBoundaryReset(retry)
             console.error("Project subfolder selector render failed.", error)
 
             <button
@@ -212,7 +216,8 @@ export function AppShellChrome() @{
           items={mainTab.items}
           selectedMainTabId={mainTab.selectedKind}
         />
-      } @catch (error) {
+      } @catch (error, retry) {
+        useErrorBoundaryReset(retry)
         console.error("Inbox unread indicator render failed.", error)
 
         <AppShellSidebarContent
@@ -276,7 +281,8 @@ function AppShellNextInboxAttentionSlot(props: {
     <AppShellNextInboxAttentionButton workbenchTabSet={props.workbenchTabSet} />
   } @pending {
     <AppShellNextInboxAttentionShortcutFallback />
-  } @catch (error) {
+  } @catch (error, retry) {
+    useErrorBoundaryReset(retry)
     console.error("Next inbox attention render failed.", error)
 
     <AppShellNextInboxAttentionShortcutFallback />

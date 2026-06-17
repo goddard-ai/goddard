@@ -10,6 +10,7 @@ import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { useQuery } from "~/lib/query.ts"
@@ -390,7 +391,13 @@ export default function InboxPage() @{
             />
           </div>
         </>
-      } @catch (error) {
+      } @catch (error, retry) {
+        const resetInboxBoundary = () => {
+          refreshInboxList()
+          retry()
+        }
+        useErrorBoundaryReset(resetInboxBoundary)
+
         <>
           <InboxPageControls
             {filterId}

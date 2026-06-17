@@ -22,6 +22,7 @@ import { useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { getProjectGitStatus } from "~/desktop-host.ts"
 import { getInboxItemPrimaryText, getInboxItemSecondaryText } from "~/inbox/text.ts"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useQueries } from "~/lib/query.ts"
@@ -234,6 +235,8 @@ export default function ProjectPage(props: { projectName?: string; projectPath: 
         <p class={styles.body}>Loading project dashboard.</p>
       </section>
     } @catch (error, retry) {
+      useErrorBoundaryReset(retry)
+
       <section class={styles.panel}>
         <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
         <p class={styles.body}>
@@ -547,6 +550,8 @@ function ProjectDashboardSections(props: { project: ProjectRecord }) @{
       <p class={styles.body}>Loading project dashboard.</p>
     </section>
   } @catch (error, retry) {
+    useErrorBoundaryReset(retry)
+
     <section class={styles.panel}>
       <h2 class={styles.sectionTitle}>Couldn't load project dashboard</h2>
       <p class={styles.body}>

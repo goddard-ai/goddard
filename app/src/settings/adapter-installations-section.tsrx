@@ -3,6 +3,7 @@ import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
 
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
@@ -301,6 +302,8 @@ export function AdapterInstallationsSettingsSection() @{
       } @pending {
         <p class={styles.emptyText}>Loading agent harnesses.</p>
       } @catch (error, retry) {
+        useErrorBoundaryReset(retry)
+
         <>
           <p class={styles.emptyText}>
             {error instanceof Error ? error.message : "Failed to load agent harnesses."}

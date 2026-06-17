@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef } from "preact/hooks"
 import { useListener } from "preact-sigma"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { TabContextProvider } from "~/tab-context.tsrx"
 import {
   getWorkbenchTabComponent,
@@ -135,6 +136,7 @@ export function MainWorkbenchView() @{
   @try {
     <ActiveMainTabComponent />
   } @catch (error, retry) {
+    useErrorBoundaryReset(retry)
     console.error("Main workbench view render failed.", error)
 
     <WorkbenchTabFailure
@@ -159,6 +161,7 @@ export function WorkbenchTabPanel() @{
   @try {
     <ActiveTabComponent {...activeTab.props} />
   } @catch (error, retry) {
+    useErrorBoundaryReset(retry)
     console.error("Workbench tab render failed.", error)
 
     <WorkbenchTabFailure

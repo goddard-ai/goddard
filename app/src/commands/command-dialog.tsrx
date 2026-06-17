@@ -4,6 +4,7 @@ import { lazy } from "preact/compat"
 import { useId, useMemo } from "preact/hooks"
 
 import { Modal } from "@goddard-ai/ui-primitives"
+import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { useAppCommand } from "./app-command.ts"
 import type { AppCommand as AppCommandType } from "./app-command.ts"
@@ -46,6 +47,7 @@ export function CommandDialog(props: CommandDialogProps) @{
         <Content {open} />
       } @pending {
       } @catch (error, retry) {
+        useErrorBoundaryReset(retry)
         console.error("Command dialog render failed.", error)
 
         <CommandDialogFailure {open} {retry} />
