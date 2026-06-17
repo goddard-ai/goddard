@@ -4,6 +4,7 @@ export type MainTabItemGroup = "primary" | "secondary"
 export const defaultMainTabItems = [
   { id: "inbox", label: "Inbox", group: "primary" },
   { id: "sessions", label: "Sessions", group: "primary" },
+  { id: "pipelines", label: "Pipelines", group: "primary" },
   { id: "search", label: "Search", group: "primary" },
   { id: "specs", label: "Specs", group: "secondary" },
   { id: "tasks", label: "Tasks", group: "secondary" },

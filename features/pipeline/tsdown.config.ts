@@ -7,6 +7,7 @@ export default defineConfig({
     "./src/daemon.ts",
     "./src/daemon-ipc.ts",
     "./src/sdk.ts",
+    "./src/app.tsx",
   ],
   format: ["esm"],
   dts: true,

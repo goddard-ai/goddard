@@ -205,6 +205,9 @@ importers:
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../core/paths
+      '@goddard-ai/pipeline':
+        specifier: workspace:*
+        version: link:../features/pipeline
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../features/pull-request

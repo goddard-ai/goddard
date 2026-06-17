@@ -27,6 +27,7 @@
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/logs": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
+    "@goddard-ai/pipeline": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk": "workspace:*",
