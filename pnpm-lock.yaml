@@ -1118,6 +1118,16 @@ importers:
         specifier: ^25.6.0
         version: 25.9.1
 
+  playground/creative-weaver:
+    dependencies:
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.9.1
+
   workforce:
     dependencies:
       '@clack/prompts':

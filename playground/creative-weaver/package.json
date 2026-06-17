@@ -1,0 +1,20 @@
+{
+  "name": "@goddard-ai/creative-weaver",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "bin": {
+    "creative-weaver-poc": "./bin/creative-weaver-poc"
+  },
+  "scripts": {
+    "start": "bun run ./src/main.ts",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "radashi": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}
