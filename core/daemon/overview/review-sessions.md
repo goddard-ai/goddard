@@ -1,0 +1,36 @@
+# Review Sessions
+
+- **Core idea**
+  - Review sessions connect daemon-managed session worktrees to the `review-sync` workflow.
+  - They give humans a separate review surface for a daemon-managed session's isolated worktree.
+  - The daemon owns mounting, running, and unmounting the review-session runtime for that session worktree.
+
+- **Session worktree dependency**
+  - Review sessions require a daemon-managed session worktree.
+  - The worktree identifies the repository, agent branch, and session context that review-sync should operate against.
+  - If a session has no worktree, review-session operations cannot provide the review-sync mount.
+
+- **Mount**
+  - Mounting prepares or reuses the review-sync session for one daemon-managed session worktree.
+  - Mounting establishes the review branch and review worktree relationship used by review-sync.
+  - A mounted review session can optionally begin its runtime immediately.
+
+- **Run**
+  - Running a review session asks review-sync to perform a sync cycle for the mounted session worktree.
+  - The result reflects review-sync outcomes such as accepted work, rejected human patch, paused state, or error state.
+
+- **Unmount**
+  - Unmounting stops the review-session relationship for the daemon-managed worktree.
+  - It is the explicit cleanup path for the mounted review surface.
+
+- **Recovery**
+  - Daemon reconciliation can clean up mounted review sessions when the associated daemon session worktree no longer has live session ownership.
+  - Review-sync guardrails still apply:
+    - the recorded agent worktree must remain on the expected agent branch
+    - the review worktree must remain on the expected review branch
+    - ambiguous or conflicted states are blocked instead of guessed through
+
+- **Boundaries**
+  - Review sessions do not replace the `review-sync` conceptual contract.
+  - They are the daemon-owned bridge between a session worktree and that existing review workflow.
+  - Review branch content is a review surface; the durable daemon session and underlying agent branch retain their own roles.
