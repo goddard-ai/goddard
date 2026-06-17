@@ -1,6 +1,11 @@
-# TSRX Page Patterns
+---
+name: app-tsrx-pages
+description: Refine Goddard app page-like TSRX components, including page skeletons, TSRX control flow, query data contexts, page models, task helpers, loading/error UI, and domain model coordination.
+---
 
-Use these patterns when refining page-like TSRX components. In app guidance, a page is the logical UI boundary defined in `app/glossary.md`: it may be a route, detail tab, panel, dialog, or embedded surface that owns any query data, page model, and internal UI coordination it needs.
+# App TSRX Pages
+
+Use this skill when refining page-like TSRX components. In app guidance, a page is the logical UI boundary defined in `app/glossary.md`: it may be a route, detail tab, panel, dialog, or embedded surface that owns any query data, page model, and internal UI coordination it needs.
 
 ## Keep The Page Shape Visible
 

@@ -1,10 +1,15 @@
-# App Form Patterns
+---
+name: app-forms
+description: Build or refactor Goddard app forms, including flat Zod-backed DOM forms, feature-local form models, dialog form composition, async fields, pending UI, and submit payloads.
+---
 
-Use this reference for app-local form guidance that intentionally does not live in `app/AGENTS.md`.
+# App Forms
+
+Use this skill for app-local form guidance. Rules constrain where state and UI belong; this skill teaches the form patterns to apply.
 
 ## When To Use A Form Model
 
-- Consider `src/lib/use-form.ts` first for flat Zod-backed DOM forms that can stay mostly uncontrolled, especially dialog forms with default values, keyed validation errors, and submit-time parsing.
+- Consider `app/src/lib/use-form.ts` first for flat Zod-backed DOM forms that can stay mostly uncontrolled, especially dialog forms with default values, keyed validation errors, and submit-time parsing.
 - Use one feature-local form model when a form has cross-field derivation, reset semantics, async option loading, or state that is shared across a dialog boundary.
 - Use simpler local state for trivial forms with a few independent inputs and no meaningful derived state.
 - Keep the form model local to the feature unless multiple forms prove they need the same behavior.
@@ -42,4 +47,4 @@ Use this reference for app-local form guidance that intentionally does not live 
 - Keep form JSX visually segmented by major parts so the structure is easy to scan.
 - Extract narrow subcomponents for clearly bounded responsibilities such as one async select field, not for arbitrary chunks of JSX that only make the form harder to follow.
 - Prefer names that describe the field or responsibility directly, such as `AdapterSelect`, over generic helper names like `Fields` or `Controls`.
-- In `src/lib/use-form`, keep complex DOM API logic in `dom.ts`; form state modules should only orchestrate private handles and state changes around those helpers.
+- In `app/src/lib/use-form.ts`, keep complex DOM API logic in `dom.ts`; form state modules should only orchestrate private handles and state changes around those helpers.

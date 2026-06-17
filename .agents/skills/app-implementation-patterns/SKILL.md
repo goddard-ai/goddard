@@ -1,6 +1,11 @@
-# App Best Practices
+---
+name: app-implementation-patterns
+description: Apply Goddard app implementation patterns for state ownership, contextual mutations, hooks, async work, cross-domain coordination, surface composition, TSRX organization, and spec alignment.
+---
 
-These practices are derived from the current app plans, `spec/`, and `app/glossary.md`. They are written for implementation work in the Electrobun app, not for backend or SDK packages.
+# App Implementation Patterns
+
+Use this skill for implementation work in the Electrobun app, not for backend or SDK packages. These practices are derived from the current app plans, `spec/`, and `app/glossary.md`.
 
 ## State Ownership
 
@@ -13,7 +18,7 @@ These practices are derived from the current app plans, `spec/`, and `app/glossa
 
 ## Contextual Mutations
 
-- Use `createMutationsProvider` from `src/lib/mutations-provider.tsx` when a feature surface owns semantic UI or data mutations that deeper descendants need to invoke.
+- Use `createMutationsProvider` from `app/src/lib/mutations-provider.tsx` when a feature surface owns semantic UI or data mutations that deeper descendants need to invoke.
 - Put feature-surface providers in the feature's `mutations.ts` module, name them after the owner such as `SessionsPageMutations`, mount them at the owning surface, and consume them with `useMutations(...)` in rows, cards, or other descendants.
 - Reach for contextual mutations when prop threading would make presentational descendants carry parent-owned callbacks like `openSession`, `removeProject`, or `openProjectTab` through intermediate components.
 - Keep ordinary props for generic controls, one-level same-file callbacks, input/select/dialog plumbing, and tiny local interactions where context would hide the data flow.

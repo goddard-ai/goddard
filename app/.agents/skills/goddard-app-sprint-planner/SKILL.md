@@ -12,7 +12,7 @@ Maintain the app sprint plan as the dependency-first, MVP-first rollout of the d
 - Read `app/plans/sprints.md` first.
 - Read `app/plans/feature-recommendations.md`.
 - Read `app/AGENTS.md` and `app/glossary.md`.
-- Load `goddard-contributor` only when sprint sequencing depends on app implementation patterns not captured in the plans.
+- Load the matching `.agents/rules/` files and app-local skills when sprint sequencing depends on implementation patterns not captured in the plans.
 - Read `spec/README.md` and `spec/app.md`.
 - Read any feature-specific plan file in `app/plans/` that the sprint change depends on.
 
