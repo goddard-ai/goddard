@@ -914,9 +914,16 @@ importers:
 
   features/pipeline:
     dependencies:
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.9.1
 
   features/pull-request:
     dependencies:

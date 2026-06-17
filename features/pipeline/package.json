@@ -12,6 +12,14 @@
       },
       "bun": "./src/schema.ts",
       "import": "./dist/schema.mjs"
+    },
+    "./loader": {
+      "types": {
+        "source": "./src/loader.ts",
+        "default": "./dist/loader.d.mts"
+      },
+      "bun": "./src/loader.ts",
+      "import": "./dist/loader.mjs"
     }
   },
   "scripts": {
@@ -22,6 +30,10 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
+    "yaml": "2.9.0",
     "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
   }
 }

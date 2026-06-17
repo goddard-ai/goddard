@@ -1,5 +1,10 @@
 # Pipeline Feature
 
-The pipeline feature owns reusable linear Pipeline definition contracts.
+The pipeline feature owns reusable linear Pipeline definition contracts and project-local definition loading.
 
-This package currently exposes only `@goddard-ai/pipeline/schema`. Daemon registration, persistence, SDK methods, and app surfaces are added by later sprint tasks.
+Exports:
+
+- `@goddard-ai/pipeline/schema`: Pipeline definition, step, and status schemas.
+- `@goddard-ai/pipeline/loader`: project-local `.goddard/pipelines/` discovery, validation, and diagnostics.
+
+Daemon registration, persistence, SDK methods, and app surfaces are added by later sprint tasks.
