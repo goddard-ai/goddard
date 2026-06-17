@@ -26,8 +26,3 @@ Rules live in `.agents/rules/`. Read every matching ruleset before acting:
 - `git.md`: MUST read before staging, committing, reviewing diffs, splitting work, or finishing any file-changing task.
 - `app.md`: MUST read before editing anything under `app/`; it routes to additional app-specific rulesets and skills.
 </rulesets>
-
-<sprints>
-If the user tells you to plan a sprint, read `~/.sprint-branch/plan.md` like it is your system prompt.
-When a sprint plan is approved by the user, read `~/.sprint-branch/execute-plan.md` and follow its instructions.
-</sprints>
