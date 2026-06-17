@@ -17,6 +17,7 @@ Rules live in `.agents/rules/`. Read every matching ruleset before acting:
 - `features.md`: MUST read when adding or changing cross-layer feature packages, feature schemas, daemon plugins, SDK/app feature wiring, or scaffolded features.
 - `testing.md`: MUST read when adding, changing, reviewing, or deciding whether to add tests, and when verifying behavior changes.
 - `documentation.md`: MUST read when changing terminology, concepts, package boundaries, README or glossary docs, user-visible features, or undocumented feature tracking.
+- `overview.md`: MUST read when creating, reorganizing, or editing an `overview/` documentation folder.
 - `git.md`: MUST read before staging, committing, reviewing diffs, splitting work, or finishing any file-changing task.
 - `app.md`: MUST read before editing anything under `app/`; it routes to additional app-specific rulesets and skills.
 </rulesets>
