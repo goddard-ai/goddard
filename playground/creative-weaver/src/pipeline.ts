@@ -3,7 +3,7 @@ import { createWeaverPayload, type Emotion, type WeaverInput } from "./weaver.ts
 const emotions = ["grief", "dread", "awe", "tension", "calm", "obsession"] satisfies Emotion[]
 
 export const creativeWeaverPipelineId = "creative-weaver"
-export const creativeWeaverBuildPayloadTransformer = "creative-weaver.build-payload"
+const creativeWeaverBuildPayloadTransformer = "creative-weaver.build-payload"
 
 export const creativeWeaverScriptTransformers = {
   [creativeWeaverBuildPayloadTransformer]: ({ input }: { input: Record<string, unknown> }) =>

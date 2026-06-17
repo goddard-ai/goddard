@@ -153,6 +153,8 @@ function createSessionSeed(overrides: SessionSeedOverrides, scenarioLabel: strin
     connectionMode: "history",
     supportsLoadSession: false,
     activeDaemonSession: false,
+    origin: "app",
+    visibility: "visible",
     completedHidden: false,
     errorMessage: null,
     blockedReason: null,

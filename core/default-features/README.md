@@ -11,9 +11,14 @@ loading daemon implementation modules.
 
 - `@goddard-ai/default-features/daemon`
   - Composes the default daemon feature plugins.
+  - Registers default Pipeline script transformers, including the Creative Weaver proof-of-concept transformer.
 - `@goddard-ai/default-features/daemon-ipc`
   - Composes the default daemon IPC route contract from core and feature route
     fragments.
+
+## Pipeline Composition
+
+The Pipeline feature is generic and only executes named script transformers that the daemon composition registers. Default Goddard composition wires `creative-weaver.build-payload` from `@goddard-ai/creative-weaver/pipeline` into `createPipelinePlugin(...)` so project-local Creative Weaver definitions can run without making the Pipeline package depend on playground code.
 
 ## License
 

@@ -60,7 +60,39 @@ Namespaces:
 - `sdk.session`
 - `sdk.action`
 - `sdk.loop`
+- `sdk.pipeline`
 - `sdk.workforce`
+
+## Pipeline Namespace
+
+Use `sdk.pipeline` to control daemon-managed Pipeline runs:
+
+```ts
+const definitions = await sdk.pipeline.listDefinitions({
+  cwd: process.cwd(),
+})
+
+const spawned = await sdk.pipeline.spawnRun({
+  cwd: process.cwd(),
+  pipelineId: "creative-weaver",
+  inputs: {
+    premise: "A lighthouse keeper ends a long friendship before dawn",
+    emotion: "grief",
+    seed: 144,
+    targetWords: 500,
+  },
+  origin: "sdk",
+  visibility: "visible",
+})
+
+const advanced = await sdk.pipeline.advanceRun({
+  id: spawned.run.id,
+})
+
+console.log(definitions.definitions.length, advanced.run.status)
+```
+
+The namespace also lists runs, reads one run with ordered steps, cancels cancellable runs, retries failed runs, and approves waiting approval steps.
 
 ## Feature Composition
 
