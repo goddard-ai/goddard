@@ -13,6 +13,14 @@ Read this ruleset before editing anything under `app/`.
 - Run formatting after modifying app files.
 - When a human asks for a new task, commit any app work from the previous task before starting. If that work is unfinished, include `Next step: ...` in the commit message body.
 
+## App Rulesets
+
+Read these additional `.agents/rules/` files when the task matches:
+
+- `app-state.md`: MUST read when changing app Sigma models, page models, contexts, component state ownership, workflow transitions, or event ownership.
+- `app-ui.md`: MUST read when editing app UI, Panda/Ark composition, styling, tab surfaces, dialogs, component naming, JSX/TSRX formatting constraints, or visual treatment.
+- `app-data.md`: MUST read when touching app query cache, SDK/daemon-backed reads, mutations, invalidation, or shared app data access.
+
 ## App-Local Skills
 
 Agents started at the repository root may not discover `app/.agents/skills/` automatically. When app work touches one of these areas, read the matching skill directly:
