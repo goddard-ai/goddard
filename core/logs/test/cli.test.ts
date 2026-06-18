@@ -67,21 +67,24 @@ test("CLI pages and expands logs from the canonical database", async () => {
 })
 
 async function runCli(args: string[], home: string) {
-  const env: Record<string, string | undefined> = process.env
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+  }
+  // Bun.spawn command lookup expects PATH, while Windows runners may expose Path.
+  env.PATH ??= env.Path
 
-  const result = await Bun.$`bun run ./src/cli.ts ${args}`
-    .cwd(fileURLToPath(new URL("..", import.meta.url)))
-    .env({
-      ...env,
-      HOME: home,
-      // Bun shell command lookup expects PATH, while Windows runners may expose Path.
-      PATH: env.PATH ?? env.Path,
-    })
-    .quiet()
-    .nothrow()
-  const stdout = result.stdout.toString()
-  const stderr = result.stderr.toString()
-  const exitCode = result.exitCode
+  const subprocess = Bun.spawn(["bun", "run", "./src/cli.ts", ...args], {
+    cwd: new URL("..", import.meta.url).pathname,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(subprocess.stdout).text(),
+    new Response(subprocess.stderr).text(),
+    subprocess.exited,
+  ])
   expect(stderr).toBe("")
   expect(exitCode).toBe(0)
   return stdout
