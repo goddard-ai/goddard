@@ -12,7 +12,7 @@
 - **What it does**
   - Resolves the active sprint.
   - Validates sprint status.
-  - Starts a [`review-sync watch`](../../../review-sync/overview/commands/watch.md)
+  - Starts a [`review-sync watch`](../../../review-sync/docs/commands/watch.md)
     session for the sprint's review branch.
   - If another sprint branch operation is active, waits for that operation to
     release the sprint lock before starting the initial review-sync watch.
@@ -27,7 +27,7 @@
   - It delegates review worktree synchronization to `review-sync`.
   - Per-cycle review-sync behavior, including rendered snapshots, accepted or
     rejected human patches, and review worktree refreshes, is defined by
-    [`review-sync sync`](../../../review-sync/overview/commands/sync.md).
+    [`review-sync sync`](../../../review-sync/docs/commands/sync.md).
   - It does not advance sprint task state by itself.
 
 - **Guardrails**
