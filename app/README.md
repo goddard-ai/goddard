@@ -62,3 +62,5 @@ composition, and the actual SDK instance.
 ## License
 
 This project is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](./LICENSE).
+
+Packaged builds may include additional native runtime libraries covered by [third-party notices](./THIRD_PARTY_NOTICES.md).

@@ -62,6 +62,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      - name: Install macOS arm64 native runtime dependencies
+        if: matrix.name == 'macOS arm64'
+        run: brew install libgit2
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
