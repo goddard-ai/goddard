@@ -147,6 +147,31 @@ describe("file-search composer entries", () => {
     expect(finder.mixedSearch).toHaveBeenCalledTimes(2)
   })
 
+  test("shares in-flight finder creation for concurrent queries in the same cwd", async () => {
+    const cwd = await createTempProject()
+    const finder = createMockFinder()
+    const createCalls: string[] = []
+    let resolveCreate: (result: { ok: true; value: MockFinder }) => void = () => undefined
+    const createFinder = async (basePath: string) => {
+      createCalls.push(basePath)
+      return new Promise<{ ok: true; value: MockFinder }>((resolve) => {
+        resolveCreate = resolve
+      })
+    }
+    const manager = createFileSearchManager({ createFinder })
+
+    const firstResult = manager.composerEntries({ cwd, query: "src", limit: 10 })
+    const secondResult = manager.composerEntries({ cwd, query: "test", limit: 10 })
+
+    resolveCreate({ ok: true, value: finder })
+    await Promise.all([firstResult, secondResult])
+    manager.destroy()
+
+    expect(createCalls).toEqual([resolve(cwd)])
+    expect(finder.mixedSearch).toHaveBeenCalledTimes(2)
+    expect(finder.destroy).toHaveBeenCalledTimes(1)
+  })
+
   test("falls back to recursive filesystem search when fff is unavailable", async () => {
     const cwd = await createTempProject()
     await mkdir(join(cwd, "src"))
@@ -208,6 +233,26 @@ describe("file-search composer entries", () => {
 
     expect(firstFinder.destroy).toHaveBeenCalledTimes(1)
     expect(secondFinder.destroy).not.toHaveBeenCalled()
+  })
+
+  test("destroys an in-flight finder that resolves after manager shutdown", async () => {
+    const cwd = await createTempProject()
+    const finder = createMockFinder()
+    let resolveCreate: (result: { ok: true; value: MockFinder }) => void = () => undefined
+    const manager = createFileSearchManager({
+      createFinder: async () =>
+        new Promise<{ ok: true; value: MockFinder }>((resolve) => {
+          resolveCreate = resolve
+        }),
+    })
+
+    const result = manager.composerEntries({ cwd, query: "src", limit: 10 })
+    manager.destroy()
+    resolveCreate({ ok: true, value: finder })
+    await result
+
+    expect(finder.destroy).toHaveBeenCalledTimes(1)
+    expect(finder.mixedSearch).not.toHaveBeenCalled()
   })
 
   test("destroys cached finders on manager shutdown", async () => {
