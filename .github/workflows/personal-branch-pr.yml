@@ -1,0 +1,70 @@
+name: Personal branch PR
+
+on:
+  push:
+    branches:
+      - aleclarson
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: personal-branch-pr-aleclarson
+  cancel-in-progress: true
+
+env:
+  USER_BRANCH: aleclarson
+  BASE_BRANCH: main
+  PR_TITLE: "Merge aleclarson into main"
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check whether user branch is ahead of main
+        id: ahead
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git init repo
+          cd repo
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+
+          git fetch --no-tags --depth=1 origin "$BASE_BRANCH"
+          git fetch --no-tags origin "$USER_BRANCH"
+
+          ahead_count="$(git rev-list --count "origin/$BASE_BRANCH..origin/$USER_BRANCH")"
+          echo "count=$ahead_count" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure PR exists
+        if: steps.ahead.outputs.count != '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          existing_pr="$(
+            gh pr list \
+              --repo "${{ github.repository }}" \
+              --base "$BASE_BRANCH" \
+              --head "$USER_BRANCH" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [ -n "$existing_pr" ]; then
+            echo "PR #$existing_pr already open."
+          else
+            gh pr create \
+              --repo "${{ github.repository }}" \
+              --base "$BASE_BRANCH" \
+              --head "$USER_BRANCH" \
+              --title "$PR_TITLE" \
+              --body 'This is the ongoing PR for changes from `aleclarson` into `main`.'
+          fi
