@@ -1,3 +1,7 @@
+/*
+ * Exercises feature package scaffold planning, argument parsing, and filesystem
+ * writes without running the interactive scaffold command.
+ */
 import { readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
