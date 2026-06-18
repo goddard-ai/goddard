@@ -5,10 +5,12 @@
 - **Core idea**
   - Inbox status is the user's workflow state for the current daemon-owned entity.
   - Later daemon attention can reopen rows when the entity needs attention again.
+  - Status changes are not a complete event log; they describe what the user should do with the row now.
 
 - **Statuses**
   - `unread`
     - The daemon says the entity needs human attention.
+    - This is the normal state after new daemon attention arrives.
   - `read`
     - The user acknowledged the row and no newer daemon attention has arrived.
   - `replied`
@@ -24,6 +26,8 @@
   - Completion is entity-specific.
   - A completed session inbox row means the user completed the session concern.
   - A completed pull request row means the pull request is no longer open, such as after merge or closure.
+  - Completion does not delete the underlying session or managed pull request record.
+  - If the entity later produces supported daemon attention, the row can become active again.
 
 - **Priority**
   - `normal` rows participate in the standard attention queue.
@@ -33,3 +37,5 @@
 - **Reopening**
   - New daemon attention can reopen rows that were read, replied, saved, archived, or completed.
   - This keeps the row focused on current attention rather than historical acknowledgement.
+  - Clients should present reopened rows as current daemon attention, not as duplicate notifications.
+  - Related pages: [inbox](./inbox.md), [session attention](./session-attention.md), and [pull request attention](./pull-request-attention.md).

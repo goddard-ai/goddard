@@ -5,6 +5,7 @@
 - **Suspension**
   - Suspended work remains blocked until explicit operator or root-agent action resolves it.
   - Suspension is the safe outcome when the daemon cannot validate that a request completed within its ownership boundaries.
+  - The visible result is a workforce request that still needs a recovery decision rather than a queue item that silently vanished.
 
 - **Validation failures**
   - A response is not a blind completion signal.
@@ -15,15 +16,19 @@
 - **Session failures**
   - Individual agent-session failure should not corrupt the broader workforce queue.
   - The affected request should remain inspectable so a coordinator can decide the next action.
+  - The coordinator can retry, update, cancel, truncate, or suspend follow-up work through daemon-owned workforce operations.
 
 - **Daemon restart**
   - Daemon restart should recover operator-visible workforce progress from durable state.
   - New work should not be accepted until the runtime has reconstructed its queue state.
+  - Clients should treat post-restart workforce state as refreshed daemon truth, even if their previous stream showed an older active request.
 
 - **Shutdown**
   - Shutdown stops new handling cleanly.
   - Durable intent should be preserved enough for later restart.
+  - Shutdown is not a validation success signal for active work.
 
 - **Boundaries**
   - Recovery should not silently erase validation problems.
   - Clients should inspect daemon workforce state instead of trying to infer recovery from repository files alone.
+  - Related pages: [workforce requests](./workforce-requests.md), [workforce](./workforce.md), and [runtime ownership](../concepts/runtime-ownership.md).

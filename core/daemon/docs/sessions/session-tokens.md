@@ -10,6 +10,7 @@
   - The daemon injects a session token into daemon-launched agent environments.
   - Agent tools use the token to resolve the current daemon session.
   - Pull request and workforce tools use tokens when an action must be attributable to the active session.
+  - If a token is missing or invalid, token-based tools should fail through the daemon contract instead of guessing session identity from local context.
 
 - **What tokens support**
   - Reporting blockers.
@@ -22,3 +23,4 @@
   - A token is scoped to session authority, not global daemon administration.
   - User-facing clients should not ask agents to expose tokens in visible replies.
   - Token-based tools should still use daemon contracts rather than mutating daemon-owned records directly.
+  - Related pages: [agent tools](../collaboration/agent-tools.md), [pull requests](../collaboration/pull-requests.md), and [workforce requests](../automation/workforce-requests.md).

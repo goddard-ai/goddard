@@ -9,10 +9,12 @@
 - **Device flow**
   - Starting device auth creates a pending authentication flow.
   - Completing the flow promotes a successful authentication into the current daemon-owned auth session.
+  - If the flow is abandoned or fails, clients should continue treating the previous daemon auth state as authoritative until a new success is recorded.
 
 - **Current identity**
   - Clients can ask the daemon who the current authenticated user is.
   - The answer reflects the daemon's local auth session as-is.
+  - A missing identity is a normal state for unauthenticated local use, not proof that daemon records are unavailable.
 
 - **Logout**
   - Logout clears the daemon-owned auth session.
@@ -22,3 +24,4 @@
   - Auth state is local daemon state.
   - Reading auth state does not create sessions or start automation.
   - Clearing auth state does not delete unrelated daemon records by itself.
+  - Related pages: [pull request feedback](../collaboration/pr-feedback.md), [pull requests](../collaboration/pull-requests.md), and [data profiles](./data-profiles.md).

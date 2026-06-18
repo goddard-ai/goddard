@@ -19,8 +19,11 @@
 - **Launch visibility**
   - A managed agent can appear in launch listings even without a Goddard adapter-install marker.
   - The entry should expose managed install status so users understand whether the agent is installed, installable, or pending update.
+  - Launch UI should treat install status as part of the user's launch decision, not as hidden background state.
+  - If installation or update is required before launch, failure should be reported as a launch availability problem.
 
 - **Boundaries**
   - Managed install policy is user-owned.
   - Managed agents do not use the same Goddard-owned binary cache path as unmanaged archive-backed or raw-binary targets.
   - Managed install status does not mean a session has already been created.
+  - Related pages: [adapters](./adapters.md), [launch preview and leases](../sessions/launch-preview-and-leases.md), and [session lifecycle](../sessions/lifecycle.md).

@@ -13,11 +13,13 @@
   - Operators can provide launch values through command-line flags and environment variables.
   - The daemon can also read selected global defaults, such as the local daemon port, from user configuration.
   - When no explicit values are provided, the daemon uses standard local defaults.
+  - Launch-time values apply to the daemon process being started; they do not silently rewrite persisted user or repository configuration.
 
 - **Runtime feature selection**
   - A normal daemon run enables local control and background stream handling.
   - Operators may start only selected runtime features when they need a narrower process.
   - Feature selection affects the current daemon process; it does not redefine ownership of already persisted daemon data.
+  - Clients should not assume a disabled runtime surface is broken; it may simply not be enabled for the current process.
 
 - **Agent launch environment**
   - Daemon-launched sessions receive daemon connection information and a session token.
@@ -28,3 +30,4 @@
   - Launch configuration chooses how this daemon process starts.
   - It does not create sessions by itself.
   - Data profile selection chooses the active local store; it does not migrate records between stores.
+  - Related pages: [data profiles](./data-profiles.md), [daemon server](./daemon-server.md), [session lifecycle](../sessions/lifecycle.md), and [launch preview and leases](../sessions/launch-preview-and-leases.md).

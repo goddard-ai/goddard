@@ -23,8 +23,11 @@
   - Persisted daemon records.
   - Session, inbox, pull request, workforce, and other local daemon state stored in that profile.
   - What clients see when they connect to a daemon running with that profile.
+  - Streams, lists, history reads, and workflow updates all reflect the active profile's store.
+  - A client connected to the development or mock profile should not present that data as ordinary production daemon state.
 
 - **Boundaries**
   - Profiles do not sync local state across machines.
   - Switching profiles changes which local store is active; it does not migrate records between profiles.
   - Mock data is local-only and should be consumed through the same daemon surface as ordinary data.
+  - Related pages: [launch](./launch.md), [mock data](../development/mock-data.md), and [inbox](../attention/inbox.md).
