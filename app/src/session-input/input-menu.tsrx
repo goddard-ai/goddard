@@ -96,7 +96,7 @@ export function SessionInputMenu(props: {
     blockOutsidePointer={false}
     class={inputMenuClass}
     closeOnEscape={true}
-    closeOnOutsidePointer={true}
+    closeOnOutsidePointer={false}
     focusOnOpen={false}
     offset={0}
     {open}
