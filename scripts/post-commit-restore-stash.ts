@@ -1,26 +1,30 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, rmSync } from "node:fs"
 
+type PendingRestore = {
+  stashSha?: string
+}
+
 /** Run a command and return its stdout as text. */
-const read = (command, args) =>
+const read = (command: string, args: string[]) =>
   execFileSync(command, args, {
     encoding: "utf8",
   })
 
 /** Run a command while streaming its output to the terminal. */
-const run = (command, args) => {
+const run = (command: string, args: string[]) => {
   execFileSync(command, args, { stdio: "inherit" })
 }
 
 /** Resolve a file path inside the current worktree's Git metadata directory. */
-const gitPath = (path) => read("git", ["rev-parse", "--git-path", path]).trim()
+const gitPath = (path: string) => read("git", ["rev-parse", "--git-path", path]).trim()
 
 /** Return true when applying a stash would overwrite local work. */
 const hasWorktreeChanges = () =>
   read("git", ["status", "--porcelain=v1", "--untracked-files=all"]).length > 0
 
 /** Look up the current stash ref for a previously recorded stash commit. */
-const findStashRef = (stashSha) => {
+const findStashRef = (stashSha: string) => {
   const stashList = read("git", ["stash", "list", "--format=%gd%x00%H"])
 
   for (const entry of stashList.split("\n")) {
@@ -39,7 +43,7 @@ const findStashRef = (stashSha) => {
 }
 
 /** Clear the pending restore marker when the target stash entry is already gone. */
-const skipMissingStashRestore = (pendingRestoreFile, stashSha) => {
+const skipMissingStashRestore = (pendingRestoreFile: string, stashSha: string) => {
   rmSync(pendingRestoreFile, { force: true })
   console.warn(
     `Skipping post-commit stash restore because ${stashSha} is no longer in the stash list.`,
@@ -54,12 +58,12 @@ const rollbackFailedRestore = () => {
 
 const pendingRestoreFile = gitPath("goddard/pre-commit-stash.json")
 
-let pendingRestore
+let pendingRestore: PendingRestore
 
 try {
-  pendingRestore = JSON.parse(readFileSync(pendingRestoreFile, "utf8"))
+  pendingRestore = JSON.parse(readFileSync(pendingRestoreFile, "utf8")) as PendingRestore
 } catch (error) {
-  if (error.code === "ENOENT") {
+  if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
     process.exit(0)
   }
 

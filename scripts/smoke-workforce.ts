@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 
-function run(label, command, args, cwd = process.cwd()) {
+function run(label: string, command: string, args: string[], cwd = process.cwd()) {
   process.stdout.write(`\n[smoke:workforce] ${label}\n`)
   execFileSync(command, args, {
     stdio: "inherit",
