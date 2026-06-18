@@ -3,21 +3,21 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
 /** Run a command and return its stdout as text. */
-const read = (command, args) =>
+const read = (command: string, args: string[]) =>
   execFileSync(command, args, {
     encoding: "utf8",
   })
 
 /** Run a command while streaming its output to the terminal. */
-const run = (command, args) => {
+const run = (command: string, args: string[]) => {
   execFileSync(command, args, { stdio: "inherit" })
 }
 
 /** Resolve a file path inside the current worktree's Git metadata directory. */
-const gitPath = (path) => read("git", ["rev-parse", "--git-path", path]).trim()
+const gitPath = (path: string) => read("git", ["rev-parse", "--git-path", path]).trim()
 
 /** Return the command for a running process, or null when it cannot be inspected. */
-const getProcessCommand = (pid) => {
+const getProcessCommand = (pid: number) => {
   try {
     return read("ps", ["-o", "command=", "-p", String(pid)]).trim()
   } catch {
@@ -26,7 +26,7 @@ const getProcessCommand = (pid) => {
 }
 
 /** Return the parent process ID for a running process, or null when it cannot be inspected. */
-const getParentPid = (pid) => {
+const getParentPid = (pid: number) => {
   try {
     const parentPid = Number(read("ps", ["-o", "ppid=", "-p", String(pid)]).trim())
     return Number.isFinite(parentPid) && parentPid > 0 ? parentPid : null
@@ -36,14 +36,14 @@ const getParentPid = (pid) => {
 }
 
 /** Parse whether the format commit message was passed on a git commit command line. */
-const hasInlineFormatCommitSubject = (command) =>
+const hasInlineFormatCommitSubject = (command: string) =>
   /(?:^|\s)(?:-m|--message)(?:=|\s+)(?:"chore: format"|'chore: format'|chore: format)(?:$|\s+-)/.test(
     command,
   )
 
 /** Return true when this hook is running for the format-only commit. */
 const isFormatCommit = () => {
-  let pid = process.ppid
+  let pid: number | null = process.ppid
 
   // pre-commit has no message-file argument; inspect ancestors for `git commit -m`.
   for (let depth = 0; depth < 8 && pid; depth += 1) {
@@ -74,20 +74,22 @@ const hasUnstagedChanges = () => {
 }
 
 /** Persist the stash commit that should be restored after the commit finishes. */
-const writePendingRestore = (stateFile, stashSha) => {
+const writePendingRestore = (stateFile: string, stashSha: string) => {
   mkdirSync(dirname(stateFile), { recursive: true })
   writeFileSync(stateFile, JSON.stringify({ stashSha }), "utf8")
 }
 
 /** Remove any pending restore marker after the stash is restored or discarded. */
-const clearPendingRestore = (stateFile) => {
+const clearPendingRestore = (stateFile: string) => {
   rmSync(stateFile, { force: true })
 }
 
 /** Abort when a previous commit left hidden changes waiting to be restored. */
-const assertNoPendingRestore = (stateFile) => {
+const assertNoPendingRestore = (stateFile: string) => {
   try {
-    const pendingRestore = JSON.parse(readFileSync(stateFile, "utf8"))
+    const pendingRestore = JSON.parse(readFileSync(stateFile, "utf8")) as {
+      stashSha?: string
+    }
 
     if (pendingRestore.stashSha) {
       throw new Error(
@@ -95,7 +97,7 @@ const assertNoPendingRestore = (stateFile) => {
       )
     }
   } catch (error) {
-    if (error.code === "ENOENT") {
+    if (isNodeErrnoException(error) && error.code === "ENOENT") {
       return
     }
 
@@ -103,8 +105,11 @@ const assertNoPendingRestore = (stateFile) => {
   }
 }
 
+const isNodeErrnoException = (error: unknown): error is NodeJS.ErrnoException =>
+  error instanceof Error
+
 /** Stash unstaged work so fixers only operate on the staged snapshot. */
-const stashUnstagedChanges = (stateFile) => {
+const stashUnstagedChanges = (stateFile: string) => {
   run("git", [
     "stash",
     "push",
@@ -121,7 +126,7 @@ const stashUnstagedChanges = (stateFile) => {
 }
 
 /** Restore the hidden unstaged work when the pre-commit fix flow fails. */
-const restoreStashAfterFailure = (stateFile, stashRef) => {
+const restoreStashAfterFailure = (stateFile: string, stashRef: string) => {
   try {
     run("git", ["stash", "pop", "--quiet", stashRef])
     clearPendingRestore(stateFile)
@@ -146,7 +151,7 @@ if (stagedFiles.length === 0) {
   process.exit(0)
 }
 
-let pendingStashRef = null
+let pendingStashRef: string | null = null
 
 if (hasUnstagedChanges()) {
   pendingStashRef = stashUnstagedChanges(pendingRestoreFile)

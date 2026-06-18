@@ -1,11 +1,19 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+type RootPackage = {
+  catalog?: {
+    bun?: string
+  }
+}
+
 const workspaceDir = dirname(dirname(fileURLToPath(import.meta.url)))
-const rootPackage = JSON.parse(readFileSync(join(workspaceDir, "package.json"), "utf8"))
+const rootPackage = JSON.parse(
+  readFileSync(join(workspaceDir, "package.json"), "utf8"),
+) as RootPackage
 const expectedVersion = rootPackage.catalog?.bun
 const runtimeBunPath = join(
   workspaceDir,
@@ -34,7 +42,7 @@ const electrobunVersion = run(runtimeBunPath, [
 assertVersion("workspace Bun runtime", installedVersion, expectedVersion)
 assertVersion("Electrobun build.bunVersion", electrobunVersion, expectedVersion)
 
-function run(command, args) {
+function run(command: string, args: string[]) {
   const result = spawnSync(command, args, {
     cwd: workspaceDir,
     encoding: "utf8",
@@ -52,7 +60,7 @@ function run(command, args) {
   return result.stdout
 }
 
-function assertVersion(label, actual, expected) {
+function assertVersion(label: string, actual: string | undefined, expected: string) {
   if (actual === expected) {
     return
   }
@@ -60,7 +68,7 @@ function assertVersion(label, actual, expected) {
   fail(`${label} is ${actual ?? "unset"}, expected ${expected}`)
 }
 
-function fail(message) {
+function fail(message: string): never {
   console.error(message)
   process.exit(1)
 }

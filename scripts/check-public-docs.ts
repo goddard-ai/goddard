@@ -1,6 +1,9 @@
 import fs from "node:fs"
 import path from "node:path"
 
+type CheckError = string
+type FileCheck = (file: string, text: string, errors: CheckError[]) => void
+
 const root = process.cwd()
 const ignoredDirs = new Set([".git", ".turbo", "dist", "node_modules", "styled-system"])
 const legacyTechnicalDocsDirs = new Set([
@@ -24,11 +27,11 @@ const bannedPatterns = [
   },
 ]
 
-function relative(filePath) {
+function relative(filePath: string) {
   return path.relative(root, filePath)
 }
 
-function walkDirs(dir, visit) {
+function walkDirs(dir: string, visit: (dir: string) => void) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory() || ignoredDirs.has(entry.name)) {
       continue
@@ -41,7 +44,7 @@ function walkDirs(dir, visit) {
 }
 
 function findDocsDirs() {
-  const docsDirs = []
+  const docsDirs: string[] = []
   walkDirs(root, (dir) => {
     if (path.basename(dir) === "docs" && !legacyTechnicalDocsDirs.has(relative(dir))) {
       docsDirs.push(dir)
@@ -50,8 +53,8 @@ function findDocsDirs() {
   return docsDirs
 }
 
-function collectMarkdownFiles(dir) {
-  const files = []
+function collectMarkdownFiles(dir: string) {
+  const files: string[] = []
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const entryPath = path.join(dir, entry.name)
     if (entry.isDirectory()) {
@@ -63,7 +66,7 @@ function collectMarkdownFiles(dir) {
   return files
 }
 
-function collectDocsSubdirs(dir) {
+function collectDocsSubdirs(dir: string) {
   const dirs = [dir]
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
@@ -73,7 +76,7 @@ function collectDocsSubdirs(dir) {
   return dirs
 }
 
-function containsMarkdown(dir) {
+function containsMarkdown(dir: string): boolean {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const entryPath = path.join(dir, entry.name)
     if (entry.isDirectory() && containsMarkdown(entryPath)) {
@@ -86,11 +89,11 @@ function containsMarkdown(dir) {
   return false
 }
 
-function lineNumberForIndex(text, index) {
+function lineNumberForIndex(text: string, index: number) {
   return text.slice(0, index).split("\n").length
 }
 
-function checkPageShape(file, text, errors) {
+const checkPageShape: FileCheck = (file, text, errors) => {
   const lines = text.split("\n")
   if (!lines[0]?.startsWith("# ")) {
     errors.push(`${relative(file)}:1 must start with one H1 heading`)
@@ -108,9 +111,13 @@ function checkPageShape(file, text, errors) {
   }
 }
 
-function checkLinks(file, text, errors) {
+const checkLinks: FileCheck = (file, text, errors) => {
   for (const match of text.matchAll(/\[[^\]]+\]\(([^)#][^)]*)\)/g)) {
     const target = match[1]
+    if (!target) {
+      continue
+    }
+
     if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
       continue
     }
@@ -124,7 +131,7 @@ function checkLinks(file, text, errors) {
   }
 }
 
-function checkBannedMarkers(file, text, errors) {
+const checkBannedMarkers: FileCheck = (file, text, errors) => {
   for (const { pattern, label } of bannedPatterns) {
     const match = pattern.exec(text)
     if (match) {
@@ -133,7 +140,7 @@ function checkBannedMarkers(file, text, errors) {
   }
 }
 
-const errors = []
+const errors: CheckError[] = []
 const docsDirs = findDocsDirs()
 
 for (const docsDir of docsDirs) {
