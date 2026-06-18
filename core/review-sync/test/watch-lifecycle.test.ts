@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, expect, test } from "bun:test"
 
 import { pauseReviewSession, statusReviewSession, watchReviewSession } from "../src/index.ts"
@@ -20,6 +21,14 @@ import {
 } from "./support.ts"
 
 afterEach(cleanupReviewSyncFixtures)
+
+test("package binary is launched with Bun", async () => {
+  const binPath = fileURLToPath(new URL("../bin/review-sync", import.meta.url))
+  const sourceCliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+
+  expect((await readFile(binPath, "utf-8")).startsWith("#!/usr/bin/env bun")).toBe(true)
+  expect((await readFile(sourceCliPath, "utf-8")).startsWith("#!/usr/bin/env bun")).toBe(true)
+})
 
 test("cli watch accepts an agent branch from the review worktree", async () => {
   const fixture = await createFixture({

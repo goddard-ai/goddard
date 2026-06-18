@@ -3,7 +3,6 @@ import { spawn } from "node:child_process"
 import { constants as fsConstants } from "node:fs"
 import { access, realpath } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
-import { dlopen, FFIType, ptr, suffix } from "bun:ffi"
 
 import { UserError } from "./errors.ts"
 import type { RuntimeContext } from "./types.ts"
@@ -43,15 +42,11 @@ export type GitHost = {
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
+type BunFfi = typeof import("bun:ffi")
 type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
 type FfiPointer = Parameters<Libgit2Symbols["git_repository_free"]>[0]
 
-const libgit2PathCandidates = [
-  process.env.LIBGIT2_PATH,
-  `libgit2.${suffix}`,
-  `/opt/homebrew/lib/libgit2.${suffix}`,
-  `/usr/local/lib/libgit2.${suffix}`,
-].filter((path) => typeof path === "string")
+const bunFfi = await loadBunFfiForSelectedHost()
 
 /** Creates the Git host selected for this process. */
 export function createReviewSyncGitHost() {
@@ -145,7 +140,11 @@ export function createCliGitHost() {
 
 /** Creates an experimental Git host that uses libgit2 for read-heavy lookups. */
 export function createLibgit2GitHost(fallback: GitHost) {
-  const libgit2 = loadLibgit2()
+  if (!bunFfi) {
+    throw new Error("The libgit2 Git host requires Bun.")
+  }
+
+  const libgit2 = loadLibgit2(bunFfi)
   const initStatus = libgit2.symbols.git_libgit2_init()
   if (initStatus < 0) {
     throw new Error(`git_libgit2_init failed with status ${initStatus}`)
@@ -180,7 +179,7 @@ export function createLibgit2GitHost(fallback: GitHost) {
     resolveCurrentBranch: async (cwd) =>
       withLibgit2Repository(libgit2.symbols, cwd, (repo) => {
         const out = pointerStorage()
-        const status = libgit2.symbols.git_repository_head(ptr(out), repo)
+        const status = libgit2.symbols.git_repository_head(bunFfi.ptr(out), repo)
         if (status !== 0) {
           return null
         }
@@ -200,15 +199,19 @@ export function createLibgit2GitHost(fallback: GitHost) {
         cwd,
         (repo) =>
           libgit2.symbols.git_reference_name_to_id(
-            ptr(new Uint8Array(20)),
+            bunFfi.ptr(new Uint8Array(20)),
             repo,
-            ptr(cString(`refs/heads/${branch}`)),
+            bunFfi.ptr(cString(`refs/heads/${branch}`)),
           ) === 0,
       ),
     resolveRef: async (cwd, refName) =>
       withLibgit2Repository(libgit2.symbols, cwd, (repo) => {
         const out = pointerStorage()
-        const status = libgit2.symbols.git_revparse_single(ptr(out), repo, ptr(cString(refName)))
+        const status = libgit2.symbols.git_revparse_single(
+          bunFfi.ptr(out),
+          repo,
+          bunFfi.ptr(cString(refName)),
+        )
         if (status !== 0) {
           return null
         }
@@ -227,66 +230,85 @@ export function createLibgit2GitHost(fallback: GitHost) {
   } satisfies GitHost
 }
 
-function loadLibgit2() {
+async function loadBunFfiForSelectedHost() {
+  if (process.env.REVIEW_SYNC_GIT_HOST !== "libgit2") {
+    return null
+  }
+
+  if (!("bun" in process.versions)) {
+    throw new Error("REVIEW_SYNC_GIT_HOST=libgit2 requires Bun.")
+  }
+
+  return await import("bun:ffi")
+}
+
+function loadLibgit2(ffi: BunFfi) {
   const errors: string[] = []
+  const libgit2PathCandidates = [
+    process.env.LIBGIT2_PATH,
+    `libgit2.${ffi.suffix}`,
+    `/opt/homebrew/lib/libgit2.${ffi.suffix}`,
+    `/usr/local/lib/libgit2.${ffi.suffix}`,
+  ].filter((path) => typeof path === "string")
+
   for (const candidate of libgit2PathCandidates) {
     try {
-      return dlopen(candidate, {
+      return ffi.dlopen(candidate, {
         git_libgit2_init: {
           args: [],
-          returns: FFIType.i32,
+          returns: ffi.FFIType.i32,
         },
         git_repository_open_ext: {
-          args: [FFIType.ptr, FFIType.cstring, FFIType.u32, FFIType.ptr],
-          returns: FFIType.i32,
+          args: [ffi.FFIType.ptr, ffi.FFIType.cstring, ffi.FFIType.u32, ffi.FFIType.ptr],
+          returns: ffi.FFIType.i32,
         },
         git_repository_free: {
-          args: [FFIType.ptr],
-          returns: FFIType.void,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.void,
         },
         git_repository_path: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.cstring,
         },
         git_repository_workdir: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.cstring,
         },
         git_repository_commondir: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.cstring,
         },
         git_repository_head: {
-          args: [FFIType.ptr, FFIType.ptr],
-          returns: FFIType.i32,
+          args: [ffi.FFIType.ptr, ffi.FFIType.ptr],
+          returns: ffi.FFIType.i32,
         },
         git_reference_name: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.cstring,
         },
         git_reference_name_to_id: {
-          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
-          returns: FFIType.i32,
+          args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.cstring],
+          returns: ffi.FFIType.i32,
         },
         git_reference_free: {
-          args: [FFIType.ptr],
-          returns: FFIType.void,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.void,
         },
         git_revparse_single: {
-          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
-          returns: FFIType.i32,
+          args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.cstring],
+          returns: ffi.FFIType.i32,
         },
         git_object_id: {
-          args: [FFIType.ptr],
-          returns: FFIType.ptr,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.ptr,
         },
         git_object_free: {
-          args: [FFIType.ptr],
-          returns: FFIType.void,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.void,
         },
         git_oid_tostr_s: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
+          args: [ffi.FFIType.ptr],
+          returns: ffi.FFIType.cstring,
         },
       })
     } catch (error) {
@@ -314,8 +336,12 @@ async function withLibgit2Repository<T>(
   cwd: string,
   operation: (repo: FfiPointer) => T | Promise<T>,
 ) {
+  if (!bunFfi) {
+    throw new Error("The libgit2 Git host requires Bun.")
+  }
+
   const out = pointerStorage()
-  const status = libgit2.git_repository_open_ext(ptr(out), ptr(cString(cwd)), 0, 0)
+  const status = libgit2.git_repository_open_ext(bunFfi.ptr(out), bunFfi.ptr(cString(cwd)), 0, 0)
   if (status !== 0) {
     throw new UserError(`Not a Git worktree: ${cwd}`)
   }
