@@ -32,10 +32,19 @@ type FileFinderInstance = Pick<FileFinder, "destroy" | "mixedSearch" | "waitForS
 type FileFinderFactory = (basePath: string) => Promise<Result<FileFinderInstance>>
 
 type FileFinderCacheEntry = {
+  kind: "ready"
   finder: FileFinderInstance
   lastUsedAt: number
   scanReady: Promise<void>
 }
+
+type PendingFileFinderCacheEntry = {
+  kind: "pending"
+  lastUsedAt: number
+  promise: Promise<FileFinderCacheEntry | null>
+}
+
+type FileFinderCacheRecord = FileFinderCacheEntry | PendingFileFinderCacheEntry
 
 function normalizeLimit(limit: number | undefined) {
   return Math.min(Math.max(limit ?? DEFAULT_COMPOSER_ENTRY_LIMIT, 1), MAX_COMPOSER_ENTRY_LIMIT)
@@ -212,7 +221,13 @@ export function createFileSearchManager(
 ) {
   const createFinder = options.createFinder ?? createFffFinder
   const now = options.now ?? Date.now
-  const finders = new Map<string, FileFinderCacheEntry>()
+  const finders = new Map<string, FileFinderCacheRecord>()
+
+  function destroyFinderEntry(entry: FileFinderCacheRecord) {
+    if (entry.kind === "ready") {
+      entry.finder.destroy()
+    }
+  }
 
   function pruneFinders(currentTime = now()) {
     for (const [basePath, entry] of finders) {
@@ -220,7 +235,7 @@ export function createFileSearchManager(
         continue
       }
 
-      entry.finder.destroy()
+      destroyFinderEntry(entry)
       finders.delete(basePath)
     }
 
@@ -235,7 +250,7 @@ export function createFileSearchManager(
         break
       }
 
-      oldest[1].finder.destroy()
+      destroyFinderEntry(oldest[1])
       finders.delete(oldest[0])
     }
   }
@@ -247,29 +262,57 @@ export function createFileSearchManager(
     const existing = finders.get(cwd)
     if (existing) {
       existing.lastUsedAt = currentTime
-      return existing
+      return existing.kind === "ready" ? existing : existing.promise
     }
 
-    const created = await createFinder(cwd)
-    if (!created.ok) {
-      return null
-    }
-
-    const entry: FileFinderCacheEntry = {
-      finder: created.value,
+    const pending: PendingFileFinderCacheEntry = {
+      kind: "pending",
       lastUsedAt: currentTime,
-      scanReady: Promise.resolve().then(() => {
-        const result = created.value.waitForScan(FINDER_SCAN_WAIT_MS)
+      promise: createFinder(cwd).then(
+        (created) => {
+          if (!created.ok) {
+            if (finders.get(cwd) === pending) {
+              finders.delete(cwd)
+            }
 
-        if (!result.ok) {
-          throw new Error(result.error)
-        }
-      }),
+            return null
+          }
+
+          const entry: FileFinderCacheEntry = {
+            kind: "ready",
+            finder: created.value,
+            lastUsedAt: pending.lastUsedAt,
+            scanReady: Promise.resolve().then(() => {
+              const result = created.value.waitForScan(FINDER_SCAN_WAIT_MS)
+
+              if (!result.ok) {
+                throw new Error(result.error)
+              }
+            }),
+          }
+
+          if (finders.get(cwd) !== pending) {
+            created.value.destroy()
+            return null
+          }
+
+          finders.set(cwd, entry)
+          pruneFinders(now())
+          return entry
+        },
+        (error: unknown) => {
+          if (finders.get(cwd) === pending) {
+            finders.delete(cwd)
+          }
+
+          throw error
+        },
+      ),
     }
 
-    finders.set(cwd, entry)
+    finders.set(cwd, pending)
     pruneFinders(currentTime)
-    return entry
+    return pending.promise
   }
 
   async function composerEntries(
@@ -305,7 +348,7 @@ export function createFileSearchManager(
 
   function destroy() {
     for (const entry of finders.values()) {
-      entry.finder.destroy()
+      destroyFinderEntry(entry)
     }
 
     finders.clear()
