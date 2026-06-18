@@ -52,8 +52,8 @@ catalogs:
       specifier: ^2.0.0
       version: 2.0.0
     kindstore:
-      specifier: ^0.4.5
-      version: 0.4.5
+      specifier: ^0.4.6
+      version: 0.4.6
     kleur:
       specifier: ^4.1.5
       version: 4.1.5
@@ -497,7 +497,7 @@ importers:
         version: 0.15.0
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       kleur:
         specifier: 'catalog:'
         version: 4.1.5
@@ -543,7 +543,7 @@ importers:
         version: link:../schema
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -871,7 +871,7 @@ importers:
         version: link:../session
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -904,7 +904,7 @@ importers:
         version: 0.5.3(zod@4.4.3)
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       radashi:
         specifier: 'catalog:'
         version: 12.9.1
@@ -943,7 +943,7 @@ importers:
         version: link:../session
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -1045,7 +1045,7 @@ importers:
         version: 2.0.0
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       kleur:
         specifier: 'catalog:'
         version: 4.1.5
@@ -1088,7 +1088,7 @@ importers:
         version: link:../session
       kindstore:
         specifier: 'catalog:'
-        version: 0.4.5(zod@4.4.3)
+        version: 0.4.6(zod@4.4.3)
       radashi:
         specifier: 'catalog:'
         version: 12.9.1
@@ -5107,8 +5107,8 @@ packages:
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
 
-  kindstore@0.4.5:
-    resolution: {integrity: sha512-t59ITsIhxJm9tEpIUyoOFWAnulKZBaAFbhxA5UBIeF08/3HGVin/KlHOC6+XAOfs2z6O0585qOqV1dNuk6kTpQ==}
+  kindstore@0.4.6:
+    resolution: {integrity: sha512-CorLxR04hPDQZhVhyt6AxMmU/IKitFwHinjDGGaO+cviYIdONOCx7fDLAugztarlkGCBqIEFrSB69mQj11SJYg==}
     engines: {bun: '>=1.0.7'}
     peerDependencies:
       zod: ^4.0.0
@@ -10599,7 +10599,7 @@ snapshots:
     dependencies:
       json-buffer: 3.0.1
 
-  kindstore@0.4.5(zod@4.4.3):
+  kindstore@0.4.6(zod@4.4.3):
     dependencies:
       ulid: 3.0.2
       zod: 4.4.3
