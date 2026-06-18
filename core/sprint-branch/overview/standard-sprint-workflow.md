@@ -1,5 +1,7 @@
 # Standard Sprint Workflow
 
+> The standard sprint workflow shows how planned task branches move from setup through review, approval, finalization, landing, and cleanup. It explains the normal path and the recovery entry points.
+
 - **Setup**
   - Create the sprint branch scaffold with `init`.
   - Restore an accidentally removed sprint folder with `restore-sprint` when a

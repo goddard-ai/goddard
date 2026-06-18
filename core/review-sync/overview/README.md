@@ -1,13 +1,14 @@
 # `review-sync` Overview
 
+> Review-sync is a local workflow for reviewing an agent-owned branch from a separate worktree. This overview explains the branch roles, synchronization loop, commands, and recovery states that matter to reviewers and agents.
+
 - **Purpose**
   - This directory describes what `review-sync` supports at a conceptual level.
   - It is written for agents and humans, including reviewers who need to
     understand the review loop without reading source code.
-  - It intentionally avoids implementation details:
+  - It stays at the public product-concept level:
     - Supported outcomes, guardrails, ownership boundaries, and recovery paths belong here.
-    - Helper functions, private schemas, exact diagnostics, storage mechanics,
-      and execution order do not.
+    - Code layout, low-level storage mechanics, and step-by-step execution order do not.
 
 - **Start here**
   - [Review sync model](./model.md)

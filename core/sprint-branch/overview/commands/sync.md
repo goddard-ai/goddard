@@ -1,5 +1,7 @@
 # `sprint-branch sync`
 
+> The sprint-branch sync command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How do I watch the active sprint review branch through the review-sync
     workflow?

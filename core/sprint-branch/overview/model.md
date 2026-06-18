@@ -1,5 +1,7 @@
 # Sprint Branch Model
 
+> The sprint-branch model describes the local branch stack used to move agent tasks from work to review, approval, and landing. This page defines branch roles, task states, guardrails, and dry-run expectations.
+
 - **Core idea**
   - `sprint-branch` manages a sprint as a small rolling branch system.
   - The system has:

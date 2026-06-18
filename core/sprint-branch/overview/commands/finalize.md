@@ -1,5 +1,7 @@
 # `sprint-branch finalize [--override-base <ref>] [--ignore-next-branch]`
 
+> The sprint-branch finalize [--override-base <ref>] [--ignore-next-branch] command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - Is the fully approved sprint ready for the human's final merge?
 
