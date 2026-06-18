@@ -1,6 +1,7 @@
 import { effect, signal } from "@preact/signals"
 import { listen, Sigma } from "preact-sigma"
 
+import { writeBootAppearanceSnapshot } from "./boot-appearance.ts"
 import {
   buildAppearanceDocumentState,
   type AppearanceMode,
@@ -56,6 +57,11 @@ export class Appearance extends Sigma<AppearanceState> {
         for (const [name, value] of Object.entries(documentState.variables)) {
           root.style.setProperty(name, value)
         }
+
+        writeBootAppearanceSnapshot({
+          mode: this.mode,
+          highContrast: this.highContrast,
+        })
       }),
     ]
   }
