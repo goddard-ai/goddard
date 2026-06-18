@@ -28,4 +28,3 @@
   - Only one active workforce runtime may exist for a given repository workspace.
   - Workforce orchestration is separate from pull request feedback handling.
   - SDK and operational clients observe and request mutations; they do not own independent workforce runtime state.
-  - Related pages: [workforce requests](./workforce-requests.md), [workforce suspension and recovery](./workforce-suspension-and-recovery.md), and [agent tools](../collaboration/agent-tools.md).

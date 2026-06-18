@@ -24,4 +24,3 @@
   - Suggestions are convenience data for clients.
   - They do not create sessions or mutate repository state.
   - Clients should treat suggestions as current daemon guidance, not as durable configuration.
-  - Related pages: [launch preview and leases](./launch-preview-and-leases.md), [session lifecycle](./lifecycle.md), and [configuration refresh](../concepts/configuration-refresh.md).

@@ -30,4 +30,3 @@
   - Repository-local configuration can declare non-executable preparation intent.
   - Repository-local arbitrary shell hooks are not part of worktree preparation.
   - User-scoped executable worktree extensions remain separate from repository-local preparation intent.
-  - Related pages: [session worktrees](./worktrees.md), [configuration refresh](../concepts/configuration-refresh.md), and [runtime ownership](../concepts/runtime-ownership.md).

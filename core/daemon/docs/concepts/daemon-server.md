@@ -25,4 +25,3 @@
   - The server is local control infrastructure, not a public external API contract.
   - The server does not make clients owners of runtime state.
   - Clients should treat daemon responses and streams as the current daemon truth for the active data profile.
-  - Related pages: [runtime ownership](./runtime-ownership.md), [data profiles](./data-profiles.md), and [session lifecycle](../sessions/lifecycle.md).

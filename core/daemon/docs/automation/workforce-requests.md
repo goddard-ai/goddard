@@ -40,4 +40,3 @@
 - **Ordering**
   - Requests for the same workforce agent are handled sequentially.
   - Queue mutations should preserve one daemon-owned projection of current workforce state.
-  - Related pages: [workforce](./workforce.md), [workforce suspension and recovery](./workforce-suspension-and-recovery.md), and [session tokens](../sessions/session-tokens.md).

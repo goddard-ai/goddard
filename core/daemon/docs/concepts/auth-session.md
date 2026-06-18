@@ -24,4 +24,3 @@
   - Auth state is local daemon state.
   - Reading auth state does not create sessions or start automation.
   - Clearing auth state does not delete unrelated daemon records by itself.
-  - Related pages: [pull request feedback](../collaboration/pr-feedback.md), [pull requests](../collaboration/pull-requests.md), and [data profiles](./data-profiles.md).

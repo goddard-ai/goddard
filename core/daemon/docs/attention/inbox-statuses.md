@@ -38,4 +38,3 @@
   - New daemon attention can reopen rows that were read, replied, saved, archived, or completed.
   - This keeps the row focused on current attention rather than historical acknowledgement.
   - Clients should present reopened rows as current daemon attention, not as duplicate notifications.
-  - Related pages: [inbox](./inbox.md), [session attention](./session-attention.md), and [pull request attention](./pull-request-attention.md).

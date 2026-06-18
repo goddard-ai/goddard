@@ -29,4 +29,3 @@
   - Mock data is not a schema exhaustiveness test.
   - Future fixtures should be added only when they exercise a named user-visible screen state or workflow.
   - App and SDK callers should consume mock data through the normal daemon control surface rather than special test-only paths.
-  - Related pages: [data profiles](../concepts/data-profiles.md), [inbox statuses](../attention/inbox-statuses.md), and [history and diagnostics](../sessions/history-and-diagnostics.md).

@@ -26,4 +26,3 @@
   - Managed install policy is user-owned.
   - Managed agents do not use the same Goddard-owned binary cache path as unmanaged archive-backed or raw-binary targets.
   - Managed install status does not mean a session has already been created.
-  - Related pages: [adapters](./adapters.md), [launch preview and leases](../sessions/launch-preview-and-leases.md), and [session lifecycle](../sessions/lifecycle.md).

@@ -29,4 +29,3 @@
   - Existing work does not silently change configuration underneath an active run.
   - If config watching degrades, the daemon should continue using accepted valid behavior until it can refresh again.
   - Worktree preparation can react to accepted repository intent such as `.worktreeinclude`, while arbitrary repository shell hooks remain outside the trust boundary.
-  - Related pages: [worktree preparation](../sessions/worktree-preparation.md), [actions](../automation/actions.md), [loops](../automation/loops.md), and [launch](./launch.md).

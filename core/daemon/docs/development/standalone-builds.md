@@ -19,4 +19,3 @@
 - **Boundaries**
   - Standalone output does not replace configuration, data profiles, or daemon feature composition.
   - Clients should still treat the running daemon as the local source of truth for daemon-managed state.
-  - Related pages: [launch](../concepts/launch.md), [feature composition](../concepts/feature-composition.md), and [data profiles](../concepts/data-profiles.md).

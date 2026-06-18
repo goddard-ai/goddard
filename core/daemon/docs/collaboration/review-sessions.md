@@ -37,4 +37,3 @@
   - Review sessions do not replace the `review-sync` conceptual contract.
   - They are the daemon-owned bridge between a session worktree and that existing review workflow.
   - Review branch content is a review surface; the durable daemon session and underlying agent branch retain their own roles.
-  - Related pages: [session worktrees](../sessions/worktrees.md), [pull requests](./pull-requests.md), and the review-sync docs outside the daemon package.

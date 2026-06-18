@@ -49,4 +49,3 @@
   - Workforce tools require workforce root context for workforce sessions.
   - Long or multi-line messages should be passed through files so shell quoting does not corrupt the reported content.
   - Hidden inbox metadata should stay concise and should not duplicate the visible user-facing response.
-  - Related pages: [session tokens](../sessions/session-tokens.md), [session attention](../attention/session-attention.md), [pull requests](./pull-requests.md), and [workforce requests](../automation/workforce-requests.md).

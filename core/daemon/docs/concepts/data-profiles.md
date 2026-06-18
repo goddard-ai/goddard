@@ -30,4 +30,3 @@
   - Profiles do not sync local state across machines.
   - Switching profiles changes which local store is active; it does not migrate records between profiles.
   - Mock data is local-only and should be consumed through the same daemon surface as ordinary data.
-  - Related pages: [launch](./launch.md), [mock data](../development/mock-data.md), and [inbox](../attention/inbox.md).

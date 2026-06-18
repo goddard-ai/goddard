@@ -35,4 +35,3 @@
 - **Boundary**
   - Feature composition is not a user configuration system for arbitrary runtime extension.
   - Repository-local configuration can declare shared intent, but trusted executable daemon extension remains user-scoped.
-  - Related pages: [runtime ownership](./runtime-ownership.md), [daemon server](./daemon-server.md), and [launch](./launch.md).

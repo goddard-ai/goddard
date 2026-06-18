@@ -30,4 +30,3 @@
   - Launch configuration chooses how this daemon process starts.
   - It does not create sessions by itself.
   - Data profile selection chooses the active local store; it does not migrate records between stores.
-  - Related pages: [data profiles](./data-profiles.md), [daemon server](./daemon-server.md), [session lifecycle](../sessions/lifecycle.md), and [launch preview and leases](../sessions/launch-preview-and-leases.md).
