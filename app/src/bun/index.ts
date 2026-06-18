@@ -3,7 +3,7 @@ import { BrowserWindow, Screen, Updater } from "electrobun/bun"
 import { loadAppStateSnapshot } from "./app-state-store.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { installAppLogCapture } from "./logging.ts"
-import { getMainWindow, setMainWindow } from "./main-window.ts"
+import { getMainWindow, setMainWindow, showMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
 import {
@@ -16,6 +16,7 @@ import {
 
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
+const MAIN_WINDOW_READY_FALLBACK_MS = 5000
 
 /** Creates the one primary Electrobun window used by the current app shell. */
 function createMainWindow(url: string, frame: WindowFrame) {
@@ -24,6 +25,7 @@ function createMainWindow(url: string, frame: WindowFrame) {
     titleBarStyle: "hiddenInset",
     frame,
     url,
+    hidden: true,
     rpc: appRpc,
     // Dev mode falls back to the native renderer when build.json is absent, so
     // opt into CEF here instead of relying on packaged build defaults.
@@ -33,9 +35,16 @@ function createMainWindow(url: string, frame: WindowFrame) {
     },
   })
 
-  window.show()
   installWindowLayoutPersistence(window)
   return window
+}
+
+function installMainWindowReadyFallback() {
+  setTimeout(() => {
+    if (showMainWindow()) {
+      console.error("Renderer did not signal readiness before the main window fallback expired.")
+    }
+  }, MAIN_WINDOW_READY_FALLBACK_MS)
 }
 
 /** Returns the frontend URL, preferring the Vite dev server while Electrobun runs in dev mode. */
@@ -114,3 +123,4 @@ const mainWindowFrame = resolveInitialWindowFrame(
 )
 const mainWindow = createMainWindow(mainWindowUrl, mainWindowFrame)
 setMainWindow(mainWindow)
+installMainWindowReadyFallback()
