@@ -67,9 +67,13 @@ export function AppStateProvider(props: {
         <context.ProjectRegistry value={appState.projectRegistry}>
           <context.ShortcutRegistry value={appState.shortcutRegistry}>
             <context.WorkbenchTabCache value={appState.workbenchTabCache}>
-              <context.WorkbenchTabSet
-                value={appState.workbenchTabSet}
-              >{props.children}</context.WorkbenchTabSet>
+              <context.WorkbenchTabSet value={appState.workbenchTabSet}>
+                @if (appState.hydrationStatus === "ready") {
+                  <>
+                    {props.children}
+                  </>
+                }
+              </context.WorkbenchTabSet>
             </context.WorkbenchTabCache>
           </context.ShortcutRegistry>
         </context.ProjectRegistry>

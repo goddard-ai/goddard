@@ -18,6 +18,8 @@ import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.
 
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
+type AppStateHydrationStatus = "pending" | "ready"
+
 /** Context-ready app model bundle produced by the app lifecycle hook. */
 export type AppState = ReturnType<typeof useAppState>
 
@@ -167,6 +169,7 @@ function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>
 
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
 export function useAppState() {
+  const [hydrationStatus, setHydrationStatus] = useState<AppStateHydrationStatus>("pending")
   const [appState] = useState(() => {
     const bootAppearance = readBootAppearanceSnapshot()
     const workbenchTabCache = new WorkbenchTabCache()
@@ -251,6 +254,7 @@ export function useAppState() {
           sigma.replaceState(appState.workbenchTabSet, snapshot.workbenchTabSet)
         }
 
+        setHydrationStatus("ready")
         startAppStateObserver()
       },
       (error) => {
@@ -258,6 +262,7 @@ export function useAppState() {
           return
         }
 
+        setHydrationStatus("ready")
         startAppStateObserver()
         console.error("Failed to load app state.", error)
       },
@@ -369,5 +374,6 @@ export function useAppState() {
     shortcutRegistry: castProtected(appState.shortcutRegistry),
     workbenchTabCache: appState.workbenchTabCache,
     workbenchTabSet: castProtected(appState.workbenchTabSet),
+    hydrationStatus,
   }
 }
