@@ -15,18 +15,8 @@ function getNextInboxWorkbenchTargetKey(item: InboxItem) {
 }
 
 function scheduleIdleTask(callback: () => void) {
-  const global = globalThis as typeof globalThis & {
-    cancelIdleCallback?: (handle: number) => void
-    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number
-  }
-
-  if (global.requestIdleCallback && global.cancelIdleCallback) {
-    const handle = global.requestIdleCallback(callback, { timeout: 1500 })
-    return () => global.cancelIdleCallback?.(handle)
-  }
-
-  const handle = setTimeout(callback, 300)
-  return () => clearTimeout(handle)
+  const handle = requestIdleCallback(callback, { timeout: 1500 })
+  return () => cancelIdleCallback(handle)
 }
 
 /** Tracks the prepared workbench target for the current Next unread inbox item. */
