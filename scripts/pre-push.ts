@@ -9,6 +9,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import globrex from "globrex"
 
+const REBASE_CHECKED_REMOTE_BRANCH_REFS = ["refs/heads/aleclarson"]
+const ZERO_SHA = "0000000000000000000000000000000000000000"
+
 const CHECKED_SOURCE_FILE_EXTENSIONS = ["ts", "tsrx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
 
 const FULL_CHECK_FILE_GLOBS = [
@@ -85,6 +88,20 @@ function findPushedSha(remoteName: string, updates: PushUpdate[]) {
   return updates.find(({ localRef }) => localRef !== "(delete)")?.localSha
 }
 
+/** Selects the pushed commit when a personal branch should prove it can rebase onto main. */
+export function findRebaseCheckedBranchPushSha(remoteName: string, updates: PushUpdate[]) {
+  if (remoteName !== "origin") {
+    return undefined
+  }
+
+  return updates.find(
+    ({ localRef, localSha, remoteRef }) =>
+      REBASE_CHECKED_REMOTE_BRANCH_REFS.includes(remoteRef) &&
+      localRef !== "(delete)" &&
+      localSha !== ZERO_SHA,
+  )?.localSha
+}
+
 /** Resolves the repository root so subprocesses run from a stable location. */
 function getRepoRoot() {
   return execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -152,21 +169,11 @@ function canRebaseOntoOriginMain(repoRoot: string, pushedSha: string) {
 
     return rebaseResult.status === 0
   } finally {
-    const removeResult = spawnSync("git", ["worktree", "remove", "--force", worktreePath], {
+    spawnSync("git", ["worktree", "remove", "--force", worktreePath], {
       cwd: repoRoot,
       stdio: "ignore",
     })
-
-    if (removeResult.status !== 0) {
-      console.error("pre-push: failed to remove temporary rebase-check worktree.")
-    }
-
     rmSync(tempRoot, { force: true, recursive: true })
-
-    spawnSync("git", ["worktree", "prune"], {
-      cwd: repoRoot,
-      stdio: "ignore",
-    })
   }
 }
 
@@ -229,7 +236,9 @@ function runRepoCheck(repoRoot: string, changedFiles: string[]) {
 /** Runs the pre-push guard and returns a process exit code. */
 async function main(argv = process.argv.slice(2)) {
   const [remoteName = ""] = argv
-  const pushedSha = findPushedSha(remoteName, parsePushUpdates(await readStdinText()))
+  const updates = parsePushUpdates(await readStdinText())
+  const pushedSha = findPushedSha(remoteName, updates)
+  const rebaseCheckedSha = findRebaseCheckedBranchPushSha(remoteName, updates)
 
   if (!pushedSha && !rebaseCheckedSha) {
     return 0
