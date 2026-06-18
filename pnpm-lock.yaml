@@ -357,8 +357,8 @@ importers:
         specifier: ^0.3.4
         version: 0.3.4(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3)
       state-launcher:
-        specifier: 0.2.1
-        version: 0.2.1(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7)
+        specifier: 0.2.2
+        version: 0.2.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7)
       vite:
         specifier: ^8.0.10
         version: 8.0.14(@types/node@25.9.1)(esbuild@0.27.3)(jiti@2.7.0)(yaml@2.9.0)
@@ -6116,6 +6116,11 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
+  semver@7.8.2:
+    resolution: {integrity: sha512-c8jsqUZm3omBOI66G90z1Dyw5z622G8oLG+omfsHBJf3CWQTlOcwOjvOG6wtiNfW6anKm/eA39LMwMtMez2TiQ==}
+    engines: {node: '>=10'}
+    hasBin: true
+
   send@1.2.1:
     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
     engines: {node: '>= 18'}
@@ -6216,8 +6221,8 @@ packages:
     resolution: {integrity: sha512-H6D7134xi6qONvh7ZHKgviXf+rd3vhGBSvebPZCaUkd8zvQ+7PtDw6CljPTe4cXWNf2IKZGNqw6VJXSb9IgBpA==}
     engines: {node: '>=20.0.0'}
 
-  state-launcher@0.2.1:
-    resolution: {integrity: sha512-S9iObCs8XOUD1xr9rOx+A3GlD1hzHunhq1umXjVhHlcs3pfdM19Svi1KZlEQJQ1533TgPKA7tjHZxaU3lj3dIA==}
+  state-launcher@0.2.2:
+    resolution: {integrity: sha512-+9Zv1pM9L4Oownhx0Zpw841X7czKoHvbN5S1oZGZt9fLd79Ba2kxla5rf4DpKwhedtvG1h3VxPjF6g06KE3Bhg==}
     peerDependencies:
       preact: '*'
 
@@ -9345,7 +9350,7 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.60.0
       debug: 4.4.3
       minimatch: 10.2.5
-      semver: 7.8.1
+      semver: 7.8.2
       tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
       typescript: 6.0.3
@@ -10698,7 +10703,7 @@ snapshots:
       lodash.isstring: 4.0.1
       lodash.once: 4.1.1
       ms: 2.1.3
-      semver: 7.8.1
+      semver: 7.8.2
 
   jszip@3.10.1:
     dependencies:
@@ -11628,6 +11633,8 @@ snapshots:
 
   semver@7.8.1: {}
 
+  semver@7.8.2: {}
+
   send@1.2.1:
     dependencies:
       debug: 4.4.3
@@ -11779,7 +11786,7 @@ snapshots:
 
   stack-trace@1.0.0: {}
 
-  state-launcher@0.2.1(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7):
+  state-launcher@0.2.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7):
     dependencies:
       '@preact/signals': 2.9.1(preact@11.0.0-beta.1)
       fuzzysort2: 0.1.1
