@@ -32,7 +32,8 @@ let activeInstallCleanup: (() => void) | null = null
 
 function isLaunchableStateShortcut(event: KeyboardEvent) {
   return (
-    event.key.toLowerCase() === "l" &&
+    // macOS Option changes `event.key`; `event.code` still identifies the physical L key.
+    (event.code === "KeyL" || event.key.toLowerCase() === "l") &&
     event.altKey &&
     event.shiftKey &&
     (event.metaKey || event.ctrlKey) &&
