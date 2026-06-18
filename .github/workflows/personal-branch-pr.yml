@@ -18,6 +18,7 @@ env:
   USER_BRANCH: aleclarson
   BASE_BRANCH: main
   PR_TITLE: "Merge aleclarson into main"
+  PR_BODY: "This is the ongoing PR for changes from `aleclarson` into `main`."
 
 jobs:
   open-pr:
@@ -63,15 +64,16 @@ jobs:
             pr_number="$existing_pr"
           else
             pr_number="$(
-              gh pr create \
-                --repo "${{ github.repository }}" \
-                --base "$BASE_BRANCH" \
-                --head "$USER_BRANCH" \
-                --title "$PR_TITLE" \
-                --body "This is the ongoing PR for changes from aleclarson into main." \
-                --json number \
+              gh api \
+                --method POST \
+                "repos/${{ github.repository }}/pulls" \
+                --raw-field base="$BASE_BRANCH" \
+                --raw-field head="$USER_BRANCH" \
+                --raw-field title="$PR_TITLE" \
+                --raw-field body="$PR_BODY" \
                 --jq '.number'
             )"
+            echo "Opened PR #$pr_number."
           fi
 
           gh pr merge "$pr_number" \
