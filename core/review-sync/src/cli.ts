@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { runReviewSync } from "./index.ts"
 import { writeResult } from "./runtime.ts"
 
