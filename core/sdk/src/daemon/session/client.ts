@@ -410,6 +410,7 @@ export async function runSession(
           agent: params.agent,
           cwd: params.cwd,
           launchLeaseId: params.launchLeaseId,
+          launchWorktreeId: params.launchWorktreeId,
           localCheckout: params.localCheckout,
           worktree: params.worktree,
           mcpServers: params.mcpServers,

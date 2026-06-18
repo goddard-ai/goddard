@@ -18,6 +18,9 @@
 - `Launch Lease`
   - The daemon-owned live ACP session prepared for a launch dialog before it becomes a durable daemon session.
   - Why: so launch-time capability discovery can be reused for the actual local-checkout session while still being abandoned safely after dialog changes.
+- `Launch Worktree Lease`
+  - The daemon-owned git worktree prepared for a launch dialog before it becomes a durable daemon session worktree.
+  - Why: so isolated worktree setup can begin while the operator is still composing launch options, and abandoned prepared worktrees can be cleaned up by daemon lifecycle rules.
 - `Inbox Manager`
   - The daemon subsystem that owns local inbox row listing, workflow updates, and attention refreshes.
   - Why: so every inbox status transition follows one set of daemon-owned write rules.

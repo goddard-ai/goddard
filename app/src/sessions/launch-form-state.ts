@@ -99,6 +99,7 @@ export const SessionLaunchFormState = createModel(function () {
   const draftPromptBlocks = signal<ComposerPromptBlocks>([])
   const draftSubpackagePath = signal<string | null>(null)
   const draftThinkingValue = signal<string | boolean | null>(null)
+  const launchWorktreeId = signal<string | null>(null)
   const launchPreview = signal<SessionLaunchPreviewResponse | null>(null)
   const openPicker = signal<LaunchPickerId>(null)
 
@@ -188,6 +189,8 @@ export const SessionLaunchFormState = createModel(function () {
               baseBranchName: draftBaseBranchName.value ?? undefined,
             }
           : undefined,
+      launchWorktreeId:
+        draftLocation.value === "worktree" ? (launchWorktreeId.value ?? undefined) : undefined,
       mcpServers: [],
       initialModelId: resolvedSelection.initialModelId,
       initialConfigOptions: resolvedSelection.initialConfigOptions,
@@ -346,6 +349,7 @@ export const SessionLaunchFormState = createModel(function () {
     effectiveCwd,
     launchModelConfig,
     launchPreview,
+    launchWorktreeId,
     modeOption,
     openPicker,
     reset(preferredProjectPath: string | null = null) {
@@ -359,6 +363,7 @@ export const SessionLaunchFormState = createModel(function () {
       draftPromptBlocks.value = []
       draftSubpackagePath.value = null
       draftThinkingValue.value = null
+      launchWorktreeId.value = null
       launchPreview.value = null
       openPicker.value = null
 

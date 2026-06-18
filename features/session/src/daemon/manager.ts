@@ -50,8 +50,12 @@ import {
   type InitialPromptOption,
   type ListSessionsRequest,
   type ListSessionsResponse,
+  type PrepareSessionLaunchWorktreeRequest,
+  type PrepareSessionLaunchWorktreeResponse,
   type ReleaseSessionLaunchLeaseRequest,
   type ReleaseSessionLaunchLeaseResponse,
+  type ReleaseSessionLaunchWorktreeRequest,
+  type ReleaseSessionLaunchWorktreeResponse,
   type SessionComposerSuggestionsRequest,
   type SessionComposerSuggestionsResponse,
   type SessionDraftSuggestionsRequest,
@@ -85,6 +89,7 @@ import {
 import { createIdleShutdownController } from "./idle-shutdown.ts"
 import { createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
 import { checkoutLocalBranch, createLaunchPreparationFeature } from "./launch-preparation.ts"
+import { createLaunchWorktreeFeature } from "./launch-worktrees.ts"
 import { createPromptTurnFeature, injectSystemPrompt } from "./prompt-turns.ts"
 import { createSessionAttentionFeature } from "./session-attention.ts"
 import { createSessionMemory, type ActiveSession } from "./session-memory.ts"
@@ -556,6 +561,7 @@ function shouldResolveConfiguredWorktreePlugins(
 async function resolveLaunchWorktree(params: {
   request: CreateSessionRequest
   existingWorktree: SessionWorktreeState | null
+  preparedLaunchWorktree: PreparedSessionWorktree | null
   worktreePlugins?: WorktreePlugin[]
   defaultWorktreesFolder?: string
   branchPrefix?: string
@@ -565,6 +571,10 @@ async function resolveLaunchWorktree(params: {
       worktreePlugins: params.worktreePlugins,
     })
     return toPreparedSessionWorktree(params.existingWorktree)
+  }
+
+  if (params.preparedLaunchWorktree) {
+    return params.preparedLaunchWorktree
   }
 
   const source = await resolveGitWorktreeSource(params.request.cwd)
@@ -800,6 +810,12 @@ export function createSessionManager(input: {
     events: input.events,
     updateSessionActivity,
   })
+  const launchWorktrees = createLaunchWorktreeFeature({
+    db,
+    configProvider: input.configProvider,
+    logger,
+    worktreePluginManager,
+  })
   const promptTurns = createPromptTurnFeature({
     db,
     memory,
@@ -825,7 +841,10 @@ export function createSessionManager(input: {
     handlePermissionRequest: promptTurns.handlePermissionRequest,
     handleSessionUpdate: promptTurns.handleSessionUpdate,
   })
-  const ready = reconcilePersistedSessions()
+  const ready = (async () => {
+    await launchWorktrees.cleanupColdWorktrees()
+    await reconcilePersistedSessions()
+  })()
 
   function publishSessionUpdated(id: SessionId, changed: readonly SessionLifecycleField[]) {
     const session = db.sessions.get(id) ?? null
@@ -1344,6 +1363,13 @@ export function createSessionManager(input: {
       resolvedRequest.initialPrompt,
       resolvedConfig?.sessionTitles?.generator,
     )
+    const launchWorktree =
+      existingArtifacts.worktree === null
+        ? launchWorktrees.takeCompatible({
+            launchWorktreeId: resolvedRequest.launchWorktreeId,
+            request: resolvedRequest,
+          })
+        : null
     const deferredInitialPrompt = !exitAfterInitialPrompt
       ? resolvedRequest.initialPrompt
       : undefined
@@ -1358,6 +1384,7 @@ export function createSessionManager(input: {
     const worktree = await resolveLaunchWorktree({
       request: resolvedRequest,
       existingWorktree: existingArtifacts.worktree,
+      preparedLaunchWorktree: launchWorktree,
       worktreePlugins: resolvedWorktreePlugins,
       defaultWorktreesFolder: resolvedConfig?.worktrees?.defaultFolder,
       branchPrefix: resolvedConfig?.worktrees?.branchPrefix,
@@ -1406,6 +1433,7 @@ export function createSessionManager(input: {
       if (
         worktree &&
         !existingArtifacts.worktree &&
+        !launchWorktree &&
         worktree.state.poweredBy === defaultPlugin.name
       ) {
         try {
@@ -1433,6 +1461,13 @@ export function createSessionManager(input: {
           id,
           "worktree.bootstrap_skipped",
           { reason: "reused_worktree" },
+          sessionLogger,
+        )
+      } else if (worktree && launchWorktree) {
+        emitDiagnostic(
+          id,
+          "worktree.bootstrap_skipped",
+          { reason: "prewarmed_worktree" },
           sessionLogger,
         )
       } else if (worktree && worktree.state.poweredBy !== defaultPlugin.name) {
@@ -1925,6 +1960,20 @@ export function createSessionManager(input: {
     }
   }
 
+  async function prepareLaunchWorktree(
+    params: PrepareSessionLaunchWorktreeRequest,
+  ): Promise<PrepareSessionLaunchWorktreeResponse> {
+    await ready
+    return launchWorktrees.prepare(params)
+  }
+
+  async function releaseLaunchWorktree(
+    params: ReleaseSessionLaunchWorktreeRequest,
+  ): Promise<ReleaseSessionLaunchWorktreeResponse> {
+    await ready
+    return launchWorktrees.release(params)
+  }
+
   async function getSubpackages(
     params: SessionSubpackagesRequest,
   ): Promise<SessionSubpackagesResponse> {
@@ -2164,6 +2213,7 @@ export function createSessionManager(input: {
   async function close(): Promise<void> {
     await ready
     await launchLeaseStore.closeAll("daemon_shutdown")
+    await launchWorktrees.close()
 
     for (const session of activeSessions.values()) {
       idleShutdown.cancelIdleShutdownTimer(session, "daemon_shutdown")
@@ -2206,6 +2256,8 @@ export function createSessionManager(input: {
     getDraftSuggestions,
     getLaunchPreview,
     releaseLaunchLease,
+    prepareLaunchWorktree,
+    releaseLaunchWorktree,
     getSubpackages,
     getDiagnostics,
     getWorktree,
