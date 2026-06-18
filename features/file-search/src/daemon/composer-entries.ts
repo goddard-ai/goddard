@@ -365,3 +365,7 @@ const fileSearchManager = createFileSearchManager()
 export async function getComposerEntries(request: FileSearchComposerEntriesRequest) {
   return fileSearchManager.composerEntries(request)
 }
+
+export function destroyFileSearchManager() {
+  fileSearchManager.destroy()
+}
