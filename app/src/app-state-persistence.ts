@@ -4,6 +4,7 @@ import { useEffect, useState } from "preact/hooks"
 import { getErrorMessage } from "radashi"
 
 import { Appearance, type AppearanceState } from "./appearance/appearance.ts"
+import { readBootAppearanceSnapshot } from "./appearance/boot-appearance.ts"
 import { CommandContext } from "./commands/command-context.ts"
 import { desktopHost } from "./desktop-host.ts"
 import { MainTab, type MainTabState } from "./main-tab.ts"
@@ -167,6 +168,7 @@ function observeSnapshot<const TSnapshot>(props: ObserveSnapshotProps<TSnapshot>
 /** Owns app-state restoration, setup, and persistence for the provider boundary. */
 export function useAppState() {
   const [appState] = useState(() => {
+    const bootAppearance = readBootAppearanceSnapshot()
     const workbenchTabCache = new WorkbenchTabCache()
     const mainTab = new MainTab()
     const projectRegistry = new ProjectRegistry()
@@ -182,8 +184,8 @@ export function useAppState() {
 
     return {
       appearance: new Appearance({
-        mode: "system",
-        highContrast: false,
+        mode: bootAppearance.mode,
+        highContrast: bootAppearance.highContrast,
       }),
       commandContext,
       mainTab,

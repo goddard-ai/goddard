@@ -4,6 +4,141 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Goddard</title>
+    <script>
+      ;(() => {
+        const storageKey = "goddard:boot-appearance"
+        const themes = {
+          "light-normal": {
+            "--theme-color-background": "rgb(247, 250, 254)",
+            "--theme-color-surface": "rgb(240, 243, 247)",
+            "--theme-color-panel": "rgb(234, 238, 242)",
+            "--theme-color-border": "rgb(182, 187, 193)",
+            "--theme-color-text": "rgb(26, 33, 42)",
+            "--theme-color-muted": "rgb(92, 99, 107)",
+            "--theme-color-focus": "rgb(67, 119, 172)",
+            "--theme-color-accent": "rgb(85, 144, 204)",
+            "--theme-color-accent-strong": "rgb(67, 119, 172)",
+            "--theme-color-accent-fg": "rgb(247, 250, 254)",
+            "--theme-color-danger": "rgb(222, 78, 75)",
+            "--theme-color-overlay": "rgba(217, 221, 226, 0.9)",
+            "--theme-color-shadow": "rgba(150, 156, 162, 0.18)",
+            "--theme-color-transcript-glow": "rgba(212, 227, 244, 0.16)",
+            "--theme-color-transcript-glow-edge": "rgba(212, 227, 244, 0)",
+            "--theme-color-transcript-user-bubble-start": "rgb(196, 208, 222)",
+            "--theme-color-transcript-user-bubble-end": "rgb(217, 227, 238)",
+            "--theme-color-transcript-user-bubble-border": "rgb(129, 162, 197)",
+            "--theme-color-transcript-user-code-bg": "rgb(180, 197, 216)",
+            "--theme-color-transcript-user-code-border": "rgb(118, 154, 192)",
+          },
+          "light-high": {
+            "--theme-color-background": "rgb(247, 250, 254)",
+            "--theme-color-surface": "rgb(236, 240, 244)",
+            "--theme-color-panel": "rgb(228, 232, 236)",
+            "--theme-color-border": "rgb(143, 149, 155)",
+            "--theme-color-text": "rgb(26, 33, 42)",
+            "--theme-color-muted": "rgb(63, 71, 79)",
+            "--theme-color-focus": "rgb(55, 104, 154)",
+            "--theme-color-accent": "rgb(71, 127, 184)",
+            "--theme-color-accent-strong": "rgb(55, 104, 154)",
+            "--theme-color-accent-fg": "rgb(247, 250, 254)",
+            "--theme-color-danger": "rgb(195, 63, 103)",
+            "--theme-color-overlay": "rgba(217, 221, 226, 0.9)",
+            "--theme-color-shadow": "rgba(150, 156, 162, 0.18)",
+            "--theme-color-transcript-glow": "rgba(208, 223, 240, 0.16)",
+            "--theme-color-transcript-glow-edge": "rgba(208, 223, 240, 0)",
+            "--theme-color-transcript-user-bubble-start": "rgb(186, 200, 217)",
+            "--theme-color-transcript-user-bubble-end": "rgb(210, 221, 234)",
+            "--theme-color-transcript-user-bubble-border": "rgb(118, 150, 185)",
+            "--theme-color-transcript-user-code-bg": "rgb(170, 189, 210)",
+            "--theme-color-transcript-user-code-border": "rgb(107, 142, 179)",
+          },
+          "dark-normal": {
+            "--theme-color-background": "rgb(19, 22, 26)",
+            "--theme-color-surface": "rgb(26, 29, 33)",
+            "--theme-color-panel": "rgb(33, 36, 40)",
+            "--theme-color-border": "rgb(73, 77, 83)",
+            "--theme-color-text": "rgb(228, 236, 245)",
+            "--theme-color-muted": "rgb(149, 156, 163)",
+            "--theme-color-focus": "rgb(134, 192, 251)",
+            "--theme-color-accent": "rgb(115, 176, 238)",
+            "--theme-color-accent-strong": "rgb(134, 192, 251)",
+            "--theme-color-accent-fg": "rgb(19, 22, 26)",
+            "--theme-color-danger": "rgb(242, 113, 106)",
+            "--theme-color-overlay": "rgba(51, 55, 59, 0.9)",
+            "--theme-color-shadow": "rgba(209, 217, 225, 0.18)",
+            "--theme-color-transcript-glow": "rgba(62, 87, 115, 0.26)",
+            "--theme-color-transcript-glow-edge": "rgba(62, 87, 115, 0)",
+            "--theme-color-transcript-user-bubble-start": "rgb(69, 84, 100)",
+            "--theme-color-transcript-user-bubble-end": "rgb(50, 60, 73)",
+            "--theme-color-transcript-user-bubble-border": "rgb(96, 127, 161)",
+            "--theme-color-transcript-user-code-bg": "rgb(79, 100, 123)",
+            "--theme-color-transcript-user-code-border": "rgb(103, 140, 178)",
+          },
+          "dark-high": {
+            "--theme-color-background": "rgb(19, 22, 26)",
+            "--theme-color-surface": "rgb(30, 33, 36)",
+            "--theme-color-panel": "rgb(39, 42, 46)",
+            "--theme-color-border": "rgb(87, 92, 97)",
+            "--theme-color-text": "rgb(228, 236, 245)",
+            "--theme-color-muted": "rgb(181, 188, 196)",
+            "--theme-color-focus": "rgb(128, 192, 255)",
+            "--theme-color-accent": "rgb(108, 176, 244)",
+            "--theme-color-accent-strong": "rgb(128, 192, 255)",
+            "--theme-color-accent-fg": "rgb(19, 22, 26)",
+            "--theme-color-danger": "rgb(247, 108, 102)",
+            "--theme-color-overlay": "rgba(51, 55, 59, 0.9)",
+            "--theme-color-shadow": "rgba(209, 217, 225, 0.18)",
+            "--theme-color-transcript-glow": "rgba(59, 87, 117, 0.26)",
+            "--theme-color-transcript-glow-edge": "rgba(59, 87, 117, 0)",
+            "--theme-color-transcript-user-bubble-start": "rgb(69, 89, 111)",
+            "--theme-color-transcript-user-bubble-end": "rgb(49, 64, 80)",
+            "--theme-color-transcript-user-bubble-border": "rgb(93, 130, 170)",
+            "--theme-color-transcript-user-code-bg": "rgb(78, 104, 133)",
+            "--theme-color-transcript-user-code-border": "rgb(100, 142, 187)",
+          },
+        }
+
+        const readSnapshot = () => {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(storageKey) || "null")
+
+            if (
+              parsed &&
+              (parsed.mode === "light" || parsed.mode === "dark" || parsed.mode === "system") &&
+              typeof parsed.highContrast === "boolean"
+            ) {
+              return parsed
+            }
+          } catch {}
+
+          return {
+            mode: "system",
+            highContrast: false,
+          }
+        }
+
+        const snapshot = readSnapshot()
+        const themeName =
+          snapshot.mode === "system"
+            ? matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : snapshot.mode
+        const root = document.documentElement
+        const variables = themes[`${themeName}-${snapshot.highContrast ? "high" : "normal"}`]
+
+        root.setAttribute("data-theme", themeName)
+        root.setAttribute("data-theme-mode", snapshot.mode)
+        root.setAttribute("data-contrast", snapshot.highContrast ? "high" : "normal")
+        root.style.colorScheme = themeName
+
+        for (const name in variables) {
+          root.style.setProperty(name, variables[name])
+        }
+
+        root.style.backgroundColor = variables["--theme-color-background"]
+      })()
+    </script>
     <link rel="stylesheet" href="index.css" />
   </head>
   <body>
