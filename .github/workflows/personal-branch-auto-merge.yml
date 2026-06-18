@@ -1,0 +1,56 @@
+name: Personal branch auto-merge
+
+on:
+  schedule:
+    # GitHub Actions schedules use UTC; 10:00 UTC is 5:00 AM EST.
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: personal-branch-auto-merge-aleclarson
+  cancel-in-progress: true
+
+env:
+  USER_BRANCH: aleclarson
+  BASE_BRANCH: main
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Find open PR
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pr_number="$(
+            gh pr list \
+              --repo "${{ github.repository }}" \
+              --base "$BASE_BRANCH" \
+              --head "$USER_BRANCH" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge
+        if: steps.pr.outputs.number != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh pr merge "${{ steps.pr.outputs.number }}" \
+            --repo "${{ github.repository }}" \
+            --auto \
+            --rebase
