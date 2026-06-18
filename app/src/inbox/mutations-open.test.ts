@@ -10,7 +10,6 @@ import type { DaemonSession } from "@goddard-ai/sdk"
 import { afterEach, beforeEach, expect, mock, test, vi } from "bun:test"
 
 import { queryClient } from "~/lib/query.ts"
-import { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 
 const inboxClient: any = {}
 const sessionClient: any = {}
@@ -25,6 +24,14 @@ mock.module("~/sdk.ts", () => ({
     pr: prClient,
     session: sessionClient,
   },
+}))
+
+mock.module("~/pull-requests/view.tsrx", () => ({
+  default: () => null,
+}))
+
+mock.module("~/session-chat/view.tsrx", () => ({
+  default: () => null,
 }))
 
 function resetSdk() {
@@ -168,6 +175,7 @@ test("inbox mutations refresh mounted inbox lists", async () => {
 
 test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", async () => {
   const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
   const workbenchTabSet = new WorkbenchTabSet()
 
   await openInboxItemInWorkbench({
@@ -178,14 +186,12 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   expect(sessionClient.get).toHaveBeenCalledWith({
     id: "ses_session_1",
   })
-  expect(sessionClient.history).toHaveBeenCalledWith({
-    id: "ses_session_1",
-  })
+  expect(sessionClient.history).not.toHaveBeenCalled()
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_session_1",
   })
   expect(adapterClient.list).toHaveBeenCalledWith({
-    cwd: "/repo",
+    cwd: "/Users/alec/Projects/goddard-ai",
     includeUninstalled: true,
   })
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
@@ -200,8 +206,9 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   })
 })
 
-test("prepareInboxItemWorkbenchTarget warms session tabs without opening them", async () => {
+test("prepareInboxItemWorkbenchTarget eagerly warms session tabs without opening them", async () => {
   const { prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
   const workbenchTabSet = new WorkbenchTabSet()
 
   const target = await prepareInboxItemWorkbenchTarget(
@@ -223,9 +230,7 @@ test("prepareInboxItemWorkbenchTarget warms session tabs without opening them", 
   expect(sessionClient.get).toHaveBeenCalledWith({
     id: "ses_prepared",
   })
-  expect(sessionClient.history).toHaveBeenCalledWith({
-    id: "ses_prepared",
-  })
+  expect(sessionClient.history).not.toHaveBeenCalled()
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_prepared",
   })
@@ -236,8 +241,26 @@ test("prepareInboxItemWorkbenchTarget warms session tabs without opening them", 
   expect(workbenchTabSet.activeClosableTab).toBeNull()
 })
 
+test("warmPreparedInboxWorkbenchTargetOnIdle warms session history", async () => {
+  const { prepareInboxItemWorkbenchTarget, warmPreparedInboxWorkbenchTargetOnIdle } =
+    await import("./open.ts")
+  const target = await prepareInboxItemWorkbenchTarget(
+    createFixtureInboxItem({ entityId: "ses_idle" }),
+  )
+
+  sessionClient.history.mockClear()
+
+  expect(target).not.toBeNull()
+  await warmPreparedInboxWorkbenchTargetOnIdle(target!)
+
+  expect(sessionClient.history).toHaveBeenCalledWith({
+    id: "ses_idle",
+  })
+})
+
 test("openInboxItemInWorkbench reuses a matching prepared session target", async () => {
   const { openInboxItemInWorkbench, prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
   const item = createFixtureInboxItem({ entityId: "ses_reused" })
   const preparedTarget = await prepareInboxItemWorkbenchTarget(item)
   const workbenchTabSet = new WorkbenchTabSet()
@@ -265,6 +288,7 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
 
 test("openInboxItemInWorkbench opens pull request rows as pull request tabs", async () => {
   const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
   const workbenchTabSet = new WorkbenchTabSet()
 
   await openInboxItemInWorkbench({
@@ -292,6 +316,7 @@ test("openInboxItemInWorkbench opens pull request rows as pull request tabs", as
 
 test("prepareInboxItemWorkbenchTarget warms pull request tabs without opening them", async () => {
   const { prepareInboxItemWorkbenchTarget } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
   const workbenchTabSet = new WorkbenchTabSet()
 
   const target = await prepareInboxItemWorkbenchTarget(

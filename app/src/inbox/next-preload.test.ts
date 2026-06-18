@@ -63,6 +63,52 @@ test("NextInboxWorkbenchPreloader reuses the current prepared target", async () 
   expect(prepareTarget).toHaveBeenCalledTimes(1)
 })
 
+test("NextInboxWorkbenchPreloader schedules idle warming for the current prepared target", async () => {
+  const item = createInboxItem({ entityId: "ses_1" })
+  const preparedTarget = createPreparedTarget(item)
+  const prepareTarget = vi.fn(async () => preparedTarget)
+  const warmTargetOnIdle = vi.fn(async () => {})
+  const scheduledTasks: Array<() => void> = []
+  const preloader = new NextInboxWorkbenchPreloader({
+    prepareTarget,
+    scheduleIdleTask: vi.fn((callback) => {
+      scheduledTasks.push(callback)
+      return () => {}
+    }),
+    warmTargetOnIdle,
+  })
+
+  preloader.prepare(item)
+  await expect(preloader.resolve(item)).resolves.toBe(preparedTarget)
+
+  expect(scheduledTasks).toHaveLength(1)
+  scheduledTasks[0]()
+  expect(warmTargetOnIdle).toHaveBeenCalledWith(preparedTarget)
+})
+
+test("NextInboxWorkbenchPreloader cancels idle warming for stale prepared targets", async () => {
+  const firstItem = createInboxItem({ entityId: "ses_1" })
+  const secondItem = createInboxItem({ entityId: "ses_2" })
+  const firstPreparedTarget = createPreparedTarget(firstItem)
+  const secondPreparedTarget = createPreparedTarget(secondItem)
+  const prepareTarget = vi
+    .fn()
+    .mockResolvedValueOnce(firstPreparedTarget)
+    .mockResolvedValueOnce(secondPreparedTarget)
+  const cancelIdleWarm = vi.fn()
+  const preloader = new NextInboxWorkbenchPreloader({
+    prepareTarget,
+    scheduleIdleTask: vi.fn(() => cancelIdleWarm),
+    warmTargetOnIdle: vi.fn(async () => {}),
+  })
+
+  preloader.prepare(firstItem)
+  await expect(preloader.resolve(firstItem)).resolves.toBe(firstPreparedTarget)
+  preloader.prepare(secondItem)
+
+  expect(cancelIdleWarm).toHaveBeenCalledTimes(1)
+})
+
 test("NextInboxWorkbenchPreloader ignores stale prepared targets", async () => {
   const firstItem = createInboxItem({ entityId: "ses_1" })
   const secondItem = createInboxItem({ entityId: "ses_2" })
