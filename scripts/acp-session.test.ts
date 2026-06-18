@@ -1,3 +1,7 @@
+/*
+ * Exercises the ACP session helper functions used by the interactive debugging
+ * script.
+ */
 import { resolve } from "node:path"
 import { describe, expect, test } from "bun:test"
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
-/** ACP debugging CLI for daemon-backed sessions and raw adapters. */
+/*
+ * Provides an ACP debugging CLI for listing agents, inspecting sessions, and
+ * resuming daemon-backed or raw adapter sessions.
+ */
 import { resolve } from "node:path"
 import { cancel, intro, isCancel, log, note, outro, text } from "@clack/prompts"
 import { createAcpRegistryService } from "acp-client/node"

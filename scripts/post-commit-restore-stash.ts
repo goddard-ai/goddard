@@ -1,3 +1,7 @@
+/*
+ * Restores the pre-commit hook's hidden unstaged changes after a successful
+ * commit and cleans up the pending restore marker.
+ */
 import { execFileSync } from "node:child_process"
 import { readFileSync, rmSync } from "node:fs"
 

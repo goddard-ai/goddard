@@ -1,3 +1,7 @@
+/*
+ * Validates public docs folders for required page shape, README coverage,
+ * resolvable local links, and banned implementation-focused phrasing.
+ */
 import fs from "node:fs"
 import path from "node:path"
 

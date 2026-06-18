@@ -1,3 +1,7 @@
+/*
+ * Starts the local development supervisor for the daemon and app processes with
+ * development environment defaults.
+ */
 import { supervise } from "procband"
 import { concat } from "radashi"
 

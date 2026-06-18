@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/**
+/*
  * Runs the pre-push guard from TypeScript so the Husky hook stays thin and the
  * repo-check rules live in a discoverable place.
  */

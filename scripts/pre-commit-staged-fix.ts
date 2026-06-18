@@ -1,3 +1,7 @@
+/*
+ * Runs format and lint fixers against staged files while temporarily hiding
+ * unstaged work so the commit snapshot stays intentional.
+ */
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
