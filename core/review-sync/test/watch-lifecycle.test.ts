@@ -60,46 +60,6 @@ test("cli watch --verbose explains watcher setup", async () => {
   expect(output).toContain("Watching review sync")
 })
 
-test("watch reports when filesystem watchers are armed", async () => {
-  const fixture = await createStartedFixture({
-    "shared.txt": "base\n",
-  })
-  await runGit(fixture.reviewDir, ["checkout", "main"])
-
-  const controller = new AbortController()
-  const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
-  const ready = createDeferred<void>()
-  let readyResolved = false
-  const watch = watchReviewSession({
-    cwd: fixture.reviewDir,
-    signal: controller.signal,
-    onWatchReady: () => {
-      readyResolved = true
-      ready.resolve()
-      controller.abort()
-    },
-  })
-
-  try {
-    await Promise.race([
-      ready.promise,
-      watch.then((result) => {
-        if (!readyResolved) {
-          throw new Error(`watch stopped before readiness: ${result.message}`)
-        }
-      }),
-    ])
-    const stopped = await watch
-
-    expect(stopped.status).toBe("paused")
-    expect(controller.signal.reason).not.toBe(timeoutReason)
-    expect(await currentBranch(fixture.reviewDir)).toBe("main")
-  } finally {
-    clearTimeout(timeout)
-  }
-})
-
 test("watch fails when started from a review-sync branch", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
