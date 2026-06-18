@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/*
+/**
  * Runs the pre-push guard from TypeScript so the Husky hook stays thin and the
  * repo-check rules live in a discoverable place.
  */
@@ -8,9 +8,6 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import globrex from "globrex"
-
-const REBASE_CHECKED_REMOTE_BRANCH_REFS = ["refs/heads/aleclarson"]
-const ZERO_SHA = "0000000000000000000000000000000000000000"
 
 const CHECKED_SOURCE_FILE_EXTENSIONS = ["ts", "tsrx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
 
@@ -86,20 +83,6 @@ function findPushedSha(remoteName: string, updates: PushUpdate[]) {
   }
 
   return updates.find(({ localRef }) => localRef !== "(delete)")?.localSha
-}
-
-/** Selects the pushed commit when a personal branch should prove it can rebase onto main. */
-export function findRebaseCheckedBranchPushSha(remoteName: string, updates: PushUpdate[]) {
-  if (remoteName !== "origin") {
-    return undefined
-  }
-
-  return updates.find(
-    ({ localRef, localSha, remoteRef }) =>
-      REBASE_CHECKED_REMOTE_BRANCH_REFS.includes(remoteRef) &&
-      localRef !== "(delete)" &&
-      localSha !== ZERO_SHA,
-  )?.localSha
 }
 
 /** Resolves the repository root so subprocesses run from a stable location. */
@@ -246,9 +229,7 @@ function runRepoCheck(repoRoot: string, changedFiles: string[]) {
 /** Runs the pre-push guard and returns a process exit code. */
 async function main(argv = process.argv.slice(2)) {
   const [remoteName = ""] = argv
-  const updates = parsePushUpdates(await readStdinText())
-  const pushedSha = findPushedSha(remoteName, updates)
-  const rebaseCheckedSha = findRebaseCheckedBranchPushSha(remoteName, updates)
+  const pushedSha = findPushedSha(remoteName, parsePushUpdates(await readStdinText()))
 
   if (!pushedSha && !rebaseCheckedSha) {
     return 0
