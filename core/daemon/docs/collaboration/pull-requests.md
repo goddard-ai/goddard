@@ -31,4 +31,3 @@
   - The daemon does not replace the app or hosting service as the primary review UI.
   - Pull request records are local daemon-managed entities.
   - Clients should not infer pull request attention independently of daemon-managed pull request events.
-  - Related pages: [pull request attention](../attention/pull-request-attention.md), [pull request feedback](./pr-feedback.md), and [session tokens](../sessions/session-tokens.md).

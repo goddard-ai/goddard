@@ -31,4 +31,3 @@
   - Worktrees isolate Git checkout state; they do not make unsafe agent behavior safe by themselves.
   - Custom worktree providers are user-scoped executable extension behavior.
   - Repository-local configuration can shape preparation intent but cannot declare custom executable worktree plugins.
-  - Related pages: [worktree preparation](./worktree-preparation.md), [configuration refresh](../concepts/configuration-refresh.md), and [review sessions](../collaboration/review-sessions.md).

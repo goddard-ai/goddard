@@ -31,4 +31,3 @@
 - **Boundaries**
   - Recovery should not silently erase validation problems.
   - Clients should inspect daemon workforce state instead of trying to infer recovery from repository files alone.
-  - Related pages: [workforce requests](./workforce-requests.md), [workforce](./workforce.md), and [runtime ownership](../concepts/runtime-ownership.md).

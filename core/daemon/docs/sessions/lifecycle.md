@@ -37,4 +37,3 @@
   - A history-only session has stored records but no live execution to resume.
   - After daemon restart, sessions whose live execution is gone become inspectable as historical records rather than pretending to still be live.
   - Recovery after restart belongs to the daemon: clients should refresh session state instead of deciding from cached connection state.
-  - Related pages: [history and diagnostics](./history-and-diagnostics.md), [cancellation and steering](./cancellation-and-steering.md), and [worktrees](./worktrees.md).

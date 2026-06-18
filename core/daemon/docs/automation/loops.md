@@ -22,4 +22,3 @@
   - Loops are for reusable runtime behavior that may continue until shut down.
   - Invalid persisted configuration should not replace the daemon's last valid behavior for future loop resolutions.
   - Loop state is daemon-owned; clients recover from missed updates by listing or inspecting loops again.
-  - Related pages: [actions](./actions.md), [configuration refresh](../concepts/configuration-refresh.md), and [runtime ownership](../concepts/runtime-ownership.md).

@@ -29,4 +29,3 @@
   - Preview and lease behavior belongs to launch-time preparation.
   - Durable session behavior begins only when a session is created.
   - A lease grants no broad daemon authority outside the launch it was prepared for.
-  - Related pages: [session lifecycle](./lifecycle.md), [adapters](../concepts/adapters.md), and [managed agent installs](../concepts/managed-agent-installs.md).

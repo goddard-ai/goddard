@@ -32,4 +32,3 @@
   - The SDK remains the primary programmatic surface.
   - The daemon remains the trusted local execution boundary.
   - Runtime domains may share daemon infrastructure but must not share mutable execution state in a way that hides ownership.
-  - Related pages: [daemon model](../model.md), [daemon server](./daemon-server.md), and [session tokens](../sessions/session-tokens.md).

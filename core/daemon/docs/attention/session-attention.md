@@ -27,4 +27,3 @@
   - Hidden attention metadata is not part of the visible user-facing chat response.
   - Completing the session's inbox concern is separate from shutting down the session.
   - A user reply can move a row to `replied` without making the session complete.
-  - Related pages: [inbox statuses](./inbox-statuses.md), [session lifecycle](../sessions/lifecycle.md), and [pull request attention](./pull-request-attention.md).

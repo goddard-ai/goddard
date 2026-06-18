@@ -27,4 +27,3 @@
   - Listing an adapter does not guarantee launch until the daemon can resolve a runnable process.
   - Adapter install state is separate from managed agent install state.
   - Repository-local catalog entries should not silently grant executable extension authority beyond the configured adapter behavior.
-  - Related pages: [managed agent installs](./managed-agent-installs.md), [launch preview and leases](../sessions/launch-preview-and-leases.md), and [launch](./launch.md).

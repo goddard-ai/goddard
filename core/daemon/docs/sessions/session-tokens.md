@@ -23,4 +23,3 @@
   - A token is scoped to session authority, not global daemon administration.
   - User-facing clients should not ask agents to expose tokens in visible replies.
   - Token-based tools should still use daemon contracts rather than mutating daemon-owned records directly.
-  - Related pages: [agent tools](../collaboration/agent-tools.md), [pull requests](../collaboration/pull-requests.md), and [workforce requests](../automation/workforce-requests.md).

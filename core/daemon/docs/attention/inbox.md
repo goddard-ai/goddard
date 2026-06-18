@@ -37,4 +37,3 @@
   - It is not an external notification aggregator.
   - It is not append-only notification history.
   - It does not identify rows by external service ids such as GitHub pull request numbers.
-  - Related pages: [inbox statuses](./inbox-statuses.md), [session attention](./session-attention.md), and [pull request attention](./pull-request-attention.md).

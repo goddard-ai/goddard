@@ -26,4 +26,3 @@
   - The inbox does not replace GitHub or another host's notification system.
   - Pull request rows are local daemon workflow state.
   - Clients should not infer pull request attention independently from daemon-managed pull request events.
-  - Related pages: [managed pull requests](../collaboration/pull-requests.md), [pull request feedback](../collaboration/pr-feedback.md), and [inbox statuses](./inbox-statuses.md).

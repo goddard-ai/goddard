@@ -28,4 +28,3 @@
   - Feedback handling is separate from workforce orchestration.
   - The runtime handles supported pull request comment and review feedback events; it is not broad long-running planning.
   - It is not a terminal-native replacement for a pull request review UI.
-  - Related pages: [pull requests](./pull-requests.md), [pull request attention](../attention/pull-request-attention.md), and [history and diagnostics](../sessions/history-and-diagnostics.md).
