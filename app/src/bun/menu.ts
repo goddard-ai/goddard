@@ -62,7 +62,12 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
       submenu: concat(
         fileMenu.closeTab,
         fileMenu.closeWindow,
-        process.platform === "darwin" ? [{ type: "separator" as const }, { role: "quit" }] : null,
+        process.platform === "darwin" ?
+          [
+            { type: "separator" as const },
+            { role: "quit", accelerator: "CommandOrControl+Q" },
+          ]
+        : null,
       ),
     },
     {
