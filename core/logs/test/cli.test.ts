@@ -66,12 +66,16 @@ test("CLI pages and expands logs from the canonical database", async () => {
 })
 
 async function runCli(args: string[], home: string) {
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOME: home,
+  }
+  // Bun.spawn command lookup expects PATH, while Windows runners may expose Path.
+  env.PATH ??= env.Path
+
   const subprocess = Bun.spawn(["bun", "run", "./src/cli.ts", ...args], {
     cwd: new URL("..", import.meta.url).pathname,
-    env: {
-      ...Bun.env,
-      HOME: home,
-    },
+    env,
     stdout: "pipe",
     stderr: "pipe",
   })
