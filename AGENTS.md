@@ -1,7 +1,7 @@
 <critical-rules>
 - Do not overwrite or revert unrelated user changes.
 - Do not edit `spec/` unless explicitly asked.
-- Do not knowingly let code, docs, or tests diverge from `spec/`.
+- Do not knowingly let code, non-overview docs, or tests diverge from `spec/`; `overview/` docs describe current supported behavior and may diverge when `spec/` describes an ideal or future shape.
 - This repo is unreleased and pre-alpha; do not add legacy compatibility paths, deprecation shims, or fallback behavior unless explicitly asked.
 - Do not use destructive git commands unless explicitly requested.
 - Commit completed file changes with Conventional Commits before ending the turn unless the user or a safer scoped workflow says not to.
