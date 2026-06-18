@@ -42,6 +42,17 @@ export async function releaseSessionLaunchLease(launchLeaseId: string | null | u
 }
 
 /**
+ * Schedules one abandoned launch worktree for delayed cleanup.
+ */
+export async function releaseSessionLaunchWorktree(launchWorktreeId: string | null | undefined) {
+  if (!launchWorktreeId) {
+    return
+  }
+
+  await goddardSdk.session.launchWorktree.release({ launchWorktreeId })
+}
+
+/**
  * Submits one prompt into an existing session and refreshes the affected session views.
  */
 export async function submitSessionPrompt(props: SessionPromptRequest) {

@@ -12,8 +12,12 @@ import type {
   InitialSessionConfigOption,
   ListSessionsRequest,
   ListSessionsResponse,
+  PrepareSessionLaunchWorktreeRequest,
+  PrepareSessionLaunchWorktreeResponse,
   ReleaseSessionLaunchLeaseRequest,
   ReleaseSessionLaunchLeaseResponse,
+  ReleaseSessionLaunchWorktreeRequest,
+  ReleaseSessionLaunchWorktreeResponse,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
@@ -68,8 +72,12 @@ export type {
   SessionUsageUpdateMessage,
   ListSessionsRequest,
   ListSessionsResponse,
+  PrepareSessionLaunchWorktreeRequest,
+  PrepareSessionLaunchWorktreeResponse,
   ReleaseSessionLaunchLeaseRequest,
   ReleaseSessionLaunchLeaseResponse,
+  ReleaseSessionLaunchWorktreeRequest,
+  ReleaseSessionLaunchWorktreeResponse,
   SessionLocalCheckoutParams,
   ShutdownSessionResponse,
 }
@@ -119,6 +127,7 @@ interface BaseSessionParams {
   agent?: AcpAdapterId | AgentDistribution
   cwd: string
   launchLeaseId?: string
+  launchWorktreeId?: string
   localCheckout?: SessionLocalCheckoutParams
   worktree?: SessionWorktreeParams
   mcpServers: acp.McpServer[]

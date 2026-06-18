@@ -227,6 +227,24 @@ export type DaemonWorktree = z.output<typeof DaemonWorktree> & {
   id: `wt_${string}`
 }
 
+/**
+ * Persisted launch-dialog worktree prepared before durable session creation.
+ */
+export const DaemonLaunchWorktree = z.strictObject({
+  key: z.string(),
+  repoRoot: z.string(),
+  requestedCwd: z.string(),
+  effectiveCwd: z.string(),
+  worktreeDir: z.string(),
+  branchName: z.string(),
+  poweredBy: z.string(),
+  releaseAfter: z.string().nullable(),
+})
+
+export type DaemonLaunchWorktree = z.output<typeof DaemonLaunchWorktree> & {
+  id: `lwt_${string}`
+}
+
 /** Session-start initial prompt values accepted by the daemon session API. */
 export const InitialPromptOption = z.union([z.string(), z.array(z.custom<acp.ContentBlock>())])
 
@@ -267,6 +285,7 @@ export const CreateSessionRequest = z.strictObject({
   agent: z.union([z.string() as z.ZodType<AcpAdapterId>, AgentDistribution]).optional(),
   cwd: z.string(),
   launchLeaseId: z.string().optional(),
+  launchWorktreeId: z.string().optional(),
   localCheckout: SessionLocalCheckoutParams.optional(),
   worktree: CreateSessionWorktreeParams.optional(),
   mcpServers: z.array(z.custom<acp.McpServer>()),
@@ -402,6 +421,37 @@ export type ReleaseSessionLaunchLeaseRequest = z.infer<typeof ReleaseSessionLaun
 /** Response payload returned after a launch lease release has been scheduled. */
 export type ReleaseSessionLaunchLeaseResponse = {
   launchLeaseId: string
+  released: boolean
+}
+
+/** Request payload used to prepare a launch-dialog worktree before session creation. */
+export const PrepareSessionLaunchWorktreeRequest = z.strictObject({
+  cwd: z.string(),
+  baseBranchName: z.string().optional(),
+})
+
+export type PrepareSessionLaunchWorktreeRequest = z.infer<
+  typeof PrepareSessionLaunchWorktreeRequest
+>
+
+/** Response payload returned after launch-dialog worktree preparation. */
+export type PrepareSessionLaunchWorktreeResponse = {
+  launchWorktreeId: string | null
+  worktree: SessionWorktree | null
+}
+
+/** Request payload used to release a launch-dialog worktree after abandonment. */
+export const ReleaseSessionLaunchWorktreeRequest = z.strictObject({
+  launchWorktreeId: z.string(),
+})
+
+export type ReleaseSessionLaunchWorktreeRequest = z.infer<
+  typeof ReleaseSessionLaunchWorktreeRequest
+>
+
+/** Response payload returned after launch-dialog worktree release is scheduled. */
+export type ReleaseSessionLaunchWorktreeResponse = {
+  launchWorktreeId: string
   released: boolean
 }
 

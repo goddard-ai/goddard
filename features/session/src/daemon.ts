@@ -16,6 +16,7 @@ import {
   type SessionWorktreePreparedEvent,
 } from "./daemon/manager.ts"
 import {
+  DaemonLaunchWorktree,
   DaemonSession,
   DaemonSessionDiagnostics,
   DaemonSessionTurn,
@@ -117,6 +118,8 @@ const sessionDb = {
   }),
 
   worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
+
+  launchWorktrees: kind("lwt", DaemonLaunchWorktree).index("key", { type: "text" }),
 }
 
 type SessionTurnRetentionRecord = {
@@ -442,6 +445,10 @@ export const sessionPlugin = definePlugin({
           launchPreview: async ({ body }) => sessionManager.getLaunchPreview(body),
           launchLease: {
             release: async ({ body }) => sessionManager.releaseLaunchLease(body),
+          },
+          launchWorktree: {
+            prepare: async ({ body }) => sessionManager.prepareLaunchWorktree(body),
+            release: async ({ body }) => sessionManager.releaseLaunchWorktree(body),
           },
           subpackages: async ({ body }) => sessionManager.getSubpackages(body),
           diagnostics: async ({ body: { id } }) => sessionManager.getDiagnostics(id),

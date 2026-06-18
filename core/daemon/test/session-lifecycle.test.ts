@@ -1899,6 +1899,67 @@ test("session worktree launch branches from the selected base branch", async () 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
+test("session.create promotes a compatible prepared launch worktree", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const require = createRequire(import.meta.url)
+  const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
+  const repoDir = await createRepoFixture({ includeSrc: true })
+  const requestedCwd = join(repoDir, "src")
+
+  const prepared = await send(client, "session.launchWorktree.prepare", {
+    cwd: requestedCwd,
+  })
+
+  expect(prepared.launchWorktreeId).toEqual(expect.stringMatching(/^lwt_/))
+  expect(prepared.worktree?.requestedCwd).toBe(await realpath(requestedCwd))
+  expect(prepared.worktree?.worktreeDir).not.toBe(repoDir)
+  expect(existsSync(prepared.worktree!.worktreeDir)).toBe(true)
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(exampleAgentPath),
+    cwd: requestedCwd,
+    launchWorktreeId: prepared.launchWorktreeId!,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+  })
+
+  const fetchedWorktree = await send(client, "session.worktree.get", {
+    id: created.session.id,
+  })
+
+  expect(fetchedWorktree.worktree?.worktreeDir).toBe(prepared.worktree?.worktreeDir)
+  expect(fetchedWorktree.worktree?.effectiveCwd).toBe(prepared.worktree?.effectiveCwd)
+  expect(db.launchWorktrees.findMany()).toHaveLength(0)
+
+  await send(client, "session.shutdown", { id: created.session.id })
+})
+
+test("daemon startup cleans cold prepared launch worktrees", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const prepared = await send(client, "session.launchWorktree.prepare", {
+    cwd: repoDir,
+  })
+  const worktreeDir = prepared.worktree!.worktreeDir
+
+  expect(existsSync(worktreeDir)).toBe(true)
+  expect(db.launchWorktrees.findMany()).toHaveLength(1)
+
+  await daemon.close()
+
+  const restarted = await startServer({ useExistingHome: true })
+  const restartedClient = createDaemonIpcClient({ daemonUrl: restarted.daemonUrl })
+
+  await send(restartedClient, "session.list", {})
+
+  expect(db.launchWorktrees.findMany()).toHaveLength(0)
+  expect(existsSync(worktreeDir)).toBe(false)
+})
+
 test("fileSearch.composerEntries scopes `@` lookups to indexed results under the requested cwd", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })

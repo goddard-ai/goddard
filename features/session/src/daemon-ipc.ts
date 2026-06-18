@@ -9,7 +9,9 @@ import {
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   GetSessionWorktreeRequest,
   ListSessionsRequest,
+  PrepareSessionLaunchWorktreeRequest,
   ReleaseSessionLaunchLeaseRequest,
+  ReleaseSessionLaunchWorktreeRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
@@ -33,7 +35,9 @@ import {
   type GetSessionResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
+  type PrepareSessionLaunchWorktreeResponse,
   type ReleaseSessionLaunchLeaseResponse,
+  type ReleaseSessionLaunchWorktreeResponse,
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
@@ -96,6 +100,18 @@ export const sessionIpcRoutes = defineIpcRoutes({
       release: http.post("release", {
         body: ReleaseSessionLaunchLeaseRequest,
         response: $type<ReleaseSessionLaunchLeaseResponse>(),
+      }),
+    }),
+    launchWorktree: http.resource("launch-worktree", {
+      /** Prepares one launch-dialog worktree for possible session creation. */
+      prepare: http.post("prepare", {
+        body: PrepareSessionLaunchWorktreeRequest,
+        response: $type<PrepareSessionLaunchWorktreeResponse>(),
+      }),
+      /** Schedules one abandoned launch-dialog worktree for delayed cleanup. */
+      release: http.post("release", {
+        body: ReleaseSessionLaunchWorktreeRequest,
+        response: $type<ReleaseSessionLaunchWorktreeResponse>(),
       }),
     }),
     /** Discovers launchable subpackage working directories under one project cwd. */

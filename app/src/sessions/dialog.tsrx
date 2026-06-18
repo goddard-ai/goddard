@@ -7,11 +7,16 @@ import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
+import { goddardSdk } from "~/sdk.ts"
 import { recordSessionLaunchAgentUse } from "./launch-preferences.ts"
 import styles from "./dialog.style.ts"
 import { SessionLaunchFormState } from "./launch-form-state.ts"
 import { isKeptSessionLaunchLease } from "./launch-lease-keeper.tsrx"
-import { createSession, releaseSessionLaunchLease } from "./mutations.ts"
+import {
+  createSession,
+  releaseSessionLaunchLease,
+  releaseSessionLaunchWorktree,
+} from "./mutations.ts"
 import { SessionLaunchForm } from "./launch-form.tsrx"
 import { getSessionDisplayTitle } from "./display.ts"
 
@@ -102,6 +107,55 @@ export default function SessionLaunchDialog(props: {
       form.reset(initialProjectPath)
     }
   }, [form, form.draftProjectPath.value, initialProjectPath, isDialogOpen])
+
+  useEffect(() => {
+    const cwd = form.effectiveCwd.value
+
+    if (!isDialogOpen || !cwd || !form.launchPreview.value?.repoRoot) {
+      form.launchWorktreeId.value = null
+      return
+    }
+
+    const baseBranchName = form.draftBaseBranchName.value ?? undefined
+    let active = true
+    let launchWorktreeId: string | null = null
+
+    void goddardSdk.session.launchWorktree.prepare({
+      cwd,
+      baseBranchName,
+    }).then((response) => {
+      launchWorktreeId = response.launchWorktreeId
+
+      if (!active) {
+        void releaseSessionLaunchWorktree(launchWorktreeId).catch((error) => {
+          console.error("Failed to release launch worktree.", error)
+        })
+        return
+      }
+
+      form.launchWorktreeId.value = launchWorktreeId
+    }).catch((error) => {
+      console.error("Failed to prepare launch worktree.", error)
+    })
+
+    return () => {
+      active = false
+
+      if (form.launchWorktreeId.value === launchWorktreeId) {
+        form.launchWorktreeId.value = null
+      }
+
+      void releaseSessionLaunchWorktree(launchWorktreeId).catch((error) => {
+        console.error("Failed to release launch worktree.", error)
+      })
+    }
+  }, [
+    form,
+    form.draftBaseBranchName.value,
+    form.effectiveCwd.value,
+    form.launchPreview.value?.repoRoot,
+    isDialogOpen,
+  ])
 
   useAppCommand(AppCommand.sessionInput.openProjectSelector, () => {
     form.setOpenPicker("project")
