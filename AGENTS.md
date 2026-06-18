@@ -5,6 +5,7 @@
 - This repo is unreleased and pre-alpha; do not add legacy compatibility paths, deprecation shims, or fallback behavior unless explicitly asked.
 - Do not use destructive git commands unless explicitly requested.
 - Commit completed file changes with Conventional Commits before ending the turn unless the user or a safer scoped workflow says not to.
+- The pre-commit hook automatically formats staged changes; do not run the repo `fmt` command unless explicitly asked.
 - Run or attempt the required verification before finishing, and report any limitation.
 </critical-rules>
 
