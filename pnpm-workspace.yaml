@@ -38,6 +38,7 @@ minimumReleaseAgeExclude:
   - "@remix-run/route-pattern"
   - acp-client
   - ai-sdk-json-schema
+  - bumped-version
   - electrobun
   - kindstore
   - powerkeys
