@@ -4,6 +4,9 @@ import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import { pauseReviewSession, resumeReviewSession, syncReviewSession } from "../src/index.ts"
+import { createRuntimeContext } from "../src/runtime.ts"
+import { listSessions } from "../src/state.ts"
+import { refreshReviewWorktreeFromAgentBranchRef } from "../src/sync.ts"
 import {
   captureReviewSyncError,
   cleanupReviewSyncFixtures,
@@ -306,6 +309,65 @@ test("sync preserves rejected human patches and refreshes review from the agent"
   expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("agent edit\n")
 })
 
+test("branch-ref refresh updates the review worktree without touching the agent worktree", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const [session] = await readFullSessionStates(fixture.agentDir)
+
+  await writeText(join(fixture.agentDir, "shared.txt"), "branch ref edit\n")
+  await runGit(fixture.agentDir, ["add", "shared.txt"])
+  await runGit(fixture.agentDir, ["commit", "-m", "branch ref edit"])
+  const result = await refreshReviewWorktreeFromAgentBranchRef(
+    session!,
+    createRuntimeContext(fixture.reviewDir),
+  )
+
+  expect(result.status).toBe("refreshed")
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("branch ref edit\n")
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("branch ref edit\n")
+})
+
+test("branch-ref refresh skips when human edits are pending", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const [session] = await readFullSessionStates(fixture.agentDir)
+
+  await writeText(join(fixture.agentDir, "shared.txt"), "branch ref edit\n")
+  await runGit(fixture.agentDir, ["add", "shared.txt"])
+  await runGit(fixture.agentDir, ["commit", "-m", "branch ref edit"])
+  await writeText(join(fixture.reviewDir, "shared.txt"), "human edit\n")
+  const result = await refreshReviewWorktreeFromAgentBranchRef(
+    session!,
+    createRuntimeContext(fixture.reviewDir),
+  )
+
+  expect(result).toEqual({ status: "skipped", reason: "pending-human-patch" })
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("human edit\n")
+})
+
+test("branch-ref refresh skips paused sessions", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const [session] = await readFullSessionStates(fixture.agentDir)
+
+  await pauseReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  await writeText(join(fixture.agentDir, "shared.txt"), "branch ref edit\n")
+  await runGit(fixture.agentDir, ["add", "shared.txt"])
+  await runGit(fixture.agentDir, ["commit", "-m", "branch ref edit"])
+  const result = await refreshReviewWorktreeFromAgentBranchRef(
+    session!,
+    createRuntimeContext(fixture.reviewDir),
+  )
+
+  expect(result).toEqual({ status: "skipped", reason: "paused" })
+  expect(await readFile(join(fixture.reviewDir, "shared.txt"), "utf-8")).toBe("base\n")
+})
+
 test("sync includes untracked non-ignored files and excludes ignored files", async () => {
   const fixture = await createStartedFixture({
     ".gitignore": "ignored.txt\n",
@@ -353,3 +415,10 @@ test("pause blocks sync mutations until resume", async () => {
   expect(synced.status).toBe("ok")
   expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human edit\n")
 })
+
+async function readFullSessionStates(cwd: string) {
+  const commonDir = (
+    await runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+  ).stdout.trim()
+  return await listSessions(commonDir)
+}
