@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, expect, test } from "bun:test"
 
 import { createLogStore, formatLogEntry, type LogEntry } from "../src/index.ts"
@@ -69,7 +70,7 @@ async function runCli(args: string[], home: string) {
   const env: Record<string, string | undefined> = process.env
 
   const result = await Bun.$`bun run ./src/cli.ts ${args}`
-    .cwd(new URL("..", import.meta.url).pathname)
+    .cwd(fileURLToPath(new URL("..", import.meta.url)))
     .env({
       ...env,
       HOME: home,
