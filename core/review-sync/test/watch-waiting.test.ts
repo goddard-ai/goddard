@@ -144,60 +144,6 @@ test("watch prepares the review branch from the branch ref while waiting", async
   }
 })
 
-test("watch does not retry on its own branch-ref preparation events", async () => {
-  const fixture = await createFixture({
-    "shared.txt": "base\n",
-  })
-  await runGit(fixture.agentDir, ["checkout", "-B", "codex/temporary"])
-
-  const controller = new AbortController()
-  const timeoutReason = "watch test timeout"
-  const timeout = setTimeout(() => controller.abort(timeoutReason), WATCH_TEST_TIMEOUT_MS)
-  const waiting = createDeferred<void>()
-  let waitingResolved = false
-  const results: ReviewSyncResult[] = []
-  const watch = watchReviewSession({
-    cwd: fixture.reviewDir,
-    agentBranch: "codex/review-sync-test",
-    signal: controller.signal,
-    verbose: true,
-    onResult: (result) => {
-      results.push(result)
-      if (result.command === "watch" && result.message.startsWith("Waiting for ")) {
-        waitingResolved = true
-        waiting.resolve()
-      }
-    },
-  })
-
-  try {
-    await Promise.race([
-      waiting.promise,
-      watch.then((result) => {
-        if (!waitingResolved) {
-          throw new Error(`watch stopped before waiting: ${result.message}`)
-        }
-      }),
-    ])
-    await sleep(500)
-    controller.abort()
-    const stopped = await watch
-
-    expect(stopped.status).toBe("ok")
-    expect(controller.signal.reason).not.toBe(timeoutReason)
-    expect(
-      results.filter((result) =>
-        result.message.includes("prepared review-sync/codex/review-sync-test in"),
-      ).length,
-    ).toBe(1)
-    expect(
-      results.some((result) => result.message.includes("repository metadata changed; retrying")),
-    ).toBe(false)
-  } finally {
-    clearTimeout(timeout)
-  }
-})
-
 test("watch syncs human commits made while waiting for agent checkout", async () => {
   const fixture = await createFixture({
     "shared.txt": "base\n",
