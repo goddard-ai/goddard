@@ -52,10 +52,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - name: Setup git-cliff
-        uses: taiki-e/install-action@v2
-        with:
-          tool: git-cliff
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Infer next version
         id: version
@@ -69,7 +67,7 @@ jobs:
           if [ -z "$latest_tag" ]; then
             bumped_tag="${PACKAGE_RELEASE_NAME}@0.1.0"
           else
-            bumped_tag="$(git-cliff --bumped-version --use-branch-tags --tag-pattern "${PACKAGE_RELEASE_NAME}@[0-9]*" --include-path "${PACKAGE_DIR}/**")"
+            bumped_tag="${PACKAGE_RELEASE_NAME}@$(pnpm exec bumped-version "$PACKAGE_DIR")"
           fi
 
           next_version="${bumped_tag#${PACKAGE_RELEASE_NAME}@}"
@@ -84,10 +82,6 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Next version is $next_version."
           fi
-
-      - name: Install dependencies
-        if: steps.version.outputs.changed == 'true'
-        run: pnpm install --frozen-lockfile
 
       - name: Check package
         if: steps.version.outputs.changed == 'true'
