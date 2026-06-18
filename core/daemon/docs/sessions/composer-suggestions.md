@@ -8,11 +8,13 @@
 - **Session-scoped suggestions**
   - A live or stored session can provide suggestions based on its current session context.
   - Suggestions may reflect commands or options the active agent has made available.
+  - If the session becomes history-only, suggestions should be treated as current daemon guidance for inspection or follow-up, not proof that live control is available.
 
 - **Draft suggestions**
   - Draft suggestions can be requested before a daemon session exists.
   - They depend on a repository working directory rather than a session id.
   - They help launch or composer UI offer relevant choices early.
+  - Draft suggestion failure should leave the launch or composer draft intact; it does not create or cancel a session by itself.
 
 - **Subpackage discovery**
   - Repository discovery can identify launchable working directories inside a project.
@@ -22,3 +24,4 @@
   - Suggestions are convenience data for clients.
   - They do not create sessions or mutate repository state.
   - Clients should treat suggestions as current daemon guidance, not as durable configuration.
+  - Related pages: [launch preview and leases](./launch-preview-and-leases.md), [session lifecycle](./lifecycle.md), and [configuration refresh](../concepts/configuration-refresh.md).

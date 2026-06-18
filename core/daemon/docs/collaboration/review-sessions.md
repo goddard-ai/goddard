@@ -16,20 +16,25 @@
   - Mounting prepares or reuses the review-sync session for one daemon-managed session worktree.
   - Mounting establishes the review branch and review worktree relationship used by review-sync.
   - A mounted review session can optionally begin its runtime immediately.
+  - If mounting cannot establish a safe review relationship, the daemon should report that outcome instead of pretending review-sync is available.
 
 - **Run**
   - Running asks review-sync to perform a sync cycle for the mounted session worktree.
   - The result reflects review-sync outcomes such as accepted work, rejected human patch, paused state, or error state.
+  - Clients should present those outcomes as review workflow state, not as direct edits to the daemon session transcript.
 
 - **Unmount**
   - Unmounting stops the review-session relationship for the daemon-managed worktree.
   - It is the explicit cleanup path for the mounted review surface.
+  - Unmounting does not delete the underlying daemon session or its attached worktree by itself.
 
 - **Recovery**
   - Daemon reconciliation can clean up mounted review sessions when the associated daemon session worktree no longer has live session ownership.
   - Review-sync guardrails still apply to agent and review worktree branches.
+  - When recovery changes mounted state, clients should reload review-session state from the daemon before offering another run action.
 
 - **Boundaries**
   - Review sessions do not replace the `review-sync` conceptual contract.
   - They are the daemon-owned bridge between a session worktree and that existing review workflow.
   - Review branch content is a review surface; the durable daemon session and underlying agent branch retain their own roles.
+  - Related pages: [session worktrees](../sessions/worktrees.md), [pull requests](./pull-requests.md), and the review-sync docs outside the daemon package.

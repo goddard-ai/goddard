@@ -22,9 +22,11 @@
   - `submit-pr`
     - Submits a pull request through the daemon pull request contract.
     - Uses the current daemon session token and current working directory to preserve session and repository context.
+    - Reports failure through the session workflow when pull request submission is unavailable or rejected.
   - `reply-pr`
     - Sends a reply through the daemon pull request contract.
     - Uses the current session token so the reply is tied back to daemon-managed session context.
+    - Keeps replies attributable to the current session rather than a detached host-service action.
 
 - **Workforce tools**
   - `request`
@@ -47,3 +49,4 @@
   - Workforce tools require workforce root context for workforce sessions.
   - Long or multi-line messages should be passed through files so shell quoting does not corrupt the reported content.
   - Hidden inbox metadata should stay concise and should not duplicate the visible user-facing response.
+  - Related pages: [session tokens](../sessions/session-tokens.md), [session attention](../attention/session-attention.md), [pull requests](./pull-requests.md), and [workforce requests](../automation/workforce-requests.md).

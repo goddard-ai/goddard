@@ -19,8 +19,10 @@
   - Session message streams expose live transcript-related session events for one session.
   - Session lifecycle streams expose app-wide session state changes without transcript content.
   - Inbox and workforce streams expose daemon-published updates for clients that need live projections.
+  - Streams help clients stay current, but clients recover from interruption by re-reading daemon state.
 
 - **Boundaries**
   - The server is local control infrastructure, not a public external API contract.
   - The server does not make clients owners of runtime state.
   - Clients should treat daemon responses and streams as the current daemon truth for the active data profile.
+  - Related pages: [runtime ownership](./runtime-ownership.md), [data profiles](./data-profiles.md), and [session lifecycle](../sessions/lifecycle.md).

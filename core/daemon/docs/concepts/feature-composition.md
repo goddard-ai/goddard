@@ -30,7 +30,9 @@
   - Feature packages own their product behavior and daemon handlers.
   - The daemon keeps cross-feature runtime boundaries coherent.
   - Feature-owned persistence belongs behind feature-owned substrate boundaries when a feature owns that data.
+  - When a feature fails or is unavailable, clients should treat that as a capability-specific outcome rather than as permission to recreate runtime state outside the daemon.
 
 - **Boundary**
   - Feature composition is not a user configuration system for arbitrary runtime extension.
   - Repository-local configuration can declare shared intent, but trusted executable daemon extension remains user-scoped.
+  - Related pages: [runtime ownership](./runtime-ownership.md), [daemon server](./daemon-server.md), and [launch](./launch.md).

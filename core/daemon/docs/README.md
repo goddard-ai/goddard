@@ -1,4 +1,4 @@
-# Daemon Overview
+# Daemon Docs
 
 > The daemon is Goddard's local background process for running and coordinating agent work. These pages explain the behavior users and clients can rely on, with enough context to enter from any topic.
 
@@ -18,6 +18,11 @@
     - Backend URL, local port, agent wrapper directory, runtime feature selection, and agent launch environment.
   - [Sessions](./sessions/README.md)
     - Session lifecycle, launch previews, tokens, history, diagnostics, cancellation, steering, worktrees, and composer suggestions.
+
+- **How to use these docs**
+  - Start with the workflow page closest to the question, then follow links to cross-cutting concepts that explain authority, state, or recovery.
+  - Pages describe current supported behavior, so they should be preferred over idealized plans when a plan and the current product differ.
+  - Public concepts can name concrete files or identifiers when those names are part of supported behavior that users configure or observe.
 
 - **Local control surfaces**
   - [Agent tools](./collaboration/agent-tools.md)

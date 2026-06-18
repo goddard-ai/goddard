@@ -21,8 +21,11 @@
   - Each handled request runs in a fresh agent session with workforce context.
   - Workforce sessions may share one repository working tree while still preserving per-agent ownership boundaries.
   - Agents can delegate additional work, respond to active work, or suspend work through daemon-injected tools.
+  - The queue advances only after the daemon accepts the handling outcome for the active request.
+  - A session failure, validation failure, or explicit suspension leaves the request visible for recovery instead of treating it as completed.
 
 - **Boundaries**
   - Only one active workforce runtime may exist for a given repository workspace.
   - Workforce orchestration is separate from pull request feedback handling.
   - SDK and operational clients observe and request mutations; they do not own independent workforce runtime state.
+  - Related pages: [workforce requests](./workforce-requests.md), [workforce suspension and recovery](./workforce-suspension-and-recovery.md), and [agent tools](../collaboration/agent-tools.md).

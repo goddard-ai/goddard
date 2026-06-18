@@ -25,9 +25,11 @@
   - Background automation remains recoverable after daemon restart.
   - Multiple clients can observe the same work without racing each other.
   - Guardrails such as session tokens, repository scope, and workforce ownership validation stay enforceable in one process boundary.
+  - Recovery is consistent because clients reload daemon-owned state instead of reconstructing it from partial local observations.
 
 - **Boundaries**
   - The app remains the primary human-facing workspace.
   - The SDK remains the primary programmatic surface.
   - The daemon remains the trusted local execution boundary.
   - Runtime domains may share daemon infrastructure but must not share mutable execution state in a way that hides ownership.
+  - Related pages: [daemon model](../model.md), [daemon server](./daemon-server.md), and [session tokens](../sessions/session-tokens.md).
