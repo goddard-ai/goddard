@@ -5,7 +5,7 @@ import { render } from "preact"
 import { AppShell } from "~/app-shell.tsrx"
 import { AppStateProvider } from "~/app-state-context.tsrx"
 import { LaunchableStates } from "~/dev/view.tsrx"
-import { desktopHost, initializeDesktopHost } from "~/desktop-host.ts"
+import { desktopHost, initializeDesktopHost, mainWindowReady } from "~/desktop-host.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
 initializeDesktopHost()
@@ -27,3 +27,9 @@ render(
   </>,
   document.getElementById("root")!,
 )
+
+requestAnimationFrame(() => {
+  void mainWindowReady().catch((error) => {
+    console.error("Failed to signal main window readiness.", error)
+  })
+})

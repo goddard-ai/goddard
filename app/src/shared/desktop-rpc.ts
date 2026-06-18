@@ -122,6 +122,10 @@ export type AppDesktopRpc = {
         params: DaemonResetSubscriptionsInput
         response: { removedCount: number }
       }
+      mainWindowReady: {
+        params: {}
+        response: {}
+      }
       maximizeWindow: {
         params: {}
         response: {}

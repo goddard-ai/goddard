@@ -66,6 +66,9 @@ export interface DesktopHostBridge {
   /** Maximizes the active desktop window through the Bun host bridge. */
   maximizeWindow(): Promise<void>
 
+  /** Signals that the renderer has mounted enough UI for the Bun host to show the main window. */
+  mainWindowReady(): Promise<void>
+
   /** Opens one URL through the operating system default browser or URL handler. */
   openExternal(url: string): Promise<boolean>
 
@@ -238,6 +241,11 @@ export async function maximizeWindow(): Promise<void> {
   await rpc.request.maximizeWindow({})
 }
 
+/** Signals that the renderer has mounted enough UI for the Bun host to show the main window. */
+export async function mainWindowReady(): Promise<void> {
+  await rpc.request.mainWindowReady({})
+}
+
 /** Opens one URL through the operating system default browser or URL handler. */
 export async function openExternal(url: string): Promise<boolean> {
   const response = await rpc.request.openExternal({ url })
@@ -290,6 +298,7 @@ export const desktopHost: DesktopHostBridge = {
   loadShortcutKeymap,
   writeShortcutKeymap,
   maximizeWindow,
+  mainWindowReady,
   openExternal,
   daemonSend,
   daemonSubscribe,
