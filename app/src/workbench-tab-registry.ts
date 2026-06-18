@@ -1,18 +1,37 @@
 import { inboxAppPlugin } from "@goddard-ai/inbox/app"
+import type { DaemonSession } from "@goddard-ai/sdk"
 import { lazy } from "preact/compat"
 
+import { queryClient } from "~/lib/query.ts"
+import { goddardSdk } from "~/sdk.ts"
 import type { SvgIconName } from "./lib/good-icon.tsrx"
 
 /** One registered non-primary workbench tab definition. */
-type WorkbenchTabDefinition<TProps extends object = any> = {
-  component: preact.FunctionComponent<any>
+type WorkbenchTabDefinitionBase<TProps extends object> = {
   getId: (props: TProps) => string
   getTitle: (props: TProps) => string
   icon: SvgIconName
   getRelatedFilesystemPath?: (props: TProps) => string | null | undefined
-  preload?: () => Promise<unknown>
+  warm?: (props: TProps) => Promise<unknown>
+  warmOnIdle?: (props: TProps) => Promise<unknown>
   restoreScroll?: boolean
 }
+
+type WorkbenchLazyTabDefinition<TProps extends object = any> =
+  WorkbenchTabDefinitionBase<TProps> & {
+    component?: never
+    loadComponent: () => Promise<{ default: preact.FunctionComponent<TProps> }>
+  }
+
+type WorkbenchStaticTabDefinition<TProps extends object = any> =
+  WorkbenchTabDefinitionBase<TProps> & {
+    component: preact.FunctionComponent<TProps>
+    loadComponent?: undefined
+  }
+
+type WorkbenchTabDefinition<TProps extends object = any> =
+  | WorkbenchLazyTabDefinition<TProps>
+  | WorkbenchStaticTabDefinition<TProps>
 
 /** One loosely typed lazily rendered non-primary tab component. */
 type LooseWorkbenchTabComponent = preact.FunctionComponent<any>
@@ -22,19 +41,50 @@ function PlaceholderWorkbenchTab() {
   return null
 }
 
-function lazyWorkbenchTab<TComponent extends LooseWorkbenchTabComponent>(
-  load: () => Promise<{ default: TComponent }>,
-) {
-  return {
-    component: lazy(load) as TComponent,
-    preload: load,
+type InferWorkbenchTabProps<TDefinition> = TDefinition extends {
+  component: preact.FunctionComponent<infer TProps>
+}
+  ? TProps
+  : TDefinition extends {
+        loadComponent: () => Promise<{ default: preact.FunctionComponent<infer TProps> }>
+      }
+    ? TProps
+    : never
+
+type NormalizedWorkbenchTabDefinitions<
+  TDefinitions extends Record<string, WorkbenchTabDefinition>,
+> = {
+  [TKind in keyof TDefinitions]: TDefinitions[TKind] & {
+    component: LooseWorkbenchTabComponent
   }
 }
 
+function defineWorkbenchTabs<const TDefinitions extends Record<string, WorkbenchTabDefinition>>(
+  definitions: TDefinitions,
+): NormalizedWorkbenchTabDefinitions<TDefinitions> {
+  const normalized = Object.fromEntries(
+    Object.entries(definitions).map(([kind, definition]) => {
+      if (definition.loadComponent) {
+        return [
+          kind,
+          {
+            ...definition,
+            component: lazy(definition.loadComponent) as LooseWorkbenchTabComponent,
+          },
+        ]
+      }
+
+      return [kind, definition]
+    }),
+  )
+
+  return normalized as NormalizedWorkbenchTabDefinitions<TDefinitions>
+}
+
 /** Runtime registry for every non-primary workbench tab component. */
-export const workbenchTabKinds = {
+const workbenchTabDefinitions = {
   inbox: {
-    ...lazyWorkbenchTab(() => import("~/inbox/page.tsrx")),
+    loadComponent: () => import("~/inbox/page.tsrx"),
     getId: (props: { projectPath?: string }) =>
       props.projectPath
         ? `project-inbox:${encodeURIComponent(props.projectPath)}`
@@ -45,13 +95,13 @@ export const workbenchTabKinds = {
     getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   projects: {
-    ...lazyWorkbenchTab(() => import("~/projects/projects-page.tsrx")),
+    loadComponent: () => import("~/projects/projects-page.tsrx"),
     getId: () => "surface:projects",
     getTitle: () => "Projects",
     icon: "tabs/projects",
   },
   sessions: {
-    ...lazyWorkbenchTab(() => import("~/sessions/page.tsrx")),
+    loadComponent: () => import("~/sessions/page.tsrx"),
     getId: (props: { projectPath?: string }) =>
       props.projectPath
         ? `project-sessions:${encodeURIComponent(props.projectPath)}`
@@ -86,19 +136,19 @@ export const workbenchTabKinds = {
     icon: "tabs/roadmap",
   },
   settings: {
-    ...lazyWorkbenchTab(() => import("~/settings/page.tsrx")),
+    loadComponent: () => import("~/settings/page.tsrx"),
     getId: () => "surface:settings",
     getTitle: () => "Settings",
     icon: "settings",
   },
   keyboardShortcuts: {
-    ...lazyWorkbenchTab(() => import("~/shortcuts/view.tsrx")),
+    loadComponent: () => import("~/shortcuts/view.tsrx"),
     getId: () => "workbench:keyboard-shortcuts",
     getTitle: () => "Keyboard Shortcuts",
     icon: "settings",
   },
   project: {
-    ...lazyWorkbenchTab(() => import("~/projects/project-page.tsrx")),
+    loadComponent: () => import("~/projects/project-page.tsrx"),
     getId: (props: { projectPath: string }) => `project:${encodeURIComponent(props.projectPath)}`,
     getTitle: (props: { projectName?: string; projectPath: string }) =>
       props.projectName ?? props.projectPath,
@@ -106,22 +156,43 @@ export const workbenchTabKinds = {
     getRelatedFilesystemPath: (props: { projectPath: string }) => props.projectPath,
   },
   sessionChat: {
-    ...lazyWorkbenchTab(() => import("~/session-chat/view.tsrx")),
+    loadComponent: () => import("~/session-chat/view.tsrx"),
     getId: (props: { sessionId: string }) => `session:${props.sessionId}`,
     getTitle: (props: { sessionTitle?: string }) => props.sessionTitle ?? "Session",
     icon: "tabs/sessions",
     getRelatedFilesystemPath: (props: { relatedFilesystemPath?: string | null }) =>
       props.relatedFilesystemPath,
+    warm: async (props: {
+      relatedFilesystemPath: string | null
+      sessionId: DaemonSession["id"]
+    }) => {
+      await Promise.all([
+        queryClient.prefetch(goddardSdk.session.worktree.get, [{ id: props.sessionId }], {
+          force: true,
+        }),
+        props.relatedFilesystemPath
+          ? queryClient.prefetch(goddardSdk.adapter.list, [
+              { cwd: props.relatedFilesystemPath, includeUninstalled: true },
+            ])
+          : undefined,
+      ])
+    },
+    warmOnIdle: async (props: { sessionId: DaemonSession["id"] }) => {
+      await queryClient.prefetch(goddardSdk.session.history, [{ id: props.sessionId }], {
+        force: true,
+        refetchOnWindowReactivate: false,
+      })
+    },
     restoreScroll: false,
   },
   sessionChanges: {
-    ...lazyWorkbenchTab(() => import("~/session-changes/view.tsrx")),
+    loadComponent: () => import("~/session-changes/view.tsrx"),
     getId: (props: { sessionId: string }) => `session-changes:${props.sessionId}`,
     getTitle: (props: { sessionTitle: string }) => `Changes · ${props.sessionTitle}`,
     icon: "tabs/changes",
   },
   pullRequest: {
-    ...lazyWorkbenchTab(() => import("~/pull-requests/view.tsrx")),
+    loadComponent: () => import("~/pull-requests/view.tsrx"),
     getId: (props: { pullRequestId: string }) => `pull-request:${props.pullRequestId}`,
     getTitle: (props: { pullRequestTitle?: string }) => props.pullRequestTitle ?? "Pull Request",
     icon: "tabs/pull-request",
@@ -129,25 +200,27 @@ export const workbenchTabKinds = {
       props.relatedFilesystemPath,
   },
   inboxDebug: {
-    ...lazyWorkbenchTab(() => import("~/inbox/debug-view.tsrx")),
+    loadComponent: () => import("~/inbox/debug-view.tsrx"),
     getId: () => "debug:inbox",
     getTitle: () => "Inbox Debug",
     icon: "tabs/inbox",
   },
   terminalDebug: {
-    ...lazyWorkbenchTab(() => import("~/terminal/debug-view.tsrx")),
+    loadComponent: () => import("~/terminal/debug-view.tsrx"),
     getId: () => "debug:terminal",
     getTitle: () => "Terminal Debug",
     icon: "tabs/sessions",
   },
 } satisfies Record<string, WorkbenchTabDefinition>
 
-/** The supported non-primary workbench tab kinds available in the shell. */
-type WorkbenchRegisteredTabKind = keyof typeof workbenchTabKinds
+export const workbenchTabKinds = defineWorkbenchTabs(workbenchTabDefinitions)
 
-/** Props inferred from one registered non-primary workbench tab component. */
+/** The supported non-primary workbench tab kinds available in the shell. */
+type WorkbenchRegisteredTabKind = keyof typeof workbenchTabDefinitions
+
+/** Props inferred from one registered non-primary workbench tab definition. */
 type WorkbenchTabProps<TKind extends WorkbenchRegisteredTabKind> = NormalizeWorkbenchTabProps<
-  preact.ComponentProps<(typeof workbenchTabKinds)[TKind]["component"]>
+  InferWorkbenchTabProps<(typeof workbenchTabDefinitions)[TKind]>
 >
 
 /** Spreadable props shape for tab components that infer no props. */
@@ -202,13 +275,25 @@ export function getWorkbenchTabComponent(
   return workbenchTabKinds[kind].component
 }
 
-/** Starts loading the component module for one workbench tab kind when it is lazy. */
-export async function preloadWorkbenchTabComponent(kind: WorkbenchRegisteredTabKind) {
-  const tabKind = workbenchTabKinds[kind]
+/** Warms the lightweight resources for one workbench tab before it is activated. */
+export async function warmWorkbenchTab(input: WorkbenchOpenTabInput) {
+  const definition = workbenchTabDefinitions[input.kind] as WorkbenchTabDefinition<
+    typeof input.props
+  >
 
-  if ("preload" in tabKind) {
-    await tabKind.preload()
-  }
+  await Promise.all([
+    definition.loadComponent ? definition.loadComponent() : undefined,
+    definition.warm?.(input.props),
+  ])
+}
+
+/** Warms heavier resources for one workbench tab after the browser has idle time. */
+export async function warmWorkbenchTabOnIdle(input: WorkbenchOpenTabInput) {
+  const definition = workbenchTabDefinitions[input.kind] as WorkbenchTabDefinition<
+    typeof input.props
+  >
+
+  await definition.warmOnIdle?.(input.props)
 }
 
 /** Returns the SVG icon registered for one workbench tab kind. */

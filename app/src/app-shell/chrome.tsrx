@@ -10,7 +10,11 @@ import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
 import { getNextUnreadInboxAttentionItem, hasUnreadSessionInboxItems } from "~/inbox/attention.ts"
 import { NextInboxWorkbenchPreloader } from "~/inbox/next-preload.ts"
-import { openInboxItemInWorkbench, prepareInboxItemWorkbenchTarget } from "~/inbox/open.ts"
+import {
+  openInboxItemInWorkbench,
+  prepareInboxItemWorkbenchTarget,
+  warmPreparedInboxWorkbenchTargetOnIdle,
+} from "~/inbox/open.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -303,6 +307,7 @@ function AppShellNextInboxAttentionButton(props: {
   const preloaderRef = useRef<NextInboxWorkbenchPreloader | null>(null)
   preloaderRef.current ??= new NextInboxWorkbenchPreloader({
     prepareTarget: prepareInboxItemWorkbenchTarget,
+    warmTargetOnIdle: warmPreparedInboxWorkbenchTargetOnIdle,
   })
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [

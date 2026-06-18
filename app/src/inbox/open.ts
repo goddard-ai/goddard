@@ -4,7 +4,7 @@ import { queryClient } from "~/lib/query.ts"
 import { getPullRequestDisplayTitle } from "~/pull-requests/display.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle } from "~/sessions/display.ts"
-import { preloadWorkbenchTabComponent } from "~/workbench-tab-registry.ts"
+import { warmWorkbenchTab, warmWorkbenchTabOnIdle } from "~/workbench-tab-registry.ts"
 import type { WorkbenchOpenTabInput, WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import { isInboxEntityKind } from "./entity-kind.ts"
 
@@ -46,19 +46,7 @@ export async function prepareInboxItemWorkbenchTarget(
       },
     } satisfies WorkbenchOpenTabInput<"sessionChat">
 
-    await Promise.all([
-      queryClient.prefetch(goddardSdk.session.history, [{ id: session.id }], {
-        force: true,
-        refetchOnWindowReactivate: false,
-      }),
-      queryClient.prefetch(goddardSdk.session.worktree.get, [{ id: session.id }], {
-        force: true,
-      }),
-      queryClient.prefetch(goddardSdk.adapter.list, [
-        { cwd: session.cwd, includeUninstalled: true },
-      ]),
-      preloadWorkbenchTabComponent(tab.kind),
-    ])
+    await warmWorkbenchTab(tab)
 
     return {
       entityId: item.entityId,
@@ -85,7 +73,7 @@ export async function prepareInboxItemWorkbenchTarget(
     },
   } satisfies WorkbenchOpenTabInput<"pullRequest">
 
-  await preloadWorkbenchTabComponent(tab.kind)
+  await warmWorkbenchTab(tab)
 
   return {
     entityId: item.entityId,
@@ -111,4 +99,9 @@ export async function openInboxItemInWorkbench(input: {
   }
 
   input.workbenchTabSet.openOrFocusTab(target.tab)
+}
+
+/** Warms heavier resources for one already prepared inbox target after idle time. */
+export async function warmPreparedInboxWorkbenchTargetOnIdle(target: PreparedInboxWorkbenchTarget) {
+  await warmWorkbenchTabOnIdle(target.tab)
 }
