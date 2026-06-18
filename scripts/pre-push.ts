@@ -4,7 +4,13 @@
  * repo-check rules live in a discoverable place.
  */
 import { execFileSync, spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import globrex from "globrex"
+
+const REBASE_CHECKED_REMOTE_BRANCH_REFS = ["refs/heads/aleclarson"]
+const ZERO_SHA = "0000000000000000000000000000000000000000"
 
 const CHECKED_SOURCE_FILE_EXTENSIONS = ["ts", "tsrx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
 
@@ -62,7 +68,7 @@ async function readStdinText() {
 }
 
 /** Parses Git's pre-push stdin format into individual ref updates. */
-function parsePushUpdates(stdinText: string) {
+export function parsePushUpdates(stdinText: string) {
   return stdinText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -80,6 +86,20 @@ function findPushedSha(remoteName: string, updates: PushUpdate[]) {
   }
 
   return updates.find(({ localRef }) => localRef !== "(delete)")?.localSha
+}
+
+/** Selects the pushed commit when a personal branch should prove it can rebase onto main. */
+export function findRebaseCheckedBranchPushSha(remoteName: string, updates: PushUpdate[]) {
+  if (remoteName !== "origin") {
+    return undefined
+  }
+
+  return updates.find(
+    ({ localRef, localSha, remoteRef }) =>
+      REBASE_CHECKED_REMOTE_BRANCH_REFS.includes(remoteRef) &&
+      localRef !== "(delete)" &&
+      localSha !== ZERO_SHA,
+  )?.localSha
 }
 
 /** Resolves the repository root so subprocesses run from a stable location. */
@@ -111,6 +131,66 @@ function getMergeBase(repoRoot: string, pushedSha: string) {
   }
 
   return result.stdout.trim() || undefined
+}
+
+/** Refreshes origin/main so the local hook checks against the latest known merge base. */
+function fetchOriginMain(repoRoot: string) {
+  const result = spawnSync(
+    "git",
+    ["fetch", "--no-tags", "origin", "+main:refs/remotes/origin/main"],
+    {
+      cwd: repoRoot,
+      stdio: "inherit",
+    },
+  )
+
+  return result.status === 0
+}
+
+/** Checks rebaseability in a temporary worktree so the developer's branch is not rewritten. */
+function canRebaseOntoOriginMain(repoRoot: string, pushedSha: string) {
+  const tempRoot = mkdtempSync(join(tmpdir(), "goddard-pre-push-rebase-"))
+  const worktreePath = join(tempRoot, "worktree")
+
+  try {
+    const addResult = spawnSync("git", ["worktree", "add", "--detach", worktreePath, pushedSha], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    })
+
+    if (addResult.status !== 0) {
+      return false
+    }
+
+    const rebaseResult = spawnSync("git", ["rebase", "--quiet", "origin/main"], {
+      cwd: worktreePath,
+      stdio: "ignore",
+    })
+
+    return rebaseResult.status === 0
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", worktreePath], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    })
+    rmSync(tempRoot, { force: true, recursive: true })
+  }
+}
+
+/** Blocks personal branch pushes that CI would be unable to auto-merge with rebase. */
+function runRebaseCheck(repoRoot: string, pushedSha: string) {
+  if (!fetchOriginMain(repoRoot)) {
+    console.error("pre-push: failed to fetch origin/main before checking rebaseability.")
+    return false
+  }
+
+  if (!canRebaseOntoOriginMain(repoRoot, pushedSha)) {
+    console.error("pre-push: pushed changes do not currently rebase cleanly onto origin/main.")
+    console.error("pre-push: rebase locally onto origin/main before pushing again.")
+    return false
+  }
+
+  return true
 }
 
 /** Lists files changed between the branch point and the pushed commit. */
@@ -156,13 +236,23 @@ function runRepoCheck(repoRoot: string, changedFiles: string[]) {
 /** Runs the pre-push guard and returns a process exit code. */
 async function main(argv = process.argv.slice(2)) {
   const [remoteName = ""] = argv
-  const pushedSha = findPushedSha(remoteName, parsePushUpdates(await readStdinText()))
+  const updates = parsePushUpdates(await readStdinText())
+  const pushedSha = findPushedSha(remoteName, updates)
+  const rebaseCheckedSha = findRebaseCheckedBranchPushSha(remoteName, updates)
 
-  if (!pushedSha) {
+  if (!pushedSha && !rebaseCheckedSha) {
     return 0
   }
 
   const repoRoot = getRepoRoot()
+
+  if (rebaseCheckedSha && !runRebaseCheck(repoRoot, rebaseCheckedSha)) {
+    return 1
+  }
+
+  if (!pushedSha) {
+    return 0
+  }
 
   if (!hasOriginMain(repoRoot)) {
     return runRepoCheck(repoRoot, []) ? 0 : 1
