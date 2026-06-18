@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 concurrency:
@@ -60,11 +60,21 @@ jobs:
 
           if [ -n "$existing_pr" ]; then
             echo "PR #$existing_pr already open."
+            pr_number="$existing_pr"
           else
-            gh pr create \
-              --repo "${{ github.repository }}" \
-              --base "$BASE_BRANCH" \
-              --head "$USER_BRANCH" \
-              --title "$PR_TITLE" \
-              --body 'This is the ongoing PR for changes from `aleclarson` into `main`.'
+            pr_number="$(
+              gh pr create \
+                --repo "${{ github.repository }}" \
+                --base "$BASE_BRANCH" \
+                --head "$USER_BRANCH" \
+                --title "$PR_TITLE" \
+                --body "This is the ongoing PR for changes from aleclarson into main." \
+                --json number \
+                --jq '.number'
+            )"
           fi
+
+          gh pr merge "$pr_number" \
+              --repo "${{ github.repository }}" \
+              --auto \
+              --rebase
