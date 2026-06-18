@@ -1,7 +1,7 @@
 <critical-rules>
 - Do not overwrite or revert unrelated user changes.
 - Do not edit `spec/` unless explicitly asked.
-- Do not knowingly let code, non-overview docs, or tests diverge from `spec/`; `overview/` docs describe current supported behavior and may diverge when `spec/` describes an ideal or future shape.
+- Do not knowingly let code, non-public docs, or tests diverge from `spec/`; public `docs/` describe current supported behavior and may diverge when `spec/` describes an ideal or future shape.
 - This repo is unreleased and pre-alpha; do not add legacy compatibility paths, deprecation shims, or fallback behavior unless explicitly asked.
 - Do not use destructive git commands unless explicitly requested.
 - Commit completed file changes with Conventional Commits before ending the turn unless the user or a safer scoped workflow says not to.
@@ -18,7 +18,7 @@ Rules live in `.agents/rules/`. Read every matching ruleset before acting:
 - `features.md`: MUST read when adding or changing cross-layer feature packages, feature schemas, daemon plugins, SDK/app feature wiring, or scaffolded features.
 - `testing.md`: MUST read when adding, changing, reviewing, or deciding whether to add tests, and when verifying behavior changes.
 - `documentation.md`: MUST read when changing terminology, concepts, package boundaries, README or glossary docs, user-visible features, or undocumented feature tracking.
-- `overview.md`: MUST read when creating, reorganizing, or editing an `overview/` documentation folder.
+- `public-docs.md`: MUST read when creating, reorganizing, or editing a public `docs/` documentation folder.
 - `git.md`: MUST read before staging, committing, reviewing diffs, splitting work, or finishing any file-changing task.
 - `app.md`: MUST read before editing anything under `app/`; it routes to additional app-specific rulesets and skills.
 </rulesets>
