@@ -3,6 +3,11 @@ import path from "node:path"
 
 const root = process.cwd()
 const ignoredDirs = new Set([".git", ".turbo", "dist", "node_modules", "styled-system"])
+const legacyTechnicalDocsDirs = new Set([
+  "core/schema/docs",
+  "core/ui-primitives/docs",
+  "workforce/docs",
+])
 
 const bannedPatterns = [
   { pattern: /\bTODO\b/i, label: "TODO marker" },
@@ -35,14 +40,14 @@ function walkDirs(dir, visit) {
   }
 }
 
-function findOverviewDirs() {
-  const overviewDirs = []
+function findDocsDirs() {
+  const docsDirs = []
   walkDirs(root, (dir) => {
-    if (path.basename(dir) === "overview") {
-      overviewDirs.push(dir)
+    if (path.basename(dir) === "docs" && !legacyTechnicalDocsDirs.has(relative(dir))) {
+      docsDirs.push(dir)
     }
   })
-  return overviewDirs
+  return docsDirs
 }
 
 function collectMarkdownFiles(dir) {
@@ -58,11 +63,11 @@ function collectMarkdownFiles(dir) {
   return files
 }
 
-function collectOverviewSubdirs(dir) {
+function collectDocsSubdirs(dir) {
   const dirs = [dir]
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      dirs.push(...collectOverviewSubdirs(path.join(dir, entry.name)))
+      dirs.push(...collectDocsSubdirs(path.join(dir, entry.name)))
     }
   }
   return dirs
@@ -129,16 +134,16 @@ function checkBannedMarkers(file, text, errors) {
 }
 
 const errors = []
-const overviewDirs = findOverviewDirs()
+const docsDirs = findDocsDirs()
 
-for (const overviewDir of overviewDirs) {
-  for (const dir of collectOverviewSubdirs(overviewDir)) {
+for (const docsDir of docsDirs) {
+  for (const dir of collectDocsSubdirs(docsDir)) {
     if (containsMarkdown(dir) && !fs.existsSync(path.join(dir, "README.md"))) {
       errors.push(`${relative(dir)} must include README.md`)
     }
   }
 
-  for (const file of collectMarkdownFiles(overviewDir)) {
+  for (const file of collectMarkdownFiles(docsDir)) {
     const text = fs.readFileSync(file, "utf8")
     checkPageShape(file, text, errors)
     checkLinks(file, text, errors)
@@ -151,6 +156,4 @@ if (errors.length > 0) {
   process.exit(1)
 }
 
-console.log(
-  `Checked ${overviewDirs.length} overview folder${overviewDirs.length === 1 ? "" : "s"}.`,
-)
+console.log(`Checked ${docsDirs.length} public docs folder${docsDirs.length === 1 ? "" : "s"}.`)

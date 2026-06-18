@@ -4,7 +4,7 @@ The Goddard Daemon is a local background process that executes autonomous coding
 
 ## Related Docs
 
-- [Daemon Overview](./overview/README.md)
+- [Daemon Docs](./docs/README.md)
 - [Daemon Glossary](./glossary.md)
 - [Daemon IPC Server Concepts](./src/ipc/server.md)
 - [Session Manager Domain Concepts](../../features/session/src/daemon/manager.md)
