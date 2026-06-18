@@ -118,8 +118,6 @@ export function SessionInput(props: {
       acceptSuggestion(suggestions[index] ?? null)
     },
   })
-  const activeSuggestionIndex = navigation.activeIndex()
-  const highlightedSuggestion = suggestions.at(activeSuggestionIndex) ?? suggestions[0] ?? null
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
     setSuggestions(
