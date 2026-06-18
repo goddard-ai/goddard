@@ -72,6 +72,10 @@ export const AppCommand = defineAppCommands({
         label: "Open Sessions",
         icon: MessageSquarePlus,
       },
+      openPipelines: {
+        label: "Open Pipelines",
+        icon: ListTodo,
+      },
       openSearch: {
         label: "Open Search",
         icon: Search,

@@ -5,7 +5,7 @@ Configuration is machine-readable and machine-writable across user, repository, 
 ## Participants
 - Developer maintaining personal defaults across repositories
 - Repository maintainer defining shared repository behavior
-- Author or maintainer of a Loop or Action definition
+- Author or maintainer of a Loop, Action, or Pipeline definition
 - SDK consumer supplying execution-time overrides
 - Runtime host resolving configuration before work begins
 - Automated tools that need to read or update persisted configuration safely
@@ -23,7 +23,7 @@ Configuration is machine-readable and machine-writable across user, repository, 
 - Captures shared team or project intent without requiring each developer to duplicate the same settings globally.
 
 ### 3. Entity Configuration
-- Overrides inherited global and local defaults for a specific Loop or Action.
+- Overrides inherited global and local defaults for a specific Loop, Action, or Pipeline.
 - Is persisted as machine-readable JSON associated with that named entity.
 - Exists so a reusable automation entity can carry its own defaults without redefining the broader repository or user baseline.
 
@@ -33,9 +33,9 @@ Configuration is machine-readable and machine-writable across user, repository, 
 - Exists to support contextual, temporary, or host-specific adjustments without mutating persisted defaults.
 
 ## Resolution Model
-- Precedence is deterministic: global configuration is the baseline, local configuration overrides global, entity configuration overrides the inherited global and local defaults for a specific Loop or Action, and runtime configuration is the final override.
+- Precedence is deterministic: global configuration is the baseline, local configuration overrides global, entity configuration overrides the inherited global and local defaults for a specific Loop, Action, or Pipeline, and runtime configuration is the final override.
 - Persisted configuration resolves from user, repository, and entity JSON sources before any runtime override is applied.
-- Loops and Actions inherit the same user and repository baseline, then apply any entity-specific defaults before execution begins.
+- Loops, Actions, and Pipelines inherit the same user and repository baseline, then apply any entity-specific defaults before execution begins.
 - Configuration should resolve before execution begins so the active runtime operates against a stable view of intent.
 
 ## Daemon Refresh Behavior
@@ -58,12 +58,18 @@ Configuration is machine-readable and machine-writable across user, repository, 
 - If an action carries persisted defaults, those defaults must live in machine-readable JSON associated with the action rather than inside the prompt content itself.
 - Actions are loaded by name at runtime.
 
+### Pipelines
+- Pipelines are named, reusable linear handoff definitions that can be resolved from configuration roots and spawned at runtime.
+- Repository-local Pipeline definitions live under `.goddard/pipelines/` so project intent stays near the repository work it coordinates.
+- A Pipeline definition may reference prompt documents and registered non-config executable capabilities, but persisted Pipeline configuration must remain machine-readable rather than executable source.
+- Pipeline runtime inputs are supplied when a run is spawned and must not implicitly rewrite the Pipeline definition.
+
 ## Boundaries
 - All persisted configuration must be machine-readable and machine-writable.
 - Persisted configuration must be stored as JSON rather than executable source.
 - Repository-scoped configuration must be able to override user-scoped defaults without mutating the user-level source of truth.
 - Repository-scoped configuration may define shared, non-executable daemon session preparation intent, but executable daemon extensions remain user-scoped so repositories cannot silently expand local trust.
-- Loop and Action definitions must inherit the shared user and repository baseline before applying their own overrides.
+- Loop, Action, and Pipeline definitions must inherit the shared user and repository baseline before applying their own overrides.
 - Prompt content must not double as a configuration transport; document metadata is not a supported configuration surface.
 - Runtime overrides must remain ephemeral and must not implicitly rewrite persisted configuration.
 - Named entities should be discoverable through the same configuration roots used for baseline defaults so repository intent stays co-located.

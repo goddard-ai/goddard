@@ -1,4 +1,5 @@
 import { inboxAppPlugin } from "@goddard-ai/inbox/app"
+import { pipelineAppPlugin } from "@goddard-ai/pipeline/app"
 import { lazy } from "preact/compat"
 
 import type { SvgIconName } from "./lib/good-icon.tsrx"
@@ -50,6 +51,12 @@ export const workbenchTabKinds = {
       props.projectName ? `Sessions · ${props.projectName}` : "Sessions",
     icon: "tabs/sessions",
     getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
+  },
+  pipelines: {
+    component: lazy(() => import("~/pipelines/page.tsrx")),
+    getId: () => "surface:pipelines",
+    getTitle: () => "Pipelines",
+    icon: pipelineAppPlugin.workbenchTab.icon,
   },
   search: {
     component: PlaceholderWorkbenchTab,
@@ -109,6 +116,15 @@ export const workbenchTabKinds = {
     getId: (props: { sessionId: string }) => `session-changes:${props.sessionId}`,
     getTitle: (props: { sessionTitle: string }) => `Changes · ${props.sessionTitle}`,
     icon: "tabs/changes",
+  },
+  pipelineRun: {
+    component: lazy(() => import("~/pipelines/run-view.tsrx")),
+    getId: (props: { runId: string }) => `pipeline-run:${props.runId}`,
+    getTitle: (props: { pipelineName?: string; runId: string }) =>
+      props.pipelineName ? `${props.pipelineName} Run` : "Pipeline Run",
+    icon: pipelineAppPlugin.runWorkbenchTab.icon,
+    getRelatedFilesystemPath: (props: { cwd?: string | null }) => props.cwd,
+    restoreScroll: false,
   },
   pullRequest: {
     component: lazy(() => import("~/pull-requests/view.tsrx")),

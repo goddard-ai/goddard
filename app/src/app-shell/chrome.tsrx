@@ -36,6 +36,7 @@ const noDragClass = "electrobun-webkit-app-region-no-drag"
 const mainTabCommands: Record<MainTabItemId, AppCommand> = {
   inbox: AppCommand.navigation.openInbox,
   sessions: AppCommand.navigation.openSessions,
+  pipelines: AppCommand.navigation.openPipelines,
   search: AppCommand.navigation.openSearch,
   specs: AppCommand.navigation.openSpecs,
   tasks: AppCommand.navigation.openTasks,
@@ -73,6 +74,10 @@ export function AppShellChrome() @{
 
   useAppCommand(AppCommand.navigation.openSessions, () => {
     navigateMainTab("sessions")
+  })
+
+  useAppCommand(AppCommand.navigation.openPipelines, () => {
+    navigateMainTab("pipelines")
   })
 
   useAppCommand(AppCommand.navigation.openSearch, () => {

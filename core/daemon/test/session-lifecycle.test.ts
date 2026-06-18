@@ -406,7 +406,13 @@ test("session completion hides from the default list but stays interactive", asy
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
+    origin: "app",
     systemPrompt: "Keep responses short.",
+    visibility: "visible",
+  })
+  expect(created.session).toMatchObject({
+    origin: "app",
+    visibility: "visible",
   })
 
   await send(client, "session.reportTurnEnded", {
@@ -823,6 +829,8 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
     connectionMode: "live",
     supportsLoadSession: false,
     activeDaemonSession: true,
+    origin: "app",
+    visibility: "visible",
     completedHidden: false,
     errorMessage: null,
     blockedReason: null,
@@ -908,6 +916,8 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
     connectionMode: "live",
     supportsLoadSession: false,
     activeDaemonSession: true,
+    origin: "app",
+    visibility: "visible",
     completedHidden: false,
     errorMessage: null,
     blockedReason: null,
@@ -2032,6 +2042,8 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
     connectionMode: "history",
     supportsLoadSession: false,
     activeDaemonSession: false,
+    origin: "app",
+    visibility: "visible",
     completedHidden: false,
     errorMessage: null,
     blockedReason: null,

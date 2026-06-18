@@ -24,7 +24,11 @@ export function evictSessionHistory(sessionId: DaemonSession["id"]) {
  * Creates one session and refreshes the visible session list afterwards.
  */
 export async function createSession(input: CreateSessionRequest) {
-  const result = await goddardSdk.session.create(input)
+  const result = await goddardSdk.session.create({
+    ...input,
+    origin: "app",
+    visibility: "visible",
+  })
   invalidateSessionLists()
   invalidateSessionLaunchPreview()
   return result

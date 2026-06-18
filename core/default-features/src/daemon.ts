@@ -1,10 +1,12 @@
 import { actionPlugin } from "@goddard-ai/action/daemon"
 import { adapterPlugin } from "@goddard-ai/adapter/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
+import { creativeWeaverScriptTransformers } from "@goddard-ai/creative-weaver/pipeline"
 import { composePlugins } from "@goddard-ai/daemon-plugin"
 import { fileSearchPlugin } from "@goddard-ai/file-search/daemon"
 import { inboxPlugin } from "@goddard-ai/inbox/daemon"
 import { loopPlugin } from "@goddard-ai/loop/daemon"
+import { createPipelinePlugin } from "@goddard-ai/pipeline/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -20,6 +22,9 @@ const defaultDaemonPlugins = [
   pullRequestPlugin,
   reviewSessionPlugin,
   loopPlugin,
+  createPipelinePlugin({
+    transformers: creativeWeaverScriptTransformers,
+  }),
   workforcePlugin,
 ] as const
 

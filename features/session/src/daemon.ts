@@ -66,7 +66,13 @@ const sessionDb = {
       lastSessionActivityAt: "desc",
       id: "desc",
     })
-    .migrate(3, {
+    .multi("visibility_completedHidden_lastSessionActivityAt_id", {
+      visibility: "asc",
+      completedHidden: "asc",
+      lastSessionActivityAt: "desc",
+      id: "desc",
+    })
+    .migrate(4, {
       1: (value, context) => {
         const { updatedAt, ...session } = value
         return {
@@ -78,6 +84,11 @@ const sessionDb = {
         const { models: _models, ...session } = value
         return session
       },
+      3: (value) => ({
+        ...value,
+        origin: "app",
+        visibility: "visible",
+      }),
     }),
 
   sessionTurns: kind("trn", DaemonSessionTurn)

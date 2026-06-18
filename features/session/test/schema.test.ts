@@ -1,6 +1,79 @@
 import { expect, test } from "bun:test"
 
-import { SessionTurnMessage, sessionTurnMessageCoversSequence } from "../src/schema.ts"
+import { resolveSessionOriginVisibility } from "../src/daemon/session-records.ts"
+import {
+  CreateSessionRequest,
+  DaemonSession,
+  SessionTurnMessage,
+  sessionTurnMessageCoversSequence,
+} from "../src/schema.ts"
+
+test("DaemonSession defaults legacy records to app-visible sessions", () => {
+  const session = DaemonSession.parse({
+    acpSessionId: "acp-session-1",
+    status: "active",
+    agentName: "Codex",
+    cwd: "/repo",
+    lastSessionActivityAt: 1,
+    mcpServers: [],
+    configOptions: [],
+    contextUsage: null,
+  })
+
+  expect(session.origin).toBe("app")
+  expect(session.visibility).toBe("visible")
+})
+
+test("CreateSessionRequest accepts explicit provenance and visibility", () => {
+  const request = CreateSessionRequest.parse({
+    cwd: "/repo",
+    mcpServers: [],
+    origin: "pipeline",
+    visibility: "hidden",
+  })
+
+  expect(request.origin).toBe("pipeline")
+  expect(request.visibility).toBe("hidden")
+})
+
+test("session creation defaults untagged new sessions to sdk-hidden", () => {
+  expect(
+    resolveSessionOriginVisibility({
+      existingSession: null,
+      request: {},
+    }),
+  ).toEqual({
+    origin: "sdk",
+    visibility: "hidden",
+  })
+})
+
+test("session creation defaults app sessions to visible", () => {
+  expect(
+    resolveSessionOriginVisibility({
+      existingSession: null,
+      request: { origin: "app" },
+    }),
+  ).toEqual({
+    origin: "app",
+    visibility: "visible",
+  })
+})
+
+test("session reconnection preserves existing provenance and visibility", () => {
+  expect(
+    resolveSessionOriginVisibility({
+      existingSession: {
+        origin: "pipeline",
+        visibility: "hidden",
+      },
+      request: {},
+    }),
+  ).toEqual({
+    origin: "pipeline",
+    visibility: "hidden",
+  })
+})
 
 test("SessionTurnMessage represents one uncoalesced turn message sequence", () => {
   const message = SessionTurnMessage.parse({

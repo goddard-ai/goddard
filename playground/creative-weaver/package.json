@@ -1,0 +1,40 @@
+{
+  "name": "@goddard-ai/creative-weaver",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "bin": {
+    "creative-weaver-poc": "./bin/creative-weaver-poc"
+  },
+  "exports": {
+    "./pipeline": {
+      "types": {
+        "source": "./src/pipeline.ts",
+        "default": "./dist/pipeline.d.mts"
+      },
+      "bun": "./src/pipeline.ts",
+      "import": "./dist/pipeline.mjs"
+    },
+    "./weaver": {
+      "types": {
+        "source": "./src/weaver.ts",
+        "default": "./dist/weaver.d.mts"
+      },
+      "bun": "./src/weaver.ts",
+      "import": "./dist/weaver.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "start": "bun run ./src/main.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --pass-with-no-tests --dots"
+  },
+  "dependencies": {
+    "radashi": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}
