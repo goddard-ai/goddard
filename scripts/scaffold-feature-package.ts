@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
-/** Scaffolds internal full-stack feature packages from the repository root. */
+/*
+ * Scaffolds internal full-stack feature packages from the repository root,
+ * including package metadata, layer entrypoints, tests, and workspace wiring.
+ */
 import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"

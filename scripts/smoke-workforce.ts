@@ -1,3 +1,7 @@
+/*
+ * Runs the workforce smoke checks that cover SDK typing, CLI typing, and the
+ * daemon workforce test suite.
+ */
 import { execFileSync } from "node:child_process"
 
 function run(label: string, command: string, args: string[], cwd = process.cwd()) {
