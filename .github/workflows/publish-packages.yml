@@ -65,12 +65,12 @@ jobs:
           latest_tag="$(git tag --merged HEAD --list "${PACKAGE_RELEASE_NAME}@[0-9]*" --sort=-v:refname | head -n 1)"
 
           if [ -z "$latest_tag" ]; then
-            bumped_tag="${PACKAGE_RELEASE_NAME}@0.1.0"
+            next_version="0.1.0"
           else
-            bumped_tag="${PACKAGE_RELEASE_NAME}@$(pnpm exec bumped-version "$PACKAGE_DIR")"
+            next_version="$(pnpm exec bumped-version "$PACKAGE_DIR")"
           fi
 
-          next_version="${bumped_tag#${PACKAGE_RELEASE_NAME}@}"
+          bumped_tag="${PACKAGE_RELEASE_NAME}@${next_version}"
 
           echo "current=$current_version" >> "$GITHUB_OUTPUT"
           echo "next=$next_version" >> "$GITHUB_OUTPUT"
