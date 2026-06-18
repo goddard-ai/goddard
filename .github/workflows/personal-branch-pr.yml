@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 concurrency:
@@ -18,7 +18,6 @@ env:
   USER_BRANCH: aleclarson
   BASE_BRANCH: main
   PR_TITLE: "Merge aleclarson into main"
-  PR_BODY: "This is the ongoing PR for changes from `aleclarson` into `main`."
 
 jobs:
   open-pr:
@@ -28,16 +27,17 @@ jobs:
       - name: Check whether user branch is ahead of main
         id: ahead
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          ahead_count="$(
-            gh api \
-              "repos/${{ github.repository }}/compare/$BASE_BRANCH...$USER_BRANCH" \
-              --jq '.ahead_by'
-          )"
+          git init repo
+          cd repo
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+
+          git fetch --no-tags --depth=1 origin "$BASE_BRANCH"
+          git fetch --no-tags origin "$USER_BRANCH"
+
+          ahead_count="$(git rev-list --count "origin/$BASE_BRANCH..origin/$USER_BRANCH")"
           echo "count=$ahead_count" >> "$GITHUB_OUTPUT"
 
       - name: Ensure PR exists
@@ -60,22 +60,11 @@ jobs:
 
           if [ -n "$existing_pr" ]; then
             echo "PR #$existing_pr already open."
-            pr_number="$existing_pr"
           else
-            pr_number="$(
-              gh api \
-                --method POST \
-                "repos/${{ github.repository }}/pulls" \
-                --raw-field base="$BASE_BRANCH" \
-                --raw-field head="$USER_BRANCH" \
-                --raw-field title="$PR_TITLE" \
-                --raw-field body="$PR_BODY" \
-                --jq '.number'
-            )"
-            echo "Opened PR #$pr_number."
-          fi
-
-          gh pr merge "$pr_number" \
+            gh pr create \
               --repo "${{ github.repository }}" \
-              --auto \
-              --rebase
+              --base "$BASE_BRANCH" \
+              --head "$USER_BRANCH" \
+              --title "$PR_TITLE" \
+              --body 'This is the ongoing PR for changes from `aleclarson` into `main`.'
+          fi
