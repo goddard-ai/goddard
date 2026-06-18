@@ -169,11 +169,21 @@ function canRebaseOntoOriginMain(repoRoot: string, pushedSha: string) {
 
     return rebaseResult.status === 0
   } finally {
-    spawnSync("git", ["worktree", "remove", "--force", worktreePath], {
+    const removeResult = spawnSync("git", ["worktree", "remove", "--force", worktreePath], {
       cwd: repoRoot,
       stdio: "ignore",
     })
+
+    if (removeResult.status !== 0) {
+      console.error("pre-push: failed to remove temporary rebase-check worktree.")
+    }
+
     rmSync(tempRoot, { force: true, recursive: true })
+
+    spawnSync("git", ["worktree", "prune"], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    })
   }
 }
 
