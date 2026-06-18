@@ -1,5 +1,7 @@
-# Ignored workspace state that keeps fresh agent worktrees ready to run checks.
-.husky/
-node_modules/
-app/styled-system/
-app/src/lib/svg-icon-data.ts
+# Generated Panda CSS artifacts used by app typecheck and lint before codegen runs.
+app/styled-system/css/
+app/styled-system/helpers.mjs
+app/styled-system/jsx/
+app/styled-system/patterns/
+app/styled-system/tokens/
+app/styled-system/types/
