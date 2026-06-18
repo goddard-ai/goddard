@@ -78,7 +78,7 @@
     "react": "npm:@preact/compat",
     "react-dom": "npm:@preact/compat",
     "sculpted": "^0.3.4",
-    "state-launcher": "0.2.1",
+    "state-launcher": "0.2.2",
     "vite": "^8.0.10"
   },
   "overrides": {}
