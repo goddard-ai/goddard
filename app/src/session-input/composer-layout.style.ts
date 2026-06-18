@@ -23,6 +23,8 @@ export default {
     },
   }),
   contentEditable: css({
+    position: "relative",
+    zIndex: "1",
     boxSizing: "border-box",
     display: "block",
     width: "100%",
@@ -59,6 +61,18 @@ export default {
     fontSize: "0.94rem",
     lineHeight: "1.6",
     pointerEvents: "none",
+  }),
+  completionOverlay: css({
+    position: "absolute",
+    zIndex: "2",
+    display: "inline-block",
+    maxWidth: "calc(100% - 32px)",
+    color: "muted",
+    fontSize: "0.94rem",
+    lineHeight: "normal",
+    pointerEvents: "none",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
   }),
   footer: css({
     display: "grid",

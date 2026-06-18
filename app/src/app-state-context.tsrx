@@ -51,6 +51,7 @@ const context = {
   MainTab: defineAppStateContext("mainTab"),
   ProjectContext: defineAppStateContext("projectContext"),
   ProjectRegistry: defineAppStateContext("projectRegistry"),
+  SavedPrompts: defineAppStateContext("savedPrompts"),
   ShortcutRegistry: defineAppStateContext("shortcutRegistry"),
   WorkbenchTabCache: defineAppStateContext("workbenchTabCache"),
   WorkbenchTabSet: defineAppStateContext("workbenchTabSet"),
@@ -65,13 +66,15 @@ export function AppStateProvider(props: {
     <context.MainTab value={appState.mainTab}>
       <context.ProjectContext value={appState.projectContext}>
         <context.ProjectRegistry value={appState.projectRegistry}>
-          <context.ShortcutRegistry value={appState.shortcutRegistry}>
-            <context.WorkbenchTabCache value={appState.workbenchTabCache}>
-              <context.WorkbenchTabSet
-                value={appState.workbenchTabSet}
-              >{props.children}</context.WorkbenchTabSet>
-            </context.WorkbenchTabCache>
-          </context.ShortcutRegistry>
+          <context.SavedPrompts value={appState.savedPrompts}>
+            <context.ShortcutRegistry value={appState.shortcutRegistry}>
+              <context.WorkbenchTabCache value={appState.workbenchTabCache}>
+                <context.WorkbenchTabSet
+                  value={appState.workbenchTabSet}
+                >{props.children}</context.WorkbenchTabSet>
+              </context.WorkbenchTabCache>
+            </context.ShortcutRegistry>
+          </context.SavedPrompts>
         </context.ProjectRegistry>
       </context.ProjectContext>
     </context.MainTab>
@@ -82,6 +85,7 @@ export const useAppearance = context.Appearance.use
 export const useMainTab = context.MainTab.use
 export const useProjectContext = context.ProjectContext.use
 export const useProjectRegistry = context.ProjectRegistry.use
+export const useSavedPrompts = context.SavedPrompts.use
 export const useShortcutRegistry = context.ShortcutRegistry.use
 export const useWorkbenchTabCache = context.WorkbenchTabCache.use
 export const useWorkbenchTabSet = context.WorkbenchTabSet.use

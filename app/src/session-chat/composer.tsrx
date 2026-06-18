@@ -11,6 +11,7 @@ const composerClasses: SessionInputClasses = {
   form: styles.form,
   editorFrame: styles.editorFrame,
   contentEditable: styles.contentEditable,
+  completionOverlay: styles.completionOverlay,
   placeholder: styles.placeholder,
   footer: styles.footer,
   footerControls: styles.footerControls,

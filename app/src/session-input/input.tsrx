@@ -6,8 +6,9 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin"
 import type { LexicalEditor } from "lexical"
 import { SendHorizontal } from "lucide-react"
 import { useListener } from "preact-sigma"
-import { useEffect, useRef, useState } from "preact/hooks"
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
+import { useSavedPrompts } from "~/app-state-context.tsrx"
 import { hasPromptContent } from "~/session-chat/composer-content.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
@@ -18,6 +19,7 @@ import {
 } from "./input-editor-content.ts"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import { SessionInputPlugins, sessionInputInitialConfig } from "./input-lexical.tsrx"
+import { isSessionInputCaretAtPromptEnd } from "./input-selection.ts"
 import { SessionInputMenu } from "./input-menu.tsrx"
 import { registerSessionInputPromptFocus } from "./prompt-focus.ts"
 
@@ -32,6 +34,7 @@ export type SessionInputClasses = {
   form: string;
   editorFrame: string;
   contentEditable: string;
+  completionOverlay?: string;
   placeholder: string;
   footer: string;
   footerControls?: string;
@@ -45,6 +48,18 @@ export type SessionInputContextUsage = {
 }
 
 type DismissedMenuState = Pick<SessionInputMenuState, "nodeKey" | "startOffset" | "trigger">
+type CompletionPosition = {
+  left: number;
+  top: number;
+}
+
+function getPlainPromptText(promptBlocks: SessionInputPromptBlocks) {
+  if (promptBlocks.length !== 1 || promptBlocks[0]?.type !== "text") {
+    return null
+  }
+
+  return promptBlocks[0].text
+}
 
 export function SessionInput(props: {
   activationFocus?: boolean;
@@ -64,7 +79,9 @@ export function SessionInput(props: {
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) @{
+  const savedPrompts = useSavedPrompts()
   const formElementRef = useRef<HTMLFormElement>(null)
+  const editorFrameRef = useRef<HTMLDivElement | null>(null)
   const menuElementRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<LexicalEditor | null>(null)
   const unregisterPromptFocusRef = useRef<(() => void) | null>(null)
@@ -77,6 +94,7 @@ export function SessionInput(props: {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [completionPosition, setCompletionPosition] = useState<CompletionPosition | null>(null)
   const suggestionRequestIdRef = useRef(0)
   const classes = props.classes ?? {}
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
@@ -107,6 +125,14 @@ export function SessionInput(props: {
   const disabled = props.disabled ?? false
   const canSubmit = !disabled && hasPromptContent(promptBlocks) && menu === null && !isSubmitting
   const highlightedSuggestion = suggestions[selectedIndex] ?? suggestions[0] ?? null
+  const plainPromptText = getPlainPromptText(promptBlocks)
+  const completionPrompt =
+    !disabled && menu === null && plainPromptText
+      ? savedPrompts.findCompletion(plainPromptText)
+      : null
+  const completionSuffix =
+    completionPrompt && plainPromptText ? completionPrompt.text.slice(plainPromptText.length) : ""
+  const completionVisible = completionSuffix.length > 0 && completionPosition !== null
   function clearMenuState() {
     setMenu((currentMenu) => (currentMenu === null ? currentMenu : null))
     setSuggestions(
@@ -119,6 +145,60 @@ export function SessionInput(props: {
   function focusEditor() {
     queueMicrotask(() => {
       editorRef.current?.focus()
+    })
+  }
+
+  function readCaretCompletionPosition() {
+    if (!editorRef.current || !editorFrameRef.current || completionSuffix.length === 0) {
+      return null
+    }
+
+    const rootElement = editorRef.current.getRootElement()
+    const selection = window.getSelection()
+
+    if (!rootElement || !selection || selection.rangeCount === 0 || !selection.isCollapsed) {
+      return null
+    }
+
+    const focusNode = selection.focusNode
+
+    if (!focusNode || !rootElement.contains(focusNode)) {
+      return null
+    }
+
+    const caretAtPromptEnd = editorRef.current.getEditorState().read(
+      () => isSessionInputCaretAtPromptEnd(),
+    )
+
+    if (!caretAtPromptEnd) {
+      return null
+    }
+
+    const range = selection.getRangeAt(0).cloneRange()
+    range.collapse(false)
+    const rangeRect = range.getBoundingClientRect()
+    const rootRect = rootElement.getBoundingClientRect()
+    const frameRect = editorFrameRef.current.getBoundingClientRect()
+    const left = (rangeRect.left || rootRect.left) - frameRect.left
+    const top = (rangeRect.top || rootRect.top) - frameRect.top
+
+    return {
+      left,
+      top,
+    }
+  }
+
+  function updateCompletionPosition() {
+    const nextPosition = readCaretCompletionPosition()
+
+    setCompletionPosition((currentPosition) => {
+      if (
+        currentPosition?.left === nextPosition?.left && currentPosition?.top === nextPosition?.top
+      ) {
+        return currentPosition
+      }
+
+      return nextPosition
     })
   }
 
@@ -174,6 +254,7 @@ export function SessionInput(props: {
       return
     }
 
+    const submittedPromptText = getPlainPromptText(promptBlocks)
     setIsSubmitting(true)
 
     try {
@@ -182,6 +263,10 @@ export function SessionInput(props: {
       return
     } finally {
       setIsSubmitting(false)
+    }
+
+    if (submittedPromptText) {
+      savedPrompts.recordSubmission(submittedPromptText)
     }
 
     dismissedMenuRef.current = null
@@ -207,6 +292,23 @@ export function SessionInput(props: {
 
   function acceptHighlightedSuggestion() {
     acceptSuggestion(highlightedSuggestion)
+  }
+
+  function acceptSavedPromptCompletion() {
+    if (!completionPrompt || !editorRef.current) {
+      return
+    }
+
+    const nextPromptBlocks: SessionInputPromptBlocks = [
+      {
+        type: "text",
+        text: completionPrompt.text,
+      },
+    ]
+
+    setSessionInputEditorPrompt(editorRef.current, nextPromptBlocks, { selectEnd: true })
+    updatePromptBlocks(nextPromptBlocks)
+    focusEditor()
   }
 
   function highlightNextSuggestion() {
@@ -340,6 +442,10 @@ export function SessionInput(props: {
     })
   }, [suggestions])
 
+  useLayoutEffect(() => {
+    updateCompletionPosition()
+  }, [completionSuffix, menu, disabled])
+
   useListener(document, "mousedown", (event) => {
     if (!menu) {
       return
@@ -375,7 +481,7 @@ export function SessionInput(props: {
     }}
   >
     <LexicalComposer initialConfig={sessionInputInitialConfig}>
-      <div class={classes.editorFrame}>
+      <div ref={editorFrameRef} class={classes.editorFrame}>
         <RichTextPlugin
           ErrorBoundary={LexicalErrorBoundary}
           contentEditable={<ContentEditable
@@ -388,17 +494,31 @@ export function SessionInput(props: {
           placeholder={<div class={classes.placeholder}>{placeholder}</div>}
         />
         <SessionInputPlugins
+          {completionVisible}
           {menu}
+          onAcceptCompletion={acceptSavedPromptCompletion}
           onAcceptMenu={acceptHighlightedSuggestion}
           onDismissMenu={dismissMenuFromEditor}
           onEditorReady={registerEditor}
           onHighlightNext={highlightNextSuggestion}
           onHighlightPrevious={highlightPreviousSuggestion}
+          onInputStateChange={updateCompletionPosition}
           onMenuChange={updateMenu}
           onPromptBlocksChange={updatePromptBlocks}
           onEscape={props.onEscape}
           onSubmit={submitFromEditor}
         />
+
+        @if (completionVisible) {
+          <div
+            class={classes.completionOverlay}
+            style={{
+              left: `${completionPosition.left}px`,
+              top: `${completionPosition.top}px`,
+            }}
+            aria-hidden="true"
+          >{completionSuffix}</div>
+        }
 
         @if (props.footerInsideFrame) {
           <SessionInputFooter

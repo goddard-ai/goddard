@@ -136,6 +136,7 @@ export default {
 
   messageActions: css({
     display: "flex",
+    gap: "2px",
     paddingTop: "8px",
     opacity: "0",
     pointerEvents: "none",

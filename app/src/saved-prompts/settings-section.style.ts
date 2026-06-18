@@ -1,0 +1,73 @@
+import { css } from "@goddard-ai/styled-system/css"
+
+export default {
+  promptList: css({
+    display: "grid",
+    gap: "8px",
+    margin: "0",
+    padding: "0",
+    listStyle: "none",
+  }),
+  promptItem: css({
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "start",
+    gap: "12px",
+    minWidth: "0",
+    padding: "12px 14px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "background",
+  }),
+  promptText: css({
+    minWidth: "0",
+    margin: "0",
+    color: "text",
+    fontSize: "0.86rem",
+    lineHeight: "1.55",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+  }),
+  deleteButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "30px",
+    height: "30px",
+    padding: "0",
+    border: "1px solid {colors.border}",
+    borderRadius: "7px",
+    backgroundColor: "surface",
+    color: "muted",
+    cursor: "pointer",
+    _hover: {
+      borderColor: "danger",
+      color: "danger",
+    },
+    _focusVisible: {
+      outline: "2px solid {colors.accentStrong}",
+      outlineOffset: "2px",
+    },
+  }),
+  emptyState: css({
+    display: "grid",
+    gap: "4px",
+    padding: "14px",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "background",
+  }),
+  emptyTitle: css({
+    margin: "0",
+    color: "text",
+    fontSize: "0.88rem",
+    fontWeight: "660",
+    lineHeight: "1.45",
+  }),
+  emptyText: css({
+    margin: "0",
+    color: "muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.55",
+  }),
+}

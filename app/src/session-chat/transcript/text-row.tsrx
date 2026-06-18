@@ -1,11 +1,12 @@
 import { cx } from "@goddard-ai/styled-system/css"
-import { BookOpen, Check, ChevronDown, Copy, Link2 } from "lucide-react"
+import { BookOpen, Bookmark, Check, ChevronDown, Copy, Link2 } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import type {
   SessionTranscriptContentBlock,
   SessionTranscriptTextMessage,
 } from "~/sessions/models.ts"
+import { useSavedPrompts } from "~/app-state-context.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { MarkdownMessage } from "../markdown-message.tsrx"
 import { getBubbleMaxWidth } from "./layout.ts"
@@ -85,6 +86,31 @@ function CopyMessageMarkdownButton(props: {
       } @else {
         <Copy size={14} strokeWidth={2.3} />
       }
+    </button>
+  </GoodTooltip>
+}
+
+function SavePromptButton(props: {
+  markdown: string;
+}) @{
+  const savedPrompts = useSavedPrompts()
+  const saved = savedPrompts.isSaved(props.markdown)
+
+  <GoodTooltip
+    ariaLabel={saved ? "Unsave prompt" : "Save prompt"}
+    content={saved ? "Unsave prompt" : "Save prompt"}
+    side="top"
+  >
+    <button
+      aria-label={saved ? "Unsave prompt" : "Save prompt"}
+      aria-pressed={saved}
+      class={styles.copyMarkdownButton}
+      type="button"
+      onClick={() => {
+        savedPrompts.toggle(props.markdown)
+      }}
+    >
+      <Bookmark fill={saved ? "currentColor" : "none"} size={14} strokeWidth={2.3} />
     </button>
   </GoodTooltip>
 }
@@ -253,6 +279,7 @@ export function TextTranscriptRow(props: {
         @if (isUserMessage && rawMarkdown.length > 0) {
           <div data-message-actions class={cx(styles.messageActions, styles.messageActionsRight)}>
             <CopyMessageMarkdownButton markdown={rawMarkdown} />
+            <SavePromptButton markdown={rawMarkdown} />
           </div>
         }
       </div>
