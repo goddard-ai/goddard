@@ -22,7 +22,7 @@
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "smoke": "bun ./scripts/smoke-happy-path.ts",
-    "test": "bun test --dots --timeout=180000"
+    "test": "bun test --dots --timeout=180000 --parallel=4"
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
