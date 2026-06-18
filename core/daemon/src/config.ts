@@ -13,6 +13,7 @@ export type RuntimeConfigInput = {
   baseUrl?: string
   port?: number
   agentBinDir?: string
+  reviewSyncLibgit2Path?: string
   env?: RuntimeEnv
 }
 
@@ -21,6 +22,7 @@ export type ResolvedRuntimeConfig = {
   baseUrl: string
   port: number
   agentBinDir: string
+  reviewSyncLibgit2Path?: string
 }
 
 export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRuntimeConfig {
@@ -38,6 +40,9 @@ export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRu
     port,
     agentBinDir:
       input.agentBinDir ?? env.GODDARD_AGENT_BIN_DIR ?? join(import.meta.dirname, "../agent-bin"),
+    ...((input.reviewSyncLibgit2Path ?? env.REVIEW_SYNC_LIBGIT2_PATH)
+      ? { reviewSyncLibgit2Path: input.reviewSyncLibgit2Path ?? env.REVIEW_SYNC_LIBGIT2_PATH }
+      : {}),
   }
 }
 

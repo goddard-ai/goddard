@@ -21,6 +21,7 @@ export type RunInput = {
   baseUrl?: string
   port?: number
   agentBinDir?: string
+  reviewSyncLibgit2Path?: string
   enableIpc?: boolean
   enableStream?: boolean
   logMode?: LogMode
@@ -32,6 +33,7 @@ export async function runDaemon({
   baseUrl,
   port,
   agentBinDir,
+  reviewSyncLibgit2Path,
   enableIpc = true,
   enableStream = true,
   logMode = "compact",
@@ -57,6 +59,7 @@ export async function runDaemon({
       logger,
       logStore,
       port,
+      reviewSyncLibgit2Path,
       store,
     })
   } catch (error) {
@@ -76,6 +79,7 @@ async function runConfiguredDaemon({
   logger,
   logStore,
   port,
+  reviewSyncLibgit2Path,
   store,
 }: {
   agentBinDir?: string
@@ -85,6 +89,7 @@ async function runConfiguredDaemon({
   logger: DaemonLogger
   logStore: ReturnType<typeof createLogStore>
   port?: number
+  reviewSyncLibgit2Path?: string
   store?: ComposedDaemonStore
 }): Promise<number> {
   let ipcServer: DaemonServer | undefined
@@ -95,6 +100,7 @@ async function runConfiguredDaemon({
       agentBinDir,
       baseUrl,
       port,
+      reviewSyncLibgit2Path,
       store,
     })
     const runtime = daemonRuntime

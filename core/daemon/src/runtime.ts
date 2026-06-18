@@ -56,6 +56,7 @@ export async function createDaemonRuntime(
     configManager?: ConfigManager
     idleSessionShutdownTimeoutMs?: number
     port?: number
+    reviewSyncLibgit2Path?: string
     store?: ComposedDaemonStore
   } = {},
 ): Promise<DaemonRuntime> {
@@ -64,6 +65,7 @@ export async function createDaemonRuntime(
     agentBinDir: options.agentBinDir,
     baseUrl: options.baseUrl,
     port: options.port,
+    reviewSyncLibgit2Path: options.reviewSyncLibgit2Path,
   })
   const store =
     options.store ??

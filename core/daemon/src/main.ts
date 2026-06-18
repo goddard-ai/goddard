@@ -65,6 +65,15 @@ function applyDataProfile(value?: (typeof daemonDataProfiles)[number]) {
   process.env.GODDARD_DATA_PROFILE = value
 }
 
+/** Persists packaged review-sync native library location before runtime modules initialize. */
+function applyReviewSyncLibgit2Path(value?: string) {
+  if (!value) {
+    return
+  }
+
+  process.env.REVIEW_SYNC_LIBGIT2_PATH = value
+}
+
 function resolveCliPort(value?: string) {
   if (!value) {
     return undefined
@@ -104,6 +113,11 @@ export async function main(argv = process.argv.slice(2)) {
             long: "agent-bin-dir",
             description: "Directory containing agent executables used by daemon-managed sessions",
           }),
+          reviewSyncLibgit2Path: option({
+            type: optional(string),
+            long: "review-sync-libgit2-path",
+            description: "Private packaged libgit2 path used by review-sync",
+          }),
           dataProfile: option({
             type: optional(oneOf(daemonDataProfiles)),
             long: "data-profile",
@@ -127,6 +141,7 @@ export async function main(argv = process.argv.slice(2)) {
         },
         handler: async (args) => {
           applyDataProfile(args.dataProfile)
+          applyReviewSyncLibgit2Path(args.reviewSyncLibgit2Path)
 
           // Load the runtime only when executing `run` so `--help` stays side-effect free.
           const { runDaemon } = await import("./daemon.ts")
@@ -135,6 +150,7 @@ export async function main(argv = process.argv.slice(2)) {
             baseUrl: args.baseUrl,
             port: resolveCliPort(args.port),
             agentBinDir: args.agentBinDir,
+            reviewSyncLibgit2Path: args.reviewSyncLibgit2Path,
             enableIpc: featureFlags.enableIpc,
             enableStream: featureFlags.enableStream,
             logMode: resolveLogMode(args),

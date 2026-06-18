@@ -8,6 +8,11 @@ import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url
 import { Updater } from "electrobun/bun"
 
 import {
+  createDaemonRunArgs,
+  resolveInstalledNativeRuntimePaths,
+  type PreparedDaemonRuntime,
+} from "./daemon-runtime-launch.ts"
+import {
   daemonServiceName,
   embeddedRuntimeDirName,
   type EmbeddedRuntimeManifest,
@@ -15,13 +20,6 @@ import {
 import { getAppDebug, writeAppError, writeAppLog } from "./logging.ts"
 
 type InstalledDaemonState = {
-  runtimeHash: string
-}
-
-type PreparedDaemonRuntime = {
-  daemonRootDir: string
-  agentBinDir: string
-  daemonExecutablePath: string
   runtimeHash: string
 }
 
@@ -209,6 +207,7 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
     daemonRootDir: installDir,
     daemonExecutablePath: join(installDir, manifest.daemon.executablePath),
     agentBinDir: join(installDir, manifest.daemon.agentBinDir),
+    ...resolveInstalledNativeRuntimePaths(manifest, installDir),
     runtimeHash: manifest.daemon.runtimeHash,
   } satisfies PreparedDaemonRuntime
 }
@@ -280,19 +279,13 @@ async function installUnixDaemonService(
 
   args.push(
     "--",
-    runtime.daemonExecutablePath,
-    "run",
-    "--base-url",
-    baseUrl,
-    "--port",
-    String(daemonPort),
-    "--agent-bin-dir",
-    runtime.agentBinDir,
+    ...createDaemonRunArgs({
+      runtime,
+      baseUrl,
+      daemonPort,
+      dataProfile,
+    }),
   )
-
-  if (dataProfile) {
-    args.push("--data-profile", dataProfile)
-  }
 
   runManagedCommand(args, {
     PATH: process.env.PATH ?? "",
@@ -307,20 +300,12 @@ async function installWindowsDaemonStartup(
   daemonPort: number,
 ) {
   const dataProfile = await resolveDaemonDataProfile()
-  const daemonArgs = [
-    runtime.daemonExecutablePath,
-    "run",
-    "--base-url",
+  const daemonArgs = createDaemonRunArgs({
+    runtime,
     baseUrl,
-    "--port",
-    String(daemonPort),
-    "--agent-bin-dir",
-    runtime.agentBinDir,
-  ]
-
-  if (dataProfile) {
-    daemonArgs.push("--data-profile", dataProfile)
-  }
+    daemonPort,
+    dataProfile,
+  })
 
   const runKeyCommand = daemonArgs.map(quoteWindowsCommandArgument).join(" ")
 
