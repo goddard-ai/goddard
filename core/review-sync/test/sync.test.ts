@@ -139,6 +139,100 @@ test("sync applies clean human edits back to the agent worktree", async () => {
   )
 })
 
+test("sync applies committed review changes when the agent branch is checked out", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  await writeText(join(fixture.reviewDir, "shared.txt"), "human commit\n")
+  await runGit(fixture.reviewDir, ["add", "shared.txt"])
+  await runGit(fixture.reviewDir, ["commit", "-m", "human review commit"])
+  const result = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+
+  expect(result.status).toBe("ok")
+  expect(result.acceptedPatchPath).toBeTruthy()
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("human commit\n")
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+})
+
+test("sync advances agent HEAD when already-rendered review content is committed", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+
+  await writeText(join(fixture.reviewDir, "shared.txt"), "human edit before commit\n")
+  const firstResult = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+  expect(firstResult.status).toBe("ok")
+  expect(firstResult.acceptedPatchPath).toBeTruthy()
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe(
+    "human edit before commit\n",
+  )
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe(
+    "M  shared.txt\n",
+  )
+
+  const beforeCommitHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
+  await runGit(fixture.reviewDir, ["commit", "-m", "human review commit after sync"])
+  const afterCommitHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
+  const secondResult = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+
+  expect(afterCommitHead).not.toBe(beforeCommitHead)
+  expect(secondResult.status).toBe("ok")
+  expect(secondResult.acceptedPatchPath).toBeUndefined()
+  expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+    afterCommitHead,
+  )
+  expect((await runGit(fixture.reviewDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+    "human review commit after sync",
+  )
+  expect((await runGit(fixture.agentDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+    afterCommitHead,
+  )
+  expect((await runGit(fixture.agentDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+    "human review commit after sync",
+  )
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe(
+    "human edit before commit\n",
+  )
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+  expect((await runGit(fixture.agentDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+})
+
+test("sync preserves a cherry-picked review commit after accepting its patch", async () => {
+  const fixture = await createStartedFixture({
+    "shared.txt": "base\n",
+  })
+  const sourceDir = join(fixture.rootDir, "source")
+  await runGit(fixture.agentDir, ["worktree", "add", "-b", "human/source", sourceDir, "main"])
+  await writeText(join(sourceDir, "shared.txt"), "picked edit\n")
+  await runGit(sourceDir, ["add", "shared.txt"])
+  await runGit(sourceDir, ["commit", "-m", "picked review edit"])
+  const pickedCommit = (await runGit(sourceDir, ["rev-parse", "HEAD"])).stdout.trim()
+
+  await runGit(fixture.reviewDir, ["cherry-pick", pickedCommit])
+  const cherryPickedHead = (await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()
+  const result = await syncReviewSession({
+    cwd: fixture.reviewDir,
+  })
+
+  expect(result.status).toBe("ok")
+  expect(result.acceptedPatchPath).toBeTruthy()
+  expect(await readFile(join(fixture.agentDir, "shared.txt"), "utf-8")).toBe("picked edit\n")
+  expect((await runGit(fixture.reviewDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+    cherryPickedHead,
+  )
+  expect((await runGit(fixture.reviewDir, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+    "picked review edit",
+  )
+  expect((await runGit(fixture.reviewDir, ["status", "--porcelain=v1"])).stdout).toBe("")
+})
+
 test("sync does not reapply the rendered baseline as another human patch", async () => {
   const fixture = await createStartedFixture({
     "shared.txt": "base\n",
