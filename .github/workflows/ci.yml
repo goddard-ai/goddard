@@ -12,6 +12,7 @@ permissions:
 env:
   NODE_VERSION: 24
   PNPM_VERSION: 11.5.1
+  GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
 jobs:
   typecheck:
@@ -20,6 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve Bun version
@@ -58,7 +60,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm run codegen && pnpm run typecheck
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm turbo run codegen --filter="...[origin/${{ github.base_ref }}]" --output-logs=errors-only
+          pnpm turbo run typecheck --filter="...[origin/${{ github.base_ref }}]" --output-logs=errors-only
+
+      - name: Typecheck
+        if: github.event_name == 'push'
+        run: |
+          pnpm turbo run codegen --filter="...[${{ env.GITHUB_EVENT_BEFORE }}]" --output-logs=errors-only
+          pnpm turbo run typecheck --filter="...[${{ env.GITHUB_EVENT_BEFORE }}]" --output-logs=errors-only
 
   lint:
     runs-on: ubuntu-latest
@@ -66,6 +77,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve Bun version
@@ -104,7 +116,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm run lint
+        if: github.event_name == 'pull_request'
+        run: pnpm turbo run lint --filter="...[origin/${{ github.base_ref }}]" --output-logs=errors-only
+
+      - name: Lint
+        if: github.event_name == 'push'
+        run: pnpm turbo run lint --filter="...[${{ env.GITHUB_EVENT_BEFORE }}]" --output-logs=errors-only
 
   test:
     name: Test (${{ matrix.os }})
@@ -119,6 +136,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Resolve Bun version
@@ -157,4 +175,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: pnpm run codegen && pnpm run test
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm turbo run codegen --filter="...[origin/${{ github.base_ref }}]" --output-logs=errors-only
+          pnpm turbo run test --filter="...[origin/${{ github.base_ref }}]" --output-logs=errors-only
+
+      - name: Test
+        if: github.event_name == 'push'
+        run: |
+          pnpm turbo run codegen --filter="...[${{ env.GITHUB_EVENT_BEFORE }}]" --output-logs=errors-only
+          pnpm turbo run test --filter="...[${{ env.GITHUB_EVENT_BEFORE }}]" --output-logs=errors-only
