@@ -3,9 +3,9 @@
 Read this ruleset when touching product behavior, `spec/`, SDK/app parity, shared data loading or mutation, system configuration, or user-visible capabilities.
 
 - `spec/` is the canonical source of product intent.
-- `overview/` docs are public documentation for current supported behavior and may intentionally diverge from `spec/` when the spec describes an ideal or future shape.
+- Public `docs/` are documentation for current supported behavior and may intentionally diverge from `spec/` when the spec describes an ideal or future shape.
 - Do not edit `spec/` unless explicitly asked.
-- Do not knowingly let code, non-overview docs, or tests diverge from `spec/`.
+- Do not knowingly let code, non-public docs, or tests diverge from `spec/`.
 - If a request conflicts with `spec/`, call it out instead of silently working around it.
 - New user-facing capability in `app/` that depends on shared data loading, shared data mutation, or system configuration must also be implemented in `core/sdk/` in the same PR.
 - UI-only behavior does not require `core/sdk/` parity.
