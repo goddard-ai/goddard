@@ -74,8 +74,3 @@ jobs:
             )"
             echo "Opened PR #$pr_number."
           fi
-
-          gh pr merge "$pr_number" \
-              --repo "${{ github.repository }}" \
-              --auto \
-              --rebase
