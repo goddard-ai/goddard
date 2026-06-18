@@ -1,5 +1,7 @@
 # `sprint-branch restore-sprint [--sprint <name>] [--force]`
 
+> The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can an accidentally removed `sprints/<name>/` folder be restored from
     the latest local backup?

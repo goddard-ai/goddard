@@ -50,8 +50,9 @@
     "goddard:logs": "bun run ./core/logs/src/cli.ts",
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
     "check:bun-runtime": "node ./scripts/check-bun-runtime.mjs",
-    "check:prepush": "turbo run codegen && turbo run typecheck lint --output-logs=errors-only --continue=always",
-    "check": "turbo run codegen && turbo run typecheck lint test --output-logs=errors-only --continue=always"
+    "check:overview": "node ./scripts/check-overview-docs.mjs",
+    "check:prepush": "pnpm run check:overview && turbo run codegen && turbo run typecheck lint --output-logs=errors-only --continue=always",
+    "check": "pnpm run check:overview && turbo run codegen && turbo run typecheck lint test --output-logs=errors-only --continue=always"
   },
   "devDependencies": {
     "@clack/prompts": "catalog:",

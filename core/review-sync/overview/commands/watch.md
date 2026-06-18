@@ -1,5 +1,7 @@
 # `review-sync watch [agent-branch]`
 
+> The review-sync watch [agent-branch] command is part of the local review-sync workflow. This page explains when to use it, what review state it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can review-sync keep the human review worktree current while agent and
     review changes continue?

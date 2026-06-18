@@ -1,5 +1,7 @@
 # `sprint-branch finish --task <task>`
 
+> The sprint-branch finish --task <task> command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - Is this active task ready for human review?
 

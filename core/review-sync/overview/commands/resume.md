@@ -1,5 +1,7 @@
 # `review-sync resume`
 
+> The review-sync resume command is part of the local review-sync workflow. This page explains when to use it, what review state it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can a paused review-sync session allow sync mutations again?
 

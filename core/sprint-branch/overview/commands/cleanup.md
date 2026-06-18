@@ -1,5 +1,7 @@
 # `sprint-branch cleanup <target> [name] [--force]`
 
+> The sprint-branch cleanup <target> [name] [--force] command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How do we remove sprint-specific local artifacts after landing?
 

@@ -1,5 +1,7 @@
 # `sprint-branch approve`
 
+> The sprint-branch approve command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How does human-approved review work become the new approved boundary?
 

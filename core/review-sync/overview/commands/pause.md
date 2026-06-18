@@ -1,5 +1,7 @@
 # `review-sync pause`
 
+> The review-sync pause command is part of the local review-sync workflow. This page explains when to use it, what review state it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can sync mutations be stopped without tearing down the review session?
 

@@ -5,9 +5,9 @@
 - **Purpose**
   - This directory describes what `@goddard-ai/daemon` supports at a conceptual level.
   - It is written for agents and humans who need to understand daemon-owned behavior without reading source code.
-  - It intentionally avoids implementation details:
+  - It stays at the public product-concept level:
     - Supported outcomes, guardrails, ownership boundaries, and recovery paths belong here.
-    - Private schemas, helper functions, exact diagnostics, storage mechanics, and execution order do not.
+    - Code layout, low-level storage mechanics, and step-by-step execution order do not.
 
 - **Start here**
   - [Daemon model](./model.md)

@@ -1,5 +1,7 @@
 # `sprint-branch reset-state [--task <task>] [--base <ref>] [--force]`
 
+> The sprint-branch reset-state [--task <task>] [--base <ref>] [--force] command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can private sprint state be recreated after a sprint plan is reworked
     or state is missing?

@@ -1,5 +1,7 @@
 # `sprint-branch resume`
 
+> The sprint-branch resume command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How does the agent return to interrupted or dependent work-ahead after
     feedback?

@@ -1,5 +1,7 @@
 # `sprint-branch stop-sync`
 
+> The sprint-branch stop-sync command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How do I stop a running `sprint-branch sync` process from another shell in
     the same working directory?

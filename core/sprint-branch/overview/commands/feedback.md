@@ -1,5 +1,7 @@
 # `sprint-branch feedback`
 
+> The sprint-branch feedback command is part of the local sprint-branch workflow. This page explains when to use it, what sprint state or branches it may change, and what guardrails apply.
+
 - **Question it answers**
   - How can the agent stop work-ahead and return to the review branch for
     human-requested changes?

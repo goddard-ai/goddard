@@ -1,13 +1,15 @@
 # `sprint-branch` Overview
 
+> Sprint-branch is a local workflow for splitting a larger agent effort into task branches that can be reviewed, approved, and landed in order. This overview explains the branch model, selection rules, commands, and recovery paths.
+
 - **Purpose**
   - This directory describes what `sprint-branch` supports at a conceptual
     level.
   - It is written for agents and humans, including people who need to
     understand the sprint review process without reading source code.
-  - It intentionally avoids implementation details:
+  - It stays at the public product-concept level:
     - Outcomes, guardrails, and procedural shape belong here.
-    - Internal files, schemas, locks, and command implementation do not.
+    - Code layout, lock mechanics, and command internals do not.
 
 - **Start here**
   - [Sprint branch model](./model.md)

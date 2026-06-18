@@ -1,5 +1,7 @@
 # `review-sync status`
 
+> The review-sync status command is part of the local review-sync workflow. This page explains when to use it, what review state it may change, and what guardrails apply.
+
 - **Question it answers**
   - What is the current review-sync session state?
 
