@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto"
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { basename, dirname, join, relative, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
 import pkg from "../package.json" with { type: "json" }
 
@@ -11,11 +11,20 @@ type StandaloneArtifact = {
   runtime?: "compiled" | "shared-bun"
 }
 
+export type NativeLibrariesManifest = {
+  libgit2?: {
+    target: string
+    path: string
+    version?: string
+    sha256: string
+  }
+}
+
 const packageDir = resolve(import.meta.dirname, "..")
 const distDir = join(packageDir, "dist")
 
 /** Builds standalone Bun executables for the daemon runtime and helper tools. */
-async function main() {
+export async function main() {
   const args = parseArgs(process.argv.slice(2))
   const target = args.get("target") ?? resolveDefaultCompileTarget()
   const runtime = resolveArtifactRuntime(args.get("runtime"), "--runtime")
@@ -61,6 +70,13 @@ async function main() {
     }
   }
 
+  const nativeLibraries = await stageNativeLibraries({
+    outputDir,
+    target,
+    libgit2SourceDir: args.get("native-libgit2-source-dir"),
+    libgit2Library: args.get("native-libgit2-library"),
+    libgit2Version: args.get("native-libgit2-version"),
+  })
   const runtimeHash = createHash("sha256")
 
   for (const artifact of artifacts) {
@@ -69,6 +85,7 @@ async function main() {
       runtimeHash.update(await readFile(`${artifact.outputPath}.mjs`))
     }
   }
+  await updateNativeLibrariesHash(runtimeHash, outputDir, nativeLibraries)
 
   await cleanupBunBuildScratchFiles()
 
@@ -86,12 +103,91 @@ async function main() {
           goddard: relativeFromOutputDir(outputDir, artifacts[1]!.outputPath),
           workforce: relativeFromOutputDir(outputDir, artifacts[2]!.outputPath),
         },
+        ...(Object.keys(nativeLibraries).length > 0 && { nativeLibraries }),
       },
       null,
       2,
     ) + "\n",
     "utf8",
   )
+}
+
+/** Stages optional native runtime libraries into the standalone output directory. */
+export async function stageNativeLibraries(input: {
+  outputDir: string
+  target: string
+  libgit2SourceDir?: string
+  libgit2Library?: string
+  libgit2Version?: string
+}) {
+  const nativeLibraries: NativeLibrariesManifest = {}
+
+  if (!input.libgit2SourceDir && !input.libgit2Library && !input.libgit2Version) {
+    return nativeLibraries
+  }
+
+  if (!input.libgit2SourceDir || !input.libgit2Library) {
+    throw new Error(
+      "--native-libgit2-source-dir and --native-libgit2-library must be provided together",
+    )
+  }
+
+  const sourceDir = resolve(process.cwd(), input.libgit2SourceDir)
+  const librarySourcePath = resolve(sourceDir, input.libgit2Library)
+  if (!isInsideOrEqual(sourceDir, librarySourcePath)) {
+    throw new Error("--native-libgit2-library must point inside --native-libgit2-source-dir")
+  }
+
+  const outputNativeDir = join(input.outputDir, "native", "libgit2")
+  await mkdir(dirname(outputNativeDir), { recursive: true })
+  await cp(sourceDir, outputNativeDir, { recursive: true, force: true })
+
+  const libraryOutputPath = join(outputNativeDir, relative(sourceDir, librarySourcePath))
+  const sha256 = createHash("sha256")
+    .update(await readFile(libraryOutputPath))
+    .digest("hex")
+
+  nativeLibraries.libgit2 = {
+    target: input.target,
+    path: relativeFromOutputDir(input.outputDir, libraryOutputPath),
+    ...(input.libgit2Version && { version: input.libgit2Version }),
+    sha256,
+  }
+
+  return nativeLibraries
+}
+
+/** Lists every file that belongs to a staged native library payload. */
+export async function listNativeLibraryFiles(
+  outputDir: string,
+  nativeLibraries: NativeLibrariesManifest,
+) {
+  const roots = new Set<string>()
+
+  if (nativeLibraries.libgit2) {
+    roots.add(join(outputDir, "native", "libgit2"))
+  }
+
+  const files: string[] = []
+  for (const root of roots) {
+    files.push(...(await listFilesRecursive(root)))
+  }
+
+  return files.sort((left, right) =>
+    relativeFromOutputDir(outputDir, left).localeCompare(relativeFromOutputDir(outputDir, right)),
+  )
+}
+
+/** Adds staged native library paths and bytes to the standalone runtime hash. */
+export async function updateNativeLibrariesHash(
+  runtimeHash: ReturnType<typeof createHash>,
+  outputDir: string,
+  nativeLibraries: NativeLibrariesManifest,
+) {
+  for (const nativeFilePath of await listNativeLibraryFiles(outputDir, nativeLibraries)) {
+    runtimeHash.update(relativeFromOutputDir(outputDir, nativeFilePath))
+    runtimeHash.update(await readFile(nativeFilePath))
+  }
 }
 
 /** Resolves how command artifacts are emitted for the standalone runtime. */
@@ -124,6 +220,27 @@ async function writeSharedBunHelper(artifact: StandaloneArtifact) {
     "utf8",
   )
   await chmod(artifact.outputPath, 0o755)
+}
+
+async function listFilesRecursive(path: string): Promise<string[]> {
+  const entries = await readdir(path, { withFileTypes: true })
+  const files: string[] = []
+
+  for (const entry of entries) {
+    const entryPath = join(path, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursive(entryPath)))
+    } else if (entry.isFile()) {
+      files.push(entryPath)
+    }
+  }
+
+  return files
+}
+
+function isInsideOrEqual(parent: string, child: string) {
+  const rel = relative(parent, child)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
 }
 
 /** Parses repeated `--key value` command-line arguments into one lookup map. */
@@ -215,4 +332,6 @@ function relativeFromOutputDir(outputDir: string, artifactPath: string) {
   return relative(outputDir, artifactPath).replaceAll("\\", "/")
 }
 
-await main()
+if (import.meta.main) {
+  await main()
+}

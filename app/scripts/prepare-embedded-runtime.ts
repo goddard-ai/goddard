@@ -22,6 +22,7 @@ type DaemonManifest = {
     goddard: string
     workforce: string
   }
+  nativeLibraries?: EmbeddedRuntimeManifest["daemon"]["nativeLibraries"]
 }
 
 const appDir = resolve(import.meta.dirname, "..")
@@ -76,6 +77,9 @@ async function main() {
         goddard: join("daemon", daemonManifest.helperPaths.goddard),
         workforce: join("daemon", daemonManifest.helperPaths.workforce),
       },
+      ...(daemonManifest.nativeLibraries && {
+        nativeLibraries: prefixNativeLibraryPaths("daemon", daemonManifest.nativeLibraries),
+      }),
     },
     serviceman: {
       version: embeddedServicemanVersion,
@@ -89,6 +93,20 @@ async function main() {
     JSON.stringify(manifest, null, 2) + "\n",
     "utf8",
   )
+}
+
+function prefixNativeLibraryPaths(
+  prefix: string,
+  nativeLibraries: NonNullable<EmbeddedRuntimeManifest["daemon"]["nativeLibraries"]>,
+) {
+  return {
+    ...(nativeLibraries.libgit2 && {
+      libgit2: {
+        ...nativeLibraries.libgit2,
+        path: join(prefix, nativeLibraries.libgit2.path),
+      },
+    }),
+  }
 }
 
 /** Downloads the pinned serviceman launcher and templates into the app bundle staging directory. */
