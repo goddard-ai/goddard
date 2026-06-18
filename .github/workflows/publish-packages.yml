@@ -89,6 +89,15 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Check package
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          pnpm run --if-present codegen
+          pnpm run --if-present typecheck
+          pnpm run --if-present lint
+          pnpm run --if-present test
+        working-directory: ${{ matrix.path }}
+
       - name: Build package
         if: steps.version.outputs.changed == 'true'
         run: pnpm run build
