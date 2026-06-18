@@ -286,6 +286,37 @@ test("SessionChat preserves history turn order and normalizes statuses", () => {
   })
 })
 
+test("SessionChat acknowledges live messages only within their target turn", () => {
+  const secondPrompt = promptMessage("prompt-2")
+  const chat = createChat({
+    history: createHistory([
+      createTurn({
+        turnId: "turn-1",
+        sequence: 1,
+        promptRequestId: "prompt-1",
+        messages: [promptMessage("prompt-1")],
+      }),
+      createTurn({
+        turnId: "turn-2",
+        sequence: 2,
+        promptRequestId: "prompt-2",
+        completedAt: null,
+        completionKind: null,
+        messages: [],
+      }),
+    ]),
+  })
+
+  chat.applyMessageNow(liveMessage(secondPrompt, 0), {
+    receivedAt: "2026-04-14T00:00:02.000Z",
+  })
+
+  const secondTurn = chat.turns.find((turn) => turn.promptRequestId === "prompt-2")
+
+  expect(secondTurn?.messageRanges).toEqual([{ sequence: 0, sequenceStart: 0 }])
+  expect(secondTurn?.messages).toEqual([secondPrompt])
+})
+
 test("SessionChat ignores history entries with missing ACP messages", () => {
   const malformedMessage = {
     sequence: 0,

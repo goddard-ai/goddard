@@ -753,13 +753,6 @@ export class SessionChat extends Sigma<SessionChatState> {
     receivedAt: string,
     options: { skipAcknowledgementCheck?: boolean } = {},
   ) {
-    if (
-      options.skipAcknowledgementCheck !== true &&
-      this.turns.some((turn) => turnAcknowledgesMessageRange(turn, range))
-    ) {
-      return
-    }
-
     const messageId = getMessageId(message)
     const promptRequestId = resolvePromptRequestId(message)
     const permissionTurn =
@@ -776,6 +769,15 @@ export class SessionChat extends Sigma<SessionChatState> {
       this.liveTurns.find((turn) => turn.promptRequestId === targetPromptRequestId) ?? null
     const targetHistoryTurn =
       this.historyTurns.find((turn) => turn.promptRequestId === targetPromptRequestId) ?? null
+
+    if (
+      options.skipAcknowledgementCheck !== true &&
+      ((existingLiveTurn !== null && turnAcknowledgesMessageRange(existingLiveTurn, range)) ||
+        (targetHistoryTurn !== null && turnAcknowledgesMessageRange(targetHistoryTurn, range)))
+    ) {
+      return
+    }
+
     const turn =
       existingLiveTurn ??
       this.#createLiveTurn(
