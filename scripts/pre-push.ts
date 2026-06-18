@@ -33,7 +33,7 @@ const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap(compileFileFilter
 /**
  * Describes one ref update streamed to the pre-push hook on stdin.
  */
-type PushUpdate = {
+export type PushUpdate = {
   localRef: string
   localSha: string
   remoteRef: string
@@ -80,12 +80,12 @@ export function parsePushUpdates(stdinText: string) {
 }
 
 /** Selects the pushed commit when origin is being updated by a non-delete ref. */
-function findPushedSha(remoteName: string, updates: PushUpdate[]) {
+function findPushedUpdate(remoteName: string, updates: PushUpdate[]) {
   if (remoteName !== "origin") {
     return undefined
   }
 
-  return updates.find(({ localRef }) => localRef !== "(delete)")?.localSha
+  return updates.find(({ localRef, localSha }) => localRef !== "(delete)" && localSha !== ZERO_SHA)
 }
 
 /** Selects the pushed commit when a personal branch should prove it can rebase onto main. */
@@ -100,6 +100,15 @@ export function findRebaseCheckedBranchPushSha(remoteName: string, updates: Push
       localRef !== "(delete)" &&
       localSha !== ZERO_SHA,
   )?.localSha
+}
+
+/** Builds the Turbo affected range from the pushed remote commit, or branch point for new refs. */
+export function getTurboAffectedFilterRange(pushedUpdate: PushUpdate, branchPoint?: string) {
+  if (pushedUpdate.remoteSha !== ZERO_SHA) {
+    return `${pushedUpdate.remoteSha}...${pushedUpdate.localSha}`
+  }
+
+  return branchPoint ? `${branchPoint}...${pushedUpdate.localSha}` : undefined
 }
 
 /** Resolves the repository root so subprocesses run from a stable location. */
@@ -204,8 +213,8 @@ function runRebaseCheck(repoRoot: string, pushedSha: string) {
 }
 
 /** Lists files changed between the branch point and the pushed commit. */
-function getChangedFiles(repoRoot: string, branchPoint: string, pushedSha: string) {
-  const result = spawnSync("git", ["diff", "--name-only", `${branchPoint}..${pushedSha}`], {
+function getChangedFiles(repoRoot: string, fromSha: string, toSha: string) {
+  const result = spawnSync("git", ["diff", "--name-only", `${fromSha}..${toSha}`], {
     cwd: repoRoot,
     encoding: "utf8",
   })
@@ -231,8 +240,8 @@ function runPnpm(repoRoot: string, args: string[]) {
   return result.status === 0
 }
 
-/** Installs dependencies only when the lockfile changed, then runs static pre-push checks. */
-function runRepoCheck(repoRoot: string, changedFiles: string[]) {
+/** Runs the static pre-push checks, filtering package checks when a push range is available. */
+function runRepoCheck(repoRoot: string, changedFiles: string[], filterRange?: string) {
   if (
     changedFiles.includes("pnpm-lock.yaml") &&
     !runPnpm(repoRoot, ["install", "--frozen-lockfile", "--ignore-scripts"])
@@ -240,14 +249,37 @@ function runRepoCheck(repoRoot: string, changedFiles: string[]) {
     return false
   }
 
-  return runPnpm(repoRoot, ["run", "check:prepush"])
+  if (!runPnpm(repoRoot, ["run", "check:docs"])) {
+    return false
+  }
+
+  if (!runPnpm(repoRoot, ["exec", "turbo", "run", "codegen"])) {
+    return false
+  }
+
+  const typecheckLintArgs = [
+    "exec",
+    "turbo",
+    "run",
+    "typecheck",
+    "lint",
+    "--output-logs=errors-only",
+    "--continue=always",
+  ]
+
+  if (filterRange) {
+    typecheckLintArgs.push(`--filter=...[${filterRange}]`)
+  }
+
+  return runPnpm(repoRoot, typecheckLintArgs)
 }
 
 /** Runs the pre-push guard and returns a process exit code. */
 async function main(argv = process.argv.slice(2)) {
   const [remoteName = ""] = argv
   const updates = parsePushUpdates(await readStdinText())
-  const pushedSha = findPushedSha(remoteName, updates)
+  const pushedUpdate = findPushedUpdate(remoteName, updates)
+  const pushedSha = pushedUpdate?.localSha
   const rebaseCheckedSha = findRebaseCheckedBranchPushSha(remoteName, updates)
 
   if (!pushedSha && !rebaseCheckedSha) {
@@ -264,6 +296,17 @@ async function main(argv = process.argv.slice(2)) {
     return 0
   }
 
+  if (pushedUpdate.remoteSha !== ZERO_SHA) {
+    const changedFiles = getChangedFiles(repoRoot, pushedUpdate.remoteSha, pushedSha)
+    const filterRange = getTurboAffectedFilterRange(pushedUpdate)
+
+    if (shouldRunRepoCheck(changedFiles) && !runRepoCheck(repoRoot, changedFiles, filterRange)) {
+      return 1
+    }
+
+    return 0
+  }
+
   if (!hasOriginMain(repoRoot)) {
     return runRepoCheck(repoRoot, []) ? 0 : 1
   }
@@ -275,8 +318,9 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   const changedFiles = getChangedFiles(repoRoot, branchPoint, pushedSha)
+  const filterRange = getTurboAffectedFilterRange(pushedUpdate, branchPoint)
 
-  if (shouldRunRepoCheck(changedFiles) && !runRepoCheck(repoRoot, changedFiles)) {
+  if (shouldRunRepoCheck(changedFiles) && !runRepoCheck(repoRoot, changedFiles, filterRange)) {
     return 1
   }
 

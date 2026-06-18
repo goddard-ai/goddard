@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 
-import { findRebaseCheckedBranchPushSha, parsePushUpdates } from "./pre-push.ts"
+import {
+  findRebaseCheckedBranchPushSha,
+  getTurboAffectedFilterRange,
+  parsePushUpdates,
+} from "./pre-push.ts"
 
 const PUSHED_SHA = "1111111111111111111111111111111111111111"
 const REMOTE_SHA = "2222222222222222222222222222222222222222"
@@ -38,5 +42,25 @@ describe("findRebaseCheckedBranchPushSha", () => {
         parsePushUpdates(`refs/heads/topic ${PUSHED_SHA} refs/heads/topic ${REMOTE_SHA}\n`),
       ),
     ).toBeUndefined()
+  })
+})
+
+describe("getTurboAffectedFilterRange", () => {
+  test("uses the pushed remote-to-local range for existing remote refs", () => {
+    const [update] = parsePushUpdates(
+      `refs/heads/topic ${PUSHED_SHA} refs/heads/topic ${REMOTE_SHA}\n`,
+    )
+
+    expect(getTurboAffectedFilterRange(update!)).toBe(`${REMOTE_SHA}...${PUSHED_SHA}`)
+  })
+
+  test("uses the branch point for new remote refs", () => {
+    const branchPoint = "3333333333333333333333333333333333333333"
+    const [update] = parsePushUpdates(
+      `refs/heads/topic ${PUSHED_SHA} refs/heads/topic ${ZERO_SHA}\n`,
+    )
+
+    expect(getTurboAffectedFilterRange(update!, branchPoint)).toBe(`${branchPoint}...${PUSHED_SHA}`)
+    expect(getTurboAffectedFilterRange(update!)).toBeUndefined()
   })
 })
