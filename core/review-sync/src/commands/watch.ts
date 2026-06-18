@@ -42,6 +42,15 @@ import {
   type WatchReviewSyncInput,
   type WatchSyncReadyReason,
 } from "../types.ts"
+import {
+  createWatchEventQueue,
+  isAbortSignalAborted,
+  shouldIgnoreWatchEvent,
+  waitForWatchQuietPeriod,
+  type WatchEventDetail,
+  type WatchEventQueue,
+  type WatchEventSource,
+} from "../watch-events.ts"
 import { reviewBranchHasHumanCommits } from "./history.ts"
 import { pauseSession } from "./pause.ts"
 import { resumeSession } from "./resume.ts"
@@ -55,15 +64,6 @@ type WatchVerboseSession = Pick<SessionState, "sessionId" | "reviewBranch">
 
 /** Emits verbose watch diagnostics through the regular result callback. */
 type WatchVerboseEmitter = (message: string, session?: WatchVerboseSession) => Promise<void>
-
-/** Filesystem event details retained until the watch loop can log them in order. */
-type WatchEventDetail = {
-  source: "worktree" | "git"
-  path: string
-  recursive: boolean
-  eventType: string
-  filename: string | null
-}
 
 /** Watches both worktrees and runs sync when either snapshot changes. */
 export async function watchReviewSession(input: WatchReviewSyncInput) {
@@ -1237,7 +1237,7 @@ async function createRepositoryMetadataWatchers(
 
 /** Creates filesystem watchers for an already resolved set of existing targets. */
 async function createFsWatchers(
-  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+  targets: Array<{ path: string; recursive: boolean; source: WatchEventSource }>,
   events: WatchEventQueue,
 ) {
   const watchers: FSWatcher[] = []
@@ -1274,10 +1274,10 @@ async function createFsWatchers(
 
 /** Keeps one watcher per existing path so duplicate Git dirs do not duplicate events. */
 async function resolveExistingWatchTargets(
-  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+  targets: Array<{ path: string; recursive: boolean; source: WatchEventSource }>,
 ) {
   const seen = new Set<string>()
-  const existing: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }> = []
+  const existing: Array<{ path: string; recursive: boolean; source: WatchEventSource }> = []
 
   for (const target of targets) {
     if (seen.has(target.path) || !(await pathExists(target.path))) {
@@ -1291,18 +1291,8 @@ async function resolveExistingWatchTargets(
   return existing
 }
 
-/** Avoids routing duplicate Git metadata events from the main worktree content watcher. */
-function shouldIgnoreWatchEvent(source: "worktree" | "git", filename: string | Buffer | null) {
-  if (source !== "worktree" || filename === null) {
-    return false
-  }
-
-  const path = filename.toString()
-  return path === ".git" || path.startsWith(".git/") || path.startsWith(".git\\")
-}
-
 /** Ignores Git's transient lock files when recursive metadata watching races their removal. */
-function shouldIgnoreWatchFailure(source: "worktree" | "git", error: unknown) {
+function shouldIgnoreWatchFailure(source: WatchEventSource, error: unknown) {
   if (source !== "git" || !(error instanceof Error)) {
     return false
   }
@@ -1365,7 +1355,7 @@ async function emitQueuedWatchEvents(
 
 /** Formats watcher targets in the same compact style as verbose event summaries. */
 function formatWatchTargets(
-  targets: Array<{ path: string; recursive: boolean; source: "worktree" | "git" }>,
+  targets: Array<{ path: string; recursive: boolean; source: WatchEventSource }>,
 ) {
   return targets
     .map((target) => `${target.source} ${target.recursive ? "recursive " : ""}${target.path}`)
@@ -1376,95 +1366,6 @@ function formatWatchTargets(
 function formatWatchEvent(event: WatchEventDetail) {
   const changedPath = event.filename ? join(event.path, event.filename) : event.path
   return `${event.source} ${event.eventType} ${changedPath}`
-}
-
-/** Creates a small event queue that can also wake on aborts or watcher errors. */
-function createWatchEventQueue(signal: AbortSignal | undefined) {
-  let pending = false
-  const pendingEvents: WatchEventDetail[] = []
-  let failure: unknown
-  const waiters = new Set<(value: boolean) => void>()
-
-  const flushWaiters = (value: boolean) => {
-    for (const waiter of waiters) {
-      waiter(value)
-    }
-    waiters.clear()
-  }
-
-  const waitForEvent = () => waitForEventOrTimeout(null)
-  const waitForEventOrTimeout = (timeoutMs: number | null) => {
-    if (failure) {
-      throw failure
-    }
-    if (pending) {
-      pending = false
-      return Promise.resolve(true)
-    }
-    if (isAbortSignalAborted(signal)) {
-      return Promise.resolve(false)
-    }
-
-    return new Promise<boolean>((resolvePromise, rejectPromise) => {
-      let timeout: ReturnType<typeof setTimeout> | null = null
-      const done = (value: boolean) => {
-        if (timeout) {
-          clearTimeout(timeout)
-        }
-        waiters.delete(done)
-        signal?.removeEventListener("abort", abort)
-
-        if (failure) {
-          rejectPromise(failure)
-          return
-        }
-        resolvePromise(value)
-      }
-      const abort = () => done(false)
-
-      waiters.add(done)
-      signal?.addEventListener("abort", abort, { once: true })
-
-      if (timeoutMs !== null) {
-        timeout = setTimeout(() => done(false), timeoutMs)
-      }
-    })
-  }
-
-  return {
-    notify: (event?: WatchEventDetail) => {
-      pending = true
-      if (event) {
-        pendingEvents.push(event)
-      }
-      flushWaiters(true)
-    },
-    drainEvents: () => pendingEvents.splice(0),
-    fail: (error: unknown) => {
-      failure = error
-      flushWaiters(false)
-    },
-    waitForEvent,
-    waitForEventOrTimeout,
-  }
-}
-
-type WatchEventQueue = ReturnType<typeof createWatchEventQueue>
-
-/** Waits until filesystem events have been quiet long enough for Git to settle. */
-async function waitForWatchQuietPeriod(
-  events: WatchEventQueue,
-  signal: AbortSignal | undefined,
-  watchDebounceMs: number,
-) {
-  while (!isAbortSignalAborted(signal)) {
-    const changed = await events.waitForEventOrTimeout(watchDebounceMs)
-    if (!changed) {
-      return true
-    }
-  }
-
-  return false
 }
 
 function resolveWatchDebounceMs(input: WatchReviewSyncInput) {
@@ -1480,11 +1381,6 @@ async function notifyWatchReady(input: WatchReviewSyncInput) {
     setTimeout(resolvePromise, resolveWatchDebounceMs(input))
   })
   await input.onWatchReady()
-}
-
-/** Checks an abort signal without causing TypeScript to over-narrow loop state. */
-function isAbortSignalAborted(signal: AbortSignal | undefined) {
-  return signal?.aborted === true
 }
 
 /** Translates process termination signals into conventional command exit codes. */
