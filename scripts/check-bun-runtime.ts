@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/*
- * Verifies that the workspace Bun runtime and Electrobun build configuration
- * both use the Bun version pinned in the root package catalog.
- */
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"

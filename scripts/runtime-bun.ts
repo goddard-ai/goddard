@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/*
- * Dispatches commands through the workspace-installed Bun binary so daemon
- * tooling uses the repository-pinned runtime.
- */
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
