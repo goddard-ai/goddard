@@ -1,6 +1,6 @@
 # Loops
 
-> A loop is a reusable daemon-owned runtime that can continue beyond a single prompt or action run. This page explains how clients start, inspect, list, and shut down loop runtimes without owning their state directly.
+A loop is a reusable daemon-owned runtime that can continue beyond a single prompt or action run. This page explains how clients start, inspect, list, and shut down loop runtimes without owning their state directly.
 
 ## Core idea
 

@@ -1,6 +1,6 @@
 # Sprint Branch Commands
 
-> Sprint-branch commands manage a local stack of agent task branches from setup through review, approval, landing, and cleanup. This index groups commands by the workflow question they answer.
+Sprint-branch commands manage a local stack of agent task branches from setup through review, approval, landing, and cleanup. This index groups commands by the workflow question they answer.
 
 ## Inspection
 

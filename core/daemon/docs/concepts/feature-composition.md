@@ -1,6 +1,6 @@
 # Feature Composition
 
-> The daemon provides shared local runtime substrate, while feature packages contribute product behavior on top of it. This page explains that composition boundary and the default feature surface clients expect.
+The daemon provides shared local runtime substrate, while feature packages contribute product behavior on top of it. This page explains that composition boundary and the default feature surface clients expect.
 
 ## Core idea
 

@@ -105,13 +105,13 @@ const checkPageShape: FileCheck = (file, text, errors) => {
   if (lines[1] !== "") {
     errors.push(`${relative(file)}:2 must be blank after the H1`)
   }
-  if (!lines[2]?.startsWith("> ")) {
-    errors.push(`${relative(file)}:3 must be a Markdown blockquote opener`)
-  } else if (/^>\s*["“]/.test(lines[2])) {
-    errors.push(`${relative(file)}:3 blockquote opener must not wrap the sentence in quotes`)
+  if (!lines[2] || lines[2].startsWith("#") || lines[2].startsWith("- ")) {
+    errors.push(`${relative(file)}:3 must be a plain opening paragraph`)
+  } else if (lines[2].startsWith("> ")) {
+    errors.push(`${relative(file)}:3 opening paragraph must not be a Markdown blockquote`)
   }
   if (lines[3] !== "") {
-    errors.push(`${relative(file)}:4 must be blank after the opening blockquote`)
+    errors.push(`${relative(file)}:4 must be blank after the opening paragraph`)
   }
 }
 

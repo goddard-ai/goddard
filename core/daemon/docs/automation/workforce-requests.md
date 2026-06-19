@@ -1,6 +1,6 @@
 # Workforce Requests
 
-> Workforce requests are queued units of delegated agent work inside one repository workforce. This page explains how requests enter the queue, change over time, and advance only through daemon-owned validation.
+Workforce requests are queued units of delegated agent work inside one repository workforce. This page explains how requests enter the queue, change over time, and advance only through daemon-owned validation.
 
 ## Core idea
 

@@ -1,6 +1,6 @@
 # Sessions
 
-> A daemon session is one Goddard agent conversation or task with local identity, status, history, diagnostics, and optional workspace isolation. This section breaks session behavior into pages that can be read independently.
+A daemon session is one Goddard agent conversation or task with local identity, status, history, diagnostics, and optional workspace isolation. This section breaks session behavior into pages that can be read independently.
 
 ## Purpose
 

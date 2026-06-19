@@ -1,6 +1,6 @@
 # Pull Request Feedback
 
-> Pull request feedback handling lets the local daemon react to supported review comments or reviews for the authenticated user. This page explains how feedback becomes queued local work without turning the daemon into a general review UI.
+Pull request feedback handling lets the local daemon react to supported review comments or reviews for the authenticated user. This page explains how feedback becomes queued local work without turning the daemon into a general review UI.
 
 ## Core idea
 

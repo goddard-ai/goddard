@@ -1,6 +1,6 @@
 # Review Sync Model
 
-> Review-sync keeps agent work and human review work separate while still letting feedback flow back to the agent branch. This page defines the branch, worktree, session, patch, and guardrail concepts behind that workflow.
+Review-sync keeps agent work and human review work separate while still letting feedback flow back to the agent branch. This page defines the branch, worktree, session, patch, and guardrail concepts behind that workflow.
 
 ## Core idea
 

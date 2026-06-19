@@ -1,6 +1,6 @@
 # Inbox
 
-> The daemon-local inbox is the list of Goddard work items that may need a human decision now. Each row represents one current session or managed pull request, so clients can triage attention without inventing their own rules.
+The daemon-local inbox is the list of Goddard work items that may need a human decision now. Each row represents one current session or managed pull request, so clients can triage attention without inventing their own rules.
 
 ## Core idea
 

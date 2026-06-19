@@ -1,6 +1,6 @@
 # Standalone Builds
 
-> Standalone builds package the daemon and helper tools into local executables for distribution. This page explains the output as a packaging concern, not a different daemon behavior model.
+Standalone builds package the daemon and helper tools into local executables for distribution. This page explains the output as a packaging concern, not a different daemon behavior model.
 
 ## Core idea
 

@@ -1,6 +1,6 @@
 # `sprint-branch` Overview
 
-> Sprint-branch is a local workflow for splitting a larger agent effort into task branches that can be reviewed, approved, and landed in order. This documentation explains the branch model, selection rules, commands, and recovery paths.
+Sprint-branch is a local workflow for splitting a larger agent effort into task branches that can be reviewed, approved, and landed in order. This documentation explains the branch model, selection rules, commands, and recovery paths.
 
 ## Purpose
 

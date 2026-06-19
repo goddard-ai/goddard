@@ -1,6 +1,6 @@
 # Review Sync Commands
 
-> Review-sync commands set up, inspect, synchronize, pause, and resume a local review workflow. This index links each command to the question it answers and the review state it may change.
+Review-sync commands set up, inspect, synchronize, pause, and resume a local review workflow. This index links each command to the question it answers and the review state it may change.
 
 ## Setup and inspection
 

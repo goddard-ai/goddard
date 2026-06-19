@@ -1,6 +1,6 @@
 # Session Lifecycle
 
-> A daemon session is the local record and live process boundary for one agent conversation or task. This page explains creation, live control, completion, shutdown, and the transition to history-only inspection.
+A daemon session is the local record and live process boundary for one agent conversation or task. This page explains creation, live control, completion, shutdown, and the transition to history-only inspection.
 
 ## Core idea
 

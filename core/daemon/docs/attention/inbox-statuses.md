@@ -1,6 +1,6 @@
 # Inbox Statuses
 
-> Inbox rows track the current workflow state for daemon-owned work, not a history of notifications. This page defines the statuses a user or client may see and how later daemon activity can change them.
+Inbox rows track the current workflow state for daemon-owned work, not a history of notifications. This page defines the statuses a user or client may see and how later daemon activity can change them.
 
 ## Core idea
 

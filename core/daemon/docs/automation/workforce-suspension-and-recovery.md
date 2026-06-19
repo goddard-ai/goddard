@@ -1,6 +1,6 @@
 # Workforce Suspension and Recovery
 
-> Workforce work is suspended when the daemon cannot safely treat a request as complete or valid. This page explains what suspension means, what remains durable, and how recovery preserves queue integrity.
+Workforce work is suspended when the daemon cannot safely treat a request as complete or valid. This page explains what suspension means, what remains durable, and how recovery preserves queue integrity.
 
 ## Suspension
 

@@ -1,6 +1,6 @@
 # Daemon Docs
 
-> The daemon is Goddard's local background process for running and coordinating agent work. These pages explain the behavior users and clients can rely on, with enough context to enter from any topic.
+The daemon is Goddard's local background process for running and coordinating agent work. These pages explain the behavior users and clients can rely on, with enough context to enter from any topic.
 
 ## Purpose
 

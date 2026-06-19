@@ -1,6 +1,6 @@
 # Pull Requests
 
-> Daemon-managed sessions can submit pull requests and send replies through a local daemon contract. This page explains how those operations preserve session, repository, security, and attention context.
+Daemon-managed sessions can submit pull requests and send replies through a local daemon contract. This page explains how those operations preserve session, repository, security, and attention context.
 
 ## Core idea
 
