@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { type Signal } from "@preact/signals"
 import { X } from "lucide-react"
 import type { RecordingSession } from "powerkeys"
 import { useEffect, useId, useRef, useState } from "preact/hooks"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
-import { text } from "~/language/text.ts"
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import styles from "./capture-dialog.style.ts"
@@ -101,7 +101,7 @@ export function KeyboardShortcutCaptureDialog(props: {
   >
     <h2 id={titleId} class={styles.title}>
       <span class={styles.titleLabel}>
-        {props.mode === "add" ? text.addShortcut : text.changeShortcut}
+        {props.mode === "add" ? t`Add shortcut` : t`Change shortcut`}
       </span>
       <span class={styles.titleText}>{props.label}</span>
     </h2>
@@ -117,7 +117,9 @@ export function KeyboardShortcutCaptureDialog(props: {
     <dl class={styles.metaList}>
       @if (props.currentExpression) {
         <div class={styles.metaRow}>
-          <dt class={styles.metaTerm}>{text.currentShortcut}</dt>
+          <dt class={styles.metaTerm}>
+            {t`Current shortcut`}
+          </dt>
           <dd class={styles.metaDetail}>
             <GoodKeyboardShortcut expression={props.currentExpression} />
           </dd>
@@ -125,24 +127,32 @@ export function KeyboardShortcutCaptureDialog(props: {
       }
       @if (props.whenClause) {
         <div class={styles.metaRow}>
-          <dt class={styles.metaTerm}>{text.when}</dt>
+          <dt class={styles.metaTerm}>
+            {t`When`}
+          </dt>
           <dd class={styles.metaDetail}>{props.whenClause}</dd>
         </div>
       }
     </dl>
     <section class={styles.captureSection}>
       <div class={styles.captureHeading}>
-        <span class={styles.captureLabel}>{text.pressTheShortcutYouWantToUse}</span>
+        <span class={styles.captureLabel}>
+          {t`Press the shortcut you want to use`}
+        </span>
 
         @if (isRecording) {
-          <span class={styles.captureStatus}>{text.listening}</span>
+          <span class={styles.captureStatus}>
+            {t`Listening...`}
+          </span>
         }
       </div>
       <div class={styles.captureValue}>
         @if (draftExpression) {
           <GoodKeyboardShortcut expression={draftExpression} />
         } @else {
-          <span class={styles.capturePlaceholder}>{text.typeAKeyCombinationOrSequence}</span>
+          <span class={styles.capturePlaceholder}>
+            {t`Type a key combination or sequence`}
+          </span>
         }
       </div>
     </section>
@@ -153,7 +163,9 @@ export function KeyboardShortcutCaptureDialog(props: {
         onClick={() => {
           props.open.value = false
         }}
-      >{text.cancel}</button>
+      >
+        {t`Cancel`}
+      </button>
 
       @if (props.onRemove) {
         <button
@@ -162,7 +174,9 @@ export function KeyboardShortcutCaptureDialog(props: {
           onClick={() => {
             void props.onRemove?.()
           }}
-        >{text.removeShortcut}</button>
+        >
+          {t`Remove shortcut`}
+        </button>
       }
 
       <button
@@ -172,7 +186,9 @@ export function KeyboardShortcutCaptureDialog(props: {
         onClick={() => {
           void props.onSave(draftExpression.trim())
         }}
-      >{text.saveShortcut}</button>
+      >
+        {t`Save shortcut`}
+      </button>
     </div>
   </Modal>
 }

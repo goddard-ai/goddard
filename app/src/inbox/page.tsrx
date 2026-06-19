@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
@@ -10,7 +11,6 @@ import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
 import { useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { goddardSdk } from "~/sdk.ts"
@@ -47,7 +47,7 @@ function getErrorMessage(error: unknown) {
     return error.message
   }
 
-  return text.theDaemonBackedInboxRequestFailed
+  return t`The daemon-backed inbox request failed.`
 }
 
 function InboxQueryContent(props: {
@@ -117,11 +117,9 @@ function InboxQueryContent(props: {
     />
     <div class={styles.listBody}>
       @if (props.realtimeErrorMessage) {
-        <div
-          class={styles.realtimeNotice}
-          role="status"
-          title={props.realtimeErrorMessage}
-        >{text.realtimeInboxUpdatesAreUnavailableManualRefreshStillWorks}</div>
+        <div class={styles.realtimeNotice} role="status" title={props.realtimeErrorMessage}>
+          {t`Realtime inbox updates are unavailable. Manual refresh still works.`}
+        </div>
       }
 
       <InboxList
@@ -160,23 +158,23 @@ function InboxPageControls(props: {
     <InboxBulkToolbar
       selectedCount={props.selectedCount}
       onArchive={() => {
-        props.onBulkAction(text.archiveSelected, { status: "archived" })
+        props.onBulkAction(t`Archive selected`, { status: "archived" })
       }}
       onClear={props.onClearSelectedItems}
       onMarkRead={() => {
-        props.onBulkAction(text.markSelectedRead, { status: "read" })
+        props.onBulkAction(t`Mark selected read`, { status: "read" })
       }}
       onMarkUnread={() => {
-        props.onBulkAction(text.markSelectedUnread, { status: "unread" })
+        props.onBulkAction(t`Mark selected unread`, { status: "unread" })
       }}
       onSave={() => {
-        props.onBulkAction(text.saveSelected, { status: "saved" })
+        props.onBulkAction(t`Save selected`, { status: "saved" })
       }}
       onSetLowPriority={() => {
-        props.onBulkAction(text.setSelectedLowPriority, { priority: "low" })
+        props.onBulkAction(t`Set selected low priority`, { priority: "low" })
       }}
       onSetNormalPriority={() => {
-        props.onBulkAction(text.setSelectedNormalPriority, { priority: "normal" })
+        props.onBulkAction(t`Set selected normal priority`, { priority: "normal" })
       }}
     />
   </>
@@ -301,14 +299,14 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
         appToaster.create({
           description: `${result.missingEntityIds.length} selected rows could not be found.`,
           duration: 3600,
-          title: text.someInboxItemsWereMissing,
+          title: t`Some inbox items were missing`,
           type: "error",
         })
       }
     } catch (error) {
       console.error(`Failed to run bulk inbox action: ${label}`, error)
       appToaster.create({
-        description: text.theSelectedInboxRowsCouldNotBeUpdated,
+        description: t`The selected inbox rows could not be updated.`,
         duration: 3200,
         title: `Couldn't ${label.toLowerCase()}`,
         type: "error",
@@ -334,9 +332,9 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     } catch (error) {
       console.error("Failed to open inbox item.", error)
       appToaster.create({
-        description: text.theLinkedDaemonEntityCouldNotBeLoaded,
+        description: t`The linked daemon entity could not be loaded.`,
         duration: 3200,
-        title: text.couldntOpenInboxItem,
+        title: t`Couldn't open inbox item`,
         type: "error",
       })
     }
@@ -382,11 +380,9 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
           />
           <div class={styles.listBody}>
             @if (realtimeErrorMessage) {
-              <div
-                class={styles.realtimeNotice}
-                role="status"
-                title={realtimeErrorMessage}
-              >{text.realtimeInboxUpdatesAreUnavailableManualRefreshStillWorks}</div>
+              <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
+                {t`Realtime inbox updates are unavailable. Manual refresh still works.`}
+              </div>
             }
 
             <InboxList

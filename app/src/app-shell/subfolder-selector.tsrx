@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { Popover } from "@goddard-ai/ui-primitives"
 import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
@@ -7,7 +8,6 @@ import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { text } from "~/language/text.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -78,7 +78,7 @@ export function AppShellSubfolderSelector(props: {
 
   const items: AppShellSubfolderItem[] = [
     {
-      label: text.projectRoot,
+      label: t`Project root`,
       path: projectPath,
       detail: projectPath,
     },
@@ -172,8 +172,8 @@ export function AppShellSubfolderSelector(props: {
       aria-expanded={open.value}
       aria-haspopup="menu"
       aria-label={selectedSubfolderLabel
-        ? `${text.workingDirectory}: ${selectedSubfolderLabel}`
-        : text.projectRoot}
+        ? t`Working directory: ${selectedSubfolderLabel}`
+        : t`Project root`}
       class={cx(styles.trigger, noDragClass)}
       data-icon-only={selectedSubfolderLabel ? undefined : "true"}
       type="button"
@@ -214,7 +214,7 @@ export function AppShellSubfolderSelector(props: {
       <input
         ref={filterInputRef}
         class={styles.filter}
-        placeholder={text.typeToFilter}
+        placeholder={t`Type to filter`}
         value={search.value}
         onInput={(event) => {
           search.value = event.currentTarget.value
@@ -243,7 +243,9 @@ export function AppShellSubfolderSelector(props: {
       />
 
       @if (filteredItems.length === 0) {
-        <div class={styles.empty}>{text.noMatchingDirectories}</div>
+        <div class={styles.empty}>
+          {t`No matching directories.`}
+        </div>
       } @else {
         <ul class={styles.list}>
           @for (const item of filteredItems) {

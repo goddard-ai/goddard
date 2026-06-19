@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { Popover } from "@goddard-ai/ui-primitives"
 import { cx } from "@goddard-ai/styled-system/css"
 import { useSignal } from "@preact/signals"
@@ -6,7 +7,6 @@ import { useEffect, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { text } from "~/language/text.ts"
 import { useQuery } from "~/lib/query.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -173,9 +173,7 @@ export function AppShellAgentSelector(props: {
       ref={triggerElementRef}
       aria-expanded={open.value}
       aria-haspopup="menu"
-      aria-label={selectedAgent
-        ? `${text.agentHarness}: ${selectedAgent.name}`
-        : text.selectAgentHarness}
+      aria-label={selectedAgent ? t`Agent harness: ${selectedAgent.name}` : t`Select agent harness`}
       class={cx(styles.trigger, noDragClass)}
       type="button"
       onClick={() => {
@@ -211,7 +209,7 @@ export function AppShellAgentSelector(props: {
       <input
         ref={filterInputRef}
         class={styles.filter}
-        placeholder={text.typeToFilter}
+        placeholder={t`Type to filter`}
         value={search.value}
         onInput={(event) => {
           search.value = event.currentTarget.value
@@ -240,7 +238,9 @@ export function AppShellAgentSelector(props: {
       />
 
       @if (filteredAdapters.length === 0) {
-        <div class={styles.empty}>{text.noMatchingAgents}</div>
+        <div class={styles.empty}>
+          {t`No matching agents.`}
+        </div>
       } @else {
         <ul class={styles.list}>
           @for (const adapter of filteredAdapters) {
@@ -274,7 +274,7 @@ export function AppShellAgentSelector(props: {
                     @if (adapter.unofficial) {
                       <>
                         ·
-                        {text.unofficial}
+                        {t`Unofficial`}
                       </>
                     }
                   </span>

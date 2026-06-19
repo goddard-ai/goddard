@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { cx } from "@goddard-ai/styled-system/css"
 import { BookOpen, Check, ChevronDown, Copy, Link2 } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
@@ -6,7 +7,6 @@ import type {
   SessionTranscriptContentBlock,
   SessionTranscriptTextMessage,
 } from "~/sessions/models.ts"
-import { text } from "~/language/text.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { MarkdownMessage } from "../markdown-message.tsrx"
 import { getBubbleMaxWidth } from "./layout.ts"
@@ -181,7 +181,9 @@ function UserPromptContent(props: {
           setExpanded(true)
         }}
       >
-        <span>{text.seeFullMessage}</span>
+        <span>
+          {t`See full message`}
+        </span>
         <ChevronDown size={15} strokeWidth={2.2} />
       </button>
     }

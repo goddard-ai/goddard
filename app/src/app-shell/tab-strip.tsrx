@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine"
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter"
 import { autoScrollForElements } from "@atlaskit/pragmatic-drag-and-drop-auto-scroll/element"
@@ -11,7 +12,6 @@ import { OverlayScrollbars } from "overlayscrollbars"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
-import { text } from "~/language/text.ts"
 import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB, type WorkbenchTab } from "~/workbench-tab-set.ts"
 import styles from "./chrome.style.ts"
@@ -211,7 +211,7 @@ export function AppShellTabStrip(props: {
 
   <div class={styles.tabStripRow}>
     <div ref={tabStrip.tabStripRef} class={styles.tabStrip} data-overlayscrollbars-initialize="">
-      <div class={styles.tabList} role="tablist" aria-label={text.workbenchTabs}>
+      <div class={styles.tabList} role="tablist" aria-label={t`Workbench tabs`}>
         <TabButton
           activeTabId={props.activeTabId}
           icon="tabs/home"

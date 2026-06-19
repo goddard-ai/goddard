@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { type Signal, useSignal } from "@preact/signals"
 import { useListener } from "preact-sigma"
 import { lazy } from "preact/compat"
 import { useId, useMemo } from "preact/hooks"
 
 import { Modal } from "@goddard-ai/ui-primitives"
-import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { globalEventHub } from "~/shared/global-event-hub.ts"
 import { useAppCommand } from "./app-command.ts"
@@ -73,11 +73,12 @@ function CommandDialogFailure(props: {
     contentClass={styles.failureContent}
   >
     <div class={styles.failureCopy}>
-      <h2 id={titleId} class={styles.failureTitle}>{text.dialogUnavailable}</h2>
-      <p
-        id={descriptionId}
-        class={styles.failureDescription}
-      >{text.thisDialogFailedToRenderTheRestOfTheAppIsStillAvailable}</p>
+      <h2 id={titleId} class={styles.failureTitle}>
+        {t`Dialog unavailable`}
+      </h2>
+      <p id={descriptionId} class={styles.failureDescription}>
+        {t`This dialog failed to render. The rest of the app is still available.`}
+      </p>
     </div>
     <div class={styles.failureActions}>
       <button
@@ -86,12 +87,12 @@ function CommandDialogFailure(props: {
         onClick={() => {
           props.open.value = false
         }}
-      >{text.close}</button>
-      <button
-        class={styles.failureButton}
-        type="button"
-        onClick={props.retry}
-      >{text.tryAgain}</button>
+      >
+        {t`Close`}
+      </button>
+      <button class={styles.failureButton} type="button" onClick={props.retry}>
+        {t`Try again`}
+      </button>
     </div>
   </Modal>
 }

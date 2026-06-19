@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
@@ -15,7 +16,6 @@ import {
   prepareInboxItemWorkbenchTarget,
   warmPreparedInboxWorkbenchTargetOnIdle,
 } from "~/inbox/open.ts"
-import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -124,7 +124,7 @@ export function AppShellChrome() @{
             <AppShellAgentSelector shortcutActive={topBarSelectorShortcutActive} />
           } @pending {
             <button
-              aria-label={text.loadingAgentHarnessSelector}
+              aria-label={t`Loading agent harness selector`}
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
@@ -134,7 +134,7 @@ export function AppShellChrome() @{
             console.error("Agent harness selector render failed.", error)
 
             <button
-              aria-label={text.retryAgentHarnessSelector}
+              aria-label={t`Retry agent harness selector`}
               class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
@@ -153,11 +153,9 @@ export function AppShellChrome() @{
             useErrorBoundaryReset(retry)
             console.error("Project switcher render failed.", error)
 
-            <button
-              class={cx(styles.switcherFallback, noDragClass)}
-              type="button"
-              onClick={retry}
-            >{text.projectSwitcherUnavailable}</button>
+            <button class={cx(styles.switcherFallback, noDragClass)} type="button" onClick={retry}>
+              {t`Project switcher unavailable`}
+            </button>
           }
         </div>
         <div class={styles.switcherRightControl}>
@@ -165,7 +163,7 @@ export function AppShellChrome() @{
             <AppShellSubfolderSelector shortcutActive={topBarSelectorShortcutActive} />
           } @pending {
             <button
-              aria-label={text.loadingProjectSubfolderSelector}
+              aria-label={t`Loading project subfolder selector`}
               class={cx(styles.switcherSideFallback, noDragClass)}
               disabled={true}
               type="button"
@@ -177,7 +175,7 @@ export function AppShellChrome() @{
             console.error("Project subfolder selector render failed.", error)
 
             <button
-              aria-label={text.retryProjectSubfolderSelector}
+              aria-label={t`Retry project subfolder selector`}
               class={cx(styles.switcherSideFallback, noDragClass)}
               type="button"
               onClick={retry}
@@ -202,7 +200,7 @@ export function AppShellChrome() @{
           />
         </div>
         <button
-          aria-label={text.settings}
+          aria-label={t`Settings`}
           class={cx(styles.actionButton, styles.settingsButton, noDragClass)}
           type="button"
           onClick={() => {
@@ -213,7 +211,7 @@ export function AppShellChrome() @{
         </button>
       </div>
     </header>
-    <nav aria-label={text.primary} class={styles.nav}>
+    <nav aria-label={t`Primary`} class={styles.nav}>
       @try {
         <AppShellSidebarQueryContent
           items={mainTab.items}
@@ -334,9 +332,9 @@ function AppShellNextInboxAttentionButton(props: {
     } catch (error) {
       console.error("Failed to open next inbox item.", error)
       appToaster.create({
-        description: text.theLinkedDaemonEntityCouldNotBeLoaded,
+        description: t`The linked daemon entity could not be loaded.`,
         duration: 3200,
-        title: text.couldntOpenNextItem,
+        title: t`Couldn't open next item`,
         type: "error",
       })
     }
@@ -352,19 +350,21 @@ function AppShellNextInboxAttentionButton(props: {
     <AppCommandTooltip
       command={AppCommand.navigation.openNextUnreadInboxItem}
       group="app-shell-next-attention"
-      label={text.next}
+      label={t`Next`}
       side="bottom"
       sideOffset={8}
     >
       <button
-        aria-label={text.openNextUnreadInboxItem}
+        aria-label={t`Open next unread inbox item`}
         class={cx(styles.nextAttentionButton, noDragClass)}
         type="button"
         onClick={() => {
           void openNextInboxItem(nextItem)
         }}
       >
-        <span>{text.next}</span>
+        <span>
+          {t`Next`}
+        </span>
         <ChevronRight aria-hidden={true} size={14} strokeWidth={2.2} />
       </button>
     </AppCommandTooltip>

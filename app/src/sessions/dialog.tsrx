@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { type Signal } from "@preact/signals"
 import { useModel, useSignal } from "@preact/signals"
 import { X } from "lucide-react"
@@ -5,7 +6,6 @@ import { useEffect, useId } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
-import { text } from "~/language/text.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { goddardSdk } from "~/sdk.ts"
@@ -60,7 +60,7 @@ export default function SessionLaunchDialog(props: {
     isLaunching.value = true
     const toastId = appToaster.create({
       description: form.effectiveCwd.value,
-      title: text.launchingSession,
+      title: t`Launching session`,
       type: "loading",
     })
 
@@ -88,14 +88,14 @@ export default function SessionLaunchDialog(props: {
       appToaster.update(toastId, {
         description: sessionTitle,
         duration: 2800,
-        title: text.sessionLaunched,
+        title: t`Session launched`,
         type: "success",
       })
     } catch (error) {
       console.error("Failed to create session.", error)
       appToaster.update(toastId, {
-        description: text.theSessionCouldNotBeCreated,
-        title: text.sessionLaunchFailed,
+        description: t`The session could not be created.`,
+        title: t`Session launch failed`,
         type: "error",
       })
     } finally {
@@ -194,13 +194,15 @@ export default function SessionLaunchDialog(props: {
     contentClass={styles.content}
   >
     <header class={styles.header}>
-      <h2 id={titleId} class={styles.title}>{text.launchSession}</h2>
-      <p
-        class={styles.description}
-      >{text.chooseTheProjectAgentHarnessLaunchOptionsAndInitialPrompt}</p>
+      <h2 id={titleId} class={styles.title}>
+        {t`Launch session`}
+      </h2>
+      <p class={styles.description}>
+        {t`Choose the project, agent harness, launch options, and initial prompt.`}
+      </p>
     </header>
     <button
-      aria-label={text.closeLaunchSessionDialog}
+      aria-label={t`Close launch session dialog`}
       class={styles.closeButton}
       type="button"
       onClick={() => {

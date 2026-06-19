@@ -1,9 +1,9 @@
+import { t } from "@lingui/core/macro"
 import { type Signal, useSignal } from "@preact/signals"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
 import { useEffect, useId } from "preact/hooks"
 
-import { text } from "~/language/text.ts"
 import { useShortcutRegistry } from "./app-state-context.tsrx"
 import styles from "./command-palette.style.ts"
 import { AppCommand, appCommandList } from "./commands/app-command.ts"
@@ -89,7 +89,9 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
     positionerClass={styles.positioner}
     contentClass={styles.content}
   >
-    <h2 id={titleId} class={styles.title}>{text.commandMenu}</h2>
+    <h2 id={titleId} class={styles.title}>
+      {t`Command menu`}
+    </h2>
 
     <div
       class={styles.root}
@@ -107,7 +109,7 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
           id={inputId}
           autoFocus={true}
           class={styles.input}
-          placeholder={text.typeACommand}
+          placeholder={t`Type a command`}
           role="searchbox"
           type="text"
           value={search.value}
@@ -115,9 +117,11 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
           aria-controls={listboxId}
         />
       </div>
-      <div id={listboxId} class={styles.list} role="listbox" aria-label={text.commandMenu}>
+      <div id={listboxId} class={styles.list} role="listbox" aria-label={t`Command menu`}>
         @if (visibleCommands.length === 0) {
-          <div class={styles.empty}>{text.noMatchingCommands}</div>
+          <div class={styles.empty}>
+            {t`No matching commands.`}
+          </div>
         } @else {
           @for (const command of visibleCommands; index index) {
             const itemId = `${listboxId}-${command.id}`
