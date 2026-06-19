@@ -1,5 +1,18 @@
 #!/usr/bin/env bun
 import { getGoddardLogDatabasePath } from "@goddard-ai/paths/node"
+import {
+  command,
+  extendType,
+  flag,
+  multioption,
+  option,
+  optional,
+  positional,
+  run,
+  string,
+  subcommands,
+  type Type,
+} from "cmd-ts"
 
 import { createLogStore, formatLogEntry, type LogEntry, type LogQuery } from "./index.ts"
 
@@ -9,26 +22,127 @@ type CliOptions = LogQuery & {
 }
 
 const defaultTailIntervalMs = 1000
+const positiveInteger = extendType(string, {
+  displayName: "positive-integer",
+  async from(value) {
+    return parsePositiveInteger(value)
+  },
+})
+const sinceDate = extendType(string, {
+  displayName: "date-or-duration",
+  async from(value) {
+    return parseSince(value)
+  },
+})
+const propertyFilters: Type<string[], Record<string, string>> = {
+  displayName: "key=value",
+  async from(values) {
+    const properties: Record<string, string> = {}
+    for (const value of values) {
+      const [key, propertyValue] = splitPropertyFilter(value)
+      properties[key] = propertyValue
+    }
+    return properties
+  },
+}
+
+const queryArgs = {
+  json: flag({
+    long: "json",
+    description: "Write logs as JSON.",
+  }),
+  afterId: option({
+    type: optional(positiveInteger),
+    long: "after-id",
+    description: "Return entries after this log id.",
+  }),
+  beforeId: option({
+    type: optional(positiveInteger),
+    long: "before-id",
+    description: "Return entries before this log id.",
+  }),
+  limit: option({
+    type: optional(positiveInteger),
+    long: "limit",
+    description: "Maximum number of entries to return.",
+  }),
+  since: option({
+    type: optional(sinceDate),
+    long: "since",
+    description: "Return entries after an ISO date or relative duration such as 30m, 2h, or 1d.",
+  }),
+  scope: option({
+    type: optional(string),
+    long: "scope",
+    description: "Return entries for one log scope.",
+  }),
+  grep: option({
+    type: optional(string),
+    long: "grep",
+    description: "Return entries whose message or properties include this text.",
+  }),
+  regex: option({
+    type: optional(string),
+    long: "regex",
+    description: "Return entries whose message or properties match this regex.",
+  }),
+  properties: multioption({
+    type: propertyFilters,
+    long: "property",
+    description: "Return entries with a matching key=value property.",
+    defaultValue: () => ({}),
+  }),
+}
+
+const pageCommand = command({
+  name: "goddard:logs",
+  description: "Page Goddard logs.",
+  args: queryArgs,
+  handler: page,
+})
+
+const app = subcommands({
+  name: "goddard:logs",
+  description: "Inspect Goddard logs.",
+  cmds: {
+    path: command({
+      name: "path",
+      description: "Print the canonical log database path.",
+      args: {},
+      handler: () => {
+        console.log(getGoddardLogDatabasePath())
+      },
+    }),
+    expand: command({
+      name: "expand",
+      description: "Expand a collapsed log value.",
+      args: {
+        id: positional({
+          type: string,
+          displayName: "collapsed_id",
+          description: "Collapsed log value id.",
+        }),
+        ...queryArgs,
+      },
+      handler: ({ id, ...options }) => expand(id, options),
+    }),
+    tail: command({
+      name: "tail",
+      description: "Continuously print new matching log entries.",
+      args: queryArgs,
+      handler: tail,
+    }),
+  },
+})
 
 export async function main(argv = process.argv.slice(2)) {
-  const [command, ...rest] = argv
-
-  if (command === "path") {
-    console.log(getGoddardLogDatabasePath())
+  const commandName = argv[0]
+  if (commandName === "path" || commandName === "expand" || commandName === "tail") {
+    await run(app, argv)
     return
   }
 
-  if (command === "expand") {
-    expand(rest)
-    return
-  }
-
-  if (command === "tail") {
-    await tail(parseOptions(rest))
-    return
-  }
-
-  page(parseOptions(argv))
+  await run(pageCommand, argv)
 }
 
 function page(options: CliOptions) {
@@ -64,14 +178,7 @@ async function tail(options: CliOptions) {
   }
 }
 
-function expand(argv: string[]) {
-  const options = parseOptions(argv)
-  const id = argv.find((argument) => !argument.startsWith("--"))
-
-  if (!id) {
-    throw new Error("Usage: pnpm goddard:logs expand <collapsed_id>")
-  }
-
+function expand(id: string, options: CliOptions) {
   const store = createLogStore()
   try {
     const value = store.expand(id)
@@ -127,58 +234,10 @@ function createPageCursors(entries: LogEntry[]) {
   }
 }
 
-function parseOptions(argv: string[]): CliOptions {
-  const options: CliOptions = {
-    properties: {},
-  }
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index]
-
-    if (!argument?.startsWith("--")) {
-      continue
-    }
-
-    if (argument === "--json") {
-      options.json = true
-      continue
-    }
-
-    const value = argv[index + 1]
-    if (!value) {
-      throw new Error(`${argument} requires a value`)
-    }
-    index += 1
-
-    if (argument === "--after-id") {
-      options.afterId = parsePositiveInteger(value, argument)
-    } else if (argument === "--before-id") {
-      options.beforeId = parsePositiveInteger(value, argument)
-    } else if (argument === "--limit") {
-      options.limit = parsePositiveInteger(value, argument)
-    } else if (argument === "--since") {
-      options.since = parseSince(value)
-    } else if (argument === "--scope") {
-      options.scope = value
-    } else if (argument === "--grep") {
-      options.grep = value
-    } else if (argument === "--regex") {
-      options.regex = value
-    } else if (argument === "--property") {
-      const [key, propertyValue] = splitPropertyFilter(value)
-      options.properties[key] = propertyValue
-    } else {
-      throw new Error(`Unknown option ${argument}`)
-    }
-  }
-
-  return options
-}
-
-function parsePositiveInteger(value: string, option: string) {
+function parsePositiveInteger(value: string) {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${option} must be a positive integer`)
+    throw new Error("Value must be a positive integer")
   }
 
   return parsed
