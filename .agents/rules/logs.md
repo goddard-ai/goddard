@@ -10,7 +10,7 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - Use the leading log entry IDs with `--before-id` and `--after-id` when the interesting event is near a page boundary.
 - Use `pnpm goddard:logs tail` while reproducing an issue so new app and daemon entries appear in one stream.
 - Use `pnpm goddard:logs --json` when exact fields, structured properties, or machine-readable output matter.
-- Use `pnpm goddard:logs expand <collapsed_id>` for collapsed property values that begin with `obj_`, `arr_`, or `str_`; add `--json` when the collapsed metadata matters.
+- Use `pnpm goddard:logs expand <collapsed_id>` for collapsed property values wrapped as `{obj_...}`, `{arr_...}`, or `{str_...}` in default output; omit the braces when passing the ID to `expand`, and add `--json` when the collapsed metadata matters.
 - Use `pnpm goddard:logs path` only when you need to inspect, copy, or remove the underlying database directly.
 - Remember that large property values are collapsed and likely secrets are redacted before persistence, so absence of a raw value in logs is expected.
 - Prefer adding or improving structured log fields over relying on long free-form messages when a debugging gap requires a code change.
