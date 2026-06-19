@@ -1,6 +1,6 @@
 # Session Attention
 
-> A daemon-managed session can ask for human attention when agent work blocks or reaches a useful stopping point. This page explains how those reports update the inbox and how short metadata helps clients present them clearly.
+A daemon-managed session can ask for human attention when agent work blocks or reaches a useful stopping point. This page explains how those reports update the inbox and how short metadata helps clients present them clearly.
 
 ## Core idea
 

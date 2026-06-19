@@ -1,6 +1,6 @@
 # Runtime Ownership
 
-> The daemon is the source of truth for live automation state, while clients request changes and observe results through daemon contracts. This page explains the ownership boundary that keeps sessions and runtimes from splitting across clients.
+The daemon is the source of truth for live automation state, while clients request changes and observe results through daemon contracts. This page explains the ownership boundary that keeps sessions and runtimes from splitting across clients.
 
 ## Core idea
 

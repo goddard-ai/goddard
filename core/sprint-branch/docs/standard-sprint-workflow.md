@@ -1,6 +1,6 @@
 # Standard Sprint Workflow
 
-> The standard sprint workflow shows how planned task branches move from setup through review, approval, finalization, landing, and cleanup. It explains the normal path and the recovery entry points.
+The standard sprint workflow shows how planned task branches move from setup through review, approval, finalization, landing, and cleanup. It explains the normal path and the recovery entry points.
 
 ## Setup
 

@@ -1,6 +1,6 @@
 # History and Diagnostics
 
-> Session history records what happened in the agent conversation, while diagnostics record lifecycle facts about the daemon-managed run. This page explains what remains inspectable while a session is live and after it becomes history-only.
+Session history records what happened in the agent conversation, while diagnostics record lifecycle facts about the daemon-managed run. This page explains what remains inspectable while a session is live and after it becomes history-only.
 
 ## Session history
 

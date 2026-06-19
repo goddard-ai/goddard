@@ -1,6 +1,6 @@
 # Development
 
-> Some daemon behavior exists to support local product development or packaging rather than end-user automation. This section explains mock data and standalone build outputs without mixing them into the runtime model.
+Some daemon behavior exists to support local product development or packaging rather than end-user automation. This section explains mock data and standalone build outputs without mixing them into the runtime model.
 
 ## Purpose
 

@@ -1,6 +1,6 @@
 # Session Tokens
 
-> A session token gives a daemon-launched process narrow authority to act on its own session. This page explains why tools can report status or collaboration events without receiving broad daemon control.
+A session token gives a daemon-launched process narrow authority to act on its own session. This page explains why tools can report status or collaboration events without receiving broad daemon control.
 
 ## Core idea
 

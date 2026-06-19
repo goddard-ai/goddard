@@ -1,6 +1,6 @@
 # Review Sessions
 
-> Review sessions connect a daemon-managed session worktree to Goddard's separate review-sync workflow. This page explains how the daemon mounts, runs, and unmounts that review surface for human review.
+Review sessions connect a daemon-managed session worktree to Goddard's separate review-sync workflow. This page explains how the daemon mounts, runs, and unmounts that review surface for human review.
 
 ## Core idea
 

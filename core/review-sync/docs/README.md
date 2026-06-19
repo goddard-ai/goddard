@@ -1,6 +1,6 @@
 # `review-sync` Overview
 
-> Review-sync is a local workflow for reviewing an agent-owned branch from a separate worktree. This documentation explains the branch roles, synchronization loop, commands, and recovery states that matter to reviewers and agents.
+Review-sync is a local workflow for reviewing an agent-owned branch from a separate worktree. This documentation explains the branch roles, synchronization loop, commands, and recovery states that matter to reviewers and agents.
 
 ## Purpose
 

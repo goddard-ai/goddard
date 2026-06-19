@@ -1,6 +1,6 @@
 # Standard Review Workflow
 
-> The standard review workflow shows how a human reviews live agent work from a separate worktree. It explains the normal loop from setup through sync, feedback, pause, and conflict recovery.
+The standard review workflow shows how a human reviews live agent work from a separate worktree. It explains the normal loop from setup through sync, feedback, pause, and conflict recovery.
 
 ## Setup
 

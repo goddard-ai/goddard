@@ -1,6 +1,6 @@
 # Cancellation and Steering
 
-> Live session work can be cancelled or redirected without clients talking directly to the agent process. This page explains how the daemon stops active work, reports aborted queued prompts, and injects replacement direction safely.
+Live session work can be cancelled or redirected without clients talking directly to the agent process. This page explains how the daemon stops active work, reports aborted queued prompts, and injects replacement direction safely.
 
 ## Cancellation
 

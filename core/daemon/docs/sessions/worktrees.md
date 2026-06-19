@@ -1,6 +1,6 @@
 # Session Worktrees
 
-> A session worktree is an optional isolated Git checkout that the daemon attaches to one session. This page explains when it is created, what it protects, and why cleanup is separate from session completion.
+A session worktree is an optional isolated Git checkout that the daemon attaches to one session. This page explains when it is created, what it protects, and why cleanup is separate from session completion.
 
 ## Core idea
 

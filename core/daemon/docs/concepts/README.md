@@ -1,6 +1,6 @@
 # Daemon Concepts
 
-> The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, adapters, and auth. This section defines those concepts independently so feature pages can stay focused.
+The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, adapters, and auth. This section defines those concepts independently so feature pages can stay focused.
 
 ## Purpose
 

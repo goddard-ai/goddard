@@ -1,6 +1,6 @@
 # Daemon Server
 
-> The daemon server is the local control surface that approved clients use to start, inspect, and mutate daemon-managed work. This page explains that boundary without requiring knowledge of the server implementation.
+The daemon server is the local control surface that approved clients use to start, inspect, and mutate daemon-managed work. This page explains that boundary without requiring knowledge of the server implementation.
 
 ## Core idea
 

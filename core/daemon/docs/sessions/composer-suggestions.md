@@ -1,6 +1,6 @@
 # Composer Suggestions
 
-> Composer suggestions help clients present relevant commands or launch choices before or during a daemon-managed session. This page explains the difference between suggestions tied to an existing session and suggestions for a draft launch.
+Composer suggestions help clients present relevant commands or launch choices before or during a daemon-managed session. This page explains the difference between suggestions tied to an existing session and suggestions for a draft launch.
 
 ## Core idea
 

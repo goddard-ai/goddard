@@ -1,6 +1,6 @@
 # Sprint Selection
 
-> Sprint selection decides which saved sprint a command should operate on when the user does not name one directly. This page explains the selectors, parked sprint behavior, and activity tracking rules.
+Sprint selection decides which saved sprint a command should operate on when the user does not name one directly. This page explains the selectors, parked sprint behavior, and activity tracking rules.
 
 ## Purpose
 
