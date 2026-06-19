@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { getShortcutKeymapPath } from "@goddard-ai/paths/node"
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, test } from "vitest"
 
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import { loadShortcutKeymap, writeShortcutKeymap } from "./shortcut-keymap.ts"

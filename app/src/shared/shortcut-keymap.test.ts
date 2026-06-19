@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { resolveShortcutBindings, ShortcutKeymapOverrides } from "./shortcut-keymap.ts"
 

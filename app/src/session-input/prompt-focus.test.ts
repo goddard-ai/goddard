@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from "lexical"
+import { expect, test } from "vitest"
 
 import {
   captureFocusedSessionInputPrompt,

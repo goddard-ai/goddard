@@ -1,6 +1,6 @@
 import { createFixtureSession, createSessionHistoryResponse } from "@goddard-ai/fixtures"
 import type { CreateSessionRequest, DaemonSession, SessionLifecycleEvent } from "@goddard-ai/sdk"
-import { afterEach, beforeEach, expect, mock, test, vi } from "bun:test"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
 import { queryClient } from "~/lib/query.ts"
 import { SESSION_LIST_LIMIT } from "./queries.ts"
@@ -9,7 +9,7 @@ const sessionClient: any = {}
 const inboxClient: any = {}
 const cleanups: Array<() => void> = []
 
-mock.module("~/sdk.ts", () => ({
+vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
     inbox: inboxClient,
     session: sessionClient,

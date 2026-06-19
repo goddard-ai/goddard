@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { WORKBENCH_MAIN_TAB, WORKBENCH_TAB_LIMIT, WorkbenchTabSet } from "./workbench-tab-set.ts"
 

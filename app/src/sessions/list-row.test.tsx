@@ -1,8 +1,8 @@
 import { createFixtureSession } from "@goddard-ai/fixtures"
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { expect, test, vi } from "vitest"
 
 import { ListRow } from "./list-row.tsrx"
 import { SessionsList } from "./list.tsrx"
@@ -12,7 +12,7 @@ function Icon(props: Record<string, unknown>) {
   return <svg {...props} />
 }
 
-mock.module("lucide-react", () => ({
+vi.mock("lucide-react", () => ({
   AlertCircle: Icon,
   CheckCircle2: Icon,
   CircleDot: Icon,

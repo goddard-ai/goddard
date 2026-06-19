@@ -1,5 +1,5 @@
 import type { SessionId } from "@goddard-ai/sdk"
-import { describe, expect, mock, test } from "bun:test"
+import { describe, expect, test, vi } from "vitest"
 
 import { loadSessionChatComposerSuggestions } from "./composer-suggestion-loader.ts"
 
@@ -8,7 +8,7 @@ type LoaderSdk = Parameters<typeof loadSessionChatComposerSuggestions>[0]["sdk"]
 function createSdk(): LoaderSdk {
   return {
     fileSearch: {
-      composerEntries: mock(async () => ({
+      composerEntries: vi.fn(async () => ({
         entries: [
           {
             type: "file" as const,
@@ -21,7 +21,7 @@ function createSdk(): LoaderSdk {
       })),
     },
     session: {
-      composerSuggestions: mock(async () => ({
+      composerSuggestions: vi.fn(async () => ({
         suggestions: [
           {
             type: "skill" as const,

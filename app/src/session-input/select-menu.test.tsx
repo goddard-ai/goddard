@@ -1,10 +1,10 @@
 import { setOverlayPortalRoots } from "@goddard-ai/ui-primitives"
 import { signal } from "@preact/signals"
-import { expect, mock, test } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { expect, test, vi } from "vitest"
 
-mock.module("lucide-react", () => ({
+vi.mock("lucide-react", () => ({
   Bot: (props: preact.SVGAttributes<SVGSVGElement>) => <svg {...props} />,
   ChevronDown: (props: preact.SVGAttributes<SVGSVGElement>) => <svg {...props} />,
   LoaderCircle: (props: preact.SVGAttributes<SVGSVGElement>) => <svg {...props} />,
@@ -14,7 +14,7 @@ let captureFocusedPrompt = false
 let captureFocusedPromptCalls = 0
 let restoreFocusedPromptCalls = 0
 
-mock.module("./prompt-focus.ts", () => ({
+vi.mock("./prompt-focus.ts", () => ({
   captureFocusedSessionInputPrompt() {
     captureFocusedPromptCalls += 1
 

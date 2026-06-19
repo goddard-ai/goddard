@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { expect, test } from "vitest"
 
 import { WorkbenchScrollPanel } from "./views.tsrx"
 

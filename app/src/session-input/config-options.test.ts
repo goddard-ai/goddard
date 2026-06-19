@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { stepConfigOptionValue, type SessionConfigOption } from "./config-options.ts"
 

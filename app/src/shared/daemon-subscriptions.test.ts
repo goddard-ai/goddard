@@ -1,5 +1,5 @@
 import type { SessionMessageEvent } from "@goddard-ai/sdk"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { createDaemonSubscriptionCoordinator } from "./daemon-subscriptions.ts"
 

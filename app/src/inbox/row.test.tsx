@@ -1,8 +1,8 @@
 import { createFixtureInboxItem } from "@goddard-ai/fixtures"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
-import { expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { expect, test, vi } from "vitest"
 
 import { InboxPageMutations } from "./mutations.ts"
 import { InboxRow } from "./row.tsrx"
@@ -11,7 +11,7 @@ function Icon(props: Record<string, unknown>) {
   return <svg {...props} />
 }
 
-mock.module("lucide-react", () => ({
+vi.mock("lucide-react", () => ({
   Archive: Icon,
   ArrowDown: Icon,
   ArrowUp: Icon,

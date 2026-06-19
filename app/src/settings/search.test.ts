@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { filterPreparedSettingsSearchSections, prepareSettingsSearchSections } from "./search.ts"
 

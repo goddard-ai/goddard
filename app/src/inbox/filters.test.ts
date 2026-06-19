@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { allInboxStatuses, DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions } from "./filters.ts"
 import { getInboxListRequest } from "./queries.ts"

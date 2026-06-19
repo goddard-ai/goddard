@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import type { Display } from "electrobun/bun"
+import { expect, test } from "vitest"
 
 import type { AppStateSnapshot, WindowFrame } from "~/shared/app-state.ts"
 import { readWindowLayoutSnapshot, resolveInitialWindowFrame } from "./window-layout.ts"

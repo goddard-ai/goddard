@@ -7,7 +7,7 @@ import {
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { afterEach, beforeEach, expect, mock, test, vi } from "bun:test"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
 import { queryClient } from "~/lib/query.ts"
 
@@ -17,7 +17,7 @@ const prClient: any = {}
 const adapterClient: any = {}
 const cleanups: Array<() => void> = []
 
-mock.module("~/sdk.ts", () => ({
+vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
     adapter: adapterClient,
     inbox: inboxClient,
@@ -26,11 +26,11 @@ mock.module("~/sdk.ts", () => ({
   },
 }))
 
-mock.module("~/pull-requests/view.tsrx", () => ({
+vi.mock("~/pull-requests/view.tsrx", () => ({
   default: () => null,
 }))
 
-mock.module("~/session-chat/view.tsrx", () => ({
+vi.mock("~/session-chat/view.tsrx", () => ({
   default: () => null,
 }))
 

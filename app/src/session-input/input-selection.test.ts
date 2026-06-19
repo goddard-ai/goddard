@@ -1,6 +1,6 @@
 import { $createListItemNode, $createListNode, ListItemNode, ListNode } from "@lexical/list"
-import { expect, test } from "bun:test"
 import { $createParagraphNode, $createTextNode, $getRoot, createEditor } from "lexical"
+import { expect, test } from "vitest"
 
 import { isSessionInputCaretAtPromptEnd, isSessionInputCaretInsideList } from "./input-selection.ts"
 

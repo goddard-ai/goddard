@@ -1,5 +1,5 @@
 import { createFixtureInboxItem } from "@goddard-ai/fixtures"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   filterPreparedInboxItemsBySearch,

@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import { render } from "preact"
+import { expect, test } from "vitest"
 
 import { GoodKeyboardShortcut } from "./good-keyboard-shortcut.tsrx"
 

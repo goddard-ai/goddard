@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test"
+import { describe, expect, test, vi } from "vitest"
 
 import { loadSessionLaunchComposerSuggestions } from "./launch-suggestion-loader.ts"
 
@@ -7,7 +7,7 @@ type LoaderSdk = Parameters<typeof loadSessionLaunchComposerSuggestions>[0]["sdk
 function createSdk(): LoaderSdk {
   return {
     fileSearch: {
-      composerEntries: mock(async () => ({
+      composerEntries: vi.fn(async () => ({
         entries: [
           {
             type: "folder" as const,
@@ -20,7 +20,7 @@ function createSdk(): LoaderSdk {
       })),
     },
     session: {
-      draftSuggestions: mock(async () => ({
+      draftSuggestions: vi.fn(async () => ({
         suggestions: [
           {
             type: "skill" as const,

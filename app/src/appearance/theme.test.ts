@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import { wcagContrast } from "culori/fn"
+import { expect, test } from "vitest"
 
 import { buildAppearanceDocumentState } from "./theme.ts"
 

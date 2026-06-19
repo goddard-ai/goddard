@@ -1,7 +1,7 @@
-import { expect, test, vi } from "bun:test"
 import { render } from "preact"
 import { useEffect } from "preact/hooks"
 import { act } from "preact/test-utils"
+import { expect, test, vi } from "vitest"
 import { z } from "zod"
 
 import { createForm, useForm } from "./use-form.ts"

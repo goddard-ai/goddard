@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import { Fragment, h, render } from "preact"
+import { expect, test } from "vitest"
 
 import { MainTab } from "~/main-tab.ts"
 import { ShortcutRegistry } from "~/shortcuts/shortcut-registry.ts"

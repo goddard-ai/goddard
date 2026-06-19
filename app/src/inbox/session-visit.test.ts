@@ -1,12 +1,12 @@
 import { createFixtureInboxItem } from "@goddard-ai/fixtures"
-import { afterEach, expect, mock, test, vi } from "bun:test"
+import { afterEach, expect, test, vi } from "vitest"
 
 const inboxClient = {
   list: vi.fn(),
   update: vi.fn(),
 }
 
-mock.module("~/sdk.ts", () => ({
+vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
     inbox: inboxClient,
   },

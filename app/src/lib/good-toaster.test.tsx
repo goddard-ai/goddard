@@ -1,11 +1,11 @@
 import { setOverlayPortalRoots } from "@goddard-ai/ui-primitives"
-import { afterEach, expect, mock, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { afterEach, expect, test, vi } from "vitest"
 
 import { appToaster, createToaster, GoodToaster } from "./good-toaster.tsrx"
 
-mock.module("lucide-react", () => ({
+vi.mock("lucide-react", () => ({
   LoaderCircle: () => <svg aria-hidden="true" data-icon="loader" />,
   X: () => <svg aria-hidden="true" />,
 }))
