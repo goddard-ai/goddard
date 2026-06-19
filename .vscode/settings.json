@@ -25,7 +25,9 @@
   },
   "search.exclude": {
     "**/.agents": true,
-    "**/bun.lock": true,
+    "**/app/locales": true,
+    "**/patches": true,
+    "**/pnpm-lock.yaml": true,
     "**/dist": true
   },
   "catppuccin-icons.associations.extensions": {
