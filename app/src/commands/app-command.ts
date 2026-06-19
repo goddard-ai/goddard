@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { signal } from "@preact/signals"
 import type { RunnableInput, ShortcutMatch } from "powerkeys"
 import { SigmaTarget, useListener } from "preact-sigma"
 import { useLayoutEffect } from "preact/hooks"
 import { mapValues } from "radashi"
 
-import { text } from "~/language/text.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { AppCommand } from "./app-command-definitions.ts"
 import { getActiveCommandLayerId, useCommandLayer } from "./command-layer.tsrx"
@@ -19,19 +19,27 @@ const appCommandHandlerCounts = signal<Record<string, Partial<Record<AppCommandI
 export const appCommandGroups = {
   navigation: {
     id: "navigation",
-    label: text.navigation,
+    get label() {
+      return t`Navigation`
+    },
   },
   workbench: {
     id: "workbench",
-    label: text.workbench,
+    get label() {
+      return t`Workbench`
+    },
   },
   projects: {
     id: "projects",
-    label: text.projects,
+    get label() {
+      return t`Projects`
+    },
   },
   session: {
     id: "session",
-    label: text.session,
+    get label() {
+      return t`Session`
+    },
   },
 } as const
 
@@ -87,20 +95,19 @@ export function defineAppCommands<const TCommands extends AppCommandTable>(
     return mapValues(namespaceDefinition.commands, (command, commandKey) => {
       const id = `${namespaceKey as string}.${commandKey as string}`
       const group = command.group ?? namespaceDefinition.group
-      return Object.assign(
-        function (match?: ShortcutMatch) {
-          if (
-            (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[id as AppCommandId] ??
-              0) === 0
-          ) {
-            return
-          }
+      const appCommand = function (match?: ShortcutMatch) {
+        if (
+          (appCommandHandlerCounts.value[getActiveCommandLayerId()]?.[id as AppCommandId] ?? 0) ===
+          0
+        ) {
+          return
+        }
 
-          appCommandBus.emit(id, match)
-        },
-        command,
-        { group, id },
-      )
+        appCommandBus.emit(id, match)
+      }
+
+      Object.defineProperties(appCommand, Object.getOwnPropertyDescriptors(command))
+      return Object.assign(appCommand, { group, id })
     })
   }) as any
 }

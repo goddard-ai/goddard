@@ -12,3 +12,430 @@ msgstr ""
 "Last-Translator: \n"
 "Language-Team: \n"
 "Plural-Forms: \n"
+
+#: src/settings/adapter-installations-section.tsrx:32
+msgid "Agent harnesses"
+msgstr "Agent harnesses"
+
+#: src/appearance/appearance-settings-section.tsrx:29
+msgid "Appearance"
+msgstr "Appearance"
+
+#: src/inbox/filters.ts:66
+msgid "Archived"
+msgstr "Archived"
+
+#: src/settings/adapter-installations-section.tsrx:253
+msgid "Available agents"
+msgstr "Available agents"
+
+#: src/appearance/appearance-settings-section.tsrx:26
+msgid "Choose how the workbench resolves theme and contrast."
+msgstr "Choose how the workbench resolves theme and contrast."
+
+#: src/settings/adapter-installations-section.tsrx:29
+msgid "Choose which agent harnesses are available when launching sessions."
+msgstr "Choose which agent harnesses are available when launching sessions."
+
+#: src/commands/app-command-definitions.ts:36
+msgid "Close Active Tab"
+msgstr "Close Active Tab"
+
+#: src/appearance/appearance-settings-section.tsrx:82
+msgid "Color mode"
+msgstr "Color mode"
+
+#: src/commands/app-command-definitions.ts:257
+msgid "Complete Session"
+msgstr "Complete Session"
+
+#: src/inbox/filters.ts:54
+msgid "Completed"
+msgstr "Completed"
+
+#: src/settings/adapter-installations-section.tsrx:46
+#: src/settings/adapter-installations-section.tsrx:117
+msgid "Configured"
+msgstr "Configured"
+
+#: src/appearance/appearance-settings-section.tsrx:116
+msgid "Contrast"
+msgstr "Contrast"
+
+#: src/appearance/appearance-settings-section.tsrx:85
+msgid "Current effective theme:"
+msgstr "Current effective theme:"
+
+#: src/commands/app-command-definitions.ts:198
+msgid "Cycle Launch Location"
+msgstr "Cycle Launch Location"
+
+#: src/appearance/appearance-settings-section.tsrx:59
+msgid "Dark"
+msgstr "Dark"
+
+#: src/commands/app-command-definitions.ts:228
+msgid "Decrease Thinking Level"
+msgstr "Decrease Thinking Level"
+
+#: src/appearance/appearance-settings-section.tsrx:130
+msgid "Disabled"
+msgstr "Disabled"
+
+#: src/appearance/appearance-settings-section.tsrx:130
+msgid "Enabled"
+msgstr "Enabled"
+
+#: src/inbox/filters.ts:61
+msgid "Entity-specific completed items will appear here."
+msgstr "Entity-specific completed items will appear here."
+
+#: src/settings/adapter-installations-section.tsrx:330
+msgid "Failed to load agent harnesses."
+msgstr "Failed to load agent harnesses."
+
+#: src/settings/adapter-installations-section.tsrx:259
+#: src/settings/adapter-installations-section.tsrx:264
+msgid "Filter available agents"
+msgstr "Filter available agents"
+
+#: src/appearance/appearance-settings-section.tsrx:44
+msgid "Follow the operating system appearance."
+msgstr "Follow the operating system appearance."
+
+#: src/appearance/appearance-settings-section.tsrx:127
+msgid "High contrast"
+msgstr "High contrast"
+
+#: src/main-tab-items.ts:10
+msgid "Inbox"
+msgstr "Inbox"
+
+#: src/commands/app-command-definitions.ts:234
+msgid "Increase Thinking Level"
+msgstr "Increase Thinking Level"
+
+#: src/settings/adapter-installations-section.tsrx:120
+msgid "Install"
+msgstr "Install"
+
+#: src/settings/adapter-installations-section.tsrx:50
+msgid "Installed"
+msgstr "Installed"
+
+#: src/settings/adapter-installations-section.tsrx:313
+msgid "Installed agents"
+msgstr "Installed agents"
+
+#: src/inbox/filters.ts:49
+msgid "Items handed back to an agent through a reply will appear here."
+msgstr "Items handed back to an agent through a reply will appear here."
+
+#: src/inbox/filters.ts:73
+msgid "Items hidden from the active workflow will appear here."
+msgstr "Items hidden from the active workflow will appear here."
+
+#: src/inbox/filters.ts:37
+msgid "Items you park for later will appear here."
+msgstr "Items you park for later will appear here."
+
+#: src/settings/adapter-installations-section.tsrx:316
+msgid "Launch selectors only show installed agents or agents declared in "
+"configuration."
+msgstr "Launch selectors only show installed agents or agents declared in "
+"configuration."
+
+#: src/appearance/appearance-settings-section.tsrx:50
+msgid "Light"
+msgstr "Light"
+
+#: src/settings/adapter-installations-section.tsrx:323
+msgid "Loading agent harnesses."
+msgstr "Loading agent harnesses."
+
+#: src/workbench-tab-set.ts:38
+msgid "Main"
+msgstr "Main"
+
+#: src/commands/app-command.ts:23
+msgid "Navigation"
+msgstr "Navigation"
+
+#: src/settings/adapter-installations-section.tsrx:227
+msgid "No agent harnesses are available."
+msgstr "No agent harnesses are available."
+
+#: src/inbox/filters.ts:70
+msgid "No archived inbox items"
+msgstr "No archived inbox items"
+
+#: src/settings/adapter-installations-section.tsrx:279
+msgid "No available agents match this search."
+msgstr "No available agents match this search."
+
+#: src/settings/adapter-installations-section.tsrx:275
+msgid "No available agents."
+msgstr "No available agents."
+
+#: src/inbox/filters.ts:58
+msgid "No completed inbox items"
+msgstr "No completed inbox items"
+
+#: src/settings/adapter-installations-section.tsrx:234
+msgid "No installed agents."
+msgstr "No installed agents."
+
+#: src/inbox/filters.ts:46
+msgid "No replied inbox items"
+msgstr "No replied inbox items"
+
+#: src/inbox/filters.ts:34
+msgid "No saved inbox items"
+msgstr "No saved inbox items"
+
+#: src/settings/page.tsrx:65
+msgid "No settings found"
+msgstr "No settings found"
+
+#: src/inbox/filters.ts:22
+msgid "No unread inbox items"
+msgstr "No unread inbox items"
+
+#: src/settings/adapter-installations-section.tsrx:57
+msgid "Not installed"
+msgstr "Not installed"
+
+#: src/commands/app-command-definitions.ts:170
+msgid "Open a project from your filesystem."
+msgstr "Open a project from your filesystem."
+
+#: src/commands/app-command-definitions.ts:192
+msgid "Open Agent Harness Selector"
+msgstr "Open Agent Harness Selector"
+
+#: src/commands/app-command-definitions.ts:210
+msgid "Open Approval Preset Selector"
+msgstr "Open Approval Preset Selector"
+
+#: src/commands/app-command-definitions.ts:204
+msgid "Open Branch Selector"
+msgstr "Open Branch Selector"
+
+#: src/commands/app-command-definitions.ts:66
+msgid "Open Command Menu"
+msgstr "Open Command Menu"
+
+#: src/commands/app-command-definitions.ts:166
+msgid "Open Folder"
+msgstr "Open Folder"
+
+#: src/commands/app-command-definitions.ts:78
+msgid "Open Inbox"
+msgstr "Open Inbox"
+
+#: src/commands/app-command-definitions.ts:72
+msgid "Open Keyboard Shortcuts"
+msgstr "Open Keyboard Shortcuts"
+
+#: src/commands/app-command-definitions.ts:216
+msgid "Open Model Selector"
+msgstr "Open Model Selector"
+
+#: src/commands/app-command-definitions.ts:54
+msgid "Open New Session Dialog"
+msgstr "Open New Session Dialog"
+
+#: src/commands/app-command-definitions.ts:84
+msgid "Open Next Unread Inbox Item"
+msgstr "Open Next Unread Inbox Item"
+
+#: src/commands/app-command-definitions.ts:180
+msgid "Open Project Selector"
+msgstr "Open Project Selector"
+
+#: src/commands/app-command-definitions.ts:48
+msgid "Open Propose Task Dialog"
+msgstr "Open Propose Task Dialog"
+
+#: src/commands/app-command-definitions.ts:114
+msgid "Open Roadmap"
+msgstr "Open Roadmap"
+
+#: src/commands/app-command-definitions.ts:96
+msgid "Open Search"
+msgstr "Open Search"
+
+#: src/commands/app-command-definitions.ts:90
+msgid "Open Sessions"
+msgstr "Open Sessions"
+
+#: src/commands/app-command-definitions.ts:120
+msgid "Open Settings"
+msgstr "Open Settings"
+
+#: src/commands/app-command-definitions.ts:102
+msgid "Open Specs"
+msgstr "Open Specs"
+
+#: src/commands/app-command-definitions.ts:108
+msgid "Open Tasks"
+msgstr "Open Tasks"
+
+#: src/commands/app-command-definitions.ts:222
+msgid "Open Thinking Level Selector"
+msgstr "Open Thinking Level Selector"
+
+#: src/commands/app-command-definitions.ts:186
+msgid "Open Working Directory Selector"
+msgstr "Open Working Directory Selector"
+
+#: src/commands/app-command.ts:35
+msgid "Projects"
+msgstr "Projects"
+
+#: src/settings/adapter-installations-section.tsrx:119
+msgid "Remove"
+msgstr "Remove"
+
+#: src/inbox/filters.ts:42
+msgid "Replied"
+msgstr "Replied"
+
+#: src/settings/adapter-installations-section.tsrx:159
+msgid "Repository"
+msgstr "Repository"
+
+#: src/settings/adapter-installations-section.tsrx:333
+msgid "Retry"
+msgstr "Retry"
+
+#: src/main-tab-items.ts:45
+msgid "Roadmap"
+msgstr "Roadmap"
+
+#: src/inbox/filters.ts:30
+msgid "Saved"
+msgstr "Saved"
+
+#: src/main-tab-items.ts:24
+msgid "Search"
+msgstr "Search"
+
+#: src/settings/page.tsrx:37
+#: src/settings/page.tsrx:42
+msgid "Search settings"
+msgstr "Search settings"
+
+#: src/commands/app-command-definitions.ts:155
+msgid "Select Archived Inbox Filter"
+msgstr "Select Archived Inbox Filter"
+
+#: src/commands/app-command-definitions.ts:149
+msgid "Select Completed Inbox Filter"
+msgstr "Select Completed Inbox Filter"
+
+#: src/commands/app-command-definitions.ts:143
+msgid "Select Replied Inbox Filter"
+msgstr "Select Replied Inbox Filter"
+
+#: src/commands/app-command-definitions.ts:137
+msgid "Select Saved Inbox Filter"
+msgstr "Select Saved Inbox Filter"
+
+#: src/commands/app-command-definitions.ts:131
+msgid "Select Unread Inbox Filter"
+msgstr "Select Unread Inbox Filter"
+
+#: src/commands/app-command.ts:41
+msgid "Session"
+msgstr "Session"
+
+#: src/main-tab-items.ts:17
+msgid "Sessions"
+msgstr "Sessions"
+
+#: src/settings/page.tsrx:77
+msgid "Settings"
+msgstr "Settings"
+
+#: src/settings/page.tsrx:75
+msgid "Settings sections"
+msgstr "Settings sections"
+
+#: src/commands/app-command-definitions.ts:269
+msgid "Skip to Next Prompt"
+msgstr "Skip to Next Prompt"
+
+#: src/commands/app-command-definitions.ts:263
+msgid "Skip to Previous Prompt"
+msgstr "Skip to Previous Prompt"
+
+#: src/main-tab-items.ts:31
+msgid "Specs"
+msgstr "Specs"
+
+#: src/commands/app-command-definitions.ts:240
+msgid "Submit"
+msgstr "Submit"
+
+#: src/commands/app-command-definitions.ts:60
+msgid "Switch Project"
+msgstr "Switch Project"
+
+#: src/appearance/appearance-settings-section.tsrx:41
+msgid "System"
+msgstr "System"
+
+#: src/main-tab-items.ts:38
+msgid "Tasks"
+msgstr "Tasks"
+
+#: src/appearance/appearance-settings-section.tsrx:119
+msgid "Tightens muted text and border separation across the app."
+msgstr "Tightens muted text and border separation across the app."
+
+#: src/settings/page.tsrx:68
+msgid "Try a different search term."
+msgstr "Try a different search term."
+
+#: src/settings/adapter-installations-section.tsrx:54
+msgid "Unavailable"
+msgstr "Unavailable"
+
+#: src/settings/adapter-installations-section.tsrx:133
+msgid "Unofficial"
+msgstr "Unofficial"
+
+#: src/inbox/filters.ts:18
+msgid "Unread"
+msgstr "Unread"
+
+#: src/inbox/filters.ts:25
+msgid "Unread and acknowledged items that remain in the active queue will "
+"appear here."
+msgstr "Unread and acknowledged items that remain in the active queue will "
+"appear here."
+
+#: src/appearance/appearance-settings-section.tsrx:62
+msgid "Use the dark built-in palette."
+msgstr "Use the dark built-in palette."
+
+#: src/appearance/appearance-settings-section.tsrx:53
+msgid "Use the light built-in palette."
+msgstr "Use the light built-in palette."
+
+#: src/commands/app-command-definitions.ts:251
+msgid "View Changes"
+msgstr "View Changes"
+
+#: src/settings/adapter-installations-section.tsrx:142
+msgid "Website"
+msgstr "Website"
+
+#: src/commands/app-command.ts:29
+msgid "Workbench"
+msgstr "Workbench"
+
+#: src/settings/adapter-installations-section.tsrx:179
+msgid "Working"
+msgstr "Working"

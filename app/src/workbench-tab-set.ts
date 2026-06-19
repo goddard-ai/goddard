@@ -1,6 +1,6 @@
+import { t } from "@lingui/core/macro"
 import { Sigma, type Immutable } from "preact-sigma"
 
-import { text } from "~/language/text.ts"
 import {
   createWorkbenchTab,
   getWorkbenchTabRelatedFilesystemPath,
@@ -34,7 +34,9 @@ export type WorkbenchTabSetState = {
 /** Immutable runtime value for the always-present main workbench tab. */
 export const WORKBENCH_MAIN_TAB: WorkbenchMainTab = {
   id: "main",
-  title: text.main,
+  get title() {
+    return t`Main`
+  },
 }
 
 /** Maximum number of closable workbench tabs kept open at once. */

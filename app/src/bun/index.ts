@@ -1,5 +1,6 @@
 import { BrowserWindow, Screen, Updater } from "electrobun/bun"
 
+import { activateDefaultLocale } from "~/language/i18n.ts"
 import { loadAppStateSnapshot } from "./app-state-store.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { installAppLogCapture } from "./logging.ts"
@@ -17,6 +18,8 @@ import {
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
 const MAIN_WINDOW_READY_FALLBACK_MS = 5000
+
+activateDefaultLocale()
 
 /** Creates the one primary Electrobun window used by the current app shell. */
 function createMainWindow(url: string, frame: WindowFrame) {

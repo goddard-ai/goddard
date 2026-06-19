@@ -1,6 +1,5 @@
 import type { InboxStatus } from "@goddard-ai/inbox/schema"
-
-import { text } from "~/language/text.ts"
+import { t } from "@lingui/core/macro"
 
 export const DEFAULT_INBOX_FILTER_ID = "unread"
 
@@ -15,34 +14,64 @@ export const allInboxStatuses = [
 
 export const inboxFilterDefinitions = {
   unread: {
-    label: text.unread,
+    get label() {
+      return t`Unread`
+    },
     statuses: ["unread", "read"],
-    emptyTitle: text.noUnreadInboxItems,
-    emptyDescription: text.unreadAndAcknowledgedItemsThatRemainInTheActiveQueueWillAppearHere,
+    get emptyTitle() {
+      return t`No unread inbox items`
+    },
+    get emptyDescription() {
+      return t`Unread and acknowledged items that remain in the active queue will appear here.`
+    },
   },
   saved: {
-    label: text.saved,
+    get label() {
+      return t`Saved`
+    },
     statuses: ["saved"],
-    emptyTitle: text.noSavedInboxItems,
-    emptyDescription: text.itemsYouParkForLaterWillAppearHere,
+    get emptyTitle() {
+      return t`No saved inbox items`
+    },
+    get emptyDescription() {
+      return t`Items you park for later will appear here.`
+    },
   },
   replied: {
-    label: text.replied,
+    get label() {
+      return t`Replied`
+    },
     statuses: ["replied"],
-    emptyTitle: text.noRepliedInboxItems,
-    emptyDescription: text.itemsHandedBackToAnAgentThroughAReplyWillAppearHere,
+    get emptyTitle() {
+      return t`No replied inbox items`
+    },
+    get emptyDescription() {
+      return t`Items handed back to an agent through a reply will appear here.`
+    },
   },
   completed: {
-    label: text.completed,
+    get label() {
+      return t`Completed`
+    },
     statuses: ["completed"],
-    emptyTitle: text.noCompletedInboxItems,
-    emptyDescription: text.entitySpecificCompletedItemsWillAppearHere,
+    get emptyTitle() {
+      return t`No completed inbox items`
+    },
+    get emptyDescription() {
+      return t`Entity-specific completed items will appear here.`
+    },
   },
   archived: {
-    label: text.archived,
+    get label() {
+      return t`Archived`
+    },
     statuses: ["archived"],
-    emptyTitle: text.noArchivedInboxItems,
-    emptyDescription: text.itemsHiddenFromTheActiveWorkflowWillAppearHere,
+    get emptyTitle() {
+      return t`No archived inbox items`
+    },
+    get emptyDescription() {
+      return t`Items hidden from the active workflow will appear here.`
+    },
   },
 } as const satisfies Record<
   string,

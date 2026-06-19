@@ -1,38 +1,56 @@
 import { ApplicationMenu, ApplicationMenuItemConfig, type BrowserWindow } from "electrobun/bun"
 import { concat } from "radashi"
 
-import { text } from "~/language/text.ts"
+import { i18n } from "~/language/i18n.ts"
 import type { AppCommandId } from "~/shared/app-commands.ts"
 import { DebugMenuSurfaces, type DebugMenuSurface } from "~/shared/debug-menu.ts"
 import { dispatchGlobalEvent } from "./rpc.ts"
 
+function menuText(message: string) {
+  return i18n._(message)
+}
+
 const fileMenu = {
-  label: text.file,
+  get label() {
+    return menuText("File")
+  },
   closeWindow: {
-    label: text.closeWindow,
+    get label() {
+      return menuText("Close Window")
+    },
     action: "file:close-window",
     accelerator: "CommandOrControl+Shift+W",
   },
   closeTab: {
-    label: text.closeTab,
+    get label() {
+      return menuText("Close Tab")
+    },
     action: "file:close-tab",
     accelerator: "CommandOrControl+W",
   },
 } as const
 
 const viewMenu = {
-  label: text.view,
+  get label() {
+    return menuText("View")
+  },
   commandPalette: {
-    label: text.commandPalette,
+    get label() {
+      return menuText("Command Palette")
+    },
     action: "view:command-palette",
   },
   reload: {
-    label: text.reload,
+    get label() {
+      return menuText("Reload")
+    },
     action: "view:reload",
     accelerator: "CommandOrControl+R",
   },
   inspectElement: {
-    label: text.inspectElement,
+    get label() {
+      return menuText("Inspect Element")
+    },
     action: "view:inspect-element",
     accelerator: "Alt+CommandOrControl+I",
   },
@@ -63,16 +81,13 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
       submenu: concat(
         fileMenu.closeTab,
         fileMenu.closeWindow,
-        process.platform === "darwin" ?
-          [
-            { type: "separator" as const },
-            { role: "quit", accelerator: "CommandOrControl+Q" },
-          ]
-        : null,
+        process.platform === "darwin"
+          ? [{ type: "separator" as const }, { role: "quit", accelerator: "CommandOrControl+Q" }]
+          : null,
       ),
     },
     {
-      label: text.edit,
+      label: menuText("Edit"),
       submenu: [
         { role: "undo" },
         { role: "redo" },
@@ -91,7 +106,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
         viewMenu.commandPalette,
         viewMenu.reload,
         {
-          label: text.developer,
+          label: menuText("Developer"),
           submenu: [viewMenu.inspectElement],
         },
       ],
@@ -100,7 +115,7 @@ export function installApplicationMenu(getMainWindow: () => BrowserWindow | null
 
   if (debugMenu.length > 0) {
     menu.push({
-      label: text.debug,
+      label: menuText("Debug"),
       submenu: debugMenu,
     })
   }
