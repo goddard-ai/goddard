@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
 import { sourceSyntax } from "sculpted/tsrx"
@@ -42,5 +44,16 @@ export default defineConfig({
   resolve: {
     conditions: ["bun"],
     tsconfigPaths: true,
+  },
+  test: {
+    environment: "happy-dom",
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    root: import.meta.dirname,
+    server: {
+      deps: {
+        inline: ["powerkeys", "@casbin/expression-eval"],
+      },
+    },
+    setupFiles: ["./test-setup.ts"],
   },
 })
