@@ -32,6 +32,14 @@ const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap((fileGlob) => [
   `**/${fileGlob}`,
 ])
 
+const BUN_RUNTIME_CHECK_FILE_PATTERNS = [
+  "app/electrobun.config.ts",
+  "package.json",
+  "pnpm-lock.yaml",
+]
+
+const IGNORED_PUBLIC_DOCS_DIRS = ["core/schema/docs", "core/ui-primitives/docs", "workforce/docs"]
+
 /**
  * Describes one ref update streamed to the pre-push hook on stdin.
  */
@@ -213,10 +221,29 @@ function getChangedFiles(repoRoot: string, fromSha: string, toSha: string) {
 }
 
 /** Detects whether the pushed diff can affect the full-repo check. */
-function shouldRunRepoCheck(changedFiles: string[]) {
+export function shouldRunRepoCheck(changedFiles: string[]) {
   return changedFiles.some((file) =>
     FULL_CHECK_FILE_PATTERNS.some((pattern) => matchesGlob(file, pattern)),
   )
+}
+
+/** Detects whether the pushed diff can affect the Bun runtime check. */
+export function shouldRunBunRuntimeCheck(changedFiles: string[]) {
+  return changedFiles.some((file) =>
+    BUN_RUNTIME_CHECK_FILE_PATTERNS.some((pattern) => matchesGlob(file, pattern)),
+  )
+}
+
+/** Detects whether the pushed diff can affect public docs validation. */
+export function shouldRunDocsCheck(changedFiles: string[]) {
+  return changedFiles.some((file) => {
+    const isDocsFile = file.startsWith("docs/") || file.includes("/docs/")
+    const isIgnoredDocsFile = IGNORED_PUBLIC_DOCS_DIRS.some(
+      (docsDir) => file === docsDir || file.startsWith(`${docsDir}/`),
+    )
+
+    return isDocsFile && !isIgnoredDocsFile
+  })
 }
 
 /** Runs one pnpm command and returns whether it succeeded. */
@@ -230,15 +257,25 @@ function runPnpm(repoRoot: string, args: string[]) {
 }
 
 /** Runs the static pre-push checks, filtering package checks when a push range is available. */
-function runRepoCheck(repoRoot: string, changedFiles: string[], filterRange?: string) {
+function runRepoCheck(repoRoot: string, changedFiles?: string[], filterRange?: string) {
   if (
-    changedFiles.includes("pnpm-lock.yaml") &&
+    changedFiles?.includes("pnpm-lock.yaml") &&
     !runPnpm(repoRoot, ["install", "--frozen-lockfile", "--ignore-scripts"])
   ) {
     return false
   }
 
-  if (!runPnpm(repoRoot, ["run", "check:docs"])) {
+  if (
+    (!changedFiles || shouldRunBunRuntimeCheck(changedFiles)) &&
+    !runPnpm(repoRoot, ["run", "check:bun-runtime"])
+  ) {
+    return false
+  }
+
+  if (
+    (!changedFiles || shouldRunDocsCheck(changedFiles)) &&
+    !runPnpm(repoRoot, ["run", "check:docs"])
+  ) {
     return false
   }
 
@@ -297,13 +334,13 @@ async function main(argv = process.argv.slice(2)) {
   }
 
   if (!hasOriginMain(repoRoot)) {
-    return runRepoCheck(repoRoot, []) ? 0 : 1
+    return runRepoCheck(repoRoot) ? 0 : 1
   }
 
   const branchPoint = getMergeBase(repoRoot, pushedSha)
 
   if (!branchPoint) {
-    return runRepoCheck(repoRoot, []) ? 0 : 1
+    return runRepoCheck(repoRoot) ? 0 : 1
   }
 
   const changedFiles = getChangedFiles(repoRoot, branchPoint, pushedSha)
