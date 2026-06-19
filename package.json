@@ -51,7 +51,6 @@
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
     "check:bun-runtime": "bun run ./scripts/check-bun-runtime.ts",
     "check:docs": "bun run ./scripts/check-public-docs.ts",
-    "check:prepush": "pnpm run check:docs && turbo run codegen && turbo run typecheck lint --output-logs=errors-only --continue=always",
     "check": "pnpm run check:docs && turbo run codegen && turbo run typecheck lint test --output-logs=errors-only --continue=always"
   },
   "devDependencies": {

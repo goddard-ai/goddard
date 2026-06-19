@@ -4,6 +4,9 @@ import {
   findRebaseCheckedBranchPushSha,
   getTurboAffectedFilterRange,
   parsePushUpdates,
+  shouldRunBunRuntimeCheck,
+  shouldRunDocsCheck,
+  shouldRunRepoCheck,
 } from "./pre-push.ts"
 
 const PUSHED_SHA = "1111111111111111111111111111111111111111"
@@ -62,5 +65,28 @@ describe("getTurboAffectedFilterRange", () => {
 
     expect(getTurboAffectedFilterRange(update!, branchPoint)).toBe(`${branchPoint}...${PUSHED_SHA}`)
     expect(getTurboAffectedFilterRange(update!)).toBeUndefined()
+  })
+})
+
+describe("changed file checks", () => {
+  test("detects files that require full repo checks", () => {
+    expect(shouldRunRepoCheck(["features/session/src/sdk.ts"])).toBe(true)
+    expect(shouldRunRepoCheck(["README.md"])).toBe(false)
+  })
+
+  test("detects files that require Bun runtime checks", () => {
+    expect(shouldRunBunRuntimeCheck(["package.json"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["pnpm-lock.yaml"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["app/electrobun.config.ts"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["app/src/bun/index.ts"])).toBe(false)
+  })
+
+  test("detects public docs changes without legacy technical docs", () => {
+    expect(shouldRunDocsCheck(["core/daemon/docs/README.md"])).toBe(true)
+    expect(shouldRunDocsCheck(["core/daemon/docs/assets/diagram.png"])).toBe(true)
+    expect(shouldRunDocsCheck(["core/schema/docs/session-titles-and-model-selection.md"])).toBe(
+      false,
+    )
+    expect(shouldRunDocsCheck(["README.md"])).toBe(false)
   })
 })
