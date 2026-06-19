@@ -105,17 +105,10 @@ function writeEntries(entries: LogEntry[], options: CliOptions) {
     return
   }
 
-  const cursors = createPageCursors(entries)
   if (entries.length === 0) {
     console.log("No logs matched.")
     return
   }
-
-  console.log(`firstId: ${cursors.firstId}`)
-  console.log(`lastId: ${cursors.lastId}`)
-  console.log(`prev: pnpm goddard:logs --before-id ${cursors.firstId}`)
-  console.log(`next: pnpm goddard:logs --after-id ${cursors.lastId}`)
-  console.log("")
 
   for (const entry of entries) {
     console.log(formatLogEntry(entry))

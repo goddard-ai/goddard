@@ -22,7 +22,7 @@ afterEach(async () => {
   }
 })
 
-test("formats log entries as scope message and properties", () => {
+test("formats log entries as timeline fields, message, and properties", () => {
   const entry: LogEntry = {
     id: 1,
     at: "2026-06-16T12:00:00.000Z",
@@ -38,7 +38,7 @@ test("formats log entries as scope message and properties", () => {
   }
 
   expect(formatLogEntry(entry)).toBe(
-    "daemon ipc.response_sent method=session.history durationMs=38 response=obj_01K00000000000000000000000",
+    "1 2026-06-16T12:00:00.000Z daemon info ipc.response_sent pid=123 method=session.history durationMs=38 response=obj_01K00000000000000000000000",
   )
 })
 
@@ -59,8 +59,9 @@ test("CLI pages and expands logs from the canonical database", async () => {
   store.close()
 
   const page = await runCli(["--property", "method=session.history"], testHome)
-  expect(page).toContain("next: pnpm goddard:logs --after-id")
-  expect(page).toContain("daemon ipc.response_sent method=session.history")
+  expect(page).toBe(
+    `${row.id} ${row.at} daemon info ipc.response_sent pid=123 method=session.history response=${row.properties.response}\n`,
+  )
 
   const expanded = await runCli(["expand", row.properties.response as string], testHome)
   expect(expanded).toContain("response payload that collapses")

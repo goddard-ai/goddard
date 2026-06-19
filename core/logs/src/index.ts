@@ -335,7 +335,15 @@ export function formatLogEntry(entry: LogEntry) {
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}=${formatPropertyValue(value)}`)
 
-  return [entry.scope, entry.message, ...properties].join(" ")
+  return [
+    entry.id,
+    entry.at,
+    entry.scope,
+    entry.level,
+    entry.message,
+    `pid=${entry.pid}`,
+    ...properties,
+  ].join(" ")
 }
 
 export function subtractHours(value: Date, hours: number) {
