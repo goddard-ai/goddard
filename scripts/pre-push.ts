@@ -6,8 +6,7 @@
 import { execFileSync, spawnSync } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import globrex from "globrex"
+import { join, matchesGlob } from "node:path"
 
 const REBASE_CHECKED_REMOTE_BRANCH_REFS = ["refs/heads/aleclarson"]
 const ZERO_SHA = "0000000000000000000000000000000000000000"
@@ -28,7 +27,10 @@ const FULL_CHECK_FILE_GLOBS = [
   "tsdown.config.ts",
 ]
 
-const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap(compileFileFilterGlobs)
+const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap((fileGlob) => [
+  fileGlob,
+  `**/${fileGlob}`,
+])
 
 /**
  * Describes one ref update streamed to the pre-push hook on stdin.
@@ -38,21 +40,6 @@ export type PushUpdate = {
   localSha: string
   remoteRef: string
   remoteSha: string
-}
-
-/** Compiles one forward-slash filepath glob into the regex used for Git diff paths. */
-function compileFileFilterGlob(fileGlob: string) {
-  const compiled = globrex(fileGlob, {
-    filepath: true,
-    globstar: true,
-  })
-
-  return compiled.path!.regex
-}
-
-/** Compiles one filepath glob for both repo-root and nested package paths. */
-function compileFileFilterGlobs(fileGlob: string) {
-  return [compileFileFilterGlob(fileGlob), compileFileFilterGlob(`**/${fileGlob}`)]
 }
 
 /** Reads the hook's stdin payload so the script can inspect pushed refs. */
@@ -227,7 +214,9 @@ function getChangedFiles(repoRoot: string, fromSha: string, toSha: string) {
 
 /** Detects whether the pushed diff can affect the full-repo check. */
 function shouldRunRepoCheck(changedFiles: string[]) {
-  return changedFiles.some((file) => FULL_CHECK_FILE_PATTERNS.some((pattern) => pattern.test(file)))
+  return changedFiles.some((file) =>
+    FULL_CHECK_FILE_PATTERNS.some((pattern) => matchesGlob(file, pattern)),
+  )
 }
 
 /** Runs one pnpm command and returns whether it succeeded. */
