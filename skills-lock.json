@@ -21,6 +21,11 @@
       "sourceType": "github",
       "computedHash": "ea607f77953c0703581fde29b9802cb40c542d45785bc43643c02a5eda224838"
     },
+    "lingui": {
+      "source": "/Users/alec/dev/skills/frontend",
+      "sourceType": "local",
+      "computedHash": "f00fc8e2466ec2ce5abaea6051c4a695e1283535fa33b2ffc183a93c7ce00504"
+    },
     "spec-editing": {
       "source": "/Users/alec/dev/skills",
       "sourceType": "local",
