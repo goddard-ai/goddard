@@ -13,15 +13,93 @@ msgstr ""
 "Language-Team: \n"
 "Plural-Forms: \n"
 
+#: src/session-input/select-menu.tsrx:376
+msgid " opens menu"
+msgstr " opens menu"
+
+#. placeholder {0}: props.selectedCount
+#: src/inbox/bulk-toolbar.tsrx:44
+msgid "{0, plural, one {# selected} other {# selected}}"
+msgstr "{0, plural, one {# selected} other {# selected}}"
+
+#. placeholder {0}: filter.label
+#: src/inbox/list.tsrx:56
+msgid "{0} inbox items"
+msgstr "{0} inbox items"
+
+#: src/projects/switch-project-dropdown.tsrx:228
+msgid "Active"
+msgstr "Active"
+
+#: src/projects/projects-page.tsrx:88
+msgid "Add a local directory to establish the app's explicit working set."
+msgstr "Add a local directory to establish the app's explicit working set."
+
+#: src/projects/switch-project-dropdown.tsrx:215
+msgid "Add a local project from your filesystem."
+msgstr "Add a local project from your filesystem."
+
+#: src/projects/projects-page.tsrx:77
+#: src/projects/projects-page.tsrx:99
+#: src/projects/projects-page.tsrx:316
+#: src/projects/projects-page.tsrx:392
+msgid "Add project"
+msgstr "Add project"
+
+#: src/shortcuts/capture-dialog.tsrx:104
+#: src/shortcuts/view.tsrx:534
+#: src/shortcuts/view.tsrx:565
+msgid "Add shortcut"
+msgstr "Add shortcut"
+
+#: src/sessions/launch-form-selectors.tsrx:45
+#: src/sessions/launch-form-selectors.tsrx:87
+msgid "Agent harness"
+msgstr "Agent harness"
+
+#. placeholder {0}: selectedAgent.name
+#: src/app-shell/agent-selector.tsrx:176
+msgid "Agent harness: {0}"
+msgstr "Agent harness: {0}"
+
 #: src/settings/adapter-installations-section.tsrx:32
 msgid "Agent harnesses"
 msgstr "Agent harnesses"
+
+#. placeholder {0}: summary.ahead
+#: src/projects/project-page.tsrx:108
+msgid "Ahead {0}"
+msgstr "Ahead {0}"
+
+#. placeholder {0}: summary.ahead
+#. placeholder {1}: summary.behind
+#: src/projects/project-page.tsrx:100
+msgid "Ahead {0}, behind {1}"
+msgstr "Ahead {0}, behind {1}"
 
 #: src/appearance/appearance-settings-section.tsrx:29
 msgid "Appearance"
 msgstr "Appearance"
 
+#: src/session-input/session-mode-selector.tsrx:20
+#: src/sessions/launch-form-selectors.tsrx:49
+msgid "Approval preset"
+msgstr "Approval preset"
+
+#: src/inbox/row.tsrx:245
+#: src/inbox/row.tsrx:251
+#: src/projects/project-page.tsrx:652
+msgid "Archive"
+msgstr "Archive"
+
+#: src/inbox/bulk-toolbar.tsrx:85
+#: src/inbox/page.tsrx:161
+msgid "Archive selected"
+msgstr "Archive selected"
+
 #: src/inbox/filters.ts:66
+#: src/inbox/row.tsrx:245
+#: src/sessions/list-row.tsrx:98
 msgid "Archived"
 msgstr "Archived"
 
@@ -29,46 +107,180 @@ msgstr "Archived"
 msgid "Available agents"
 msgstr "Available agents"
 
+#. placeholder {0}: summary.behind
+#: src/projects/project-page.tsrx:116
+msgid "behind {0}"
+msgstr "behind {0}"
+
+#: src/sessions/list-row.tsrx:74
+msgid "Blocked"
+msgstr "Blocked"
+
+#: src/projects/projects-page.tsrx:356
+msgid "Browse"
+msgstr "Browse"
+
+#: src/projects/projects-page.tsrx:381
+#: src/shortcuts/capture-dialog.tsrx:167
+msgid "Cancel"
+msgstr "Cancel"
+
+#: src/session-chat/transcript-items.ts:845
+#: src/sessions/list-row.tsrx:92
+msgid "Cancelled"
+msgstr "Cancelled"
+
+#: src/shortcuts/capture-dialog.tsrx:104
+#: src/shortcuts/view.tsrx:579
+msgid "Change shortcut"
+msgstr "Change shortcut"
+
+#: src/sessions/launch-form-selectors.tsrx:142
+msgid "Choose a branch"
+msgstr "Choose a branch"
+
+#: src/app-shell/onboarding.tsrx:16
+msgid "Choose a local folder to start working in Goddard."
+msgstr "Choose a local folder to start working in Goddard."
+
 #: src/appearance/appearance-settings-section.tsrx:26
 msgid "Choose how the workbench resolves theme and contrast."
 msgstr "Choose how the workbench resolves theme and contrast."
+
+#: src/projects/projects-page.tsrx:319
+msgid "Choose one local root and optionally adjust the display name."
+msgstr "Choose one local root and optionally adjust the display name."
+
+#: src/sessions/dialog.tsrx:201
+msgid "Choose the project, agent harness, launch options, and initial prompt."
+msgstr "Choose the project, agent harness, launch options, and initial prompt."
 
 #: src/settings/adapter-installations-section.tsrx:29
 msgid "Choose which agent harnesses are available when launching sessions."
 msgstr "Choose which agent harnesses are available when launching sessions."
 
+#: src/inbox/bulk-toolbar.tsrx:92
+msgid "Clear selection"
+msgstr "Clear selection"
+
+#: src/commands/command-dialog.tsrx:91
+msgid "Close"
+msgstr "Close"
+
 #: src/commands/app-command-definitions.ts:36
 msgid "Close Active Tab"
 msgstr "Close Active Tab"
+
+#: src/sessions/dialog.tsrx:205
+msgid "Close launch session dialog"
+msgstr "Close launch session dialog"
 
 #: src/appearance/appearance-settings-section.tsrx:82
 msgid "Color mode"
 msgstr "Color mode"
 
+#: src/shortcuts/view.tsrx:336
+msgid "Command"
+msgstr "Command"
+
+#: src/command-palette.tsrx:93
+#: src/command-palette.tsrx:120
+msgid "Command menu"
+msgstr "Command menu"
+
+#: src/sessions/launch-form-selectors.tsrx:152
+msgid "Commit or stash local changes to launch from another branch."
+msgstr "Commit or stash local changes to launch from another branch."
+
+#: src/inbox/row.tsrx:229
+#: src/inbox/row.tsrx:235
+msgid "Complete"
+msgstr "Complete"
+
+#: src/session-chat/view.tsrx:289
+msgid "Complete failed"
+msgstr "Complete failed"
+
 #: src/commands/app-command-definitions.ts:257
+#: src/session-chat/view.tsrx:275
 msgid "Complete Session"
 msgstr "Complete Session"
 
+#: src/session-chat/view.tsrx:272
+msgid "Complete unavailable while agent is active"
+msgstr "Complete unavailable while agent is active"
+
 #: src/inbox/filters.ts:54
+#: src/inbox/row.tsrx:229
+#: src/sessions/list-row.tsrx:80
 msgid "Completed"
 msgstr "Completed"
+
+#: src/session-chat/view.tsrx:274
+msgid "Completing session"
+msgstr "Completing session"
 
 #: src/settings/adapter-installations-section.tsrx:46
 #: src/settings/adapter-installations-section.tsrx:117
 msgid "Configured"
 msgstr "Configured"
 
+#: src/session-chat/transcript/permission-request-row.tsrx:132
+msgid "Context"
+msgstr "Context"
+
 #: src/appearance/appearance-settings-section.tsrx:116
 msgid "Contrast"
 msgstr "Contrast"
+
+#: src/inbox/list.tsrx:32
+msgid "Couldn't load inbox"
+msgstr "Couldn't load inbox"
+
+#: src/projects/project-page.tsrx:249
+#: src/projects/project-page.tsrx:570
+msgid "Couldn't load project dashboard"
+msgstr "Couldn't load project dashboard"
+
+#: src/pull-requests/view.tsrx:99
+msgid "Couldn't load pull request"
+msgstr "Couldn't load pull request"
+
+#: src/sessions/list.tsrx:25
+msgid "Couldn't load sessions"
+msgstr "Couldn't load sessions"
+
+#: src/inbox/page.tsrx:337
+msgid "Couldn't open inbox item"
+msgstr "Couldn't open inbox item"
+
+#: src/app-shell/chrome.tsrx:337
+msgid "Couldn't open next item"
+msgstr "Couldn't open next item"
+
+#: src/sessions/launch-form-selectors.tsrx:125
+msgid "Current branch"
+msgstr "Current branch"
 
 #: src/appearance/appearance-settings-section.tsrx:85
 msgid "Current effective theme:"
 msgstr "Current effective theme:"
 
+#: src/session-changes/view.tsrx:20
+msgid "Current git diff for this session workspace."
+msgstr "Current git diff for this session workspace."
+
+#: src/shortcuts/capture-dialog.tsrx:121
+msgid "Current shortcut"
+msgstr "Current shortcut"
+
 #: src/commands/app-command-definitions.ts:198
 msgid "Cycle Launch Location"
 msgstr "Cycle Launch Location"
+
+#: src/pull-requests/view.tsrx:69
+msgid "Daemon-managed pull request linked from the inbox."
+msgstr "Daemon-managed pull request linked from the inbox."
 
 #: src/appearance/appearance-settings-section.tsrx:59
 msgid "Dark"
@@ -78,9 +290,34 @@ msgstr "Dark"
 msgid "Decrease Thinking Level"
 msgstr "Decrease Thinking Level"
 
+#: src/projects/projects-page.tsrx:365
+msgid "Derived from folder name"
+msgstr "Derived from folder name"
+
+#: src/sessions/launch-form.tsrx:145
+msgid "Describe the first thing this session should do."
+msgstr "Describe the first thing this session should do."
+
+#: src/projects/project-page.tsrx:159
+msgid "Detached HEAD"
+msgstr "Detached HEAD"
+
+#: src/commands/command-dialog.tsrx:77
+msgid "Dialog unavailable"
+msgstr "Dialog unavailable"
+
 #: src/appearance/appearance-settings-section.tsrx:130
 msgid "Disabled"
 msgstr "Disabled"
+
+#: src/lib/good-toaster.tsrx:161
+msgid "Dismiss notification"
+msgstr "Dismiss notification"
+
+#: src/projects/projects-page.tsrx:126
+#: src/projects/projects-page.tsrx:361
+msgid "Display name"
+msgstr "Display name"
 
 #: src/appearance/appearance-settings-section.tsrx:130
 msgid "Enabled"
@@ -89,6 +326,14 @@ msgstr "Enabled"
 #: src/inbox/filters.ts:61
 msgid "Entity-specific completed items will appear here."
 msgstr "Entity-specific completed items will appear here."
+
+#: src/sessions/list-row.tsrx:86
+msgid "Error"
+msgstr "Error"
+
+#: src/session-chat/transcript-items.ts:834
+msgid "Failed"
+msgstr "Failed"
 
 #: src/settings/adapter-installations-section.tsrx:330
 msgid "Failed to load agent harnesses."
@@ -103,13 +348,44 @@ msgstr "Filter available agents"
 msgid "Follow the operating system appearance."
 msgstr "Follow the operating system appearance."
 
+#: src/sessions/launch-form-selectors.tsrx:140
+#: src/sessions/launch-form.tsrx:161
+msgid "Git branch"
+msgstr "Git branch"
+
+#: src/projects/project-page.tsrx:541
+msgid "Git checkouts"
+msgstr "Git checkouts"
+
+#: src/session-changes/view.tsrx:31
+msgid "Git diff unavailable"
+msgstr "Git diff unavailable"
+
+#: src/projects/project-page.tsrx:92
+#: src/projects/project-page.tsrx:156
+msgid "Git status unavailable"
+msgstr "Git status unavailable"
+
 #: src/appearance/appearance-settings-section.tsrx:127
 msgid "High contrast"
 msgstr "High contrast"
 
+#: src/pull-requests/view.tsrx:78
+msgid "Host"
+msgstr "Host"
+
+#: src/sessions/list-row.tsrx:104
+msgid "Idle"
+msgstr "Idle"
+
+#: src/inbox/toolbar.tsrx:22
 #: src/main-tab-items.ts:10
 msgid "Inbox"
 msgstr "Inbox"
+
+#: src/inbox/toolbar.tsrx:24
+msgid "Inbox filters"
+msgstr "Inbox filters"
 
 #: src/commands/app-command-definitions.ts:234
 msgid "Increase Thinking Level"
@@ -127,6 +403,10 @@ msgstr "Installed"
 msgid "Installed agents"
 msgstr "Installed agents"
 
+#: src/session-chat/transcript-items.ts:823
+msgid "Interrupted"
+msgstr "Interrupted"
+
 #: src/inbox/filters.ts:49
 msgid "Items handed back to an agent through a reply will appear here."
 msgstr "Items handed back to an agent through a reply will appear here."
@@ -139,27 +419,125 @@ msgstr "Items hidden from the active workflow will appear here."
 msgid "Items you park for later will appear here."
 msgstr "Items you park for later will appear here."
 
+#: src/projects/projects-page.tsrx:66
+msgid "Keep an explicit set of local roots available to the workbench."
+msgstr "Keep an explicit set of local roots available to the workbench."
+
+#: src/sessions/launch-form-selectors.tsrx:226
+#: src/sessions/launch-form.tsrx:156
+msgid "Launch location"
+msgstr "Launch location"
+
 #: src/settings/adapter-installations-section.tsrx:316
 msgid "Launch selectors only show installed agents or agents declared in "
 "configuration."
 msgstr "Launch selectors only show installed agents or agents declared in "
 "configuration."
 
+#: src/sessions/dialog.tsrx:198
+#: src/sessions/launch-form.tsrx:146
+msgid "Launch session"
+msgstr "Launch session"
+
+#: src/projects/project-page.tsrx:297
+#: src/sessions/dialog.tsrx:63
+msgid "Launching session"
+msgstr "Launching session"
+
 #: src/appearance/appearance-settings-section.tsrx:50
 msgid "Light"
 msgstr "Light"
+
+#: src/shortcuts/capture-dialog.tsrx:145
+msgid "Listening..."
+msgstr "Listening..."
+
+#: src/app-shell/chrome.tsrx:127
+msgid "Loading agent harness selector"
+msgstr "Loading agent harness selector"
 
 #: src/settings/adapter-installations-section.tsrx:323
 msgid "Loading agent harnesses."
 msgstr "Loading agent harnesses."
 
+#: src/inbox/list.tsrx:24
+msgid "Loading inbox..."
+msgstr "Loading inbox..."
+
+#: src/session-input/select-menu.tsrx:556
+#: src/sessions/launch-form-selectors.tsrx:37
+msgid "Loading options..."
+msgstr "Loading options..."
+
+#: src/projects/project-page.tsrx:241
+#: src/projects/project-page.tsrx:562
+msgid "Loading project dashboard."
+msgstr "Loading project dashboard."
+
+#: src/app-shell/chrome.tsrx:166
+msgid "Loading project subfolder selector"
+msgstr "Loading project subfolder selector"
+
+#: src/pull-requests/view.tsrx:41
+msgid "Loading pull request"
+msgstr "Loading pull request"
+
+#: src/sessions/list.tsrx:17
+msgid "Loading sessions..."
+msgstr "Loading sessions..."
+
+#: src/session-input/input-menu.tsrx:127
+msgid "Loading suggestions..."
+msgstr "Loading suggestions..."
+
+#: src/pull-requests/view.tsrx:40
+msgid "Loading the daemon-managed pull request record."
+msgstr "Loading the daemon-managed pull request record."
+
 #: src/workbench-tab-set.ts:38
 msgid "Main"
 msgstr "Main"
 
+#: src/inbox/row.tsrx:81
+msgid "Mark read"
+msgstr "Mark read"
+
+#: src/inbox/bulk-toolbar.tsrx:50
+#: src/inbox/page.tsrx:165
+msgid "Mark selected read"
+msgstr "Mark selected read"
+
+#: src/inbox/bulk-toolbar.tsrx:57
+#: src/inbox/page.tsrx:168
+msgid "Mark selected unread"
+msgstr "Mark selected unread"
+
+#: src/inbox/row.tsrx:81
+msgid "Mark unread"
+msgstr "Mark unread"
+
+#: src/session-chat/view.tsrx:502
+#: src/sessions/launch-form-selectors.tsrx:46
+#: src/sessions/launch-form-selectors.tsrx:440
+msgid "Model"
+msgstr "Model"
+
 #: src/commands/app-command.ts:23
 msgid "Navigation"
 msgstr "Navigation"
+
+#: src/sessions/launch-form-selectors.tsrx:215
+msgid "New worktree"
+msgstr "New worktree"
+
+#: src/app-shell/chrome.tsrx:353
+#: src/app-shell/chrome.tsrx:366
+msgid "Next"
+msgstr "Next"
+
+#: src/session-chat/view.tsrx:357
+msgid "Next prompt"
+msgstr "Next prompt"
 
 #: src/settings/adapter-installations-section.tsrx:227
 msgid "No agent harnesses are available."
@@ -177,6 +555,10 @@ msgstr "No available agents match this search."
 msgid "No available agents."
 msgstr "No available agents."
 
+#: src/session-changes/view.tsrx:46
+msgid "No changes"
+msgstr "No changes"
+
 #: src/inbox/filters.ts:58
 msgid "No completed inbox items"
 msgstr "No completed inbox items"
@@ -184,6 +566,50 @@ msgstr "No completed inbox items"
 #: src/settings/adapter-installations-section.tsrx:234
 msgid "No installed agents."
 msgstr "No installed agents."
+
+#: src/session-input/input-menu.tsrx:132
+msgid "No matches for this trigger yet."
+msgstr "No matches for this trigger yet."
+
+#: src/app-shell/agent-selector.tsrx:242
+msgid "No matching agents."
+msgstr "No matching agents."
+
+#: src/command-palette.tsrx:123
+msgid "No matching commands."
+msgstr "No matching commands."
+
+#: src/app-shell/subfolder-selector.tsrx:247
+msgid "No matching directories."
+msgstr "No matching directories."
+
+#: src/inbox/list.tsrx:45
+msgid "No matching inbox items"
+msgstr "No matching inbox items"
+
+#: src/session-input/select-menu.tsrx:561
+msgid "No matching options."
+msgstr "No matching options."
+
+#: src/projects/switch-project-dropdown.tsrx:237
+msgid "No matching projects."
+msgstr "No matching projects."
+
+#: src/sessions/list.tsrx:38
+msgid "No matching sessions"
+msgstr "No matching sessions"
+
+#: src/shortcuts/view.tsrx:371
+msgid "No matching shortcuts."
+msgstr "No matching shortcuts."
+
+#: src/projects/projects-page.tsrx:85
+msgid "No projects yet"
+msgstr "No projects yet"
+
+#: src/projects/project-page.tsrx:493
+msgid "No recent sessions are linked to this project."
+msgstr "No recent sessions are linked to this project."
 
 #: src/inbox/filters.ts:46
 msgid "No replied inbox items"
@@ -193,17 +619,41 @@ msgstr "No replied inbox items"
 msgid "No saved inbox items"
 msgstr "No saved inbox items"
 
+#: src/sessions/list.tsrx:38
+msgid "No sessions yet"
+msgstr "No sessions yet"
+
 #: src/settings/page.tsrx:65
 msgid "No settings found"
 msgstr "No settings found"
+
+#: src/session-input/select-menu.tsrx:380
+msgid "No shortcut assigned"
+msgstr "No shortcut assigned"
 
 #: src/inbox/filters.ts:22
 msgid "No unread inbox items"
 msgstr "No unread inbox items"
 
+#: src/projects/project-page.tsrx:469
+msgid "No unread or read inbox messages are linked to this project."
+msgstr "No unread or read inbox messages are linked to this project."
+
 #: src/settings/adapter-installations-section.tsrx:57
 msgid "Not installed"
 msgstr "Not installed"
+
+#: src/sessions/launch-form-selectors.tsrx:384
+msgid "Off"
+msgstr "Off"
+
+#: src/sessions/launch-form-selectors.tsrx:380
+msgid "On"
+msgstr "On"
+
+#: src/app-shell/onboarding.tsrx:13
+msgid "Open a project"
+msgstr "Open a project"
 
 #: src/commands/app-command-definitions.ts:170
 msgid "Open a project from your filesystem."
@@ -229,6 +679,10 @@ msgstr "Open Command Menu"
 msgid "Open Folder"
 msgstr "Open Folder"
 
+#: src/projects/switch-project-dropdown.tsrx:212
+msgid "Open folder..."
+msgstr "Open folder..."
+
 #: src/commands/app-command-definitions.ts:78
 msgid "Open Inbox"
 msgstr "Open Inbox"
@@ -245,9 +699,22 @@ msgstr "Open Model Selector"
 msgid "Open New Session Dialog"
 msgstr "Open New Session Dialog"
 
+#: src/app-shell/chrome.tsrx:358
+msgid "Open next unread inbox item"
+msgstr "Open next unread inbox item"
+
 #: src/commands/app-command-definitions.ts:84
 msgid "Open Next Unread Inbox Item"
 msgstr "Open Next Unread Inbox Item"
+
+#: src/pull-requests/view.tsrx:74
+msgid "Open on GitHub"
+msgstr "Open on GitHub"
+
+#: src/app-shell/onboarding.tsrx:27
+#: src/projects/switch-project-dropdown.tsrx:153
+msgid "Open project"
+msgstr "Open project"
 
 #: src/commands/app-command-definitions.ts:180
 msgid "Open Project Selector"
@@ -277,6 +744,10 @@ msgstr "Open Settings"
 msgid "Open Specs"
 msgstr "Open Specs"
 
+#: src/projects/projects-page.tsrx:193
+msgid "Open tab"
+msgstr "Open tab"
+
 #: src/commands/app-command-definitions.ts:108
 msgid "Open Tasks"
 msgstr "Open Tasks"
@@ -289,42 +760,223 @@ msgstr "Open Thinking Level Selector"
 msgid "Open Working Directory Selector"
 msgstr "Open Working Directory Selector"
 
+#: src/pull-requests/view.tsrx:79
+msgid "Owner"
+msgstr "Owner"
+
+#: src/projects/projects-page.tsrx:125
+msgid "Path"
+msgstr "Path"
+
+#: src/session-chat/transcript.tsrx:642
+msgid "Preparing transcript layout..."
+msgstr "Preparing transcript layout..."
+
+#: src/shortcuts/capture-dialog.tsrx:140
+msgid "Press the shortcut you want to use"
+msgstr "Press the shortcut you want to use"
+
+#: src/session-chat/view.tsrx:342
+msgid "Previous prompt"
+msgstr "Previous prompt"
+
+#: src/app-shell/chrome.tsrx:214
+msgid "Primary"
+msgstr "Primary"
+
+#: src/projects/project-page.tsrx:607
+msgid "Primary checkout"
+msgstr "Primary checkout"
+
+#: src/sessions/launch-form.tsrx:90
+msgid "Project"
+msgstr "Project"
+
+#: src/projects/project-page.tsrx:227
+msgid "Project dashboard"
+msgstr "Project dashboard"
+
+#: src/projects/projects-page.tsrx:112
+msgid "Project details"
+msgstr "Project details"
+
+#: src/projects/projects-page.tsrx:334
+msgid "Project path"
+msgstr "Project path"
+
+#: src/app-shell/subfolder-selector.tsrx:81
+#: src/app-shell/subfolder-selector.tsrx:176
+#: src/sessions/launch-form-selectors.tsrx:272
+#: src/sessions/launch-form-selectors.tsrx:331
+msgid "Project root"
+msgstr "Project root"
+
+#: src/app-shell/chrome.tsrx:157
+msgid "Project switcher unavailable"
+msgstr "Project switcher unavailable"
+
+#: src/projects/project-page.tsrx:214
+msgid "Project unavailable"
+msgstr "Project unavailable"
+
 #: src/commands/app-command.ts:35
+#: src/projects/projects-page.tsrx:63
 msgid "Projects"
 msgstr "Projects"
 
+#: src/session-chat/view.tsrx:640
+msgid "Prompt wasn't sent"
+msgstr "Prompt wasn't sent"
+
+#: src/pull-requests/view.tsrx:81
+msgid "Pull request"
+msgstr "Pull request"
+
+#: src/pull-requests/view.tsrx:77
+msgid "Pull request details"
+msgstr "Pull request details"
+
+#: src/inbox/page.tsrx:121
+#: src/inbox/page.tsrx:384
+msgid "Realtime inbox updates are unavailable. Manual refresh still works."
+msgstr "Realtime inbox updates are unavailable. Manual refresh still works."
+
+#: src/projects/project-page.tsrx:488
+msgid "Recent sessions"
+msgstr "Recent sessions"
+
+#: src/shortcuts/view.tsrx:295
+msgid "Record key binding search"
+msgstr "Record key binding search"
+
+#: src/inbox/toolbar.tsrx:62
+#: src/inbox/toolbar.tsrx:63
+msgid "Refresh inbox"
+msgstr "Refresh inbox"
+
+#: src/projects/project-page.tsrx:466
+msgid "Related inbox"
+msgstr "Related inbox"
+
+#: src/projects/projects-page.tsrx:204
 #: src/settings/adapter-installations-section.tsrx:119
 msgid "Remove"
 msgstr "Remove"
+
+#: src/shortcuts/capture-dialog.tsrx:178
+#: src/shortcuts/view.tsrx:594
+msgid "Remove shortcut"
+msgstr "Remove shortcut"
 
 #: src/inbox/filters.ts:42
 msgid "Replied"
 msgstr "Replied"
 
+#: src/pull-requests/view.tsrx:80
 #: src/settings/adapter-installations-section.tsrx:159
 msgid "Repository"
 msgstr "Repository"
 
+#: src/projects/project-page.tsrx:255
+#: src/projects/project-page.tsrx:576
 #: src/settings/adapter-installations-section.tsrx:333
 msgid "Retry"
 msgstr "Retry"
+
+#: src/app-shell/chrome.tsrx:137
+msgid "Retry agent harness selector"
+msgstr "Retry agent harness selector"
+
+#: src/app-shell/chrome.tsrx:178
+msgid "Retry project subfolder selector"
+msgstr "Retry project subfolder selector"
 
 #: src/main-tab-items.ts:45
 msgid "Roadmap"
 msgstr "Roadmap"
 
+#: src/sessions/list-row.tsrx:68
+msgid "Running"
+msgstr "Running"
+
+#: src/inbox/row.tsrx:197
+#: src/inbox/row.tsrx:203
+msgid "Save"
+msgstr "Save"
+
+#: src/inbox/bulk-toolbar.tsrx:64
+#: src/inbox/page.tsrx:171
+msgid "Save selected"
+msgstr "Save selected"
+
+#: src/shortcuts/capture-dialog.tsrx:190
+msgid "Save shortcut"
+msgstr "Save shortcut"
+
 #: src/inbox/filters.ts:30
+#: src/inbox/row.tsrx:197
 msgid "Saved"
 msgstr "Saved"
+
+#: src/session-chat/view.tsrx:359
+msgid "Scroll to next user prompt"
+msgstr "Scroll to next user prompt"
+
+#: src/session-chat/view.tsrx:345
+msgid "Scroll to previous user prompt"
+msgstr "Scroll to previous user prompt"
 
 #: src/main-tab-items.ts:24
 msgid "Search"
 msgstr "Search"
 
+#: src/shortcuts/view.tsrx:278
+msgid "Search commands, shortcuts, or when clauses"
+msgstr "Search commands, shortcuts, or when clauses"
+
+#: src/inbox/toolbar.tsrx:52
+msgid "Search inbox"
+msgstr "Search inbox"
+
+#: src/inbox/toolbar.tsrx:46
+msgid "Search inbox items"
+msgstr "Search inbox items"
+
+#: src/projects/switch-project-dropdown.tsrx:174
+#: src/projects/switch-project-dropdown.tsrx:191
+msgid "Search projects"
+msgstr "Search projects"
+
+#: src/sessions/list-toolbar.tsrx:12
+#: src/sessions/list-toolbar.tsrx:18
+msgid "Search session titles"
+msgstr "Search session titles"
+
 #: src/settings/page.tsrx:37
 #: src/settings/page.tsrx:42
 msgid "Search settings"
 msgstr "Search settings"
+
+#: src/shortcuts/view.tsrx:270
+msgid "Search shortcuts"
+msgstr "Search shortcuts"
+
+#: src/session-chat/transcript/text-row.tsrx:185
+msgid "See full message"
+msgstr "See full message"
+
+#: src/sessions/launch-form.tsrx:92
+msgid "Select a project"
+msgstr "Select a project"
+
+#: src/projects/projects-page.tsrx:117
+msgid "Select a project to inspect its configured path and display name."
+msgstr "Select a project to inspect its configured path and display name."
+
+#: src/app-shell/agent-selector.tsrx:176
+#: src/sessions/launch-form-selectors.tsrx:89
+msgid "Select agent harness"
+msgstr "Select agent harness"
 
 #: src/commands/app-command-definitions.ts:155
 msgid "Select Archived Inbox Filter"
@@ -346,14 +998,67 @@ msgstr "Select Saved Inbox Filter"
 msgid "Select Unread Inbox Filter"
 msgstr "Select Unread Inbox Filter"
 
+#: src/projects/projects-page.tsrx:177
+msgid "Selected"
+msgstr "Selected"
+
+#: src/inbox/bulk-toolbar.tsrx:43
+msgid "Selected inbox item actions"
+msgstr "Selected inbox item actions"
+
+#: src/projects/projects-page.tsrx:116
+msgid "Selected project metadata for the current workspace."
+msgstr "Selected project metadata for the current workspace."
+
 #: src/commands/app-command.ts:41
 msgid "Session"
 msgstr "Session"
+
+#: src/session-chat/view.tsrx:270
+msgid "Session completed"
+msgstr "Session completed"
+
+#: src/projects/project-page.tsrx:332
+#: src/sessions/dialog.tsrx:98
+msgid "Session launch failed"
+msgstr "Session launch failed"
+
+#: src/projects/project-page.tsrx:325
+#: src/sessions/dialog.tsrx:91
+msgid "Session launched"
+msgstr "Session launched"
+
+#: src/session-input/session-mode-selector.tsrx:54
+msgid "Session option"
+msgstr "Session option"
 
 #: src/main-tab-items.ts:17
 msgid "Sessions"
 msgstr "Sessions"
 
+#: src/sessions/list.tsrx:43
+msgid "Sessions will appear here once the daemon has created them."
+msgstr "Sessions will appear here once the daemon has created them."
+
+#: src/inbox/row.tsrx:85
+msgid "Set low priority"
+msgstr "Set low priority"
+
+#: src/inbox/row.tsrx:85
+msgid "Set normal priority"
+msgstr "Set normal priority"
+
+#: src/inbox/bulk-toolbar.tsrx:71
+#: src/inbox/page.tsrx:174
+msgid "Set selected low priority"
+msgstr "Set selected low priority"
+
+#: src/inbox/bulk-toolbar.tsrx:78
+#: src/inbox/page.tsrx:177
+msgid "Set selected normal priority"
+msgstr "Set selected normal priority"
+
+#: src/app-shell/chrome.tsrx:203
 #: src/settings/page.tsrx:77
 msgid "Settings"
 msgstr "Settings"
@@ -361,6 +1066,14 @@ msgstr "Settings"
 #: src/settings/page.tsrx:75
 msgid "Settings sections"
 msgstr "Settings sections"
+
+#: src/shortcuts/view.tsrx:345
+msgid "Shortcut"
+msgstr "Shortcut"
+
+#: src/shortcuts/view.tsrx:611
+msgid "Show commands with same shortcut"
+msgstr "Show commands with same shortcut"
 
 #: src/commands/app-command-definitions.ts:269
 msgid "Skip to Next Prompt"
@@ -370,15 +1083,43 @@ msgstr "Skip to Next Prompt"
 msgid "Skip to Previous Prompt"
 msgstr "Skip to Previous Prompt"
 
+#: src/inbox/page.tsrx:302
+msgid "Some inbox items were missing"
+msgstr "Some inbox items were missing"
+
 #: src/main-tab-items.ts:31
 msgid "Specs"
 msgstr "Specs"
+
+#: src/session-chat/view.tsrx:400
+#: src/session-chat/view.tsrx:400
+#: src/session-chat/view.tsrx:402
+msgid "Stop active turn"
+msgstr "Stop active turn"
+
+#: src/session-chat/view.tsrx:332
+msgid "Stop failed"
+msgstr "Stop failed"
+
+#: src/shortcuts/view.tsrx:294
+msgid "Stop recording key binding search"
+msgstr "Stop recording key binding search"
+
+#: src/session-chat/view.tsrx:319
+msgid "Stop skipped"
+msgstr "Stop skipped"
+
+#: src/session-chat/transcript-items.ts:856
+msgid "Stopped"
+msgstr "Stopped"
 
 #: src/commands/app-command-definitions.ts:240
 msgid "Submit"
 msgstr "Submit"
 
 #: src/commands/app-command-definitions.ts:60
+#: src/projects/switch-project-dropdown.tsrx:139
+#: src/projects/switch-project-dropdown.tsrx:159
 msgid "Switch Project"
 msgstr "Switch Project"
 
@@ -386,9 +1127,88 @@ msgstr "Switch Project"
 msgid "System"
 msgstr "System"
 
+#: src/session-chat/transcript/permission-request-row.tsrx:115
+msgid "Target"
+msgstr "Target"
+
 #: src/main-tab-items.ts:38
 msgid "Tasks"
 msgstr "Tasks"
+
+#: src/session-chat/transcript/plan-update-row.tsrx:67
+msgid "The agent cleared its plan."
+msgstr "The agent cleared its plan."
+
+#: src/session-chat/view.tsrx:320
+msgid "The daemon did not find an active turn to stop."
+msgstr "The daemon did not find an active turn to stop."
+
+#: src/inbox/list.tsrx:35
+#: src/inbox/page.tsrx:50
+msgid "The daemon-backed inbox request failed."
+msgstr "The daemon-backed inbox request failed."
+
+#: src/inbox/row.tsrx:104
+msgid "The daemon-backed inbox row could not be updated."
+msgstr "The daemon-backed inbox row could not be updated."
+
+#: src/pull-requests/view.tsrx:97
+msgid "The daemon-backed pull request record could not be loaded."
+msgstr "The daemon-backed pull request record could not be loaded."
+
+#: src/sessions/list.tsrx:28
+msgid "The daemon-backed session list request failed."
+msgstr "The daemon-backed session list request failed."
+
+#: src/app-shell/chrome.tsrx:335
+#: src/inbox/page.tsrx:335
+msgid "The linked daemon entity could not be loaded."
+msgstr "The linked daemon entity could not be loaded."
+
+#: src/projects/project-page.tsrx:252
+#: src/projects/project-page.tsrx:573
+msgid "The project dashboard data request failed."
+msgstr "The project dashboard data request failed."
+
+#: src/projects/project-page.tsrx:217
+msgid "The project record for this tab is no longer in the machine-wide project "
+"registry."
+msgstr "The project record for this tab is no longer in the machine-wide "
+"project registry."
+
+#: src/inbox/page.tsrx:309
+msgid "The selected inbox rows could not be updated."
+msgstr "The selected inbox rows could not be updated."
+
+#: src/projects/project-page.tsrx:331
+#: src/sessions/dialog.tsrx:97
+msgid "The session could not be created."
+msgstr "The session could not be created."
+
+#: src/sessions/launch-form-selectors.tsrx:47
+#: src/sessions/launch-form-selectors.tsrx:456
+msgid "Thinking level"
+msgstr "Thinking level"
+
+#: src/session-chat/transcript.tsrx:322
+msgid "Thinking..."
+msgstr "Thinking..."
+
+#: src/commands/command-dialog.tsrx:80
+msgid "This dialog failed to render. The rest of the app is still available."
+msgstr "This dialog failed to render. The rest of the app is still available."
+
+#: src/session-changes/view.tsrx:34
+msgid "This session is not currently attached to a git workspace."
+msgstr "This session is not currently attached to a git workspace."
+
+#: src/session-changes/view.tsrx:49
+msgid "This session workspace is currently clean."
+msgstr "This session workspace is currently clean."
+
+#: src/session-chat/transcript/work-drawer-row.tsrx:61
+msgid "Thought"
+msgstr "Thought"
 
 #: src/appearance/appearance-settings-section.tsrx:119
 msgid "Tightens muted text and border separation across the app."
@@ -398,10 +1218,43 @@ msgstr "Tightens muted text and border separation across the app."
 msgid "Try a different search term."
 msgstr "Try a different search term."
 
+#: src/inbox/list.tsrx:49
+msgid "Try a shorter search or a status filter like is:unread."
+msgstr "Try a shorter search or a status filter like is:unread."
+
+#: src/sessions/list.tsrx:42
+msgid "Try a shorter title query or different keywords."
+msgstr "Try a shorter title query or different keywords."
+
+#: src/commands/command-dialog.tsrx:94
+#: src/pull-requests/view.tsrx:96
+msgid "Try again"
+msgstr "Try again"
+
+#: src/command-palette.tsrx:112
+msgid "Type a command"
+msgstr "Type a command"
+
+#: src/shortcuts/view.tsrx:277
+msgid "Type a key binding"
+msgstr "Type a key binding"
+
+#: src/shortcuts/capture-dialog.tsrx:154
+msgid "Type a key combination or sequence"
+msgstr "Type a key combination or sequence"
+
+#: src/app-shell/agent-selector.tsrx:212
+#: src/app-shell/subfolder-selector.tsrx:217
+#: src/session-input/select-menu.tsrx:542
+msgid "Type to filter"
+msgstr "Type to filter"
+
 #: src/settings/adapter-installations-section.tsrx:54
 msgid "Unavailable"
 msgstr "Unavailable"
 
+#: src/app-shell/agent-selector.tsrx:277
+#: src/sessions/launch-form-selectors.tsrx:68
 #: src/settings/adapter-installations-section.tsrx:133
 msgid "Unofficial"
 msgstr "Unofficial"
@@ -416,6 +1269,17 @@ msgid "Unread and acknowledged items that remain in the active queue will "
 msgstr "Unread and acknowledged items that remain in the active queue will "
 "appear here."
 
+#: src/session-input/session-mode-selector.tsrx:21
+#: src/session-input/session-mode-selector.tsrx:56
+#: src/sessions/launch-form-selectors.tsrx:458
+msgid "Use the agent harness default"
+msgstr "Use the agent harness default"
+
+#: src/session-chat/view.tsrx:504
+#: src/sessions/launch-form-selectors.tsrx:442
+msgid "Use the agent harness default model"
+msgstr "Use the agent harness default model"
+
 #: src/appearance/appearance-settings-section.tsrx:62
 msgid "Use the dark built-in palette."
 msgstr "Use the dark built-in palette."
@@ -425,17 +1289,60 @@ msgid "Use the light built-in palette."
 msgstr "Use the light built-in palette."
 
 #: src/commands/app-command-definitions.ts:251
+#: src/projects/project-page.tsrx:638
 msgid "View Changes"
 msgstr "View Changes"
+
+#: src/session-chat/view.tsrx:373
+msgid "View session changes"
+msgstr "View session changes"
 
 #: src/settings/adapter-installations-section.tsrx:142
 msgid "Website"
 msgstr "Website"
 
+#: src/shortcuts/capture-dialog.tsrx:131
+#: src/shortcuts/view.tsrx:348
+msgid "When"
+msgstr "When"
+
+#: src/sessions/launch-form-selectors.tsrx:210
+msgid "Work locally"
+msgstr "Work locally"
+
 #: src/commands/app-command.ts:29
 msgid "Workbench"
 msgstr "Workbench"
 
+#: src/app-shell/tab-strip.tsrx:214
+msgid "Workbench tabs"
+msgstr "Workbench tabs"
+
 #: src/settings/adapter-installations-section.tsrx:179
 msgid "Working"
 msgstr "Working"
+
+#: src/sessions/launch-form-selectors.tsrx:329
+#: src/sessions/launch-form.tsrx:107
+msgid "Working directory"
+msgstr "Working directory"
+
+#: src/app-shell/subfolder-selector.tsrx:175
+msgid "Working directory: {selectedSubfolderLabel}"
+msgstr "Working directory: {selectedSubfolderLabel}"
+
+#: src/projects/project-page.tsrx:124
+msgid "Working tree has changes"
+msgstr "Working tree has changes"
+
+#: src/pull-requests/view.tsrx:82
+msgid "Workspace"
+msgstr "Workspace"
+
+#: src/projects/project-page.tsrx:607
+msgid "Worktree"
+msgstr "Worktree"
+
+#: src/session-chat/view.tsrx:643
+msgid "Your draft is still here. Try again when the session is available."
+msgstr "Your draft is still here. Try again when the session is available."

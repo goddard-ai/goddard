@@ -1,6 +1,6 @@
+import { t } from "@lingui/core/macro"
 import type { DaemonSession } from "@goddard-ai/sdk"
 
-import { text } from "~/language/text.ts"
 import { useQuery } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import styles from "./view.style.ts"
@@ -16,7 +16,9 @@ export default function SessionChangesView(props: {
     <header class={styles.header}>
       <p class={styles.repository}>{props.repositoryLabel}</p>
       <h1 class={styles.title}>{props.sessionTitle}</h1>
-      <p class={styles.description}>{text.currentGitDiffForThisSessionWorkspace}</p>
+      <p class={styles.description}>
+        {t`Current git diff for this session workspace.`}
+      </p>
 
       @if (changes.workspaceRoot) {
         <p class={styles.workspaceRoot}>{changes.workspaceRoot}</p>
@@ -25,8 +27,12 @@ export default function SessionChangesView(props: {
 
     @if (changes.workspaceRoot === null) {
       <div class={styles.empty}>
-        <h2 class={styles.emptyTitle}>{text.gitDiffUnavailable}</h2>
-        <p class={styles.description}>{text.thisSessionIsNotCurrentlyAttachedToAGitWorkspace}</p>
+        <h2 class={styles.emptyTitle}>
+          {t`Git diff unavailable`}
+        </h2>
+        <p class={styles.description}>
+          {t`This session is not currently attached to a git workspace.`}
+        </p>
       </div>
     } @else if (changes.hasChanges) {
       <div class={styles.panel}>
@@ -36,8 +42,12 @@ export default function SessionChangesView(props: {
       </div>
     } @else {
       <div class={styles.empty}>
-        <h2 class={styles.emptyTitle}>{text.noChanges}</h2>
-        <p class={styles.description}>{text.thisSessionWorkspaceIsCurrentlyClean}</p>
+        <h2 class={styles.emptyTitle}>
+          {t`No changes`}
+        </h2>
+        <p class={styles.description}>
+          {t`This session workspace is currently clean.`}
+        </p>
       </div>
     }
   </section>

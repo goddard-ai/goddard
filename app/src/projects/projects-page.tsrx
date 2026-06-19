@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import { type Signal, useSignal } from "@preact/signals"
@@ -6,7 +7,6 @@ import { useEffect, useId, useRef } from "preact/hooks"
 
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { browseForProject as browseForProjectPath } from "~/desktop-host.ts"
-import { text } from "~/language/text.ts"
 import { Modal } from "@goddard-ai/ui-primitives"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { openProjectTab, ProjectsPageMutations } from "./mutations.ts"
@@ -59,8 +59,12 @@ export default function ProjectsPage() @{
       <section class={styles.panel}>
         <header class={styles.sectionHeader}>
           <div class={styles.sectionCopy}>
-            <h1 class={styles.title}>{text.projects}</h1>
-            <p class={styles.body}>{text.keepAnExplicitSetOfLocalRootsAvailableToTheWorkbench}</p>
+            <h1 class={styles.title}>
+              {t`Projects`}
+            </h1>
+            <p class={styles.body}>
+              {t`Keep an explicit set of local roots available to the workbench.`}
+            </p>
           </div>
           <button
             class={cx(styles.buttonBase, styles.primaryButton)}
@@ -70,17 +74,19 @@ export default function ProjectsPage() @{
             }}
           >
             <Plus size={16} strokeWidth={2.2} />
-            {text.addProject}
+            {t`Add project`}
           </button>
         </header>
 
         @if (projects.length === 0) {
           <div class={styles.empty}>
             <div class={styles.emptyCopy}>
-              <h2 class={styles.title}>{text.noProjectsYet}</h2>
-              <p
-                class={styles.body}
-              >{text.addALocalDirectoryToEstablishTheAppsExplicitWorkingSet}</p>
+              <h2 class={styles.title}>
+                {t`No projects yet`}
+              </h2>
+              <p class={styles.body}>
+                {t`Add a local directory to establish the app's explicit working set.`}
+              </p>
               <div>
                 <button
                   class={cx(styles.buttonBase, styles.primaryButton)}
@@ -90,7 +96,7 @@ export default function ProjectsPage() @{
                   }}
                 >
                   <Plus size={16} strokeWidth={2.2} />
-                  {text.addProject}
+                  {t`Add project`}
                 </button>
               </div>
             </div>
@@ -102,11 +108,13 @@ export default function ProjectsPage() @{
       <aside class={styles.panel}>
         <div class={styles.asideBody}>
           <div class={styles.intro}>
-            <h2 class={styles.subheading}>{text.projectDetails}</h2>
+            <h2 class={styles.subheading}>
+              {t`Project details`}
+            </h2>
             <p class={styles.body}>
               {selectedProject
-                ? text.selectedProjectMetadataForTheCurrentWorkspace
-                : text.selectAProjectToInspectItsConfiguredPathAndDisplayName}
+                ? t`Selected project metadata for the current workspace.`
+                : t`Select a project to inspect its configured path and display name.`}
             </p>
           </div>
 
@@ -114,8 +122,8 @@ export default function ProjectsPage() @{
             <>
               <h3 class={styles.selectedTitle}>{selectedProject.name}</h3>
               <div class={styles.cardList}>
-                <InfoCard label={text.path} value={selectedProject.path} />
-                <InfoCard label={text.displayName} value={selectedProject.name} />
+                <InfoCard label={t`Path`} value={selectedProject.path} />
+                <InfoCard label={t`Display name`} value={selectedProject.name} />
               </div>
             </>
           }
@@ -165,7 +173,9 @@ function ProjectListRow(props: {
         <h3 class={styles.rowTitle}>{props.project.name}</h3>
 
         @if (props.isSelected) {
-          <span class={styles.selectedBadge}>{text.selected}</span>
+          <span class={styles.selectedBadge}>
+            {t`Selected`}
+          </span>
         }
       </div>
       <p class={styles.path}>{props.project.path}</p>
@@ -180,7 +190,7 @@ function ProjectListRow(props: {
         }}
       >
         <ArrowUpRight size={15} strokeWidth={2.2} />
-        {text.openTab}
+        {t`Open tab`}
       </button>
       <button
         class={cx(styles.buttonBase, styles.dangerButton)}
@@ -191,7 +201,7 @@ function ProjectListRow(props: {
         }}
       >
         <Trash2 size={15} strokeWidth={2.1} />
-        {text.remove}
+        {t`Remove`}
       </button>
     </div>
   </article>
@@ -302,11 +312,12 @@ function AddProjectDialog(props: {
     >
       <header class={styles.dialogHeader}>
         <div class={styles.dialogHeaderCopy}>
-          <h2 id={titleId} class={styles.dialogTitle}>{text.addProject}</h2>
-          <p
-            id={descriptionId}
-            class={styles.body}
-          >{text.chooseOneLocalRootAndOptionallyAdjustTheDisplayName}</p>
+          <h2 id={titleId} class={styles.dialogTitle}>
+            {t`Add project`}
+          </h2>
+          <p id={descriptionId} class={styles.body}>
+            {t`Choose one local root and optionally adjust the display name.`}
+          </p>
         </div>
         <button
           class={styles.closeButton}
@@ -319,7 +330,9 @@ function AddProjectDialog(props: {
         </button>
       </header>
       <label class={styles.field}>
-        <span class={styles.label}>{text.projectPath}</span>
+        <span class={styles.label}>
+          {t`Project path`}
+        </span>
         <input
           ref={pathInputRef}
           class={styles.textInput}
@@ -340,14 +353,16 @@ function AddProjectDialog(props: {
           }}
         >
           <FolderSearch2 size={15} strokeWidth={2.1} />
-          {text.browse}
+          {t`Browse`}
         </button>
       </div>
       <label class={styles.field}>
-        <span class={styles.label}>{text.displayName}</span>
+        <span class={styles.label}>
+          {t`Display name`}
+        </span>
         <input
           class={styles.textInput}
-          placeholder={text.derivedFromFolderName}
+          placeholder={t`Derived from folder name`}
           type="text"
           value={draftName.value}
           onInput={(event) => {
@@ -362,7 +377,9 @@ function AddProjectDialog(props: {
           onClick={() => {
             props.open.value = false
           }}
-        >{text.cancel}</button>
+        >
+          {t`Cancel`}
+        </button>
         <button
           class={cx(styles.buttonBase, styles.primaryButton)}
           disabled={!canAddProject}
@@ -372,7 +389,7 @@ function AddProjectDialog(props: {
           }}
         >
           <Plus size={15} strokeWidth={2.2} />
-          {text.addProject}
+          {t`Add project`}
         </button>
       </div>
     </form>

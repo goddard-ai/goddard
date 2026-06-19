@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 /** Shared custom dropdown used by the launch-session selectors. */
 import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
@@ -8,7 +9,6 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks"
 
 import { GoodKeyboardShortcut } from "~/lib/good-keyboard-shortcut.tsrx"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
-import { text } from "~/language/text.ts"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
@@ -373,11 +373,11 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             @if (props.shortcut) {
               <>
                 <GoodKeyboardShortcut expression={props.shortcut} />
-                {` ${text.opensMenu}`}
+                {t` opens menu`}
               </>
             } @else {
               <>
-                {text.noShortcutAssigned}
+                {t`No shortcut assigned`}
               </>
             }
           </span>
@@ -539,7 +539,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             }}
             class={styles.menuFilter}
             disabled={props.disabled}
-            placeholder={text.typeToFilter}
+            placeholder={t`Type to filter`}
             value={query}
           />
         }
@@ -553,11 +553,13 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
               })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              {text.loadingOptions}
+              {t`Loading options...`}
             </span>
           </div>
         } @else if (filteredItems.length === 0) {
-          <div class={styles.menuEmpty}>{text.noMatchingOptions}</div>
+          <div class={styles.menuEmpty}>
+            {t`No matching options.`}
+          </div>
         } @else {
           <ul class={styles.menuList}>
             @for (const item of filteredItems; index index) {

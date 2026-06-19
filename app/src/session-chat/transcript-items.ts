@@ -1,9 +1,9 @@
 import type { DaemonSession, SessionHistoryTurn as SdkSessionHistoryTurn } from "@goddard-ai/sdk"
+import { t } from "@lingui/core/macro"
 import type * as acp from "acp-client/protocol"
 import hashSum from "hash-sum"
 import { isObject } from "radashi"
 
-import { text } from "~/language/text.ts"
 import type {
   SessionTranscriptContentBlock,
   SessionTranscriptItem,
@@ -820,7 +820,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "interrupted",
-      title: text.interrupted,
+      title: t`Interrupted`,
       reason: session.errorMessage ?? "No turn completion was recorded",
       timestamp: null,
     } satisfies SessionTranscriptTurnStop
@@ -831,7 +831,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "failed",
-      title: text.failed,
+      title: t`Failed`,
       reason: extractTurnFailureReason(turn, session),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop
@@ -842,7 +842,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "cancelled",
-      title: text.cancelled,
+      title: t`Cancelled`,
       reason: formatStopReason(turn.stopReason),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop
@@ -853,7 +853,7 @@ function createTurnStopRow(session: DaemonSession, turn: SessionHistoryTurn) {
       kind: "turnStop",
       id: `${turn.turnId}:stop`,
       status: "stopped",
-      title: text.stopped,
+      title: t`Stopped`,
       reason: formatStopReason(turn.stopReason),
       timestamp: turn.completedAt,
     } satisfies SessionTranscriptTurnStop

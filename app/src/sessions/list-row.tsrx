@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
@@ -11,7 +12,6 @@ import {
   XCircle,
 } from "lucide-react"
 
-import { text } from "~/language/text.ts"
 import { GoodTooltip } from "~/lib/good-tooltip.tsrx"
 import { useMutations } from "~/lib/mutations-provider.tsx"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "./display.ts"
@@ -65,43 +65,43 @@ function getSessionStatusPresentation(status: DaemonSession["status"]) {
       return {
         icon: LoaderCircle,
         color: token.var("colors.accentStrong"),
-        label: text.running,
+        label: t`Running`,
       }
     case "blocked":
       return {
         icon: PauseCircle,
         color: token.var("colors.text"),
-        label: text.blocked,
+        label: t`Blocked`,
       }
     case "done":
       return {
         icon: CheckCircle2,
         color: token.var("colors.text"),
-        label: text.completed,
+        label: t`Completed`,
       }
     case "error":
       return {
         icon: AlertCircle,
         color: token.var("colors.danger"),
-        label: text.error,
+        label: t`Error`,
       }
     case "cancelled":
       return {
         icon: XCircle,
         color: token.var("colors.muted"),
-        label: text.cancelled,
+        label: t`Cancelled`,
       }
     case "archived":
       return {
         icon: CheckCircle2,
         color: token.var("colors.muted"),
-        label: text.archived,
+        label: t`Archived`,
       }
     default:
       return {
         icon: CircleDot,
         color: token.var("colors.muted"),
-        label: text.idle,
+        label: t`Idle`,
       }
   }
 }

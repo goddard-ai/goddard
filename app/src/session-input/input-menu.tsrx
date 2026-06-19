@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { css } from "@goddard-ai/styled-system/css"
 import { Popover, type ListNavigationController } from "@goddard-ai/ui-primitives"
 import { useSignal } from "@preact/signals"
 import { BookOpen, Command, File, Folder, LoaderCircle } from "lucide-react"
 import { useEffect } from "preact/hooks"
 
-import { text } from "~/language/text.ts"
 import type { SessionInputMenuState } from "./input-menu-detection.ts"
 import type { SessionInputSuggestion, SessionInputTrigger } from "./input.tsrx"
 import {
@@ -124,11 +124,13 @@ export function SessionInputMenu(props: {
               })}
             >
               <LoaderCircle class={css({ animation: "spin 1s linear infinite" })} size={14} />
-              {text.loadingSuggestions}
+              {t`Loading suggestions...`}
             </span>
           </div>
         } @else if (props.suggestions.length === 0) {
-          <div class={inputMenuEmptyClass}>{text.noMatchesForThisTriggerYet}</div>
+          <div class={inputMenuEmptyClass}>
+            {t`No matches for this trigger yet.`}
+          </div>
         } @else {
           @for (const suggestion of props.suggestions; index index) {
             <button

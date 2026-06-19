@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { useEffect } from "preact/hooks"
 import { Folder } from "lucide-react"
 
 import { useShortcutRegistry } from "~/app-state-context.tsrx"
 import { AppCommand } from "~/commands/app-command.ts"
 import { getShortcutLabel } from "~/commands/shortcut-label.ts"
-import { text } from "~/language/text.ts"
 import type { ProjectRecord } from "~/projects/project-registry.ts"
 import { goddardSdk } from "~/sdk.ts"
 import composerInputStyles from "~/session-input/composer-layout.style.ts"
@@ -87,9 +87,9 @@ export function SessionLaunchForm(props: {
           disabled={disabled || props.projects.length === 0}
           filterable={true}
           items={projectItems}
-          label={text.project}
+          label={t`Project`}
           open={form.getPickerOpen("project")}
-          placeholder={text.selectAProject}
+          placeholder={t`Select a project`}
           shortcut={projectShortcut}
           value={form.draftProjectPath.value}
           onValueChange={(value) => {
@@ -104,7 +104,7 @@ export function SessionLaunchForm(props: {
       @try {
         <SessionSubpackageSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label={text.workingDirectory} />
+        <SessionLaunchLoadingSelect label={t`Working directory`} />
       }
     </div>
 
@@ -142,8 +142,8 @@ export function SessionLaunchForm(props: {
       }}
       onEscape={props.onEscape}
       iconOnlySubmit={true}
-      placeholder={text.describeTheFirstThingThisSessionShouldDo}
-      submitLabel={text.launchSession}
+      placeholder={t`Describe the first thing this session should do.`}
+      submitLabel={t`Launch session`}
       onSubmit={async () => {
         await props.onSubmit()
       }}
@@ -153,12 +153,12 @@ export function SessionLaunchForm(props: {
       @try {
         <SessionLaunchLocationSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label={text.launchLocation} />
+        <SessionLaunchLoadingSelect label={t`Launch location`} />
       }
       @try {
         <SessionLaunchBranchSelector {disabled} {form} />
       } @pending {
-        <SessionLaunchLoadingSelect label={text.gitBranch} />
+        <SessionLaunchLoadingSelect label={t`Git branch`} />
       }
     </div>
   </div>

@@ -1,10 +1,10 @@
+import { t } from "@lingui/core/macro"
 import { ChevronRight } from "lucide-react"
 
 import type {
   SessionTranscriptToolContent,
   SessionTranscriptWorkDrawer,
 } from "~/sessions/models.ts"
-import { text } from "~/language/text.ts"
 import { buildToolDiffPreview } from "./layout.ts"
 import styles from "./transcript.style.ts"
 
@@ -57,7 +57,9 @@ export function WorkDrawerTranscriptRow(props: {
               <li class={styles.workDrawerItem} key={`${props.message.id}:${item.id}`}>
                 @if (item.kind === "thought") {
                   <article class={styles.workDrawerThought}>
-                    <div class={styles.workDrawerItemHeading}>{text.thought}</div>
+                    <div class={styles.workDrawerItemHeading}>
+                      {t`Thought`}
+                    </div>
                     <p class={styles.workDrawerDetailText}>{item.text}</p>
                   </article>
                 } @else {

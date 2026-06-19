@@ -1,3 +1,4 @@
+import { t } from "@lingui/core/macro"
 import { cx } from "@goddard-ai/styled-system/css"
 import * as fuzzysort from "fuzzysort2"
 import { Search } from "lucide-react"
@@ -7,7 +8,6 @@ import { useRef } from "preact/hooks"
 import { useProjectContext, useProjectRegistry, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { Popover, useSearchNavigation } from "@goddard-ai/ui-primitives"
-import { text } from "~/language/text.ts"
 import { isEmptyQuery } from "~/lib/search-query.ts"
 import { openProjectFromFilesystem, openProjectTab } from "./mutations.ts"
 import { orderProjectsByRecentActivity } from "./project-context.ts"
@@ -136,7 +136,7 @@ export function SwitchProjectDropdown() @{
       ref={triggerElementRef}
       aria-expanded={isOpen.value ? "true" : "false"}
       aria-haspopup="dialog"
-      aria-label={text.switchProject}
+      aria-label={t`Switch Project`}
       class={cx(styles.trigger, noDragClass)}
       type="button"
       onClick={() => {
@@ -150,13 +150,13 @@ export function SwitchProjectDropdown() @{
       }}
     >
       <span class={styles.triggerLabel}>
-        {activeProject?.name ?? text.openProject}
+        {activeProject?.name ?? t`Open project`}
       </span>
     </button>
 
     <Popover
       anchor={() => triggerElementRef.current}
-      ariaLabel={text.switchProject}
+      ariaLabel={t`Switch Project`}
       class={styles.content}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
@@ -170,7 +170,9 @@ export function SwitchProjectDropdown() @{
       strategy="fixed"
     >
       <label class={styles.searchField}>
-        <span class={styles.srOnly}>{text.searchProjects}</span>
+        <span class={styles.srOnly}>
+          {t`Search projects`}
+        </span>
         <Search aria-hidden={true} size={16} strokeWidth={2.1} />
         <input
           ref={(element) => {
@@ -186,7 +188,7 @@ export function SwitchProjectDropdown() @{
             }
           }}
           class={styles.searchInput}
-          placeholder={text.searchProjects}
+          placeholder={t`Search projects`}
           value={search.value}
         />
       </label>
@@ -206,10 +208,12 @@ export function SwitchProjectDropdown() @{
                 <span class={styles.itemBody}>
                   @if (item.kind === "open-folder") {
                     <>
-                      <span class={styles.itemTitle}>{text.openFolderEllipsis}</span>
-                      <span
-                        class={styles.itemDetail}
-                      >{text.addALocalProjectFromYourFilesystem}</span>
+                      <span class={styles.itemTitle}>
+                        {t`Open folder...`}
+                      </span>
+                      <span class={styles.itemDetail}>
+                        {t`Add a local project from your filesystem.`}
+                      </span>
                     </>
                   } @else {
                     <>
@@ -220,14 +224,18 @@ export function SwitchProjectDropdown() @{
                 </span>
 
                 @if (item.kind === "project" && activeProject?.path === item.project.path) {
-                  <span class={styles.activeBadge}>{text.active}</span>
+                  <span class={styles.activeBadge}>
+                    {t`Active`}
+                  </span>
                 }
               </button>
             </li>
           }
         </ul>
       } @else {
-        <p class={styles.empty}>{text.noMatchingProjects}</p>
+        <p class={styles.empty}>
+          {t`No matching projects.`}
+        </p>
       }
     </Popover>
   </>
