@@ -377,10 +377,18 @@ function redactValue(value: unknown, parentKey?: string): unknown {
 
 function formatPropertyValue(value: unknown) {
   if (typeof value === "string") {
+    if (isCollapsedValueId(value)) {
+      return `{${value}}`
+    }
+
     return value.includes(" ") ? JSON.stringify(value) : value
   }
 
   return JSON.stringify(value)
+}
+
+function isCollapsedValueId(value: string) {
+  return /^(obj|arr|str)_[0-9A-HJKMNP-TV-Z]{26}$/.test(value)
 }
 
 function isSecretKey(key: string) {
