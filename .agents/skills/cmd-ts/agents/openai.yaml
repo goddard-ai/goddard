@@ -1,0 +1,4 @@
+interface:
+  display_name: "cmd-ts"
+  short_description: "Build typed TypeScript command-line apps"
+  default_prompt: "Use $cmd-ts to add a typed command-line interface with cmd-ts."
