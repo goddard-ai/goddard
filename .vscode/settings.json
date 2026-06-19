@@ -10,7 +10,10 @@
   },
   "prettier.documentSelectors": ["**/*.tsrx"],
   "files.readonlyInclude": {
-    "core/schema/src/acp-adapters.ts": true
+    "app/src/assets/icon.iconset/**": true,
+    "app/src/lib/svg-icon-data.ts": true,
+    "app/styled-system/**/*.d.ts": true,
+    "app/styled-system/**/*.mjs": true
   },
   "files.exclude": {
     "**/.husky": true,
