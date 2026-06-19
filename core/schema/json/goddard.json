@@ -369,6 +369,9 @@
     "sessionTitles": {
       "$ref": "#/$defs/SessionTitlesConfig"
     },
+    "transcription": {
+      "$ref": "#/$defs/TranscriptionConfig"
+    },
     "subpackages": {
       "$ref": "#/$defs/SubpackagesConfig"
     },
@@ -1049,6 +1052,15 @@
       "properties": {
         "generator": {
           "$ref": "#/$defs/ModelConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "TranscriptionConfig": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/TranscriptionModelConfig"
         }
       },
       "additionalProperties": false
@@ -5792,6 +5804,2201 @@
             "model": {
               "type": "string",
               "examples": ["glm-5.1", "glm-5v-turbo"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Zhipu AI Coding Plan",
+          "description": "https://docs.bigmodel.cn/cn/coding-plan/overview"
+        }
+      ]
+    },
+    "TranscriptionModelConfig": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "302ai"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["glm-5v-turbo"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "302.AI",
+          "description": "https://doc.302.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "abacus"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.1-flash-lite-preview",
+                "gemini-3.1-pro-preview",
+                "gpt-4o-2024-11-20"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Abacus",
+          "description": "https://abacus.ai/help/api"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "abliteration-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "abliteration.ai",
+          "description": "https://docs.abliteration.ai/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "aihubmix"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "AIHubMix",
+          "description": "https://docs.aihubmix.com"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "alibaba"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "qwen-omni-turbo-realtime",
+                "qwen-omni-turbo",
+                "qwen2-5-omni-7b",
+                "qwen3-asr-flash",
+                "qwen3-livetranslate-flash-realtime",
+                "qwen3-omni-flash-realtime",
+                "qwen3-omni-flash",
+                "qwen3.5-122b-a10b",
+                "qwen3.5-27b",
+                "qwen3.5-35b-a3b",
+                "qwen3.5-397b-a17b",
+                "qwen3.6-27b",
+                "qwen3.6-35b-a3b"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Alibaba",
+          "description": "https://www.alibabacloud.com/help/en/model-studio/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "alibaba-cn"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "qwen-omni-turbo-realtime",
+                "qwen-omni-turbo",
+                "qwen2-5-omni-7b",
+                "qwen3-asr-flash",
+                "qwen3-omni-flash-realtime",
+                "qwen3-omni-flash"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Alibaba (China)",
+          "description": "https://www.alibabacloud.com/help/en/model-studio/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "alibaba-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Alibaba Coding Plan",
+          "description": "https://www.alibabacloud.com/help/en/model-studio/coding-plan"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "alibaba-coding-plan-cn"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Alibaba Coding Plan (China)",
+          "description": "https://help.aliyun.com/zh/model-studio/coding-plan"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "amazon-bedrock"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["mistral.voxtral-mini-3b-2507", "mistral.voxtral-small-24b-2507"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Amazon Bedrock",
+          "description": "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "anthropic"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Anthropic",
+          "description": "https://docs.anthropic.com/en/docs/about-claude/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "azure"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gpt-5.1-chat", "gpt-5.1-codex", "gpt-5.1", "phi-4-multimodal"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Azure",
+          "description": "https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "azure-cognitive-services"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Azure Cognitive Services",
+          "description": "https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "bailing"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Bailing",
+          "description": "https://alipaytbox.yuque.com/sxs0ba/ling/intro"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "baseten"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Baseten",
+          "description": "https://docs.baseten.co/development/model-apis/overview"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "berget"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["google/gemma-4-31B-it"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Berget.AI",
+          "description": "https://api.berget.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cerebras"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Cerebras",
+          "description": "https://inference-docs.cerebras.ai/models/overview"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "chutes"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Chutes",
+          "description": "https://llm.chutes.ai/v1/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "clarifai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Clarifai",
+          "description": "https://docs.clarifai.com/compute/inference/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cloudferro-sherlock"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "CloudFerro Sherlock",
+          "description": "https://docs.sherlock.cloudferro.com/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cloudflare-ai-gateway"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Cloudflare AI Gateway",
+          "description": "https://developers.cloudflare.com/ai-gateway/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cloudflare-workers-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Cloudflare Workers AI",
+          "description": "https://developers.cloudflare.com/workers-ai/models/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cohere"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Cohere",
+          "description": "https://docs.cohere.com/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "cortecs"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Cortecs",
+          "description": "https://api.cortecs.ai/v1/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "databricks"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "databricks-gemini-2-5-flash",
+                "databricks-gemini-2-5-pro",
+                "databricks-gemini-3-1-flash-lite",
+                "databricks-gemini-3-1-pro",
+                "databricks-gemini-3-flash",
+                "databricks-gemini-3-pro"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Databricks",
+          "description": "https://docs.databricks.com/aws/en/machine-learning/foundation-models/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "deepinfra"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Deep Infra",
+          "description": "https://deepinfra.com/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "deepseek"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "DeepSeek",
+          "description": "https://api-docs.deepseek.com/quick_start/pricing"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "digitalocean"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["nemotron-3-nano-omni"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "DigitalOcean",
+          "description": "https://docs.digitalocean.com/products/gradient-ai-platform/details/models/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "dinference"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "DInference",
+          "description": "https://dinference.com"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "drun"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "D.Run (China)",
+          "description": "https://www.d.run"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "evroc"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "KBLab/kb-whisper-large",
+                "mistralai/Voxtral-Small-24B-2507",
+                "openai/whisper-large-v3"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "evroc",
+          "description": "https://docs.evroc.com/products/think/overview.html"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "fastrouter"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "FastRouter",
+          "description": "https://fastrouter.ai/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "firepass"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Fireworks (Firepass)",
+          "description": "https://docs.fireworks.ai/firepass"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "fireworks-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Fireworks AI",
+          "description": "https://fireworks.ai/docs/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "friendli"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Friendli",
+          "description": "https://friendli.ai/docs/guides/serverless_endpoints/introduction"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "frogbot"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3-1-pro-preview",
+                "gemini-3-flash-preview"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "FrogBot",
+          "description": "https://docs.frogbot.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "github-copilot"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3-pro-preview"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "GitHub Copilot",
+          "description": "https://docs.github.com/en/copilot"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "github-models"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "meta/llama-3.2-11b-vision-instruct",
+                "meta/llama-3.2-90b-vision-instruct",
+                "microsoft/phi-4-multimodal-instruct",
+                "openai/gpt-4o-mini",
+                "openai/gpt-4o"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "GitHub Models",
+          "description": "https://docs.github.com/en/github-models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "gitlab"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "GitLab Duo",
+          "description": "https://docs.gitlab.com/user/duo_agent_platform/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "google"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-flash",
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash-lite-preview-06-17",
+                "gemini-2.5-flash-lite-preview-09-2025",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash-preview-04-17",
+                "gemini-2.5-flash-preview-05-20",
+                "gemini-2.5-flash-preview-09-2025",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro-preview-05-06",
+                "gemini-2.5-pro-preview-06-05",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview",
+                "gemini-3.1-flash-lite-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview",
+                "gemini-flash-latest",
+                "gemini-flash-lite-latest",
+                "gemini-live-2.5-flash-preview-native-audio",
+                "gemini-live-2.5-flash"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Google",
+          "description": "https://ai.google.dev/gemini-api/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "google-vertex"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash-lite-preview-06-17",
+                "gemini-2.5-flash-lite-preview-09-2025",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash-preview-04-17",
+                "gemini-2.5-flash-preview-05-20",
+                "gemini-2.5-flash-preview-09-2025",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro-preview-05-06",
+                "gemini-2.5-pro-preview-06-05",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview",
+                "gemini-3.1-flash-lite-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview",
+                "gemini-flash-latest",
+                "gemini-flash-lite-latest"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Vertex",
+          "description": "https://cloud.google.com/vertex-ai/generative-ai/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "google-vertex-anthropic"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Vertex (Anthropic)",
+          "description": "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "groq"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["whisper-large-v3-turbo", "whisper-large-v3"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Groq",
+          "description": "https://console.groq.com/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "helicone"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-3-pro-preview", "grok-4-fast-non-reasoning", "qwen3-coder"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Helicone",
+          "description": "https://helicone.ai/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "hpc-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "HPC-AI",
+          "description": "https://www.hpc-ai.com/doc/docs/quickstart/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "huggingface"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Hugging Face",
+          "description": "https://huggingface.co/docs/inference-providers"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "iflowcn"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "iFlow",
+          "description": "https://platform.iflow.cn/en/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "inception"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Inception",
+          "description": "https://platform.inceptionlabs.ai/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "inference"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Inference",
+          "description": "https://inference.net/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "io-net"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "IO.NET",
+          "description": "https://io.net/docs/guides/intelligence/io-intelligence"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "jiekou"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.5-flash-lite-preview-06-17",
+                "gemini-2.5-flash-lite-preview-09-2025",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash-preview-05-20",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro-preview-06-05",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-pro-preview"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Jiekou.AI",
+          "description": "https://docs.jiekou.ai/docs/support/quickstart?utm_source=github_models.dev"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "kilo"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.0-flash-001",
+                "google/gemini-2.0-flash-lite-001",
+                "google/gemini-2.5-flash-lite-preview-09-2025",
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro-preview-05-06",
+                "google/gemini-2.5-pro-preview",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash-preview",
+                "google/gemini-3.1-flash-lite-preview",
+                "google/gemini-3.1-pro-preview-customtools",
+                "google/gemini-3.1-pro-preview",
+                "mistralai/voxtral-small-24b-2507",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+                "openai/gpt-4o-audio-preview",
+                "openai/gpt-audio-mini",
+                "openai/gpt-audio",
+                "openrouter/auto",
+                "xiaomi/mimo-v2-omni",
+                "xiaomi/mimo-v2.5",
+                "~google/gemini-flash-latest",
+                "~google/gemini-pro-latest"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Kilo Gateway",
+          "description": "https://kilo.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "kimi-for-coding"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Kimi For Coding",
+          "description": "https://www.kimi.com/coding/docs/en/third-party-agents.html"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "kuae-cloud-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "KUAE Cloud Coding Plan",
+          "description": "https://docs.mthreads.com/kuaecloud/kuaecloud-doc-online/coding_plan/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "llama"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Llama",
+          "description": "https://llama.developer.meta.com/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "llmgateway"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash-lite-preview-09-2025",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.1-flash-lite-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3.1-pro-preview",
+                "mimo-v2-omni",
+                "mimo-v2.5",
+                "qwen-omni-turbo",
+                "qwen3.6-35b-a3b",
+                "qwen35-397b-a17b"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "LLM Gateway",
+          "description": "https://llmgateway.io/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "lmstudio"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "LMStudio",
+          "description": "https://lmstudio.ai/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "lucidquery"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "LucidQuery AI",
+          "description": "https://lucidquery.com/api/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "meganova"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Meganova",
+          "description": "https://docs.meganova.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "minimax"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "MiniMax (minimax.io)",
+          "description": "https://platform.minimax.io/docs/guides/quickstart"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "minimax-cn"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "MiniMax (minimaxi.com)",
+          "description": "https://platform.minimaxi.com/docs/guides/quickstart"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "minimax-cn-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "MiniMax Coding Plan (minimaxi.com)",
+          "description": "https://platform.minimaxi.com/docs/coding-plan/intro"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "minimax-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "MiniMax Coding Plan (minimax.io)",
+          "description": "https://platform.minimax.io/docs/coding-plan/intro"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "mistral"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Mistral",
+          "description": "https://docs.mistral.ai/getting-started/models/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "mixlayer"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Mixlayer",
+          "description": "https://docs.mixlayer.com"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "moark"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Moark",
+          "description": "https://moark.com/docs/openapi/v1#tag/%E6%96%87%E6%9C%AC%E7%94%9F%E6%88%90"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "modelscope"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "ModelScope",
+          "description": "https://modelscope.cn/docs/model-service/API-Inference/intro"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "moonshotai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Moonshot AI",
+          "description": "https://platform.moonshot.ai/docs/api/chat"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "moonshotai-cn"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Moonshot AI (China)",
+          "description": "https://platform.moonshot.cn/docs/api/chat"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "morph"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Morph",
+          "description": "https://docs.morphllm.com/api-reference/introduction"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "nano-gpt"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "NanoGPT",
+          "description": "https://docs.nano-gpt.com"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "nebius"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Nebius Token Factory",
+          "description": "https://docs.tokenfactory.nebius.com/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "neuralwatt"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Neuralwatt",
+          "description": "https://portal.neuralwatt.com/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "nova"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Nova",
+          "description": "https://nova.amazon.com/dev/documentation"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "novita-ai"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["qwen/qwen3-omni-30b-a3b-instruct", "qwen/qwen3-omni-30b-a3b-thinking"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "NovitaAI",
+          "description": "https://novita.ai/docs/guides/introduction"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "nvidia"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "microsoft/phi-4-mini-instruct",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+                "nvidia/nemotron-voicechat",
+                "openai/whisper-large-v3",
+                "qwen/qwen3.5-122b-a10b"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Nvidia",
+          "description": "https://docs.api.nvidia.com/nim/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "ollama-cloud"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Ollama Cloud",
+          "description": "https://docs.ollama.com/cloud"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "openai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "OpenAI",
+          "description": "https://platform.openai.com/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "opencode"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-3-flash", "gemini-3-pro", "gemini-3.1-pro", "mimo-v2-omni-free"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "OpenCode Zen",
+          "description": "https://opencode.ai/docs/zen"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "opencode-go"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["mimo-v2-omni", "mimo-v2.5"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "OpenCode Go",
+          "description": "https://opencode.ai/docs/zen"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "openrouter"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.0-flash-001",
+                "google/gemini-2.5-flash-lite-preview-09-2025",
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash-preview-09-2025",
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro-preview-05-06",
+                "google/gemini-2.5-pro-preview-06-05",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash-preview",
+                "google/gemini-3-pro-preview",
+                "google/gemini-3.1-flash-lite-preview",
+                "google/gemini-3.1-pro-preview-customtools",
+                "google/gemini-3.1-pro-preview",
+                "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+                "xiaomi/mimo-v2-omni",
+                "xiaomi/mimo-v2.5"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "OpenRouter",
+          "description": "https://openrouter.ai/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "ovhcloud"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "OVHcloud AI Endpoints",
+          "description": "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog//"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "perplexity"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Perplexity",
+          "description": "https://docs.perplexity.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "perplexity-agent"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash-preview",
+                "google/gemini-3.1-pro-preview"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Perplexity Agent",
+          "description": "https://docs.perplexity.ai/docs/agent-api/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "poe"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.0-flash-lite",
+                "google/gemini-2.0-flash",
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash",
+                "google/gemini-3-pro",
+                "google/gemini-3.1-flash-lite",
+                "google/gemini-3.1-pro"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Poe",
+          "description": "https://creator.poe.com/docs/external-applications/openai-compatible-api"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "privatemode-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Privatemode AI",
+          "description": "https://docs.privatemode.ai/api/overview"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "qihang-ai"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3-pro-preview"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "QiHang",
+          "description": "https://www.qhaigc.net/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "qiniu-ai"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "gemini-2.0-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-3.0-flash-preview",
+                "gemini-3.0-pro-preview",
+                "qwen-vl-max-2025-01-25",
+                "qwen2.5-vl-72b-instruct",
+                "qwen2.5-vl-7b-instruct",
+                "x-ai/grok-4-fast-non-reasoning",
+                "x-ai/grok-4-fast-reasoning",
+                "x-ai/grok-4-fast",
+                "x-ai/grok-4.1-fast-non-reasoning",
+                "x-ai/grok-4.1-fast-reasoning"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Qiniu",
+          "description": "https://developer.qiniu.com/aitokenapi"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "regolo-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Regolo AI",
+          "description": "https://docs.regolo.ai/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "requesty"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash-preview",
+                "google/gemini-3-pro-preview",
+                "openai/gpt-5"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Requesty",
+          "description": "https://requesty.ai/solution/llm-routing/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "sap-ai-core"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "SAP AI Core",
+          "description": "https://help.sap.com/docs/sap-ai-core"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "sarvam"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Sarvam AI",
+          "description": "https://docs.sarvam.ai/api-reference-docs/getting-started/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "scaleway"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["voxtral-small-24b-2507", "whisper-large-v3"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Scaleway",
+          "description": "https://www.scaleway.com/en/docs/generative-apis/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "siliconflow"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "Qwen/Qwen3-Omni-30B-A3B-Captioner",
+                "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+                "Qwen/Qwen3-Omni-30B-A3B-Thinking"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "SiliconFlow",
+          "description": "https://cloud.siliconflow.com/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "siliconflow-cn"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "SiliconFlow (China)",
+          "description": "https://cloud.siliconflow.com/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "stackit"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "STACKIT",
+          "description": "https://docs.stackit.cloud/products/data-and-ai/ai-model-serving/basics/available-shared-models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "stepfun"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "StepFun",
+          "description": "https://platform.stepfun.com/docs/zh/overview/concept"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "submodel"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "submodel",
+          "description": "https://submodel.gitbook.io"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "synthetic"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Synthetic",
+          "description": "https://synthetic.new/pricing"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "tencent-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Tencent Coding Plan (China)",
+          "description": "https://cloud.tencent.com/document/product/1772/128947"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "tencent-tokenhub"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Tencent TokenHub",
+          "description": "https://cloud.tencent.com/document/product/1823/130050"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "the-grid-ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "The Grid AI",
+          "description": "https://thegrid.ai/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "togetherai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Together AI",
+          "description": "https://docs.together.ai/docs/serverless-models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "upstage"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Upstage",
+          "description": "https://developers.upstage.ai/docs/apis/chat"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "v0"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "v0",
+          "description": "https://sdk.vercel.ai/providers/ai-sdk-providers/vercel"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "venice"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-3-1-pro-preview", "gemini-3-flash-preview"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Venice AI",
+          "description": "https://docs.venice.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "vercel"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.5-flash-lite-preview-09-2025",
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash-preview-09-2025",
+                "google/gemini-3-pro-preview",
+                "xiaomi/mimo-v2.5"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Vercel AI Gateway",
+          "description": "https://github.com/vercel/ai/tree/5eb85cc45a259553501f535b8ac79a77d0e79223/packages/gateway"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "vivgrid"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["gemini-3.1-flash-lite-preview", "gemini-3.1-pro-preview"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Vivgrid",
+          "description": "https://docs.vivgrid.com/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "vultr"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Vultr",
+          "description": "https://api.vultrinference.com/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "wafer.ai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Wafer",
+          "description": "https://docs.wafer.ai/wafer-pass"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "wandb"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Weights & Biases",
+          "description": "https://docs.wandb.ai/guides/integrations/inference/"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "xai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "xAI",
+          "description": "https://docs.x.ai/docs/models"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "xiaomi"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["mimo-v2-omni", "mimo-v2.5"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Xiaomi",
+          "description": "https://platform.xiaomimimo.com/#/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "xiaomi-token-plan-ams"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Xiaomi Token Plan (Europe)",
+          "description": "https://platform.xiaomimimo.com/#/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "xiaomi-token-plan-cn"
+            },
+            "model": {
+              "type": "string",
+              "examples": ["mimo-v2-omni", "mimo-v2.5"]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Xiaomi Token Plan (China)",
+          "description": "https://platform.xiaomimimo.com/#/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "xiaomi-token-plan-sgp"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Xiaomi Token Plan (Singapore)",
+          "description": "https://platform.xiaomimimo.com/#/docs"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "zai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Z.AI",
+          "description": "https://docs.z.ai/guides/overview/pricing"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "zai-coding-plan"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Z.AI Coding Plan",
+          "description": "https://docs.z.ai/devpack/overview"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "zenmux"
+            },
+            "model": {
+              "type": "string",
+              "examples": [
+                "google/gemini-2.5-flash-lite",
+                "google/gemini-2.5-flash",
+                "google/gemini-2.5-pro",
+                "google/gemini-3-flash-preview",
+                "google/gemini-3.1-flash-lite-preview",
+                "google/gemini-3.1-pro-preview",
+                "xiaomi/mimo-v2-omni",
+                "xiaomi/mimo-v2.5"
+              ]
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "ZenMux",
+          "description": "https://docs.zenmux.ai"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "zhipuai"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "required": ["provider", "model"],
+          "additionalProperties": false,
+          "title": "Zhipu AI",
+          "description": "https://docs.z.ai/guides/overview/pricing"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "zhipuai-coding-plan"
+            },
+            "model": {
+              "type": "string"
             }
           },
           "required": ["provider", "model"],

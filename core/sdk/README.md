@@ -30,7 +30,7 @@ Use `@goddard-ai/sdk` when you need to:
 
 - Call daemon IPC actions through one stable SDK instance.
 - Work from a browser-safe or other non-Node host with an explicit daemon client.
-- Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
+- Use the same auth, PR, transcription, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, daemon-owned turn cancellation, steering, history, shutdown, and model changes.
 - Stream live daemon-filtered session updates through generated stream routes such as
@@ -57,6 +57,7 @@ Namespaces:
 - `sdk.auth`
 - `sdk.pr`
 - `sdk.inbox`
+- `sdk.transcription`
 - `sdk.session`
 - `sdk.action`
 - `sdk.loop`

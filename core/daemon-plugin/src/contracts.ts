@@ -92,6 +92,10 @@ export type RootConfigSnapshot<TConfig extends object = Record<string, unknown>>
 export type DaemonConfigProvider<TConfig extends object = Record<string, unknown>> = {
   readonly getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot<TConfig>>
   readonly getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot<TConfig> | null
+  readonly getGlobalRootConfig?: () => Promise<{
+    readonly globalRoot: string
+    readonly config: TConfig
+  }>
 }
 
 /** Shared daemon logger surface exposed to daemon plugins. */

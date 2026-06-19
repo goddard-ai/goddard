@@ -26,6 +26,7 @@ import {
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   SteerSessionRequest,
+  TranscribeAudioRequest,
   type CancelSessionResponse,
   type CompleteSessionResponse,
   type CreateSessionResponse,
@@ -46,9 +47,17 @@ import {
   type SetSessionModelResponse,
   type ShutdownSessionResponse,
   type SteerSessionResponse,
+  type TranscribeAudioResponse,
 } from "./schema.ts"
 
 export const sessionIpcRoutes = defineIpcRoutes({
+  transcription: http.resource("transcription", {
+    /** Transcribes one audio payload through the daemon's configured global transcription model. */
+    transcribe: http.post("transcribe", {
+      body: TranscribeAudioRequest,
+      response: $type<TranscribeAudioResponse>(),
+    }),
+  }),
   session: http.resource("session", {
     /** Creates one daemon-managed session record. */
     create: http.post("create", {

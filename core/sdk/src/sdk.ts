@@ -86,6 +86,7 @@ export class GoddardSdk {
   readonly fileSearch: FeatureSdkNamespaces["fileSearch"]
   readonly pr: FeatureSdkNamespaces["pr"]
   readonly inbox: FeatureSdkNamespaces["inbox"]
+  readonly transcription: FeatureSdkNamespaces["transcription"]
   readonly session: ReturnType<typeof createSessionNamespace>
   readonly reviewSession: FeatureSdkNamespaces["reviewSession"]
   readonly action: FeatureSdkNamespaces["action"]
@@ -104,6 +105,7 @@ export class GoddardSdk {
     this.fileSearch = features.fileSearch
     this.pr = features.pr
     this.inbox = features.inbox
+    this.transcription = features.transcription
     this.session = createSessionNamespace(this.#client, features.session)
     this.reviewSession = features.reviewSession
     this.action = features.action

@@ -131,6 +131,23 @@ export async function readMergedRootConfig(
   }
 }
 
+/** Reads and resolves only the global root config without consulting repository-local overrides. */
+export async function readGlobalRootConfig() {
+  const globalRoot = getGoddardGlobalDir()
+  const rootConfigSchema = buildRootConfigSchema()
+  const user = await readJsonConfig(
+    getGlobalConfigPath(),
+    rootConfigSchema,
+    "Global config",
+    "goddard.json",
+  )
+
+  return {
+    globalRoot,
+    config: await mergeRootConfigLayers(user, undefined),
+  }
+}
+
 /**
  * Prevents repository-local config from declaring daemon-owned global-only settings.
  */
@@ -150,6 +167,12 @@ function assertLocalConfigIsWithinSupportedScope(normalized: unknown) {
   if (isObject(worktrees) && "plugins" in worktrees) {
     throw new Error(
       "`worktrees.plugins` is only supported in the global Goddard config, not repository-local config.",
+    )
+  }
+
+  if ("transcription" in config) {
+    throw new Error(
+      "`transcription` is only supported in the global Goddard config, not repository-local config.",
     )
   }
 
