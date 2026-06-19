@@ -1,4 +1,5 @@
 import {
+  createAcpSessionUpdateMatrixScenario,
   createFixtureSession,
   createSessionHistoryResponse,
   createSessionHistoryTurn,
@@ -909,6 +910,85 @@ test("SessionChat exposes pending permission and plan events", () => {
     "permissionRequest",
     "planUpdate",
   ])
+})
+
+test("SessionChat consumes the ACP session/update matrix fixture", () => {
+  const { historyResponse, session } = createAcpSessionUpdateMatrixScenario()
+  const chat = new SessionChat({
+    history: historyResponse,
+    session,
+  })
+
+  expect(chat.summary).toMatchObject({
+    activeTurnId: "turn-acp-updates-active",
+    status: "running",
+  })
+  expect(chat.turns.map((turn) => [turn.turnId, turn.status])).toEqual([
+    ["turn-acp-updates-completed", "completed"],
+    ["turn-acp-updates-active", "running"],
+  ])
+
+  const completedTurn = chat.turns[0]
+  expect(completedTurn?.events.map((event) => event.kind)).toEqual(
+    expect.arrayContaining(["prompt", "planUpdate", "permissionRequest", "permissionResponse"]),
+  )
+  expect(
+    completedTurn?.events.flatMap((event) =>
+      event.kind === "sessionUpdate" ? [event.sessionUpdate] : [],
+    ),
+  ).toEqual(
+    expect.arrayContaining([
+      "agent_message_chunk",
+      "agent_thought_chunk",
+      "available_commands_update",
+      "config_option_update",
+      "current_mode_update",
+      "session_info_update",
+      "tool_call",
+      "tool_call_update",
+      "usage_update",
+      "user_message_chunk",
+    ]),
+  )
+
+  const transcript = chat.transcriptMessages
+  expect(transcript.some((item) => item.kind === "planUpdate")).toBe(true)
+  expect(
+    transcript.some((item) => item.kind === "permissionRequest" && item.status === "allowed"),
+  ).toBe(true)
+  expect(
+    transcript
+      .flatMap((item) => (item.kind === "workDrawer" ? item.items : []))
+      .map((item) => (item.kind === "toolCall" ? `${item.toolCallId}:${item.status}` : item.kind)),
+  ).toEqual(
+    expect.arrayContaining([
+      "thought",
+      "tool-acp-read:completed",
+      "tool-acp-edit:completed",
+      "tool-acp-execute:failed",
+    ]),
+  )
+  expect(
+    transcript.some(
+      (item) =>
+        item.kind === "toolCall" &&
+        item.toolCallId === "tool-acp-active-search" &&
+        item.status === "in_progress",
+    ),
+  ).toBe(true)
+  expect(
+    transcript.some(
+      (item) =>
+        item.kind === "message" &&
+        item.role === "assistant" &&
+        item.streaming === true &&
+        item.content.some(
+          (block) =>
+            block.type === "text" &&
+            block.text.includes("This turn stays active with an in-progress search."),
+        ),
+    ),
+  ).toBe(true)
 })
 
 test("SessionChat shows thinking while a turn is running outside tool calls", () => {

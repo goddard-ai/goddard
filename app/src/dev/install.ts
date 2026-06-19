@@ -13,6 +13,9 @@ import { goddardSdk } from "~/sdk.ts"
 import { SESSION_LIST_LIMIT } from "~/sessions/queries.ts"
 import type { WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import {
+  acpSessionUpdateMatrixHistoryResponse,
+  acpSessionUpdateMatrixSession,
+  acpSessionUpdateMatrixSessionResponse,
   blockedSession,
   blockedSessionChangesResponse,
   blockedSessionHistoryResponse,
@@ -158,7 +161,43 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
     },
   })
 
-  return [inboxAttentionQueue, sessionsCriticalQueue, sessionBlockedWithChanges]
+  const acpSessionUpdateMatrix = defineLaunchableState("session.acpUpdateMatrix", {
+    label: "ACP session/update matrix",
+    description: "Session detail covering ACP update variants, tools, thoughts, and live turns.",
+    tags: ["session", "acp", "transcript", "tools", "thoughts"],
+    launch() {
+      const cleanup = composeCleanups([
+        queryClient.injectData(
+          goddardSdk.session.get,
+          [{ id: acpSessionUpdateMatrixSession.id }],
+          acpSessionUpdateMatrixSessionResponse,
+        ),
+        queryClient.injectData(
+          goddardSdk.session.history,
+          [{ id: acpSessionUpdateMatrixSession.id }],
+          acpSessionUpdateMatrixHistoryResponse,
+        ),
+      ])
+      workbenchTabSet.openOrFocusTab({
+        kind: "sessionChat",
+        persistence: "transient",
+        props: {
+          relatedFilesystemPath: acpSessionUpdateMatrixSession.cwd,
+          sessionId: acpSessionUpdateMatrixSession.id,
+          sessionTitle: acpSessionUpdateMatrixSession.title,
+        },
+      })
+      closeLauncher()
+      return cleanup
+    },
+  })
+
+  return [
+    inboxAttentionQueue,
+    sessionsCriticalQueue,
+    sessionBlockedWithChanges,
+    acpSessionUpdateMatrix,
+  ]
 }
 
 export function installLaunchableStates(deps: LaunchableStateDeps) {
