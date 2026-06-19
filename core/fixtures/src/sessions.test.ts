@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 
 import {
+  createAcpSessionUpdateMatrixScenario,
   createFixtureInboxItem,
   createFixturePullRequest,
   createFixtureSession,
@@ -83,3 +84,44 @@ test("cross-feature fixtures create stable linked defaults", () => {
   expect(inboxItem.entityId).toBe(session.id)
   expect(pullRequest.id).toBe("pr_42")
 })
+
+test("ACP update matrix fixture covers every routed session/update discriminator", () => {
+  const { historyResponse } = createAcpSessionUpdateMatrixScenario()
+  const sessionUpdates = new Set(
+    historyResponse.turns.flatMap((turn) =>
+      turn.messages.flatMap(({ message }) => {
+        const sessionUpdate = getSessionUpdateDiscriminator(message)
+        return sessionUpdate ? [sessionUpdate] : []
+      }),
+    ),
+  )
+
+  expect(sessionUpdates).toEqual(
+    new Set([
+      "agent_message_chunk",
+      "agent_thought_chunk",
+      "available_commands_update",
+      "config_option_update",
+      "current_mode_update",
+      "plan",
+      "session_info_update",
+      "tool_call",
+      "tool_call_update",
+      "usage_update",
+      "user_message_chunk",
+    ]),
+  )
+})
+
+function getSessionUpdateDiscriminator(message: unknown) {
+  if (!isRecord(message) || !isRecord(message.params) || !isRecord(message.params.update)) {
+    return null
+  }
+
+  const { sessionUpdate } = message.params.update
+  return typeof sessionUpdate === "string" ? sessionUpdate : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}

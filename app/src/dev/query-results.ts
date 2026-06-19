@@ -1,4 +1,5 @@
 import {
+  createAcpSessionUpdateMatrixScenario,
   createBlockedSessionScenario,
   createInboxAttentionQueueScenario,
   createSessionTriageQueueScenario,
@@ -10,6 +11,7 @@ const inboxAttentionQueue = createInboxAttentionQueueScenario({
   blockedSession: sessionTriageQueue.blockedSession,
 })
 const blockedSessionDetail = createBlockedSessionScenario(sessionTriageQueue.blockedSession)
+const acpSessionUpdateMatrix = createAcpSessionUpdateMatrixScenario()
 
 export const blockedSession = sessionTriageQueue.blockedSession
 export const activeSession = sessionTriageQueue.activeSession
@@ -23,3 +25,6 @@ export const blockedSessionResponse = blockedSessionDetail.sessionResponse
 export const blockedSessionHistoryResponse = blockedSessionDetail.historyResponse
 export const blockedSessionWorktreeResponse = blockedSessionDetail.worktreeResponse
 export const blockedSessionChangesResponse = blockedSessionDetail.changesResponse
+export const acpSessionUpdateMatrixSession = acpSessionUpdateMatrix.session
+export const acpSessionUpdateMatrixSessionResponse = acpSessionUpdateMatrix.sessionResponse
+export const acpSessionUpdateMatrixHistoryResponse = acpSessionUpdateMatrix.historyResponse
