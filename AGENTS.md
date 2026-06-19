@@ -17,6 +17,7 @@ Rules live in `.agents/rules/`. Read every matching ruleset before acting:
 - `defaults.md`: MUST read when adding or changing config, normalization, persisted data shapes, SDK inputs, domain defaults, or resolved values.
 - `features.md`: MUST read when adding or changing cross-layer feature packages, feature schemas, daemon plugins, SDK/app feature wiring, or scaffolded features.
 - `testing.md`: MUST read when adding, changing, reviewing, or deciding whether to add tests, and when verifying behavior changes.
+- `logs.md`: MUST read when debugging Goddard daemon behavior, app behavior, daemon/app interactions, IPC flows, or failures where runtime logs may explain what happened.
 - `documentation.md`: MUST read when changing terminology, concepts, package boundaries, README or glossary docs, user-visible features, or undocumented feature tracking.
 - `public-docs.md`: MUST read when creating, reorganizing, or editing a public `docs/` documentation folder.
 - `git.md`: MUST read before staging, committing, reviewing diffs, splitting work, or finishing any file-changing task.
