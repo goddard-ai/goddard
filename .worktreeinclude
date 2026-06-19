@@ -1,5 +1,4 @@
 # Ignored workspace state that keeps fresh agent worktrees ready to run checks.
 .husky/
-node_modules/
 app/styled-system/
 app/src/lib/svg-icon-data.ts
