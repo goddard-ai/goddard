@@ -45,6 +45,16 @@ function isLaunchableStateShortcut(event: KeyboardEvent) {
   )
 }
 
+function isStateLauncherKeyEvent(event: KeyboardEvent) {
+  return event.composedPath().some((target) => {
+    return (
+      target instanceof HTMLElement &&
+      (target.hasAttribute("data-state-launcher") ||
+        target.hasAttribute("data-state-launcher-host"))
+    )
+  })
+}
+
 function composeCleanups(cleanups: LaunchCleanup[]) {
   return async () => {
     for (let index = cleanups.length - 1; index >= 0; index -= 1) {
@@ -170,6 +180,13 @@ export function installLaunchableStates(deps: LaunchableStateDeps) {
     launcher.close()
   }
   const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape" && isStateLauncherKeyEvent(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      launcher.close()
+      return
+    }
+
     if (!isLaunchableStateShortcut(event)) {
       return
     }
