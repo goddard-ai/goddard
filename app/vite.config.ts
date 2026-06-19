@@ -27,9 +27,16 @@ export default defineConfig({
     }),
     tsrxPreact(),
     preact({
+      include: /\.[cm]?[jt]sx?$|\.tsrx$/,
       // Workspace source can contain standard decorators; transform them before Prefresh parses HMR signatures.
       babel: {
-        plugins: [["@babel/plugin-proposal-decorators", { version: "2023-11" }]],
+        plugins: [
+          "@lingui/babel-plugin-lingui-macro",
+          ["@babel/plugin-proposal-decorators", { version: "2023-11" }],
+        ],
+        parserOpts: {
+          plugins: ["typescript"],
+        },
       },
     }),
   ],

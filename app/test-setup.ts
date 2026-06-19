@@ -1,6 +1,10 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterEach } from "vitest"
 
+import { activateDefaultLocale } from "./src/language/i18n.ts"
+
+activateDefaultLocale()
+
 GlobalRegistrator.register({
   url: "http://localhost",
 })
