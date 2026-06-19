@@ -10,5 +10,6 @@ patch_*.js
 core/**/src/**/*.d.ts
 core/**/src/**/*.d.ts.map
 app/**/svg-icon-data.ts
+app/locales/**/*.js
 !core/daemon/src/worktrees/
 !core/daemon/src/worktrees/**
