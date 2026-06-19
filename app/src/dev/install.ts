@@ -28,7 +28,7 @@ type LaunchableStateDeps = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
-type CreateLaunchableStateDeps = LaunchableStateDeps & {
+type LauncherContext = LaunchableStateDeps & {
   closeLauncher: () => void
 }
 
@@ -53,11 +53,7 @@ function composeCleanups(cleanups: LaunchCleanup[]) {
   }
 }
 
-function createLaunchableStates({
-  closeLauncher,
-  mainTab,
-  workbenchTabSet,
-}: CreateLaunchableStateDeps) {
+function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: LauncherContext) {
   const inboxAttentionQueue = defineLaunchableState("inbox.attentionQueue", {
     label: "Inbox attention queue",
     description: "Unread session blockers and a pull-request update.",
@@ -158,7 +154,7 @@ export function installLaunchableStates(deps: LaunchableStateDeps) {
   activeInstallCleanup?.()
 
   let closeLauncher = () => {}
-  const commands = createLaunchableStates({
+  const commands = defineLaunchableStates({
     ...deps,
     closeLauncher: () => {
       closeLauncher()
