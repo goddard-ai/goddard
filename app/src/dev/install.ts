@@ -28,6 +28,10 @@ type LaunchableStateDeps = {
   workbenchTabSet: Protected<WorkbenchTabSet>
 }
 
+type CreateLaunchableStateDeps = LaunchableStateDeps & {
+  closeLauncher: () => void
+}
+
 let activeInstallCleanup: (() => void) | null = null
 
 function isLaunchableStateShortcut(event: KeyboardEvent) {
@@ -49,7 +53,11 @@ function composeCleanups(cleanups: LaunchCleanup[]) {
   }
 }
 
-function createLaunchableStates({ mainTab, workbenchTabSet }: LaunchableStateDeps) {
+function createLaunchableStates({
+  closeLauncher,
+  mainTab,
+  workbenchTabSet,
+}: CreateLaunchableStateDeps) {
   const inboxAttentionQueue = defineLaunchableState("inbox.attentionQueue", {
     label: "Inbox attention queue",
     description: "Unread session blockers and a pull-request update.",
@@ -79,6 +87,7 @@ function createLaunchableStates({ mainTab, workbenchTabSet }: LaunchableStateDep
       ])
       workbenchTabSet.activateTab("main")
       mainTab.selectKind("inbox")
+      closeLauncher()
       return cleanup
     },
   })
@@ -97,6 +106,7 @@ function createLaunchableStates({ mainTab, workbenchTabSet }: LaunchableStateDep
       ])
       workbenchTabSet.activateTab("main")
       mainTab.selectKind("sessions")
+      closeLauncher()
       return cleanup
     },
   })
@@ -136,6 +146,7 @@ function createLaunchableStates({ mainTab, workbenchTabSet }: LaunchableStateDep
           sessionTitle: blockedSession.title,
         },
       })
+      closeLauncher()
       return cleanup
     },
   })
@@ -146,13 +157,22 @@ function createLaunchableStates({ mainTab, workbenchTabSet }: LaunchableStateDep
 export function installLaunchableStates(deps: LaunchableStateDeps) {
   activeInstallCleanup?.()
 
-  const commands = createLaunchableStates(deps)
+  let closeLauncher = () => {}
+  const commands = createLaunchableStates({
+    ...deps,
+    closeLauncher: () => {
+      closeLauncher()
+    },
+  })
   const unregisterStates = registerLaunchableState(commands)
   const launcher = mountStateLauncher({
     initiallyOpen: false,
     position: "bottom-right",
     title: "App states",
   })
+  closeLauncher = () => {
+    launcher.close()
+  }
   const handleKeyDown = (event: KeyboardEvent) => {
     if (!isLaunchableStateShortcut(event)) {
       return
