@@ -6,30 +6,37 @@ import { AppShell } from "~/app-shell.tsrx"
 import { AppStateProvider } from "~/app-state-context.tsrx"
 import { LaunchableStates } from "~/dev/view.tsrx"
 import { desktopHost, initializeDesktopHost, mainWindowReady } from "~/desktop-host.ts"
+import { activateLocale, defaultLocale } from "~/language/i18n.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
-initializeDesktopHost()
-startQueryWindowReactivationRefetch()
-setOverlayPortalRoots({
-  dialog: () => document.getElementById("dialog-portal"),
-  menu: () => document.getElementById("menu-portal"),
-})
+async function main() {
+  await activateLocale(defaultLocale)
 
-// Expose the desktop bridge for manual smoke checks until real flows consume it.
-window.__goddardDesktop = desktopHost
-
-render(
-  <>
-    <AppStateProvider>
-      {import.meta.env.DEV ? <LaunchableStates /> : null}
-      <AppShell />
-    </AppStateProvider>
-  </>,
-  document.getElementById("root")!,
-)
-
-requestAnimationFrame(() => {
-  void mainWindowReady().catch((error) => {
-    console.error("Failed to signal main window readiness.", error)
+  initializeDesktopHost()
+  startQueryWindowReactivationRefetch()
+  setOverlayPortalRoots({
+    dialog: () => document.getElementById("dialog-portal"),
+    menu: () => document.getElementById("menu-portal"),
   })
-})
+
+  // Expose the desktop bridge for manual smoke checks until real flows consume it.
+  window.__goddardDesktop = desktopHost
+
+  render(
+    <>
+      <AppStateProvider>
+        {import.meta.env.DEV ? <LaunchableStates /> : null}
+        <AppShell />
+      </AppStateProvider>
+    </>,
+    document.getElementById("root")!,
+  )
+
+  requestAnimationFrame(() => {
+    void mainWindowReady().catch((error) => {
+      console.error("Failed to signal main window readiness.", error)
+    })
+  })
+}
+
+void main()

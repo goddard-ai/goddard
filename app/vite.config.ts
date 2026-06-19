@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 
+import { lingui } from "@lingui/vite-plugin"
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
 import { sourceSyntax } from "sculpted/tsrx"
@@ -14,6 +15,7 @@ export default defineConfig({
   base: "./",
   publicDir: "../../public",
   plugins: [
+    lingui(),
     svgIcons(),
     sculpted({
       projectRoot: import.meta.dirname,
