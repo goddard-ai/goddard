@@ -6,6 +6,8 @@ Read this ruleset when creating, reorganizing, or editing a public `docs/` docum
 - Write for readers who may not know the repository, package layout, implementation history, or local jargon.
 - Technical terms, config files, commands, and identifiers are allowed when they explain supported behavior or capabilities; define them in context and keep the page conceptual.
 - Start each public docs page with one short Markdown blockquote that explains what the concept is and why it matters.
+- Use `##` headings for page sections; do not use bold bulleted items as section headings.
+- Use bulleted lists for section content, with nested bullets encouraged when they make states, decisions, or consequences easier to scan.
 - Organize pages around user-findable concepts, states, ownership boundaries, workflows, guardrails, recovery paths, and decisions.
 - Prefer one page per concept a user, agent, or reviewer might reasonably search for directly.
 - Keep directory `README.md` files as public scan-first maps grouped by user task or concept.
