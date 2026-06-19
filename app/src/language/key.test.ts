@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { englishText } from "./en.ts"
 import { toLanguageKey } from "./key.ts"

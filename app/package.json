@@ -69,6 +69,7 @@
     "@babel/plugin-proposal-decorators": "^7.29.0",
     "@goddard-ai/fixtures": "workspace:*",
     "@happy-dom/global-registrator": "catalog:",
+    "@lingui/babel-plugin-lingui-macro": "^6.2.0",
     "@lingui/cli": "^6.2.0",
     "@lingui/vite-plugin": "^6.2.0",
     "@pandacss/dev": "catalog:",

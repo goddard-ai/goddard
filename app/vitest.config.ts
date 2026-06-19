@@ -1,3 +1,4 @@
+import { lingui } from "@lingui/vite-plugin"
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
 import { sourceSyntax } from "sculpted/tsrx"
@@ -8,6 +9,7 @@ import svgIcons from "./plugins/svg-icon-build-plugin.ts"
 
 export default defineConfig({
   plugins: [
+    lingui(),
     svgIcons(),
     sculpted({
       projectRoot: import.meta.dirname,
@@ -19,8 +21,15 @@ export default defineConfig({
     }),
     tsrxPreact(),
     preact({
+      include: /\.[cm]?[jt]sx?$|\.tsrx$/,
       babel: {
-        plugins: [["@babel/plugin-proposal-decorators", { version: "2023-11" }]],
+        plugins: [
+          "@lingui/babel-plugin-lingui-macro",
+          ["@babel/plugin-proposal-decorators", { version: "2023-11" }],
+        ],
+        parserOpts: {
+          plugins: ["typescript"],
+        },
       },
     }),
   ],

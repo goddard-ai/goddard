@@ -6,6 +6,11 @@ export type Locale = typeof defaultLocale
 
 export { i18n }
 
+export function activateDefaultLocale() {
+  i18n.load(defaultLocale, {})
+  i18n.activate(defaultLocale)
+}
+
 export async function activateLocale(locale: Locale) {
   const { messages } = await import(`../../locales/${locale}/messages.po`)
 
