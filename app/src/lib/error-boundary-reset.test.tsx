@@ -1,6 +1,6 @@
-import { afterEach, expect, test, vi } from "bun:test"
 import { render } from "preact"
 import { act } from "preact/test-utils"
+import { afterEach, expect, test, vi } from "vitest"
 
 import { useErrorBoundaryReset } from "./error-boundary-reset.ts"
 

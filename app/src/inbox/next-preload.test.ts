@@ -1,5 +1,5 @@
 import type { InboxItem } from "@goddard-ai/inbox/schema"
-import { expect, test, vi } from "bun:test"
+import { expect, test, vi } from "vitest"
 
 import { NextInboxWorkbenchPreloader } from "./next-preload.ts"
 import type { PreparedInboxWorkbenchTarget } from "./open.ts"

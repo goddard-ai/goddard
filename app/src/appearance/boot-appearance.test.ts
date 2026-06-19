@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   BOOT_APPEARANCE_STORAGE_KEY,
@@ -18,7 +18,7 @@ function resetDocumentTheme() {
 }
 
 function runInlineBootScript() {
-  const html = readFileSync(new URL("../main/index.html", import.meta.url), "utf8")
+  const html = readFileSync("src/main/index.html", "utf8")
   const script = html.match(/<script>\s*([\S\s]*?)\s*<\/script>/)?.[1]
 
   expect(typeof script).toBe("string")

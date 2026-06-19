@@ -1,6 +1,5 @@
 import type { SessionPromptRequest } from "@goddard-ai/sdk"
 import { $createListItemNode, $createListNode, ListItemNode, ListNode } from "@lexical/list"
-import { expect, test } from "bun:test"
 import {
   $createParagraphNode,
   $createTextNode,
@@ -8,6 +7,7 @@ import {
   createEditor,
   type EditorState,
 } from "lexical"
+import { expect, test } from "vitest"
 
 import { $createComposerChipNode, ComposerChipNode } from "./composer-chip-node.tsrx"
 import {

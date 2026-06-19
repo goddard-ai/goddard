@@ -11,7 +11,7 @@ import type {
   SessionUsageUpdateMessage,
 } from "@goddard-ai/sdk"
 import * as acp from "acp-client/protocol"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { SessionChat } from "./model.ts"
 

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { findActivationFocusTarget, findSearchFocusTarget } from "./focus-targets.ts"
 

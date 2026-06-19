@@ -1,6 +1,6 @@
 import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
 import type { ListAdaptersResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { filterSlashCommandSuggestions, SessionLaunchFormState } from "./launch-form-state.ts"
 import { preferredLaunchAgentId } from "./launch-preferences.ts"

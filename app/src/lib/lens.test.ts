@@ -1,5 +1,5 @@
 import { Signal, signal } from "@preact/signals"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { lens } from "./lens.ts"
 

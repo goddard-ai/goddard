@@ -1,6 +1,6 @@
 import { createFixtureSession } from "@goddard-ai/fixtures"
 import type { DaemonSession } from "@goddard-ai/sdk"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { buildSessionChatTranscript } from "./transcript-items.ts"
 

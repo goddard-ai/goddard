@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { getAppStatePath } from "@goddard-ai/paths/node"
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, test } from "vitest"
 
 import type { AppStateSnapshot } from "~/shared/app-state.ts"
 import {

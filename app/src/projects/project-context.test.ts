@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test"
 import { sigma } from "preact-sigma"
+import { expect, test } from "vitest"
 
 import { WORKBENCH_MAIN_TAB, WorkbenchTabSet } from "~/workbench-tab-set.ts"
 import {

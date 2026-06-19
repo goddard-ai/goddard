@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import { AppCommand } from "~/commands/app-command.ts"
 import { CommandContext, isCommandAvailable } from "~/commands/command-context.ts"
