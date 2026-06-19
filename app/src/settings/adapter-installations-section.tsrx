@@ -1,9 +1,9 @@
+import { t } from "@lingui/core/macro"
 import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/sdk"
 import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
 
-import { text } from "~/language/text.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { ExternalLink } from "~/lib/external-link.tsrx"
 import { queryClient, useQuery } from "~/lib/query.ts"
@@ -24,9 +24,13 @@ import styles from "./adapter-installations-section.style.ts"
 const availableAdapterMinimumFuzzyScore = 0.12
 
 export const adapterInstallationsSettingsSectionMetadata = {
-  description: text.chooseWhichAgentHarnessesAreAvailableWhenLaunchingSessions,
   id: "settings-adapter-installations",
-  title: text.agentHarnesses,
+  get description() {
+    return t`Choose which agent harnesses are available when launching sessions.`
+  },
+  get title() {
+    return t`Agent harnesses`
+  },
 }
 
 type SearchableAdapterCatalogEntry = {
@@ -39,18 +43,18 @@ type SearchableAdapterCatalogEntry = {
 
 function getInstallationDetail(installation: AdapterInstallationState) {
   if (installation.method === "config") {
-    return text.configured
+    return t`Configured`
   }
 
   if (installation.installed) {
-    return text.installed
+    return t`Installed`
   }
 
   if (!installation.installable) {
-    return text.unavailable
+    return t`Unavailable`
   }
 
-  return text.notInstalled
+  return t`Not installed`
 }
 
 function isGithubRepository(repository: string | null | undefined) {
@@ -110,10 +114,10 @@ function AdapterInstallationRow(props: {
     props.pending || props.installation.method === "config" || !props.installation.installable
   const actionLabel =
     props.installation.method === "config"
-      ? text.configured
+      ? t`Configured`
       : props.installation.installed
-        ? text.remove
-        : text.install
+        ? t`Remove`
+        : t`Install`
   const ActionIcon = props.installation.installed ? Trash2 : Download
 
   <li class={styles.adapterItem}>
@@ -126,7 +130,7 @@ function AdapterInstallationRow(props: {
         {props.adapter.version}
         {" · "}
         {getInstallationDetail(props.installation)}
-        {props.adapter.unofficial ? ` · ${text.unofficial}` : ""}
+        {props.adapter.unofficial ? ` · ${t`Unofficial`}` : ""}
       </span>
       <span class={styles.adapterDescription}>{props.adapter.description}</span>
 
@@ -135,7 +139,7 @@ function AdapterInstallationRow(props: {
           @if (props.adapter.website) {
             <ExternalLink class={styles.adapterLink} href={props.adapter.website}>
               <Globe aria-hidden={true} size={14} strokeWidth={2.1} />
-              {text.website}
+              {t`Website`}
             </ExternalLink>
           }
 
@@ -152,7 +156,7 @@ function AdapterInstallationRow(props: {
                 <GitBranch aria-hidden={true} size={14} strokeWidth={2.1} />
               }
 
-              {text.repository}
+              {t`Repository`}
             </ExternalLink>
           }
         </span>
@@ -172,7 +176,7 @@ function AdapterInstallationRow(props: {
       }}
     >
       <ActionIcon aria-hidden={true} size={15} strokeWidth={2.2} />
-      {props.pending ? text.working : actionLabel}
+      {props.pending ? t`Working` : actionLabel}
     </button>
   </li>
 }
@@ -219,12 +223,16 @@ function AdapterInstallationList() @{
   }
 
   @if (adapterCatalog.adapters.length === 0) {
-    <p class={styles.emptyText}>{text.noAgentHarnessesAreAvailable}</p>
+    <p class={styles.emptyText}>
+      {t`No agent harnesses are available.`}
+    </p>
   } @else {
     <div class={styles.agentGroups}>
       <section class={styles.agentGroup}>
         @if (installedAdapters.length === 0) {
-          <p class={styles.emptyText}>{text.noInstalledAgents}</p>
+          <p class={styles.emptyText}>
+            {t`No installed agents.`}
+          </p>
         } @else {
           <ul class={styles.adapterList}>
             @for (const adapter of installedAdapters) {
@@ -241,15 +249,19 @@ function AdapterInstallationList() @{
         }
       </section>
       <section class={styles.agentGroup}>
-        <h3 class={styles.agentGroupTitle}>{text.availableAgents}</h3>
+        <h3 class={styles.agentGroupTitle}>
+          {t`Available agents`}
+        </h3>
 
         @if (availableAdapters.length > 0) {
           <label class={styles.searchField}>
-            <span class={styles.srOnly}>{text.filterAvailableAgents}</span>
+            <span class={styles.srOnly}>
+              {t`Filter available agents`}
+            </span>
             <Search aria-hidden={true} class={styles.searchIcon} size={15} strokeWidth={2.1} />
             <input
               class={styles.searchInput}
-              placeholder={text.filterAvailableAgents}
+              placeholder={t`Filter available agents`}
               type="search"
               value={availableAgentSearchQuery}
               onInput={(event) => {
@@ -259,9 +271,13 @@ function AdapterInstallationList() @{
           </label>
         }
         @if (availableAdapters.length === 0) {
-          <p class={styles.emptyText}>{text.noAvailableAgents}</p>
+          <p class={styles.emptyText}>
+            {t`No available agents.`}
+          </p>
         } @else if (visibleAvailableAdapters.length === 0) {
-          <p class={styles.emptyText}>{text.noAvailableAgentsMatchThisSearch}</p>
+          <p class={styles.emptyText}>
+            {t`No available agents match this search.`}
+          </p>
         } @else {
           <ul class={styles.adapterList}>
             @for (const adapter of visibleAvailableAdapters) {
@@ -293,21 +309,29 @@ export function AdapterInstallationsSettingsSection() @{
       <SettingsSectionDescription>{adapterInstallationsSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>{text.installedAgents}</SettingsLegend>
-      <SettingsHelperText>{text.launchSelectorsOnlyShowInstalledAgentsOrAgentsDeclaredInConfiguration}</SettingsHelperText>
+      <SettingsLegend>
+        {t`Installed agents`}
+      </SettingsLegend>
+      <SettingsHelperText>
+        {t`Launch selectors only show installed agents or agents declared in configuration.`}
+      </SettingsHelperText>
 
       @try {
         <AdapterInstallationList />
       } @pending {
-        <p class={styles.emptyText}>{text.loadingAgentHarnesses}</p>
+        <p class={styles.emptyText}>
+          {t`Loading agent harnesses.`}
+        </p>
       } @catch (error, retry) {
         useErrorBoundaryReset(retry)
 
         <>
           <p class={styles.emptyText}>
-            {error instanceof Error ? error.message : text.failedToLoadAgentHarnesses}
+            {error instanceof Error ? error.message : t`Failed to load agent harnesses.`}
           </p>
-          <button class={styles.actionButton} type="button" onClick={retry}>{text.retry}</button>
+          <button class={styles.actionButton} type="button" onClick={retry}>
+            {t`Retry`}
+          </button>
         </>
       }
     </SettingsFieldset>

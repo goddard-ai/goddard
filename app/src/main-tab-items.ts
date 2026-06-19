@@ -1,15 +1,51 @@
-import { text } from "~/language/text.ts"
+import { t } from "@lingui/core/macro"
 
 export type MainTabItemGroup = "primary" | "secondary"
 
 /** Static main tab metadata shared by the model and app shell. */
 export const defaultMainTabItems = [
-  { id: "inbox", label: text.inbox, group: "primary" },
-  { id: "sessions", label: text.sessions, group: "primary" },
-  { id: "search", label: text.search, group: "primary" },
-  { id: "specs", label: text.specs, group: "secondary" },
-  { id: "tasks", label: text.tasks, group: "secondary" },
-  { id: "roadmap", label: text.roadmap, group: "secondary" },
+  {
+    id: "inbox",
+    get label() {
+      return t`Inbox`
+    },
+    group: "primary",
+  },
+  {
+    id: "sessions",
+    get label() {
+      return t`Sessions`
+    },
+    group: "primary",
+  },
+  {
+    id: "search",
+    get label() {
+      return t`Search`
+    },
+    group: "primary",
+  },
+  {
+    id: "specs",
+    get label() {
+      return t`Specs`
+    },
+    group: "secondary",
+  },
+  {
+    id: "tasks",
+    get label() {
+      return t`Tasks`
+    },
+    group: "secondary",
+  },
+  {
+    id: "roadmap",
+    get label() {
+      return t`Roadmap`
+    },
+    group: "secondary",
+  },
 ] as const satisfies {
   group: MainTabItemGroup
   id: string

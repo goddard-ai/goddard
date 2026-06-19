@@ -1,5 +1,5 @@
+import { t } from "@lingui/core/macro"
 import { useAppearance } from "~/app-state-context.tsrx"
-import { text } from "~/language/text.ts"
 import {
   SettingsChoiceBody,
   SettingsChoiceDescription,
@@ -21,9 +21,13 @@ import styles from "./appearance-settings-section.style.ts"
 import type { AppearanceMode } from "./theme.ts"
 
 export const appearanceSettingsSectionMetadata = {
-  description: text.chooseHowTheWorkbenchResolvesThemeAndContrast,
   id: "settings-appearance",
-  title: text.appearance,
+  get description() {
+    return t`Choose how the workbench resolves theme and contrast.`
+  },
+  get title() {
+    return t`Appearance`
+  },
 }
 
 const themeModeOptions: readonly {
@@ -33,18 +37,30 @@ const themeModeOptions: readonly {
 }[] = [
   {
     mode: "system",
-    label: text.system,
-    description: text.followTheOperatingSystemAppearance,
+    get label() {
+      return t`System`
+    },
+    get description() {
+      return t`Follow the operating system appearance.`
+    },
   },
   {
     mode: "light",
-    label: text.light,
-    description: text.useTheLightBuiltInPalette,
+    get label() {
+      return t`Light`
+    },
+    get description() {
+      return t`Use the light built-in palette.`
+    },
   },
   {
     mode: "dark",
-    label: text.dark,
-    description: text.useTheDarkBuiltInPalette,
+    get label() {
+      return t`Dark`
+    },
+    get description() {
+      return t`Use the dark built-in palette.`
+    },
   },
 ]
 
@@ -62,9 +78,11 @@ export function AppearanceSettingsSection() @{
       <SettingsSectionDescription>{appearanceSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
     <SettingsFieldset>
-      <SettingsLegend>{text.colorMode}</SettingsLegend>
+      <SettingsLegend>
+        {t`Color mode`}
+      </SettingsLegend>
       <SettingsHelperText>
-        {text.currentEffectiveTheme}
+        {t`Current effective theme:`}
         {" "}
         {appearance.effectiveTheme}
       </SettingsHelperText>
@@ -94,16 +112,22 @@ export function AppearanceSettingsSection() @{
       </SettingsChoiceList>
     </SettingsFieldset>
     <SettingsFieldset>
-      <SettingsLegend>{text.contrast}</SettingsLegend>
-      <SettingsHelperText>{text.tightensMutedTextAndBorderSeparationAcrossTheApp}</SettingsHelperText>
+      <SettingsLegend>
+        {t`Contrast`}
+      </SettingsLegend>
+      <SettingsHelperText>
+        {t`Tightens muted text and border separation across the app.`}
+      </SettingsHelperText>
       <SettingsControlRowLabel
         class={styles.controlRow}
         data-selected={appearance.highContrast ? "true" : undefined}
       >
         <SettingsChoiceBody>
-          <SettingsChoiceTitle>{text.highContrast}</SettingsChoiceTitle>
+          <SettingsChoiceTitle>
+            {t`High contrast`}
+          </SettingsChoiceTitle>
           <SettingsChoiceDescription>
-            {appearance.highContrast ? text.enabled : text.disabled}
+            {appearance.highContrast ? t`Enabled` : t`Disabled`}
           </SettingsChoiceDescription>
         </SettingsChoiceBody>
         <SettingsChoiceInput
