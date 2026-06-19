@@ -146,6 +146,7 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
       ])
       workbenchTabSet.openOrFocusTab({
         kind: "sessionChat",
+        persistence: "transient",
         props: {
           relatedFilesystemPath: blockedSession.cwd,
           sessionId: blockedSession.id,

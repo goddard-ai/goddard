@@ -237,9 +237,13 @@ type WorkbenchTabByKind = {
     kind: TKind
     title: string
     dirty: boolean
+    persistence: WorkbenchTabPersistence
     props: WorkbenchTabProps<TKind>
   }
 }
+
+/** Controls whether one detail tab should survive app reloads. */
+export type WorkbenchTabPersistence = "restore" | "transient"
 
 /** The supported closable workbench tab kinds available in the shell. */
 export type WorkbenchTabKind = keyof WorkbenchTabByKind
@@ -252,6 +256,7 @@ export type WorkbenchTab<TKind extends WorkbenchTabKind = WorkbenchTabKind> =
 export type WorkbenchOpenTabInput<TKind extends WorkbenchTabKind = WorkbenchTabKind> = {
   [TRegisteredKind in WorkbenchTabKind]: {
     kind: TRegisteredKind
+    persistence?: WorkbenchTabPersistence
     props: WorkbenchTabProps<TRegisteredKind>
   }
 }[TKind]
@@ -317,6 +322,7 @@ export function createWorkbenchTab(input: WorkbenchOpenTabInput): WorkbenchTab {
     title: definition.getTitle(input.props),
     props: input.props,
     dirty: false,
+    persistence: input.persistence ?? "restore",
   } as WorkbenchTab
 }
 
