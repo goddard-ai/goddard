@@ -2,51 +2,58 @@
 
 > The review-sync sync command is part of the local review-sync workflow. This page explains when to use it, what review state it may change, and what guardrails apply.
 
-- **Question it answers**
-  - What happens when the current agent and review worktrees need to converge once?
+## Question it answers
 
-- **Session selection**
-  - The session is inferred from the current worktree or checked-out branch.
-  - The command may run from either the recorded agent worktree or the recorded review worktree.
-  - If multiple saved sessions match, the command refuses to choose one.
+- What happens when the current agent and review worktrees need to converge once?
 
-- **What it does**
-  - Detects whether the review worktree has changed since the last rendered snapshot.
-  - Applies a clean human patch to the agent worktree and saves it as accepted.
-  - Saves a conflicting human patch as rejected without applying it to the agent worktree.
-  - Captures the latest agent content after any accepted patch.
-  - Renders the review worktree index and working tree to that latest agent content.
-  - Promotes a clean review commit onto the agent branch when that commit
+## Session selection
+
+- The session is inferred from the current worktree or checked-out branch.
+- The command may run from either the recorded agent worktree or the recorded review worktree.
+- If multiple saved sessions match, the command refuses to choose one.
+
+## What it does
+
+- Detects whether the review worktree has changed since the last rendered snapshot.
+- Applies a clean human patch to the agent worktree and saves it as accepted.
+- Saves a conflicting human patch as rejected without applying it to the agent worktree.
+- Captures the latest agent content after any accepted patch.
+- Renders the review worktree index and working tree to that latest agent content.
+- Promotes a clean review commit onto the agent branch when that commit
     already has the same content as the latest agent snapshot.
-  - Advances the disposable review branch to the latest real agent commit when
+- Advances the disposable review branch to the latest real agent commit when
     synchronized agent content includes committed work.
 
-- **What it changes**
-  - The agent worktree when a human patch is accepted.
-  - The agent branch when a clean review commit records the synchronized agent content.
-  - The review worktree index and working tree after every completed sync.
-  - The disposable review branch when sync can align it with real agent commits.
-  - The saved accepted or rejected patch inventory when a human patch exists.
-  - The session's last-sync outcome.
+## What it changes
 
-- **What it never changes**
-  - It does not mutate a paused session.
-  - It does not apply a rejected human patch to the agent worktree.
-  - It does not move the visible review branch to synthetic snapshot commits.
-  - It does not preserve review branch commit history that cannot be promoted
+- The agent worktree when a human patch is accepted.
+- The agent branch when a clean review commit records the synchronized agent content.
+- The review worktree index and working tree after every completed sync.
+- The disposable review branch when sync can align it with real agent commits.
+- The saved accepted or rejected patch inventory when a human patch exists.
+- The session's last-sync outcome.
+
+## What it never changes
+
+- It does not mutate a paused session.
+- It does not apply a rejected human patch to the agent worktree.
+- It does not move the visible review branch to synthetic snapshot commits.
+- It does not preserve review branch commit history that cannot be promoted
     onto the agent branch.
-  - It does not synchronize ignored files.
+- It does not synchronize ignored files.
 
-- **Guardrails**
-  - The recorded agent worktree must be on the recorded agent branch.
-  - The recorded review worktree must be on the derived review branch.
-  - Both worktrees must still belong to the recorded Git repository.
-  - In-progress Git operations that make patch or branch movement unsafe are refused.
-  - A paused session returns a paused result without changing files.
+## Guardrails
 
-- **Recovery behavior**
-  - On `rejected-human-patch`, inspect the saved rejected patch and rework the
+- The recorded agent worktree must be on the recorded agent branch.
+- The recorded review worktree must be on the derived review branch.
+- Both worktrees must still belong to the recorded Git repository.
+- In-progress Git operations that make patch or branch movement unsafe are refused.
+- A paused session returns a paused result without changing files.
+
+## Recovery behavior
+
+- On `rejected-human-patch`, inspect the saved rejected patch and rework the
     change against the current agent content.
-  - After manual recovery, run `sync` again from either recorded worktree.
-  - If the agent worktree is on another branch, return it to the recorded agent
+- After manual recovery, run `sync` again from either recorded worktree.
+- If the agent worktree is on another branch, return it to the recorded agent
     branch before retrying one-shot sync.
