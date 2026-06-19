@@ -94,17 +94,16 @@ const queryArgs = {
   }),
 }
 
-const pageCommand = command({
-  name: "goddard:logs",
-  description: "Page Goddard logs.",
-  args: queryArgs,
-  handler: page,
-})
-
 const app = subcommands({
   name: "goddard:logs",
   description: "Inspect Goddard logs.",
   cmds: {
+    page: command({
+      name: "page",
+      description: "Page Goddard logs.",
+      args: queryArgs,
+      handler: page,
+    }),
     path: command({
       name: "path",
       description: "Print the canonical log database path.",
@@ -136,13 +135,7 @@ const app = subcommands({
 })
 
 export async function main(argv = process.argv.slice(2)) {
-  const commandName = argv[0]
-  if (commandName === "path" || commandName === "expand" || commandName === "tail") {
-    await run(app, argv)
-    return
-  }
-
-  await run(pageCommand, argv)
+  await run(app, argv)
 }
 
 function page(options: CliOptions) {

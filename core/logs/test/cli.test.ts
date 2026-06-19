@@ -58,13 +58,24 @@ test("CLI pages and expands logs from the canonical database", async () => {
   })
   store.close()
 
-  const page = await runCli(["--property", "method=session.history"], testHome)
+  const page = await runCli(["page", "--property", "method=session.history"], testHome)
   expect(page).toBe(
     `${row.id} ${row.at} daemon info ipc.response_sent pid=123 method=session.history response={${row.properties.response}}\n`,
   )
 
   const expanded = await runCli(["expand", row.properties.response as string], testHome)
   expect(expanded).toContain("response payload that collapses")
+})
+
+test("CLI help lists log subcommands", async () => {
+  testHome = await mkdtemp(join(tmpdir(), "goddard-logs-cli-test-"))
+  process.env.HOME = testHome
+
+  const help = await runCli(["--help"], testHome)
+  expect(help).toContain("page")
+  expect(help).toContain("tail")
+  expect(help).toContain("expand")
+  expect(help).toContain("path")
 })
 
 async function runCli(args: string[], home: string) {
