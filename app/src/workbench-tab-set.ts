@@ -1,4 +1,4 @@
-import { Sigma } from "preact-sigma"
+import { Sigma, type Immutable } from "preact-sigma"
 
 import {
   createWorkbenchTab,
@@ -53,6 +53,31 @@ function findLeastRecentClosableTabId(tabSet: WorkbenchTabSetState) {
   }
 
   return null
+}
+
+/** Returns the subset of a tab snapshot that should survive app reloads. */
+export function getRestorableWorkbenchTabSetState(
+  tabSet: Immutable<WorkbenchTabSetState>,
+): WorkbenchTabSetState {
+  const tabs = Object.fromEntries(
+    Object.entries(tabSet.tabs)
+      .filter(([, tab]) => tab.persistence !== "transient")
+      .map(([tabId, tab]) => [tabId, tab as WorkbenchTab]),
+  )
+  const isFocusableTabId = (tabId: string) => tabId === WORKBENCH_MAIN_TAB.id || tabId in tabs
+  const recency = tabSet.recency.filter(isFocusableTabId)
+  const activeTabId = isFocusableTabId(tabSet.activeTabId)
+    ? tabSet.activeTabId
+    : (recency[0] ?? WORKBENCH_MAIN_TAB.id)
+
+  return {
+    tabs,
+    orderedTabIds: tabSet.orderedTabIds.filter((tabId) => tabId in tabs),
+    activeTabId,
+    recency: [activeTabId, ...recency.filter((tabId) => tabId !== activeTabId)].filter(
+      isFocusableTabId,
+    ),
+  }
 }
 
 /** Sigma state for the shell's closable workbench tab strip. */

@@ -1,6 +1,11 @@
 import { expect, test } from "vitest"
 
-import { WORKBENCH_MAIN_TAB, WORKBENCH_TAB_LIMIT, WorkbenchTabSet } from "./workbench-tab-set.ts"
+import {
+  getRestorableWorkbenchTabSetState,
+  WORKBENCH_MAIN_TAB,
+  WORKBENCH_TAB_LIMIT,
+  WorkbenchTabSet,
+} from "./workbench-tab-set.ts"
 
 function openSessionTabs(tabSet: WorkbenchTabSet, count: number) {
   for (let index = 1; index <= count; index += 1) {
@@ -32,6 +37,20 @@ test("WorkbenchTabSet reports directly closed tabs", () => {
   tabSet.closeTab("session:session-1")
 
   expect(closedTabIds).toEqual(["session:session-1"])
+})
+
+test("WorkbenchTabSet opens restorable tabs by default", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-1",
+    },
+  } as any)
+
+  expect(tabSet.tabs["session:session-1"]?.persistence).toBe("restore")
 })
 
 test("WorkbenchTabSet focuses the most recently used open tab after closing the active tab", () => {
@@ -134,4 +153,35 @@ test("WorkbenchTabSet reports least-recently-used tabs closed by the tab limit",
 
   expect(closedTabIds).toEqual(["session:session-0"])
   expect(tabSet.tabs["session:session-0"]).toBeUndefined()
+})
+
+test("getRestorableWorkbenchTabSetState removes transient tabs from reload snapshots", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-1",
+    },
+  } as any)
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    persistence: "transient",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-2",
+    },
+  } as any)
+
+  expect(getRestorableWorkbenchTabSetState(tabSet)).toMatchObject({
+    activeTabId: "session:session-1",
+    orderedTabIds: ["session:session-1"],
+    recency: ["session:session-1", WORKBENCH_MAIN_TAB.id],
+    tabs: {
+      "session:session-1": {
+        persistence: "restore",
+      },
+    },
+  })
 })

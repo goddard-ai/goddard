@@ -14,7 +14,11 @@ import { startSessionLifecycleSubscription } from "./sessions/lifecycle.ts"
 import { SHORTCUT_KEYMAP_FILE_VERSION } from "./shared/shortcut-keymap.ts"
 import { ShortcutRegistry } from "./shortcuts/shortcut-registry.ts"
 import { WorkbenchTabCache } from "./workbench-tab-cache.ts"
-import { WorkbenchTabSet, type WorkbenchTabSetState } from "./workbench-tab-set.ts"
+import {
+  getRestorableWorkbenchTabSetState,
+  WorkbenchTabSet,
+  type WorkbenchTabSetState,
+} from "./workbench-tab-set.ts"
 
 const APP_STATE_WRITE_DEBOUNCE_MS = 250
 
@@ -220,7 +224,9 @@ export function useAppState() {
           mainTab: sigma.captureState(appState.mainTab),
           projectContext: sigma.captureState(appState.projectContext),
           projectRegistry: sigma.captureState(appState.projectRegistry),
-          workbenchTabSet: sigma.captureState(appState.workbenchTabSet),
+          workbenchTabSet: getRestorableWorkbenchTabSetState(
+            sigma.captureState(appState.workbenchTabSet),
+          ),
         }),
         writeSnapshot: (snapshot) => {
           return desktopHost.writeAppStateSnapshot(snapshot)
@@ -251,7 +257,10 @@ export function useAppState() {
           sigma.replaceState(appState.mainTab, snapshot.mainTab)
           sigma.replaceState(appState.projectContext, snapshot.projectContext)
           sigma.replaceState(appState.projectRegistry, snapshot.projectRegistry)
-          sigma.replaceState(appState.workbenchTabSet, snapshot.workbenchTabSet)
+          sigma.replaceState(
+            appState.workbenchTabSet,
+            getRestorableWorkbenchTabSetState(snapshot.workbenchTabSet),
+          )
         }
 
         setHydrationStatus("ready")
