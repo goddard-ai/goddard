@@ -23,6 +23,7 @@ import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SessionContext, SetupContext } from "../context.ts"
 import {
   createChunkPreview,
+  createDebug,
   createLogger,
   createPayloadPreview,
   isVerboseLogging,
@@ -48,6 +49,7 @@ export async function startDaemonServer(
   } = {},
 ): Promise<DaemonServer> {
   const logger = createLogger()
+  const debug = createDebug("ipc.server")
   const setupContext = SetupContext.get()
   const runtime =
     setupContext?.runtime ??
@@ -168,7 +170,7 @@ export async function startDaemonServer(
       return IpcRequestContext.run(context, handler)
     },
     onRequestReceived: ({ name, payload }) => {
-      logger.log("ipc.request_received", {
+      debug("ipc.request_received", {
         requestName: name,
         method: name,
         payload,
@@ -181,7 +183,7 @@ export async function startDaemonServer(
         context.setSessionId(responseSessionId)
       }
 
-      logger.log("ipc.response_sent", {
+      debug("ipc.response_sent", {
         requestName: name,
         method: name,
         durationMs,

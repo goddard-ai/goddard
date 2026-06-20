@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { createLogStore } from "@goddard-ai/logs"
 import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
@@ -63,7 +64,7 @@ test("daemon submit request requires a valid session token", async () => {
   const failedIpcRequest = failed?.ipcRequest as Record<string, unknown> | undefined
   expect(received?.requestName).toBe("pr.submit")
   expect(received?.payload).toEqual({
-    token: "[REDACTED]",
+    token: "[redacted]",
     cwd: process.cwd(),
     title: "Ship daemon security",
     body: "Done.",
@@ -778,23 +779,34 @@ async function captureLogs(
   action: () => Promise<void>,
 ): Promise<{ logs: Array<Record<string, unknown>> }> {
   const output: string[] = []
+  const store = createLogStore({ databasePath: ":memory:" })
   const restoreLogging = configureLogging({
     mode: "json",
     writeLine: (line) => {
       output.push(line)
     },
+    store,
   })
 
   try {
     await action()
+    const debugLogs = store.query({ debugScope: "ipc.server", limit: 1_000 }).map((entry) => ({
+      event: entry.message,
+      level: entry.level,
+      ...entry.properties,
+    }))
     return {
-      logs: output
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.trim().length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>),
+      logs: [
+        ...output
+          .flatMap((chunk) => chunk.split("\n"))
+          .filter((line) => line.trim().length > 0)
+          .map((line) => JSON.parse(line) as Record<string, unknown>),
+        ...debugLogs,
+      ],
     }
   } finally {
     restoreLogging()
+    store.close()
   }
 }
 

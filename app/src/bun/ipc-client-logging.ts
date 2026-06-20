@@ -1,56 +1,57 @@
 import type { IpcClientHook, IpcClientHookEvent } from "@goddard-ai/ipc"
 import { getErrorMessage } from "radashi"
 
+import { getAppDebug } from "./logging.ts"
+
 const secretKeys = new Set(["token", "authorization", "goddard_session_token"])
 const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 
-/** Creates the development-only daemon IPC console hook for the desktop host. */
-export function createClientIpcLogHook(): IpcClientHook | undefined {
-  if (!isClientIpcLoggingEnabled()) {
-    return undefined
-  }
+/** Creates the daemon IPC debug hook for the desktop host. */
+export function createClientIpcLogHook(): IpcClientHook {
+  const debug = getAppDebug("ipc.client")
 
   return (event) => {
-    console.log(formatClientIpcLogEvent(event))
+    const { message, properties } = formatClientIpcLogEvent(event)
+    debug(message, properties)
   }
-}
-
-function isClientIpcLoggingEnabled() {
-  return (
-    (process.env.NODE_ENV === "development" || Bun.env.NODE_ENV === "development") &&
-    (process.env.GODDARD_CLIENT_IPC_LOG === "1" || Bun.env.GODDARD_CLIENT_IPC_LOG === "1")
-  )
 }
 
 function formatClientIpcLogEvent(event: IpcClientHookEvent) {
   const base = {
-    scope: "client",
-    at: new Date().toISOString(),
-    event: `ipc.client.${event.type}`,
     opId: event.opId,
     requestName: event.routeName,
+    method: event.routeName,
   }
 
   if (event.type === "request.start") {
-    return JSON.stringify({
-      ...base,
-      payload: createPayloadPreview(event.payload),
-    })
+    return {
+      message: "ipc.client.request_started",
+      properties: {
+        ...base,
+        payload: createPayloadPreview(event.payload),
+      },
+    }
   }
 
   if (event.type === "request.success") {
-    return JSON.stringify({
-      ...base,
-      durationMs: event.durationMs,
-      response: createPayloadPreview(event.response),
-    })
+    return {
+      message: "ipc.client.request_succeeded",
+      properties: {
+        ...base,
+        durationMs: event.durationMs,
+        response: createPayloadPreview(event.response),
+      },
+    }
   }
 
-  return JSON.stringify({
-    ...base,
-    durationMs: event.durationMs,
-    errorMessage: getErrorMessage(event.error),
-  })
+  return {
+    message: "ipc.client.request_failed",
+    properties: {
+      ...base,
+      durationMs: event.durationMs,
+      errorMessage: getErrorMessage(event.error),
+    },
+  }
 }
 
 function createPayloadPreview(value: unknown): unknown {
