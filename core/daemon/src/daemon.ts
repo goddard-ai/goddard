@@ -17,6 +17,7 @@ import {
   createLogger,
   createPayloadPreview,
   installDaemonFatalErrorCapture,
+  type DaemonLogger,
   type LogMode,
 } from "./logging.ts"
 import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
@@ -33,6 +34,19 @@ export type RunInput = {
   store?: ComposedDaemonStore
 }
 
+type ConfiguredDaemonInput = {
+  agentBinDir: string
+  baseUrl: string
+  configManager: ReturnType<typeof createConfigManager>
+  enableIpc: boolean
+  enableStream: boolean
+  logger: DaemonLogger
+  logStore: ReturnType<typeof createLogStore>
+  ownsStore: boolean
+  port: number
+  store: ComposedDaemonStore
+}
+
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
 export async function runDaemon(input: RunInput): Promise<number> {
   const logStore = createLogStore()
@@ -45,12 +59,6 @@ export async function runDaemon(input: RunInput): Promise<number> {
   })
   installDaemonFatalErrorCapture()
   const logger = createLogger()
-  const enableIpc = input.enableIpc ?? true
-  const enableStream = input.enableStream ?? true
-  let configManager!: ReturnType<typeof createConfigManager>
-  let store!: ComposedDaemonStore
-  let ownsStore = false
-  let ipcServer: DaemonServer | undefined
 
   try {
     const runtime = resolveRuntimeConfig({
@@ -58,14 +66,57 @@ export async function runDaemon(input: RunInput): Promise<number> {
       port: input.port,
       agentBinDir: input.agentBinDir,
     })
-    configManager = createConfigManager()
-    store = input.store ?? openComposedDaemonStore()
-    ownsStore = input.store == null
+    const configManager = createConfigManager()
+    let didHandoffConfigManager = false
 
+    try {
+      const store = input.store ?? openComposedDaemonStore()
+      didHandoffConfigManager = true
+
+      return await runConfiguredDaemon({
+        ...runtime,
+        configManager,
+        enableIpc: input.enableIpc ?? true,
+        enableStream: input.enableStream ?? true,
+        logger,
+        logStore,
+        ownsStore: input.store == null,
+        store,
+      })
+    } finally {
+      if (!didHandoffConfigManager) {
+        await configManager.close().catch(() => {})
+      }
+    }
+  } catch (error) {
+    logger.log("daemon.run_failed", toErrorProperties(error))
+    return 1
+  } finally {
+    restoreLogging()
+    logStore.close()
+  }
+}
+
+async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number> {
+  const {
+    agentBinDir,
+    baseUrl,
+    configManager,
+    enableIpc,
+    enableStream,
+    logger,
+    logStore,
+    ownsStore,
+    port,
+    store,
+  } = input
+  let ipcServer: DaemonServer | undefined
+
+  try {
     logger.log("daemon.startup", {
-      baseUrl: runtime.baseUrl,
-      port: runtime.port,
-      agentBinDir: runtime.agentBinDir,
+      baseUrl,
+      port,
+      agentBinDir,
     })
     void Promise.resolve()
       .then(() => {
@@ -82,14 +133,16 @@ export async function runDaemon(input: RunInput): Promise<number> {
       return 0
     }
 
-    const client = await defaultCreateBackendClient(runtime.baseUrl, store)
+    const client = await defaultCreateBackendClient(baseUrl, store)
     if (enableIpc) {
-      ipcServer = await SetupContext.run({ runtime, configManager }, () =>
-        startDaemonServer(client, {
-          port: runtime.port,
-          agentBinDir: runtime.agentBinDir,
-          store,
-        }),
+      ipcServer = await SetupContext.run(
+        { runtime: { agentBinDir, baseUrl, port }, configManager },
+        () =>
+          startDaemonServer(client, {
+            port,
+            agentBinDir,
+            store,
+          }),
       )
     }
 
@@ -176,7 +229,7 @@ export async function runDaemon(input: RunInput): Promise<number> {
                 event,
                 prompt,
                 daemonUrl: activeIpcServer.daemonUrl,
-                agentBinDir: runtime.agentBinDir,
+                agentBinDir,
                 configManager,
                 store,
               })
@@ -202,24 +255,17 @@ export async function runDaemon(input: RunInput): Promise<number> {
       ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      port: ipcServer?.port ?? runtime.port,
+      port: ipcServer?.port ?? port,
     })
     return 0
-  } catch (error) {
-    logger.log("daemon.run_failed", toErrorProperties(error))
-    return 1
   } finally {
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
-    if (configManager) {
-      await configManager.close().catch(() => {})
-    }
-    if (ownsStore && store) {
+    await configManager.close().catch(() => {})
+    if (ownsStore) {
       store.close()
     }
-    restoreLogging()
-    logStore.close()
   }
 }
 
