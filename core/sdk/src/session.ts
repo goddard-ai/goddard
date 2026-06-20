@@ -39,6 +39,8 @@ import type {
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   ShutdownSessionResponse,
+  SteerSessionRequest,
+  SteerSessionResponse,
 } from "@goddard-ai/session/schema"
 import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
@@ -61,6 +63,8 @@ export type {
   SessionLaunchPreviewResponse,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SteerSessionRequest,
+  SteerSessionResponse,
   SessionId,
   SessionLifecycleEvent,
   SessionLifecycleField,

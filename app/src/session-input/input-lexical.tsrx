@@ -30,7 +30,7 @@ import {
   type SessionInputMenuState,
 } from "./input-menu-detection.ts"
 import { isSessionInputCaretAtPromptEnd, isSessionInputCaretInsideList } from "./input-selection.ts"
-import type { SessionInputPromptBlocks } from "./input.tsrx"
+import type { SessionInputPromptBlocks, SessionInputSubmitMode } from "./input.tsrx"
 
 const sessionInputMarkdownTransformers = [UNORDERED_LIST, ORDERED_LIST]
 
@@ -77,8 +77,10 @@ export function SessionInputPlugins(props: {
   onHighlightPrevious: () => void;
   onMenuChange: (menu: SessionInputMenuState | null) => void;
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void;
+  canSubmit: boolean;
+  enableQueueSubmitShortcut?: boolean;
   onEscape?: () => void;
-  onSubmit: () => void;
+  onSubmit: (mode?: SessionInputSubmitMode) => void;
   onAcceptMenu: () => void;
 }) @{
   const [editor] = useLexicalComposerContext()
@@ -163,7 +165,13 @@ export function SessionInputPlugins(props: {
       KEY_TAB_COMMAND,
       (event) => {
         if (!props.menu) {
-          return false
+          if (!props.enableQueueSubmitShortcut || !props.canSubmit) {
+            return false
+          }
+
+          event?.preventDefault()
+          props.onSubmit("queue")
+          return true
         }
 
         event?.preventDefault()
