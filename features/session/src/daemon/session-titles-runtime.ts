@@ -18,6 +18,7 @@ export function createSessionTitleRuntime(input: {
   configProvider: DaemonConfigProvider<{
     sessionTitles?: SessionTitlesConfig
   }>
+  debug: (event: string, fields?: Record<string, unknown>) => void
   emitDiagnostic: (
     sessionId: SessionId,
     type: string,
@@ -43,15 +44,30 @@ export function createSessionTitleRuntime(input: {
     diagnosticLogger?: DaemonLogger
   }) {
     if (pendingGenerations.has(params.id)) {
+      input.debug("session.titles.generation_skipped", {
+        sessionId: params.id,
+        reason: "already_pending",
+      })
       return
     }
 
     const task = (async () => {
       const sessionRecord = input.db.sessions.get(params.id) ?? null
       if (!sessionRecord || sessionRecord.titleState !== "pending") {
+        input.debug("session.titles.generation_skipped", {
+          sessionId: params.id,
+          reason: sessionRecord ? "not_pending" : "missing_session",
+          titleState: sessionRecord?.titleState,
+        })
         return
       }
 
+      input.debug("session.titles.generation_started", {
+        sessionId: params.id,
+        provider: params.generatorConfig.provider,
+        model: params.generatorConfig.model,
+        fallbackTitle: params.fallbackTitle,
+      })
       input.emitDiagnostic(
         params.id,
         "session_title_generation_started",
@@ -81,6 +97,12 @@ export function createSessionTitleRuntime(input: {
           undefined,
           params.diagnosticLogger,
         )
+        input.debug("session.titles.generated", {
+          sessionId: params.id,
+          provider: loadedTextModel.descriptor.provider,
+          model: loadedTextModel.descriptor.model,
+          title: generatedTitle,
+        })
         input.emitDiagnostic(
           params.id,
           "session_title_generated",
@@ -101,6 +123,12 @@ export function createSessionTitleRuntime(input: {
           undefined,
           params.diagnosticLogger,
         )
+        input.debug("session.titles.generation_failed", {
+          sessionId: params.id,
+          provider: params.generatorConfig.provider,
+          model: params.generatorConfig.model,
+          errorMessage: getErrorMessage(error),
+        })
         input.emitDiagnostic(
           params.id,
           "session_title_generation_failed",
@@ -131,10 +159,23 @@ export function createSessionTitleRuntime(input: {
       sessionRecord.titleState !== "placeholder" ||
       pendingPreparations.has(params.id)
     ) {
+      input.debug("session.titles.preparation_skipped", {
+        sessionId: params.id,
+        reason: !sessionRecord
+          ? "missing_session"
+          : pendingPreparations.has(params.id)
+            ? "already_pending"
+            : "not_placeholder",
+        titleState: sessionRecord?.titleState,
+      })
       return
     }
 
     const task = (async () => {
+      input.debug("session.titles.preparation_started", {
+        sessionId: params.id,
+        cwd: sessionRecord.cwd,
+      })
       let generatorConfig = input.configProvider.getLastKnownRootConfig(sessionRecord.cwd)?.config
         .sessionTitles?.generator
 
@@ -147,6 +188,11 @@ export function createSessionTitleRuntime(input: {
 
       const preparedTitle = prepareSessionTitle(params.prompt, generatorConfig)
       if (preparedTitle.titleState === "placeholder" || !preparedTitle.promptText) {
+        input.debug("session.titles.preparation_skipped", {
+          sessionId: params.id,
+          reason: "placeholder_result",
+          titleState: preparedTitle.titleState,
+        })
         return
       }
 
@@ -159,6 +205,12 @@ export function createSessionTitleRuntime(input: {
         undefined,
         params.diagnosticLogger,
       )
+      input.debug("session.titles.prepared", {
+        sessionId: params.id,
+        title: preparedTitle.title,
+        titleState: preparedTitle.titleState,
+        hasGenerator: Boolean(preparedTitle.generatorConfig),
+      })
 
       if (preparedTitle.titleState === "pending" && preparedTitle.generatorConfig) {
         queueSessionTitleGeneration({

@@ -8,7 +8,7 @@ import {
 } from "@goddard-ai/paths/node"
 import { getErrorMessage } from "radashi"
 
-import { createLogger } from "./logging.ts"
+import { createDebug, createLogger } from "./logging.ts"
 import { readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
 
 const WATCH_RELOAD_SETTLE_MS = 50
@@ -61,6 +61,7 @@ type CachedRootConfigEntry = {
 /** Creates the daemon-owned config manager for merged persisted root-config snapshots. */
 export function createConfigManager() {
   const logger = createLogger()
+  const debug = createDebug("config.watch")
   const entries = new Map<string, CachedRootConfigEntry>()
   const globalRoot = resolve(getGoddardGlobalDir())
   const globalConfigPath = resolve(getGlobalConfigPath())
@@ -181,6 +182,12 @@ export function createConfigManager() {
     }
 
     const nextTarget = resolveWatchTarget(state)
+    debug("config.watch.target_resolved", {
+      watchScope: state.scope,
+      watchMode: nextTarget.watchMode,
+      watchRoot: nextTarget.watchedDir,
+      configPath: state.configPath,
+    })
     if (
       state.watcher &&
       state.watchMode === nextTarget.watchMode &&
@@ -204,14 +211,30 @@ export function createConfigManager() {
         ensureWatchTarget(state, onChange)
 
         if (eventType !== "change" && eventType !== "rename") {
+          debug("config.watch.event_ignored", {
+            watchScope: state.scope,
+            watchMode: previousWatchMode,
+            watchRoot: previousWatchedDir,
+            eventType,
+            filename: filename?.toString(),
+            reason: "unsupported_event",
+          })
           return
         }
 
-        if (
+        const shouldReload =
           previousWatchMode !== state.watchMode ||
           previousWatchedDir !== state.watchedDir ||
           shouldHandleWatchEvent(state, eventType, previousWatchMode, filename ?? null)
-        ) {
+        debug(shouldReload ? "config.watch.event_matched" : "config.watch.event_ignored", {
+          watchScope: state.scope,
+          watchMode: previousWatchMode,
+          watchRoot: previousWatchedDir,
+          eventType,
+          filename: filename?.toString(),
+          reason: shouldReload ? undefined : "unrelated_path",
+        })
+        if (shouldReload) {
           onChange()
         }
       })
@@ -291,6 +314,12 @@ export function createConfigManager() {
       return
     }
 
+    debug("config.watch.reload_scheduled", {
+      watchScope: changedLayer,
+      localConfigPath: entry.localConfigPath,
+      version: entry.snapshot?.version,
+      replacedPendingReload: Boolean(entry.debounceHandle),
+    })
     if (entry.debounceHandle) {
       clearTimeout(entry.debounceHandle)
     }
@@ -313,6 +342,11 @@ export function createConfigManager() {
 
       while (true) {
         try {
+          debug("config.watch.reload_started", {
+            watchScope: changedLayer,
+            localConfigPath: entry.localConfigPath,
+            attemptsRemaining,
+          })
           const nextConfig = await readMergedRootConfig(entry.cwd)
           entry.snapshot = {
             ...nextConfig,

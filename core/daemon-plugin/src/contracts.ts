@@ -110,6 +110,9 @@ export type TextPreview = {
 /** Logging and preview helpers exposed to daemon plugins. */
 export type DaemonLogService = {
   readonly createLogger: () => DaemonLogger
+  readonly createDebug: (
+    debugScope: string,
+  ) => (event: string, fields?: Record<string, unknown>) => void
   readonly isVerboseLogging: () => boolean
   readonly createPayloadPreview: (
     value: unknown,
