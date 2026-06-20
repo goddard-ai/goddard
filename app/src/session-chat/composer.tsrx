@@ -3,6 +3,7 @@ import {
   type SessionInputClasses,
   type SessionInputContextUsage,
   type SessionInputPromptBlocks,
+  type SessionInputRestoreQueuedPrompt,
   type SessionInputSubmitMode,
   type SessionInputSuggestionLoader,
 } from "~/session-input/input.tsrx"
@@ -26,6 +27,7 @@ export function Composer(props: {
   onSubmit: (prompt: SessionInputPromptBlocks, options: {
     mode: SessionInputSubmitMode;
   }) => Promise<void> | void;
+  onRestoreQueuedPrompt?: SessionInputRestoreQueuedPrompt;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: preact.ComponentChildren;
@@ -45,6 +47,7 @@ export function Composer(props: {
     activationFocus={true}
     enableQueueSubmitShortcut={props.enableQueueSubmitShortcut}
     loadSuggestions={props.loadSuggestions}
+    onRestoreQueuedPrompt={props.onRestoreQueuedPrompt}
     onPromptChange={props.onPromptChange}
     placeholder={props.placeholder}
     submitLabel={props.submitLabel}

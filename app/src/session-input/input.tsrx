@@ -30,6 +30,8 @@ export type SessionInputSuggestion =
   FileSearchComposerEntry | SessionComposerSuggestionsResponse["suggestions"][number]
 export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 export type SessionInputSubmitMode = "default" | "queue"
+export type SessionInputRestoreQueuedPrompt =
+  () => Promise<SessionInputPromptBlocks | null> | SessionInputPromptBlocks | null
 export type SessionInputTrigger = "at" | "dollar" | "slash"
 export type SessionInputSuggestionLoader = (input: {
     trigger: SessionInputTrigger;
@@ -63,6 +65,7 @@ export function SessionInput(props: {
   onSubmit: (prompt: SessionInputPromptBlocks, options: {
     mode: SessionInputSubmitMode;
   }) => Promise<void> | void;
+  onRestoreQueuedPrompt?: SessionInputRestoreQueuedPrompt;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: preact.ComponentChildren;
@@ -86,6 +89,7 @@ export function SessionInput(props: {
   const [suggestions, setSuggestions] = useState<SessionInputSuggestion[]>([])
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isRestoringQueuedPrompt, setIsRestoringQueuedPrompt] = useState(false)
   const suggestionRequestIdRef = useRef(0)
   const classes = props.classes ?? {}
   const placeholder = props.placeholder ?? "Add the next instruction for this session."
@@ -115,6 +119,10 @@ export function SessionInput(props: {
 
   const disabled = props.disabled ?? false
   const canSubmit = !disabled && hasPromptContent(promptBlocks) && menu === null && !isSubmitting
+  const canRestoreQueuedPrompt =
+    !disabled && !hasPromptContent(promptBlocks) && menu === null && !isSubmitting &&
+      !isRestoringQueuedPrompt &&
+      props.onRestoreQueuedPrompt !== undefined
   const navigation = useListNavigation({
     activeAttribute: "aria-selected",
     count: () => suggestions.length,
@@ -315,6 +323,31 @@ export function SessionInput(props: {
     void submitPrompt(mode)
   }
 
+  async function restoreQueuedPromptFromEditor() {
+    if (!canRestoreQueuedPrompt || !props.onRestoreQueuedPrompt) {
+      return
+    }
+
+    setIsRestoringQueuedPrompt(true)
+
+    try {
+      const restoredPromptBlocks = await props.onRestoreQueuedPrompt()
+      if (!restoredPromptBlocks || !hasPromptContent(restoredPromptBlocks)) {
+        return
+      }
+
+      setPromptBlocks(restoredPromptBlocks)
+      props.onPromptChange?.(restoredPromptBlocks)
+
+      if (editorRef.current) {
+        setSessionInputEditorPrompt(editorRef.current, restoredPromptBlocks)
+        focusEditor()
+      }
+    } finally {
+      setIsRestoringQueuedPrompt(false)
+    }
+  }
+
   useEffect(() => {
     if (!menu) {
       return
@@ -423,8 +456,10 @@ export function SessionInput(props: {
           onMenuChange={updateMenu}
           onPromptBlocksChange={updatePromptBlocks}
           {canSubmit}
+          {canRestoreQueuedPrompt}
           enableQueueSubmitShortcut={props.enableQueueSubmitShortcut}
           onEscape={props.onEscape}
+          onRestoreQueuedPrompt={restoreQueuedPromptFromEditor}
           onSubmit={submitFromEditor}
         />
 

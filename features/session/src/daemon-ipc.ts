@@ -35,6 +35,7 @@ import {
   type GetSessionResponse,
   type GetSessionWorktreeResponse,
   type ListSessionsResponse,
+  type PopQueuedSessionPromptResponse,
   type PrepareSessionLaunchWorktreeResponse,
   type ReleaseSessionLaunchLeaseResponse,
   type ReleaseSessionLaunchWorktreeResponse,
@@ -145,6 +146,11 @@ export const sessionIpcRoutes = defineIpcRoutes({
     steer: http.post("steer", {
       body: SteerSessionRequest,
       response: $type<SteerSessionResponse>(),
+    }),
+    /** Removes the newest client-originated queued prompt before dispatch and returns it. */
+    popQueuedPrompt: http.post("pop-queued-prompt", {
+      body: SessionIdParams,
+      response: $type<PopQueuedSessionPromptResponse>(),
     }),
     /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
     send: http.post("send", {

@@ -35,6 +35,13 @@ function resetSdk() {
     abortedQueue: [],
     response: { stopReason: "end_turn" },
   }))
+  sessionClient.popQueuedPrompt = vi.fn(async () => ({
+    id: "ses_session_1",
+    prompt: {
+      requestId: "prompt-queued",
+      prompt: [{ type: "text", text: "Queued prompt." }],
+    },
+  }))
   sessionClient.configOption = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
       session: createFixtureSession({ id }),
@@ -184,6 +191,7 @@ test("createSession refreshes session lists and launch previews", async () => {
 test("session mutations refresh list, detail, and transcript queries", async () => {
   const {
     cancelSessionTurn,
+    popQueuedSessionPrompt,
     reconnectSession,
     respondSessionPermission,
     setSessionConfigOption,
@@ -221,6 +229,10 @@ test("session mutations refresh list, detail, and transcript queries", async () 
           id: sessionId,
           prompt: [{ type: "text", text: "Adjust course." }],
         }),
+    },
+    {
+      run: () => popQueuedSessionPrompt(sessionId),
+      assert: () => expect(sessionClient.popQueuedPrompt).toHaveBeenCalledWith({ id: sessionId }),
     },
     {
       run: () =>

@@ -520,6 +520,15 @@ export const AbortedSessionPrompt = z.strictObject({
 
 export type AbortedSessionPrompt = z.infer<typeof AbortedSessionPrompt>
 
+/** One queued prompt payload removed before daemon dispatch. */
+export type QueuedSessionPrompt = AbortedSessionPrompt
+
+/** Response payload returned after removing one queued client prompt before dispatch. */
+export type PopQueuedSessionPromptResponse = {
+  id: string
+  prompt: QueuedSessionPrompt | null
+}
+
 /** Request payload used to cancel the active turn for one daemon-managed session. */
 export const CancelSessionRequest = z.strictObject({
   id: SessionId,

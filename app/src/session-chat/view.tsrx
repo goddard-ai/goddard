@@ -46,6 +46,7 @@ import {
 import {
   cancelSessionTurn,
   completeSession,
+  popQueuedSessionPrompt,
   reconnectSession,
   respondSessionPermission,
   setSessionConfigOption,
@@ -664,6 +665,15 @@ function SessionChatComposerDock(props: {
       onPromptChange={() => {
         if (submitError) {
           props.page.submitPrompt.clearError()
+        }
+      }}
+      onRestoreQueuedPrompt={async () => {
+        try {
+          const result = await popQueuedSessionPrompt(props.chat.session.id)
+          return result.prompt?.prompt ?? null
+        } catch (error) {
+          console.error("Failed to restore queued session prompt.", error)
+          return null
         }
       }}
       onSubmit={async (prompt, options) => {
