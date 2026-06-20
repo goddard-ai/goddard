@@ -33,6 +33,9 @@ export type DaemonLogger = {
   snapshot: () => DaemonLogger
 }
 
+/** Function that writes a daemon debug event to the durable log store. */
+export type DaemonDebugLogger = (event: string, fields?: Record<string, unknown>) => void
+
 /** Structured preview emitted when long text must be truncated for logs. */
 export type TextPreview = {
   text: string
@@ -121,6 +124,24 @@ export function createLogger(
   }
 
   return logger
+}
+
+/** Creates a daemon debug logger that is queryable through the durable log store. */
+export function createDebug(debugScope: string): DaemonDebugLogger {
+  return (event: string, fields: Record<string, unknown> = {}) => {
+    const entry: LogEntry = {
+      scope: "daemon",
+      at: new Date().toISOString(),
+      event,
+      ...readAmbientLogFields(),
+      ...fields,
+    }
+
+    durableLogger?.debug(event, {
+      ...readLogProperties(entry),
+      debugScope,
+    })
+  }
 }
 
 /** Captures process-level daemon failures that escape normal request/runtime handlers. */

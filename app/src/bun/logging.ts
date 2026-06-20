@@ -1,10 +1,20 @@
-import { createLogger, createLogStore, toErrorProperties, type Logger } from "@goddard-ai/logs"
+import {
+  createDebug,
+  createLogger,
+  createLogStore,
+  toErrorProperties,
+  type DebugLogger,
+  type Logger,
+  type LogStore,
+} from "@goddard-ai/logs"
 import { getErrorMessage } from "radashi"
 
 import type { AppLogInput } from "~/shared/desktop-rpc.ts"
 
 const consoleMethods: AppLogInput["level"][] = ["debug", "error", "info", "log", "warn"]
 let appLogger: Logger | undefined
+let appLogStore: LogStore | undefined
+const appDebugLoggers = new Map<string, DebugLogger>()
 let didInstallLogCapture = false
 let didInstallFatalErrorCapture = false
 
@@ -12,11 +22,26 @@ let didInstallFatalErrorCapture = false
 export function getAppLogger() {
   appLogger ??= createLogger({
     scope: "app",
-    store: createLogStore(),
+    store: getAppLogStore(),
     pid: process.pid,
   })
 
   return appLogger
+}
+
+/** Returns a process-global app debug logger for a focused runtime subsystem. */
+export function getAppDebug(debugScope: string) {
+  let debug = appDebugLoggers.get(debugScope)
+  if (!debug) {
+    debug = createDebug(debugScope, {
+      scope: "app",
+      store: getAppLogStore(),
+      pid: process.pid,
+    })
+    appDebugLoggers.set(debugScope, debug)
+  }
+
+  return debug
 }
 
 /** Captures Bun-host console output into the shared SQLite log store for agent inspection. */
@@ -96,4 +121,9 @@ function formatConsoleValue(value: unknown) {
   }
 
   return Bun.inspect(value)
+}
+
+function getAppLogStore() {
+  appLogStore ??= createLogStore()
+  return appLogStore
 }

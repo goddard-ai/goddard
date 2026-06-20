@@ -1,7 +1,8 @@
+import { createLogStore } from "@goddard-ai/logs"
 import { expect, test } from "bun:test"
 
 import { IpcRequestContext, SessionContext } from "../src/context.ts"
-import { configureLogging, createLogger } from "../src/logging.ts"
+import { configureLogging, createDebug, createLogger } from "../src/logging.ts"
 
 const ansiColorPattern = new RegExp(String.raw`\u001B\[[0-9;]*m`, "g")
 
@@ -151,4 +152,51 @@ test("snapshot logger preserves captured async context outside the original run"
     worktreeDir: null,
     worktreePoweredBy: null,
   })
+})
+
+test("debug logger writes scoped durable rows without terminal output", () => {
+  const output: string[] = []
+  const store = createLogStore({ databasePath: ":memory:" })
+  const restoreLogging = configureLogging({
+    mode: "json",
+    writeLine: (line) => {
+      output.push(line)
+    },
+    store,
+  })
+
+  try {
+    IpcRequestContext.run(
+      {
+        opId: "op-1",
+        sessionId: null,
+        setSessionId: () => {},
+      },
+      () => {
+        createDebug("ipc.server")("ipc.request_received", {
+          requestName: "session.history",
+        })
+      },
+    )
+
+    expect(output).toHaveLength(0)
+    expect(store.query({ debugScope: "ipc" })).toEqual([
+      expect.objectContaining({
+        scope: "daemon",
+        level: "debug",
+        message: "ipc.request_received",
+        properties: {
+          debugScope: "ipc.server",
+          ipcRequest: {
+            opId: "op-1",
+            sessionId: null,
+          },
+          requestName: "session.history",
+        },
+      }),
+    ])
+  } finally {
+    restoreLogging()
+    store.close()
+  }
 })
