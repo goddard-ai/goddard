@@ -664,6 +664,68 @@ describe("core/ipc", () => {
     await expect(client.add({ a: 1, b: 2 })).rejects.toThrow("Add is disabled")
   })
 
+  test("preserves structured client-visible handler failures", async () => {
+    const ipcServer = createServer({
+      port: 0,
+      routes,
+      handlers: {
+        ping: () => ({ ok: true as const }),
+        echo: ({ body: { text } }) => ({ echoed: text }),
+        add: () => {
+          throw new IpcClientError({
+            code: "math.add_disabled",
+            details: { reason: "maintenance" },
+            message: "Add is disabled",
+          })
+        },
+        systemAlert: () => [],
+        userAlert: () => [],
+      },
+    })
+
+    await once(ipcServer.server, "listening")
+    const address = readTcpAddress(ipcServer.server)
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => {
+        ipcServer.server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    })
+
+    const client = createNodeClient(address, routes)
+    try {
+      await client.add({ a: 1, b: 2 })
+      throw new Error("Expected client.add to reject")
+    } catch (error) {
+      expect(error).toBeInstanceOf(IpcClientError)
+      expect(error).toMatchObject({
+        code: "math.add_disabled",
+        details: { reason: "maintenance" },
+        message: "Add is disabled",
+      })
+    }
+
+    const response = await requestRaw(address, {
+      method: "POST",
+      path: "/add",
+      body: { a: 1, b: 2 },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(JSON.parse(response.body)).toEqual({
+      error: {
+        code: "math.add_disabled",
+        details: { reason: "maintenance" },
+        message: "Add is disabled",
+      },
+    })
+  })
+
   test("rewords missing IPC request failures", async () => {
     const missingAddress = await getUnusedTcpAddress()
     const client = createNodeClient(missingAddress, routes)

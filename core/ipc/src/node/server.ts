@@ -9,12 +9,25 @@ const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
 
 /** Returns the safe client-facing status code and message for one IPC server failure. */
 function getErrorResponse(error: unknown): {
+  body: unknown
   statusCode: number
-  message: string
 } {
-  return error instanceof IpcClientError
-    ? { statusCode: 400, message: error.message }
-    : { statusCode: 500, message: INTERNAL_SERVER_ERROR_MESSAGE }
+  if (!(error instanceof IpcClientError)) {
+    return { statusCode: 500, body: { error: INTERNAL_SERVER_ERROR_MESSAGE } }
+  }
+
+  return {
+    statusCode: 400,
+    body: {
+      error: error.code
+        ? {
+            code: error.code,
+            ...(error.details === undefined ? {} : { details: error.details }),
+            message: error.message,
+          }
+        : error.message,
+    },
+  }
 }
 
 /** Request metadata made available to request wrappers and lifecycle hooks. */
@@ -96,8 +109,8 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
         return
       }
 
-      const { statusCode, message } = getErrorResponse(error)
-      await writeResponse(res, Response.json({ error: message }, { status: statusCode }))
+      const { statusCode, body } = getErrorResponse(error)
+      await writeResponse(res, Response.json(body, { status: statusCode }))
     } finally {
       webRequest?.cleanup()
     }

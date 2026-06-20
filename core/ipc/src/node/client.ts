@@ -57,8 +57,25 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
     }) as typeof fetch,
     onJsonError: async (response) => {
       const body = (await response.json().catch(() => undefined)) as
-        | { error?: unknown; message?: unknown }
+        | {
+            error?:
+              | unknown
+              | {
+                  code?: unknown
+                  details?: unknown
+                  message?: unknown
+                }
+            message?: unknown
+          }
         | undefined
+      if (isStructuredIpcError(body?.error)) {
+        throw new IpcClientError({
+          code: body.error.code,
+          details: body.error.details,
+          message: body.error.message,
+        })
+      }
+
       const message =
         typeof body?.error === "string"
           ? body.error
@@ -68,6 +85,21 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
       throw new Error(message)
     },
   })
+}
+
+function isStructuredIpcError(value: unknown): value is {
+  code: string
+  details?: unknown
+  message: string
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    "message" in value &&
+    typeof value.code === "string" &&
+    typeof value.message === "string"
+  )
 }
 
 function formatAddress(address: NodeTcpAddress) {
