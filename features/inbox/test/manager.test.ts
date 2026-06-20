@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
+import { IpcClientError } from "@goddard-ai/ipc"
 import type { SessionId } from "@goddard-ai/session/schema"
 import { afterEach, beforeEach, expect, test } from "bun:test"
 import { kindstore, type Kindstore } from "kindstore"
 
 import { createInboxManager, inboxPlugin } from "../src/daemon.ts"
+import { InboxErrorCodes } from "../src/schema.ts"
 
 let store: Kindstore<(typeof inboxPlugin)["db"]["schema"], {}>
 
@@ -147,8 +149,14 @@ test("generic inbox updates reject entity-specific completion", () => {
   })
 
   expect(() => inbox.updateInboxItem({ entityId: sessionId, status: "completed" })).toThrow(
-    /entity-specific/i,
+    IpcClientError,
   )
+  try {
+    inbox.updateInboxItem({ entityId: sessionId, status: "completed" })
+    throw new Error("Expected inbox update to reject entity-specific completion")
+  } catch (error) {
+    expect(error).toHaveProperty("code", InboxErrorCodes.CompletedRequiresEntityOperation)
+  }
   expect(inbox.completeSession(sessionId)?.status).toBe("completed")
 })
 
