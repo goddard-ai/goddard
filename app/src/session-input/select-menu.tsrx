@@ -104,8 +104,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const [query, setQuery] = useState("")
   const typeaheadQueryRef = useRef("")
   const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const ignorePointerHoverRef = useRef(false)
-  const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
   const promptRestoreRef = useRef<(() => void) | null>(null)
   const closeReasonRef = useRef<SelectCloseReason | null>(null)
   const wasOpenRef = useRef(props.open.value)
@@ -162,27 +160,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     typeaheadTimerRef.current = setTimeout(clearTypeaheadQuery, selectorMenuTypeaheadTimeoutMs)
   }
 
-  function ignorePointerHoverUntilPointerMoves() {
-    ignorePointerHoverRef.current = true
-  }
-
-  function updatePointerPosition(event: PointerEvent) {
-    const previousPosition = lastPointerPositionRef.current
-    const nextPosition = {
-      x: event.clientX,
-      y: event.clientY,
-    }
-
-    if (
-      !previousPosition || previousPosition.x !== nextPosition.x ||
-        previousPosition.y !== nextPosition.y
-    ) {
-      ignorePointerHoverRef.current = false
-    }
-
-    lastPointerPositionRef.current = nextPosition
-  }
-
   function getSearchableItemMatch(query: string, item: SessionInputSelectItem) {
     const searchableItem = searchableItems.find((entry) => entry.item.value === item.value)
 
@@ -230,7 +207,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     onQueryChange(nextQuery) {
       setQuery(nextQuery)
     },
-    shouldIgnorePointer: () => ignorePointerHoverRef.current,
   })
 
   function findNearestTypeaheadIndex(query: string) {
@@ -277,7 +253,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       return
     }
 
-    ignorePointerHoverUntilPointerMoves()
     navigation.setActiveIndex(nextIndex)
     queueMicrotask(() => {
       navigation.focusItem(nextIndex)
@@ -341,11 +316,9 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       setQuery("")
       navigation.resetActiveIndex()
       clearTypeaheadQuery()
-      ignorePointerHoverRef.current = false
       return
     }
 
-    ignorePointerHoverUntilPointerMoves()
     const currentIndex = filteredItems.findIndex((item) => item.value === props.value)
     navigation.setActiveIndex(
       props.filterable && !isEmptyQuery(query)
@@ -481,7 +454,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
         ref={menuBodyRef}
         class={styles.menuBody}
         onBlur={closeWhenFocusLeavesSelect}
-        onPointerMove={updatePointerPosition}
         onKeyDown={(event) => {
           if (props.disabled) {
             return
@@ -508,7 +480,6 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
             case "ArrowUp":
             case "Home":
             case "End":
-              ignorePointerHoverUntilPointerMoves()
               if (navigation.onKeyDown(event)) {
                 queueMicrotask(navigation.focusActiveItem)
               }
