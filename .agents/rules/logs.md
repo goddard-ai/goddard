@@ -6,8 +6,8 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - Read each default output line as `id at scope level message pid=<pid> ...properties`.
 - Treat the default `pnpm goddard:logs page` output as a combined timeline. Keep both scopes visible when diagnosing daemon/app handoffs, IPC, startup, auth, or UI-triggered behavior.
 - Use `--scope daemon` or `--scope app` only after the cross-process timeline is no longer needed.
-- `pnpm goddard:logs page` hides `debug` rows by default. Use `--level debug` to include all debug rows, or `--debug <subsystem>` to show debug rows with a matching `debugScope` prefix.
-- Use `pnpm goddard:logs scopes` to list observed debug scopes grouped by log scope; add `--since`, `--scope`, or `--prefix` before choosing a focused `--debug <subsystem>` filter.
+- `pnpm goddard:logs page` hides `debug` rows by default. Use `--level debug` to include all debug rows, or `--debug <scope-prefix>` to show debug rows with a matching full debug scope or namespace prefix, such as `--debug session` for `session.acp`, `session.queue`, and `session.stream`.
+- Use `pnpm goddard:logs scopes` to list observed debug scopes grouped by log scope; add `--since`, `--scope`, or `--prefix` before choosing a focused `--debug <scope-prefix>` filter.
 - Start with recent, focused queries such as `pnpm goddard:logs page --since 30m`, then add `--grep`, `--regex`, or `--property path=value` filters to narrow the result.
 - For IPC/session investigations, use `pnpm goddard:logs page --json` early to identify stable correlation fields such as `opId`, `sessionId`, `requestName`, `method`, and `pid`, then pivot with `--property`, `--grep`, or `--debug`.
 - Use `--property` for top-level properties or dot-notation paths inside inline object properties, such as `--property method=daemon.health` or `--property ipcRequest.opId=<id>`; collapsed `{obj_...}` values must be inspected with `expand`.
