@@ -3,6 +3,11 @@ import type { RPCSchema } from "electrobun/bun"
 import type { AppStateSnapshot } from "./app-state.ts"
 import type { DaemonStreamName, GlobalEventEnvelope } from "./global-event-hub.ts"
 import type { ShortcutKeymapFile } from "./shortcut-keymap.ts"
+import type {
+  OpenWorktreeResponse,
+  WorktreeOpenerId,
+  WorktreeOpenersResponse,
+} from "./worktree-openers.ts"
 
 /** Valid daemon IPC request names forwarded through the desktop host. */
 export type DaemonRequestName = string
@@ -105,6 +110,14 @@ export type AppDesktopRpc = {
       writeShortcutKeymap: {
         params: { keymap: ShortcutKeymapFile }
         response: {}
+      }
+      listWorktreeOpeners: {
+        params: { sessionId: string }
+        response: WorktreeOpenersResponse
+      }
+      openWorktree: {
+        params: { sessionId: string; openerId: WorktreeOpenerId }
+        response: OpenWorktreeResponse
       }
       daemonSend: {
         params: DaemonSendInput

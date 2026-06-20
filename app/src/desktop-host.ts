@@ -17,6 +17,11 @@ import type {
 } from "~/shared/desktop-rpc.ts"
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
+import type {
+  OpenWorktreeResponse,
+  WorktreeOpenerId,
+  WorktreeOpenersResponse,
+} from "~/shared/worktree-openers.ts"
 import { goddardSdk } from "./sdk.ts"
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
@@ -62,6 +67,12 @@ export interface DesktopHostBridge {
 
   /** Writes the app-only shortcut keymap file through the Bun host bridge. */
   writeShortcutKeymap(keymap: ShortcutKeymapFile): Promise<void>
+
+  /** Lists local apps that can open the selected session worktree. */
+  listWorktreeOpeners(sessionId: string): Promise<WorktreeOpenersResponse>
+
+  /** Opens one session worktree with a local app or file manager. */
+  openWorktree(sessionId: string, openerId: WorktreeOpenerId): Promise<OpenWorktreeResponse>
 
   /** Maximizes the active desktop window through the Bun host bridge. */
   maximizeWindow(): Promise<void>
@@ -236,6 +247,16 @@ export async function writeShortcutKeymap(keymap: ShortcutKeymapFile) {
   await rpc.request.writeShortcutKeymap({ keymap })
 }
 
+/** Lists local apps that can open the selected session worktree. */
+export async function listWorktreeOpeners(sessionId: string) {
+  return await rpc.request.listWorktreeOpeners({ sessionId })
+}
+
+/** Opens one session worktree with a local app or file manager. */
+export async function openWorktree(sessionId: string, openerId: WorktreeOpenerId) {
+  return await rpc.request.openWorktree({ sessionId, openerId })
+}
+
 /** Maximizes the active desktop window through the Bun host. */
 export async function maximizeWindow(): Promise<void> {
   await rpc.request.maximizeWindow({})
@@ -297,6 +318,8 @@ export const desktopHost: DesktopHostBridge = {
   writeAppStateSnapshot,
   loadShortcutKeymap,
   writeShortcutKeymap,
+  listWorktreeOpeners,
+  openWorktree,
   maximizeWindow,
   mainWindowReady,
   openExternal,
