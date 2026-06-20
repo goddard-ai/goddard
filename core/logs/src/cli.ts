@@ -66,7 +66,7 @@ const logLevel = extendType(string, {
   },
 })
 const propertyFilters: Type<string[], Record<string, string>> = {
-  displayName: "key=value",
+  displayName: "path=value",
   async from(values) {
     const properties: Record<string, string> = {}
     for (const value of values) {
@@ -77,11 +77,13 @@ const propertyFilters: Type<string[], Record<string, string>> = {
   },
 }
 
+const jsonFlag = flag({
+  long: "json",
+  description: "Write output as JSON.",
+})
+
 const queryArgs = {
-  json: flag({
-    long: "json",
-    description: "Write logs as JSON.",
-  }),
+  json: jsonFlag,
   afterId: option({
     type: optional(positiveInteger),
     long: "after-id",
@@ -130,7 +132,8 @@ const queryArgs = {
   properties: multioption({
     type: propertyFilters,
     long: "property",
-    description: "Return entries with a matching key=value property.",
+    description:
+      "Return entries with a matching property path such as method=name or ipcRequest.opId=id.",
     defaultValue: () => ({}),
   }),
 }
@@ -188,7 +191,7 @@ const app = subcommands({
           displayName: "collapsed_id",
           description: "Collapsed log value id.",
         }),
-        ...queryArgs,
+        json: jsonFlag,
       },
       handler: ({ id, ...options }) => expand(id, options),
     }),
@@ -309,7 +312,7 @@ function readMaxCountLength(summaries: DebugScopeSummary[]) {
   return Math.max("count".length, ...summaries.map((summary) => String(summary.count).length))
 }
 
-function expand(id: string, options: CliOptions) {
+function expand(id: string, options: { json?: boolean }) {
   const store = createLogStore()
   try {
     const value = store.expand(id)

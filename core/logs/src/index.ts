@@ -526,7 +526,12 @@ function filterByRegex(entries: LogEntry[], pattern: string) {
 }
 
 function toJsonPath(key: string) {
-  return `$."${key.replaceAll('"', '\\"')}"`
+  const segments = key
+    .split(".")
+    .map((segment) => `"${segment.replaceAll('"', '\\"')}"`)
+    .join(".")
+
+  return `$.${segments}`
 }
 
 function toLogLevelRankSql(column: string) {

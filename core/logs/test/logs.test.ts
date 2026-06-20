@@ -142,7 +142,14 @@ test("queries by scope, grep, cursor, and property", async () => {
     scope: "daemon",
     level: "info",
     message: "third",
-    properties: { method: "b", durationMs: 38 },
+    properties: {
+      method: "b",
+      durationMs: 38,
+      ipcRequest: {
+        opId: "op_123",
+        sessionId: "ses_1",
+      },
+    },
   })
 
   expect(store.query({ scope: "daemon" }).map((entry) => entry.message)).toEqual(["first", "third"])
@@ -154,6 +161,9 @@ test("queries by scope, grep, cursor, and property", async () => {
   expect(store.query({ properties: { durationMs: "38" } }).map((entry) => entry.message)).toEqual([
     "third",
   ])
+  expect(
+    store.query({ properties: { "ipcRequest.opId": "op_123" } }).map((entry) => entry.message),
+  ).toEqual(["third"])
   expect(store.query({ regex: "nee(dle)?|third" }).map((entry) => entry.message)).toEqual([
     "needle",
     "third",
