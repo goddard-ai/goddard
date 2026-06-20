@@ -82,7 +82,7 @@
     "postcss": "^8.5.10",
     "react": "npm:@preact/compat",
     "react-dom": "npm:@preact/compat",
-    "sculpted": "^0.3.4",
+    "sculpted": "^0.3.8",
     "state-launcher": "0.2.2",
     "vite": "^8.0.10",
     "vitest": "^4.1.8"
