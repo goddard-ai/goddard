@@ -1512,12 +1512,6 @@ export function createSessionManager({
           method: "method" in message ? message.method : undefined,
           message: log.createPayloadPreview(message, { maxStringLength: 160 }),
         })
-        sessionLogger.log("agent.message_write", {
-          direction: "write",
-          hasId: "id" in message && message.id != null,
-          method: "method" in message ? message.method : undefined,
-          message: log.createPayloadPreview(message),
-        })
       }
 
       if (!worktree && resolvedRequest.localCheckout) {

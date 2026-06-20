@@ -84,25 +84,6 @@ function sessionStatusFromClientMessage(
   return null
 }
 
-/** Logs ACP messages in a structured form without dumping full payloads verbatim. */
-function logAgentMessage(
-  diagnosticLogger: ReturnType<DaemonLogService["createLogger"]>,
-  createPayloadPreview: DaemonLogService["createPayloadPreview"],
-  event: "agent.message_read" | "agent.message_write",
-  sessionId: SessionId,
-  acpSessionId: string | undefined,
-  message: acp.AnyMessage,
-): void {
-  diagnosticLogger.log(event, {
-    sessionId,
-    acpSessionId,
-    direction: event === "agent.message_read" ? "read" : "write",
-    hasId: "id" in message && message.id != null,
-    method: "method" in message ? message.method : undefined,
-    message: createPayloadPreview(message),
-  })
-}
-
 /** Normalizes one queued prompt back into the client-facing aborted-queue payload. */
 function toAbortedQueuedPrompt(entry: {
   requestId: string | number
@@ -208,14 +189,6 @@ export function createPromptTurnFeature({
       }
     }
 
-    logAgentMessage(
-      active.logger,
-      log.createPayloadPreview,
-      "agent.message_write",
-      active.id,
-      active.acpSessionId,
-      message,
-    )
     acpDebug("session.acp.message_write", {
       sessionId: active.id,
       acpSessionId: active.acpSessionId,
@@ -249,14 +222,6 @@ export function createPromptTurnFeature({
       params,
     } satisfies acp.AnyMessage
 
-    logAgentMessage(
-      active.logger,
-      log.createPayloadPreview,
-      "agent.message_read",
-      active.id,
-      active.acpSessionId,
-      message,
-    )
     acpDebug("session.acp.message_read", {
       sessionId: active.id,
       acpSessionId: active.acpSessionId,
@@ -297,14 +262,6 @@ export function createPromptTurnFeature({
         params,
       } satisfies acp.AnyMessage
 
-      logAgentMessage(
-        active.logger,
-        log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        message,
-      )
       acpDebug("session.acp.message_read", {
         sessionId: active.id,
         acpSessionId: active.acpSessionId,
@@ -379,14 +336,6 @@ export function createPromptTurnFeature({
         result: response,
       } satisfies acp.AnyMessage
 
-      logAgentMessage(
-        active.logger,
-        log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        responseMessage,
-      )
       acpDebug("session.acp.message_read", {
         sessionId: active.id,
         acpSessionId: active.acpSessionId,
@@ -428,14 +377,6 @@ export function createPromptTurnFeature({
         },
       } satisfies acp.AnyMessage
 
-      logAgentMessage(
-        active.logger,
-        log.createPayloadPreview,
-        "agent.message_read",
-        active.id,
-        active.acpSessionId,
-        responseMessage,
-      )
       acpDebug("session.acp.message_read", {
         sessionId: active.id,
         acpSessionId: active.acpSessionId,
