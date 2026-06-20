@@ -67,6 +67,47 @@ test("CLI pages and expands logs from the canonical database", async () => {
   expect(expanded).toContain("response payload that collapses")
 })
 
+test("CLI hides debug logs by default and can show scoped debug logs", async () => {
+  testHome = await mkdtemp(join(tmpdir(), "goddard-logs-cli-test-"))
+  process.env.HOME = testHome
+  const store = createLogStore()
+  store.append({
+    scope: "daemon",
+    level: "debug",
+    pid: 123,
+    message: "history.normalized",
+    properties: { debugScope: "session.history" },
+  })
+  store.append({
+    scope: "daemon",
+    level: "debug",
+    pid: 123,
+    message: "config.refreshed",
+    properties: { debugScope: "config.reload" },
+  })
+  store.append({
+    scope: "daemon",
+    level: "info",
+    pid: 123,
+    message: "daemon.ready",
+  })
+  store.close()
+
+  const defaultPage = await runCli(["page"], testHome)
+  expect(defaultPage).toContain("daemon.ready")
+  expect(defaultPage).not.toContain("history.normalized")
+
+  const debugPage = await runCli(["page", "--level", "debug"], testHome)
+  expect(debugPage).toContain("history.normalized")
+  expect(debugPage).toContain("config.refreshed")
+  expect(debugPage).toContain("daemon.ready")
+
+  const scopedDebugPage = await runCli(["page", "--debug", "session"], testHome)
+  expect(scopedDebugPage).toContain("history.normalized")
+  expect(scopedDebugPage).not.toContain("config.refreshed")
+  expect(scopedDebugPage).not.toContain("daemon.ready")
+})
+
 test("CLI help lists log subcommands", async () => {
   testHome = await mkdtemp(join(tmpdir(), "goddard-logs-cli-test-"))
   process.env.HOME = testHome

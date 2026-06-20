@@ -14,7 +14,13 @@ import {
   type Type,
 } from "cmd-ts"
 
-import { createLogStore, formatLogEntry, type LogEntry, type LogQuery } from "./index.ts"
+import {
+  createLogStore,
+  formatLogEntry,
+  type LogEntry,
+  type LogLevel,
+  type LogQuery,
+} from "./index.ts"
 
 type CliOptions = LogQuery & {
   json?: boolean
@@ -22,6 +28,7 @@ type CliOptions = LogQuery & {
 }
 
 const defaultTailIntervalMs = 1000
+const defaultMinimumLevel = "info" satisfies LogLevel
 const positiveInteger = extendType(string, {
   displayName: "positive-integer",
   async from(value) {
@@ -32,6 +39,22 @@ const sinceDate = extendType(string, {
   displayName: "date-or-duration",
   async from(value) {
     return parseSince(value)
+  },
+})
+const logLevel = extendType(string, {
+  displayName: "debug|info|log|warn|error",
+  async from(value) {
+    if (
+      value !== "debug" &&
+      value !== "info" &&
+      value !== "log" &&
+      value !== "warn" &&
+      value !== "error"
+    ) {
+      throw new Error("--level must be one of debug, info, log, warn, or error")
+    }
+
+    return value
   },
 })
 const propertyFilters: Type<string[], Record<string, string>> = {
@@ -65,6 +88,16 @@ const queryArgs = {
     type: optional(positiveInteger),
     long: "limit",
     description: "Maximum number of entries to return.",
+  }),
+  level: option({
+    type: optional(logLevel),
+    long: "level",
+    description: "Minimum log level to show. Defaults to info.",
+  }),
+  debugScope: option({
+    type: optional(string),
+    long: "debug",
+    description: "Show debug entries for this debug scope prefix.",
   }),
   since: option({
     type: optional(sinceDate),
@@ -141,8 +174,9 @@ export async function main(argv = process.argv.slice(2)) {
 function page(options: CliOptions) {
   const store = createLogStore()
   try {
-    const entries = store.query(options)
-    writeEntries(entries, options)
+    const query = normalizeQueryOptions(options)
+    const entries = store.query(query)
+    writeEntries(entries, query)
   } finally {
     store.close()
   }
@@ -155,7 +189,7 @@ async function tail(options: CliOptions) {
     const store = createLogStore()
     try {
       const entries = store.query({
-        ...options,
+        ...normalizeQueryOptions(options),
         afterId,
         beforeId: undefined,
       })
@@ -187,6 +221,13 @@ function expand(id: string, options: CliOptions) {
     console.log(JSON.stringify(value.body, null, 2))
   } finally {
     store.close()
+  }
+}
+
+function normalizeQueryOptions(options: CliOptions): CliOptions {
+  return {
+    ...options,
+    level: options.debugScope ? "debug" : (options.level ?? defaultMinimumLevel),
   }
 }
 

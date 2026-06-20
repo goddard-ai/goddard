@@ -34,6 +34,8 @@ export type LogEntry = {
 export type LogQuery = {
   afterId?: number
   beforeId?: number
+  debugScope?: string
+  level?: LogLevel
   limit?: number
   since?: string
   scope?: string
@@ -49,6 +51,8 @@ export type Logger = {
   log: (message: string, properties?: LogProperties) => void
   warn: (message: string, properties?: LogProperties) => void
 }
+
+export type DebugLogger = (message: string, properties?: LogProperties) => void
 
 export type LogStore = {
   append: (input: {
@@ -68,6 +72,13 @@ export type LogStore = {
 const defaultInlineByteLimit = 512
 const defaultLimit = 100
 const maxLimit = 1000
+const logLevelRanks = {
+  debug: 0,
+  info: 1,
+  log: 1,
+  warn: 2,
+  error: 3,
+} satisfies Record<LogLevel, number>
 const secretKeys = new Set(["token", "authorization", "goddard_session_token"])
 const envSecretFragments = ["TOKEN", "SECRET", "KEY", "AUTH"]
 const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -237,6 +248,20 @@ export function createLogStore(options: { databasePath?: string; inlineByteLimit
         bindings.push(query.scope)
       }
 
+      if (query.level) {
+        clauses.push(toLogLevelRankSql("level") + " >= ?")
+        bindings.push(logLevelRanks[query.level])
+      }
+
+      if (query.debugScope) {
+        clauses.push("level = ?")
+        bindings.push("debug")
+        clauses.push(
+          `(CAST(json_extract(properties_json, '$."debugScope"') AS TEXT) = ? OR CAST(json_extract(properties_json, '$."debugScope"') AS TEXT) LIKE ?)`,
+        )
+        bindings.push(query.debugScope, `${query.debugScope}.%`)
+      }
+
       if (query.grep) {
         const pattern = `%${query.grep}%`
         clauses.push("(message LIKE ? OR properties_json LIKE ?)")
@@ -330,6 +355,25 @@ export function createLogger(options: {
   }
 }
 
+export function createDebug(
+  debugScope: string,
+  options: {
+    scope: LogScope
+    store?: LogStore
+    pid?: number
+    onLine?: (line: string) => void
+  },
+): DebugLogger {
+  const logger = createLogger(options)
+
+  return (message, properties = {}) => {
+    logger.debug(message, {
+      ...properties,
+      debugScope,
+    })
+  }
+}
+
 export function formatLogEntry(entry: LogEntry) {
   const properties = Object.entries(entry.properties)
     .filter(([, value]) => value !== undefined)
@@ -418,6 +462,10 @@ function filterByRegex(entries: LogEntry[], pattern: string) {
 
 function toJsonPath(key: string) {
   return `$."${key.replaceAll('"', '\\"')}"`
+}
+
+function toLogLevelRankSql(column: string) {
+  return `CASE ${column} WHEN 'debug' THEN 0 WHEN 'info' THEN 1 WHEN 'log' THEN 1 WHEN 'warn' THEN 2 WHEN 'error' THEN 3 ELSE 1 END`
 }
 
 function normalizeDate(value: Date | string) {

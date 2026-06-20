@@ -6,6 +6,7 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - Read each default output line as `id at scope level message pid=<pid> ...properties`.
 - Treat the default `pnpm goddard:logs page` output as a combined timeline. Keep both scopes visible when diagnosing daemon/app handoffs, IPC, startup, auth, or UI-triggered behavior.
 - Use `--scope daemon` or `--scope app` only after the cross-process timeline is no longer needed.
+- `pnpm goddard:logs page` hides `debug` rows by default. Use `--level debug` to include all debug rows, or `--debug <subsystem>` to show debug rows with a matching `debugScope` prefix.
 - Start with recent, focused queries such as `pnpm goddard:logs page --since 30m`, then add `--grep`, `--regex`, or `--property key=value` filters to narrow the result.
 - Use the leading log entry IDs with `--before-id` and `--after-id` when the interesting event is near a page boundary.
 - Use `pnpm goddard:logs tail` while reproducing an issue so new app and daemon entries appear in one stream.
