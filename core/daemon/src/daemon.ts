@@ -47,8 +47,8 @@ export async function runDaemon(input: RunInput): Promise<number> {
   const logger = createLogger()
   const enableIpc = input.enableIpc ?? true
   const enableStream = input.enableStream ?? true
-  let configManager: ReturnType<typeof createConfigManager> | undefined
-  let store: ComposedDaemonStore | undefined
+  let configManager!: ReturnType<typeof createConfigManager>
+  let store!: ComposedDaemonStore
   let ownsStore = false
   let ipcServer: DaemonServer | undefined
 
@@ -61,8 +61,6 @@ export async function runDaemon(input: RunInput): Promise<number> {
     configManager = createConfigManager()
     store = input.store ?? openComposedDaemonStore()
     ownsStore = input.store == null
-    const activeConfigManager = configManager
-    const activeStore = store
 
     logger.log("daemon.startup", {
       baseUrl: runtime.baseUrl,
@@ -84,13 +82,13 @@ export async function runDaemon(input: RunInput): Promise<number> {
       return 0
     }
 
-    const client = await defaultCreateBackendClient(runtime.baseUrl, activeStore)
+    const client = await defaultCreateBackendClient(runtime.baseUrl, store)
     if (enableIpc) {
-      ipcServer = await SetupContext.run({ runtime, configManager: activeConfigManager }, () =>
+      ipcServer = await SetupContext.run({ runtime, configManager }, () =>
         startDaemonServer(client, {
           port: runtime.port,
           agentBinDir: runtime.agentBinDir,
-          store: activeStore,
+          store,
         }),
       )
     }
@@ -179,8 +177,8 @@ export async function runDaemon(input: RunInput): Promise<number> {
                 prompt,
                 daemonUrl: activeIpcServer.daemonUrl,
                 agentBinDir: runtime.agentBinDir,
-                configManager: activeConfigManager,
-                store: activeStore,
+                configManager,
+                store,
               })
               logger.log("pr_feedback.finish", {
                 exitCode,
@@ -214,7 +212,9 @@ export async function runDaemon(input: RunInput): Promise<number> {
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
-    await configManager?.close().catch(() => {})
+    if (configManager) {
+      await configManager.close().catch(() => {})
+    }
     if (ownsStore && store) {
       store.close()
     }
