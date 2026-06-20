@@ -29,6 +29,7 @@ import { registerSessionInputPromptFocus } from "./prompt-focus.ts"
 export type SessionInputSuggestion =
   FileSearchComposerEntry | SessionComposerSuggestionsResponse["suggestions"][number]
 export type SessionInputPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
+export type SessionInputSubmitMode = "default" | "queue"
 export type SessionInputTrigger = "at" | "dollar" | "slash"
 export type SessionInputSuggestionLoader = (input: {
     trigger: SessionInputTrigger;
@@ -59,7 +60,9 @@ export function SessionInput(props: {
   disabled?: boolean;
   loadSuggestions: SessionInputSuggestionLoader;
   onEscape?: () => void;
-  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
+  onSubmit: (prompt: SessionInputPromptBlocks, options: {
+    mode: SessionInputSubmitMode;
+  }) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: preact.ComponentChildren;
@@ -67,6 +70,7 @@ export function SessionInput(props: {
   footerInsideFrame?: boolean;
   iconOnlySubmit?: boolean;
   initialPrompt?: SessionInputPromptBlocks;
+  enableQueueSubmitShortcut?: boolean;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
 }) @{
@@ -190,7 +194,7 @@ export function SessionInput(props: {
       currentMenu?.anchorTop === nextMenu?.anchorTop
   }
 
-  async function submitPrompt() {
+  async function submitPrompt(mode: SessionInputSubmitMode = "default") {
     if (disabled || !hasPromptContent(promptBlocks) || menu !== null || isSubmitting) {
       return
     }
@@ -198,7 +202,7 @@ export function SessionInput(props: {
     setIsSubmitting(true)
 
     try {
-      await props.onSubmit(promptBlocks)
+      await props.onSubmit(promptBlocks, { mode })
     } catch {
       return
     } finally {
@@ -303,12 +307,12 @@ export function SessionInput(props: {
     })
   }
 
-  function submitFromEditor() {
+  function submitFromEditor(mode: SessionInputSubmitMode = "default") {
     if (disabled) {
       return
     }
 
-    void submitPrompt()
+    void submitPrompt(mode)
   }
 
   useEffect(() => {
@@ -418,6 +422,8 @@ export function SessionInput(props: {
           onHighlightPrevious={highlightPreviousSuggestion}
           onMenuChange={updateMenu}
           onPromptBlocksChange={updatePromptBlocks}
+          {canSubmit}
+          enableQueueSubmitShortcut={props.enableQueueSubmitShortcut}
           onEscape={props.onEscape}
           onSubmit={submitFromEditor}
         />

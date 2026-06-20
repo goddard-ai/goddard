@@ -30,6 +30,11 @@ function resetSdk() {
     createSessionHistoryResponse({ session: createFixtureSession({ id }) }),
   )
   sessionClient.prompt = vi.fn(async () => ({ accepted: true }))
+  sessionClient.steer = vi.fn(async () => ({
+    id: "ses_session_1",
+    abortedQueue: [],
+    response: { stopReason: "end_turn" },
+  }))
   sessionClient.configOption = {
     set: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
       session: createFixtureSession({ id }),
@@ -183,6 +188,7 @@ test("session mutations refresh list, detail, and transcript queries", async () 
     respondSessionPermission,
     setSessionConfigOption,
     setSessionModel,
+    steerSessionPrompt,
     submitSessionPrompt,
   } = await import("./mutations.ts")
   const sessionId = "ses_session_1" as DaemonSession["id"]
@@ -202,6 +208,18 @@ test("session mutations refresh list, detail, and transcript queries", async () 
           id: sessionId,
           acpId: "acp-session-1",
           prompt: [{ type: "text", text: "Continue." }],
+        }),
+    },
+    {
+      run: () =>
+        steerSessionPrompt({
+          id: sessionId,
+          prompt: [{ type: "text", text: "Adjust course." }],
+        }),
+      assert: () =>
+        expect(sessionClient.steer).toHaveBeenCalledWith({
+          id: sessionId,
+          prompt: [{ type: "text", text: "Adjust course." }],
         }),
     },
     {

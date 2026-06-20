@@ -3,6 +3,7 @@ import {
   type SessionInputClasses,
   type SessionInputContextUsage,
   type SessionInputPromptBlocks,
+  type SessionInputSubmitMode,
   type SessionInputSuggestionLoader,
 } from "~/session-input/input.tsrx"
 import styles from "~/session-input/composer-layout.style.ts"
@@ -22,13 +23,16 @@ const composerClasses: SessionInputClasses = {
 export function Composer(props: {
   disabled?: boolean;
   loadSuggestions: SessionInputSuggestionLoader;
-  onSubmit: (prompt: SessionInputPromptBlocks) => Promise<void> | void;
+  onSubmit: (prompt: SessionInputPromptBlocks, options: {
+    mode: SessionInputSubmitMode;
+  }) => Promise<void> | void;
   onPromptChange?: (prompt: SessionInputPromptBlocks) => void;
   placeholder?: string;
   helperText?: preact.ComponentChildren;
   footerControls?: preact.ComponentChildren;
   contextUsage?: SessionInputContextUsage | null;
   submitLabel?: string;
+  enableQueueSubmitShortcut?: boolean;
 }) @{
   <SessionInput
     classes={composerClasses}
@@ -39,6 +43,7 @@ export function Composer(props: {
     helperText={props.helperText}
     iconOnlySubmit={true}
     activationFocus={true}
+    enableQueueSubmitShortcut={props.enableQueueSubmitShortcut}
     loadSuggestions={props.loadSuggestions}
     onPromptChange={props.onPromptChange}
     placeholder={props.placeholder}

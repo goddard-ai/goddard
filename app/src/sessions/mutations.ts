@@ -5,6 +5,7 @@ import type {
   SessionPromptRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SteerSessionRequest,
 } from "@goddard-ai/sdk"
 
 import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
@@ -58,6 +59,15 @@ export async function releaseSessionLaunchWorktree(launchWorktreeId: string | nu
 export async function submitSessionPrompt(props: SessionPromptRequest) {
   await goddardSdk.session.prompt(props)
   invalidateSessionViews(props.id)
+}
+
+/**
+ * Cancels the active turn, injects one replacement prompt, and refreshes views.
+ */
+export async function steerSessionPrompt(props: SteerSessionRequest) {
+  const result = await goddardSdk.session.steer(props)
+  invalidateSessionViews(props.id)
+  return result
 }
 
 /**

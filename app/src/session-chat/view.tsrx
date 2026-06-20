@@ -50,6 +50,7 @@ import {
   respondSessionPermission,
   setSessionConfigOption,
   submitSessionPrompt,
+  steerSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
@@ -648,6 +649,7 @@ function SessionChatComposerDock(props: {
     <Composer
       contextUsage={props.chat.summary.contextUsage}
       disabled={!props.canSubmitPrompt}
+      enableQueueSubmitShortcut={true}
       footerControls={footerControls}
       helperText={null}
       loadSuggestions={async (input) => {
@@ -664,7 +666,7 @@ function SessionChatComposerDock(props: {
           props.page.submitPrompt.clearError()
         }
       }}
-      onSubmit={async (prompt) => {
+      onSubmit={async (prompt, options) => {
         props.onSubmittedPrompt()
         await props.page.submitPrompt.run(async () => {
           if (props.canReconnectSession) {
@@ -673,11 +675,18 @@ function SessionChatComposerDock(props: {
           }
 
           await applyDraftSessionControls()
-          await submitSessionPrompt({
-            id: props.chat.session.id,
-            acpId: props.chat.session.acpSessionId,
-            prompt,
-          })
+          if (props.chat.summary.activeTurnId !== null && options.mode !== "queue") {
+            await steerSessionPrompt({
+              id: props.chat.session.id,
+              prompt,
+            })
+          } else {
+            await submitSessionPrompt({
+              id: props.chat.session.id,
+              acpId: props.chat.session.acpSessionId,
+              prompt,
+            })
+          }
           props.chat.toggleCompletedHidden(false)
         }).catch((error) => {
           console.error("Failed to submit session prompt.", error)
