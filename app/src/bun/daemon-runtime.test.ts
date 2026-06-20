@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 
 import {
   createDaemonRunArgs,
