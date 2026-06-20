@@ -12,5 +12,6 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - Use `pnpm goddard:logs page --json` when exact fields, structured properties, or machine-readable output matter.
 - Use `pnpm goddard:logs expand <collapsed_id>` for collapsed property values wrapped as `{obj_...}`, `{arr_...}`, or `{str_...}` in default output; omit the braces when passing the ID to `expand`, and add `--json` when the collapsed metadata matters.
 - Use `pnpm goddard:logs path` only when you need to inspect, copy, or remove the underlying database directly.
+- When inspecting daemon persistence directly, remember development runs use the development data profile. The dev daemon DB is `~/.goddard/development/goddard.db`; `~/.goddard/goddard.db` is the non-development profile and may be stale or unrelated.
 - Remember that large property values are collapsed and likely secrets are redacted before persistence, so absence of a raw value in logs is expected.
 - Prefer adding or improving structured log fields over relying on long free-form messages when a debugging gap requires a code change.
