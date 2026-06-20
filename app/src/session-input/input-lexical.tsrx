@@ -78,8 +78,10 @@ export function SessionInputPlugins(props: {
   onMenuChange: (menu: SessionInputMenuState | null) => void;
   onPromptBlocksChange: (blocks: SessionInputPromptBlocks) => void;
   canSubmit: boolean;
+  canRestoreQueuedPrompt: boolean;
   enableQueueSubmitShortcut?: boolean;
   onEscape?: () => void;
+  onRestoreQueuedPrompt: () => void;
   onSubmit: (mode?: SessionInputSubmitMode) => void;
   onAcceptMenu: () => void;
 }) @{
@@ -183,6 +185,12 @@ export function SessionInputPlugins(props: {
     const unregisterBackspace = editor.registerCommand(
       KEY_BACKSPACE_COMMAND,
       (event) => {
+        if (event?.shiftKey && props.canRestoreQueuedPrompt) {
+          event.preventDefault()
+          props.onRestoreQueuedPrompt()
+          return true
+        }
+
         if (!deleteSessionInputChipBeforeCaret()) {
           return false
         }

@@ -461,6 +461,7 @@ export const sessionPlugin = definePlugin({
           }),
           cancel: async ({ body: { id } }) => sessionManager.cancelSessionTurn(id),
           steer: async ({ body: { id, prompt } }) => sessionManager.steerSession(id, prompt),
+          popQueuedPrompt: async ({ body: { id } }) => sessionManager.popQueuedPrompt(id),
           send: async ({ body: { id, message } }) => {
             await sessionManager.sendMessage(
               id,

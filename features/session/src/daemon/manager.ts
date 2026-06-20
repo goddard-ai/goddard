@@ -50,6 +50,7 @@ import {
   type InitialPromptOption,
   type ListSessionsRequest,
   type ListSessionsResponse,
+  type PopQueuedSessionPromptResponse,
   type PrepareSessionLaunchWorktreeRequest,
   type PrepareSessionLaunchWorktreeResponse,
   type ReleaseSessionLaunchLeaseRequest,
@@ -2164,6 +2165,11 @@ export function createSessionManager(input: {
     return promptTurns.steerSession(id, prompt)
   }
 
+  async function popQueuedPrompt(id: SessionId): Promise<PopQueuedSessionPromptResponse> {
+    await ready
+    return promptTurns.popQueuedPrompt(id)
+  }
+
   async function shutdownSession(id: SessionId): Promise<boolean> {
     await ready
     const active = activeSessions.get(id)
@@ -2279,6 +2285,7 @@ export function createSessionManager(input: {
     setSessionModel,
     cancelSessionTurn,
     steerSession,
+    popQueuedPrompt,
     promptSession,
     shutdownSession,
     sessionSubscriberConnected,

@@ -71,6 +71,15 @@ export async function steerSessionPrompt(props: SteerSessionRequest) {
 }
 
 /**
+ * Removes the newest queued prompt and refreshes affected session views.
+ */
+export async function popQueuedSessionPrompt(sessionId: DaemonSession["id"]) {
+  const result = await goddardSdk.session.popQueuedPrompt({ id: sessionId })
+  invalidateSessionViews(sessionId)
+  return result
+}
+
+/**
  * Updates one active ACP session config option and refreshes the affected session views.
  */
 export async function setSessionConfigOption(props: SetSessionConfigOptionRequest) {

@@ -12,6 +12,7 @@ import type {
   DaemonSession,
   DaemonSessionStatus,
   DaemonSessionTurnDraft,
+  PopQueuedSessionPromptResponse,
   SessionLifecycleField,
   SessionMessageEvent,
   SessionTurnMessage,
@@ -742,6 +743,47 @@ export function createPromptTurnFeature(input: {
     return await response
   }
 
+  async function popQueuedPrompt(id: SessionId): Promise<PopQueuedSessionPromptResponse> {
+    const active = activeSessions.get(id)
+    if (!active) {
+      throw new IpcClientError(`Session ${id} is not active`)
+    }
+
+    let queuedPromptIndex = -1
+    for (let index = active.promptQueue.length - 1; index >= 0; index -= 1) {
+      if (active.promptQueue[index]?.source === "client") {
+        queuedPromptIndex = index
+        break
+      }
+    }
+    if (queuedPromptIndex === -1) {
+      return {
+        id,
+        prompt: null,
+      }
+    }
+
+    const [queuedPrompt] = active.promptQueue.splice(queuedPromptIndex, 1)
+    if (!queuedPrompt) {
+      return {
+        id,
+        prompt: null,
+      }
+    }
+
+    input.publishSessionUpdated(active.id, ["queue"])
+    input.idleShutdown.refreshIdleShutdownState(active.id, "queued_prompt_popped")
+    input.emitDiagnostic(active.id, "session_prompt_queue_popped", {
+      requestId: queuedPrompt.requestId,
+      queueLength: active.promptQueue.length,
+    })
+
+    return {
+      id,
+      prompt: toAbortedQueuedPrompt(queuedPrompt),
+    }
+  }
+
   async function steerSession(
     id: SessionId,
     prompt: string | acp.ContentBlock[],
@@ -797,6 +839,7 @@ export function createPromptTurnFeature(input: {
     handlePermissionRequest,
     handleSessionUpdate,
     promptSession,
+    popQueuedPrompt,
     sendMessage,
     steerSession,
   }
