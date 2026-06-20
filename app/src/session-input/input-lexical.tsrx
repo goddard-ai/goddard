@@ -16,6 +16,7 @@ import {
   KEY_TAB_COMMAND,
   PASTE_COMMAND,
 } from "lexical"
+import { useSetup } from "preact-sigma"
 import { useEffect } from "preact/hooks"
 
 import { ComposerChipNode } from "~/session-chat/composer-chip-node.tsrx"
@@ -111,140 +112,133 @@ export function SessionInputPlugins(props: {
     })
   }, [editor, props])
 
-  useEffect(() => {
-    const unregisterEnter = editor.registerCommand(
-      KEY_ENTER_COMMAND,
-      (event) => {
-        if (props.menu) {
+  useSetup(
+    () => [
+      editor.registerCommand(
+        KEY_ENTER_COMMAND,
+        (event) => {
+          if (props.menu) {
+            event?.preventDefault()
+            props.onAcceptMenu()
+            return true
+          }
+
+          if (event?.shiftKey) {
+            return false
+          }
+
+          if (!event?.metaKey && !event?.ctrlKey) {
+            if (isSessionInputCaretInsideList() || !isSessionInputCaretAtPromptEnd()) {
+              return false
+            }
+          }
+
+          event?.preventDefault()
+          props.onSubmit()
+          return true
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        KEY_ARROW_DOWN_COMMAND,
+        (event) => {
+          if (!props.menu) {
+            return false
+          }
+
+          event?.preventDefault()
+          props.onHighlightNext()
+          return true
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        KEY_ARROW_UP_COMMAND,
+        (event) => {
+          if (!props.menu) {
+            return false
+          }
+
+          event?.preventDefault()
+          props.onHighlightPrevious()
+          return true
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        KEY_TAB_COMMAND,
+        (event) => {
+          if (!props.menu) {
+            if (!props.enableQueueSubmitShortcut || !props.canSubmit) {
+              return false
+            }
+
+            event?.preventDefault()
+            props.onSubmit("queue")
+            return true
+          }
+
           event?.preventDefault()
           props.onAcceptMenu()
           return true
-        }
-
-        if (event?.shiftKey) {
-          return false
-        }
-
-        if (!event?.metaKey && !event?.ctrlKey) {
-          if (isSessionInputCaretInsideList() || !isSessionInputCaretAtPromptEnd()) {
-            return false
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        KEY_BACKSPACE_COMMAND,
+        (event) => {
+          if (event?.shiftKey && props.canRestoreQueuedPrompt) {
+            event.preventDefault()
+            props.onRestoreQueuedPrompt()
+            return true
           }
-        }
 
-        event?.preventDefault()
-        props.onSubmit()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterArrowDown = editor.registerCommand(
-      KEY_ARROW_DOWN_COMMAND,
-      (event) => {
-        if (!props.menu) {
-          return false
-        }
-
-        event?.preventDefault()
-        props.onHighlightNext()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterArrowUp = editor.registerCommand(
-      KEY_ARROW_UP_COMMAND,
-      (event) => {
-        if (!props.menu) {
-          return false
-        }
-
-        event?.preventDefault()
-        props.onHighlightPrevious()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterTab = editor.registerCommand(
-      KEY_TAB_COMMAND,
-      (event) => {
-        if (!props.menu) {
-          if (!props.enableQueueSubmitShortcut || !props.canSubmit) {
+          if (!deleteSessionInputChipBeforeCaret()) {
             return false
           }
 
           event?.preventDefault()
-          props.onSubmit("queue")
           return true
-        }
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        KEY_ESCAPE_COMMAND,
+        (event) => {
+          if (!props.menu) {
+            if (!props.onEscape) {
+              return false
+            }
 
-        event?.preventDefault()
-        props.onAcceptMenu()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterBackspace = editor.registerCommand(
-      KEY_BACKSPACE_COMMAND,
-      (event) => {
-        if (event?.shiftKey && props.canRestoreQueuedPrompt) {
+            event?.preventDefault()
+            props.onEscape()
+            return true
+          }
+
+          event?.preventDefault()
+          props.onDismissMenu()
+          return true
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+      editor.registerCommand(
+        PASTE_COMMAND,
+        (event) => {
+          const link = readPastedWebLink(event)
+
+          if (!link) {
+            return false
+          }
+
           event.preventDefault()
-          props.onRestoreQueuedPrompt()
+          insertSessionInputWebLink(editor, link)
           return true
-        }
-
-        if (!deleteSessionInputChipBeforeCaret()) {
-          return false
-        }
-
-        event?.preventDefault()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterEscape = editor.registerCommand(
-      KEY_ESCAPE_COMMAND,
-      (event) => {
-        if (!props.menu) {
-          if (!props.onEscape) {
-            return false
-          }
-
-          event?.preventDefault()
-          props.onEscape()
-          return true
-        }
-
-        event?.preventDefault()
-        props.onDismissMenu()
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-    const unregisterPaste = editor.registerCommand(
-      PASTE_COMMAND,
-      (event) => {
-        const link = readPastedWebLink(event)
-
-        if (!link) {
-          return false
-        }
-
-        event.preventDefault()
-        insertSessionInputWebLink(editor, link)
-        return true
-      },
-      COMMAND_PRIORITY_HIGH,
-    )
-
-    return () => {
-      unregisterEnter()
-      unregisterArrowDown()
-      unregisterArrowUp()
-      unregisterTab()
-      unregisterBackspace()
-      unregisterEscape()
-      unregisterPaste()
-    }
-  }, [editor, props])
+        },
+        COMMAND_PRIORITY_HIGH,
+      ),
+    ],
+    [editor, props],
+  )
 
   <>
     <HistoryPlugin />
