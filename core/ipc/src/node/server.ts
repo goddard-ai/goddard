@@ -23,7 +23,6 @@ function getErrorResponse(error: unknown): {
         ? {
             code: error.code,
             ...(error.details === undefined ? {} : { details: error.details }),
-            message: error.message,
           }
         : error.message,
     },

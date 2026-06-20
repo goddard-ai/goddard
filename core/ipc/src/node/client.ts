@@ -63,7 +63,6 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
               | {
                   code?: unknown
                   details?: unknown
-                  message?: unknown
                 }
             message?: unknown
           }
@@ -72,7 +71,6 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
         throw new IpcClientError({
           code: body.error.code,
           details: body.error.details,
-          message: body.error.message,
         })
       }
 
@@ -90,15 +88,9 @@ export function createNodeClient<const TRoutes extends HttpRouteTree>(
 function isStructuredIpcError(value: unknown): value is {
   code: string
   details?: unknown
-  message: string
 } {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "code" in value &&
-    "message" in value &&
-    typeof value.code === "string" &&
-    typeof value.message === "string"
+    typeof value === "object" && value !== null && "code" in value && typeof value.code === "string"
   )
 }
 

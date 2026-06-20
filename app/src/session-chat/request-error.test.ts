@@ -10,7 +10,6 @@ test("formats known session IPC errors by exported code", () => {
       new IpcClientError({
         code: SessionErrorCodes.NotActive,
         details: { sessionId: "ses_1" },
-        message: "Session ses_1 is not active",
       }),
     ),
   ).toBe("This session is no longer active. Refresh the session and try again.")

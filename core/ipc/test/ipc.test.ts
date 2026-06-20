@@ -675,7 +675,6 @@ describe("core/ipc", () => {
           throw new IpcClientError({
             code: "math.add_disabled",
             details: { reason: "maintenance" },
-            message: "Add is disabled",
           })
         },
         systemAlert: () => [],
@@ -706,7 +705,7 @@ describe("core/ipc", () => {
       expect(error).toMatchObject({
         code: "math.add_disabled",
         details: { reason: "maintenance" },
-        message: "Add is disabled",
+        message: "IPC request failed: math.add_disabled",
       })
     }
 
@@ -721,7 +720,6 @@ describe("core/ipc", () => {
       error: {
         code: "math.add_disabled",
         details: { reason: "maintenance" },
-        message: "Add is disabled",
       },
     })
   })
