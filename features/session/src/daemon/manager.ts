@@ -451,11 +451,9 @@ async function initializeSession(params: {
 
     if (params.resumeAcpId !== undefined) {
       if (initializeResult.agentCapabilities?.loadSession !== true) {
-        throw createSessionIpcError(
-          SessionErrorCodes.CannotResumeUnsupportedAgent,
-          `Cannot resume ACP session ${params.resumeAcpId}: agent does not support session/load`,
-          { acpSessionId: params.resumeAcpId },
-        )
+        throw createSessionIpcError(SessionErrorCodes.CannotResumeUnsupportedAgent, {
+          acpSessionId: params.resumeAcpId,
+        })
       }
 
       session = await client.loadSession({
@@ -585,11 +583,9 @@ async function resolveLaunchWorktree(params: {
 
   if (params.request.worktree?.enabled !== true) {
     if (source?.bare) {
-      throw createSessionIpcError(
-        SessionErrorCodes.LaunchBareRepository,
-        "Cannot launch a local session from a bare git repository.",
-        { cwd: params.request.cwd },
-      )
+      throw createSessionIpcError(SessionErrorCodes.LaunchBareRepository, {
+        cwd: params.request.cwd,
+      })
     }
 
     return null
@@ -979,7 +975,7 @@ export function createSessionManager({
   function requireSessionDocument(id: SessionId) {
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw createSessionIpcError(SessionErrorCodes.NotFound, `Unknown session: ${id}`, {
+      throw createSessionIpcError(SessionErrorCodes.NotFound, {
         sessionId: id,
       })
     }
@@ -1228,7 +1224,7 @@ export function createSessionManager({
 
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
-      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+      throw createSessionIpcError(SessionErrorCodes.NotFound, {
         sessionId: params.id,
       })
     }
@@ -1360,7 +1356,7 @@ export function createSessionManager({
     idleShutdown.refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
-      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+      throw createSessionIpcError(SessionErrorCodes.NotFound, {
         sessionId: params.id,
       })
     }
@@ -1765,11 +1761,7 @@ export function createSessionManager({
     const existingRecord = db.sessions.get(params.id) ?? null
     const existingSession = existingRecord ?? null
     if (!existingSession) {
-      throw createSessionIpcError(
-        SessionErrorCodes.NotFound,
-        `Cannot load unknown session: ${params.id}`,
-        { sessionId: params.id },
-      )
+      throw createSessionIpcError(SessionErrorCodes.NotFound, { sessionId: params.id })
     }
 
     return launchSession(params, existingSession)
@@ -1779,7 +1771,7 @@ export function createSessionManager({
     await ready
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+      throw createSessionIpcError(SessionErrorCodes.NotFound, {
         sessionId: id,
       })
     }
@@ -1804,7 +1796,7 @@ export function createSessionManager({
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw createSessionIpcError(SessionErrorCodes.InvalidCursor, "Invalid session cursor", {
+      throw createSessionIpcError(SessionErrorCodes.InvalidCursor, {
         cursor: params.cursor ?? null,
       })
     }
@@ -1839,9 +1831,6 @@ export function createSessionManager({
       session.connectionMode === "history"
         ? SessionErrorCodes.ArchivedNotReconnectable
         : SessionErrorCodes.NotReconnectable,
-      session.connectionMode === "history"
-        ? `Session ${id} is archived and no longer reconnectable`
-        : `Session ${id} is not reconnectable`,
       { connectionMode: session.connectionMode, sessionId: id },
     )
   }
@@ -1892,11 +1881,10 @@ export function createSessionManager({
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw createSessionIpcError(
-        SessionErrorCodes.InvalidHistoryCursor,
-        "Invalid session history cursor",
-        { cursor: params.cursor ?? null, sessionId: params.id },
-      )
+      throw createSessionIpcError(SessionErrorCodes.InvalidHistoryCursor, {
+        cursor: params.cursor ?? null,
+        sessionId: params.id,
+      })
     }
 
     const turns = [...page.items].reverse().map(toSessionHistoryTurnFromRecord)
@@ -2168,11 +2156,7 @@ export function createSessionManager({
     await ready
     const active = activeSessions.get(params.id)
     if (!active) {
-      throw createSessionIpcError(
-        SessionErrorCodes.NotActive,
-        `Session ${params.id} is not active`,
-        { sessionId: params.id },
-      )
+      throw createSessionIpcError(SessionErrorCodes.NotActive, { sessionId: params.id })
     }
 
     const result = await active.session.setConfigOption(params.configId, params.value)
@@ -2186,11 +2170,7 @@ export function createSessionManager({
     await ready
     const active = activeSessions.get(params.id)
     if (!active) {
-      throw createSessionIpcError(
-        SessionErrorCodes.NotActive,
-        `Session ${params.id} is not active`,
-        { sessionId: params.id },
-      )
+      throw createSessionIpcError(SessionErrorCodes.NotActive, { sessionId: params.id })
     }
 
     const response = await active.session.setModel(params.modelId)
@@ -2261,7 +2241,7 @@ export function createSessionManager({
         where: { token },
       }) ?? null
     if (!record?.permissions) {
-      throw createSessionIpcError(SessionErrorCodes.InvalidToken, "Invalid session token")
+      throw createSessionIpcError(SessionErrorCodes.InvalidToken)
     }
 
     return record.id

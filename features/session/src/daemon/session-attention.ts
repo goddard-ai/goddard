@@ -29,7 +29,7 @@ export function createSessionAttentionFeature({
   function requireSessionDocument(id: SessionId) {
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw createSessionIpcError(SessionErrorCodes.NotFound, `Unknown session: ${id}`, {
+      throw createSessionIpcError(SessionErrorCodes.NotFound, {
         sessionId: id,
       })
     }

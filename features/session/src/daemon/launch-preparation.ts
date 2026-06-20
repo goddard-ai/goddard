@@ -112,36 +112,30 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
   const repoRoot = await resolveGitRepoRoot(params.cwd)
 
   if (!repoRoot) {
-    throw createSessionIpcError(
-      SessionErrorCodes.LaunchOutsideRepository,
-      "Cannot checkout a branch outside a git repository.",
-      { cwd: params.cwd },
-    )
+    throw createSessionIpcError(SessionErrorCodes.LaunchOutsideRepository, { cwd: params.cwd })
   }
 
   if (await inspectLaunchCheckoutDirty(repoRoot)) {
-    throw createSessionIpcError(
-      SessionErrorCodes.LaunchDirtyCheckout,
-      "Cannot checkout a branch while the local checkout has changes.",
-      { cwd: params.cwd, repoRoot },
-    )
+    throw createSessionIpcError(SessionErrorCodes.LaunchDirtyCheckout, {
+      cwd: params.cwd,
+      repoRoot,
+    })
   }
 
   const result = Bun.spawn(["git", "checkout", params.branchName], {
     cwd: repoRoot,
     stdin: "ignore",
     stdout: "ignore",
-    stderr: "pipe",
+    stderr: "ignore",
   })
-  const stderr = result.stderr ? await new Response(result.stderr).text() : ""
   await result.exited
 
   if (result.exitCode !== 0) {
-    throw createSessionIpcError(
-      SessionErrorCodes.LaunchCheckoutFailed,
-      `Cannot checkout branch ${params.branchName}: ${stderr.trim() || "git checkout failed"}`,
-      { branchName: params.branchName, cwd: params.cwd, repoRoot },
-    )
+    throw createSessionIpcError(SessionErrorCodes.LaunchCheckoutFailed, {
+      branchName: params.branchName,
+      cwd: params.cwd,
+      repoRoot,
+    })
   }
 }
 
