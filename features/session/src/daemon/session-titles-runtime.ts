@@ -12,7 +12,14 @@ type SessionId = DaemonSession["id"]
 type SessionTitleGeneratorConfig = NonNullable<SessionTitlesConfig["generator"]>
 
 /** Owns asynchronous session-title preparation and generation tasks for live prompt flow. */
-export function createSessionTitleRuntime(input: {
+export function createSessionTitleRuntime({
+  db,
+  memory,
+  configProvider,
+  debug,
+  emitDiagnostic,
+  updateSession,
+}: {
   db: SessionDb
   memory: SessionMemory
   configProvider: DaemonConfigProvider<{
@@ -32,8 +39,8 @@ export function createSessionTitleRuntime(input: {
     diagnosticLogger?: DaemonLogger,
   ) => void
 }) {
-  const pendingPreparations = input.memory.pendingSessionTitlePreparations
-  const pendingGenerations = input.memory.pendingSessionTitleGenerations
+  const pendingPreparations = memory.pendingSessionTitlePreparations
+  const pendingGenerations = memory.pendingSessionTitleGenerations
 
   /** Starts one detached title-generation task for a session whose fallback title is already persisted. */
   function queueSessionTitleGeneration(params: {
@@ -44,7 +51,7 @@ export function createSessionTitleRuntime(input: {
     diagnosticLogger?: DaemonLogger
   }) {
     if (pendingGenerations.has(params.id)) {
-      input.debug("session.titles.generation_skipped", {
+      debug("session.titles.generation_skipped", {
         sessionId: params.id,
         reason: "already_pending",
       })
@@ -52,9 +59,9 @@ export function createSessionTitleRuntime(input: {
     }
 
     const task = (async () => {
-      const sessionRecord = input.db.sessions.get(params.id) ?? null
+      const sessionRecord = db.sessions.get(params.id) ?? null
       if (!sessionRecord || sessionRecord.titleState !== "pending") {
-        input.debug("session.titles.generation_skipped", {
+        debug("session.titles.generation_skipped", {
           sessionId: params.id,
           reason: sessionRecord ? "not_pending" : "missing_session",
           titleState: sessionRecord?.titleState,
@@ -62,13 +69,13 @@ export function createSessionTitleRuntime(input: {
         return
       }
 
-      input.debug("session.titles.generation_started", {
+      debug("session.titles.generation_started", {
         sessionId: params.id,
         provider: params.generatorConfig.provider,
         model: params.generatorConfig.model,
         fallbackTitle: params.fallbackTitle,
       })
-      input.emitDiagnostic(
+      emitDiagnostic(
         params.id,
         "session_title_generation_started",
         {
@@ -88,7 +95,7 @@ export function createSessionTitleRuntime(input: {
           throw new Error("Generated session title was empty or invalid.")
         }
 
-        input.updateSession(
+        updateSession(
           params.id,
           {
             title: generatedTitle,
@@ -97,13 +104,13 @@ export function createSessionTitleRuntime(input: {
           undefined,
           params.diagnosticLogger,
         )
-        input.debug("session.titles.generated", {
+        debug("session.titles.generated", {
           sessionId: params.id,
           provider: loadedTextModel.descriptor.provider,
           model: loadedTextModel.descriptor.model,
           title: generatedTitle,
         })
-        input.emitDiagnostic(
+        emitDiagnostic(
           params.id,
           "session_title_generated",
           {
@@ -114,7 +121,7 @@ export function createSessionTitleRuntime(input: {
           params.diagnosticLogger,
         )
       } catch (error) {
-        input.updateSession(
+        updateSession(
           params.id,
           {
             title: params.fallbackTitle,
@@ -123,13 +130,13 @@ export function createSessionTitleRuntime(input: {
           undefined,
           params.diagnosticLogger,
         )
-        input.debug("session.titles.generation_failed", {
+        debug("session.titles.generation_failed", {
           sessionId: params.id,
           provider: params.generatorConfig.provider,
           model: params.generatorConfig.model,
           errorMessage: getErrorMessage(error),
         })
-        input.emitDiagnostic(
+        emitDiagnostic(
           params.id,
           "session_title_generation_failed",
           {
@@ -153,13 +160,13 @@ export function createSessionTitleRuntime(input: {
     prompt: string | acp.ContentBlock[]
     diagnosticLogger?: DaemonLogger
   }) {
-    const sessionRecord = input.db.sessions.get(params.id) ?? null
+    const sessionRecord = db.sessions.get(params.id) ?? null
     if (
       !sessionRecord ||
       sessionRecord.titleState !== "placeholder" ||
       pendingPreparations.has(params.id)
     ) {
-      input.debug("session.titles.preparation_skipped", {
+      debug("session.titles.preparation_skipped", {
         sessionId: params.id,
         reason: !sessionRecord
           ? "missing_session"
@@ -172,23 +179,23 @@ export function createSessionTitleRuntime(input: {
     }
 
     const task = (async () => {
-      input.debug("session.titles.preparation_started", {
+      debug("session.titles.preparation_started", {
         sessionId: params.id,
         cwd: sessionRecord.cwd,
       })
-      let generatorConfig = input.configProvider.getLastKnownRootConfig(sessionRecord.cwd)?.config
+      let generatorConfig = configProvider.getLastKnownRootConfig(sessionRecord.cwd)?.config
         .sessionTitles?.generator
 
       if (!generatorConfig) {
         try {
-          generatorConfig = (await input.configProvider.getRootConfig(sessionRecord.cwd)).config
+          generatorConfig = (await configProvider.getRootConfig(sessionRecord.cwd)).config
             .sessionTitles?.generator
         } catch {}
       }
 
       const preparedTitle = prepareSessionTitle(params.prompt, generatorConfig)
       if (preparedTitle.titleState === "placeholder" || !preparedTitle.promptText) {
-        input.debug("session.titles.preparation_skipped", {
+        debug("session.titles.preparation_skipped", {
           sessionId: params.id,
           reason: "placeholder_result",
           titleState: preparedTitle.titleState,
@@ -196,7 +203,7 @@ export function createSessionTitleRuntime(input: {
         return
       }
 
-      input.updateSession(
+      updateSession(
         params.id,
         {
           title: preparedTitle.title,
@@ -205,7 +212,7 @@ export function createSessionTitleRuntime(input: {
         undefined,
         params.diagnosticLogger,
       )
-      input.debug("session.titles.prepared", {
+      debug("session.titles.prepared", {
         sessionId: params.id,
         title: preparedTitle.title,
         titleState: preparedTitle.titleState,
@@ -223,7 +230,7 @@ export function createSessionTitleRuntime(input: {
       }
     })()
       .catch((error) => {
-        input.emitDiagnostic(
+        emitDiagnostic(
           params.id,
           "session_title_generation_failed",
           {

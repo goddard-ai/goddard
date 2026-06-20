@@ -23,7 +23,15 @@ import {
 type SessionTurnDraftDoc = DaemonSessionTurnDraft
 
 /** Owns active-turn draft persistence and completed-turn finalization for live sessions. */
-export function createActiveTurnStore(input: {
+export function createActiveTurnStore({
+  db,
+  debug,
+  emitDiagnostic,
+  publishSessionUpdated,
+  refreshIdleShutdownState,
+  updateSessionAvailableCommands,
+  updateSessionContextUsage,
+}: {
   db: SessionDb
   debug: (event: string, fields?: Record<string, unknown>) => void
   emitDiagnostic: (
@@ -43,8 +51,6 @@ export function createActiveTurnStore(input: {
   ) => void
   updateSessionContextUsage: (sessionId: ActiveSession["id"], message: acp.AnyMessage) => boolean
 }) {
-  const db = input.db
-
   function clearTurnDraftFlushTimer(activeTurn: ActiveTurnBuffer | null) {
     if (!activeTurn?.flushTimer) {
       return
@@ -57,7 +63,7 @@ export function createActiveTurnStore(input: {
   function flushActiveTurnDraft(active: ActiveSession, reason: string) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
-      input.debug("session.turns.flush_skipped", {
+      debug("session.turns.flush_skipped", {
         sessionId: active.id,
         reason,
         skippedReason: "no_active_turn",
@@ -80,7 +86,7 @@ export function createActiveTurnStore(input: {
     } else {
       activeTurn.draftId = db.sessionTurnDrafts.create(draftInput).id
     }
-    input.debug("session.turns.draft_flushed", {
+    debug("session.turns.draft_flushed", {
       sessionId: active.id,
       reason,
       turnId: activeTurn.turnId,
@@ -90,7 +96,7 @@ export function createActiveTurnStore(input: {
       updatedExistingDraft: Boolean(existingDraft),
     })
 
-    input.emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_turn_draft_flushed",
       {
@@ -106,7 +112,7 @@ export function createActiveTurnStore(input: {
   function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
     const activeTurn = active.activeTurn
     if (!activeTurn) {
-      input.debug("session.turns.flush_schedule_skipped", {
+      debug("session.turns.flush_schedule_skipped", {
         sessionId: active.id,
         reason,
         skippedReason: "no_active_turn",
@@ -115,7 +121,7 @@ export function createActiveTurnStore(input: {
     }
 
     if (immediate) {
-      input.debug("session.turns.flush_immediate", {
+      debug("session.turns.flush_immediate", {
         sessionId: active.id,
         reason,
         turnId: activeTurn.turnId,
@@ -126,7 +132,7 @@ export function createActiveTurnStore(input: {
     }
 
     clearTurnDraftFlushTimer(activeTurn)
-    input.debug("session.turns.flush_scheduled", {
+    debug("session.turns.flush_scheduled", {
       sessionId: active.id,
       reason,
       turnId: activeTurn.turnId,
@@ -152,7 +158,7 @@ export function createActiveTurnStore(input: {
 
     if (existingTurn?.turnId === draftRecord.turnId) {
       db.sessionTurnDrafts.delete(draftRecord.id)
-      input.debug("session.turns.draft_promotion_skipped", {
+      debug("session.turns.draft_promotion_skipped", {
         sessionId,
         draftId: draftRecord.id,
         turnId: draftRecord.turnId,
@@ -168,7 +174,7 @@ export function createActiveTurnStore(input: {
       : db.sessionTurns.create(toCompletedTurnInput(sessionId, turn))
 
     db.sessionTurnDrafts.delete(draftRecord.id)
-    input.debug("session.turns.draft_promoted", {
+    debug("session.turns.draft_promoted", {
       sessionId,
       draftId: draftRecord.id,
       turnId: draftRecord.turnId,
@@ -176,7 +182,7 @@ export function createActiveTurnStore(input: {
       replacedExistingTurn: Boolean(existingTurn),
       messageCount: draftRecord.messages.length,
     })
-    input.emitDiagnostic(
+    emitDiagnostic(
       sessionId,
       "session_turn_draft_promoted",
       {
@@ -191,15 +197,15 @@ export function createActiveTurnStore(input: {
   function appendTurnScopedMessage(active: ActiveSession, message: acp.AnyMessage) {
     const availableCommands = getAvailableCommandsFromMessage(message)
     if (availableCommands) {
-      input.debug("session.turns.available_commands_updated", {
+      debug("session.turns.available_commands_updated", {
         sessionId: active.id,
         commandCount: availableCommands.length,
       })
-      input.updateSessionAvailableCommands(active.id, availableCommands)
+      updateSessionAvailableCommands(active.id, availableCommands)
     }
 
-    if (input.updateSessionContextUsage(active.id, message)) {
-      input.debug("session.turns.message_skipped", {
+    if (updateSessionContextUsage(active.id, message)) {
+      debug("session.turns.message_skipped", {
         sessionId: active.id,
         reason: "context_usage_update",
       })
@@ -208,7 +214,7 @@ export function createActiveTurnStore(input: {
 
     const activeTurn = active.activeTurn
     if (!activeTurn) {
-      input.debug("session.turns.message_skipped", {
+      debug("session.turns.message_skipped", {
         sessionId: active.id,
         reason: "no_active_turn",
       })
@@ -217,7 +223,7 @@ export function createActiveTurnStore(input: {
 
     const turnMessage = appendSessionHistoryMessage(activeTurn.messages, message)
     if (!turnMessage) {
-      input.debug("session.turns.message_skipped", {
+      debug("session.turns.message_skipped", {
         sessionId: active.id,
         turnId: activeTurn.turnId,
         sequence: activeTurn.sequence,
@@ -227,7 +233,7 @@ export function createActiveTurnStore(input: {
       })
       return null
     }
-    input.debug("session.turns.message_appended", {
+    debug("session.turns.message_appended", {
       sessionId: active.id,
       turnId: activeTurn.turnId,
       sequence: activeTurn.sequence,
@@ -247,7 +253,7 @@ export function createActiveTurnStore(input: {
   function finalizeActiveTurn(active: ActiveSession, message: acp.AnyMessage) {
     const activeTurn = active.activeTurn
     if (!activeTurn || !isTurnTerminalMessage(activeTurn, message)) {
-      input.debug("session.turns.finalize_skipped", {
+      debug("session.turns.finalize_skipped", {
         sessionId: active.id,
         reason: activeTurn ? "non_terminal_message" : "no_active_turn",
         method: "method" in message ? message.method : undefined,
@@ -292,9 +298,9 @@ export function createActiveTurnStore(input: {
     clearTurnDraftFlushTimer(activeTurn)
     active.activeTurn = null
     active.nextTurnSequence = Math.max(active.nextTurnSequence, completedTurn.sequence + 1)
-    input.publishSessionUpdated(active.id, ["activeTurn"])
-    input.refreshIdleShutdownState(active.id, "turn_completed")
-    input.debug("session.turns.finalized", {
+    publishSessionUpdated(active.id, ["activeTurn"])
+    refreshIdleShutdownState(active.id, "turn_completed")
+    debug("session.turns.finalized", {
       sessionId: active.id,
       turnId: completedTurn.turnId,
       sequence: completedTurn.sequence,
@@ -302,7 +308,7 @@ export function createActiveTurnStore(input: {
       stopReason: stopReason ?? undefined,
       messageCount: completedTurn.messages.length,
     })
-    input.emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_turn_persisted",
       {
