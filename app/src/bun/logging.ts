@@ -91,9 +91,19 @@ export function installAppFatalErrorCapture() {
 
 /** Appends one normalized app log record into the shared SQLite log store. */
 export function writeAppLog(input: AppLogInput) {
+  if (input.debugScope) {
+    getAppDebug(input.debugScope)(input.message, {
+      source: input.source,
+      webviewId: input.webviewId,
+      ...input.properties,
+    })
+    return
+  }
+
   getAppLogger()[input.level](input.message, {
     source: input.source,
     webviewId: input.webviewId,
+    ...input.properties,
   })
 }
 

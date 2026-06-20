@@ -309,6 +309,7 @@ export const sessionPlugin = definePlugin({
   },
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
+    const streamDebug = context.log.createDebug("session.stream")
     const messageListeners = new Set<(event: RoutedSessionMessageEvent) => void>()
     const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>()
     const sessionManager = createSessionManager({
@@ -342,19 +343,36 @@ export const sessionPlugin = definePlugin({
           return
         }
         queue.push(event.message)
+        streamDebug("session.stream.message_queued", {
+          sessionId: id,
+          queueLength: queue.length,
+          listenerCount: messageListeners.size,
+        })
         wake?.()
       }
       const abort = () => {
+        streamDebug("session.stream.message_abort_signaled", {
+          sessionId: id,
+          queueLength: queue.length,
+        })
         wake?.()
       }
 
       await sessionManager.sessionSubscriberConnected(id)
       messageListeners.add(listener)
+      streamDebug("session.stream.message_subscriber_attached", {
+        sessionId: id,
+        listenerCount: messageListeners.size,
+      })
       signal.addEventListener("abort", abort)
       try {
         while (!signal.aborted) {
           const event = queue.shift()
           if (event) {
+            streamDebug("session.stream.message_yielded", {
+              sessionId: id,
+              queueLength: queue.length,
+            })
             yield event
             continue
           }
@@ -366,6 +384,12 @@ export const sessionPlugin = definePlugin({
       } finally {
         signal.removeEventListener("abort", abort)
         messageListeners.delete(listener)
+        streamDebug("session.stream.message_subscriber_detached", {
+          sessionId: id,
+          listenerCount: messageListeners.size,
+          aborted: signal.aborted,
+          queueLength: queue.length,
+        })
         await sessionManager.sessionSubscriberDisconnected(id)
       }
     }
@@ -375,18 +399,33 @@ export const sessionPlugin = definePlugin({
       let wake: (() => void) | undefined
       const listener = (event: SessionLifecycleEvent) => {
         queue.push(event)
+        streamDebug("session.stream.lifecycle_queued", {
+          eventKind: event.kind,
+          queueLength: queue.length,
+          listenerCount: lifecycleListeners.size,
+        })
         wake?.()
       }
       const abort = () => {
+        streamDebug("session.stream.lifecycle_abort_signaled", {
+          queueLength: queue.length,
+        })
         wake?.()
       }
 
       lifecycleListeners.add(listener)
+      streamDebug("session.stream.lifecycle_subscriber_attached", {
+        listenerCount: lifecycleListeners.size,
+      })
       signal.addEventListener("abort", abort)
       try {
         while (!signal.aborted) {
           const event = queue.shift()
           if (event) {
+            streamDebug("session.stream.lifecycle_yielded", {
+              eventKind: event.kind,
+              queueLength: queue.length,
+            })
             yield event
             continue
           }
@@ -398,6 +437,11 @@ export const sessionPlugin = definePlugin({
       } finally {
         signal.removeEventListener("abort", abort)
         lifecycleListeners.delete(listener)
+        streamDebug("session.stream.lifecycle_subscriber_detached", {
+          listenerCount: lifecycleListeners.size,
+          aborted: signal.aborted,
+          queueLength: queue.length,
+        })
       }
     }
 

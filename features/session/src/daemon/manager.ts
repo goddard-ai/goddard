@@ -784,8 +784,10 @@ export function createSessionManager(input: {
     emitDiagnostic,
     shutdownSession,
   })
+  const acpDebug = input.log.createDebug("session.acp")
   const activeTurns = createActiveTurnStore({
     db,
+    debug: input.log.createDebug("session.turns"),
     emitDiagnostic,
     publishSessionUpdated,
     refreshIdleShutdownState: idleShutdown.refreshIdleShutdownState,
@@ -796,6 +798,7 @@ export function createSessionManager(input: {
     db,
     memory,
     configProvider: input.configProvider,
+    debug: input.log.createDebug("session.titles"),
     emitDiagnostic,
     updateSession,
   })
@@ -1492,6 +1495,13 @@ export function createSessionManager(input: {
       }
 
       const onMessageWrite = (message: acp.AnyMessage) => {
+        acpDebug("session.acp.message_write", {
+          sessionId: id,
+          acpSessionId: sessionContext.acpSessionId,
+          hasId: "id" in message && message.id != null,
+          method: "method" in message ? message.method : undefined,
+          message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+        })
         sessionLogger.log("agent.message_write", {
           direction: "write",
           hasId: "id" in message && message.id != null,

@@ -122,6 +122,7 @@ export async function startDaemonServer(
       },
     },
     log: {
+      createDebug,
       createLogger,
       isVerboseLogging,
       createPayloadPreview,

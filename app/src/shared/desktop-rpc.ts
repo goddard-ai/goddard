@@ -52,6 +52,8 @@ export type AppLogInput = {
   source: "host" | "renderer"
   level: "debug" | "error" | "info" | "log" | "warn"
   message: string
+  debugScope?: string
+  properties?: Record<string, unknown>
   webviewId?: number
 }
 

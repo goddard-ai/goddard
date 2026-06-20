@@ -27,10 +27,15 @@ type QueryEntry = {
   hasData: boolean
   injectionId: number | null
   promise: Promise<unknown> | null
+  queryKey: string
   queryFn: AnyQueryFunction
   refetchOnWindowReactivate: boolean
   stale: boolean
   subscribers: Set<() => void>
+}
+
+type QueryDebugWindow = Window & {
+  __goddardDidInstallLogCapture?: boolean
 }
 
 type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = {
@@ -198,6 +203,13 @@ export class QueryClient {
     const entry = this.getEntry(queryKey)
     const wasInactive = entry.subscribers.size === 0
     entry.subscribers.add(subscriber)
+    debugQuery("app.query.subscribed", {
+      queryKey,
+      subscriberCount: entry.subscribers.size,
+      hasData: entry.hasData,
+      hasPromise: Boolean(entry.promise),
+      stale: entry.stale,
+    })
 
     if (wasInactive && entry.hasData && !entry.promise && !this.isInjected(entry)) {
       void this.fetchEntry(entry, true)
@@ -205,6 +217,10 @@ export class QueryClient {
 
     return () => {
       entry.subscribers.delete(subscriber)
+      debugQuery("app.query.unsubscribed", {
+        queryKey,
+        subscriberCount: entry.subscribers.size,
+      })
     }
   }
 
@@ -217,6 +233,12 @@ export class QueryClient {
       const entry = this.entries.get(this.getQueryKey(queryFn, args))
 
       if (entry) {
+        debugQuery("app.query.invalidated", {
+          queryKey: this.getQueryKey(queryFn, args),
+          mode: "exact",
+          subscriberCount: entry.subscribers.size,
+          hasPromise: Boolean(entry.promise),
+        })
         this.invalidateEntry(entry)
       }
 
@@ -227,6 +249,12 @@ export class QueryClient {
       const entry = this.entries.get(key)
 
       if (entry) {
+        debugQuery("app.query.invalidated", {
+          queryKey: key,
+          mode: "function",
+          subscriberCount: entry.subscribers.size,
+          hasPromise: Boolean(entry.promise),
+        })
         this.invalidateEntry(entry)
       }
     }
@@ -241,20 +269,35 @@ export class QueryClient {
     const entry = this.entries.get(queryKey)
 
     if (!entry) {
+      debugQuery("app.query.evict_skipped", {
+        queryKey,
+        reason: "missing_entry",
+      })
       return
     }
 
     if (this.isInjected(entry)) {
+      debugQuery("app.query.evict_skipped", {
+        queryKey,
+        reason: "injected",
+      })
       return
     }
 
     if (entry.subscribers.size > 0) {
+      debugQuery("app.query.evict_invalidated", {
+        queryKey,
+        subscriberCount: entry.subscribers.size,
+      })
       this.invalidateEntry(entry)
       return
     }
 
     this.entries.delete(queryKey)
     this.entryKeysByFunction.get(queryFn)?.delete(queryKey)
+    debugQuery("app.query.evicted", {
+      queryKey,
+    })
   }
 
   /**
@@ -268,6 +311,11 @@ export class QueryClient {
         !entry.promise &&
         !this.isInjected(entry)
       ) {
+        debugQuery("app.query.refetch_active", {
+          subscriberCount: entry.subscribers.size,
+          hasData: entry.hasData,
+          stale: entry.stale,
+        })
         void this.fetchEntry(entry, entry.hasData)
       }
     }
@@ -301,9 +349,20 @@ export class QueryClient {
     entry.promise = null
     entry.stale = false
     this.notify(entry)
+    debugQuery("app.query.data_injected", {
+      queryKey,
+      injectionId,
+      subscriberCount: entry.subscribers.size,
+      replacedExistingEntry: Boolean(existingEntry),
+    })
 
     return () => {
       if (entry.injectionId !== injectionId) {
+        debugQuery("app.query.inject_cleanup_skipped", {
+          queryKey,
+          injectionId,
+          currentInjectionId: entry.injectionId,
+        })
         return
       }
 
@@ -313,6 +372,11 @@ export class QueryClient {
         if (entry.subscribers.size === 0) {
           this.entries.delete(queryKey)
           this.entryKeysByFunction.get(queryFn)?.delete(queryKey)
+          debugQuery("app.query.inject_cleaned_up", {
+            queryKey,
+            injectionId,
+            removedEntry: true,
+          })
           return
         }
 
@@ -322,6 +386,12 @@ export class QueryClient {
         entry.promise = null
         entry.stale = true
         this.notify(entry)
+        debugQuery("app.query.inject_cleaned_up", {
+          queryKey,
+          injectionId,
+          removedEntry: false,
+          restoredPreviousEntry: false,
+        })
         return
       }
 
@@ -332,27 +402,53 @@ export class QueryClient {
       entry.refetchOnWindowReactivate = previousEntry.refetchOnWindowReactivate
       entry.stale = previousEntry.promise ? true : previousEntry.stale
       this.notify(entry)
+      debugQuery("app.query.inject_cleaned_up", {
+        queryKey,
+        injectionId,
+        removedEntry: false,
+        restoredPreviousEntry: true,
+      })
     }
   }
 
   private fetchEntry(entry: QueryEntry, background: boolean) {
     if (this.isInjected(entry)) {
+      debugQuery("app.query.fetch_skipped", {
+        queryKey: entry.queryKey,
+        reason: "injected",
+      })
       return Promise.resolve(entry.data)
     }
 
     if (entry.promise) {
+      debugQuery("app.query.fetch_joined", {
+        queryKey: entry.queryKey,
+        background,
+      })
       return entry.promise
     }
 
     entry.error = null
     entry.stale = false
 
+    debugQuery("app.query.fetch_started", {
+      queryKey: entry.queryKey,
+      background,
+      hasData: entry.hasData,
+      subscriberCount: entry.subscribers.size,
+      argCount: entry.args.length,
+    })
     const promise = Promise.resolve().then(() => entry.queryFn(...entry.args))
     entry.promise = promise
 
     promise.then(
       (data) => {
         if (entry.promise !== promise) {
+          debugQuery("app.query.fetch_result_ignored", {
+            queryKey: entry.queryKey,
+            reason: "stale_promise",
+            background,
+          })
           return
         }
 
@@ -360,6 +456,12 @@ export class QueryClient {
         entry.hasData = true
         entry.promise = null
         this.notify(entry)
+        debugQuery("app.query.fetch_succeeded", {
+          queryKey: entry.queryKey,
+          background,
+          subscriberCount: entry.subscribers.size,
+          stale: entry.stale,
+        })
 
         if (entry.stale) {
           void this.fetchEntry(entry, background)
@@ -367,6 +469,11 @@ export class QueryClient {
       },
       (error) => {
         if (entry.promise !== promise) {
+          debugQuery("app.query.fetch_result_ignored", {
+            queryKey: entry.queryKey,
+            reason: "stale_promise",
+            background,
+          })
           return
         }
 
@@ -377,6 +484,14 @@ export class QueryClient {
         }
 
         this.notify(entry)
+        debugQuery("app.query.fetch_failed", {
+          queryKey: entry.queryKey,
+          background,
+          hasData: entry.hasData,
+          subscriberCount: entry.subscribers.size,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          stale: entry.stale,
+        })
 
         if (entry.stale) {
           void this.fetchEntry(entry, entry.hasData)
@@ -416,6 +531,7 @@ export class QueryClient {
       hasData: false,
       injectionId: null,
       promise: null,
+      queryKey,
       queryFn,
       refetchOnWindowReactivate: options.refetchOnWindowReactivate,
       stale: true,
@@ -424,6 +540,11 @@ export class QueryClient {
 
     this.entries.set(queryKey, entry)
     this.getFunctionEntryKeys(queryFn).add(queryKey)
+    debugQuery("app.query.entry_created", {
+      queryKey,
+      argCount: args.length,
+      refetchOnWindowReactivate: options.refetchOnWindowReactivate,
+    })
     return entry
   }
 
@@ -465,10 +586,34 @@ export class QueryClient {
   }
 
   private notify(entry: QueryEntry) {
+    debugQuery("app.query.notified", {
+      queryKey: entry.queryKey,
+      subscriberCount: entry.subscribers.size,
+      hasData: entry.hasData,
+      hasPromise: Boolean(entry.promise),
+      stale: entry.stale,
+    })
     for (const subscriber of entry.subscribers) {
       subscriber()
     }
   }
+}
+
+function debugQuery(message: string, properties: Record<string, unknown> = {}) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  if (!(window as QueryDebugWindow).__goddardDidInstallLogCapture) {
+    return
+  }
+
+  console.debug({
+    __goddardDebugLog: true,
+    debugScope: "app.query",
+    message,
+    properties,
+  })
 }
 
 export const queryClient = new QueryClient()

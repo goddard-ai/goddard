@@ -19,6 +19,13 @@ import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import { goddardSdk } from "./sdk.ts"
 
+type RendererDebugLogInput = {
+  __goddardDebugLog: true
+  debugScope: string
+  message: string
+  properties?: Record<string, unknown>
+}
+
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's
   // default 1s request timeout, so the app bridge must wait for the host response.
@@ -154,7 +161,10 @@ function installRendererLogCapture() {
   for (const method of consoleMethods) {
     const original = console[method].bind(console)
     console[method] = (...args: unknown[]) => {
-      void writeRendererLog(method, args.map(formatConsoleValue).join(" "))
+      const debugLog = method === "debug" ? readRendererDebugLog(args) : null
+      void (debugLog
+        ? writeRendererDebugLog(debugLog)
+        : writeRendererLog(method, args.map(formatConsoleValue).join(" ")))
       original(...args)
     }
   }
@@ -176,6 +186,43 @@ async function writeRendererLog(level: AppLogInput["level"], message: string) {
       webviewId: window.__electrobunWebviewId,
     })
     .catch(() => {})
+}
+
+async function writeRendererDebugLog(input: RendererDebugLogInput) {
+  await rpc.request
+    .writeAppLog({
+      source: "renderer",
+      level: "debug",
+      message: input.message,
+      debugScope: input.debugScope,
+      properties: input.properties,
+      webviewId: window.__electrobunWebviewId,
+    })
+    .catch(() => {})
+}
+
+function readRendererDebugLog(args: unknown[]): RendererDebugLogInput | null {
+  const [input] = args
+  if (!input || typeof input !== "object") {
+    return null
+  }
+
+  const record = input as Partial<RendererDebugLogInput>
+  if (
+    record.__goddardDebugLog !== true ||
+    typeof record.debugScope !== "string" ||
+    typeof record.message !== "string"
+  ) {
+    return null
+  }
+
+  return {
+    __goddardDebugLog: true,
+    debugScope: record.debugScope,
+    message: record.message,
+    properties:
+      record.properties && typeof record.properties === "object" ? record.properties : undefined,
+  }
 }
 
 function formatErrorEvent(event: ErrorEvent) {

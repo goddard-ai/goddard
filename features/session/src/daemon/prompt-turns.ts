@@ -143,6 +143,8 @@ export function createPromptTurnFeature(input: {
   ) => void
 }) {
   const activeSessions = input.memory.activeSessions
+  const acpDebug = input.log.createDebug("session.acp")
+  const queueDebug = input.log.createDebug("session.queue")
 
   function publishSessionMessage(
     active: ActiveSession,
@@ -202,6 +204,13 @@ export function createPromptTurnFeature(input: {
       active.acpSessionId,
       message,
     )
+    acpDebug("session.acp.message_write", {
+      sessionId: active.id,
+      acpSessionId: active.acpSessionId,
+      hasId: "id" in message && message.id != null,
+      method: "method" in message ? message.method : undefined,
+      message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+    })
     input.emitDiagnostic(
       active.id,
       "session_message_sent",
@@ -236,6 +245,14 @@ export function createPromptTurnFeature(input: {
       active.acpSessionId,
       message,
     )
+    acpDebug("session.acp.message_read", {
+      sessionId: active.id,
+      acpSessionId: active.acpSessionId,
+      hasId: false,
+      method: acp.CLIENT_METHODS.session_update,
+      updateType: params.update.sessionUpdate,
+      message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+    })
     publishSessionMessage(active, message, {
       messageEvent: active.activeTurn
         ? undefined
@@ -276,6 +293,13 @@ export function createPromptTurnFeature(input: {
         active.acpSessionId,
         message,
       )
+      acpDebug("session.acp.message_read", {
+        sessionId: active.id,
+        acpSessionId: active.acpSessionId,
+        hasId: true,
+        method: acp.CLIENT_METHODS.session_request_permission,
+        message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+      })
       publishSessionMessage(active, message)
     })
   }
@@ -351,11 +375,26 @@ export function createPromptTurnFeature(input: {
         active.acpSessionId,
         responseMessage,
       )
+      acpDebug("session.acp.message_read", {
+        sessionId: active.id,
+        acpSessionId: active.acpSessionId,
+        hasId: true,
+        responseId: entry.requestId,
+        responseKind: "result",
+        message: input.log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
+      })
       const detachedEvent = createDetachedPromptResponseEvent(active, entry, responseMessage)
       if (!detachedEvent) {
         updateSessionFromPromptResponse(active, entry.requestId, response)
       }
       entry.resolve?.(response)
+      queueDebug("session.queue.prompt_completed", {
+        sessionId: active.id,
+        requestId: entry.requestId,
+        turnSequence: entry.turnSequence,
+        detached: Boolean(detachedEvent),
+        queueLength: active.promptQueue.length,
+      })
 
       if (active.blockingPromptRequestId === entry.requestId) {
         active.blockingPromptRequestId = null
@@ -385,7 +424,23 @@ export function createPromptTurnFeature(input: {
         active.acpSessionId,
         responseMessage,
       )
+      acpDebug("session.acp.message_read", {
+        sessionId: active.id,
+        acpSessionId: active.acpSessionId,
+        hasId: true,
+        responseId: entry.requestId,
+        responseKind: "error",
+        errorMessage: getErrorMessage(error),
+        message: input.log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
+      })
       entry.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
+      queueDebug("session.queue.prompt_failed", {
+        sessionId: active.id,
+        requestId: entry.requestId,
+        turnSequence: entry.turnSequence,
+        errorMessage: getErrorMessage(error),
+        queueLength: active.promptQueue.length,
+      })
       if (active.blockingPromptRequestId === entry.requestId) {
         active.blockingPromptRequestId = null
       }
@@ -401,13 +456,30 @@ export function createPromptTurnFeature(input: {
 
   async function processPromptQueue(active: ActiveSession): Promise<void> {
     if (active.blockingPromptRequestId !== null || active.pendingSteer?.waitingForBoundary) {
+      queueDebug("session.queue.dispatch_blocked", {
+        sessionId: active.id,
+        blockingPromptRequestId: active.blockingPromptRequestId,
+        pendingSteerRequestId: active.pendingSteer?.requestId,
+        waitingForBoundary: active.pendingSteer?.waitingForBoundary,
+        queueLength: active.promptQueue.length,
+      })
       return
     }
 
     const nextPrompt = active.promptQueue.shift()
     if (!nextPrompt) {
+      queueDebug("session.queue.dispatch_skipped", {
+        sessionId: active.id,
+        reason: "empty_queue",
+      })
       return
     }
+    queueDebug("session.queue.prompt_dequeued", {
+      sessionId: active.id,
+      requestId: nextPrompt.requestId,
+      source: nextPrompt.source,
+      remainingQueueLength: active.promptQueue.length,
+    })
     input.publishSessionUpdated(active.id, ["queue"])
 
     const promptRequest = {
@@ -468,6 +540,13 @@ export function createPromptTurnFeature(input: {
         },
         active.logger,
       )
+      queueDebug("session.queue.prompt_dispatching", {
+        sessionId: active.id,
+        requestId: nextPrompt.requestId,
+        source: nextPrompt.source,
+        turnId: activeTurn.turnId,
+        sequence: activeTurn.sequence,
+      })
       publishClientMessage(active, message, {
         persistTurnMessage: false,
         onBeforePublish: (resolvedMessage) => {
@@ -533,6 +612,12 @@ export function createPromptTurnFeature(input: {
       queuedPrompt.reject?.(new IpcClientError(reason))
     }
 
+    queueDebug("session.queue.prompts_aborted", {
+      sessionId: active.id,
+      reason,
+      abortedQueueLength: abortedQueue.length,
+      includedPendingSteer: Boolean(options.includePendingSteer),
+    })
     input.publishSessionUpdated(active.id, ["queue"])
     input.idleShutdown.refreshIdleShutdownState(active.id, "queued_prompts_aborted")
     return abortedQueue
@@ -546,6 +631,12 @@ export function createPromptTurnFeature(input: {
     const pendingSteer = active.pendingSteer
     active.pendingSteer = null
     pendingSteer.reject(new IpcClientError(reason))
+    queueDebug("session.queue.pending_steer_aborted", {
+      sessionId: active.id,
+      requestId: pendingSteer.requestId,
+      cancelledRequestId: pendingSteer.cancelledRequestId,
+      reason,
+    })
     return [
       toAbortedQueuedPrompt({
         requestId: pendingSteer.requestId,
@@ -561,6 +652,10 @@ export function createPromptTurnFeature(input: {
     },
   ): Promise<boolean> {
     if (active.blockingPromptRequestId === null) {
+      queueDebug("session.queue.cancel_skipped", {
+        sessionId: active.id,
+        reason: "no_blocking_prompt",
+      })
       return false
     }
 
@@ -576,6 +671,11 @@ export function createPromptTurnFeature(input: {
       { updateStatus: options.updateStatus },
     )
     await active.session.cancel()
+    queueDebug("session.queue.cancel_sent", {
+      sessionId: active.id,
+      blockingPromptRequestId: active.blockingPromptRequestId,
+      updateStatus: options.updateStatus,
+    })
 
     return true
   }
@@ -632,6 +732,13 @@ export function createPromptTurnFeature(input: {
         message.params.update.sessionUpdate === "tool_call_update"
       : "id" in message && message.id != null && message.id === steer.cancelledRequestId
     if (!reachedBoundary) {
+      queueDebug("session.queue.steer_boundary_waiting", {
+        sessionId: active.id,
+        requestId: steer.requestId,
+        cancelledRequestId: steer.cancelledRequestId,
+        method: "method" in message ? message.method : undefined,
+        hasId: "id" in message && message.id != null,
+      })
       return
     }
 
@@ -641,6 +748,12 @@ export function createPromptTurnFeature(input: {
     }
 
     active.pendingSteer = null
+    queueDebug("session.queue.steer_boundary_reached", {
+      sessionId: active.id,
+      requestId: steer.requestId,
+      cancelledRequestId: steer.cancelledRequestId,
+      abortedQueueLength: steer.abortedQueue.length,
+    })
     try {
       const response = await promptSession(active.id, steer.prompt, { priority: "next" })
       steer.resolve({
@@ -674,6 +787,12 @@ export function createPromptTurnFeature(input: {
         requestId: message.id,
         prompt: [...message.params.prompt],
         source: "client",
+      })
+      queueDebug("session.queue.prompt_enqueued", {
+        sessionId: active.id,
+        requestId: message.id,
+        source: "client",
+        queueLength: active.promptQueue.length,
       })
       input.publishSessionUpdated(active.id, ["queue"])
       input.updateSessionActivity(id, {
@@ -749,6 +868,13 @@ export function createPromptTurnFeature(input: {
       } else {
         active.promptQueue.push(queuedPrompt)
       }
+      queueDebug("session.queue.prompt_enqueued", {
+        sessionId: active.id,
+        requestId,
+        source: "daemon",
+        priority: options.priority ?? "normal",
+        queueLength: active.promptQueue.length,
+      })
     })
 
     input.updateSessionActivity(active.id, {})
@@ -796,6 +922,11 @@ export function createPromptTurnFeature(input: {
     }
 
     input.publishSessionUpdated(active.id, ["queue"])
+    queueDebug("session.queue.prompt_popped", {
+      sessionId: active.id,
+      requestId: queuedPrompt.requestId,
+      queueLength: active.promptQueue.length,
+    })
     input.idleShutdown.refreshIdleShutdownState(active.id, "queued_prompt_popped")
     input.emitDiagnostic(active.id, "session_prompt_queue_popped", {
       requestId: queuedPrompt.requestId,
@@ -824,6 +955,11 @@ export function createPromptTurnFeature(input: {
     )
 
     if (active.blockingPromptRequestId === null) {
+      queueDebug("session.queue.steer_immediate", {
+        sessionId: active.id,
+        requestId,
+        abortedQueueLength: abortedQueue.length,
+      })
       const response = await promptSession(id, prompt, { priority: "next" })
       return {
         id,
@@ -843,6 +979,12 @@ export function createPromptTurnFeature(input: {
         resolve,
         reject,
       }
+      queueDebug("session.queue.steer_started", {
+        sessionId: active.id,
+        requestId,
+        cancelledRequestId: active.blockingPromptRequestId,
+        abortedQueueLength: abortedQueue.length,
+      })
       input.updateSessionActivity(active.id, {})
       input.idleShutdown.refreshIdleShutdownState(active.id, "steer_started")
 

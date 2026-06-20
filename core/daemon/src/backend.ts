@@ -9,6 +9,8 @@ import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
 import type { StreamMessage } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
+import { createDebug } from "./logging.ts"
+
 /** Fetch implementation consumed by the daemon's backend client. */
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -106,6 +108,7 @@ class BackendStreamSubscription implements StreamSubscription {
 
 /** Creates the daemon's direct rouzer-backed client for backend auth, PR, and stream routes. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
+  const debug = createDebug("backend.stream")
   const routeClient = createRouteClient({
     baseURL: options.baseUrl,
     fetch: createAuthorizedFetch(options) as typeof fetch,
@@ -117,6 +120,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
     stream: {
       subscribe: async () => {
         const abortController = new AbortController()
+        debug("backend.stream.subscribe_started")
         const response = await authorizedClient.remoteRepo.stream(undefined, {
           signal: abortController.signal,
         })
@@ -133,9 +137,13 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
           throw new Error("Stream response did not include a body")
         }
 
+        debug("backend.stream.opened", {
+          status: response.status,
+        })
         const body = response.body
         const reader = response.body.getReader()
         const subscription = new BackendStreamSubscription(() => {
+          debug("backend.stream.close_requested")
           abortController.abort()
           // Different runtimes observe SSE teardown at different layers; cancel all of them so
           // long-lived stream responses do not keep tests or local daemon shutdowns alive.
@@ -144,7 +152,7 @@ export function createBackendClient(options: BackendClientOptions): BackendClien
         })
 
         subscription.emit("open")
-        void consumeSseResponse(reader, subscription, abortController.signal)
+        void consumeSseResponse(reader, subscription, abortController.signal, debug)
 
         return subscription
       },
@@ -224,6 +232,7 @@ async function consumeSseResponse(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   subscription: BackendStreamSubscription,
   signal: AbortSignal,
+  debug: (event: string, fields?: Record<string, unknown>) => void,
 ): Promise<void> {
   const decoder = new TextDecoder()
   let buffer = ""
@@ -235,26 +244,40 @@ async function consumeSseResponse(
         break
       }
 
+      debug("backend.stream.chunk_read", {
+        byteLength: value.byteLength,
+      })
       buffer += decoder.decode(value, { stream: true })
-      buffer = flushSseBuffer(buffer, subscription)
+      buffer = flushSseBuffer(buffer, subscription, debug)
     }
 
     buffer += decoder.decode()
-    flushSseBuffer(buffer, subscription)
+    flushSseBuffer(buffer, subscription, debug)
   } catch (error) {
     if (!signal.aborted) {
+      debug("backend.stream.read_failed", {
+        errorMessage: getErrorMessage(error),
+      })
       subscription.emit("error", error)
     }
   } finally {
+    const aborted = signal.aborted
     await reader.cancel().catch(() => {})
     if (!subscription.isClosed()) {
       subscription.close()
     }
+    debug("backend.stream.closed", {
+      aborted,
+    })
   }
 }
 
 /** Emits complete SSE messages from buffered stream content and preserves trailing partial frames. */
-function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription): string {
+function flushSseBuffer(
+  buffer: string,
+  subscription: BackendStreamSubscription,
+  debug: (event: string, fields?: Record<string, unknown>) => void,
+): string {
   let remaining = buffer
 
   while (true) {
@@ -273,9 +296,15 @@ function flushSseBuffer(buffer: string, subscription: BackendStreamSubscription)
 
     try {
       const parsed = JSON.parse(data) as StreamMessage
+      debug("backend.stream.event_received", {
+        eventType: parsed.event.type,
+      })
       subscription.emit("event", parsed.event)
       subscription.emit(parsed.event.type, parsed.event)
     } catch (error) {
+      debug("backend.stream.event_parse_failed", {
+        errorMessage: getErrorMessage(error),
+      })
       subscription.emit("error", new Error(`Invalid stream payload: ${getErrorMessage(error)}`))
     }
   }
