@@ -1,3 +1,4 @@
+import type { IpcErrorRegistry, IpcErrorRegistryError } from "@goddard-ai/ipc"
 import {
   AttentionHeadline,
   AttentionMetadataInput,
@@ -49,6 +50,50 @@ export type InboxEntityId = z.infer<typeof InboxEntityId>
 export const InboxStatus = z.enum(["unread", "read", "replied", "completed", "saved", "archived"])
 
 export type InboxStatus = z.infer<typeof InboxStatus>
+
+/** Structured client-visible daemon inbox errors keyed by exported error identifiers. */
+export const InboxIpcErrors = {
+  CompletedRequiresEntityOperation: {
+    code: InboxErrorCodes.CompletedRequiresEntityOperation,
+    details: z.strictObject({
+      entityId: InboxEntityId,
+      status: InboxStatus,
+    }),
+  },
+  EmptyBulkUpdate: {
+    code: InboxErrorCodes.EmptyBulkUpdate,
+    details: z.undefined(),
+  },
+  EmptyStatusFilter: {
+    code: InboxErrorCodes.EmptyStatusFilter,
+    details: z.undefined(),
+  },
+  EmptyUpdate: {
+    code: InboxErrorCodes.EmptyUpdate,
+    details: z.undefined(),
+  },
+  InvalidCursor: {
+    code: InboxErrorCodes.InvalidCursor,
+    details: z.strictObject({
+      cursor: z.string().nullable(),
+    }),
+  },
+  ItemNotFound: {
+    code: InboxErrorCodes.ItemNotFound,
+    details: z.strictObject({
+      entityId: InboxEntityId,
+    }),
+  },
+  RepliedRequiresSessionEntity: {
+    code: InboxErrorCodes.RepliedRequiresSessionEntity,
+    details: z.strictObject({
+      entityId: InboxEntityId,
+      status: InboxStatus,
+    }),
+  },
+} as const satisfies IpcErrorRegistry
+
+export type InboxIpcError = IpcErrorRegistryError<typeof InboxIpcErrors>
 
 /** Coarse inbox priority used for daemon and user sorting decisions. */
 export const InboxPriority = z.enum(["normal", "low"])

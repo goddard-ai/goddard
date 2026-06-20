@@ -1,10 +1,16 @@
-import { IpcClientError } from "@goddard-ai/ipc"
+import {
+  IpcClientError,
+  type IpcClientErrorPayload,
+  type IpcErrorDescriptorForCode,
+  type IpcErrorDetails,
+} from "@goddard-ai/ipc"
 import type { SessionId } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
 import type { InboxStore } from "../daemon.ts"
 import {
   InboxErrorCodes,
+  InboxIpcErrors,
   type BulkUpdateInboxItemsRequest,
   type InboxEntityId,
   type InboxErrorCode,
@@ -50,6 +56,11 @@ type InboxManagerOptions = {
   publishEvent: InboxItemEventPublisher
 }
 
+type InboxIpcErrorDescriptor<TCode extends InboxErrorCode> = IpcErrorDescriptorForCode<
+  typeof InboxIpcErrors,
+  TCode
+>
+
 function normalizeInboxPageSize(limit?: number) {
   if (!Number.isFinite(limit)) {
     return DEFAULT_INBOX_PAGE_SIZE
@@ -62,16 +73,20 @@ function isSessionEntityId(entityId: InboxEntityId): entityId is SessionId {
   return entityId.startsWith("ses_")
 }
 
-function createInboxIpcError(
-  code: InboxErrorCode,
+function createInboxIpcError<TCode extends InboxErrorCode>(
+  code: TCode,
   message: string,
-  details?: Record<string, unknown>,
+  ...[details]: undefined extends IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>
+    ? [details?: IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>]
+    : [details: IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>]
 ) {
-  return new IpcClientError({
+  const input = {
     code,
-    ...(details ? { details } : {}),
+    ...(details === undefined ? {} : { details }),
     message,
-  })
+  } as IpcClientErrorPayload<InboxIpcErrorDescriptor<TCode>>
+
+  return new IpcClientError<InboxIpcErrorDescriptor<TCode>>(input)
 }
 
 function assertUserWorkflowStatus(entityId: InboxEntityId, status: InboxStatus | undefined) {

@@ -1,17 +1,53 @@
-type IpcClientErrorInput =
+import type { z } from "zod"
+
+export type IpcErrorDescriptor<
+  TCode extends string = string,
+  TDetails extends z.ZodType<unknown> = z.ZodType<unknown>,
+> = {
+  readonly code: TCode
+  readonly details: TDetails
+}
+
+export type IpcErrorRegistry = Record<string, IpcErrorDescriptor>
+
+export type IpcErrorDescriptorForCode<
+  TRegistry extends IpcErrorRegistry,
+  TCode extends TRegistry[keyof TRegistry]["code"],
+> = Extract<TRegistry[keyof TRegistry], { readonly code: TCode }>
+
+export type IpcErrorDetails<TDescriptor extends IpcErrorDescriptor> = z.output<
+  TDescriptor["details"]
+>
+
+export type IpcErrorRegistryError<TRegistry extends IpcErrorRegistry> = {
+  [K in keyof TRegistry]: IpcClientErrorPayload<TRegistry[K]>
+}[keyof TRegistry]
+
+export type IpcClientErrorPayload<TDescriptor extends IpcErrorDescriptor> =
+  undefined extends IpcErrorDetails<TDescriptor>
+    ? {
+        code: TDescriptor["code"]
+        details?: IpcErrorDetails<TDescriptor>
+        message: string
+      }
+    : {
+        code: TDescriptor["code"]
+        details: IpcErrorDetails<TDescriptor>
+        message: string
+      }
+
+type IpcClientErrorInput<TDescriptor extends IpcErrorDescriptor> =
   | string
-  | {
-      code: string
-      details?: unknown
-      message: string
-    }
+  | IpcClientErrorPayload<TDescriptor>
 
 /** Error whose message and optional structured code/details are safe to return to the IPC client. */
-export class IpcClientError extends Error {
-  readonly code: string | null
-  readonly details: unknown
+export class IpcClientError<
+  TDescriptor extends IpcErrorDescriptor = IpcErrorDescriptor,
+> extends Error {
+  readonly code: TDescriptor["code"] | null
+  readonly details: IpcErrorDetails<TDescriptor> | undefined
 
-  constructor(input: IpcClientErrorInput, options?: ErrorOptions) {
+  constructor(input: IpcClientErrorInput<TDescriptor>, options?: ErrorOptions) {
     const message = typeof input === "string" ? input : input.message
     super(message, options)
     this.name = "IpcClientError"
