@@ -601,7 +601,7 @@ export function createPromptTurnFeature({
       sessionId: active.id,
       requestId: pendingSteer.requestId,
       cancelledRequestId: pendingSteer.cancelledRequestId,
-      reason,
+      reason: "superseded_by_steer",
     })
     return [
       toAbortedQueuedPrompt({
