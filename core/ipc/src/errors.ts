@@ -28,12 +28,10 @@ export type IpcClientErrorPayload<TDescriptor extends IpcErrorDescriptor> =
     ? {
         code: TDescriptor["code"]
         details?: IpcErrorDetails<TDescriptor>
-        message: string
       }
     : {
         code: TDescriptor["code"]
         details: IpcErrorDetails<TDescriptor>
-        message: string
       }
 
 type IpcClientErrorInput<TDescriptor extends IpcErrorDescriptor> =
@@ -48,7 +46,7 @@ export class IpcClientError<
   readonly details: IpcErrorDetails<TDescriptor> | undefined
 
   constructor(input: IpcClientErrorInput<TDescriptor>, options?: ErrorOptions) {
-    const message = typeof input === "string" ? input : input.message
+    const message = typeof input === "string" ? input : `IPC request failed: ${input.code}`
     super(message, options)
     this.name = "IpcClientError"
     this.code = typeof input === "string" ? null : input.code

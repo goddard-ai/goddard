@@ -7,10 +7,12 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { IpcClientError } from "@goddard-ai/ipc"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
 import {
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
+  SessionErrorCodes,
   type DaemonSessionDiagnosticEvent,
   type GetSessionHistoryResponse,
   type SessionId,
@@ -60,6 +62,19 @@ function findSessionPromptRequest(history: GetSessionHistoryResponse) {
 
 function readStreamMessagePayload(payload: unknown) {
   return getSessionTurnMessagePayload(payload as AcpMessage | SessionTurnMessage)
+}
+
+async function expectIpcErrorCode<T>(
+  promise: Promise<T>,
+  code: (typeof SessionErrorCodes)[keyof typeof SessionErrorCodes],
+) {
+  try {
+    await promise
+    throw new Error(`Expected IPC error code ${code}`)
+  } catch (error) {
+    expect(error).toBeInstanceOf(IpcClientError)
+    expect(error).toHaveProperty("code", code)
+  }
 }
 
 afterEach(async () => {
@@ -448,8 +463,9 @@ test("session completion hides from the default list but stays interactive", asy
     const history = await send(client, "session.history", { id: created.session.id })
     return history.turns.some((turn: any) => turn.completedAt === null)
   })
-  await expect(send(client, "session.complete", { id: created.session.id })).rejects.toThrow(
-    /active turn/i,
+  await expectIpcErrorCode(
+    send(client, "session.complete", { id: created.session.id }),
+    SessionErrorCodes.CannotCompleteActiveTurn,
   )
 
   await send(client, "session.cancel", { id: created.session.id })
@@ -515,8 +531,9 @@ test("session reconnect fails when the resolved agent no longer supports ACP ses
     agent: createWrappedNodeAgent(chunkingAgentPath),
   })
 
-  await expect(send(client, "session.connect", { id: created.session.id })).rejects.toThrow(
-    /does not support session\/load/i,
+  await expectIpcErrorCode(
+    send(client, "session.connect", { id: created.session.id }),
+    SessionErrorCodes.CannotResumeUnsupportedAgent,
   )
 
   const session = await send(client, "session.get", { id: created.session.id })
@@ -883,9 +900,13 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   expect(
     diagnostics.events.some((event: any) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
-  await expect(send(client, "session.connect", { id: sessionId })).rejects.toThrow(/archived/i)
-  await expect(send(client, "session.resolveToken", { token: "tok-restart-1" })).rejects.toThrow(
-    /invalid session token/i,
+  await expectIpcErrorCode(
+    send(client, "session.connect", { id: sessionId }),
+    SessionErrorCodes.ArchivedNotReconnectable,
+  )
+  await expectIpcErrorCode(
+    send(client, "session.resolveToken", { token: "tok-restart-1" }),
+    SessionErrorCodes.InvalidToken,
   )
 })
 
@@ -1829,8 +1850,9 @@ test("session completion enforces worktree cleanliness without blocking local di
   expect(dirtyWorktree).toBeTruthy()
   await send(client, "session.reportTurnEnded", { id: dirty.session.id })
   await writeFile(join(dirtyWorktree!.worktreeDir, "dirty-note.txt"), "uncommitted\n", "utf-8")
-  await expect(send(client, "session.complete", { id: dirty.session.id })).rejects.toThrow(
-    /uncommitted changes/i,
+  await expectIpcErrorCode(
+    send(client, "session.complete", { id: dirty.session.id }),
+    SessionErrorCodes.CannotCompleteDirtyWorktree,
   )
   await send(client, "session.shutdown", { id: dirty.session.id })
 
@@ -1854,8 +1876,9 @@ test("session completion enforces worktree cleanliness without blocking local di
   )
   runGit(committedWorktree!.worktreeDir, ["add", "committed-note.txt"])
   runGit(committedWorktree!.worktreeDir, ["commit", "-m", "session work"])
-  await expect(send(client, "session.complete", { id: committed.session.id })).rejects.toThrow(
-    /not been merged/i,
+  await expectIpcErrorCode(
+    send(client, "session.complete", { id: committed.session.id }),
+    SessionErrorCodes.CannotCompleteUnmergedCommits,
   )
   await send(client, "session.shutdown", { id: committed.session.id })
 })
@@ -2267,7 +2290,7 @@ test("session.create refuses local branch checkout with uncommitted changes", as
   runGit(repoDir, ["branch", "feature-launch"])
   await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
 
-  await expect(
+  await expectIpcErrorCode(
     send(client, "session.create", {
       agent: createWrappedNodeAgent(launchPreviewAgentPath),
       cwd: repoDir,
@@ -2277,7 +2300,8 @@ test("session.create refuses local branch checkout with uncommitted changes", as
       initialPrompt: "Start the selected branch session.",
       oneShot: true,
     }),
-  ).rejects.toThrow(/local checkout has changes/i)
+    SessionErrorCodes.LaunchDirtyCheckout,
+  )
 })
 
 test("session.create promotes compatible launch leases instead of creating a second ACP session", async () => {
