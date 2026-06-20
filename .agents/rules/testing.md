@@ -18,6 +18,7 @@ Read this ruleset when adding, changing, reviewing, or deciding whether to add t
 - For daemon logging tests, capture logs through explicit seams such as `configureDaemonLogging({ writeLine })` instead of spying on stdout.
 - For CLI tests, capture real subprocess output instead of spying on `console` or `process`.
 - Prefer stable, contract-level assertions over incidental wording-heavy output checks.
+- Do not add regression tests for logging-only changes.
 - Kindstore migrations do not require dedicated regression tests.
 - Do not test feature-package plugin seams directly. Move complex or critical feature logic outside the plugin entrypoint and test that module directly.
 - When practical test infrastructure is missing, document the limitation and give concrete manual verification steps.
