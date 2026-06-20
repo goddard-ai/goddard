@@ -10,3 +10,4 @@ Read this ruleset when touching product behavior, `spec/`, SDK/app parity, share
 - New user-facing capability in `app/` that depends on shared data loading, shared data mutation, or system configuration must also be implemented in `core/sdk/` in the same PR.
 - UI-only behavior does not require `core/sdk/` parity.
 - Do not ship `app/` ahead of `core/sdk/` when shared data or system configuration behavior is involved.
+- App-visible daemon errors are product contracts. Use stable exported error-code identifiers and do not make app behavior depend on parsing English daemon messages.

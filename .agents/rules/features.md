@@ -11,6 +11,7 @@ Read this ruleset when adding or changing cross-layer feature packages, feature 
 - Feature packages must import thin plugin support packages such as `@goddard-ai/sdk-plugin`, `@goddard-ai/daemon-plugin`, and `@goddard-ai/app-plugin`, not public packages that bundle them.
 - Feature packages self-declare schemas from their own `schema` entrypoint.
 - Do not add feature-owned schemas to `@goddard-ai/schema`; reserve it for core daemon/backend/shared substrate schemas.
+- Feature-owned client-visible error-code identifiers belong in the owning feature schema entrypoint, not in `@goddard-ai/schema`.
 - App feature entrypoints must stay SDK-agnostic at the package level. Express SDK needs as type-level app plugin requirements or app composition metadata, and let the static app composition root provide the actual SDK instance.
 - Daemon feature packages that own persistence declare their kindstore schema through the daemon plugin `db` option and use inferred setup `context.db`.
 - Do not import the core daemon persistence singleton for feature-owned tables.
