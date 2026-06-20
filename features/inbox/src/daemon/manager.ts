@@ -3,18 +3,20 @@ import type { SessionId } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
 import type { InboxStore } from "../daemon.ts"
-import type {
-  BulkUpdateInboxItemsRequest,
-  InboxEntityId,
-  InboxHeadline,
-  InboxItem,
-  InboxItemEventMutation,
-  InboxPriority,
-  InboxReason,
-  InboxScope,
-  InboxStatus,
-  ListInboxRequest,
-  UpdateInboxItemRequest,
+import {
+  InboxErrorCodes,
+  type BulkUpdateInboxItemsRequest,
+  type InboxEntityId,
+  type InboxErrorCode,
+  type InboxHeadline,
+  type InboxItem,
+  type InboxItemEventMutation,
+  type InboxPriority,
+  type InboxReason,
+  type InboxScope,
+  type InboxStatus,
+  type ListInboxRequest,
+  type UpdateInboxItemRequest,
 } from "../schema.ts"
 
 const DEFAULT_INBOX_PAGE_SIZE = 50
@@ -60,23 +62,46 @@ function isSessionEntityId(entityId: InboxEntityId): entityId is SessionId {
   return entityId.startsWith("ses_")
 }
 
+function createInboxIpcError(
+  code: InboxErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+) {
+  return new IpcClientError({
+    code,
+    ...(details ? { details } : {}),
+    message,
+  })
+}
+
 function assertUserWorkflowStatus(entityId: InboxEntityId, status: InboxStatus | undefined) {
   if (!status) {
     return
   }
 
   if (!userWorkflowStatuses.has(status)) {
-    throw new IpcClientError("Inbox status completed requires an entity-specific operation")
+    throw createInboxIpcError(
+      InboxErrorCodes.CompletedRequiresEntityOperation,
+      "Inbox status completed requires an entity-specific operation",
+      { entityId, status },
+    )
   }
 
   if (status === "replied" && !isSessionEntityId(entityId)) {
-    throw new IpcClientError("Inbox status replied only applies to session entities")
+    throw createInboxIpcError(
+      InboxErrorCodes.RepliedRequiresSessionEntity,
+      "Inbox status replied only applies to session entities",
+      { entityId, status },
+    )
   }
 }
 
 function assertMutableFields(input: { status?: InboxStatus; priority?: InboxPriority }) {
   if (!input.status && !input.priority) {
-    throw new IpcClientError("At least one inbox field must be updated")
+    throw createInboxIpcError(
+      InboxErrorCodes.EmptyUpdate,
+      "At least one inbox field must be updated",
+    )
   }
 }
 
@@ -108,7 +133,10 @@ export function createInboxManager(options: InboxManagerOptions) {
     const pageSize = normalizeInboxPageSize(params.limit)
     const statuses = params.statuses ?? ["unread"]
     if (statuses.length === 0) {
-      throw new IpcClientError("Inbox status filter cannot be empty")
+      throw createInboxIpcError(
+        InboxErrorCodes.EmptyStatusFilter,
+        "Inbox status filter cannot be empty",
+      )
     }
 
     let page: ReturnType<typeof db.inboxItems.findPage>
@@ -125,7 +153,9 @@ export function createInboxManager(options: InboxManagerOptions) {
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw new IpcClientError("Invalid inbox cursor")
+      throw createInboxIpcError(InboxErrorCodes.InvalidCursor, "Invalid inbox cursor", {
+        cursor: params.cursor ?? null,
+      })
     }
 
     return {
@@ -165,7 +195,9 @@ export function createInboxManager(options: InboxManagerOptions) {
         where: { entityId: input.entityId },
       }) ?? null
     if (!existing) {
-      throw new IpcClientError("Inbox item not found")
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+        entityId: input.entityId,
+      })
     }
 
     const item = db.inboxItems.update(existing.id, {
@@ -174,7 +206,9 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: timestamp,
     })
     if (!item) {
-      throw new IpcClientError("Inbox item not found")
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+        entityId: input.entityId,
+      })
     }
 
     return { item: publishItem(item, "updated") }
@@ -183,7 +217,10 @@ export function createInboxManager(options: InboxManagerOptions) {
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
     assertMutableFields(input)
     if (input.entityIds.length === 0) {
-      throw new IpcClientError("Inbox bulk update requires at least one entity id")
+      throw createInboxIpcError(
+        InboxErrorCodes.EmptyBulkUpdate,
+        "Inbox bulk update requires at least one entity id",
+      )
     }
 
     const entityIds = [...new Set(input.entityIds)]
@@ -237,7 +274,9 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: Date.now(),
     })
     if (!item) {
-      throw new IpcClientError("Inbox item not found")
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+        entityId: sessionId,
+      })
     }
 
     return publishItem(item, "replied")
@@ -257,7 +296,9 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: Date.now(),
     })
     if (!item) {
-      throw new IpcClientError("Inbox item not found")
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+        entityId: sessionId,
+      })
     }
 
     return publishItem(item, "completed")

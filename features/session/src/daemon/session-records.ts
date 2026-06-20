@@ -1,17 +1,18 @@
-import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type * as acp from "acp-client/protocol"
 
 import type { SessionDb } from "../daemon.ts"
-import type {
-  CreateSessionRequest,
-  DaemonSession,
-  DaemonSessionMetadata,
-  DaemonSessionTurnDraft,
-  DaemonWorktree,
-  SessionConnection,
-  SessionHistoryTurn,
+import {
+  SessionErrorCodes,
+  type CreateSessionRequest,
+  type DaemonSession,
+  type DaemonSessionMetadata,
+  type DaemonSessionTurnDraft,
+  type DaemonWorktree,
+  type SessionConnection,
+  type SessionHistoryTurn,
 } from "../schema.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import { toCompletedTurnInput } from "./turn-history.ts"
 import type { PreparedSessionWorktree, SessionWorktreeState } from "./worktree.ts"
 
@@ -268,7 +269,11 @@ export function persistLaunchedSession(
   if (params.existingSession) {
     const existingDocument = db.sessions.get(params.id) ?? null
     if (!existingDocument) {
-      throw new IpcClientError(`Cannot update unknown session: ${params.id}`)
+      throw createSessionIpcError(
+        SessionErrorCodes.NotFound,
+        `Cannot update unknown session: ${params.id}`,
+        { sessionId: params.id },
+      )
     }
 
     db.sessions.update(params.id, params.sessionRecord)

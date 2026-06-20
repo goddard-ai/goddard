@@ -6,22 +6,23 @@ import type {
   DaemonAgentInstallService,
   DaemonConfigProvider,
 } from "@goddard-ai/daemon-plugin"
-import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"
 import * as acp from "acp-client/protocol"
 
-import type {
-  SessionLaunchPreviewRequest,
-  SessionLaunchPreviewResponse,
-  SessionsConfig,
+import {
+  SessionErrorCodes,
+  type SessionLaunchPreviewRequest,
+  type SessionLaunchPreviewResponse,
+  type SessionsConfig,
 } from "../schema.ts"
 import { spawnAgentProcess, waitForAgentProcessExit } from "./agent-process.ts"
 import {
   getSlashComposerSuggestions,
   MAX_COMPOSER_SUGGESTION_LIMIT,
 } from "./composer-suggestions.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"
 import { resolveGitRepoRoot, resolveGitWorktreeSource } from "./worktree.ts"
@@ -111,11 +112,19 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
   const repoRoot = await resolveGitRepoRoot(params.cwd)
 
   if (!repoRoot) {
-    throw new IpcClientError("Cannot checkout a branch outside a git repository.")
+    throw createSessionIpcError(
+      SessionErrorCodes.LaunchOutsideRepository,
+      "Cannot checkout a branch outside a git repository.",
+      { cwd: params.cwd },
+    )
   }
 
   if (await inspectLaunchCheckoutDirty(repoRoot)) {
-    throw new IpcClientError("Cannot checkout a branch while the local checkout has changes.")
+    throw createSessionIpcError(
+      SessionErrorCodes.LaunchDirtyCheckout,
+      "Cannot checkout a branch while the local checkout has changes.",
+      { cwd: params.cwd, repoRoot },
+    )
   }
 
   const result = Bun.spawn(["git", "checkout", params.branchName], {
@@ -128,8 +137,10 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
   await result.exited
 
   if (result.exitCode !== 0) {
-    throw new IpcClientError(
+    throw createSessionIpcError(
+      SessionErrorCodes.LaunchCheckoutFailed,
       `Cannot checkout branch ${params.branchName}: ${stderr.trim() || "git checkout failed"}`,
+      { branchName: params.branchName, cwd: params.cwd, repoRoot },
     )
   }
 }

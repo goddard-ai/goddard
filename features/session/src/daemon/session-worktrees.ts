@@ -1,7 +1,11 @@
-import { IpcClientError } from "@goddard-ai/ipc"
-
 import type { SessionDb } from "../daemon.ts"
-import type { DaemonSession, DaemonWorktree, GetSessionWorktreeResponse } from "../schema.ts"
+import {
+  SessionErrorCodes,
+  type DaemonSession,
+  type DaemonWorktree,
+  type GetSessionWorktreeResponse,
+} from "../schema.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import type { SessionEventEmitter } from "./manager.ts"
 import type { SessionMemory } from "./session-memory.ts"
 import { inspectWorktreeCompletionState, type SessionWorktreeState } from "./worktree.ts"
@@ -55,7 +59,9 @@ export function createSessionWorktreeFeature({
   function requireSessionDocument(id: SessionId) {
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw new IpcClientError(`Unknown session: ${id}`)
+      throw createSessionIpcError(SessionErrorCodes.NotFound, `Unknown session: ${id}`, {
+        sessionId: id,
+      })
     }
 
     return record
@@ -83,7 +89,11 @@ export function createSessionWorktreeFeature({
   async function requireWorktree(id: SessionId): Promise<SessionWorktreeLifecycleState> {
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
     if (!worktreeRecord) {
-      throw new IpcClientError(`Session ${id} does not have a daemon worktree`)
+      throw createSessionIpcError(
+        SessionErrorCodes.NoWorktree,
+        `Session ${id} does not have a daemon worktree`,
+        { sessionId: id },
+      )
     }
 
     return toSessionWorktreeLifecycleState(worktreeRecord, id)
@@ -108,7 +118,11 @@ export function createSessionWorktreeFeature({
     requireSessionDocument(id)
     const active = memory.activeSessions.get(id) ?? null
     if (active?.activeTurn) {
-      throw new IpcClientError("Cannot complete a session while the agent has an active turn")
+      throw createSessionIpcError(
+        SessionErrorCodes.CannotCompleteActiveTurn,
+        "Cannot complete a session while the agent has an active turn",
+        { sessionId: id },
+      )
     }
 
     const worktreeRecord = await resolvePersistedWorktreeRecord(id)
@@ -117,20 +131,26 @@ export function createSessionWorktreeFeature({
       try {
         completionState = await inspectWorktreeCompletionState(worktreeRecord)
       } catch {
-        throw new IpcClientError(
+        throw createSessionIpcError(
+          SessionErrorCodes.CannotInspectCompletionState,
           "Cannot complete a worktree session because its git state could not be inspected",
+          { sessionId: id },
         )
       }
 
       if (completionState.dirty) {
-        throw new IpcClientError(
+        throw createSessionIpcError(
+          SessionErrorCodes.CannotCompleteDirtyWorktree,
           "Cannot complete a worktree session while its working tree has uncommitted changes",
+          { sessionId: id, worktreeDir: worktreeRecord.worktreeDir },
         )
       }
 
       if (completionState.unmergedCommits) {
-        throw new IpcClientError(
+        throw createSessionIpcError(
+          SessionErrorCodes.CannotCompleteUnmergedCommits,
           "Cannot complete a worktree session while it has commits that have not been merged into the primary checkout",
+          { sessionId: id, worktreeDir: worktreeRecord.worktreeDir },
         )
       }
     }

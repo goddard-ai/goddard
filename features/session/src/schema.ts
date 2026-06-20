@@ -10,34 +10,50 @@ export { StaticSessionParamsSchema as StaticSessionParams }
 
 /** Client-visible daemon session error codes shared across daemon, SDK, and app layers. */
 export const SessionErrorCodes = {
+  ArchivedNotReconnectable: "session.archived_not_reconnectable",
   CannotCompleteActiveTurn: "session.cannot_complete_active_turn",
+  CannotCompleteDirtyWorktree: "session.cannot_complete_dirty_worktree",
+  CannotCompleteUnmergedCommits: "session.cannot_complete_unmerged_commits",
+  CannotInspectCompletionState: "session.cannot_inspect_completion_state",
+  CannotResumeUnsupportedAgent: "session.cannot_resume_unsupported_agent",
   InvalidCursor: "session.invalid_cursor",
   InvalidHistoryCursor: "session.invalid_history_cursor",
   InvalidToken: "session.invalid_token",
   LaunchBareRepository: "session.launch_bare_repository",
+  LaunchCheckoutFailed: "session.launch_checkout_failed",
   LaunchDirtyCheckout: "session.launch_dirty_checkout",
   LaunchOutsideRepository: "session.launch_outside_repository",
   MissingJsonRpcId: "session.missing_json_rpc_id",
   NotActive: "session.not_active",
   NotFound: "session.not_found",
+  NotReconnectable: "session.not_reconnectable",
   NoWorktree: "session.no_worktree",
+  PromptAborted: "session.prompt_aborted",
   UnsupportedMessage: "session.unsupported_message",
 } as const
 
 export type SessionErrorCode = (typeof SessionErrorCodes)[keyof typeof SessionErrorCodes]
 
 export const SessionErrorCode = z.enum([
+  SessionErrorCodes.ArchivedNotReconnectable,
   SessionErrorCodes.CannotCompleteActiveTurn,
+  SessionErrorCodes.CannotCompleteDirtyWorktree,
+  SessionErrorCodes.CannotCompleteUnmergedCommits,
+  SessionErrorCodes.CannotInspectCompletionState,
+  SessionErrorCodes.CannotResumeUnsupportedAgent,
   SessionErrorCodes.InvalidCursor,
   SessionErrorCodes.InvalidHistoryCursor,
   SessionErrorCodes.InvalidToken,
   SessionErrorCodes.LaunchBareRepository,
+  SessionErrorCodes.LaunchCheckoutFailed,
   SessionErrorCodes.LaunchDirtyCheckout,
   SessionErrorCodes.LaunchOutsideRepository,
   SessionErrorCodes.MissingJsonRpcId,
   SessionErrorCodes.NotActive,
   SessionErrorCodes.NotFound,
+  SessionErrorCodes.NotReconnectable,
   SessionErrorCodes.NoWorktree,
+  SessionErrorCodes.PromptAborted,
   SessionErrorCodes.UnsupportedMessage,
 ])
 

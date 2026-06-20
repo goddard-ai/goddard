@@ -14,7 +14,6 @@ import type {
   EventBus,
   EventDefinition,
 } from "@goddard-ai/daemon-plugin"
-import { IpcClientError } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type {
   AttentionHeadline,
@@ -36,6 +35,7 @@ import { clamp, getErrorMessage, unique } from "radashi"
 import type { SessionDb } from "../daemon.ts"
 import {
   parseSessionIdleShutdownDurationMs,
+  SessionErrorCodes,
   type CancelSessionResponse,
   type CreateSessionRequest,
   type DaemonSession,
@@ -88,6 +88,7 @@ import {
   normalizeComposerSuggestionLimit,
 } from "./composer-suggestions.ts"
 import { createIdleShutdownController } from "./idle-shutdown.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseStore, type LaunchLease } from "./launch-lease.ts"
 import { checkoutLocalBranch, createLaunchPreparationFeature } from "./launch-preparation.ts"
 import { createLaunchWorktreeFeature } from "./launch-worktrees.ts"
@@ -450,8 +451,10 @@ async function initializeSession(params: {
 
     if (params.resumeAcpId !== undefined) {
       if (initializeResult.agentCapabilities?.loadSession !== true) {
-        throw new IpcClientError(
+        throw createSessionIpcError(
+          SessionErrorCodes.CannotResumeUnsupportedAgent,
           `Cannot resume ACP session ${params.resumeAcpId}: agent does not support session/load`,
+          { acpSessionId: params.resumeAcpId },
         )
       }
 
@@ -582,7 +585,11 @@ async function resolveLaunchWorktree(params: {
 
   if (params.request.worktree?.enabled !== true) {
     if (source?.bare) {
-      throw new IpcClientError("Cannot launch a local session from a bare git repository.")
+      throw createSessionIpcError(
+        SessionErrorCodes.LaunchBareRepository,
+        "Cannot launch a local session from a bare git repository.",
+        { cwd: params.request.cwd },
+      )
     }
 
     return null
@@ -972,7 +979,9 @@ export function createSessionManager({
   function requireSessionDocument(id: SessionId) {
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw new IpcClientError(`Unknown session: ${id}`)
+      throw createSessionIpcError(SessionErrorCodes.NotFound, `Unknown session: ${id}`, {
+        sessionId: id,
+      })
     }
 
     return record
@@ -1219,7 +1228,9 @@ export function createSessionManager({
 
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
-      throw new IpcClientError("Session not found")
+      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+        sessionId: params.id,
+      })
     }
 
     return sessionDocument
@@ -1349,7 +1360,9 @@ export function createSessionManager({
     idleShutdown.refreshIdleShutdownState(activeSession.id, "session_activated")
     const sessionDocument = db.sessions.get(params.id) ?? null
     if (!sessionDocument) {
-      throw new IpcClientError("Session not found")
+      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+        sessionId: params.id,
+      })
     }
 
     return sessionDocument
@@ -1752,7 +1765,11 @@ export function createSessionManager({
     const existingRecord = db.sessions.get(params.id) ?? null
     const existingSession = existingRecord ?? null
     if (!existingSession) {
-      throw new IpcClientError(`Cannot load unknown session: ${params.id}`)
+      throw createSessionIpcError(
+        SessionErrorCodes.NotFound,
+        `Cannot load unknown session: ${params.id}`,
+        { sessionId: params.id },
+      )
     }
 
     return launchSession(params, existingSession)
@@ -1762,7 +1779,9 @@ export function createSessionManager({
     await ready
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw new IpcClientError("Session not found")
+      throw createSessionIpcError(SessionErrorCodes.NotFound, "Session not found", {
+        sessionId: id,
+      })
     }
     return record
   }
@@ -1785,7 +1804,9 @@ export function createSessionManager({
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw new IpcClientError("Invalid session cursor")
+      throw createSessionIpcError(SessionErrorCodes.InvalidCursor, "Invalid session cursor", {
+        cursor: params.cursor ?? null,
+      })
     }
 
     return {
@@ -1814,10 +1835,14 @@ export function createSessionManager({
       return reloadedSession
     }
 
-    throw new IpcClientError(
+    throw createSessionIpcError(
+      session.connectionMode === "history"
+        ? SessionErrorCodes.ArchivedNotReconnectable
+        : SessionErrorCodes.NotReconnectable,
       session.connectionMode === "history"
         ? `Session ${id} is archived and no longer reconnectable`
         : `Session ${id} is not reconnectable`,
+      { connectionMode: session.connectionMode, sessionId: id },
     )
   }
 
@@ -1867,7 +1892,11 @@ export function createSessionManager({
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw new IpcClientError("Invalid session history cursor")
+      throw createSessionIpcError(
+        SessionErrorCodes.InvalidHistoryCursor,
+        "Invalid session history cursor",
+        { cursor: params.cursor ?? null, sessionId: params.id },
+      )
     }
 
     const turns = [...page.items].reverse().map(toSessionHistoryTurnFromRecord)
@@ -2139,7 +2168,11 @@ export function createSessionManager({
     await ready
     const active = activeSessions.get(params.id)
     if (!active) {
-      throw new IpcClientError(`Session ${params.id} is not active`)
+      throw createSessionIpcError(
+        SessionErrorCodes.NotActive,
+        `Session ${params.id} is not active`,
+        { sessionId: params.id },
+      )
     }
 
     const result = await active.session.setConfigOption(params.configId, params.value)
@@ -2153,7 +2186,11 @@ export function createSessionManager({
     await ready
     const active = activeSessions.get(params.id)
     if (!active) {
-      throw new IpcClientError(`Session ${params.id} is not active`)
+      throw createSessionIpcError(
+        SessionErrorCodes.NotActive,
+        `Session ${params.id} is not active`,
+        { sessionId: params.id },
+      )
     }
 
     const response = await active.session.setModel(params.modelId)
@@ -2224,7 +2261,7 @@ export function createSessionManager({
         where: { token },
       }) ?? null
     if (!record?.permissions) {
-      throw new IpcClientError("Invalid session token")
+      throw createSessionIpcError(SessionErrorCodes.InvalidToken, "Invalid session token")
     }
 
     return record.id
