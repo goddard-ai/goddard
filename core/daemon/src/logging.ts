@@ -2,12 +2,13 @@ import { inspect } from "node:util"
 import { AsyncContext } from "@b9g/async-context"
 import {
   createLogger as createCoreLogger,
+  toErrorProperties,
   type Logger as CoreLogger,
   type LogStore,
 } from "@goddard-ai/logs"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import kleur from "kleur"
-import { omit } from "radashi"
+import { getErrorMessage, omit } from "radashi"
 
 import { FeedbackEventContext, IpcRequestContext, SessionContext } from "./context.ts"
 import { getDaemonPluginComposition } from "./plugins.ts"
@@ -55,6 +56,7 @@ type LogEntry = {
 let logMode: LogMode = "compact"
 let logWriter: LogWriter = defaultWriteLine
 let durableLogger: CoreLogger | undefined
+let didInstallFatalErrorCapture = false
 
 /** Configures the shared daemon log writer and output mode for the current process. */
 export function configureLogging(options: {
@@ -119,6 +121,35 @@ export function createLogger(
   }
 
   return logger
+}
+
+/** Captures process-level daemon failures that escape normal request/runtime handlers. */
+export function installDaemonFatalErrorCapture(): void {
+  if (didInstallFatalErrorCapture) {
+    return
+  }
+
+  didInstallFatalErrorCapture = true
+
+  process.on("uncaughtException", (error) => {
+    logFatalError("daemon.uncaught_exception", error)
+    process.exit(1)
+  })
+
+  process.on("unhandledRejection", (reason) => {
+    logFatalError("daemon.unhandled_rejection", reason)
+    process.exit(1)
+  })
+}
+
+function logFatalError(event: string, error: unknown): void {
+  try {
+    createLogger().log(event, toErrorProperties(error))
+  } catch (loggingError) {
+    process.stderr.write(
+      `${event}: ${getErrorMessage(error)}\nlogging failed: ${getErrorMessage(loggingError)}\n`,
+    )
+  }
 }
 
 /** Returns true when daemon logs are rendered in expanded verbose mode. */

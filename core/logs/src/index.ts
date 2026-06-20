@@ -506,7 +506,17 @@ function createUlid() {
 }
 
 export function toErrorProperties(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      errorMessage: error.message,
+      errorName: error.name,
+      errorStack: error.stack,
+      errorCauseMessage: error.cause === undefined ? undefined : getErrorMessage(error.cause),
+    }
+  }
+
   return {
     errorMessage: getErrorMessage(error),
+    errorName: typeof error,
   }
 }

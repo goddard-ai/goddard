@@ -10,9 +10,9 @@ import { activateLocale, defaultLocale } from "~/language/i18n.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
 
 async function main() {
+  initializeDesktopHost()
   await activateLocale(defaultLocale)
 
-  initializeDesktopHost()
   startQueryWindowReactivationRefetch()
   setOverlayPortalRoots({
     dialog: () => document.getElementById("dialog-portal"),

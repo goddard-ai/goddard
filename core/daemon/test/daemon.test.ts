@@ -18,6 +18,7 @@ import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
+const originalDaemonPort = process.env.GODDARD_DAEMON_PORT
 const agentBinDir = fileURLToPath(new URL("../agent-bin", import.meta.url))
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
@@ -31,6 +32,11 @@ afterEach(async () => {
     delete process.env.HOME
   } else {
     process.env.HOME = originalHome
+  }
+  if (originalDaemonPort === undefined) {
+    delete process.env.GODDARD_DAEMON_PORT
+  } else {
+    process.env.GODDARD_DAEMON_PORT = originalDaemonPort
   }
 
   while (cleanup.length > 0) {
@@ -408,6 +414,29 @@ test("daemon run supports verbose terminal logs with expanded fields", async () 
   expect(output.some((line) => line.includes("daemon.startup"))).toBe(true)
   expect(output.some((line) => line.includes("baseUrl:"))).toBe(true)
   expect(output.every((line) => line.trim().startsWith("{"))).toBe(false)
+})
+
+test("daemon run logs startup failures after logging is configured", async () => {
+  process.env.GODDARD_DAEMON_PORT = "not-a-port"
+
+  const { logs, result: exitCode } = await captureJsonLogs(() =>
+    runDaemon({
+      baseUrl: "",
+      enableIpc: false,
+      enableStream: false,
+      logMode: "json",
+      store: db,
+    }),
+  )
+
+  expect(exitCode).toBe(1)
+  expect(logs).toContainEqual(
+    expect.objectContaining({
+      event: "daemon.run_failed",
+      errorName: "Error",
+      errorMessage: "GODDARD_DAEMON_PORT must be an integer TCP port between 1 and 65535",
+    }),
+  )
 })
 
 test("daemon URL round-trips the TCP address", () => {

@@ -3,7 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { createDebug, createLogger, createLogStore, subtractHours } from "../src/index.ts"
+import {
+  createDebug,
+  createLogger,
+  createLogStore,
+  subtractHours,
+  toErrorProperties,
+} from "../src/index.ts"
 
 let testDir: string | undefined
 
@@ -109,6 +115,22 @@ test("redacts secrets before persistence", async () => {
   })
 
   store.close()
+})
+
+test("serializes error properties for durable logs", () => {
+  const cause = new Error("inner")
+  const error = new Error("outer", { cause })
+
+  expect(toErrorProperties(error)).toEqual({
+    errorMessage: "outer",
+    errorName: "Error",
+    errorStack: expect.stringContaining("Error: outer"),
+    errorCauseMessage: "inner",
+  })
+  expect(toErrorProperties("plain failure")).toEqual({
+    errorMessage: "plain failure",
+    errorName: "string",
+  })
 })
 
 test("queries by scope, grep, cursor, and property", async () => {

@@ -3,7 +3,7 @@ import { BrowserWindow, Screen, Updater } from "electrobun/bun"
 import { activateDefaultLocale } from "~/language/i18n.ts"
 import { loadAppStateSnapshot } from "./app-state-store.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
-import { installAppLogCapture } from "./logging.ts"
+import { installAppFatalErrorCapture, installAppLogCapture, writeAppError } from "./logging.ts"
 import { getMainWindow, setMainWindow, showMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
@@ -18,8 +18,6 @@ import {
 const DEV_SERVER_PORT = 5173
 const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
 const MAIN_WINDOW_READY_FALLBACK_MS = 5000
-
-activateDefaultLocale()
 
 /** Creates the one primary Electrobun window used by the current app shell. */
 function createMainWindow(url: string, frame: WindowFrame) {
@@ -113,17 +111,27 @@ function installWindowLayoutPersistence(window: BrowserWindow<typeof appRpc>) {
   window.on("close", saveWindowFrameBeforeClose)
 }
 
-installApplicationMenu(getMainWindow)
-
 installAppLogCapture()
-await ensureDaemonRuntime()
-const mainWindowUrl = await getMainWindowUrl()
-const windowLayout = readWindowLayoutSnapshot(await loadAppStateSnapshot())
-const mainWindowFrame = resolveInitialWindowFrame(
-  windowLayout?.mainWindow.frame ?? null,
-  Screen.getAllDisplays(),
-  Screen.getPrimaryDisplay(),
-)
-const mainWindow = createMainWindow(mainWindowUrl, mainWindowFrame)
-setMainWindow(mainWindow)
-installMainWindowReadyFallback()
+installAppFatalErrorCapture()
+
+async function main() {
+  activateDefaultLocale()
+  installApplicationMenu(getMainWindow)
+
+  await ensureDaemonRuntime()
+  const mainWindowUrl = await getMainWindowUrl()
+  const windowLayout = readWindowLayoutSnapshot(await loadAppStateSnapshot())
+  const mainWindowFrame = resolveInitialWindowFrame(
+    windowLayout?.mainWindow.frame ?? null,
+    Screen.getAllDisplays(),
+    Screen.getPrimaryDisplay(),
+  )
+  const mainWindow = createMainWindow(mainWindowUrl, mainWindowFrame)
+  setMainWindow(mainWindow)
+  installMainWindowReadyFallback()
+}
+
+await main().catch((error) => {
+  writeAppError("app.host.startup_failed", error)
+  process.exit(1)
+})
