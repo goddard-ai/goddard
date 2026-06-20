@@ -6,6 +6,29 @@ import {
 import { SessionId } from "@goddard-ai/session/schema"
 import { z } from "zod"
 
+/** Client-visible daemon inbox error codes shared across daemon, SDK, and app layers. */
+export const InboxErrorCodes = {
+  CompletedRequiresEntityOperation: "inbox.completed_requires_entity_operation",
+  EmptyBulkUpdate: "inbox.empty_bulk_update",
+  EmptyStatusFilter: "inbox.empty_status_filter",
+  EmptyUpdate: "inbox.empty_update",
+  InvalidCursor: "inbox.invalid_cursor",
+  ItemNotFound: "inbox.item_not_found",
+  RepliedRequiresSessionEntity: "inbox.replied_requires_session_entity",
+} as const
+
+export type InboxErrorCode = (typeof InboxErrorCodes)[keyof typeof InboxErrorCodes]
+
+export const InboxErrorCode = z.enum([
+  InboxErrorCodes.CompletedRequiresEntityOperation,
+  InboxErrorCodes.EmptyBulkUpdate,
+  InboxErrorCodes.EmptyStatusFilter,
+  InboxErrorCodes.EmptyUpdate,
+  InboxErrorCodes.InvalidCursor,
+  InboxErrorCodes.ItemNotFound,
+  InboxErrorCodes.RepliedRequiresSessionEntity,
+])
+
 /** Tagged inbox item id emitted by the daemon inbox store. */
 export const InboxItemId = z.custom<`inb_${string}`>(
   (value): value is `inb_${string}` => typeof value === "string" && value.startsWith("inb_"),
