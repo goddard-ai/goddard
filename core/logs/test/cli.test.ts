@@ -53,6 +53,9 @@ test("CLI pages and expands logs from the canonical database", async () => {
     message: "ipc.response_sent",
     properties: {
       method: "session.history",
+      ipcRequest: {
+        opId: "op_123",
+      },
       response: "response payload that collapses",
     },
   })
@@ -60,8 +63,11 @@ test("CLI pages and expands logs from the canonical database", async () => {
 
   const page = await runCli(["page", "--property", "method=session.history"], testHome)
   expect(page).toBe(
-    `${row.id} ${row.at} daemon info ipc.response_sent pid=123 method=session.history response={${row.properties.response}}\n`,
+    `${row.id} ${row.at} daemon info ipc.response_sent pid=123 method=session.history ipcRequest={"opId":"op_123"} response={${row.properties.response}}\n`,
   )
+
+  const nestedPage = await runCli(["page", "--property", "ipcRequest.opId=op_123"], testHome)
+  expect(nestedPage).toBe(page)
 
   const expanded = await runCli(["expand", row.properties.response as string], testHome)
   expect(expanded).toContain("response payload that collapses")
