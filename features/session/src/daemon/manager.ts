@@ -754,7 +754,20 @@ function normalizeSessionPageSize(limit?: number): number {
 }
 
 /** Creates the daemon-owned session lifecycle boundary over storage and agent processes. */
-export function createSessionManager(input: {
+export function createSessionManager({
+  db,
+  getDaemonUrl,
+  createAgentEnvironment,
+  emitMessage,
+  emitLifecycleEvent,
+  events,
+  configProvider,
+  log,
+  registryService,
+  agentInstallService,
+  sessionContext: sessionContextService,
+  idleSessionShutdownTimeoutMs,
+}: {
   db: SessionDb
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
@@ -768,14 +781,13 @@ export function createSessionManager(input: {
   sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
 }) {
-  const db = input.db
-  const logger = input.log.createLogger()
+  const logger = log.createLogger()
   const memory = createSessionMemory()
   const activeSessions = memory.activeSessions
   const activeSessionsByAcpSessionId = memory.activeSessionsByAcpSessionId
   const launchLeaseStore = createLaunchLeaseStore({ logger })
   const worktreePluginManager = createWorktreePluginManager({
-    configProvider: input.configProvider,
+    configProvider,
     logger,
   })
   const idleShutdown = createIdleShutdownController({
@@ -784,10 +796,10 @@ export function createSessionManager(input: {
     emitDiagnostic,
     shutdownSession,
   })
-  const acpDebug = input.log.createDebug("session.acp")
+  const acpDebug = log.createDebug("session.acp")
   const activeTurns = createActiveTurnStore({
     db,
-    debug: input.log.createDebug("session.turns"),
+    debug: log.createDebug("session.turns"),
     emitDiagnostic,
     publishSessionUpdated,
     refreshIdleShutdownState: idleShutdown.refreshIdleShutdownState,
@@ -797,35 +809,35 @@ export function createSessionManager(input: {
   const sessionTitles = createSessionTitleRuntime({
     db,
     memory,
-    configProvider: input.configProvider,
-    debug: input.log.createDebug("session.titles"),
+    configProvider,
+    debug: log.createDebug("session.titles"),
     emitDiagnostic,
     updateSession,
   })
   const sessionAttention = createSessionAttentionFeature({
     db,
     memory,
-    events: input.events,
+    events,
     updateSessionActivity,
   })
   const sessionWorktrees = createSessionWorktreeFeature({
     db,
     memory,
-    events: input.events,
+    events,
     updateSessionActivity,
   })
   const launchWorktrees = createLaunchWorktreeFeature({
     db,
-    configProvider: input.configProvider,
+    configProvider,
     logger,
     worktreePluginManager,
   })
   const promptTurns = createPromptTurnFeature({
     db,
     memory,
-    log: input.log,
-    events: input.events,
-    emitMessage: input.emitMessage,
+    log,
+    events,
+    emitMessage,
     activeTurns,
     idleShutdown,
     sessionTitles,
@@ -836,11 +848,11 @@ export function createSessionManager(input: {
   const launchPreparation = createLaunchPreparationFeature({
     memory,
     launchLeaseStore,
-    configProvider: input.configProvider,
-    getDaemonUrl: input.getDaemonUrl,
-    createAgentEnvironment: input.createAgentEnvironment,
-    registryService: input.registryService,
-    agentInstallService: input.agentInstallService,
+    configProvider,
+    getDaemonUrl,
+    createAgentEnvironment,
+    registryService,
+    agentInstallService,
     getPackageVersion,
     handlePermissionRequest: promptTurns.handlePermissionRequest,
     handleSessionUpdate: promptTurns.handleSessionUpdate,
@@ -856,7 +868,7 @@ export function createSessionManager(input: {
       return
     }
 
-    input.emitLifecycleEvent({
+    emitLifecycleEvent({
       kind: "sessionUpdated",
       session,
       changed: unique(changed),
@@ -893,8 +905,8 @@ export function createSessionManager(input: {
 
   /** Resolves the idle shutdown timeout after root config has been resolved for a session cwd. */
   function resolveIdleSessionShutdownTimeoutMs(config?: SessionManagerRootConfig): number {
-    if (input.idleSessionShutdownTimeoutMs !== undefined) {
-      return input.idleSessionShutdownTimeoutMs
+    if (idleSessionShutdownTimeoutMs !== undefined) {
+      return idleSessionShutdownTimeoutMs
     }
 
     const configuredDuration = config?.sessions?.idleShutdown
@@ -1262,7 +1274,7 @@ export function createSessionManager(input: {
 
       const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(activeSession.id)
       try {
-        await input.events.emit("session.stopping", {
+        await events.emit("session.stopping", {
           sessionId: activeSession.id,
           reason: "agent_process_exit",
           worktree: worktreeRecord
@@ -1354,9 +1366,7 @@ export function createSessionManager(input: {
     const existingArtifacts = resolveExistingSessionArtifacts(db, id, existingSession)
     const resolvedConfig =
       params.config ??
-      (input.configProvider
-        ? (await input.configProvider.getRootConfig(params.request.cwd)).config
-        : undefined)
+      (configProvider ? (await configProvider.getRootConfig(params.request.cwd)).config : undefined)
     const resolvedWorktreePlugins =
       params.worktreePlugins ??
       (shouldResolveConfiguredWorktreePlugins(params.request, existingArtifacts.worktree)
@@ -1424,7 +1434,7 @@ export function createSessionManager(input: {
     }
 
     let sessionLogger = logger
-    sessionLogger = input.sessionContext.run(sessionContext, () => sessionLogger.snapshot())
+    sessionLogger = sessionContextService.run(sessionContext, () => sessionLogger.snapshot())
     let spawnedAgentProcess: AgentProcessHandle | null = null
     let initializedClient: AcpClient | null = null
 
@@ -1487,7 +1497,7 @@ export function createSessionManager(input: {
       }
 
       if (worktree) {
-        await input.events.emit("session.worktree.prepared", {
+        await events.emit("session.worktree.prepared", {
           sessionId: id,
           request: resolvedRequest,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -1500,13 +1510,13 @@ export function createSessionManager(input: {
           acpSessionId: sessionContext.acpSessionId,
           hasId: "id" in message && message.id != null,
           method: "method" in message ? message.method : undefined,
-          message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+          message: log.createPayloadPreview(message, { maxStringLength: 160 }),
         })
         sessionLogger.log("agent.message_write", {
           direction: "write",
           hasId: "id" in message && message.id != null,
           method: "method" in message ? message.method : undefined,
-          message: input.log.createPayloadPreview(message),
+          message: log.createPayloadPreview(message),
         })
       }
 
@@ -1545,15 +1555,15 @@ export function createSessionManager(input: {
         initializedClient = initialized.client
       } else {
         agentProcess = await spawnAgentProcess({
-          daemonUrl: input.getDaemonUrl(),
+          daemonUrl: getDaemonUrl(),
           token,
           agent: resolvedRequest.agent,
           cwd,
-          createAgentEnvironment: input.createAgentEnvironment,
+          createAgentEnvironment: createAgentEnvironment,
           env: resolvedRequest.env,
           envPolicy: resolvedConfig?.sessions?.envPolicy,
-          registryService: input.registryService,
-          agentInstallService: input.agentInstallService,
+          registryService: registryService,
+          agentInstallService: agentInstallService,
           registry: resolvedRegistry,
           managedAgents: resolvedConfig?.agents?.managed,
         })
@@ -1619,7 +1629,7 @@ export function createSessionManager(input: {
       await params.onPersisted?.({
         sessionId: id,
       })
-      await input.events.emit("session.persisted", {
+      await events.emit("session.persisted", {
         sessionId: id,
         request: resolvedRequest,
       })
@@ -1657,7 +1667,7 @@ export function createSessionManager(input: {
           supportsLoadSession: sessionSupportsLoad,
         })
         if (worktree) {
-          await input.events.emit("session.launch.finished", {
+          await events.emit("session.launch.finished", {
             sessionId: id,
             reason: "one_shot_completed",
             worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -1690,7 +1700,7 @@ export function createSessionManager(input: {
         })
       }
       if (worktree) {
-        await input.events.emit("session.activated", {
+        await events.emit("session.activated", {
           sessionId: id,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
         })
@@ -1708,7 +1718,7 @@ export function createSessionManager(input: {
         await waitForAgentProcessExit(spawnedAgentProcess).catch(() => {})
       }
       if (worktree) {
-        await input.events.emit("session.launch.failed", {
+        await events.emit("session.launch.failed", {
           sessionId: id,
           error,
           worktree: toSessionWorktreeLifecycleState(worktree.state, id),
@@ -1990,7 +2000,7 @@ export function createSessionManager(input: {
   ): Promise<SessionSubpackagesResponse> {
     await ready
 
-    const config = await input.configProvider.getRootConfig(params.cwd).then((root) => root.config)
+    const config = await configProvider.getRootConfig(params.cwd).then((root) => root.config)
 
     return {
       subpackages: await discoverSessionSubpackages({
@@ -2191,7 +2201,7 @@ export function createSessionManager(input: {
     emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
     const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
     try {
-      await input.events.emit("session.stopping", {
+      await events.emit("session.stopping", {
         sessionId: id,
         reason: "session_shutdown",
         worktree: worktreeRecord ? toSessionWorktreeLifecycleState(worktreeRecord, id) : null,
@@ -2235,7 +2245,7 @@ export function createSessionManager(input: {
       idleShutdown.cancelIdleShutdownTimer(session, "daemon_shutdown")
       const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(session.id)
       try {
-        await input.events.emit("session.stopping", {
+        await events.emit("session.stopping", {
           sessionId: session.id,
           reason: "daemon_shutdown",
           worktree: worktreeRecord

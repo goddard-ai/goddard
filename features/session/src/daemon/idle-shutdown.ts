@@ -7,7 +7,12 @@ import type { ActiveSession, SessionMemory } from "./session-memory.ts"
 type SessionId = DaemonSession["id"]
 
 /** Owns subscriber-count and timer decisions for loadable idle sessions. */
-export function createIdleShutdownController(input: {
+export function createIdleShutdownController({
+  memory,
+  logger,
+  emitDiagnostic,
+  shutdownSession,
+}: {
   memory: SessionMemory
   logger: DaemonLogger
   emitDiagnostic: (
@@ -20,7 +25,7 @@ export function createIdleShutdownController(input: {
 }) {
   /** Returns how many `session.streamMessages` stream subscribers are attached to one session id. */
   function getSessionSubscriberCount(id: SessionId): number {
-    return input.memory.sessionSubscriberCounts.get(id) ?? 0
+    return memory.sessionSubscriberCounts.get(id) ?? 0
   }
 
   /** Checks whether one live session is quiescent enough for idle auto-shutdown. */
@@ -44,7 +49,7 @@ export function createIdleShutdownController(input: {
 
     clearTimeout(active.idleShutdownTimer)
     active.idleShutdownTimer = null
-    input.emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_cancelled",
       { reason, timeoutMs: active.idleShutdownTimeoutMs },
@@ -54,7 +59,7 @@ export function createIdleShutdownController(input: {
 
   /** Re-checks whether one active session should have an idle auto-shutdown timer armed right now. */
   function refreshIdleShutdownState(id: SessionId, reason: string) {
-    const active = input.memory.activeSessions.get(id)
+    const active = memory.activeSessions.get(id)
     if (!active) {
       return
     }
@@ -68,7 +73,7 @@ export function createIdleShutdownController(input: {
       return
     }
 
-    input.emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_idle_shutdown_timer_started",
       { reason, timeoutMs: active.idleShutdownTimeoutMs },
@@ -76,7 +81,7 @@ export function createIdleShutdownController(input: {
     )
     active.idleShutdownTimer = setTimeout(() => {
       void handleIdleShutdownTimerExpired(active.id).catch((error) => {
-        input.logger.log("session_idle_shutdown_timer_failed", {
+        logger.log("session_idle_shutdown_timer_failed", {
           sessionId: active.id,
           errorMessage: getErrorMessage(error),
         })
@@ -86,7 +91,7 @@ export function createIdleShutdownController(input: {
 
   /** Shuts down one loadable idle session when its auto-shutdown timer expires without any reconnect. */
   async function handleIdleShutdownTimerExpired(id: SessionId): Promise<void> {
-    const active = input.memory.activeSessions.get(id)
+    const active = memory.activeSessions.get(id)
     if (!active) {
       return
     }
@@ -96,18 +101,18 @@ export function createIdleShutdownController(input: {
       return
     }
 
-    input.emitDiagnostic(
+    emitDiagnostic(
       id,
       "session_idle_shutdown_timer_expired",
       { timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
-    await input.shutdownSession(id)
+    await shutdownSession(id)
   }
 
   /** Records one new `session.streamMessages` subscriber so idle shutdown waits for attached clients. */
   function sessionSubscriberConnected(id: SessionId): void {
-    input.memory.sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
+    memory.sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
     refreshIdleShutdownState(id, "subscriber_connected")
   }
 
@@ -115,9 +120,9 @@ export function createIdleShutdownController(input: {
   function sessionSubscriberDisconnected(id: SessionId): void {
     const current = getSessionSubscriberCount(id)
     if (current <= 1) {
-      input.memory.sessionSubscriberCounts.delete(id)
+      memory.sessionSubscriberCounts.delete(id)
     } else {
-      input.memory.sessionSubscriberCounts.set(id, current - 1)
+      memory.sessionSubscriberCounts.set(id, current - 1)
     }
     refreshIdleShutdownState(id, "subscriber_disconnected")
   }

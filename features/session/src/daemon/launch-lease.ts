@@ -75,7 +75,7 @@ function canPromoteLaunchLease(params: {
 }
 
 /** Creates the daemon-local registry that owns launch lease lookup, release, and cleanup. */
-export function createLaunchLeaseStore(input: { logger: DaemonLogger }) {
+export function createLaunchLeaseStore({ logger }: { logger: DaemonLogger }) {
   const launchLeases = new Map<string, LaunchLease>()
   const launchLeaseIdsByKey = new Map<string, string>()
 
@@ -103,7 +103,7 @@ export function createLaunchLeaseStore(input: { logger: DaemonLogger }) {
     cancelReleaseTimer(lease)
     remove(lease)
     lease.closing = (async () => {
-      input.logger.log("launch_lease_closing", {
+      logger.log("launch_lease_closing", {
         launchLeaseId: lease.id,
         acpSessionId: lease.acpSessionId,
         reason,
@@ -126,7 +126,7 @@ export function createLaunchLeaseStore(input: { logger: DaemonLogger }) {
       return
     }
 
-    input.logger.log("launch_lease_release_scheduled", {
+    logger.log("launch_lease_release_scheduled", {
       launchLeaseId: lease.id,
       acpSessionId: lease.acpSessionId,
       reason,
@@ -134,7 +134,7 @@ export function createLaunchLeaseStore(input: { logger: DaemonLogger }) {
     })
     lease.releaseTimer = setTimeout(() => {
       void close(lease, reason).catch((error) => {
-        input.logger.log("launch_lease_close_failed", {
+        logger.log("launch_lease_close_failed", {
           launchLeaseId: lease.id,
           reason,
           errorMessage: getErrorMessage(error),
