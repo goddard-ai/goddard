@@ -545,7 +545,7 @@ export function createPromptTurnFeature({
         }),
       )
       pendingSteer.reject(
-        createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+        createSessionIpcError(SessionErrorCodes.PromptAborted, {
           sessionId: active.id,
         }),
       )
@@ -568,7 +568,7 @@ export function createPromptTurnFeature({
       }
 
       queuedPrompt.reject?.(
-        createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+        createSessionIpcError(SessionErrorCodes.PromptAborted, {
           sessionId: active.id,
         }),
       )
@@ -585,7 +585,7 @@ export function createPromptTurnFeature({
     return abortedQueue
   }
 
-  function abortPendingSteer(active: ActiveSession, reason: string): AbortedSessionPrompt[] {
+  function abortPendingSteer(active: ActiveSession): AbortedSessionPrompt[] {
     if (!active.pendingSteer) {
       return []
     }
@@ -593,7 +593,7 @@ export function createPromptTurnFeature({
     const pendingSteer = active.pendingSteer
     active.pendingSteer = null
     pendingSteer.reject(
-      createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+      createSessionIpcError(SessionErrorCodes.PromptAborted, {
         sessionId: active.id,
       }),
     )
@@ -655,7 +655,7 @@ export function createPromptTurnFeature({
   ): Promise<CancelSessionResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+      throw createSessionIpcError(SessionErrorCodes.NotActive, {
         sessionId: id,
       })
     }
@@ -738,18 +738,14 @@ export function createPromptTurnFeature({
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+      throw createSessionIpcError(SessionErrorCodes.NotActive, {
         sessionId: id,
       })
     }
 
     if (isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)) {
       if ("id" in message === false || message.id == null) {
-        throw createSessionIpcError(
-          SessionErrorCodes.MissingJsonRpcId,
-          "Queued prompt messages must include a JSON-RPC id",
-          { sessionId: id },
-        )
+        throw createSessionIpcError(SessionErrorCodes.MissingJsonRpcId, { sessionId: id })
       }
 
       sessionTitles.queueSessionTitlePreparation({
@@ -808,11 +804,7 @@ export function createPromptTurnFeature({
       return
     }
 
-    throw createSessionIpcError(
-      SessionErrorCodes.UnsupportedMessage,
-      `Unsupported ACP session message for active session ${id}`,
-      { sessionId: id },
-    )
+    throw createSessionIpcError(SessionErrorCodes.UnsupportedMessage, { sessionId: id })
   }
 
   async function promptSession(
@@ -824,7 +816,7 @@ export function createPromptTurnFeature({
   ): Promise<acp.PromptResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+      throw createSessionIpcError(SessionErrorCodes.NotActive, {
         sessionId: id,
       })
     }
@@ -876,7 +868,7 @@ export function createPromptTurnFeature({
   async function popQueuedPrompt(id: SessionId): Promise<PopQueuedSessionPromptResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+      throw createSessionIpcError(SessionErrorCodes.NotActive, {
         sessionId: id,
       })
     }
@@ -927,16 +919,13 @@ export function createPromptTurnFeature({
   ): Promise<SteerSessionResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+      throw createSessionIpcError(SessionErrorCodes.NotActive, {
         sessionId: id,
       })
     }
 
     const requestId = randomUUID()
-    const abortedQueue = abortPendingSteer(
-      active,
-      `Pending steering was replaced for session ${id}.`,
-    )
+    const abortedQueue = abortPendingSteer(active)
 
     if (active.blockingPromptRequestId === null) {
       queueDebug("session.queue.steer_immediate", {

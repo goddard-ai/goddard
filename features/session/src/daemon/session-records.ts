@@ -269,11 +269,7 @@ export function persistLaunchedSession(
   if (params.existingSession) {
     const existingDocument = db.sessions.get(params.id) ?? null
     if (!existingDocument) {
-      throw createSessionIpcError(
-        SessionErrorCodes.NotFound,
-        `Cannot update unknown session: ${params.id}`,
-        { sessionId: params.id },
-      )
+      throw createSessionIpcError(SessionErrorCodes.NotFound, { sessionId: params.id })
     }
 
     db.sessions.update(params.id, params.sessionRecord)

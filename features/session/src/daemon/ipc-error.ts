@@ -14,7 +14,6 @@ type SessionIpcErrorDescriptor<TCode extends SessionErrorCode> = IpcErrorDescrip
 
 export function createSessionIpcError<TCode extends SessionErrorCode>(
   code: TCode,
-  message: string,
   ...[details]: undefined extends IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>
     ? [details?: IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>]
     : [details: IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>]
@@ -22,7 +21,6 @@ export function createSessionIpcError<TCode extends SessionErrorCode>(
   const input = {
     code,
     ...(details === undefined ? {} : { details }),
-    message,
   } as IpcClientErrorPayload<SessionIpcErrorDescriptor<TCode>>
 
   return new IpcClientError<SessionIpcErrorDescriptor<TCode>>(input)
