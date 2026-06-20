@@ -188,25 +188,33 @@ msgstr "Command"
 msgid "Command menu"
 msgstr "Command menu"
 
+#: src/session-chat/request-error.ts:42
+msgid "Commit or stash local changes before starting this branch session."
+msgstr "Commit or stash local changes before starting this branch session."
+
 #: src/sessions/launch-form-selectors.tsrx:152
 msgid "Commit or stash local changes to launch from another branch."
 msgstr "Commit or stash local changes to launch from another branch."
+
+#: src/session-chat/request-error.ts:25
+msgid "Commit or stash worktree changes before completing this session."
+msgstr "Commit or stash worktree changes before completing this session."
 
 #: src/inbox/row.tsrx:229
 #: src/inbox/row.tsrx:235
 msgid "Complete"
 msgstr "Complete"
 
-#: src/session-chat/view.tsrx:289
+#: src/session-chat/view.tsrx:292
 msgid "Complete failed"
 msgstr "Complete failed"
 
 #: src/commands/app-command-definitions.ts:257
-#: src/session-chat/view.tsrx:275
+#: src/session-chat/view.tsrx:278
 msgid "Complete Session"
 msgstr "Complete Session"
 
-#: src/session-chat/view.tsrx:272
+#: src/session-chat/view.tsrx:275
 msgid "Complete unavailable while agent is active"
 msgstr "Complete unavailable while agent is active"
 
@@ -216,7 +224,7 @@ msgstr "Complete unavailable while agent is active"
 msgid "Completed"
 msgstr "Completed"
 
-#: src/session-chat/view.tsrx:274
+#: src/session-chat/view.tsrx:277
 msgid "Completing session"
 msgstr "Completing session"
 
@@ -516,7 +524,11 @@ msgstr "Mark selected unread"
 msgid "Mark unread"
 msgstr "Mark unread"
 
-#: src/session-chat/view.tsrx:502
+#: src/session-chat/request-error.ts:27
+msgid "Merge the worktree commits before completing this session."
+msgstr "Merge the worktree commits before completing this session."
+
+#: src/session-chat/view.tsrx:505
 #: src/sessions/launch-form-selectors.tsrx:46
 #: src/sessions/launch-form-selectors.tsrx:440
 msgid "Model"
@@ -535,7 +547,7 @@ msgstr "New worktree"
 msgid "Next"
 msgstr "Next"
 
-#: src/session-chat/view.tsrx:357
+#: src/session-chat/view.tsrx:360
 msgid "Next prompt"
 msgstr "Next prompt"
 
@@ -776,7 +788,7 @@ msgstr "Preparing transcript layout..."
 msgid "Press the shortcut you want to use"
 msgstr "Press the shortcut you want to use"
 
-#: src/session-chat/view.tsrx:342
+#: src/session-chat/view.tsrx:345
 msgid "Previous prompt"
 msgstr "Previous prompt"
 
@@ -824,7 +836,7 @@ msgstr "Project unavailable"
 msgid "Projects"
 msgstr "Projects"
 
-#: src/session-chat/view.tsrx:640
+#: src/session-chat/view.tsrx:643
 msgid "Prompt wasn't sent"
 msgstr "Prompt wasn't sent"
 
@@ -918,11 +930,11 @@ msgstr "Save shortcut"
 msgid "Saved"
 msgstr "Saved"
 
-#: src/session-chat/view.tsrx:359
+#: src/session-chat/view.tsrx:362
 msgid "Scroll to next user prompt"
 msgstr "Scroll to next user prompt"
 
-#: src/session-chat/view.tsrx:345
+#: src/session-chat/view.tsrx:348
 msgid "Scroll to previous user prompt"
 msgstr "Scroll to previous user prompt"
 
@@ -1014,7 +1026,7 @@ msgstr "Selected project metadata for the current workspace."
 msgid "Session"
 msgstr "Session"
 
-#: src/session-chat/view.tsrx:270
+#: src/session-chat/view.tsrx:273
 msgid "Session completed"
 msgstr "Session completed"
 
@@ -1027,6 +1039,10 @@ msgstr "Session launch failed"
 #: src/sessions/dialog.tsrx:91
 msgid "Session launched"
 msgstr "Session launched"
+
+#: src/session-chat/request-error.ts:51
+msgid "Session not found. Refresh and try again."
+msgstr "Session not found. Refresh and try again."
 
 #: src/session-input/session-mode-selector.tsrx:54
 msgid "Session option"
@@ -1091,13 +1107,21 @@ msgstr "Some inbox items were missing"
 msgid "Specs"
 msgstr "Specs"
 
-#: src/session-chat/view.tsrx:400
-#: src/session-chat/view.tsrx:400
-#: src/session-chat/view.tsrx:402
+#: src/session-chat/request-error.ts:44
+msgid "Start the branch session from a repository checkout."
+msgstr "Start the branch session from a repository checkout."
+
+#: src/session-chat/request-error.ts:38
+msgid "Start the session from a non-bare repository checkout."
+msgstr "Start the session from a non-bare repository checkout."
+
+#: src/session-chat/view.tsrx:403
+#: src/session-chat/view.tsrx:403
+#: src/session-chat/view.tsrx:405
 msgid "Stop active turn"
 msgstr "Stop active turn"
 
-#: src/session-chat/view.tsrx:332
+#: src/session-chat/view.tsrx:335
 msgid "Stop failed"
 msgstr "Stop failed"
 
@@ -1105,7 +1129,7 @@ msgstr "Stop failed"
 msgid "Stop recording key binding search"
 msgstr "Stop recording key binding search"
 
-#: src/session-chat/view.tsrx:319
+#: src/session-chat/view.tsrx:322
 msgid "Stop skipped"
 msgstr "Stop skipped"
 
@@ -1139,7 +1163,11 @@ msgstr "Tasks"
 msgid "The agent cleared its plan."
 msgstr "The agent cleared its plan."
 
-#: src/session-chat/view.tsrx:320
+#: src/session-chat/request-error.ts:40
+msgid "The branch checkout failed. Check the project and try again."
+msgstr "The branch checkout failed. Check the project and try again."
+
+#: src/session-chat/view.tsrx:323
 msgid "The daemon did not find an active turn to stop."
 msgstr "The daemon did not find an active turn to stop."
 
@@ -1176,6 +1204,14 @@ msgid "The project record for this tab is no longer in the machine-wide project 
 msgstr "The project record for this tab is no longer in the machine-wide "
 "project registry."
 
+#: src/session-chat/request-error.ts:55
+msgid "The queued prompt was cancelled."
+msgstr "The queued prompt was cancelled."
+
+#: src/session-chat/request-error.ts:14
+msgid "The request failed."
+msgstr "The request failed."
+
 #: src/inbox/page.tsrx:309
 msgid "The selected inbox rows could not be updated."
 msgstr "The selected inbox rows could not be updated."
@@ -1184,6 +1220,20 @@ msgstr "The selected inbox rows could not be updated."
 #: src/sessions/dialog.tsrx:97
 msgid "The session could not be created."
 msgstr "The session could not be created."
+
+#: src/session-chat/request-error.ts:34
+msgid "The session data is out of date. Refresh and try again."
+msgstr "The session data is out of date. Refresh and try again."
+
+#: src/session-chat/request-error.ts:47
+msgid "The session request is not supported."
+msgstr "The session request is not supported."
+
+#: src/session-chat/request-error.ts:29
+msgid "The worktree state could not be inspected. Try again after checking the "
+"project."
+msgstr "The worktree state could not be inspected. Try again after checking the "
+"project."
 
 #: src/sessions/launch-form-selectors.tsrx:47
 #: src/sessions/launch-form-selectors.tsrx:456
@@ -1194,13 +1244,33 @@ msgstr "Thinking level"
 msgid "Thinking..."
 msgstr "Thinking..."
 
+#: src/session-chat/request-error.ts:31
+msgid "This agent cannot reconnect to the previous session."
+msgstr "This agent cannot reconnect to the previous session."
+
 #: src/commands/command-dialog.tsrx:80
 msgid "This dialog failed to render. The rest of the app is still available."
 msgstr "This dialog failed to render. The rest of the app is still available."
 
+#: src/session-chat/request-error.ts:21
+msgid "This session can no longer be reconnected."
+msgstr "This session can no longer be reconnected."
+
+#: src/session-chat/request-error.ts:53
+msgid "This session does not have a worktree."
+msgstr "This session does not have a worktree."
+
+#: src/session-chat/request-error.ts:49
+msgid "This session is no longer active. Refresh the session and try again."
+msgstr "This session is no longer active. Refresh the session and try again."
+
 #: src/session-changes/view.tsrx:34
 msgid "This session is not currently attached to a git workspace."
 msgstr "This session is not currently attached to a git workspace."
+
+#: src/session-chat/request-error.ts:36
+msgid "This session link is no longer valid."
+msgstr "This session link is no longer valid."
 
 #: src/session-changes/view.tsrx:49
 msgid "This session workspace is currently clean."
@@ -1275,7 +1345,7 @@ msgstr "Unread and acknowledged items that remain in the active queue will "
 msgid "Use the agent harness default"
 msgstr "Use the agent harness default"
 
-#: src/session-chat/view.tsrx:504
+#: src/session-chat/view.tsrx:507
 #: src/sessions/launch-form-selectors.tsrx:442
 msgid "Use the agent harness default model"
 msgstr "Use the agent harness default model"
@@ -1293,9 +1363,13 @@ msgstr "Use the light built-in palette."
 msgid "View Changes"
 msgstr "View Changes"
 
-#: src/session-chat/view.tsrx:373
+#: src/session-chat/view.tsrx:376
 msgid "View session changes"
 msgstr "View session changes"
+
+#: src/session-chat/request-error.ts:23
+msgid "Wait for the active turn to finish before completing this session."
+msgstr "Wait for the active turn to finish before completing this session."
 
 #: src/settings/adapter-installations-section.tsrx:142
 msgid "Website"
@@ -1343,6 +1417,6 @@ msgstr "Workspace"
 msgid "Worktree"
 msgstr "Worktree"
 
-#: src/session-chat/view.tsrx:643
+#: src/session-chat/view.tsrx:646
 msgid "Your draft is still here. Try again when the session is available."
 msgstr "Your draft is still here. Try again when the session is available."
