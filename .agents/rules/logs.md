@@ -17,3 +17,8 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - When inspecting daemon persistence directly, remember development runs use the development data profile. The dev daemon DB is `~/.goddard/development/goddard.db`; `~/.goddard/goddard.db` is the non-development profile and may be stale or unrelated.
 - Remember that large property values are collapsed and likely secrets are redacted before persistence, so absence of a raw value in logs is expected.
 - Prefer adding or improving structured log fields over relying on long free-form messages when a debugging gap requires a code change.
+- Use normal logs for events that belong in the default operational timeline: startup/shutdown, lifecycle transitions, auth/config changes, IPC/app-daemon handoffs, user-visible failures, degraded behavior, and actionable warnings/errors.
+- Use `createDebug("<scope>")` for focused subsystem traces that are useful only when investigating that scope: queue movement, stream/message flow, retries, timing/order details, state counters, handled noisy errors, and internal branch decisions.
+- If the event changes the durable story of what happened, use a normal log. If it only explains how one subsystem got there and would clutter default logs, use debug.
+- Keep debug scopes stable and dotted, and reuse nearby scopes when possible.
+- Do not hide important failures only in debug logs.
