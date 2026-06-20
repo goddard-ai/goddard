@@ -8,6 +8,39 @@ import { z } from "zod"
 
 export { StaticSessionParamsSchema as StaticSessionParams }
 
+/** Client-visible daemon session error codes shared across daemon, SDK, and app layers. */
+export const SessionErrorCodes = {
+  CannotCompleteActiveTurn: "session.cannot_complete_active_turn",
+  InvalidCursor: "session.invalid_cursor",
+  InvalidHistoryCursor: "session.invalid_history_cursor",
+  InvalidToken: "session.invalid_token",
+  LaunchBareRepository: "session.launch_bare_repository",
+  LaunchDirtyCheckout: "session.launch_dirty_checkout",
+  LaunchOutsideRepository: "session.launch_outside_repository",
+  MissingJsonRpcId: "session.missing_json_rpc_id",
+  NotActive: "session.not_active",
+  NotFound: "session.not_found",
+  NoWorktree: "session.no_worktree",
+  UnsupportedMessage: "session.unsupported_message",
+} as const
+
+export type SessionErrorCode = (typeof SessionErrorCodes)[keyof typeof SessionErrorCodes]
+
+export const SessionErrorCode = z.enum([
+  SessionErrorCodes.CannotCompleteActiveTurn,
+  SessionErrorCodes.InvalidCursor,
+  SessionErrorCodes.InvalidHistoryCursor,
+  SessionErrorCodes.InvalidToken,
+  SessionErrorCodes.LaunchBareRepository,
+  SessionErrorCodes.LaunchDirtyCheckout,
+  SessionErrorCodes.LaunchOutsideRepository,
+  SessionErrorCodes.MissingJsonRpcId,
+  SessionErrorCodes.NotActive,
+  SessionErrorCodes.NotFound,
+  SessionErrorCodes.NoWorktree,
+  SessionErrorCodes.UnsupportedMessage,
+])
+
 /** Tagged session id emitted by the session store. */
 export const SessionId = z.custom<`ses_${string}`>(
   (value): value is `ses_${string}` => typeof value === "string" && value.startsWith("ses_"),
