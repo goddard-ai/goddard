@@ -1,3 +1,4 @@
+import type { IpcErrorRegistry, IpcErrorRegistryError } from "@goddard-ai/ipc"
 import { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import { StaticSessionParams as StaticSessionParamsSchema } from "@goddard-ai/schema/config"
@@ -74,6 +75,138 @@ export type SessionIdParams = z.infer<typeof SessionIdParams>
 export const DaemonSessionConnectionMode = z.enum(["live", "history", "none"])
 
 export type DaemonSessionConnectionMode = z.output<typeof DaemonSessionConnectionMode>
+
+/** Structured client-visible daemon session errors keyed by exported error identifiers. */
+export const SessionIpcErrors = {
+  ArchivedNotReconnectable: {
+    code: SessionErrorCodes.ArchivedNotReconnectable,
+    details: z.strictObject({
+      connectionMode: DaemonSessionConnectionMode,
+      sessionId: SessionId,
+    }),
+  },
+  CannotCompleteActiveTurn: {
+    code: SessionErrorCodes.CannotCompleteActiveTurn,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  CannotCompleteDirtyWorktree: {
+    code: SessionErrorCodes.CannotCompleteDirtyWorktree,
+    details: z.strictObject({
+      sessionId: SessionId,
+      worktreeDir: z.string(),
+    }),
+  },
+  CannotCompleteUnmergedCommits: {
+    code: SessionErrorCodes.CannotCompleteUnmergedCommits,
+    details: z.strictObject({
+      sessionId: SessionId,
+      worktreeDir: z.string(),
+    }),
+  },
+  CannotInspectCompletionState: {
+    code: SessionErrorCodes.CannotInspectCompletionState,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  CannotResumeUnsupportedAgent: {
+    code: SessionErrorCodes.CannotResumeUnsupportedAgent,
+    details: z.strictObject({
+      acpSessionId: z.string(),
+    }),
+  },
+  InvalidCursor: {
+    code: SessionErrorCodes.InvalidCursor,
+    details: z.strictObject({
+      cursor: z.string().nullable(),
+    }),
+  },
+  InvalidHistoryCursor: {
+    code: SessionErrorCodes.InvalidHistoryCursor,
+    details: z.strictObject({
+      cursor: z.string().nullable(),
+      sessionId: SessionId,
+    }),
+  },
+  InvalidToken: {
+    code: SessionErrorCodes.InvalidToken,
+    details: z.undefined(),
+  },
+  LaunchBareRepository: {
+    code: SessionErrorCodes.LaunchBareRepository,
+    details: z.strictObject({
+      cwd: z.string(),
+    }),
+  },
+  LaunchCheckoutFailed: {
+    code: SessionErrorCodes.LaunchCheckoutFailed,
+    details: z.strictObject({
+      branchName: z.string(),
+      cwd: z.string(),
+      repoRoot: z.string(),
+    }),
+  },
+  LaunchDirtyCheckout: {
+    code: SessionErrorCodes.LaunchDirtyCheckout,
+    details: z.strictObject({
+      cwd: z.string(),
+      repoRoot: z.string(),
+    }),
+  },
+  LaunchOutsideRepository: {
+    code: SessionErrorCodes.LaunchOutsideRepository,
+    details: z.strictObject({
+      cwd: z.string(),
+    }),
+  },
+  MissingJsonRpcId: {
+    code: SessionErrorCodes.MissingJsonRpcId,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  NotActive: {
+    code: SessionErrorCodes.NotActive,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  NotFound: {
+    code: SessionErrorCodes.NotFound,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  NotReconnectable: {
+    code: SessionErrorCodes.NotReconnectable,
+    details: z.strictObject({
+      connectionMode: DaemonSessionConnectionMode,
+      sessionId: SessionId,
+    }),
+  },
+  NoWorktree: {
+    code: SessionErrorCodes.NoWorktree,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  PromptAborted: {
+    code: SessionErrorCodes.PromptAborted,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+  UnsupportedMessage: {
+    code: SessionErrorCodes.UnsupportedMessage,
+    details: z.strictObject({
+      sessionId: SessionId,
+    }),
+  },
+} as const satisfies IpcErrorRegistry
+
+export type SessionIpcError = IpcErrorRegistryError<typeof SessionIpcErrors>
 
 export const DaemonSessionStopReason = z.enum([
   "end_turn",

@@ -87,8 +87,8 @@ export type {
   SessionLocalCheckoutParams,
   ShutdownSessionResponse,
 }
-export type { SessionWorktreeParams } from "@goddard-ai/session/schema"
-export { SessionErrorCodes } from "@goddard-ai/session/schema"
+export type { SessionIpcError, SessionWorktreeParams } from "@goddard-ai/session/schema"
+export { SessionErrorCodes, SessionIpcErrors } from "@goddard-ai/session/schema"
 
 export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
 

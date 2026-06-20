@@ -1,15 +1,29 @@
-import { IpcClientError } from "@goddard-ai/ipc"
+import {
+  IpcClientError,
+  type IpcClientErrorPayload,
+  type IpcErrorDescriptorForCode,
+  type IpcErrorDetails,
+} from "@goddard-ai/ipc"
 
-import type { SessionErrorCode } from "../schema.ts"
+import { SessionIpcErrors, type SessionErrorCode } from "../schema.ts"
 
-export function createSessionIpcError(
-  code: SessionErrorCode,
+type SessionIpcErrorDescriptor<TCode extends SessionErrorCode> = IpcErrorDescriptorForCode<
+  typeof SessionIpcErrors,
+  TCode
+>
+
+export function createSessionIpcError<TCode extends SessionErrorCode>(
+  code: TCode,
   message: string,
-  details?: Record<string, unknown>,
+  ...[details]: undefined extends IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>
+    ? [details?: IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>]
+    : [details: IpcErrorDetails<SessionIpcErrorDescriptor<TCode>>]
 ) {
-  return new IpcClientError({
+  const input = {
     code,
-    ...(details ? { details } : {}),
+    ...(details === undefined ? {} : { details }),
     message,
-  })
+  } as IpcClientErrorPayload<SessionIpcErrorDescriptor<TCode>>
+
+  return new IpcClientError<SessionIpcErrorDescriptor<TCode>>(input)
 }
