@@ -17,6 +17,10 @@ import type {
 } from "~/shared/desktop-rpc.ts"
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
+import {
+  isRendererLogCaptureInstalled,
+  markRendererLogCaptureInstalled,
+} from "./lib/renderer-log-capture.ts"
 import { goddardSdk } from "./sdk.ts"
 
 type RendererDebugLogInput = {
@@ -98,7 +102,6 @@ export interface DesktopHostBridge {
 declare global {
   interface Window {
     __goddardDesktop: DesktopHostBridge
-    __goddardDidInstallLogCapture?: boolean
   }
 }
 
@@ -152,11 +155,11 @@ export function initializeDesktopHost(): void {
 }
 
 function installRendererLogCapture() {
-  if (window.__goddardDidInstallLogCapture) {
+  if (isRendererLogCaptureInstalled()) {
     return
   }
 
-  window.__goddardDidInstallLogCapture = true
+  markRendererLogCaptureInstalled()
 
   for (const method of consoleMethods) {
     const original = console[method].bind(console)

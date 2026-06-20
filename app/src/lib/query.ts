@@ -1,6 +1,8 @@
 import hashSum from "hash-sum"
 import { useEffect, useState } from "preact/hooks"
 
+import { isRendererLogCaptureInstalled } from "./renderer-log-capture.ts"
+
 type QueryArgs = readonly any[]
 type QueryFunction<TArgs extends QueryArgs = QueryArgs, TData = unknown> = (
   ...args: TArgs
@@ -32,10 +34,6 @@ type QueryEntry = {
   refetchOnWindowReactivate: boolean
   stale: boolean
   subscribers: Set<() => void>
-}
-
-type QueryDebugWindow = Window & {
-  __goddardDidInstallLogCapture?: boolean
 }
 
 type QueryDescriptor<TQueryFn extends QueryInput = QueryInput> = {
@@ -604,7 +602,7 @@ function debugQuery(message: string, properties: Record<string, unknown> = {}) {
     return
   }
 
-  if (!(window as QueryDebugWindow).__goddardDidInstallLogCapture) {
+  if (!isRendererLogCaptureInstalled()) {
     return
   }
 
