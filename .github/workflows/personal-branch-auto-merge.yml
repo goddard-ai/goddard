@@ -42,7 +42,7 @@ jobs:
           )"
           echo "number=$pr_number" >> "$GITHUB_OUTPUT"
 
-      - name: Enable auto-merge
+      - name: Merge when ready
         if: steps.pr.outputs.number != ''
         shell: bash
         env:
@@ -50,7 +50,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          merge_state="$(
+            gh pr view "${{ steps.pr.outputs.number }}" \
+              --repo "${{ github.repository }}" \
+              --json isDraft,mergeStateStatus \
+              --jq 'if .isDraft then "DRAFT" else .mergeStateStatus end'
+          )"
+
+          if [ "$merge_state" != "CLEAN" ]; then
+            echo "PR #${{ steps.pr.outputs.number }} is not ready to merge; mergeStateStatus=$merge_state."
+            exit 0
+          fi
+
           gh pr merge "${{ steps.pr.outputs.number }}" \
             --repo "${{ github.repository }}" \
-            --auto \
             --rebase
