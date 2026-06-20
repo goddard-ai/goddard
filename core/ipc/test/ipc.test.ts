@@ -10,6 +10,7 @@ import {
   $type,
   http,
   IpcClientError,
+  isIpcClientErrorForRegistry,
   ndjson,
   type HttpRouteTree,
   type IpcClientHookEvent,
@@ -42,6 +43,19 @@ const routes = {
     }>(),
   }),
 } satisfies HttpRouteTree
+
+const mathIpcErrors = {
+  AddDisabled: {
+    code: "math.add_disabled",
+    details: z.strictObject({
+      reason: z.string(),
+    }),
+  },
+  AddUnauthorized: {
+    code: "math.add_unauthorized",
+    details: z.undefined(),
+  },
+} as const
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -722,6 +736,52 @@ describe("core/ipc", () => {
         details: { reason: "maintenance" },
       },
     })
+  })
+
+  test("narrows IPC client errors by registry", () => {
+    const error: unknown = new IpcClientError({
+      code: "math.add_disabled",
+      details: { reason: "maintenance" },
+    })
+
+    if (!isIpcClientErrorForRegistry(error, mathIpcErrors)) {
+      throw new Error("Expected math IPC error")
+    }
+
+    switch (error.code) {
+      case "math.add_disabled":
+        expect(error.details).toEqual({ reason: "maintenance" })
+        break
+      case "math.add_unauthorized":
+        expect(error.details).toBeUndefined()
+        break
+      default:
+        expect.unreachable()
+    }
+  })
+
+  test("rejects IPC client errors outside a registry", () => {
+    expect(
+      isIpcClientErrorForRegistry(
+        new IpcClientError({
+          code: "math.subtract_disabled",
+          details: { reason: "maintenance" },
+        }),
+        mathIpcErrors,
+      ),
+    ).toBe(false)
+  })
+
+  test("rejects IPC client errors with invalid registry details", () => {
+    expect(
+      isIpcClientErrorForRegistry(
+        new IpcClientError({
+          code: "math.add_disabled",
+          details: { retryAfter: 30 },
+        }),
+        mathIpcErrors,
+      ),
+    ).toBe(false)
   })
 
   test("rewords missing IPC request failures", async () => {
