@@ -1026,13 +1026,17 @@ export function createSessionManager({
     type: string,
     detail?: Record<string, unknown>,
     diagnosticLogger: DaemonLogger = logger,
+    options: { logSessionId?: boolean } = {},
   ) {
     const event: DaemonSessionDiagnosticEvent = {
       type,
       at: new Date().toISOString(),
       detail,
     }
-    diagnosticLogger.log(type, { sessionId, ...detail })
+    diagnosticLogger.log(type, {
+      ...(options.logSessionId === false ? {} : { sessionId }),
+      ...detail,
+    })
     const diagnosticsRecord =
       db.sessionDiagnostics.first({
         where: { sessionId },
@@ -1901,12 +1905,18 @@ export function createSessionManager({
       }
     }
 
-    emitDiagnostic(params.id, "session_history_read", {
-      persistedTurnCount: page.items.length,
-      returnedTurnCount: turns.length,
-      hasCursor: params.cursor != null,
-      hasMore: page.next != null,
-    })
+    emitDiagnostic(
+      params.id,
+      "session_history_read",
+      {
+        persistedTurnCount: page.items.length,
+        returnedTurnCount: turns.length,
+        hasCursor: params.cursor != null,
+        hasMore: page.next != null,
+      },
+      logger,
+      { logSessionId: false },
+    )
 
     return {
       id: session.id,
