@@ -75,7 +75,6 @@ function isSessionEntityId(entityId: InboxEntityId): entityId is SessionId {
 
 function createInboxIpcError<TCode extends InboxErrorCode>(
   code: TCode,
-  message: string,
   ...[details]: undefined extends IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>
     ? [details?: IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>]
     : [details: IpcErrorDetails<InboxIpcErrorDescriptor<TCode>>]
@@ -83,7 +82,6 @@ function createInboxIpcError<TCode extends InboxErrorCode>(
   const input = {
     code,
     ...(details === undefined ? {} : { details }),
-    message,
   } as IpcClientErrorPayload<InboxIpcErrorDescriptor<TCode>>
 
   return new IpcClientError<InboxIpcErrorDescriptor<TCode>>(input)
@@ -95,28 +93,20 @@ function assertUserWorkflowStatus(entityId: InboxEntityId, status: InboxStatus |
   }
 
   if (!userWorkflowStatuses.has(status)) {
-    throw createInboxIpcError(
-      InboxErrorCodes.CompletedRequiresEntityOperation,
-      "Inbox status completed requires an entity-specific operation",
-      { entityId, status },
-    )
+    throw createInboxIpcError(InboxErrorCodes.CompletedRequiresEntityOperation, {
+      entityId,
+      status,
+    })
   }
 
   if (status === "replied" && !isSessionEntityId(entityId)) {
-    throw createInboxIpcError(
-      InboxErrorCodes.RepliedRequiresSessionEntity,
-      "Inbox status replied only applies to session entities",
-      { entityId, status },
-    )
+    throw createInboxIpcError(InboxErrorCodes.RepliedRequiresSessionEntity, { entityId, status })
   }
 }
 
 function assertMutableFields(input: { status?: InboxStatus; priority?: InboxPriority }) {
   if (!input.status && !input.priority) {
-    throw createInboxIpcError(
-      InboxErrorCodes.EmptyUpdate,
-      "At least one inbox field must be updated",
-    )
+    throw createInboxIpcError(InboxErrorCodes.EmptyUpdate)
   }
 }
 
@@ -148,10 +138,7 @@ export function createInboxManager(options: InboxManagerOptions) {
     const pageSize = normalizeInboxPageSize(params.limit)
     const statuses = params.statuses ?? ["unread"]
     if (statuses.length === 0) {
-      throw createInboxIpcError(
-        InboxErrorCodes.EmptyStatusFilter,
-        "Inbox status filter cannot be empty",
-      )
+      throw createInboxIpcError(InboxErrorCodes.EmptyStatusFilter)
     }
 
     let page: ReturnType<typeof db.inboxItems.findPage>
@@ -168,7 +155,7 @@ export function createInboxManager(options: InboxManagerOptions) {
         after: params.cursor ?? undefined,
       })
     } catch {
-      throw createInboxIpcError(InboxErrorCodes.InvalidCursor, "Invalid inbox cursor", {
+      throw createInboxIpcError(InboxErrorCodes.InvalidCursor, {
         cursor: params.cursor ?? null,
       })
     }
@@ -210,7 +197,7 @@ export function createInboxManager(options: InboxManagerOptions) {
         where: { entityId: input.entityId },
       }) ?? null
     if (!existing) {
-      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, {
         entityId: input.entityId,
       })
     }
@@ -221,7 +208,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: timestamp,
     })
     if (!item) {
-      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, {
         entityId: input.entityId,
       })
     }
@@ -232,10 +219,7 @@ export function createInboxManager(options: InboxManagerOptions) {
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
     assertMutableFields(input)
     if (input.entityIds.length === 0) {
-      throw createInboxIpcError(
-        InboxErrorCodes.EmptyBulkUpdate,
-        "Inbox bulk update requires at least one entity id",
-      )
+      throw createInboxIpcError(InboxErrorCodes.EmptyBulkUpdate)
     }
 
     const entityIds = [...new Set(input.entityIds)]
@@ -289,7 +273,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: Date.now(),
     })
     if (!item) {
-      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, {
         entityId: sessionId,
       })
     }
@@ -311,7 +295,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       updatedAt: Date.now(),
     })
     if (!item) {
-      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, "Inbox item not found", {
+      throw createInboxIpcError(InboxErrorCodes.ItemNotFound, {
         entityId: sessionId,
       })
     }
