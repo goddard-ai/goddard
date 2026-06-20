@@ -1,4 +1,3 @@
-import { IpcClientError } from "@goddard-ai/ipc"
 import type {
   AttentionHeadline,
   AttentionMetadataInput,
@@ -6,7 +5,8 @@ import type {
 } from "@goddard-ai/schema/attention"
 
 import type { SessionDb } from "../daemon.ts"
-import type { DaemonSession } from "../schema.ts"
+import { SessionErrorCodes, type DaemonSession } from "../schema.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import type { SessionEventEmitter } from "./manager.ts"
 import { resolveSessionAttentionMetadata } from "./metadata.ts"
 import type { SessionMemory } from "./session-memory.ts"
@@ -29,7 +29,9 @@ export function createSessionAttentionFeature({
   function requireSessionDocument(id: SessionId) {
     const record = db.sessions.get(id) ?? null
     if (!record) {
-      throw new IpcClientError(`Unknown session: ${id}`)
+      throw createSessionIpcError(SessionErrorCodes.NotFound, `Unknown session: ${id}`, {
+        sessionId: id,
+      })
     }
 
     return record

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto"
 import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
-import { IpcClientError } from "@goddard-ai/ipc"
 import { isAcpRequest } from "acp-client"
 import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
@@ -21,6 +20,7 @@ import {
 } from "../schema.ts"
 import type { createActiveTurnStore } from "./active-turns.ts"
 import type { createIdleShutdownController } from "./idle-shutdown.ts"
+import { createSessionIpcError } from "./ipc-error.ts"
 import type { SessionEventEmitter } from "./manager.ts"
 import type { ActiveSession, QueuedPromptEntry, SessionMemory } from "./session-memory.ts"
 import { resolveLatestStoredTurnSequence } from "./session-records.ts"
@@ -544,7 +544,11 @@ export function createPromptTurnFeature({
           prompt: pendingSteer.prompt,
         }),
       )
-      pendingSteer.reject(new IpcClientError(reason))
+      pendingSteer.reject(
+        createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+          sessionId: active.id,
+        }),
+      )
     }
 
     while (active.promptQueue.length > 0) {
@@ -563,7 +567,11 @@ export function createPromptTurnFeature({
         continue
       }
 
-      queuedPrompt.reject?.(new IpcClientError(reason))
+      queuedPrompt.reject?.(
+        createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+          sessionId: active.id,
+        }),
+      )
     }
 
     queueDebug("session.queue.prompts_aborted", {
@@ -584,7 +592,11 @@ export function createPromptTurnFeature({
 
     const pendingSteer = active.pendingSteer
     active.pendingSteer = null
-    pendingSteer.reject(new IpcClientError(reason))
+    pendingSteer.reject(
+      createSessionIpcError(SessionErrorCodes.PromptAborted, reason, {
+        sessionId: active.id,
+      }),
+    )
     queueDebug("session.queue.pending_steer_aborted", {
       sessionId: active.id,
       requestId: pendingSteer.requestId,
@@ -643,10 +655,8 @@ export function createPromptTurnFeature({
   ): Promise<CancelSessionResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError({
-        code: SessionErrorCodes.NotActive,
-        details: { sessionId: id },
-        message: `Session ${id} is not active`,
+      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+        sessionId: id,
       })
     }
 
@@ -728,12 +738,18 @@ export function createPromptTurnFeature({
   async function sendMessage(id: SessionId, message: acp.AnyMessage): Promise<void> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
+      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+        sessionId: id,
+      })
     }
 
     if (isAcpRequest<PromptRequestMessage>(message, acp.AGENT_METHODS.session_prompt)) {
       if ("id" in message === false || message.id == null) {
-        throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
+        throw createSessionIpcError(
+          SessionErrorCodes.MissingJsonRpcId,
+          "Queued prompt messages must include a JSON-RPC id",
+          { sessionId: id },
+        )
       }
 
       sessionTitles.queueSessionTitlePreparation({
@@ -792,7 +808,11 @@ export function createPromptTurnFeature({
       return
     }
 
-    throw new IpcClientError(`Unsupported ACP session message for active session ${id}`)
+    throw createSessionIpcError(
+      SessionErrorCodes.UnsupportedMessage,
+      `Unsupported ACP session message for active session ${id}`,
+      { sessionId: id },
+    )
   }
 
   async function promptSession(
@@ -804,7 +824,9 @@ export function createPromptTurnFeature({
   ): Promise<acp.PromptResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
+      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+        sessionId: id,
+      })
     }
 
     sessionTitles.queueSessionTitlePreparation({
@@ -854,7 +876,9 @@ export function createPromptTurnFeature({
   async function popQueuedPrompt(id: SessionId): Promise<PopQueuedSessionPromptResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
+      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+        sessionId: id,
+      })
     }
 
     let queuedPromptIndex = -1
@@ -903,7 +927,9 @@ export function createPromptTurnFeature({
   ): Promise<SteerSessionResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
+      throw createSessionIpcError(SessionErrorCodes.NotActive, `Session ${id} is not active`, {
+        sessionId: id,
+      })
     }
 
     const requestId = randomUUID()

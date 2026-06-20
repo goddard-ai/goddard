@@ -1,6 +1,6 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
 import { readFileSync } from "node:fs"
-import { createRouteClient, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
+import { createRouteClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
@@ -87,8 +87,19 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
     clientHook: input.ipcHook,
     onJsonError: async (response) => {
       const body = (await response.json().catch(() => undefined)) as
-        | { error?: unknown; message?: unknown }
+        | {
+            error?: unknown
+            message?: unknown
+          }
         | undefined
+      if (isStructuredIpcError(body?.error)) {
+        throw new IpcClientError({
+          code: body.error.code,
+          details: body.error.details,
+          message: body.error.message,
+        })
+      }
+
       const message =
         typeof body?.error === "string"
           ? body.error
@@ -98,6 +109,21 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
       throw new Error(message)
     },
   }) as DaemonIpcClient
+}
+
+function isStructuredIpcError(value: unknown): value is {
+  code: string
+  details?: unknown
+  message: string
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "code" in value &&
+    "message" in value &&
+    typeof value.code === "string" &&
+    typeof value.message === "string"
+  )
 }
 
 function resolveDaemonPort(env: DaemonClientEnv) {
