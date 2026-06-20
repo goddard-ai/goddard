@@ -135,7 +135,18 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
 }
 
 /** Owns launch-dialog preparation and ACP lease warming before durable session creation. */
-export function createLaunchPreparationFeature(input: {
+export function createLaunchPreparationFeature({
+  memory,
+  launchLeaseStore,
+  configProvider,
+  getDaemonUrl,
+  createAgentEnvironment,
+  registryService,
+  agentInstallService,
+  getPackageVersion,
+  handlePermissionRequest,
+  handleSessionUpdate,
+}: {
   memory: SessionMemory
   launchLeaseStore: LaunchLeaseStore
   configProvider: DaemonConfigProvider<LaunchPreparationRootConfig>
@@ -162,9 +173,9 @@ export function createLaunchPreparationFeature(input: {
     const repoRoot = source?.path ?? null
     const bare = source?.bare ?? false
     const { branches, currentBranch } = launchBranches
-    const existingLease = input.launchLeaseStore.findByKey(key)
+    const existingLease = launchLeaseStore.findByKey(key)
     if (existingLease) {
-      input.launchLeaseStore.reactivate(existingLease)
+      launchLeaseStore.reactivate(existingLease)
       existingLease.repoRoot = repoRoot
       existingLease.branches = branches
       existingLease.currentBranch = currentBranch
@@ -185,21 +196,21 @@ export function createLaunchPreparationFeature(input: {
       }
     }
 
-    const resolvedConfig = await input.configProvider
+    const resolvedConfig = await configProvider
       .getRootConfig(params.cwd)
       .then((root) => root.config)
     const resolvedRegistry = resolvedConfig?.registry
     const launchLeaseId = randomUUID()
     const token = randomBytes(32).toString("hex")
     const agentProcess = await spawnAgentProcess({
-      daemonUrl: input.getDaemonUrl(),
+      daemonUrl: getDaemonUrl(),
       token,
       agent: params.agent,
       cwd: params.cwd,
-      createAgentEnvironment: input.createAgentEnvironment,
+      createAgentEnvironment,
       envPolicy: resolvedConfig?.sessions?.envPolicy,
-      registryService: input.registryService,
-      agentInstallService: input.agentInstallService,
+      registryService,
+      agentInstallService,
       registry: resolvedRegistry,
       managedAgents: resolvedConfig?.agents?.managed,
     })
@@ -218,29 +229,29 @@ export function createLaunchPreparationFeature(input: {
         stdout: agentProcess.stdout,
         clientInfo: {
           name: "npm:@goddard-ai/daemon",
-          version: input.getPackageVersion(),
+          version: getPackageVersion(),
         },
         handler: {
           async requestPermission(permissionParams) {
             const active =
-              input.memory.activeSessionsByAcpSessionId.get(permissionParams.sessionId) ??
+              memory.activeSessionsByAcpSessionId.get(permissionParams.sessionId) ??
               (acpSessionId
-                ? (input.memory.activeSessionsByAcpSessionId.get(acpSessionId) ?? null)
+                ? (memory.activeSessionsByAcpSessionId.get(acpSessionId) ?? null)
                 : null)
             if (active) {
-              return await input.handlePermissionRequest(active, permissionParams)
+              return await handlePermissionRequest(active, permissionParams)
             }
 
             return { outcome: { outcome: "cancelled" } }
           },
           async sessionUpdate(params) {
             const active =
-              input.memory.activeSessionsByAcpSessionId.get(params.sessionId) ??
+              memory.activeSessionsByAcpSessionId.get(params.sessionId) ??
               (acpSessionId
-                ? (input.memory.activeSessionsByAcpSessionId.get(acpSessionId) ?? null)
+                ? (memory.activeSessionsByAcpSessionId.get(acpSessionId) ?? null)
                 : null)
             if (active) {
-              await input.handleSessionUpdate(active, params)
+              await handleSessionUpdate(active, params)
               return
             }
 
@@ -291,7 +302,7 @@ export function createLaunchPreparationFeature(input: {
         releaseTimer: null,
         closing: null,
       }
-      input.launchLeaseStore.register(lease)
+      launchLeaseStore.register(lease)
 
       return {
         launchLeaseId: lease.id,

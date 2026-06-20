@@ -119,7 +119,19 @@ function normalizePrompt(prompt: string | acp.ContentBlock[]): acp.ContentBlock[
 }
 
 /** Owns live prompt turn queueing, cancellation, steering, permission routing, and ACP publication. */
-export function createPromptTurnFeature(input: {
+export function createPromptTurnFeature({
+  db,
+  memory,
+  log,
+  events,
+  emitMessage,
+  activeTurns,
+  idleShutdown,
+  sessionTitles,
+  emitDiagnostic,
+  publishSessionUpdated,
+  updateSessionActivity,
+}: {
   db: SessionDb
   memory: SessionMemory
   log: DaemonLogService
@@ -142,9 +154,9 @@ export function createPromptTurnFeature(input: {
     diagnosticLogger?: ReturnType<DaemonLogService["createLogger"]>,
   ) => void
 }) {
-  const activeSessions = input.memory.activeSessions
-  const acpDebug = input.log.createDebug("session.acp")
-  const queueDebug = input.log.createDebug("session.queue")
+  const activeSessions = memory.activeSessions
+  const acpDebug = log.createDebug("session.acp")
+  const queueDebug = log.createDebug("session.queue")
 
   function publishSessionMessage(
     active: ActiveSession,
@@ -156,16 +168,16 @@ export function createPromptTurnFeature(input: {
   ) {
     const turnMessage =
       options.persistTurnMessage !== false
-        ? input.activeTurns.appendTurnScopedMessage(active, message)
+        ? activeTurns.appendTurnScopedMessage(active, message)
         : null
     const messageEvent = options.messageEvent ?? turnMessage
     if (messageEvent) {
-      input.emitMessage(active.id, messageEvent)
+      emitMessage(active.id, messageEvent)
       return
     }
 
     if (isContextUsageUpdateMessage(message)) {
-      input.emitMessage(active.id, message)
+      emitMessage(active.id, message)
       return
     }
 
@@ -184,7 +196,7 @@ export function createPromptTurnFeature(input: {
     if (options.updateStatus !== false) {
       const nextStatus = sessionStatusFromClientMessage(message, active.status)
       if (nextStatus) {
-        input.updateSessionActivity(
+        updateSessionActivity(
           active.id,
           { status: nextStatus },
           {
@@ -198,7 +210,7 @@ export function createPromptTurnFeature(input: {
 
     logAgentMessage(
       active.logger,
-      input.log.createPayloadPreview,
+      log.createPayloadPreview,
       "agent.message_write",
       active.id,
       active.acpSessionId,
@@ -209,9 +221,9 @@ export function createPromptTurnFeature(input: {
       acpSessionId: active.acpSessionId,
       hasId: "id" in message && message.id != null,
       method: "method" in message ? message.method : undefined,
-      message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+      message: log.createPayloadPreview(message, { maxStringLength: 160 }),
     })
-    input.emitDiagnostic(
+    emitDiagnostic(
       active.id,
       "session_message_sent",
       {
@@ -239,7 +251,7 @@ export function createPromptTurnFeature(input: {
 
     logAgentMessage(
       active.logger,
-      input.log.createPayloadPreview,
+      log.createPayloadPreview,
       "agent.message_read",
       active.id,
       active.acpSessionId,
@@ -251,7 +263,7 @@ export function createPromptTurnFeature(input: {
       hasId: false,
       method: acp.CLIENT_METHODS.session_update,
       updateType: params.update.sessionUpdate,
-      message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+      message: log.createPayloadPreview(message, { maxStringLength: 160 }),
     })
     publishSessionMessage(active, message, {
       messageEvent: active.activeTurn
@@ -276,8 +288,8 @@ export function createPromptTurnFeature(input: {
         params,
         resolve,
       }
-      input.publishSessionUpdated(active.id, ["permission"])
-      input.idleShutdown.refreshIdleShutdownState(active.id, "permission_request_started")
+      publishSessionUpdated(active.id, ["permission"])
+      idleShutdown.refreshIdleShutdownState(active.id, "permission_request_started")
       const message = {
         jsonrpc: "2.0",
         id: requestId,
@@ -287,7 +299,7 @@ export function createPromptTurnFeature(input: {
 
       logAgentMessage(
         active.logger,
-        input.log.createPayloadPreview,
+        log.createPayloadPreview,
         "agent.message_read",
         active.id,
         active.acpSessionId,
@@ -298,7 +310,7 @@ export function createPromptTurnFeature(input: {
         acpSessionId: active.acpSessionId,
         hasId: true,
         method: acp.CLIENT_METHODS.session_request_permission,
-        message: input.log.createPayloadPreview(message, { maxStringLength: 160 }),
+        message: log.createPayloadPreview(message, { maxStringLength: 160 }),
       })
       publishSessionMessage(active, message)
     })
@@ -313,7 +325,7 @@ export function createPromptTurnFeature(input: {
     const nextStatus = stopReason === "end_turn" ? "done" : null
 
     if (nextStatus || stopReason) {
-      input.updateSessionActivity(
+      updateSessionActivity(
         active.id,
         {
           ...(nextStatus && { status: nextStatus }),
@@ -369,7 +381,7 @@ export function createPromptTurnFeature(input: {
 
       logAgentMessage(
         active.logger,
-        input.log.createPayloadPreview,
+        log.createPayloadPreview,
         "agent.message_read",
         active.id,
         active.acpSessionId,
@@ -381,7 +393,7 @@ export function createPromptTurnFeature(input: {
         hasId: true,
         responseId: entry.requestId,
         responseKind: "result",
-        message: input.log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
+        message: log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
       })
       const detachedEvent = createDetachedPromptResponseEvent(active, entry, responseMessage)
       if (!detachedEvent) {
@@ -402,7 +414,7 @@ export function createPromptTurnFeature(input: {
 
       publishSessionMessage(active, responseMessage, { messageEvent: detachedEvent })
       if (!detachedEvent) {
-        input.activeTurns.finalizeActiveTurn(active, responseMessage)
+        activeTurns.finalizeActiveTurn(active, responseMessage)
       }
       await handleSteerBoundary(active, responseMessage)
       await processPromptQueue(active)
@@ -418,7 +430,7 @@ export function createPromptTurnFeature(input: {
 
       logAgentMessage(
         active.logger,
-        input.log.createPayloadPreview,
+        log.createPayloadPreview,
         "agent.message_read",
         active.id,
         active.acpSessionId,
@@ -431,7 +443,7 @@ export function createPromptTurnFeature(input: {
         responseId: entry.requestId,
         responseKind: "error",
         errorMessage: getErrorMessage(error),
-        message: input.log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
+        message: log.createPayloadPreview(responseMessage, { maxStringLength: 160 }),
       })
       entry.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
       queueDebug("session.queue.prompt_failed", {
@@ -447,7 +459,7 @@ export function createPromptTurnFeature(input: {
       const detachedEvent = createDetachedPromptResponseEvent(active, entry, responseMessage)
       publishSessionMessage(active, responseMessage, { messageEvent: detachedEvent })
       if (!detachedEvent) {
-        input.activeTurns.finalizeActiveTurn(active, responseMessage)
+        activeTurns.finalizeActiveTurn(active, responseMessage)
       }
       await handleSteerBoundary(active, responseMessage)
       await processPromptQueue(active)
@@ -480,7 +492,7 @@ export function createPromptTurnFeature(input: {
       source: nextPrompt.source,
       remainingQueueLength: active.promptQueue.length,
     })
-    input.publishSessionUpdated(active.id, ["queue"])
+    publishSessionUpdated(active.id, ["queue"])
 
     const promptRequest = {
       sessionId: active.acpSessionId,
@@ -501,12 +513,12 @@ export function createPromptTurnFeature(input: {
     }
     active.isFirstPrompt = false
     const existingDraft =
-      input.db.sessionTurnDrafts.first({
+      db.sessionTurnDrafts.first({
         where: { sessionId: active.id },
       }) ?? null
     if (existingDraft) {
-      input.activeTurns.persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
-      active.nextTurnSequence = resolveLatestStoredTurnSequence(input.db, active.id) + 1
+      activeTurns.persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
+      active.nextTurnSequence = resolveLatestStoredTurnSequence(db, active.id) + 1
     }
 
     const activeTurn: ActiveTurnBuffer<SessionTurnDraftDoc["id"]> = {
@@ -526,11 +538,11 @@ export function createPromptTurnFeature(input: {
     // Claim the blocking slot before the write so overlapping prompt dispatches stay serialized.
     active.blockingPromptRequestId = nextPrompt.requestId
 
-    input.publishSessionUpdated(active.id, ["activeTurn"])
-    input.idleShutdown.refreshIdleShutdownState(active.id, "turn_started")
+    publishSessionUpdated(active.id, ["activeTurn"])
+    idleShutdown.refreshIdleShutdownState(active.id, "turn_started")
 
     try {
-      input.emitDiagnostic(
+      emitDiagnostic(
         active.id,
         "session_turn_started",
         {
@@ -551,22 +563,22 @@ export function createPromptTurnFeature(input: {
         persistTurnMessage: false,
         onBeforePublish: (resolvedMessage) => {
           const turnMessage = appendSessionHistoryMessage(activeTurn.messages, resolvedMessage)
-          input.activeTurns.flushActiveTurnDraft(active, "start")
+          activeTurns.flushActiveTurnDraft(active, "start")
           return turnMessage ?? undefined
         },
       })
       void completePrompt(active, nextPrompt, message)
     } catch (error) {
       if (activeTurn.draftId) {
-        input.db.sessionTurnDrafts.delete(activeTurn.draftId)
+        db.sessionTurnDrafts.delete(activeTurn.draftId)
       }
-      input.activeTurns.clearTurnDraftFlushTimer(active.activeTurn)
+      activeTurns.clearTurnDraftFlushTimer(active.activeTurn)
       active.activeTurn = null
       if (active.blockingPromptRequestId === nextPrompt.requestId) {
         active.blockingPromptRequestId = null
       }
-      input.publishSessionUpdated(active.id, ["activeTurn"])
-      input.idleShutdown.refreshIdleShutdownState(active.id, "turn_start_failed")
+      publishSessionUpdated(active.id, ["activeTurn"])
+      idleShutdown.refreshIdleShutdownState(active.id, "turn_start_failed")
       nextPrompt.reject?.(error instanceof Error ? error : new Error(getErrorMessage(error)))
       throw error
     }
@@ -618,8 +630,8 @@ export function createPromptTurnFeature(input: {
       abortedQueueLength: abortedQueue.length,
       includedPendingSteer: Boolean(options.includePendingSteer),
     })
-    input.publishSessionUpdated(active.id, ["queue"])
-    input.idleShutdown.refreshIdleShutdownState(active.id, "queued_prompts_aborted")
+    publishSessionUpdated(active.id, ["queue"])
+    idleShutdown.refreshIdleShutdownState(active.id, "queued_prompts_aborted")
     return abortedQueue
   }
 
@@ -703,7 +715,7 @@ export function createPromptTurnFeature(input: {
       updateStatus: options.updateStatus,
     })
 
-    input.emitDiagnostic(id, "session_turn_cancelled", {
+    emitDiagnostic(id, "session_turn_cancelled", {
       activeTurnCancelled,
       abortedQueueLength: abortedQueue.length,
     })
@@ -762,7 +774,7 @@ export function createPromptTurnFeature(input: {
         response,
       })
     } catch (error) {
-      input.idleShutdown.refreshIdleShutdownState(active.id, "steer_cleared")
+      idleShutdown.refreshIdleShutdownState(active.id, "steer_cleared")
       steer.reject(error instanceof Error ? error : new Error(getErrorMessage(error)))
     }
   }
@@ -778,7 +790,7 @@ export function createPromptTurnFeature(input: {
         throw new IpcClientError("Queued prompt messages must include a JSON-RPC id")
       }
 
-      input.sessionTitles.queueSessionTitlePreparation({
+      sessionTitles.queueSessionTitlePreparation({
         id: active.id,
         prompt: message.params.prompt,
         diagnosticLogger: active.logger,
@@ -794,15 +806,15 @@ export function createPromptTurnFeature(input: {
         source: "client",
         queueLength: active.promptQueue.length,
       })
-      input.publishSessionUpdated(active.id, ["queue"])
-      input.updateSessionActivity(id, {
+      publishSessionUpdated(active.id, ["queue"])
+      updateSessionActivity(id, {
         completedHidden: false,
       })
-      await input.events.emit("session.replied", {
+      await events.emit("session.replied", {
         sessionId: id,
       })
-      input.idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
-      input.emitDiagnostic(active.id, "session_prompt_enqueued", {
+      idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
+      emitDiagnostic(active.id, "session_prompt_enqueued", {
         requestId: message.id,
         queueLength: active.promptQueue.length,
       })
@@ -827,8 +839,8 @@ export function createPromptTurnFeature(input: {
     ) {
       const permissionRequest = active.lastPermissionRequest
       active.lastPermissionRequest = null
-      input.publishSessionUpdated(active.id, ["permission"])
-      input.idleShutdown.refreshIdleShutdownState(active.id, "permission_request_resolved")
+      publishSessionUpdated(active.id, ["permission"])
+      idleShutdown.refreshIdleShutdownState(active.id, "permission_request_resolved")
       publishClientMessage(active, message)
       permissionRequest.resolve(message.result as acp.RequestPermissionResponse)
       return
@@ -849,7 +861,7 @@ export function createPromptTurnFeature(input: {
       throw new IpcClientError(`Session ${id} is not active`)
     }
 
-    input.sessionTitles.queueSessionTitlePreparation({
+    sessionTitles.queueSessionTitlePreparation({
       id: active.id,
       prompt,
       diagnosticLogger: active.logger,
@@ -877,10 +889,10 @@ export function createPromptTurnFeature(input: {
       })
     })
 
-    input.updateSessionActivity(active.id, {})
-    input.publishSessionUpdated(active.id, ["queue"])
-    input.idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
-    input.emitDiagnostic(
+    updateSessionActivity(active.id, {})
+    publishSessionUpdated(active.id, ["queue"])
+    idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
+    emitDiagnostic(
       active.id,
       "session_prompt_enqueued",
       {
@@ -921,14 +933,14 @@ export function createPromptTurnFeature(input: {
       }
     }
 
-    input.publishSessionUpdated(active.id, ["queue"])
+    publishSessionUpdated(active.id, ["queue"])
     queueDebug("session.queue.prompt_popped", {
       sessionId: active.id,
       requestId: queuedPrompt.requestId,
       queueLength: active.promptQueue.length,
     })
-    input.idleShutdown.refreshIdleShutdownState(active.id, "queued_prompt_popped")
-    input.emitDiagnostic(active.id, "session_prompt_queue_popped", {
+    idleShutdown.refreshIdleShutdownState(active.id, "queued_prompt_popped")
+    emitDiagnostic(active.id, "session_prompt_queue_popped", {
       requestId: queuedPrompt.requestId,
       queueLength: active.promptQueue.length,
     })
@@ -985,8 +997,8 @@ export function createPromptTurnFeature(input: {
         cancelledRequestId: active.blockingPromptRequestId,
         abortedQueueLength: abortedQueue.length,
       })
-      input.updateSessionActivity(active.id, {})
-      input.idleShutdown.refreshIdleShutdownState(active.id, "steer_started")
+      updateSessionActivity(active.id, {})
+      idleShutdown.refreshIdleShutdownState(active.id, "steer_started")
 
       void sendInternalCancel(active, { updateStatus: false }).catch((error) => {
         if (active.pendingSteer?.requestId === requestId) {

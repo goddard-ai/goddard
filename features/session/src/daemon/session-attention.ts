@@ -15,14 +15,19 @@ type SessionId = DaemonSession["id"]
 type SessionDoc = DaemonSession
 
 /** Owns user-visible attention state: initiatives, blockers, turn-ended metadata, and results. */
-export function createSessionAttentionFeature(input: {
+export function createSessionAttentionFeature({
+  db,
+  memory,
+  events,
+  updateSessionActivity,
+}: {
   db: SessionDb
   memory: SessionMemory
   events: SessionEventEmitter
   updateSessionActivity: (id: SessionId, update: Partial<DaemonSession>) => void
 }) {
   function requireSessionDocument(id: SessionId) {
-    const record = input.db.sessions.get(id) ?? null
+    const record = db.sessions.get(id) ?? null
     if (!record) {
       throw new IpcClientError(`Unknown session: ${id}`)
     }
@@ -31,13 +36,13 @@ export function createSessionAttentionFeature(input: {
   }
 
   function resolveCurrentTurnId(id: SessionId) {
-    const activeTurn = input.memory.activeSessions.get(id)?.activeTurn ?? null
+    const activeTurn = memory.activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn) {
       return activeTurn.turnId
     }
 
     return (
-      input.db.sessionTurns.first({
+      db.sessionTurns.first({
         where: { sessionId: id },
         orderBy: {
           sessionId: "asc",
@@ -51,7 +56,7 @@ export function createSessionAttentionFeature(input: {
     id: SessionId,
     metadata: { scope: AttentionScope; headline: AttentionHeadline },
   ) {
-    const activeTurn = input.memory.activeSessions.get(id)?.activeTurn ?? null
+    const activeTurn = memory.activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn) {
       activeTurn.inboxScope = metadata.scope
       activeTurn.inboxHeadline = metadata.headline
@@ -59,7 +64,7 @@ export function createSessionAttentionFeature(input: {
     }
 
     const latestTurn =
-      input.db.sessionTurns.first({
+      db.sessionTurns.first({
         where: { sessionId: id },
         orderBy: {
           sessionId: "asc",
@@ -67,7 +72,7 @@ export function createSessionAttentionFeature(input: {
         },
       }) ?? null
     if (latestTurn) {
-      input.db.sessionTurns.update(latestTurn.id, {
+      db.sessionTurns.update(latestTurn.id, {
         inboxScope: metadata.scope,
         inboxHeadline: metadata.headline,
       })
@@ -94,7 +99,7 @@ export function createSessionAttentionFeature(input: {
 
   async function declareInitiative(id: SessionId, title: string) {
     requireSessionDocument(id)
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       status: "active",
       completedHidden: false,
       initiative: title,
@@ -118,13 +123,13 @@ export function createSessionAttentionFeature(input: {
       },
       blockedReason: reason,
     })
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       status: "blocked",
       completedHidden: false,
       blockedReason: reason,
       inboxScope: resolved.scope,
     })
-    await input.events.emit("session.blocked", {
+    await events.emit("session.blocked", {
       sessionId: id,
       reason,
       scope: resolved.scope,
@@ -144,7 +149,7 @@ export function createSessionAttentionFeature(input: {
         fallbackHeadline: session.lastAgentMessage ?? session.initiative ?? session.title,
       },
     })
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       status: "done",
       completedHidden: false,
       initiative: null,
@@ -152,9 +157,9 @@ export function createSessionAttentionFeature(input: {
       inboxScope: resolved.scope,
     })
 
-    const activeTurn = input.memory.activeSessions.get(id)?.activeTurn ?? null
+    const activeTurn = memory.activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn?.touchedAttentionEntity !== true) {
-      await input.events.emit("session.turn.ended", {
+      await events.emit("session.turn.ended", {
         sessionId: id,
         scope: resolved.scope,
         headline: resolved.headline,
@@ -174,11 +179,11 @@ export function createSessionAttentionFeature(input: {
       session,
       metadata,
     })
-    const activeTurn = input.memory.activeSessions.get(id)?.activeTurn ?? null
+    const activeTurn = memory.activeSessions.get(id)?.activeTurn ?? null
     if (activeTurn) {
       activeTurn.touchedAttentionEntity = true
     }
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       inboxScope: resolved.scope,
     })
 
@@ -191,7 +196,7 @@ export function createSessionAttentionFeature(input: {
 
   async function recordSessionResult(id: SessionId, message: string) {
     requireSessionDocument(id)
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       status: "done",
       lastAgentMessage: message,
     })
