@@ -17,6 +17,7 @@ import {
 import {
   createLogStore,
   formatLogEntry,
+  type DebugScopeSummary,
   type LogEntry,
   type LogLevel,
   type LogQuery,
@@ -25,6 +26,13 @@ import {
 type CliOptions = LogQuery & {
   json?: boolean
   properties: Record<string, string>
+}
+
+type ScopeListOptions = {
+  json?: boolean
+  prefix?: string
+  scope?: string
+  since?: string
 }
 
 const defaultTailIntervalMs = 1000
@@ -145,6 +153,32 @@ const app = subcommands({
         console.log(getGoddardLogDatabasePath())
       },
     }),
+    scopes: command({
+      name: "scopes",
+      description: "List observed debug scopes, grouped by log scope.",
+      args: {
+        json: flag({
+          long: "json",
+          description: "Write debug scope summaries as JSON.",
+        }),
+        since: option({
+          type: optional(sinceDate),
+          long: "since",
+          description: "Return scopes observed after an ISO date or duration such as 30m.",
+        }),
+        scope: option({
+          type: optional(string),
+          long: "scope",
+          description: "Return debug scopes for one log scope.",
+        }),
+        prefix: option({
+          type: optional(string),
+          long: "prefix",
+          description: "Return debug scopes with this debug scope prefix.",
+        }),
+      },
+      handler: listScopes,
+    }),
     expand: command({
       name: "expand",
       description: "Expand a collapsed log value.",
@@ -182,6 +216,16 @@ function page(options: CliOptions) {
   }
 }
 
+function listScopes(options: ScopeListOptions) {
+  const store = createLogStore()
+  try {
+    const summaries = store.listDebugScopes(options)
+    writeScopeSummaries(summaries, options)
+  } finally {
+    store.close()
+  }
+}
+
 async function tail(options: CliOptions) {
   let afterId = options.afterId
 
@@ -203,6 +247,66 @@ async function tail(options: CliOptions) {
 
     await new Promise((resolve) => setTimeout(resolve, defaultTailIntervalMs))
   }
+}
+
+function writeScopeSummaries(summaries: DebugScopeSummary[], options: ScopeListOptions) {
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          items: summaries,
+        },
+        null,
+        2,
+      ),
+    )
+    return
+  }
+
+  if (summaries.length === 0) {
+    console.log("No debug scopes observed.")
+    return
+  }
+
+  const groups = Map.groupBy(summaries, (summary) => summary.scope)
+  let firstGroup = true
+  for (const [scope, group] of groups) {
+    if (!firstGroup) {
+      console.log("")
+    }
+    firstGroup = false
+    console.log(scope)
+    console.log(formatScopeSummaryHeader(group))
+    for (const summary of group) {
+      console.log(formatScopeSummary(summary, group))
+    }
+  }
+}
+
+function formatScopeSummaryHeader(summaries: DebugScopeSummary[]) {
+  return [
+    "debugScope".padEnd(readMaxDebugScopeLength(summaries)),
+    "count".padStart(readMaxCountLength(summaries)),
+    "firstSeen".padEnd(24),
+    "lastSeen",
+  ].join("  ")
+}
+
+function formatScopeSummary(summary: DebugScopeSummary, summaries: DebugScopeSummary[]) {
+  return [
+    summary.debugScope.padEnd(readMaxDebugScopeLength(summaries)),
+    String(summary.count).padStart(readMaxCountLength(summaries)),
+    summary.firstSeen.padEnd(24),
+    summary.lastSeen,
+  ].join("  ")
+}
+
+function readMaxDebugScopeLength(summaries: DebugScopeSummary[]) {
+  return Math.max("debugScope".length, ...summaries.map((summary) => summary.debugScope.length))
+}
+
+function readMaxCountLength(summaries: DebugScopeSummary[]) {
+  return Math.max("count".length, ...summaries.map((summary) => String(summary.count).length))
 }
 
 function expand(id: string, options: CliOptions) {
