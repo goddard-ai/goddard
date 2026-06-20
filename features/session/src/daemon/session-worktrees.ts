@@ -41,14 +41,19 @@ export function toSessionWorktreeLifecycleState(
 }
 
 /** Owns session worktree lookup, lifecycle projection, and completion safety checks. */
-export function createSessionWorktreeFeature(input: {
+export function createSessionWorktreeFeature({
+  db,
+  memory,
+  events,
+  updateSessionActivity,
+}: {
   db: SessionDb
   memory: SessionMemory
   events: SessionEventEmitter
   updateSessionActivity: (id: SessionId, update: Partial<DaemonSession>) => void
 }) {
   function requireSessionDocument(id: SessionId) {
-    const record = input.db.sessions.get(id) ?? null
+    const record = db.sessions.get(id) ?? null
     if (!record) {
       throw new IpcClientError(`Unknown session: ${id}`)
     }
@@ -58,7 +63,7 @@ export function createSessionWorktreeFeature(input: {
 
   async function resolvePersistedWorktreeRecord(id: SessionId) {
     return (
-      input.db.worktrees.first({
+      db.worktrees.first({
         where: { sessionId: id },
       }) ?? null
     )
@@ -85,14 +90,14 @@ export function createSessionWorktreeFeature(input: {
   }
 
   async function listWorktrees(): Promise<SessionWorktreeLifecycleState[]> {
-    return input.db.worktrees
+    return db.worktrees
       .findMany()
       .map((record: DaemonWorktree) => toSessionWorktreeLifecycleState(record, record.sessionId))
   }
 
   async function findWorktreeByDir(worktreeDir: string) {
     const record =
-      input.db.worktrees
+      db.worktrees
         .findMany()
         .find((worktreeRecord: DaemonWorktree) => worktreeRecord.worktreeDir === worktreeDir) ??
       null
@@ -101,7 +106,7 @@ export function createSessionWorktreeFeature(input: {
 
   async function completeSession(id: SessionId) {
     requireSessionDocument(id)
-    const active = input.memory.activeSessions.get(id) ?? null
+    const active = memory.activeSessions.get(id) ?? null
     if (active?.activeTurn) {
       throw new IpcClientError("Cannot complete a session while the agent has an active turn")
     }
@@ -130,10 +135,10 @@ export function createSessionWorktreeFeature(input: {
       }
     }
 
-    input.updateSessionActivity(id, {
+    updateSessionActivity(id, {
       completedHidden: true,
     })
-    await input.events.emit("session.completed", {
+    await events.emit("session.completed", {
       sessionId: id,
     })
     return requireSessionDocument(id)

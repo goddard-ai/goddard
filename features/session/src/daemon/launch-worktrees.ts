@@ -53,7 +53,12 @@ function toResponse(record: DaemonLaunchWorktree): PrepareSessionLaunchWorktreeR
 }
 
 /** Owns launch-dialog worktrees prepared before durable session creation. */
-export function createLaunchWorktreeFeature(input: {
+export function createLaunchWorktreeFeature({
+  db,
+  configProvider,
+  logger,
+  worktreePluginManager,
+}: {
   db: SessionDb
   configProvider: DaemonConfigProvider<LaunchWorktreeRootConfig>
   logger: DaemonLogger
@@ -73,19 +78,19 @@ export function createLaunchWorktreeFeature(input: {
 
   async function cleanupRecord(record: DaemonLaunchWorktree, reason: string) {
     cancelReleaseTimer(record.id)
-    input.db.launchWorktrees.delete(record.id)
+    db.launchWorktrees.delete(record.id)
     const worktree = toWorktreeState(record)
     try {
       await cleanupSessionWorktree(worktree, {
-        worktreePlugins: await input.worktreePluginManager.getPlugins(worktree.repoRoot),
+        worktreePlugins: await worktreePluginManager.getPlugins(worktree.repoRoot),
       })
-      input.logger.log("launch_worktree_cleaned", {
+      logger.log("launch_worktree_cleaned", {
         launchWorktreeId: record.id,
         worktreeDir: record.worktreeDir,
         reason,
       })
     } catch (error) {
-      input.logger.log("launch_worktree_cleanup_failed", {
+      logger.log("launch_worktree_cleanup_failed", {
         launchWorktreeId: record.id,
         worktreeDir: record.worktreeDir,
         reason,
@@ -100,8 +105,8 @@ export function createLaunchWorktreeFeature(input: {
     }
 
     const releaseAfter = new Date(Date.now() + LAUNCH_WORKTREE_RELEASE_TIMEOUT_MS).toISOString()
-    input.db.launchWorktrees.update(record.id, { releaseAfter })
-    input.logger.log("launch_worktree_release_scheduled", {
+    db.launchWorktrees.update(record.id, { releaseAfter })
+    logger.log("launch_worktree_release_scheduled", {
       launchWorktreeId: record.id,
       worktreeDir: record.worktreeDir,
       reason,
@@ -110,7 +115,7 @@ export function createLaunchWorktreeFeature(input: {
     releaseTimers.set(
       record.id,
       setTimeout(() => {
-        const latest = input.db.launchWorktrees.get(record.id) ?? null
+        const latest = db.launchWorktrees.get(record.id) ?? null
         if (!latest) {
           releaseTimers.delete(record.id)
           return
@@ -124,12 +129,12 @@ export function createLaunchWorktreeFeature(input: {
   function reactivate(record: DaemonLaunchWorktree) {
     cancelReleaseTimer(record.id)
     if (record.releaseAfter !== null) {
-      input.db.launchWorktrees.update(record.id, { releaseAfter: null })
+      db.launchWorktrees.update(record.id, { releaseAfter: null })
     }
   }
 
   function findById(id: string) {
-    return input.db.launchWorktrees.findMany().find((record) => record.id === id) ?? null
+    return db.launchWorktrees.findMany().find((record) => record.id === id) ?? null
   }
 
   async function prepare(
@@ -137,7 +142,7 @@ export function createLaunchWorktreeFeature(input: {
   ): Promise<PrepareSessionLaunchWorktreeResponse> {
     const key = createLaunchWorktreeKey(params)
     const existing =
-      input.db.launchWorktrees.first({
+      db.launchWorktrees.first({
         where: { key },
       }) ?? null
 
@@ -158,8 +163,8 @@ export function createLaunchWorktreeFeature(input: {
     }
 
     const [config, worktreePlugins] = await Promise.all([
-      input.configProvider.getRootConfig(params.cwd).then((root) => root.config),
-      input.worktreePluginManager.getPlugins(params.cwd),
+      configProvider.getRootConfig(params.cwd).then((root) => root.config),
+      worktreePluginManager.getPlugins(params.cwd),
     ])
     let worktree: SessionWorktreeState | null = null
 
@@ -182,7 +187,7 @@ export function createLaunchWorktreeFeature(input: {
           worktreeDir: worktree.worktreeDir,
           config: config?.worktrees?.bootstrap,
           onEvent: (event) => {
-            input.logger.log("launch_worktree_bootstrap_event", {
+            logger.log("launch_worktree_bootstrap_event", {
               launchWorktreeKey: key,
               type: event.type,
               detail: event.detail,
@@ -191,12 +196,12 @@ export function createLaunchWorktreeFeature(input: {
         })
       }
 
-      const record = input.db.launchWorktrees.create({
+      const record = db.launchWorktrees.create({
         key,
         ...worktree,
         releaseAfter: null,
       })
-      input.logger.log("launch_worktree_prepared", {
+      logger.log("launch_worktree_prepared", {
         launchWorktreeId: record.id,
         worktreeDir: record.worktreeDir,
       })
@@ -205,7 +210,7 @@ export function createLaunchWorktreeFeature(input: {
     } catch (error) {
       if (worktree) {
         await cleanupSessionWorktree(worktree, { worktreePlugins }).catch((cleanupError) => {
-          input.logger.log("launch_worktree_prepare_cleanup_failed", {
+          logger.log("launch_worktree_prepare_cleanup_failed", {
             worktreeDir: worktree?.worktreeDir,
             errorMessage: getErrorMessage(cleanupError),
           })
@@ -257,12 +262,12 @@ export function createLaunchWorktreeFeature(input: {
     }
 
     cancelReleaseTimer(record.id)
-    input.db.launchWorktrees.delete(record.id)
+    db.launchWorktrees.delete(record.id)
     return toPreparedSessionWorktree(toWorktreeState(record))
   }
 
   async function cleanupColdWorktrees() {
-    const records = input.db.launchWorktrees.findMany()
+    const records = db.launchWorktrees.findMany()
     await Promise.all(records.map((record) => cleanupRecord(record, "daemon_startup")))
   }
 
