@@ -6,7 +6,6 @@ import type { AppStateSnapshot } from "~/shared/app-state.ts"
 import { createDaemonSubscriptionCoordinator } from "~/shared/daemon-subscriptions.ts"
 import type {
   AppDesktopRpc,
-  AppLogInput,
   DaemonRequestName,
   DaemonRequestPayload,
   DaemonRequestResponse,
@@ -18,17 +17,10 @@ import type {
 import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import {
-  isRendererLogCaptureInstalled,
-  markRendererLogCaptureInstalled,
+  installRendererLogCapture,
+  type RendererLogCaptureInput,
 } from "./lib/renderer-log-capture.ts"
 import { goddardSdk } from "./sdk.ts"
-
-type RendererDebugLogInput = {
-  __goddardDebugLog: true
-  debugScope: string
-  message: string
-  properties?: Record<string, unknown>
-}
 
 const rpc = Electroview.defineRPC<AppDesktopRpc>({
   // Native dialogs and host-side daemon work can legitimately outlive Electrobun's
@@ -44,7 +36,6 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
   },
 })
 
-const consoleMethods: AppLogInput["level"][] = ["debug", "error", "info", "log", "warn"]
 let electroview: Electroview<typeof rpc> | undefined
 let daemonSubscriptionCoordinator:
   | ReturnType<typeof createDaemonSubscriptionCoordinator>
@@ -130,7 +121,7 @@ function getDaemonSubscriptionCoordinator() {
 /** Creates the Electrobun view bridge once for the active browser context. */
 export function initializeDesktopHost(): void {
   electroview ??= new Electroview({ rpc })
-  installRendererLogCapture()
+  installRendererLogCapture(writeRendererLog)
 
   if (!didRegisterDaemonResetOnUnload) {
     didRegisterDaemonResetOnUnload = true
@@ -154,98 +145,14 @@ export function initializeDesktopHost(): void {
     })
 }
 
-function installRendererLogCapture() {
-  if (isRendererLogCaptureInstalled()) {
-    return
-  }
-
-  markRendererLogCaptureInstalled()
-
-  for (const method of consoleMethods) {
-    const original = console[method].bind(console)
-    console[method] = (...args: unknown[]) => {
-      const debugLog = method === "debug" ? readRendererDebugLog(args) : null
-      void (debugLog
-        ? writeRendererDebugLog(debugLog)
-        : writeRendererLog(method, args.map(formatConsoleValue).join(" ")))
-      original(...args)
-    }
-  }
-
-  window.addEventListener("error", (event) => {
-    void writeRendererLog("error", formatErrorEvent(event))
-  })
-  window.addEventListener("unhandledrejection", (event) => {
-    void writeRendererLog("error", formatConsoleValue(event.reason))
-  })
-}
-
-async function writeRendererLog(level: AppLogInput["level"], message: string) {
+async function writeRendererLog(input: RendererLogCaptureInput) {
   await rpc.request
     .writeAppLog({
       source: "renderer",
-      level,
-      message,
+      ...input,
       webviewId: window.__electrobunWebviewId,
     })
     .catch(() => {})
-}
-
-async function writeRendererDebugLog(input: RendererDebugLogInput) {
-  await rpc.request
-    .writeAppLog({
-      source: "renderer",
-      level: "debug",
-      message: input.message,
-      debugScope: input.debugScope,
-      properties: input.properties,
-      webviewId: window.__electrobunWebviewId,
-    })
-    .catch(() => {})
-}
-
-function readRendererDebugLog(args: unknown[]): RendererDebugLogInput | null {
-  const [input] = args
-  if (!input || typeof input !== "object") {
-    return null
-  }
-
-  const record = input as Partial<RendererDebugLogInput>
-  if (
-    record.__goddardDebugLog !== true ||
-    typeof record.debugScope !== "string" ||
-    typeof record.message !== "string"
-  ) {
-    return null
-  }
-
-  return {
-    __goddardDebugLog: true,
-    debugScope: record.debugScope,
-    message: record.message,
-    properties:
-      record.properties && typeof record.properties === "object" ? record.properties : undefined,
-  }
-}
-
-function formatErrorEvent(event: ErrorEvent) {
-  return event.error ? formatConsoleValue(event.error) : event.message
-}
-
-function formatConsoleValue(value: unknown) {
-  if (typeof value === "string") {
-    return value
-  }
-
-  if (value instanceof Error) {
-    return value.stack ?? value.message
-  }
-
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
 }
 
 /** Returns one runtime handshake from the Bun host. */
