@@ -8,6 +8,7 @@ Read this ruleset when touching app query cache, SDK/daemon-backed reads, mutati
 - Prefer immediate destructuring of SDK response objects from `useQuery()` and `useQueries()` when practical, instead of carrying wrapper objects like `session.session` through render code.
 - Prefer feature-local write helpers that pair one SDK mutation with the affected query invalidation.
 - Do not add thin read wrappers around simple `goddardSdk` query calls. Prefer stable `goddardSdk` methods directly unless a helper adds real behavior such as nullable handling.
+- For SDK or daemon-backed error presentation, branch on shared exported error-code identifiers when available instead of matching English daemon messages.
 - Do not add optimistic UI or loading indicators for local form submissions.
 - Import-path precedence in `app/src/` is `./...`, then `~/...`, then `../...`.
 - Use explicit TypeScript source extensions on those imports. Prefer `.ts` for `.ts` modules and `.tsrx` for `.tsrx` modules, including `~/...` imports.
