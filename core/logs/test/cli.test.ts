@@ -108,6 +108,67 @@ test("CLI hides debug logs by default and can show scoped debug logs", async () 
   expect(scopedDebugPage).not.toContain("daemon.ready")
 })
 
+test("CLI lists observed debug scopes grouped by log scope", async () => {
+  testHome = await mkdtemp(join(tmpdir(), "goddard-logs-cli-test-"))
+  process.env.HOME = testHome
+  const store = createLogStore()
+  store.append({
+    at: "2026-06-20T12:00:00.000Z",
+    scope: "daemon",
+    level: "debug",
+    pid: 123,
+    message: "ipc.request_received",
+    properties: { debugScope: "ipc.server" },
+  })
+  store.append({
+    at: "2026-06-20T12:01:00.000Z",
+    scope: "daemon",
+    level: "debug",
+    pid: 123,
+    message: "session.queue.prompt_enqueued",
+    properties: { debugScope: "session.queue" },
+  })
+  store.append({
+    at: "2026-06-20T12:02:00.000Z",
+    scope: "daemon",
+    level: "debug",
+    pid: 123,
+    message: "session.queue.prompt_dequeued",
+    properties: { debugScope: "session.queue" },
+  })
+  store.append({
+    at: "2026-06-20T12:03:00.000Z",
+    scope: "app",
+    level: "debug",
+    pid: 456,
+    message: "app.query.fetch_started",
+    properties: { debugScope: "app.query" },
+  })
+  store.append({
+    at: "2026-06-20T12:04:00.000Z",
+    scope: "daemon",
+    level: "info",
+    pid: 123,
+    message: "daemon.ready",
+    properties: { debugScope: "not.counted" },
+  })
+  store.close()
+
+  const scopes = await runCli(["scopes"], testHome)
+  expect(scopes).toContain("app\n")
+  expect(scopes).toContain("app.query       1  2026-06-20T12:03:00.000Z")
+  expect(scopes).toContain("daemon\n")
+  expect(scopes).toContain("session.queue      2  2026-06-20T12:01:00.000Z")
+  expect(scopes).toContain("ipc.server         1  2026-06-20T12:00:00.000Z")
+  expect(scopes).not.toContain("not.counted")
+
+  const filtered = await runCli(["scopes", "--scope", "daemon", "--prefix", "session"], testHome)
+  expect(filtered).toContain("daemon\n")
+  expect(filtered).toContain("session.queue")
+  expect(filtered).not.toContain("app.query")
+  expect(filtered).not.toContain("ipc.server")
+})
+
 test("CLI help lists log subcommands", async () => {
   testHome = await mkdtemp(join(tmpdir(), "goddard-logs-cli-test-"))
   process.env.HOME = testHome
@@ -117,6 +178,7 @@ test("CLI help lists log subcommands", async () => {
   expect(help).toContain("tail")
   expect(help).toContain("expand")
   expect(help).toContain("path")
+  expect(help).toContain("scopes")
 })
 
 async function runCli(args: string[], home: string) {

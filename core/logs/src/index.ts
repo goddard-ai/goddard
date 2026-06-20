@@ -44,6 +44,20 @@ export type LogQuery = {
   properties?: Record<string, string>
 }
 
+export type DebugScopeQuery = {
+  prefix?: string
+  scope?: string
+  since?: string
+}
+
+export type DebugScopeSummary = {
+  scope: LogScope
+  debugScope: string
+  count: number
+  firstSeen: string
+  lastSeen: string
+}
+
 export type Logger = {
   debug: (message: string, properties?: LogProperties) => void
   error: (message: string, properties?: LogProperties) => void
@@ -65,6 +79,7 @@ export type LogStore = {
   }) => LogEntry
   close: () => void
   expand: (id: string) => LogCollapsedValue | null
+  listDebugScopes: (query?: DebugScopeQuery) => DebugScopeSummary[]
   query: (query?: LogQuery) => LogEntry[]
   retainSince: (since: Date | string) => void
 }
@@ -220,6 +235,56 @@ export function createLogStore(options: { databasePath?: string; inlineByteLimit
             body: JSON.parse(row.body_json),
           }
         : null
+    },
+    listDebugScopes(query = {}) {
+      const clauses = ["level = ?", "json_type(properties_json, '$.\"debugScope\"') = 'text'"]
+      const bindings: SQLQueryBindings[] = ["debug"]
+
+      if (query.scope) {
+        clauses.push("scope = ?")
+        bindings.push(query.scope)
+      }
+
+      if (query.since) {
+        clauses.push("at >= ?")
+        bindings.push(query.since)
+      }
+
+      if (query.prefix) {
+        clauses.push(
+          `(CAST(json_extract(properties_json, '$."debugScope"') AS TEXT) = ? OR CAST(json_extract(properties_json, '$."debugScope"') AS TEXT) LIKE ?)`,
+        )
+        bindings.push(query.prefix, `${query.prefix}.%`)
+      }
+
+      const rows = db
+        .query(
+          `SELECT
+             scope,
+             CAST(json_extract(properties_json, '$."debugScope"') AS TEXT) AS debug_scope,
+             COUNT(*) AS count,
+             MIN(at) AS first_seen,
+             MAX(at) AS last_seen
+           FROM log_entries
+           WHERE ${clauses.join(" AND ")}
+           GROUP BY scope, debug_scope
+           ORDER BY scope ASC, last_seen DESC, debug_scope ASC`,
+        )
+        .all(...bindings) as Array<{
+        scope: LogScope
+        debug_scope: string
+        count: number
+        first_seen: string
+        last_seen: string
+      }>
+
+      return rows.map((row) => ({
+        scope: row.scope,
+        debugScope: row.debug_scope,
+        count: row.count,
+        firstSeen: row.first_seen,
+        lastSeen: row.last_seen,
+      }))
     },
     query(query = {}) {
       const clauses: string[] = []
