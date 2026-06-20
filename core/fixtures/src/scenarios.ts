@@ -38,6 +38,7 @@ export const launchableStateIds = {
   requests: {
     blockedPrompt: "prompt-query-injection",
     blockedPermission: "permission-write-tests",
+    activePrompt: "prompt-tab-restore",
   },
   tools: {
     blockedPermission: "tool-write-query-injection",
@@ -234,6 +235,41 @@ export function createBlockedSessionScenario(
     historyResponse,
     worktreeResponse,
     changesResponse,
+  }
+}
+
+export function createActiveSessionScenario(
+  session = createSessionTriageQueueScenario().activeSession,
+) {
+  const sessionResponse = createGetSessionResponse(session)
+  const historyResponse = createSessionHistoryResponse({
+    session,
+    turns: [
+      {
+        inboxHeadline: "Agent finished a pass and is ready for direction.",
+        inboxScope: "App shell",
+        messages: [
+          createSessionPromptMessage({
+            requestId: launchableStateIds.requests.activePrompt,
+            session,
+            text: "Investigate the tab restore race in the app shell.",
+          }),
+          createSessionAgentChunkMessage({
+            session,
+            text: "I checked the restore path and am ready for the next direction.",
+          }),
+        ],
+        promptRequestId: launchableStateIds.requests.activePrompt,
+        startedAt: fixtureTimestamp,
+        turnId: launchableStateIds.turns.active,
+      },
+    ],
+  })
+
+  return {
+    session,
+    sessionResponse,
+    historyResponse,
   }
 }
 

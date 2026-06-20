@@ -16,6 +16,9 @@ import {
   acpSessionUpdateMatrixHistoryResponse,
   acpSessionUpdateMatrixSession,
   acpSessionUpdateMatrixSessionResponse,
+  activeSession,
+  activeSessionHistoryResponse,
+  activeSessionResponse,
   blockedSession,
   blockedSessionChangesResponse,
   blockedSessionHistoryResponse,
@@ -69,8 +72,8 @@ function composeCleanups(cleanups: LaunchCleanup[]) {
 function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: LauncherContext) {
   const inboxAttentionQueue = defineLaunchableState("inbox.attentionQueue", {
     label: "Inbox attention queue",
-    description: "Unread session blockers and a pull-request update.",
-    tags: ["inbox", "session", "pull request", "attention"],
+    description: "Unread session blockers, next-attention chrome, and a pull-request update.",
+    tags: ["inbox", "session", "pull request", "attention", "next"],
     launch() {
       const cleanup = composeCleanups([
         queryClient.injectData(
@@ -92,6 +95,16 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
           goddardSdk.session.history,
           [{ id: blockedSession.id }],
           blockedSessionHistoryResponse,
+        ),
+        queryClient.injectData(
+          goddardSdk.session.get,
+          [{ id: activeSession.id }],
+          activeSessionResponse,
+        ),
+        queryClient.injectData(
+          goddardSdk.session.history,
+          [{ id: activeSession.id }],
+          activeSessionHistoryResponse,
         ),
       ])
       workbenchTabSet.activateTab("main")
