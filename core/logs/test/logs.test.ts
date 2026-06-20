@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
-import { createLogger, createLogStore, subtractHours } from "../src/index.ts"
+import { createDebug, createLogger, createLogStore, subtractHours } from "../src/index.ts"
 
 let testDir: string | undefined
 
@@ -138,6 +138,37 @@ test("queries by scope, grep, cursor, and property", async () => {
   ])
   expect(store.query({ afterId: 1 }).map((entry) => entry.message)).toEqual(["needle", "third"])
   expect(store.query({ beforeId: 3 }).map((entry) => entry.message)).toEqual(["first", "needle"])
+
+  store.close()
+})
+
+test("queries by minimum level and debug scope prefix", async () => {
+  const store = await createTestStore()
+  const sessionDebug = createDebug("session.history", { scope: "daemon", store, pid: 123 })
+  const configDebug = createDebug("config.reload", { scope: "daemon", store, pid: 123 })
+
+  sessionDebug("history.normalized", { sessionId: "ses_1" })
+  configDebug("config.refreshed")
+  store.append({ scope: "daemon", level: "info", message: "daemon.ready" })
+  store.append({ scope: "daemon", level: "warn", message: "daemon.slow" })
+
+  expect(store.query({ level: "info" }).map((entry) => entry.message)).toEqual([
+    "daemon.ready",
+    "daemon.slow",
+  ])
+  expect(store.query({ level: "debug" }).map((entry) => entry.message)).toEqual([
+    "history.normalized",
+    "config.refreshed",
+    "daemon.ready",
+    "daemon.slow",
+  ])
+  expect(store.query({ debugScope: "session" }).map((entry) => entry.message)).toEqual([
+    "history.normalized",
+  ])
+  expect(store.query({ debugScope: "session" })[0]?.properties).toMatchObject({
+    debugScope: "session.history",
+    sessionId: "ses_1",
+  })
 
   store.close()
 })
