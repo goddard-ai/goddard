@@ -88,6 +88,7 @@ export type {
   ShutdownSessionResponse,
 }
 export type { SessionWorktreeParams } from "@goddard-ai/session/schema"
+export { SessionErrorCodes } from "@goddard-ai/session/schema"
 
 export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
 
