@@ -20,6 +20,7 @@ import { loadSessionChatComposerSuggestions } from "./composer-suggestion-loader
 import { SessionChat } from "./model.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
 import { SessionChatPageModelProvider, useSessionChatPageModel } from "./page-model.ts"
+import { formatSessionRequestError } from "./request-error.ts"
 import { SessionChatQueryDataProvider } from "./query-data.tsrx"
 import { Transcript } from "./transcript.tsrx"
 import styles from "./view.style.ts"
@@ -725,14 +726,6 @@ function SessionChatStateMessage(props: {
         >{props.actionLabel}</button>
       : null}
   </div>
-}
-
-function formatSessionRequestError(error: unknown) {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message
-  }
-
-  return "The daemon rejected the request."
 }
 
 function isSessionChatHeaderActionError(error: unknown) {

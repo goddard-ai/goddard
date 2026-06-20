@@ -6,17 +6,18 @@ import * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
 import type { SessionDb } from "../daemon.ts"
-import type {
-  AbortedSessionPrompt,
-  CancelSessionResponse,
-  DaemonSession,
-  DaemonSessionStatus,
-  DaemonSessionTurnDraft,
-  PopQueuedSessionPromptResponse,
-  SessionLifecycleField,
-  SessionMessageEvent,
-  SessionTurnMessage,
-  SteerSessionResponse,
+import {
+  SessionErrorCodes,
+  type AbortedSessionPrompt,
+  type CancelSessionResponse,
+  type DaemonSession,
+  type DaemonSessionStatus,
+  type DaemonSessionTurnDraft,
+  type PopQueuedSessionPromptResponse,
+  type SessionLifecycleField,
+  type SessionMessageEvent,
+  type SessionTurnMessage,
+  type SteerSessionResponse,
 } from "../schema.ts"
 import type { createActiveTurnStore } from "./active-turns.ts"
 import type { createIdleShutdownController } from "./idle-shutdown.ts"
@@ -642,7 +643,11 @@ export function createPromptTurnFeature({
   ): Promise<CancelSessionResponse> {
     const active = activeSessions.get(id)
     if (!active) {
-      throw new IpcClientError(`Session ${id} is not active`)
+      throw new IpcClientError({
+        code: SessionErrorCodes.NotActive,
+        details: { sessionId: id },
+        message: `Session ${id} is not active`,
+      })
     }
 
     const abortedQueue = await abortQueuedPrompts(
