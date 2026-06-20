@@ -538,6 +538,22 @@ export function createPromptTurnFeature(input: {
     return abortedQueue
   }
 
+  function abortPendingSteer(active: ActiveSession, reason: string): AbortedSessionPrompt[] {
+    if (!active.pendingSteer) {
+      return []
+    }
+
+    const pendingSteer = active.pendingSteer
+    active.pendingSteer = null
+    pendingSteer.reject(new IpcClientError(reason))
+    return [
+      toAbortedQueuedPrompt({
+        requestId: pendingSteer.requestId,
+        prompt: pendingSteer.prompt,
+      }),
+    ]
+  }
+
   async function sendInternalCancel(
     active: ActiveSession,
     options: {
@@ -626,7 +642,7 @@ export function createPromptTurnFeature(input: {
 
     active.pendingSteer = null
     try {
-      const response = await promptSession(active.id, steer.prompt)
+      const response = await promptSession(active.id, steer.prompt, { priority: "next" })
       steer.resolve({
         id: active.id,
         abortedQueue: steer.abortedQueue,
@@ -705,6 +721,9 @@ export function createPromptTurnFeature(input: {
   async function promptSession(
     id: SessionId,
     prompt: string | acp.ContentBlock[],
+    options: {
+      priority?: "next"
+    } = {},
   ): Promise<acp.PromptResponse> {
     const active = activeSessions.get(id)
     if (!active) {
@@ -718,13 +737,18 @@ export function createPromptTurnFeature(input: {
     })
     const requestId = randomUUID()
     const response = new Promise<acp.PromptResponse>((resolve, reject) => {
-      active.promptQueue.push({
+      const queuedPrompt = {
         requestId,
         prompt: normalizePrompt(prompt),
         source: "daemon",
         resolve,
         reject,
-      })
+      } satisfies QueuedPromptEntry
+      if (options.priority === "next") {
+        active.promptQueue.unshift(queuedPrompt)
+      } else {
+        active.promptQueue.push(queuedPrompt)
+      }
     })
 
     input.updateSessionActivity(active.id, {})
@@ -794,16 +818,13 @@ export function createPromptTurnFeature(input: {
     }
 
     const requestId = randomUUID()
-    const abortedQueue = await abortQueuedPrompts(
+    const abortedQueue = abortPendingSteer(
       active,
-      `Queued prompts were aborted for session ${id}.`,
-      {
-        includePendingSteer: true,
-      },
+      `Pending steering was replaced for session ${id}.`,
     )
 
     if (active.blockingPromptRequestId === null) {
-      const response = await promptSession(id, prompt)
+      const response = await promptSession(id, prompt, { priority: "next" })
       return {
         id,
         abortedQueue,

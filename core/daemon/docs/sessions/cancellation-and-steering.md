@@ -1,6 +1,6 @@
 # Cancellation and Steering
 
-Live session work can be cancelled or redirected without clients talking directly to the agent process. This page explains how the daemon stops active work, reports aborted queued prompts, and injects replacement direction safely.
+Live session work can be cancelled or redirected without clients talking directly to the agent process. This page explains how the daemon stops active work, preserves or reports queued prompts, and injects replacement direction safely.
 
 ## Cancellation
 
@@ -15,7 +15,7 @@ Live session work can be cancelled or redirected without clients talking directl
 - Steering is cancel-and-reprompt behavior owned by the daemon.
 - It cancels active work, waits for a safe boundary, then injects one replacement prompt.
 - This gives client surfaces a supported way to redirect active work without hand-rolling timing against raw agent traffic.
-- Queued prompts that no longer make sense after steering are not silently replayed.
+- Existing queued prompts stay queued after the replacement prompt and continue draining in their original order.
 - Steering is useful when the user wants to preserve the session while replacing the immediate direction of work.
 
 ## Safe boundary
@@ -25,7 +25,7 @@ Live session work can be cancelled or redirected without clients talking directl
 
 ## Boundaries
 
-- Cancellation does not mean queued work should be replayed automatically.
+- Cancellation does not mean queued work should be replayed automatically; steering preserves queued work behind the replacement prompt.
 - Steering is for redirecting active work, not editing historical records.
 - Both actions require a live session; history-only sessions can be inspected but not actively steered.
 - Recovery is daemon-owned: if a client loses connection during cancellation or steering, it should reload session history and lifecycle state from the daemon.

@@ -1610,14 +1610,10 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
   })
   await waitFor(async () => events.includes("result:prompt-1:cancelled"))
   await waitFor(async () => events.includes("chunk:prompt_started:replacement"))
+  await waitFor(async () => events.includes("prompt:stale-queued"))
   await Promise.resolve(unsubscribe()).catch(() => {})
 
-  expect(steered.abortedQueue).toEqual([
-    {
-      requestId: "prompt-2",
-      prompt: [{ type: "text", text: "stale-queued" }],
-    },
-  ])
+  expect(steered.abortedQueue).toEqual([])
   expect(steered.response.stopReason).toBe("end_turn")
   expect(events.indexOf("chunk:cancel_notice:hold:update-boundary")).toBeGreaterThan(-1)
   expect(events.indexOf("tool_call_update:cancel_boundary:hold:update-boundary")).toBeGreaterThan(
@@ -1630,6 +1626,9 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
     events.indexOf("result:prompt-1:cancelled"),
   )
   expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
+    events.indexOf("prompt:replacement"),
+  )
+  expect(events.indexOf("prompt:stale-queued")).toBeGreaterThan(
     events.indexOf("prompt:replacement"),
   )
 })
@@ -1693,20 +1692,19 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
   })
   await waitFor(async () => events.includes("result:prompt-1:cancelled"))
   await waitFor(async () => events.includes("chunk:prompt_started:replacement"))
+  await waitFor(async () => events.includes("chunk:prompt_started:stale-queued"))
   await Promise.resolve(unsubscribe()).catch(() => {})
 
-  expect(steered.abortedQueue).toEqual([
-    {
-      requestId: "prompt-2",
-      prompt: [{ type: "text", text: "stale-queued" }],
-    },
-  ])
+  expect(steered.abortedQueue).toEqual([])
   expect(steered.response.stopReason).toBe("end_turn")
   expect(events.indexOf("chunk:cancel_notice:hold:final-only")).toBeGreaterThan(-1)
   expect(events.some((event) => event.startsWith("tool_call:cancel_boundary:"))).toBe(false)
   expect(events.some((event) => event.startsWith("tool_call_update:cancel_boundary:"))).toBe(false)
   expect(events.indexOf("chunk:prompt_started:replacement")).toBeGreaterThan(
     events.indexOf("result:prompt-1:cancelled"),
+  )
+  expect(events.indexOf("chunk:prompt_started:stale-queued")).toBeGreaterThan(
+    events.indexOf("chunk:prompt_started:replacement"),
   )
 })
 
