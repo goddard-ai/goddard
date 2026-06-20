@@ -1,9 +1,12 @@
-import { createLogger, createLogStore, type Logger } from "@goddard-ai/logs"
+import { createLogger, createLogStore, toErrorProperties, type Logger } from "@goddard-ai/logs"
+import { getErrorMessage } from "radashi"
 
 import type { AppLogInput } from "~/shared/desktop-rpc.ts"
 
 const consoleMethods: AppLogInput["level"][] = ["debug", "error", "info", "log", "warn"]
 let appLogger: Logger | undefined
+let didInstallLogCapture = false
+let didInstallFatalErrorCapture = false
 
 /** Returns the process-global app logger used by the Bun host. */
 export function getAppLogger() {
@@ -18,19 +21,47 @@ export function getAppLogger() {
 
 /** Captures Bun-host console output into the shared SQLite log store for agent inspection. */
 export function installAppLogCapture() {
+  if (didInstallLogCapture) {
+    return
+  }
+
   getAppLogger()
+  didInstallLogCapture = true
 
   for (const method of consoleMethods) {
     const original = console[method].bind(console)
     console[method] = (...args: unknown[]) => {
-      writeAppLog({
-        source: "host",
-        level: method,
-        message: args.map(formatConsoleValue).join(" "),
-      })
+      try {
+        writeAppLog({
+          source: "host",
+          level: method,
+          message: args.map(formatConsoleValue).join(" "),
+        })
+      } catch {
+        // Console output must stay available when durable logging is unavailable.
+      }
       original(...args)
     }
   }
+}
+
+/** Captures Bun-host process failures that escape normal app startup and RPC handlers. */
+export function installAppFatalErrorCapture() {
+  if (didInstallFatalErrorCapture) {
+    return
+  }
+
+  didInstallFatalErrorCapture = true
+
+  process.on("uncaughtException", (error) => {
+    writeAppError("app.host.uncaught_exception", error)
+    process.exit(1)
+  })
+
+  process.on("unhandledRejection", (reason) => {
+    writeAppError("app.host.unhandled_rejection", reason)
+    process.exit(1)
+  })
 }
 
 /** Appends one normalized app log record into the shared SQLite log store. */
@@ -39,6 +70,20 @@ export function writeAppLog(input: AppLogInput) {
     source: input.source,
     webviewId: input.webviewId,
   })
+}
+
+/** Appends one structured app-host error entry into the shared SQLite log store. */
+export function writeAppError(message: string, error: unknown) {
+  try {
+    getAppLogger().error(message, {
+      source: "host",
+      ...toErrorProperties(error),
+    })
+  } catch (loggingError) {
+    process.stderr.write(
+      `${message}: ${getErrorMessage(error)}\nlogging failed: ${getErrorMessage(loggingError)}\n`,
+    )
+  }
 }
 
 function formatConsoleValue(value: unknown) {

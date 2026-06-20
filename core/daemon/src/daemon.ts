@@ -1,4 +1,4 @@
-import { createLogStore, subtractHours } from "@goddard-ai/logs"
+import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
@@ -12,7 +12,13 @@ import { resolveRuntimeConfig } from "./config.ts"
 import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
-import { configureLogging, createLogger, createPayloadPreview, type LogMode } from "./logging.ts"
+import {
+  configureLogging,
+  createLogger,
+  createPayloadPreview,
+  installDaemonFatalErrorCapture,
+  type LogMode,
+} from "./logging.ts"
 import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
 import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
@@ -37,20 +43,27 @@ export async function runDaemon(input: RunInput): Promise<number> {
     },
     store: logStore,
   })
+  installDaemonFatalErrorCapture()
   const logger = createLogger()
   const enableIpc = input.enableIpc ?? true
   const enableStream = input.enableStream ?? true
-  const runtime = resolveRuntimeConfig({
-    baseUrl: input.baseUrl,
-    port: input.port,
-    agentBinDir: input.agentBinDir,
-  })
-  const configManager = createConfigManager()
-  const store = input.store ?? openComposedDaemonStore()
-  const ownsStore = input.store == null
+  let configManager: ReturnType<typeof createConfigManager> | undefined
+  let store: ComposedDaemonStore | undefined
+  let ownsStore = false
   let ipcServer: DaemonServer | undefined
 
   try {
+    const runtime = resolveRuntimeConfig({
+      baseUrl: input.baseUrl,
+      port: input.port,
+      agentBinDir: input.agentBinDir,
+    })
+    configManager = createConfigManager()
+    store = input.store ?? openComposedDaemonStore()
+    ownsStore = input.store == null
+    const activeConfigManager = configManager
+    const activeStore = store
+
     logger.log("daemon.startup", {
       baseUrl: runtime.baseUrl,
       port: runtime.port,
@@ -71,13 +84,13 @@ export async function runDaemon(input: RunInput): Promise<number> {
       return 0
     }
 
-    const client = await defaultCreateBackendClient(runtime.baseUrl, store)
+    const client = await defaultCreateBackendClient(runtime.baseUrl, activeStore)
     if (enableIpc) {
-      ipcServer = await SetupContext.run({ runtime, configManager }, () =>
+      ipcServer = await SetupContext.run({ runtime, configManager: activeConfigManager }, () =>
         startDaemonServer(client, {
           port: runtime.port,
           agentBinDir: runtime.agentBinDir,
-          store,
+          store: activeStore,
         }),
       )
     }
@@ -115,70 +128,72 @@ export async function runDaemon(input: RunInput): Promise<number> {
       )
 
       subscription.on("event", async (payload) => {
-        const event = payload as RepoEvent
-        if (!isFeedbackEvent(event)) {
-          return
-        }
-
-        const feedbackContext = {
-          repository: `${event.owner}/${event.repo}`,
-          prNumber: event.prNumber,
-          feedbackType: event.type,
-        }
-
-        await FeedbackEventContext.run(feedbackContext, async () => {
-          if (!activeIpcServer) {
-            logger.log("repo.feedback_ignored", {
-              reason: "ipc_disabled",
-            })
+        try {
+          const event = payload as RepoEvent
+          if (!isFeedbackEvent(event)) {
             return
           }
 
-          const prompt = buildPrompt(event)
-          const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-          if (runningPrs.has(requestKey)) {
-            logger.log("repo.feedback_coalesced")
-            return
+          const feedbackContext = {
+            repository: `${event.owner}/${event.repo}`,
+            prNumber: event.prNumber,
+            feedbackType: event.type,
           }
 
-          runningPrs.add(requestKey)
-
-          try {
-            const { managed } = await client.pullRequests.managed({
-              owner: event.owner,
-              repo: event.repo,
-              prNumber: event.prNumber,
-            })
-            if (!managed) {
+          await FeedbackEventContext.run(feedbackContext, async () => {
+            if (!activeIpcServer) {
               logger.log("repo.feedback_ignored", {
-                reason: "unmanaged_pr",
+                reason: "ipc_disabled",
               })
               return
             }
 
-            logger.log("pr_feedback.launch", {
-              prompt: createPayloadPreview(prompt),
-            })
-            const exitCode = await runPrFeedbackFlow({
-              event,
-              prompt,
-              daemonUrl: activeIpcServer.daemonUrl,
-              agentBinDir: runtime.agentBinDir,
-              configManager,
-              store,
-            })
-            logger.log("pr_feedback.finish", {
-              exitCode,
-            })
-          } catch (error) {
-            logger.log("pr_feedback.failed", {
-              errorMessage: getErrorMessage(error),
-            })
-          } finally {
-            runningPrs.delete(requestKey)
-          }
-        })
+            const prompt = buildPrompt(event)
+            const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
+
+            if (runningPrs.has(requestKey)) {
+              logger.log("repo.feedback_coalesced")
+              return
+            }
+
+            runningPrs.add(requestKey)
+
+            try {
+              const { managed } = await client.pullRequests.managed({
+                owner: event.owner,
+                repo: event.repo,
+                prNumber: event.prNumber,
+              })
+              if (!managed) {
+                logger.log("repo.feedback_ignored", {
+                  reason: "unmanaged_pr",
+                })
+                return
+              }
+
+              logger.log("pr_feedback.launch", {
+                prompt: createPayloadPreview(prompt),
+              })
+              const exitCode = await runPrFeedbackFlow({
+                event,
+                prompt,
+                daemonUrl: activeIpcServer.daemonUrl,
+                agentBinDir: runtime.agentBinDir,
+                configManager: activeConfigManager,
+                store: activeStore,
+              })
+              logger.log("pr_feedback.finish", {
+                exitCode,
+              })
+            } catch (error) {
+              logger.log("pr_feedback.failed", toErrorProperties(error))
+            } finally {
+              runningPrs.delete(requestKey)
+            }
+          })
+        } catch (error) {
+          logger.log("repo.event_failed", toErrorProperties(error))
+        }
       })
     }
 
@@ -193,16 +208,14 @@ export async function runDaemon(input: RunInput): Promise<number> {
     })
     return 0
   } catch (error) {
-    logger.log("daemon.run_failed", {
-      errorMessage: getErrorMessage(error),
-    })
+    logger.log("daemon.run_failed", toErrorProperties(error))
     return 1
   } finally {
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
-    await configManager.close().catch(() => {})
-    if (ownsStore) {
+    await configManager?.close().catch(() => {})
+    if (ownsStore && store) {
       store.close()
     }
     restoreLogging()

@@ -172,5 +172,24 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.main) {
-  await main()
+  await main().catch(async (error) => {
+    try {
+      const { createLogger, createLogStore, toErrorProperties } = await import("@goddard-ai/logs")
+      const store = createLogStore()
+
+      try {
+        createLogger({ scope: "daemon", store, pid: process.pid }).error(
+          "daemon.cli_failed",
+          toErrorProperties(error),
+        )
+      } finally {
+        store.close()
+      }
+    } catch {
+      // Preserve the original CLI failure when durable logging is unavailable.
+    }
+
+    console.error(error)
+    process.exit(1)
+  })
 }
