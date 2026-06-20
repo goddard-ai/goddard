@@ -23,6 +23,9 @@ export type IpcErrorRegistryError<TRegistry extends IpcErrorRegistry> = {
   [K in keyof TRegistry]: IpcClientErrorPayload<TRegistry[K]>
 }[keyof TRegistry]
 
+export type IpcClientErrorForRegistry<TRegistry extends IpcErrorRegistry> = Error &
+  IpcErrorRegistryError<TRegistry>
+
 export type IpcClientErrorPayload<TDescriptor extends IpcErrorDescriptor> =
   undefined extends IpcErrorDetails<TDescriptor>
     ? {
@@ -52,4 +55,24 @@ export class IpcClientError<
     this.code = typeof input === "string" ? null : input.code
     this.details = typeof input === "string" ? undefined : input.details
   }
+}
+
+export function isIpcClientErrorForRegistry<TRegistry extends IpcErrorRegistry>(
+  error: unknown,
+  registry: TRegistry,
+): error is IpcClientErrorForRegistry<TRegistry> {
+  if (!(error instanceof IpcClientError) || typeof error.code !== "string") {
+    return false
+  }
+
+  const descriptor = Object.values(registry).find((entry) => entry.code === error.code)
+  if (!descriptor) {
+    return false
+  }
+
+  return descriptor.details.safeParse(error.details).success
+}
+
+export function assertNever(value: never): never {
+  throw new Error(`Unexpected value: ${String(value)}`)
 }
