@@ -273,7 +273,7 @@ test("useListNavigation supports ref cleanup functions and null cleanup", async 
   harness.cleanup()
 })
 
-test("useListNavigation can focus registered items and suppress pointer highlighting", async () => {
+test("useListNavigation can focus registered items and only highlights after pointer movement", async () => {
   const count = signal(2)
   let ignorePointer = true
   let navigation: ListNavigationController | null = null
@@ -292,8 +292,11 @@ test("useListNavigation can focus registered items and suppress pointer highligh
   buttons[1]?.dispatchEvent(new PointerEvent("pointerenter"))
   expect(navigation!.activeIndex()).toBe(0)
 
+  buttons[1]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 1 }))
+  expect(navigation!.activeIndex()).toBe(0)
+
   ignorePointer = false
-  buttons[1]?.dispatchEvent(new PointerEvent("pointerenter"))
+  buttons[1]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 2, clientY: 1 }))
   expect(navigation!.activeIndex()).toBe(1)
 
   navigation!.focusActiveItem()
@@ -301,6 +304,63 @@ test("useListNavigation can focus registered items and suppress pointer highligh
 
   navigation!.focusItem(0)
   expect(document.activeElement).toBe(buttons[0])
+
+  harness.cleanup()
+})
+
+test("useListNavigation ignores stale pointer enters after item updates until pointer movement", async () => {
+  const count = signal(2)
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    count,
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  await harness.render()
+
+  let buttons = harness.container.querySelectorAll("button")
+
+  buttons[1]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 1 }))
+  expect(navigation!.activeIndex()).toBe(1)
+
+  count.value = 3
+  await harness.render()
+  buttons = harness.container.querySelectorAll("button")
+
+  buttons[0]?.dispatchEvent(new PointerEvent("pointerenter"))
+  expect(navigation!.activeIndex()).toBe(1)
+
+  buttons[0]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 2 }))
+  expect(navigation!.activeIndex()).toBe(0)
+
+  harness.cleanup()
+})
+
+test("useListNavigation ignores stale pointer enters after scrolling until pointer movement", async () => {
+  const count = signal(2)
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    count,
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  await harness.render()
+
+  const buttons = harness.container.querySelectorAll("button")
+
+  buttons[1]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 1 }))
+  expect(navigation!.activeIndex()).toBe(1)
+
+  harness.container.dispatchEvent(new Event("scroll"))
+  buttons[0]?.dispatchEvent(new PointerEvent("pointerenter"))
+  expect(navigation!.activeIndex()).toBe(1)
+
+  buttons[0]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 2 }))
+  expect(navigation!.activeIndex()).toBe(0)
 
   harness.cleanup()
 })

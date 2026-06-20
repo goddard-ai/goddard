@@ -99,6 +99,8 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
   const activeIndexRef = useRef(0)
   const itemElementsRef = useRef(new Map<number, HTMLElement>())
   const itemCleanupRef = useRef(new Map<number, () => void>())
+  const ignorePointerHighlightRef = useRef(true)
+  const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
 
   optionsRef.current = options
 
@@ -155,7 +157,34 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       return activeIndexRef.current
     }
 
-    function syncActiveElement() {
+    function suppressPointerHighlightUntilMove() {
+      ignorePointerHighlightRef.current = true
+    }
+
+    function updatePointerPosition(event: PointerEvent) {
+      const previousPosition = lastPointerPositionRef.current
+      const nextPosition = {
+        x: event.clientX,
+        y: event.clientY,
+      }
+      const moved =
+        !previousPosition ||
+        previousPosition.x !== nextPosition.x ||
+        previousPosition.y !== nextPosition.y
+
+      if (moved) {
+        ignorePointerHighlightRef.current = false
+      }
+
+      lastPointerPositionRef.current = nextPosition
+      return moved
+    }
+
+    function shouldIgnorePointerHighlight() {
+      return ignorePointerHighlightRef.current || optionsRef.current.shouldIgnorePointer?.()
+    }
+
+    function syncActiveElement(options?: { pointerOrigin?: boolean }) {
       const count = getCount()
       const activeAttribute = getActiveAttribute()
 
@@ -180,6 +209,10 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
           const scrollOptions = getScrollOptions()
 
           if (scrollOptions) {
+            if (!options?.pointerOrigin) {
+              suppressPointerHighlightUntilMove()
+            }
+
             element.scrollIntoView(scrollOptions)
           }
         } else {
@@ -202,11 +235,29 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       activeIndexRef.current = isItemDisabled(clampedIndex)
         ? findEnabledIndex(clampedIndex, direction)
         : clampedIndex
+      suppressPointerHighlightUntilMove()
       syncActiveElement()
     }
 
     function setActiveIndex(index: number) {
       setActiveIndexWithDirection(index, 1)
+    }
+
+    function setActiveIndexFromPointer(index: number) {
+      const count = getCount()
+
+      if (count === 0) {
+        activeIndexRef.current = 0
+        syncActiveElement({ pointerOrigin: true })
+        return
+      }
+
+      const clampedIndex = Math.min(Math.max(index, 0), count - 1)
+
+      activeIndexRef.current = isItemDisabled(clampedIndex)
+        ? findEnabledIndex(clampedIndex, 1)
+        : clampedIndex
+      syncActiveElement({ pointerOrigin: true })
     }
 
     function moveActiveIndex(delta: -1 | 1) {
@@ -221,6 +272,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       const nextIndex = findEnabledIndex(activeIndexRef.current + delta, delta)
 
       activeIndexRef.current = nextIndex
+      suppressPointerHighlightUntilMove()
       syncActiveElement()
     }
 
@@ -275,16 +327,28 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       }
 
       itemElementsRef.current.set(index, element)
+      suppressPointerHighlightUntilMove()
 
       const handlePointerEnter = () => {
-        if (!optionsRef.current.shouldIgnorePointer?.() && !isItemDisabled(index)) {
-          setActiveIndex(index)
+        if (!shouldIgnorePointerHighlight() && !isItemDisabled(index)) {
+          setActiveIndexFromPointer(index)
+        }
+      }
+      const handlePointerMove = (event: PointerEvent) => {
+        if (
+          updatePointerPosition(event) &&
+          !shouldIgnorePointerHighlight() &&
+          !isItemDisabled(index)
+        ) {
+          setActiveIndexFromPointer(index)
         }
       }
 
       element.addEventListener("pointerenter", handlePointerEnter)
+      element.addEventListener("pointermove", handlePointerMove)
       itemCleanupRef.current.set(index, () => {
         element.removeEventListener("pointerenter", handlePointerEnter)
+        element.removeEventListener("pointermove", handlePointerMove)
         itemElementsRef.current.delete(index)
       })
       syncActiveElement()
@@ -332,6 +396,17 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
       itemCleanupRef.current.clear()
       itemElementsRef.current.clear()
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const handleScroll = () => {
+      ignorePointerHighlightRef.current = true
+    }
+
+    document.addEventListener("scroll", handleScroll, true)
+    return () => {
+      document.removeEventListener("scroll", handleScroll, true)
     }
   }, [])
 

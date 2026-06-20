@@ -129,9 +129,10 @@ overlay behavior in the caller but need shared active-row behavior.
 controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
 Enter activation, pointer hover, registered-row focus helpers, disabled-row
 skipping from DOM state, active DOM attributes, and scroll-into-view. Wrapping
-and scroll-into-view are enabled by default. Use `shouldIgnorePointer` for
-menus that temporarily suppress hover while keyboard or typeahead navigation is
-in progress.
+and scroll-into-view are enabled by default. Pointer hover is ignored after the
+list first appears, item registration changes, programmatic active-index
+changes, or scroll events until the pointer actually moves. Use
+`shouldIgnorePointer` only for additional caller-owned suppression rules.
 
 `useSearchNavigation` adds `inputRef` for search inputs. It listens for input
 changes, resets active index, delegates movement keys to list navigation, and
