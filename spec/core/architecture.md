@@ -8,6 +8,7 @@
 | Database | Turso (SQLite at the Edge) |
 | Authentication | GitHub OAuth Device Flow |
 | Desktop application | Trusted desktop host + web frontend |
+| Browser-to-local daemon access | Loopback HTTP with explicit origin validation and bearer-token authorization |
 
 ## Platform Components
 - **Control Plane** — worker-hosted authority for sessions, managed pull request state, and user-scoped event fan-out.
@@ -40,11 +41,22 @@ Design rule: daemon control capabilities live here first.
 - Primary human-facing workspace for authentication, session steering, pull request review, specs, tasks, and roadmap context.
 - Use SDK contracts for daemon authentication and other platform interactions.
 - Host or supervise local background automation when unattended execution is enabled.
+- Bootstrap its embedded webview with short-lived daemon-issued webview tokens when the webview connects directly to daemon loopback IPC.
 
 Boundaries:
-- Must keep privileged OS and daemon access behind the trusted desktop host boundary.
-- Embedded browser surfaces must not bypass that boundary for direct daemon access.
+- Must keep privileged OS access behind the trusted desktop host boundary.
+- Embedded browser daemon access must be host-mediated even when requests go directly from the webview to daemon loopback IPC: the trusted host obtains the webview token, the token is scoped to the current app/webview session, and the daemon still validates the request origin.
 - Must not fork platform behavior away from SDK contracts.
+
+### Browser Workspace
+- A hosted browser surface may present the workspace UI and connect to a local daemon over loopback HTTP when local browser access is explicitly enabled.
+- Hosted browser access uses local daemon pairing, an origin-bound bearer token, explicit origin allowlisting, host validation, and Private Network Access-compatible preflight behavior.
+
+Boundaries:
+- Browser access is disabled by default and must fail closed for missing, malformed, unconfigured, or ambiguous origins.
+- `https://app.goddardai.org` is the initial production browser origin; any other hosted or local development origin requires explicit daemon configuration.
+- Browser access must not use cookies for local daemon authorization and must not rely on CORS as authorization.
+- Discovery may use an explicit connection URL, custom protocol, or manual port entry, but must not silently perform broad port scanning.
 
 ### Background Runtime
 - Own authenticated event stream consumption as part of supervised automation behavior.
