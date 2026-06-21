@@ -19,6 +19,30 @@ export type StoreConnectionOptions = {
 
 const metadata = {
   authToken: z.string(),
+  browserAccess: z.strictObject({
+    pendingPairings: z.record(
+      z.string(),
+      z.strictObject({
+        origin: z.string(),
+        codeHash: z.string(),
+        label: z.string().nullable(),
+        createdAt: z.string(),
+        expiresAt: z.string(),
+        confirmedAt: z.string().nullable(),
+        completedAt: z.string().nullable(),
+      }),
+    ),
+    browserTokens: z.record(
+      z.string(),
+      z.strictObject({
+        origin: z.string(),
+        tokenHash: z.string(),
+        label: z.string().nullable(),
+        createdAt: z.string(),
+        revokedAt: z.string().nullable(),
+      }),
+    ),
+  }),
   managedAgentUpdateChecks: z.record(
     z.string(),
     z.strictObject({

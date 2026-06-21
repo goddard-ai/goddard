@@ -33,6 +33,7 @@ function getErrorResponse(error: unknown): {
 type RequestHookInput = {
   name: string
   payload: unknown
+  request: Request
 }
 
 /** Lifecycle data passed to request-received hooks. */
@@ -61,6 +62,9 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
   handlers: RouteRequestHandlerMap<TRoutes>
   browserAccess?: {
     readonly allowedOrigins: readonly string[]
+    readonly authorizeRequest?: (
+      request: Request,
+    ) => Promise<Response | null | undefined> | Response | null | undefined
   }
   runHandler?: RunHandlerHook
   onRequestReceived?: (input: RequestReceivedHookInput) => Promise<void> | void
@@ -74,6 +78,7 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
   const browserAccess = config.browserAccess
     ? {
         allowedOrigins: new Set(config.browserAccess.allowedOrigins.map(normalizeAllowedOrigin)),
+        authorizeRequest: config.browserAccess.authorizeRequest,
       }
     : null
   const handlers = wrapHandlers(routes, config.handlers, config)
@@ -120,6 +125,14 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
       }
 
       webRequest = await createWebRequest(req, res, hostname, port)
+      if (browserAccess && hasOriginHeader(req) && browserAccess.authorizeRequest) {
+        const authorizationResponse = await browserAccess.authorizeRequest(webRequest.request)
+        if (authorizationResponse) {
+          await writeResponse(res, mergeResponseHeaders(authorizationResponse, responseHeaders))
+          return
+        }
+      }
+
       const response = await router({
         request: webRequest.request,
         ip: req.socket.remoteAddress ?? "",
@@ -283,11 +296,12 @@ function wrapRequestHandler(
     "runHandler" | "onRequestReceived" | "onResponseSent" | "onRequestFailed"
   >,
 ) {
-  return async (context: { body?: unknown; query?: unknown }) => {
+  return async (context: { body?: unknown; query?: unknown; request: Request }) => {
     const startedAt = Date.now()
     const requestInput: RequestHookInput = {
       name,
       payload: "body" in context ? context.body : context.query,
+      request: context.request,
     }
 
     const processRequest = async () => {
