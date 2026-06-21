@@ -4,8 +4,12 @@ import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
   createDaemonEventBus,
+  matchesDaemonEventFilter,
   type DaemonConfigProvider,
   type DaemonSetupSubstrate,
+  type EventBus,
+  type EventDefinition,
+  type DaemonEventEnvelope as PluginDaemonEventEnvelope,
 } from "@goddard-ai/daemon-plugin"
 import { composeIpcRoutes } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
@@ -16,6 +20,7 @@ import {
   type BrowserAccessPairingConfirmRequest,
   type BrowserAccessPairingStartRequest,
   type BrowserAccessWebviewTokenCreateRequest,
+  type DaemonEventsStreamRequest,
 } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
@@ -40,6 +45,8 @@ import {
   createPayloadPreview,
   isVerboseLogging,
   readSessionIdForLog,
+  type DaemonDebugLogger,
+  type DaemonLogger,
 } from "../logging.ts"
 import type { ManagedAgentUsageStore } from "../managed-agent-usage.ts"
 import {
@@ -50,6 +57,7 @@ import {
 import type { DaemonServer } from "./types.ts"
 
 type ComposedDaemonPlugin = ReturnType<typeof getDaemonPluginComposition>["plugins"][number]
+type ComposedDaemonEvents = EventBus<Record<string, EventDefinition<unknown>>>
 
 export async function startDaemonServer(
   client: BackendClient,
@@ -78,6 +86,9 @@ export async function startDaemonServer(
     rootConfig.config.daemon?.browserAccess,
   )
   const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
+  const composition = getDaemonPluginComposition()
+  const events = createDaemonEventBus(composition.events)
+  observeDaemonEventsForLogging(events, logger)
 
   const registryService = createAcpRegistryService()
   const managedAgentUsageStore: ManagedAgentUsageStore = {
@@ -165,6 +176,8 @@ export async function startDaemonServer(
     },
     client,
     store,
+    composition.plugins,
+    events,
   )
   const ipcHandlers = {
     daemon: {
@@ -190,11 +203,16 @@ export async function startDaemonServer(
       },
     },
     ...pluginSetup.ipcHandlers,
+    events: {
+      stream: async function* (ctx: { body: DaemonEventsStreamRequest; request: Request }) {
+        yield* subscribeDaemonEvents(events, ctx.body ?? {}, ctx.request.signal)
+      },
+    },
   }
 
   const ipcServer = createServer({
     port: runtime.port,
-    routes: composeIpcRoutes([coreDaemonIpcRoutes, getDaemonPluginComposition().ipcRoutes]),
+    routes: composeIpcRoutes([coreDaemonIpcRoutes, composition.ipcRoutes]),
     handlers: ipcHandlers as any,
     browserAccess: {
       allowedOrigins: browserAccessConfig.allowedOrigins,
@@ -295,14 +313,15 @@ async function setupDaemonPlugins(
   configProvider: DaemonConfigProvider,
   backendClient: BackendClient,
   store: ComposedDaemonStore,
+  plugins: readonly ComposedDaemonPlugin[],
+  events: ComposedDaemonEvents,
 ) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
-  const events = createDaemonEventBus()
 
-  for (const plugin of getDaemonPluginComposition().plugins) {
+  for (const plugin of plugins) {
     const consumedExtensions = (plugin.consumes ?? []).map(
       (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
     )
@@ -341,6 +360,88 @@ async function setupDaemonPlugins(
       }
     },
   }
+}
+
+async function* subscribeDaemonEvents(
+  events: ComposedDaemonEvents,
+  filter: DaemonEventsStreamRequest,
+  signal: AbortSignal,
+) {
+  const queue: PluginDaemonEventEnvelope[] = []
+  let wake: (() => void) | undefined
+  const listener = (event: PluginDaemonEventEnvelope) => {
+    if (!matchesDaemonEventFilter(event, filter)) {
+      return
+    }
+    queue.push(event)
+    wake?.()
+  }
+  const abort = () => {
+    wake?.()
+  }
+
+  const unsubscribe = events.observe(listener)
+  signal.addEventListener("abort", abort)
+  try {
+    while (!signal.aborted) {
+      const event = queue.shift()
+      if (event) {
+        yield event
+        continue
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve
+      })
+      wake = undefined
+    }
+  } finally {
+    signal.removeEventListener("abort", abort)
+    unsubscribe()
+  }
+}
+
+function observeDaemonEventsForLogging(events: ComposedDaemonEvents, logger: DaemonLogger) {
+  const debugLoggers = new Map<string, DaemonDebugLogger>()
+
+  events.observe((event) => {
+    const fields = createDaemonEventLogFields(event)
+    const debugScope = event.log?.debug
+    if (debugScope) {
+      const debugLogger =
+        debugLoggers.get(debugScope) ?? createAndRememberDebugLogger(debugLoggers, debugScope)
+      debugLogger(event.name, fields)
+      return
+    }
+
+    logger.log(event.name, fields)
+  })
+}
+
+function createAndRememberDebugLogger(loggers: Map<string, DaemonDebugLogger>, debugScope: string) {
+  const logger = createDebug(debugScope)
+  loggers.set(debugScope, logger)
+  return logger
+}
+
+function createDaemonEventLogFields(event: PluginDaemonEventEnvelope): Record<string, unknown> {
+  const payloadFields = isRecord(event.payload) ? event.payload : { payload: event.payload }
+  return {
+    ...sanitizeEventLogFields(payloadFields),
+    eventId: event.id,
+    eventAt: event.at,
+  }
+}
+
+function sanitizeEventLogFields(fields: Record<string, unknown>) {
+  const sanitized: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(fields)) {
+    sanitized[key] = value instanceof Error ? { errorMessage: getErrorMessage(value) } : value
+  }
+  return sanitized
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function createPluginBackendContext(plugin: ComposedDaemonPlugin, client: BackendClient) {

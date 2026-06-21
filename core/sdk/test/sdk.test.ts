@@ -110,6 +110,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     const { sdk } = createSdkWithClient()
 
     expect(Object.hasOwn(sdk, "daemon")).toBe(true)
+    expect(Object.hasOwn(sdk, "events")).toBe(true)
     expect(Object.hasOwn(sdk, "auth")).toBe(true)
     expect(Object.hasOwn(sdk, "adapter")).toBe(true)
     expect(Object.hasOwn(sdk, "fileSearch")).toBe(true)
@@ -120,6 +121,38 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "action")).toBe(true)
     expect(Object.hasOwn(sdk, "loop")).toBe(true)
     expect(Object.hasOwn(sdk, "workforce")).toBe(true)
+  })
+
+  test("events.stream maps to the unified daemon event stream and aborts", async () => {
+    const { sdk, subscribe } = createSdkWithClient()
+    const unsubscribe = vi.fn()
+    const controller = new AbortController()
+    const filter = {
+      names: ["session.activated"],
+      where: [{ path: "sessionId", equals: "ses_1" }],
+    }
+
+    subscribe.mockImplementationOnce(async () => unsubscribe)
+
+    const events = await sdk.events.stream(filter, { signal: controller.signal })
+    const iterator = events[Symbol.asyncIterator]()
+    const result = iterator.next()
+
+    await waitForCondition(() => subscribe.mock.calls.length === 1)
+    expect(subscribe).toHaveBeenCalledWith(
+      {
+        name: "events.stream",
+        filter,
+      },
+      expect.any(Function),
+    )
+
+    controller.abort()
+    await expect(result).resolves.toEqual({
+      done: true,
+      value: undefined,
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("inbox.streamItems streams daemon inbox item updates", async () => {
