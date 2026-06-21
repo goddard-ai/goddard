@@ -1,0 +1,11 @@
+!source/
+source/*
+!source/.gitignore
+
+!build/
+build/*
+!build/.gitignore
+
+!dist/
+dist/*
+!dist/.gitignore

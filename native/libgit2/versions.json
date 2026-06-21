@@ -1,0 +1,7 @@
+{
+  "libgit2": {
+    "repo": "https://github.com/libgit2/libgit2.git",
+    "version": "1.9.0",
+    "ref": "v1.9.0"
+  }
+}

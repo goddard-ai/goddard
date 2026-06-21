@@ -1,0 +1,14 @@
+{
+  "name": "@goddard-native/libgit2",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "scripts": {
+    "fetch": "bun run ./scripts/fetch.ts",
+    "build": "bun run ./scripts/build.ts",
+    "verify": "bun run ./scripts/verify.ts",
+    "clean": "bun run ./scripts/clean.ts",
+    "artifact": "bun run ./scripts/print-artifact.ts"
+  }
+}

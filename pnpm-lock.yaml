@@ -1256,6 +1256,8 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
+  native/libgit2: {}
+
   playground/agent-loop:
     dependencies:
       '@clack/prompts':

@@ -3,6 +3,7 @@ packages:
   - app/styled-system
   - core/*
   - core/daemon/client
+  - native/*
   - playground/*
   - features/*
   - workforce
