@@ -9,12 +9,14 @@ import type {
   DaemonSendInput,
   DaemonSubscribeInput,
   DaemonUnsubscribeInput,
+  DaemonWebviewAccessInput,
 } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
 import { createClientIpcLogHook } from "./ipc-client-logging.ts"
 
 let daemonClient: DaemonIpcClient | undefined
+let daemonUrl: string | undefined
 const daemonStreamSubscriptions = new Map<
   string,
   {
@@ -30,10 +32,12 @@ async function getDaemonClient() {
     return daemonClient
   }
 
+  const runtime = await ensureDaemonRuntime()
   const client = createDaemonIpcClient({
-    ...(await ensureDaemonRuntime()),
+    ...runtime,
     ipcHook: createClientIpcLogHook(),
   })
+  daemonUrl = runtime.daemonUrl
   daemonClient = client
   return client
 }
@@ -156,6 +160,19 @@ export async function daemonResetSubscriptions(input: DaemonResetSubscriptionsIn
 
   return {
     removedCount: subscriptionIds.length,
+  }
+}
+
+/** Issues a short-lived daemon browser-access token for the active desktop webview origin. */
+export async function daemonWebviewAccess(input: DaemonWebviewAccessInput) {
+  const client = await getDaemonClient()
+  const token = await client.daemon.browserAccess.webviewToken.create({
+    origin: input.origin,
+  })
+
+  return {
+    daemonUrl: daemonUrl ?? (await ensureDaemonRuntime()).daemonUrl,
+    ...token,
   }
 }
 

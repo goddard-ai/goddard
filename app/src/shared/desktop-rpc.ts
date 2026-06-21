@@ -42,6 +42,19 @@ export type DaemonResetSubscriptionsInput = {
   webviewId: number
 }
 
+/** Host-bootstrapped daemon access credentials for direct desktop webview IPC. */
+export type DaemonWebviewAccess = {
+  daemonUrl: string
+  token: string
+  origin: string
+  expiresAt: string
+}
+
+/** Bun-host RPC payload for issuing daemon access to the current desktop webview origin. */
+export type DaemonWebviewAccessInput = {
+  origin: string
+}
+
 /** Minimal runtime information exposed by the Electrobun Bun host. */
 export type RuntimeInfo = {
   runtime: "electrobun"
@@ -123,6 +136,10 @@ export type AppDesktopRpc = {
       daemonResetSubscriptions: {
         params: DaemonResetSubscriptionsInput
         response: { removedCount: number }
+      }
+      daemonWebviewAccess: {
+        params: DaemonWebviewAccessInput
+        response: DaemonWebviewAccess
       }
       mainWindowReady: {
         params: {}
