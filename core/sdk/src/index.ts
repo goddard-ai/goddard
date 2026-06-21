@@ -4,6 +4,12 @@ export * from "./session.ts"
 export * from "./sdk.ts"
 export { AgentSession } from "./daemon/session/client-session.ts"
 export type {
+  DaemonEventEnvelope,
+  DaemonEventLogMetadata,
+  DaemonEventPropertyFilter,
+  DaemonEventsStreamRequest,
+} from "@goddard-ai/schema/daemon-ipc"
+export type {
   FileSearchComposerEntriesRequest,
   FileSearchComposerEntriesResponse,
   FileSearchComposerEntry,

@@ -1192,6 +1192,55 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
   )
 })
 
+test("daemon event stream emits filtered composed event envelopes", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const systemPrompt = "Event stream contract"
+  const events: Array<{
+    name: string
+    payload?: { sessionId?: string; request?: { systemPrompt?: string } }
+  }> = []
+  const unsubscribe = await subscribe(
+    client,
+    {
+      name: "events.stream",
+      filter: {
+        names: ["session.persisted"],
+        where: [{ path: "request.systemPrompt", equals: systemPrompt }],
+      },
+    },
+    (event) => {
+      events.push(event)
+    },
+  )
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribe()).catch(() => {})
+  })
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: process.cwd(),
+    mcpServers: [],
+    systemPrompt,
+  })
+
+  await waitFor(async () => events.some((event) => event.payload?.sessionId === created.session.id))
+  expect(events).toEqual([
+    expect.objectContaining({
+      name: "session.persisted",
+      payload: expect.objectContaining({
+        sessionId: created.session.id,
+        request: expect.objectContaining({
+          systemPrompt,
+        }),
+      }),
+    }),
+  ])
+
+  await Promise.resolve(unsubscribe()).catch(() => {})
+  await send(client, "session.shutdown", { id: created.session.id })
+})
+
 test("idle auto-shutdown waits for the last session.streamMessages subscriber to disconnect", async () => {
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })

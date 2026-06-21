@@ -6,6 +6,7 @@ import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
+import type { DaemonEventsStreamRequest } from "@goddard-ai/schema/daemon-ipc"
 import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
@@ -47,6 +48,15 @@ function createDaemonNamespace(client: any) {
   }
 }
 
+/** Builds the daemon event namespace with one thin method for the unified event stream. */
+function createEventsNamespace(client: any) {
+  return {
+    /** Streams composed daemon events with optional payload-relative exact-match filters. */
+    stream: (input: DaemonEventsStreamRequest = {}, options?: { signal?: AbortSignal }) =>
+      client.events.stream(input, options),
+  }
+}
+
 /** Builds the session namespace with one thin method per daemon session IPC action. */
 function createSessionNamespace(client: any, sessionFeature: FeatureSdkNamespaces["session"]) {
   return {
@@ -81,6 +91,7 @@ export class GoddardSdk {
   readonly #client: GoddardClient
 
   readonly daemon: ReturnType<typeof createDaemonNamespace>
+  readonly events: ReturnType<typeof createEventsNamespace>
   readonly auth: FeatureSdkNamespaces["auth"]
   readonly adapter: FeatureSdkNamespaces["adapter"]
   readonly fileSearch: FeatureSdkNamespaces["fileSearch"]
@@ -99,6 +110,7 @@ export class GoddardSdk {
     }) as FeatureSdkNamespaces
 
     this.daemon = createDaemonNamespace(this.#client)
+    this.events = createEventsNamespace(this.#client)
     this.auth = features.auth
     this.adapter = features.adapter
     this.fileSearch = features.fileSearch
