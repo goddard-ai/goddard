@@ -26,9 +26,15 @@ export type ConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig>
 /** One or more root config namespaces owned by a daemon plugin. */
 export type ConfigDefinitions = Record<string, ConfigDefinition<any, any>>
 
+/** Optional routing metadata for event-derived daemon logs. */
+export type EventLogMetadata = {
+  readonly debug?: string
+}
+
 /** Type-only declaration for one in-process daemon plugin event payload. */
 export type EventDefinition<TPayload = unknown> = {
   readonly payload?: TPayload
+  readonly log?: EventLogMetadata
 }
 
 /** One or more event payloads owned by a daemon plugin. */
@@ -36,6 +42,19 @@ export type EventDefinitions = Record<string, EventDefinition<any>>
 
 type InferEventPayload<TDefinition> =
   TDefinition extends EventDefinition<infer TPayload> ? TPayload : never
+
+/** Streamable envelope produced whenever one daemon plugin event is emitted. */
+export type DaemonEventEnvelope<TName extends string = string, TPayload = unknown> = {
+  readonly id: string
+  readonly at: string
+  readonly name: TName
+  readonly payload: TPayload
+  readonly log?: EventLogMetadata
+}
+
+type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
+  [TName in keyof TEvents & string]: DaemonEventEnvelope<TName, InferEventPayload<TEvents[TName]>>
+}[keyof TEvents & string]
 
 export type EventBus<
   TEmitEvents extends EventDefinitions,
@@ -48,6 +67,9 @@ export type EventBus<
   readonly on: <TName extends keyof TListenEvents & string>(
     eventName: TName,
     listener: (payload: InferEventPayload<TListenEvents[TName]>) => void | Promise<void>,
+  ) => () => void
+  readonly observe: (
+    listener: (event: EventEnvelopeUnion<TListenEvents>) => void | Promise<void>,
   ) => () => void
 }
 

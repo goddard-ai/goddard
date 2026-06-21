@@ -3,7 +3,13 @@ import { $type, http, ndjson } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { composePlugins, createDaemonEventBus, definePlugin, event } from "../src/index.ts"
+import {
+  composePlugins,
+  createDaemonEventBus,
+  definePlugin,
+  event,
+  matchesDaemonEventFilter,
+} from "../src/index.ts"
 
 describe("daemon plugin composition", () => {
   test("orders plugins by consumed dependencies and composes route/config fragments", () => {
@@ -161,7 +167,7 @@ describe("daemon plugin composition", () => {
     const session = definePlugin({
       name: "session",
       events: {
-        "session.turn.ended": event<{ sessionId: string }>(),
+        "session.turn.ended": event<{ sessionId: string }>({ debug: "session.lifecycle" }),
       },
       setup({ events }) {
         events.emit("session.turn.ended", { sessionId: "session-1" })
@@ -187,11 +193,27 @@ describe("daemon plugin composition", () => {
     const composition = composePlugins([inbox, session])
 
     expect(composition.events["session.turn.ended"]).toBeDefined()
+    expect(composition.events["session.turn.ended"]?.log).toEqual({
+      debug: "session.lifecycle",
+    })
   })
 
-  test("event bus waits for async listeners", async () => {
-    const events = createDaemonEventBus()
+  test("event bus emits observable envelopes and waits for async observers and listeners", async () => {
+    const events = createDaemonEventBus({
+      "session.stopping": event<{ id: string }>({ debug: "session.lifecycle" }),
+    })
     const calls: string[] = []
+    const envelopes: Array<{ name: string; payload: unknown; debug?: string }> = []
+
+    events.observe(async (envelope) => {
+      await Promise.resolve()
+      envelopes.push({
+        name: envelope.name,
+        payload: envelope.payload,
+        debug: envelope.log?.debug,
+      })
+      calls.push(`observer:${(envelope.payload as { id: string }).id}`)
+    })
 
     events.on("session.stopping", async (payload) => {
       await Promise.resolve()
@@ -202,7 +224,72 @@ describe("daemon plugin composition", () => {
     await events.emit("session.stopping", { id: "session-1" })
     calls.push("after")
 
-    expect(calls).toEqual(["before", "listener:session-1", "after"])
+    expect(calls).toEqual(["before", "observer:session-1", "listener:session-1", "after"])
+    expect(envelopes).toEqual([
+      {
+        name: "session.stopping",
+        payload: { id: "session-1" },
+        debug: "session.lifecycle",
+      },
+    ])
+  })
+
+  test("event bus observers can unsubscribe independently of named listeners", async () => {
+    const events = createDaemonEventBus()
+    const observed: unknown[] = []
+    const listened: unknown[] = []
+
+    const unsubscribe = events.observe((envelope) => {
+      observed.push(envelope.payload)
+    })
+    events.on("session.stopping", (payload) => {
+      listened.push(payload)
+    })
+
+    unsubscribe()
+    await events.emit("session.stopping", { id: "session-1" })
+
+    expect(observed).toEqual([])
+    expect(listened).toEqual([{ id: "session-1" }])
+  })
+
+  test("daemon event filters match names and exact payload paths", () => {
+    const envelope = {
+      name: "session.activated",
+      payload: {
+        sessionId: "ses_123",
+        worktree: {
+          state: "mounted",
+          counters: [1, { done: true }],
+        },
+      },
+    }
+
+    expect(
+      matchesDaemonEventFilter(envelope, {
+        names: ["session.activated"],
+        where: [
+          { path: "sessionId", equals: "ses_123" },
+          { path: "worktree.state", equals: "mounted" },
+          { path: "worktree.counters", equals: [1, { done: true }] },
+        ],
+      }),
+    ).toBe(true)
+    expect(
+      matchesDaemonEventFilter(envelope, {
+        names: ["session.launch.failed"],
+      }),
+    ).toBe(false)
+    expect(
+      matchesDaemonEventFilter(envelope, {
+        where: [{ path: "worktree.missing", equals: "mounted" }],
+      }),
+    ).toBe(false)
+    expect(
+      matchesDaemonEventFilter(envelope, {
+        where: [{ path: "worktree.state", equals: "prepared" }],
+      }),
+    ).toBe(false)
   })
 
   test("rejects consumed plugins that are not part of the composition", () => {
