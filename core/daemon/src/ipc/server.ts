@@ -38,6 +38,7 @@ import {
 import { createConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SessionContext, SetupContext } from "../context.ts"
+import { daemonRuntimeEvents } from "../events.ts"
 import {
   createChunkPreview,
   createDebug,
@@ -87,7 +88,10 @@ export async function startDaemonServer(
   )
   const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
   const composition = getDaemonPluginComposition()
-  const events = createDaemonEventBus(composition.events)
+  const events = createDaemonEventBus({
+    ...daemonRuntimeEvents,
+    ...composition.events,
+  })
   observeDaemonEventsForLogging(events, logger)
 
   const registryService = createAcpRegistryService()
@@ -273,6 +277,7 @@ export async function startDaemonServer(
 
   return {
     daemonUrl,
+    events,
     port,
     close: async () => {
       if (closed) {
