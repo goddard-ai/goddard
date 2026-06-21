@@ -25,7 +25,7 @@
     "build:standalone": "bun run ./scripts/build-standalone.ts",
     "lint": "oxlint",
     "fmt": "prettier -w .",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
     "test": "bun test --dots --timeout=90000"
   },
   "dependencies": {
