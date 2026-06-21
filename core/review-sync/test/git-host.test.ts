@@ -15,12 +15,14 @@ import {
 import { runGit } from "./support.ts"
 
 const originalGitHost = process.env.REVIEW_SYNC_GIT_HOST
+const originalGoddardGitHost = process.env.GODDARD_GIT_HOST
 const originalLibgit2Path = process.env.LIBGIT2_PATH
 const originalReviewSyncLibgit2Path = process.env.REVIEW_SYNC_LIBGIT2_PATH
 const tempRoots: string[] = []
 
 afterEach(async () => {
   restoreEnv("REVIEW_SYNC_GIT_HOST", originalGitHost)
+  restoreEnv("GODDARD_GIT_HOST", originalGoddardGitHost)
   restoreEnv("LIBGIT2_PATH", originalLibgit2Path)
   restoreEnv("REVIEW_SYNC_LIBGIT2_PATH", originalReviewSyncLibgit2Path)
   resetReviewSyncGitHostForTests()
@@ -30,18 +32,18 @@ afterEach(async () => {
 })
 
 test("review-sync Git host mode defaults to auto and honors explicit modes", () => {
-  delete process.env.REVIEW_SYNC_GIT_HOST
+  delete process.env.GODDARD_GIT_HOST
   expect(resolveReviewSyncGitHostMode()).toBe("auto")
 
-  process.env.REVIEW_SYNC_GIT_HOST = "cli"
+  process.env.GODDARD_GIT_HOST = "cli"
   expect(resolveReviewSyncGitHostMode()).toBe("cli")
 
-  process.env.REVIEW_SYNC_GIT_HOST = "libgit2"
+  process.env.GODDARD_GIT_HOST = "libgit2"
   expect(resolveReviewSyncGitHostMode()).toBe("libgit2")
 })
 
 test("review-sync Git host forced CLI mode does not require libgit2", async () => {
-  process.env.REVIEW_SYNC_GIT_HOST = "cli"
+  process.env.GODDARD_GIT_HOST = "cli"
   process.env.LIBGIT2_PATH = "/missing/libgit2.dylib"
   const repoDir = await createRepo()
 
@@ -53,7 +55,7 @@ test("review-sync Git host forced CLI mode does not require libgit2", async () =
 })
 
 test("review-sync Git host auto mode falls back to CLI when libgit2 cannot load", async () => {
-  delete process.env.REVIEW_SYNC_GIT_HOST
+  delete process.env.GODDARD_GIT_HOST
   const repoDir = await createRepo()
 
   const host = createReviewSyncGitHost({
@@ -64,7 +66,7 @@ test("review-sync Git host auto mode falls back to CLI when libgit2 cannot load"
 })
 
 test("review-sync Git host forced libgit2 mode fails when libgit2 cannot load", () => {
-  process.env.REVIEW_SYNC_GIT_HOST = "libgit2"
+  process.env.GODDARD_GIT_HOST = "libgit2"
 
   expect(() =>
     createReviewSyncGitHost({

@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
+    "@goddard-ai/git": "workspace:*",
     "cmd-ts": "catalog:",
     "radashi": "catalog:"
   }

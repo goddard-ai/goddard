@@ -152,7 +152,7 @@ export function resetGitHostForTests() {
 
 export function createCliGitHost(): GitHost {
   const run = async (cwd: string, args: string[], options: GitRunOptions = {}) => {
-    const result = await runGit(cwd, args, options)
+    const result = await runGitCommand(cwd, args, options)
     if (result.status !== 0 && options.allowFailure !== true) {
       throw new GitCommandError(cwd, args, result)
     }
@@ -698,7 +698,7 @@ function cString(value: string) {
   return Buffer.from(`${value}\0`)
 }
 
-async function runGit(cwd: string, args: string[], options: GitRunOptions = {}) {
+export async function runGitCommand(cwd: string, args: string[], options: GitRunOptions = {}) {
   return await new Promise<GitCommandResult>((resolvePromise, rejectPromise) => {
     const child = spawn("git", args, {
       cwd,

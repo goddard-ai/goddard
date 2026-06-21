@@ -1,31 +1,31 @@
 /** Git and filesystem helpers used by review-sync internals. */
-import { spawn } from "node:child_process"
 import { constants as fsConstants } from "node:fs"
-import { access, realpath } from "node:fs/promises"
+import { access } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import {
+  createCliGitHost as createSharedCliGitHost,
+  createGitHost as createSharedGitHost,
+  createLibgit2GitHost as createSharedLibgit2GitHost,
+  GitCommandError,
+  GitNotRepositoryError,
+  normalizePath as normalizeSharedPath,
+  resetGitHostForTests,
+  resolveGitHostMode,
+  runGitCommand,
+  type GitCommandResult,
+  type GitHostMode,
+  type GitRunOptions,
+  type GitHost as SharedGitHost,
+  type WorktreeInfo,
+} from "@goddard-ai/git"
 
 import { UserError } from "./errors.ts"
 import type { RuntimeContext } from "./types.ts"
 
-/** Parsed Git worktree-list entry used for branch ownership validation. */
-export type WorktreeInfo = {
-  path: string
-  branch: string | null
-}
+export type { GitRunOptions, WorktreeInfo }
 
 /** Captured subprocess result used by Git command wrappers. */
-export type CommandResult = {
-  status: number
-  stdout: string
-  stderr: string
-}
-
-/** Options for running a raw Git command through the configured host. */
-export type GitRunOptions = {
-  allowFailure?: boolean
-  stdin?: string | "ignore"
-  env?: Record<string, string | undefined>
-}
+export type CommandResult = GitCommandResult
 
 /** Internal Git access boundary used by review-sync operations. */
 export type GitHost = {
@@ -42,129 +42,29 @@ export type GitHost = {
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
-type BunFfi = typeof import("bun:ffi")
-type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
-type FfiPointer = Parameters<Libgit2Symbols["git_repository_free"]>[0]
-type ReviewSyncGitHostMode = "auto" | "cli" | "libgit2"
-
-const bunFfi = await loadBunFfiForRuntime()
-let initializedLibgit2: Libgit2Symbols | undefined
+type ReviewSyncGitHostMode = GitHostMode
 
 /** Creates the Git host selected for this process. */
 export function createReviewSyncGitHost(options: { libgit2PathCandidates?: string[] } = {}) {
-  const fallback = createCliGitHost()
-  const mode = resolveReviewSyncGitHostMode()
-
-  if (mode === "cli") {
-    return fallback
-  }
-
-  try {
-    return createLibgit2GitHost(fallback, {
-      fallbackOnOperationError: mode === "auto",
+  return adaptSharedGitHost(
+    createSharedGitHost({
+      mode: resolveReviewSyncGitHostMode(),
       libgit2PathCandidates: options.libgit2PathCandidates,
-    })
-  } catch (error) {
-    if (mode === "auto") {
-      return fallback
-    }
-    throw error
-  }
+    }),
+  )
 }
 
 export function resolveReviewSyncGitHostMode(): ReviewSyncGitHostMode {
-  if (process.env.REVIEW_SYNC_GIT_HOST === "cli") {
-    return "cli"
-  }
-  if (process.env.REVIEW_SYNC_GIT_HOST === "libgit2") {
-    return "libgit2"
-  }
-  return "auto"
+  return resolveGitHostMode()
 }
 
 export function resetReviewSyncGitHostForTests() {
-  initializedLibgit2 = undefined
+  resetGitHostForTests()
 }
 
 /** Creates the default Git host backed by Git CLI subprocesses. */
 export function createCliGitHost() {
-  const run = async (cwd: string, args: string[], options: GitRunOptions = {}) => {
-    const result = await runCommand("git", args, {
-      cwd,
-      stdin: options.stdin,
-      env: {
-        ...process.env,
-        ...options.env,
-      },
-    })
-
-    if (result.status !== 0 && options.allowFailure !== true) {
-      throw new Error(
-        `git ${args.join(" ")} failed in ${cwd}: ${
-          result.stderr.trim() || result.stdout.trim() || "unknown Git error"
-        }`,
-      )
-    }
-
-    return result
-  }
-
-  return {
-    run,
-    resolveRequiredRepoRoot: async (cwd) => {
-      const result = await run(cwd, ["rev-parse", "--show-toplevel"], {
-        allowFailure: true,
-      })
-      if (result.status !== 0 || !result.stdout.trim()) {
-        throw new UserError(`Not a Git worktree: ${cwd}`)
-      }
-      return await normalizePath(result.stdout.trim())
-    },
-    resolveRequiredGitCommonDir: async (cwd) => {
-      const result = await run(cwd, ["rev-parse", "--git-common-dir"])
-      const value = result.stdout.trim()
-      return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
-    },
-    resolveRequiredGitDir: async (cwd) => {
-      const result = await run(cwd, ["rev-parse", "--git-dir"])
-      const value = result.stdout.trim()
-      return await normalizePath(isAbsolute(value) ? value : resolve(cwd, value))
-    },
-    resolveCurrentBranch: async (cwd) => {
-      const result = await run(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], {
-        allowFailure: true,
-      })
-      return result.status === 0 ? result.stdout.trim() || null : null
-    },
-    branchExists: async (cwd, branch) => {
-      const result = await run(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
-        allowFailure: true,
-      })
-      return result.status === 0
-    },
-    isWorktreeClean: async (cwd) => {
-      const result = await run(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
-      return !result.stdout.trim()
-    },
-    resolveRef: async (cwd, refName) => {
-      const result = await run(cwd, ["rev-parse", "--verify", "-q", refName], {
-        allowFailure: true,
-      })
-      return result.status === 0 ? result.stdout.trim() || null : null
-    },
-    updateRef: async (cwd, refName, oid) => {
-      await run(cwd, ["update-ref", refName, oid])
-    },
-    deleteRef: async (cwd, refName) => {
-      await run(cwd, ["update-ref", "-d", refName], {
-        allowFailure: true,
-      })
-    },
-    listWorktrees: async (cwd) => {
-      const result = await run(cwd, ["worktree", "list", "--porcelain"])
-      return await parseGitWorktrees(result.stdout)
-    },
-  } satisfies GitHost
+  return adaptSharedGitHost(createSharedCliGitHost())
 }
 
 /** Creates an experimental Git host that uses libgit2 for read-heavy lookups. */
@@ -172,276 +72,104 @@ export function createLibgit2GitHost(
   fallback: GitHost,
   options: { fallbackOnOperationError?: boolean; libgit2PathCandidates?: string[] } = {},
 ) {
-  const ffi = requireBunFfi()
-  const libgit2 = ensureLibgit2(options.libgit2PathCandidates)
+  return adaptSharedGitHost(createSharedLibgit2GitHost(toSharedGitHost(fallback), options))
+}
 
-  const runLibgit2 = async <T>(
-    operation: () => Promise<T>,
-    fallbackOperation: () => Promise<T>,
-  ) => {
-    if (!options.fallbackOnOperationError) {
-      return await operation()
-    }
-
-    try {
-      return await operation()
-    } catch {
-      return await fallbackOperation()
-    }
-  }
-
+function adaptSharedGitHost(shared: SharedGitHost): GitHost {
   return {
-    ...fallback,
-    resolveRequiredRepoRoot: async (cwd) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(libgit2, cwd, async (repo) => {
-            const workdir = libgit2.git_repository_workdir(repo)
-            if (!workdir) {
-              throw new UserError(`Not a Git worktree: ${cwd}`)
-            }
-            return await normalizePath(String(workdir))
-          }),
-        () => fallback.resolveRequiredRepoRoot(cwd),
-      ),
-    resolveRequiredGitCommonDir: async (cwd) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(libgit2, cwd, async (repo) => {
-            const commonDir = libgit2.git_repository_commondir(repo)
-            if (!commonDir) {
-              throw new Error(`libgit2 could not resolve Git common dir for ${cwd}`)
-            }
-            return await normalizePath(String(commonDir))
-          }),
-        () => fallback.resolveRequiredGitCommonDir(cwd),
-      ),
-    resolveRequiredGitDir: async (cwd) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(libgit2, cwd, async (repo) => {
-            const gitDir = libgit2.git_repository_path(repo)
-            if (!gitDir) {
-              throw new Error(`libgit2 could not resolve Git dir for ${cwd}`)
-            }
-            return await normalizePath(String(gitDir))
-          }),
-        () => fallback.resolveRequiredGitDir(cwd),
-      ),
-    resolveCurrentBranch: async (cwd) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(libgit2, cwd, (repo) => {
-            const out = pointerStorage()
-            const status = libgit2.git_repository_head(ffi.ptr(out), repo)
-            if (status !== 0) {
-              return null
-            }
-
-            const head = readPointer(out)
-            try {
-              const name = libgit2.git_reference_name(head)
-              const branchRef = name ? String(name) : ""
-              return branchRef.startsWith("refs/heads/")
-                ? branchRef.slice("refs/heads/".length)
-                : null
-            } finally {
-              libgit2.git_reference_free(head)
-            }
-          }),
-        () => fallback.resolveCurrentBranch(cwd),
-      ),
-    branchExists: async (cwd, branch) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(
-            libgit2,
-            cwd,
-            (repo) =>
-              libgit2.git_reference_name_to_id(
-                ffi.ptr(new Uint8Array(20)),
-                repo,
-                ffi.ptr(cString(`refs/heads/${branch}`)),
-              ) === 0,
-          ),
-        () => fallback.branchExists(cwd, branch),
-      ),
-    resolveRef: async (cwd, refName) =>
-      runLibgit2(
-        () =>
-          withLibgit2Repository(libgit2, cwd, (repo) => {
-            const out = pointerStorage()
-            const status = libgit2.git_revparse_single(
-              ffi.ptr(out),
-              repo,
-              ffi.ptr(cString(refName)),
-            )
-            if (status !== 0) {
-              return null
-            }
-
-            const object = readPointer(out)
-            try {
-              const oid = libgit2.git_object_id(object)
-              if (!oid) {
-                return null
-              }
-              return String(libgit2.git_oid_tostr_s(oid))
-            } finally {
-              libgit2.git_object_free(object)
-            }
-          }),
-        () => fallback.resolveRef(cwd, refName),
-      ),
-  } satisfies GitHost
+    run: runReviewSyncGitCommand,
+    resolveRequiredRepoRoot: (cwd) => mapSharedGitErrors(() => shared.repository.resolveRoot(cwd)),
+    resolveRequiredGitCommonDir: (cwd) =>
+      mapSharedGitErrors(() => shared.repository.resolveCommonDir(cwd)),
+    resolveRequiredGitDir: (cwd) => mapSharedGitErrors(() => shared.repository.resolveGitDir(cwd)),
+    resolveCurrentBranch: (cwd) => shared.refs.getCurrentBranch(cwd),
+    branchExists: (cwd, branch) => shared.refs.branchExists(cwd, branch),
+    isWorktreeClean: (cwd) => shared.status.isWorktreeClean(cwd),
+    resolveRef: (cwd, refName) => shared.refs.resolve(cwd, refName),
+    updateRef: (cwd, refName, oid) => shared.refs.update(cwd, refName, oid),
+    deleteRef: (cwd, refName) => shared.refs.delete(cwd, refName),
+    listWorktrees: (cwd) => shared.worktrees.list(cwd),
+  }
 }
 
-async function loadBunFfiForRuntime() {
-  if (!("bun" in process.versions)) {
-    return null
+function toSharedGitHost(host: GitHost): SharedGitHost {
+  return {
+    repository: {
+      resolveRoot: (cwd) => host.resolveRequiredRepoRoot(cwd),
+      resolveGitDir: (cwd) => host.resolveRequiredGitDir(cwd),
+      resolveCommonDir: (cwd) => host.resolveRequiredGitCommonDir(cwd),
+      resolveGitPath: async (cwd, gitPath) => {
+        const result = await host.run(cwd, ["rev-parse", "--git-path", gitPath])
+        return resolveGitOutputPath(cwd, result.stdout.trim())
+      },
+      isBareRepository: async (cwd) => {
+        const result = await host.run(cwd, ["rev-parse", "--is-bare-repository"], {
+          allowFailure: true,
+        })
+        return result.status === 0 && result.stdout.trim() === "true"
+      },
+    },
+    refs: {
+      resolve: (cwd, refName) => host.resolveRef(cwd, refName),
+      exists: async (cwd, refName) => (await host.resolveRef(cwd, refName)) !== null,
+      update: (cwd, refName, oid) => host.updateRef(cwd, refName, oid),
+      delete: (cwd, refName) => host.deleteRef(cwd, refName),
+      getCurrentBranch: (cwd) => host.resolveCurrentBranch(cwd),
+      branchExists: (cwd, branch) => host.branchExists(cwd, branch),
+      getBranchHead: (cwd, branch) => host.resolveRef(cwd, `refs/heads/${branch}`),
+    },
+    history: {
+      resolveHead: (cwd) => host.resolveRef(cwd, "HEAD"),
+      isAncestor: async (cwd, ancestor, descendant) => {
+        const result = await host.run(cwd, ["merge-base", "--is-ancestor", ancestor, descendant], {
+          allowFailure: true,
+        })
+        return result.status === 0
+      },
+      getMergeBase: async (cwd, left, right) => {
+        const result = await host.run(cwd, ["merge-base", left, right], {
+          allowFailure: true,
+        })
+        return result.status === 0 ? result.stdout.trim() || null : null
+      },
+    },
+    status: {
+      getWorkingTreeStatus: async (cwd) => {
+        const result = await host.run(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
+        const entries = result.stdout
+          .split("\n")
+          .map((entry) => entry.trimEnd())
+          .filter(Boolean)
+        return {
+          clean: entries.length === 0,
+          entries,
+        }
+      },
+      isWorktreeClean: (cwd) => host.isWorktreeClean(cwd),
+    },
+    worktrees: {
+      list: (cwd) => host.listWorktrees(cwd),
+    },
+  }
+}
+
+async function runReviewSyncGitCommand(cwd: string, args: string[], options: GitRunOptions = {}) {
+  const result = await runGitCommand(cwd, args, options)
+  if (result.status !== 0 && options.allowFailure !== true) {
+    throw new GitCommandError(cwd, args, result)
   }
 
-  return await import("bun:ffi")
+  return result
 }
 
-function requireBunFfi() {
-  if (!bunFfi) {
-    throw new Error("The libgit2 Git host requires Bun.")
-  }
-
-  return bunFfi
-}
-
-function ensureLibgit2(candidates?: string[]) {
-  if (!candidates && initializedLibgit2) {
-    return initializedLibgit2
-  }
-
-  const libgit2 = loadLibgit2(candidates)
-  const initStatus = libgit2.symbols.git_libgit2_init()
-  if (initStatus < 0) {
-    throw new Error(`git_libgit2_init failed with status ${initStatus}`)
-  }
-
-  if (candidates) {
-    return libgit2.symbols
-  }
-
-  initializedLibgit2 = libgit2.symbols
-  return initializedLibgit2
-}
-
-function loadLibgit2(candidates = libgit2PathCandidates()) {
-  const ffi = requireBunFfi()
-  const errors: string[] = []
-  for (const candidate of candidates) {
-    try {
-      return ffi.dlopen(candidate, {
-        git_libgit2_init: {
-          args: [],
-          returns: ffi.FFIType.i32,
-        },
-        git_repository_open_ext: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.cstring, ffi.FFIType.u32, ffi.FFIType.ptr],
-          returns: ffi.FFIType.i32,
-        },
-        git_repository_free: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.void,
-        },
-        git_repository_path: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.cstring,
-        },
-        git_repository_workdir: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.cstring,
-        },
-        git_repository_commondir: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.cstring,
-        },
-        git_repository_head: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.ptr],
-          returns: ffi.FFIType.i32,
-        },
-        git_reference_name: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.cstring,
-        },
-        git_reference_name_to_id: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.cstring],
-          returns: ffi.FFIType.i32,
-        },
-        git_reference_free: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.void,
-        },
-        git_revparse_single: {
-          args: [ffi.FFIType.ptr, ffi.FFIType.ptr, ffi.FFIType.cstring],
-          returns: ffi.FFIType.i32,
-        },
-        git_object_id: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.ptr,
-        },
-        git_object_free: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.void,
-        },
-        git_oid_tostr_s: {
-          args: [ffi.FFIType.ptr],
-          returns: ffi.FFIType.cstring,
-        },
-      })
-    } catch (error) {
-      errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  throw new Error(`Unable to load libgit2. Tried: ${errors.join("; ")}`)
-}
-
-function libgit2PathCandidates() {
-  const ffi = requireBunFfi()
-  return [
-    process.env.LIBGIT2_PATH,
-    process.env.REVIEW_SYNC_LIBGIT2_PATH,
-    `libgit2.${ffi.suffix}`,
-    `/opt/homebrew/lib/libgit2.${ffi.suffix}`,
-    `/usr/local/lib/libgit2.${ffi.suffix}`,
-  ].filter((path) => typeof path === "string")
-}
-
-function pointerStorage() {
-  return new BigUint64Array(1)
-}
-
-function readPointer(storage: BigUint64Array) {
-  return Number(storage[0]) as FfiPointer
-}
-
-function cString(value: string) {
-  return Buffer.from(`${value}\0`)
-}
-
-async function withLibgit2Repository<T>(
-  libgit2: Libgit2Symbols,
-  cwd: string,
-  operation: (repo: FfiPointer) => T | Promise<T>,
-) {
-  const ffi = requireBunFfi()
-  const out = pointerStorage()
-  const status = libgit2.git_repository_open_ext(ffi.ptr(out), ffi.ptr(cString(cwd)), 0, 0)
-  if (status !== 0) {
-    throw new UserError(`Not a Git worktree: ${cwd}`)
-  }
-
-  const repo = readPointer(out)
+async function mapSharedGitErrors<T>(operation: () => Promise<T>) {
   try {
-    return await operation(repo)
-  } finally {
-    libgit2.git_repository_free(repo)
+    return await operation()
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      throw new UserError(error.message)
+    }
+    throw error
   }
 }
 
@@ -565,7 +293,7 @@ async function isStaleRebaseHead(cwd: string, context: RuntimeContext) {
 
 /** Resolves and canonicalizes an existing filesystem path. */
 export async function normalizePath(path: string) {
-  return await realpath(resolve(path))
+  return await normalizeSharedPath(path)
 }
 
 /** Tests whether child is equal to or nested under parent. */
@@ -609,79 +337,6 @@ export async function listGitWorktrees(cwd: string, context: RuntimeContext) {
   return await context.gitHost.listWorktrees(cwd)
 }
 
-async function parseGitWorktrees(stdout: string) {
-  const worktrees: WorktreeInfo[] = []
-  let current: Partial<WorktreeInfo> = {}
-
-  for (const line of stdout.split("\n")) {
-    if (!line.trim()) {
-      if (current.path) {
-        worktrees.push({
-          path: await normalizePath(current.path),
-          branch: current.branch ?? null,
-        })
-      }
-      current = {}
-      continue
-    }
-
-    if (line.startsWith("worktree ")) {
-      current.path = line.slice("worktree ".length)
-    } else if (line.startsWith("branch refs/heads/")) {
-      current.branch = line.slice("branch refs/heads/".length)
-    }
-  }
-
-  if (current.path) {
-    worktrees.push({
-      path: await normalizePath(current.path),
-      branch: current.branch ?? null,
-    })
-  }
-
-  return worktrees
-}
-
-/** Runs a subprocess with captured output and optional stdin. */
-async function runCommand(
-  command: string,
-  args: string[],
-  options: {
-    cwd: string
-    stdin?: string | "ignore"
-    env: Record<string, string | undefined>
-  },
-) {
-  return await new Promise<CommandResult>((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
-    })
-
-    let stdout = ""
-    let stderr = ""
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.on("error", rejectPromise)
-    child.on("close", (status) => {
-      resolvePromise({
-        status: status ?? 1,
-        stdout,
-        stderr,
-      })
-    })
-
-    if (options.stdin && options.stdin !== "ignore") {
-      child.stdin.end(options.stdin)
-    } else {
-      child.stdin.end()
-    }
-  })
+function resolveGitOutputPath(cwd: string, value: string) {
+  return isAbsolute(value) ? value : resolve(cwd, value)
 }
