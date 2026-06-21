@@ -9,7 +9,14 @@ import {
 } from "@goddard-ai/daemon-plugin"
 import { composeIpcRoutes } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
-import { coreDaemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
+import {
+  coreDaemonIpcRoutes,
+  type BrowserAccessClientRevokeRequest,
+  type BrowserAccessPairingCompleteRequest,
+  type BrowserAccessPairingConfirmRequest,
+  type BrowserAccessPairingStartRequest,
+  type BrowserAccessWebviewTokenCreateRequest,
+} from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
 import { createAcpRegistryService } from "acp-client/node"
@@ -18,6 +25,11 @@ import { getErrorMessage } from "radashi"
 import { createAgentInstallService } from "../agent-install-service.ts"
 import { createManagedAgentUpdateScheduler } from "../agent-update-scheduler.ts"
 import type { BackendClient } from "../backend.ts"
+import {
+  createBrowserAccessService,
+  resolveBrowserAccessRuntimeConfig,
+  runBrowserAccessRequestContext,
+} from "../browser-access.ts"
 import { createConfigManager } from "../config-manager.ts"
 import { prependAgentBinToPath, resolveRuntimeConfig } from "../config.ts"
 import { IpcRequestContext, SessionContext, SetupContext } from "../context.ts"
@@ -61,6 +73,11 @@ export async function startDaemonServer(
   const ownsConfigManager = setupContext == null
   const store = options.store ?? openComposedDaemonStore()
   const ownsStore = options.store == null
+  const rootConfig = await configManager.getRootConfig()
+  const browserAccessConfig = resolveBrowserAccessRuntimeConfig(
+    rootConfig.config.daemon?.browserAccess,
+  )
+  const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
 
   const registryService = createAcpRegistryService()
   const managedAgentUsageStore: ManagedAgentUsageStore = {
@@ -152,6 +169,25 @@ export async function startDaemonServer(
   const ipcHandlers = {
     daemon: {
       health: async () => ({ ok: true }),
+      browserAccess: {
+        pairing: {
+          start: ({ body }: { body: BrowserAccessPairingStartRequest }) =>
+            browserAccessService.startPairing(body),
+          confirm: ({ body }: { body: BrowserAccessPairingConfirmRequest }) =>
+            browserAccessService.confirmPairing(body),
+          complete: ({ body }: { body: BrowserAccessPairingCompleteRequest }) =>
+            browserAccessService.completePairing(body),
+        },
+        client: {
+          list: () => browserAccessService.listClients(),
+          revoke: ({ body }: { body: BrowserAccessClientRevokeRequest }) =>
+            browserAccessService.revokeClient(body),
+        },
+        webviewToken: {
+          create: ({ body }: { body: BrowserAccessWebviewTokenCreateRequest }) =>
+            browserAccessService.createDesktopWebviewToken(body),
+        },
+      },
     },
     ...pluginSetup.ipcHandlers,
   }
@@ -160,7 +196,11 @@ export async function startDaemonServer(
     port: runtime.port,
     routes: composeIpcRoutes([coreDaemonIpcRoutes, getDaemonPluginComposition().ipcRoutes]),
     handlers: ipcHandlers as any,
-    runHandler: ({ payload }, handler) => {
+    browserAccess: {
+      allowedOrigins: browserAccessConfig.allowedOrigins,
+      authorizeRequest: browserAccessService.authorizeRequest,
+    },
+    runHandler: ({ payload, request }, handler) => {
       const context: IpcRequestContext = {
         opId: randomUUID(),
         sessionId: readSessionIdForLog(payload) ?? null,
@@ -168,7 +208,7 @@ export async function startDaemonServer(
           context.sessionId = sessionId
         },
       }
-      return IpcRequestContext.run(context, handler)
+      return IpcRequestContext.run(context, () => runBrowserAccessRequestContext(request, handler))
     },
     onRequestReceived: ({ name, payload }) => {
       debug("ipc.request_received", {

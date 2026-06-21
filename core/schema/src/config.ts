@@ -119,6 +119,26 @@ export const InlineSessionParams = StaticSessionParams.extend({
 
 export type InlineSessionParams = z.infer<typeof InlineSessionParams>
 
+/** Browser origins allowed to request local daemon loopback access. */
+export const BrowserAccessConfig = z
+  .strictObject({
+    enabled: z
+      .literal(true)
+      .optional()
+      .describe("Enables browser-origin access to the local daemon control server."),
+    allowedOrigins: z
+      .array(z.string())
+      .optional()
+      .describe("Hosted browser origins allowed to start local daemon pairing."),
+    desktopWebviewOrigins: z
+      .array(z.string())
+      .optional()
+      .describe("Trusted desktop webview origins allowed to use host-bootstrapped tokens."),
+  })
+  .describe("Browser-origin access policy for the local daemon control server.")
+
+export type BrowserAccessConfig = z.infer<typeof BrowserAccessConfig>
+
 /** Schema for persisted daemon connection defaults loaded from JSON. */
 export const DaemonConfig = z
   .strictObject({
@@ -131,6 +151,9 @@ export const DaemonConfig = z
       .describe(
         "TCP port used by the local daemon control server. Only supported in the global Goddard config.",
       ),
+    browserAccess: BrowserAccessConfig.optional().describe(
+      "Browser-origin access policy for the local daemon control server.",
+    ),
   })
   .describe("Persisted daemon connection defaults loaded from JSON.")
 
