@@ -59,6 +59,9 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
   hostname?: string
   routes: TRoutes
   handlers: RouteRequestHandlerMap<TRoutes>
+  browserAccess?: {
+    readonly allowedOrigins: readonly string[]
+  }
   runHandler?: RunHandlerHook
   onRequestReceived?: (input: RequestReceivedHookInput) => Promise<void> | void
   onResponseSent?: (input: ResponseSentHookInput) => Promise<void> | void
@@ -68,6 +71,11 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
 /** Creates the Node IPC server for one TCP-backed Rouzer route tree. */
 export function createServer<TRoutes extends HttpRouteTree>(config: CreateServerConfig<TRoutes>) {
   const { port, hostname = "127.0.0.1", routes } = config
+  const browserAccess = config.browserAccess
+    ? {
+        allowedOrigins: new Set(config.browserAccess.allowedOrigins.map(normalizeAllowedOrigin)),
+      }
+    : null
   const handlers = wrapHandlers(routes, config.handlers, config)
   const router = createRouter({
     plugins: [ndjson.routerPlugin],
@@ -81,6 +89,36 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
     const responseHeaders = new Headers()
     let webRequest: { readonly request: Request; readonly cleanup: () => void } | undefined
     try {
+      if (browserAccess) {
+        const host = validateBrowserAccessHost(req, server, hostname, port)
+        if (!host.valid) {
+          await writeResponse(res, forbiddenResponse())
+          return
+        }
+
+        const browserHeaders = resolveBrowserAccessHeaders(req, browserAccess.allowedOrigins)
+        if (req.method === "OPTIONS") {
+          await writeResponse(
+            res,
+            browserHeaders
+              ? new Response(null, { status: 204, headers: browserHeaders })
+              : forbiddenResponse(),
+          )
+          return
+        }
+
+        if (hasOriginHeader(req) && !browserHeaders) {
+          await writeResponse(res, forbiddenResponse())
+          return
+        }
+
+        if (browserHeaders) {
+          for (const [name, value] of browserHeaders) {
+            responseHeaders.set(name, value)
+          }
+        }
+      }
+
       webRequest = await createWebRequest(req, res, hostname, port)
       const response = await router({
         request: webRequest.request,
@@ -118,6 +156,93 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
   server.listen(port, hostname)
 
   return { server }
+}
+
+function forbiddenResponse() {
+  return Response.json({ error: "Forbidden" }, { status: 403 })
+}
+
+function normalizeAllowedOrigin(origin: string) {
+  if (origin === "*" || origin === "null") {
+    throw new Error(`Browser access origin must be explicit: ${origin}`)
+  }
+
+  const url = new URL(origin)
+  if (url.origin !== origin) {
+    throw new Error(`Browser access origin must not include a path, query, or hash: ${origin}`)
+  }
+
+  return url.origin
+}
+
+function validateBrowserAccessHost(
+  req: http.IncomingMessage,
+  server: http.Server,
+  hostname: string,
+  configuredPort: number,
+) {
+  const host = req.headers.host
+  if (!host) {
+    return { valid: false }
+  }
+
+  const address = server.address()
+  const port =
+    address && typeof address !== "string"
+      ? address.port
+      : configuredPort === 0
+        ? null
+        : configuredPort
+  if (port === null) {
+    return { valid: false }
+  }
+
+  const expectedHosts = new Set([
+    `${hostname}:${port}`,
+    `127.0.0.1:${port}`,
+    `localhost:${port}`,
+    `[::1]:${port}`,
+  ])
+
+  return { valid: expectedHosts.has(host) }
+}
+
+function hasOriginHeader(req: http.IncomingMessage) {
+  return req.headers.origin !== undefined
+}
+
+function resolveBrowserAccessHeaders(
+  req: http.IncomingMessage,
+  allowedOrigins: ReadonlySet<string>,
+): Headers | null {
+  const origin = req.headers.origin
+  if (typeof origin !== "string") {
+    return null
+  }
+
+  let normalizedOrigin: string
+  try {
+    normalizedOrigin = new URL(origin).origin
+  } catch {
+    return null
+  }
+
+  if (normalizedOrigin !== origin || !allowedOrigins.has(normalizedOrigin)) {
+    return null
+  }
+
+  const headers = new Headers({
+    "Access-Control-Allow-Origin": normalizedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, content-type",
+    Vary: "Origin, Access-Control-Request-Private-Network",
+  })
+
+  if (req.headers["access-control-request-private-network"] === "true") {
+    headers.set("Access-Control-Allow-Private-Network", "true")
+  }
+
+  return headers
 }
 
 function wrapHandlers(
