@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
 import type { AgentService } from "@goddard-ai/agent/daemon"
 import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
+import { createGitHost, runGitCommand } from "@goddard-ai/git"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"
@@ -43,26 +44,19 @@ export async function listLaunchBranches(cwd: string) {
     return { branches: [], currentBranch: null }
   }
 
-  const result = Bun.spawn(
-    ["git", "for-each-ref", "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)", "refs/heads"],
-    {
-      cwd: source.path,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    },
-  )
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  if (result.exitCode !== 0) {
+  const result = await runGitCommand(source.path, [
+    "for-each-ref",
+    "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)",
+    "refs/heads",
+  ])
+  if (result.status !== 0) {
     return { branches: [], currentBranch: null }
   }
 
   const branches: string[] = []
   let currentBranch: string | null = null
 
-  for (const rawLine of stdout.split("\n")) {
+  for (const rawLine of result.stdout.split("\n")) {
     const line = rawLine.trim()
     if (!line) {
       continue
@@ -91,16 +85,8 @@ export async function inspectLaunchCheckoutDirty(cwd: string): Promise<boolean> 
     return false
   }
 
-  const result = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=normal"], {
-    cwd: repoRoot,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  return result.exitCode === 0 && stdout.trim().length > 0
+  const status = await createGitHost().status.getWorkingTreeStatus(repoRoot)
+  return status.entries.length > 0
 }
 
 /** Switches the user's local checkout before launching the first prompt. */
@@ -118,15 +104,11 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
     })
   }
 
-  const result = Bun.spawn(["git", "checkout", params.branchName], {
-    cwd: repoRoot,
+  const result = await runGitCommand(repoRoot, ["checkout", params.branchName], {
     stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
   })
-  await result.exited
 
-  if (result.exitCode !== 0) {
+  if (result.status !== 0) {
     throw createSessionIpcError(SessionErrorCodes.LaunchCheckoutFailed, {
       branchName: params.branchName,
       cwd: params.cwd,

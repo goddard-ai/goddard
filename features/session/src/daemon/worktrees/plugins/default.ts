@@ -4,13 +4,12 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
+import { createGitHost, runGitCommand } from "@goddard-ai/git"
 import type {
   WorktreeCleanupOptions,
   WorktreePlugin,
   WorktreeSetupOptions,
 } from "@goddard-ai/worktree-plugin"
-
-import { runCommand } from "../process.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",
@@ -46,10 +45,13 @@ export const defaultPlugin: WorktreePlugin = {
     }
     await mkdir(path.dirname(worktreeDir), { recursive: true })
 
-    const wtResult = await runCommand("git", ["worktree", "add", "--detach", worktreeDir], {
-      cwd: options.cwd,
-      stdin: "ignore",
-    })
+    const wtResult = await runGitCommand(
+      options.cwd,
+      ["worktree", "add", "--detach", worktreeDir],
+      {
+        stdin: "ignore",
+      },
+    )
 
     if (wtResult.status !== 0) {
       throw new Error(
@@ -60,36 +62,28 @@ export const defaultPlugin: WorktreePlugin = {
     try {
       const prNumberMatch = options.branchName.match(/(?:^pr-|\/pr\/)(\d+)$/)
       if (prNumberMatch) {
-        await runCommand(
-          "git",
+        await runGitCommand(
+          worktreeDir,
           ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`],
-          {
-            cwd: worktreeDir,
-            stdin: "ignore",
-          },
+          { stdin: "ignore" },
         )
 
-        await runCommand("git", ["checkout", "-B", options.branchName, "FETCH_HEAD"], {
-          cwd: worktreeDir,
+        await runGitCommand(worktreeDir, ["checkout", "-B", options.branchName, "FETCH_HEAD"], {
           stdin: "ignore",
         })
         return worktreeDir
       }
 
-      await runCommand(
-        "git",
+      await runGitCommand(
+        worktreeDir,
         options.baseBranchName
           ? ["checkout", "-B", options.branchName, options.baseBranchName]
           : ["checkout", "-B", options.branchName],
-        {
-          cwd: worktreeDir,
-          stdin: "ignore",
-        },
+        { stdin: "ignore" },
       )
     } catch {
       try {
-        await runCommand("git", ["checkout", options.branchName], {
-          cwd: worktreeDir,
+        await runGitCommand(worktreeDir, ["checkout", options.branchName], {
           stdin: "ignore",
         })
       } catch {
@@ -102,13 +96,10 @@ export const defaultPlugin: WorktreePlugin = {
 
   async cleanup(options: WorktreeCleanupOptions) {
     try {
-      const wtResult = await runCommand(
-        "git",
+      const wtResult = await runGitCommand(
+        options.cwd,
         ["worktree", "remove", "--force", options.worktreeDir],
-        {
-          cwd: options.cwd,
-          stdin: "ignore",
-        },
+        { stdin: "ignore" },
       )
 
       if (wtResult.status !== 0) {
@@ -129,10 +120,5 @@ function resolveHomeDir() {
 }
 
 async function isBareRepository(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "--is-bare-repository"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  return result.status === 0 && result.stdout.trim() === "true"
+  return await createGitHost().repository.isBareRepository(cwd)
 }

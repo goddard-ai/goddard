@@ -2,6 +2,7 @@
 import { type Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import { runGitCommand } from "@goddard-ai/git"
 
 import type { SessionSubpackage } from "../schema.ts"
 import { resolveGitRepoRoot } from "./worktree.ts"
@@ -91,13 +92,14 @@ async function isGitIgnoredPath(params: { gitRoot: string | null; path: string }
     return false
   }
 
-  const result = Bun.spawn(["git", "check-ignore", "-q", "--", `${relativePath}/`], {
-    cwd: params.gitRoot,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  })
-  return (await result.exited) === 0
+  const result = await runGitCommand(
+    params.gitRoot,
+    ["check-ignore", "-q", "--", `${relativePath}/`],
+    {
+      stdin: "ignore",
+    },
+  )
+  return result.status === 0
 }
 
 /** Finds the first configured manifest present in one candidate subpackage directory. */

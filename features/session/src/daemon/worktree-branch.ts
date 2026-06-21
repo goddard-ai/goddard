@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto"
 import { userInfo } from "node:os"
+import { createGitHost } from "@goddard-ai/git"
 
 const WORKTREE_BRANCH_ADJECTIVES = [
   "brave",
@@ -166,15 +167,7 @@ function readLocalUsername() {
 }
 
 async function gitBranchExists(cwd: string, branchName: string) {
-  const result = Bun.spawn(["git", "show-ref", "--verify", "--quiet", `refs/heads/${branchName}`], {
-    cwd,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  })
-
-  await result.exited
-  return result.exitCode === 0
+  return await createGitHost().refs.branchExists(cwd, branchName)
 }
 
 function sanitizeBranchPath(value: string, fallback: string) {

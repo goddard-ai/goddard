@@ -2,8 +2,7 @@
 import { constants as fsConstants } from "node:fs"
 import { cp, mkdir, stat } from "node:fs/promises"
 import * as path from "node:path"
-
-import { runCommand } from "../process.ts"
+import { runGitCommand } from "@goddard-ai/git"
 
 const worktreeIncludeFileName = ".worktreeinclude"
 
@@ -138,13 +137,10 @@ async function listWorktreeIncludeCandidates(repoRoot: string) {
  * Lists the repository-relative untracked entries Git currently exposes for one checkout.
  */
 async function listUntrackedEntries(repoRoot: string) {
-  const result = await runCommand(
-    "git",
+  const result = await runGitCommand(
+    repoRoot,
     ["ls-files", "--others", "--exclude-standard", "--directory"],
-    {
-      cwd: repoRoot,
-      stdin: "ignore",
-    },
+    { stdin: "ignore" },
   )
 
   if (result.status !== 0) {
@@ -168,13 +164,10 @@ async function listUntrackedEntries(repoRoot: string) {
  * Lists untracked entries matched by one Git exclude-pattern file.
  */
 async function listUntrackedEntriesMatchedByExcludeFile(repoRoot: string, excludeFile: string) {
-  const result = await runCommand(
-    "git",
+  const result = await runGitCommand(
+    repoRoot,
     ["ls-files", "--others", "--ignored", "--directory", "-z", `--exclude-from=${excludeFile}`],
-    {
-      cwd: repoRoot,
-      stdin: "ignore",
-    },
+    { stdin: "ignore" },
   )
 
   if (result.status !== 0) {
@@ -195,8 +188,7 @@ async function filterGitignoredPaths(repoRoot: string, relativePaths: string[]) 
   const normalizedPaths = relativePaths.map((relativePath) =>
     trimTrailingPathSeparator(relativePath),
   )
-  const result = await runCommand("git", ["check-ignore", "--stdin", "-z"], {
-    cwd: repoRoot,
+  const result = await runGitCommand(repoRoot, ["check-ignore", "--stdin", "-z"], {
     stdin: `${normalizedPaths.join("\0")}\0`,
   })
 

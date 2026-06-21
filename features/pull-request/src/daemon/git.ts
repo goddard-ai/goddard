@@ -1,4 +1,5 @@
 import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
+import { createGitHost, runGitCommand } from "@goddard-ai/git"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
 
@@ -73,7 +74,7 @@ async function inferRepoFromGit(cwd: string, parseRepositoryUrl: RepositoryUrlPa
 }
 
 async function inferCurrentBranch(cwd: string): Promise<string> {
-  return runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+  return (await createGitHost().refs.getCurrentBranch(cwd)) ?? "HEAD"
 }
 
 async function inferBaseBranch(cwd: string): Promise<string> {
@@ -96,22 +97,11 @@ async function inferPrNumberFromGit(cwd: string): Promise<number> {
 }
 
 async function runGit(cwd: string, args: string[]): Promise<string> {
-  const subprocess = Bun.spawn(["git", ...args], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [exitCode, stdout, stderr] = await Promise.all([
-    subprocess.exited,
-    new Response(subprocess.stdout).text(),
-    new Response(subprocess.stderr).text(),
-  ])
-
-  if (exitCode !== 0) {
-    const message = stderr.trim()
-    throw new Error(message || `git ${args.join(" ")} failed in ${cwd}`)
+  const result = await runGitCommand(cwd, args)
+  if (result.status !== 0) {
+    const stderr = result.stderr.trim()
+    throw new Error(stderr || `git ${args.join(" ")} failed in ${cwd}`)
   }
 
-  return stdout.trim()
+  return result.stdout.trim()
 }

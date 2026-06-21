@@ -1,6 +1,7 @@
 /** Worktrunk-backed worktree plugin used when a repository is managed by `wt`. */
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { runGitCommand } from "@goddard-ai/git"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import { runCommand } from "../process.ts"
@@ -31,9 +32,7 @@ export const worktrunkPlugin: WorktreePlugin = {
       })
 
       if (switchResult.status === 0) {
-        const worktreeListResult = await runCommand("git", ["worktree", "list"], {
-          cwd: options.cwd,
-        })
+        const worktreeListResult = await runGitCommand(options.cwd, ["worktree", "list"])
 
         if (worktreeListResult.status === 0) {
           const lines = worktreeListResult.stdout.split("\n")
@@ -42,13 +41,10 @@ export const worktrunkPlugin: WorktreePlugin = {
               const wtPath = line.split(" ")[0]
               if (wtPath) {
                 if (options.baseBranchName) {
-                  await runCommand(
-                    "git",
+                  await runGitCommand(
+                    wtPath,
                     ["checkout", "-B", options.branchName, options.baseBranchName],
-                    {
-                      cwd: wtPath,
-                      stdin: "ignore",
-                    },
+                    { stdin: "ignore" },
                   )
                 }
 

@@ -1,12 +1,12 @@
 /** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { createGitHost } from "@goddard-ai/git"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../../schema.ts"
 import { defaultPlugin } from "./plugins/default.ts"
 import { worktrunkPlugin } from "./plugins/worktrunk.ts"
-import { runCommand } from "./process.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
 
@@ -282,34 +282,22 @@ async function assertLinkedWorktree(params: {
  * Resolves one repository's git dir as an absolute path when available.
  */
 async function resolveGitDir(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    return normalizeExistingPath(await createGitHost().repository.resolveGitDir(cwd))
+  } catch {
     return null
   }
-
-  const gitDir = result.stdout.trim()
-  return gitDir ? normalizeExistingPath(path.resolve(cwd, gitDir)) : null
 }
 
 /**
  * Resolves one repository's common git dir as an absolute path when available.
  */
 async function resolveGitCommonDir(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "--git-common-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    return normalizeExistingPath(await createGitHost().repository.resolveCommonDir(cwd))
+  } catch {
     return null
   }
-
-  const commonDir = result.stdout.trim()
-  return commonDir ? normalizeExistingPath(path.resolve(cwd, commonDir)) : null
 }
 
 /**
@@ -347,12 +335,9 @@ async function assertGitRepository(cwd: string) {
     throw new Error(`Not a git repository: ${cwd}`)
   }
 
-  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    await createGitHost().repository.resolveGitDir(cwd)
+  } catch {
     throw new Error(`Not a git repository: ${cwd}`)
   }
 }
