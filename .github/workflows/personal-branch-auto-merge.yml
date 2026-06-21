@@ -7,8 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
+  checks: read
   contents: write
   pull-requests: write
+  statuses: read
 
 concurrency:
   group: personal-branch-auto-merge-aleclarson
@@ -50,18 +52,100 @@ jobs:
         run: |
           set -euo pipefail
 
+          pr_number="${{ steps.pr.outputs.number }}"
+          repo_owner="${GITHUB_REPOSITORY_OWNER}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+
           merge_state="$(
-            gh pr view "${{ steps.pr.outputs.number }}" \
+            gh pr view "$pr_number" \
               --repo "${{ github.repository }}" \
               --json isDraft,mergeStateStatus \
               --jq 'if .isDraft then "DRAFT" else .mergeStateStatus end'
           )"
 
           if [ "$merge_state" != "CLEAN" ]; then
-            echo "PR #${{ steps.pr.outputs.number }} is not ready to merge; mergeStateStatus=$merge_state."
+            echo "PR #$pr_number is not ready to merge; mergeStateStatus=$merge_state."
             exit 0
           fi
 
-          gh pr merge "${{ steps.pr.outputs.number }}" \
+          # shellcheck disable=SC2016
+          check_summary="$(
+            gh pr view "$pr_number" \
+              --repo "${{ github.repository }}" \
+              --json statusCheckRollup \
+              --jq '
+                .statusCheckRollup as $checks
+                | if ($checks | length) == 0 then
+                    "NO_CHECKS"
+                  else
+                    [
+                      $checks[]
+                      | select(
+                          if .__typename == "CheckRun" then
+                            .status != "COMPLETED"
+                            or (.conclusion as $conclusion | (["SUCCESS", "SKIPPED", "NEUTRAL"] | index($conclusion)) == null)
+                          elif .__typename == "StatusContext" then
+                            .state != "SUCCESS"
+                          else
+                            true
+                          end
+                        )
+                    ] as $not_passing
+                    | if ($not_passing | length) == 0 then
+                        "PASSING"
+                      else
+                        "NOT_PASSING"
+                      end
+                  end
+              '
+          )"
+
+          if [ "$check_summary" != "PASSING" ]; then
+            echo "PR #$pr_number is not ready to merge; status checks are $check_summary."
+            exit 0
+          fi
+
+          # shellcheck disable=SC2016
+          review_summary="$(
+            gh api graphql \
+              --paginate \
+              -f owner="$repo_owner" \
+              -f name="$repo_name" \
+              -F number="$pr_number" \
+              -f query='
+                query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                      reviewDecision
+                      reviewThreads(first: 100, after: $endCursor) {
+                        nodes {
+                          isResolved
+                        }
+                        pageInfo {
+                          hasNextPage
+                          endCursor
+                        }
+                      }
+                    }
+                  }
+                }
+              ' |
+              jq -s '
+                if any(.[].data.repository.pullRequest.reviewDecision; . == "CHANGES_REQUESTED") then
+                    "CHANGES_REQUESTED"
+                  elif any(.[].data.repository.pullRequest.reviewThreads.nodes[]?; .isResolved == false) then
+                    "UNRESOLVED_THREADS"
+                  else
+                    "RESOLVED"
+                  end
+              '
+          )"
+
+          if [ "$review_summary" != "RESOLVED" ]; then
+            echo "PR #$pr_number is not ready to merge; review feedback is $review_summary."
+            exit 0
+          fi
+
+          gh pr merge "$pr_number" \
             --repo "${{ github.repository }}" \
             --rebase
