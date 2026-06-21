@@ -786,6 +786,9 @@ importers:
       '@clack/prompts':
         specifier: 'catalog:'
         version: 1.5.0
+      '@goddard-ai/git':
+        specifier: workspace:*
+        version: link:../git
       '@goddard-ai/review-sync':
         specifier: workspace:*
         version: link:../review-sync

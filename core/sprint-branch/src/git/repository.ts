@@ -1,17 +1,16 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 
-import { GitCommandError, runGit } from "./command"
+import { getSharedGitHost } from "./command"
 
 /** Resolves the root directory of the Git repository containing the start directory. */
 export async function resolveRepositoryRoot(startDir: string) {
-  return (await runGit(startDir, ["rev-parse", "--show-toplevel"])).trim()
+  return await getSharedGitHost().repository.resolveRoot(startDir)
 }
 
 /** Resolves a repository-local path inside Git's private metadata directory. */
 export async function resolveGitPath(rootDir: string, gitPath: string) {
-  const resolved = (await runGit(rootDir, ["rev-parse", "--git-path", gitPath])).trim()
-  return path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
+  return getSharedGitHost().repository.resolveGitPath(rootDir, gitPath)
 }
 
 /** Ensures a Git-private exclude pattern exists without duplicating it. */
@@ -34,21 +33,13 @@ export async function ensureGitInfoExcludeEntry(rootDir: string, entry: string) 
 
 /** Resolves a path inside Git's common metadata directory shared by linked worktrees. */
 export async function resolveGitCommonPath(rootDir: string, gitPath: string) {
-  const resolved = (await runGit(rootDir, ["rev-parse", "--git-common-dir"])).trim()
-  const commonDir = path.isAbsolute(resolved) ? resolved : path.join(rootDir, resolved)
+  const commonDir = await getSharedGitHost().repository.resolveCommonDir(rootDir)
   return path.join(commonDir, gitPath)
 }
 
 /** Resolves the current branch, returning null for detached HEAD. */
 export async function getCurrentBranch(rootDir: string) {
-  try {
-    return (await runGit(rootDir, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim()
-  } catch (error) {
-    if (error instanceof GitCommandError) {
-      return null
-    }
-    throw error
-  }
+  return await getSharedGitHost().refs.getCurrentBranch(rootDir)
 }
 
 /** Detects Git sequencer operations that need manual completion before retrying a command. */

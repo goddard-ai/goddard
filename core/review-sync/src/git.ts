@@ -150,6 +150,20 @@ function toSharedGitHost(host: GitHost): SharedGitHost {
     worktrees: {
       list: (cwd) => host.listWorktrees(cwd),
     },
+    stash: {
+      list: async (cwd) => {
+        const result = await host.run(cwd, ["stash", "list", "--format=%gd%x00%s"])
+        return new Map(
+          result.stdout
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => {
+              const [ref, message = ""] = line.split("\0")
+              return [ref, message] as const
+            }),
+        )
+      },
+    },
   }
 }
 

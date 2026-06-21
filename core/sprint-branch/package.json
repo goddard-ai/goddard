@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@clack/prompts": "catalog:",
+    "@goddard-ai/git": "workspace:*",
     "@goddard-ai/review-sync": "workspace:*",
     "cmd-ts": "catalog:",
     "node-notifier": "^10.0.1",

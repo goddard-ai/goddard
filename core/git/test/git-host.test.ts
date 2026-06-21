@@ -107,6 +107,11 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
         throw new Error("fallback should not be used")
       },
     },
+    stash: {
+      list: async () => {
+        throw new Error("fallback should not be used")
+      },
+    },
   })
   const host = createLibgit2GitHost(fallback, {
     libgit2PathCandidates: [libgit2Path],

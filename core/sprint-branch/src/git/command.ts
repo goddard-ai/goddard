@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
+import { createGitHost, type GitHost } from "@goddard-ai/git"
 
 const execFileAsync = promisify(execFile)
+let sharedGitHost: GitHost | undefined
 
 /** Error wrapper that preserves the failed Git argv for diagnostics. */
 export class GitCommandError extends Error {
@@ -54,4 +56,9 @@ export async function gitSucceeds(cwd: string, args: string[]) {
     }
     throw error
   }
+}
+
+export function getSharedGitHost() {
+  sharedGitHost ??= createGitHost()
+  return sharedGitHost
 }

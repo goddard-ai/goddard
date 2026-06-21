@@ -43,5 +43,9 @@ export function createFakeGitHost(overrides: DeepPartial<GitHost> = {}): GitHost
       list: fail,
       ...overrides.worktrees,
     },
+    stash: {
+      list: fail,
+      ...overrides.stash,
+    },
   }
 }

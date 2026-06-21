@@ -66,12 +66,17 @@ export type GitWorktreeApi = {
   list: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
+export type GitStashApi = {
+  list: (cwd: string) => Promise<Map<string, string>>
+}
+
 export type GitHost = {
   repository: GitRepositoryApi
   refs: GitRefsApi
   history: GitHistoryApi
   status: GitStatusApi
   worktrees: GitWorktreeApi
+  stash: GitStashApi
 }
 
 type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
@@ -273,6 +278,12 @@ export function createCliGitHost(): GitHost {
         return await parseGitWorktrees(result.stdout)
       },
     },
+    stash: {
+      list: async (cwd) => {
+        const result = await run(cwd, ["stash", "list", "--format=%gd%x00%s"])
+        return parseGitStashes(result.stdout)
+      },
+    },
   }
 }
 
@@ -431,13 +442,16 @@ export function createLibgit2GitHost(
               }
 
               try {
-                return (
-                  libgit2.git_graph_descendant_of(
-                    repo,
-                    libgit2.git_object_id(descendantObject),
-                    libgit2.git_object_id(ancestorObject),
-                  ) === 1
-                )
+                const ancestorOid = libgit2.git_object_id(ancestorObject)
+                const descendantOid = libgit2.git_object_id(descendantObject)
+                if (
+                  String(libgit2.git_oid_tostr_s(ancestorOid)) ===
+                  String(libgit2.git_oid_tostr_s(descendantOid))
+                ) {
+                  return true
+                }
+
+                return libgit2.git_graph_descendant_of(repo, descendantOid, ancestorOid) === 1
               } finally {
                 libgit2.git_object_free(ancestorObject)
                 libgit2.git_object_free(descendantObject)
@@ -484,6 +498,9 @@ export function createLibgit2GitHost(
     },
     worktrees: {
       list: (cwd) => fallback.worktrees.list(cwd),
+    },
+    stash: {
+      list: (cwd) => fallback.stash.list(cwd),
     },
   }
 }
@@ -680,6 +697,18 @@ async function parseGitWorktrees(stdout: string) {
   }
 
   return worktrees
+}
+
+function parseGitStashes(stdout: string) {
+  return new Map(
+    stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [ref, message = ""] = line.split("\0")
+        return [ref, message] as const
+      }),
+  )
 }
 
 function resolveGitOutputPath(cwd: string, value: string) {
