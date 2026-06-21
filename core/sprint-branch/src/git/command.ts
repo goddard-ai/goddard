@@ -1,8 +1,5 @@
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
-import { createGitHost, type GitHost } from "@goddard-ai/git"
+import { createGitHost, runGitCommand, type GitHost } from "@goddard-ai/git"
 
-const execFileAsync = promisify(execFile)
 let sharedGitHost: GitHost | undefined
 
 /** Error wrapper that preserves the failed Git argv for diagnostics. */
@@ -30,19 +27,21 @@ export class GitCommandError extends Error {
 
 /** Runs one Git command with read-only lock avoidance by default. */
 export async function runGit(cwd: string, args: string[]) {
-  try {
-    const result = await execFileAsync("git", args, {
-      cwd,
-      env: {
-        ...process.env,
-        GIT_OPTIONAL_LOCKS: "0",
-      },
-      maxBuffer: 20 * 1024 * 1024,
+  const result = await runGitCommand(cwd, args, {
+    env: {
+      GIT_OPTIONAL_LOCKS: "0",
+    },
+  })
+  if (result.status !== 0) {
+    throw new GitCommandError(args, {
+      message: `git ${args.join(" ")} failed`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      code: result.status,
     })
-    return String(result.stdout)
-  } catch (error) {
-    throw new GitCommandError(args, error)
   }
+
+  return result.stdout
 }
 
 /** Returns true when the Git command exits successfully. */
