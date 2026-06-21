@@ -16,9 +16,12 @@ export type PopoverCloseReason = "escape" | "group" | "outside"
 export type PopoverProps = FloatingPositionOptions & {
     open: Signal<boolean>;
     anchor: () => FloatingReference | null;
+    id?: string;
     class?: string;
+    style?: preact.CSSProperties;
     role?: any;
     ariaLabel?: string;
+    ariaLabelledBy?: string;
     blockOutsidePointer?: boolean;
     closeOnEscape?: boolean;
     closeOnOutsidePointer?: boolean;
@@ -120,8 +123,11 @@ export function Popover(props: PopoverProps) @{
     <div
       ref={contentRef}
       aria-label={props.ariaLabel}
+      aria-labelledby={props.ariaLabelledBy}
       class={props.class}
+      id={props.id}
       role={props.role}
+      style={props.style}
       tabIndex={props.focusOnOpen ?? true ? -1 : undefined}
       onKeyDown={(event) => {
         if (props.modalFocus) {

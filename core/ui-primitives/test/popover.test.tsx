@@ -14,7 +14,13 @@ async function flushEffects() {
   })
 }
 
-function renderPopover(props: { closeOnOutsidePointer?: boolean; restoreFocus?: boolean }) {
+function renderPopover(props: {
+  ariaLabelledBy?: string
+  closeOnOutsidePointer?: boolean
+  id?: string
+  restoreFocus?: boolean
+  style?: preact.CSSProperties
+}) {
   const anchor = document.createElement("button")
   const container = document.createElement("div")
   const menuRoot = document.createElement("div")
@@ -31,8 +37,11 @@ function renderPopover(props: { closeOnOutsidePointer?: boolean; restoreFocus?: 
       <Popover
         anchor={() => anchor}
         open={open}
+        ariaLabelledBy={props.ariaLabelledBy}
         closeOnOutsidePointer={props.closeOnOutsidePointer}
+        id={props.id}
         restoreFocus={props.restoreFocus}
+        style={props.style}
       >
         <button>Inside</button>
       </Popover>
@@ -123,6 +132,22 @@ test("Popover blocks outside pointer interactions when outside dismissal is enab
   expect(harness.menuRoot.querySelector(".goddard-overlay-pointer-blocker")).toBeInstanceOf(
     HTMLElement,
   )
+  harness.cleanup()
+})
+
+test("Popover applies caller-owned DOM identity, labelling, and styles", async () => {
+  const harness = renderPopover({
+    ariaLabelledBy: "popover-heading",
+    id: "custom-popover",
+    style: { color: "red" },
+  })
+
+  await harness.render()
+
+  const popover = harness.menuRoot.querySelector("#custom-popover")
+  expect(popover).toBeInstanceOf(HTMLElement)
+  expect(popover?.getAttribute("aria-labelledby")).toBe("popover-heading")
+  expect((popover as HTMLElement | null)?.style.color).toBe("red")
   harness.cleanup()
 })
 

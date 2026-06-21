@@ -62,18 +62,22 @@ Use `OverlayPortal` only when building a new overlay primitive inside this packa
 
 ## Styling contract
 
-The package accepts class names but ships no CSS. Overlay content receives inline positioning styles from `startFloatingPosition`, including:
+The package accepts class names and explicit style props but ships no CSS. `Modal` exposes separate backdrop, positioner, and content style props because it renders three surfaces. `Popover`, `Menu`, `MenuItem`, and `Tooltip` expose `style` on their primary rendered surface.
+
+Overlay content receives inline positioning styles from `startFloatingPosition`, including:
 
 - `position`, `top`, and `left` for placement.
 - `--available-height` and `--available-width` CSS variables.
 - `--reference-width` for same-width or responsive layouts.
 - bounded `maxHeight`, `maxWidth`, `minHeight`, `minWidth`, and `width` values when relevant.
 
+Callers should avoid using style props to override positioning-owned properties on anchored overlays.
+
 ## Accessibility responsibilities
 
 The primitives provide behavior, not complete content accessibility. Callers must still provide:
 
 - Stable title and description elements for `Modal.titleId` and `Modal.descriptionId`.
-- Meaningful `ariaLabel` values when visible labels are absent.
+- Meaningful `ariaLabel` values when visible labels are absent, or `ariaLabelledBy` when a visible element names the overlay.
 - Non-disabled interactive children where keyboard focus should land.
 - Explicit close controls for modal dialogs and long-lived popovers.
