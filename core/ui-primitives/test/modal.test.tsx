@@ -13,8 +13,12 @@ async function flushEffects() {
 }
 
 function renderModal(props: {
+  backdropStyle?: preact.CSSProperties
   closeOnOutsidePointer?: boolean
+  contentId?: string
+  contentStyle?: preact.CSSProperties
   onBeforeClose?: (reason: "escape" | "explicit" | "outside") => boolean
+  positionerStyle?: preact.CSSProperties
 }) {
   const container = document.createElement("div")
   const trigger = document.createElement("button")
@@ -34,9 +38,13 @@ function renderModal(props: {
         open={open}
         titleId="modal-title"
         descriptionId="modal-description"
+        backdropStyle={props.backdropStyle}
         closeOnOutsidePointer={props.closeOnOutsidePointer}
+        contentId={props.contentId}
+        contentStyle={props.contentStyle}
         initialFocus={() => document.getElementById("modal-input") as HTMLInputElement | null}
         onBeforeClose={props.onBeforeClose}
+        positionerStyle={props.positionerStyle}
       >
         <h2 id="modal-title">Title</h2>
         <p id="modal-description">Description</p>
@@ -77,6 +85,26 @@ test("Modal focuses initial control and restores focus when Escape closes", asyn
 
   expect(harness.open.value).toBe(false)
   expect(document.activeElement).toBe(harness.trigger)
+  harness.cleanup()
+})
+
+test("Modal applies caller-owned DOM identity and styles to modal surfaces", async () => {
+  const harness = renderModal({
+    backdropStyle: { background: "rgba(0, 0, 0, 0.5)" },
+    contentId: "settings-dialog",
+    contentStyle: { color: "red" },
+    positionerStyle: { display: "grid" },
+  })
+
+  await harness.render()
+
+  const backdrop = harness.dialogRoot.querySelector('[aria-hidden="true"]')
+  const positioner = harness.dialogRoot.querySelector('[style*="display"]')
+  const content = harness.dialogRoot.querySelector("#settings-dialog")
+
+  expect((backdrop as HTMLElement | null)?.style.background).toBe("rgba(0, 0, 0, 0.5)")
+  expect((positioner as HTMLElement | null)?.style.display).toBe("grid")
+  expect((content as HTMLElement | null)?.style.color).toBe("red")
   harness.cleanup()
 })
 

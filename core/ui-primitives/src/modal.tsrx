@@ -14,8 +14,12 @@ export type ModalProps = {
   titleId: string;
   descriptionId?: string;
   backdropClass?: string;
+  backdropStyle?: preact.CSSProperties;
   positionerClass?: string;
+  positionerStyle?: preact.CSSProperties;
+  contentId?: string;
   contentClass?: string;
+  contentStyle?: preact.CSSProperties;
   closeOnEscape?: boolean;
   closeOnOutsidePointer?: boolean;
   initialFocus?: () => HTMLElement | null;
@@ -80,15 +84,17 @@ export function Modal(props: ModalProps) @{
   }
 
   <OverlayPortal root="dialog">
-    <div aria-hidden="true" class={props.backdropClass} />
-    <div class={props.positionerClass}>
+    <div aria-hidden="true" class={props.backdropClass} style={props.backdropStyle} />
+    <div class={props.positionerClass} style={props.positionerStyle}>
       <div
         ref={contentRef}
         aria-describedby={props.descriptionId}
         aria-labelledby={props.titleId}
         aria-modal="true"
         class={props.contentClass}
+        id={props.contentId}
         role="dialog"
+        style={props.contentStyle}
         tabIndex={-1}
         onKeyDown={(event) => {
           keepFocusInside(event.currentTarget, event)

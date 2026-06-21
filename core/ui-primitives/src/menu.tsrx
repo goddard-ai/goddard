@@ -11,17 +11,22 @@ type MenuControls = {
 
 export type MenuProps = {
   anchor: () => FloatingReference | null;
-  ariaLabel: string;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
   class?: string;
   children?: preact.ComponentChildren;
+  id?: string;
   open: Signal<boolean>;
+  style?: preact.CSSProperties;
 }
 
 export type MenuItemProps = {
   children?: preact.ComponentChildren;
   class?: string;
   disabled?: boolean;
+  id?: string;
   onSelect?: () => void;
+  style?: preact.CSSProperties;
 }
 
 const menuContext = createContext<MenuControls | null>(null)
@@ -42,9 +47,11 @@ export function Menu(props: MenuProps) @{
     <Popover
       anchor={props.anchor}
       ariaLabel={props.ariaLabel}
+      ariaLabelledBy={props.ariaLabelledBy}
       class={props.class}
       closeOnEscape={true}
       closeOnOutsidePointer={true}
+      id={props.id}
       initialFocus={() =>
         menuRef.current?.querySelector<HTMLElement>(
           "[role=\"menuitem\"]:not([aria-disabled=\"true\"])",
@@ -55,6 +62,7 @@ export function Menu(props: MenuProps) @{
       restoreFocus={true}
       role="menu"
       strategy="fixed"
+      style={props.style}
       onKeyDown={(event) => {
         const menu = menuRef.current
 
@@ -123,7 +131,9 @@ export function MenuItem(props: MenuItemProps) @{
   <button
     aria-disabled={props.disabled ? "true" : undefined}
     class={props.class}
+    id={props.id}
     role="menuitem"
+    style={props.style}
     tabIndex={props.disabled ? undefined : -1}
     type="button"
     onClick={() => {

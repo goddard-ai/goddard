@@ -58,6 +58,8 @@ Important optional props:
 
 - `descriptionId`
 - `backdropClass`, `positionerClass`, `contentClass`
+- `backdropStyle`, `positionerStyle`, `contentStyle`
+- `contentId`
 - `closeOnEscape` defaults to true
 - `closeOnOutsidePointer` defaults to false
 - `initialFocus`
@@ -77,7 +79,7 @@ Required props:
 Important optional props:
 
 - Floating options: `placement`, `offset`, `sameWidth`, `strategy`
-- `ariaLabel`, `role`, `class`
+- `id`, `ariaLabel`, `ariaLabelledBy`, `role`, `class`, `style`
 - `closeOnEscape` defaults to true
 - `closeOnOutsidePointer` defaults to true
 - `blockOutsidePointer` defaults to `closeOnOutsidePointer`
@@ -102,7 +104,9 @@ Do not open a popover until `anchor()` can return the mounted anchor. Point anch
 - initial focus on the first enabled menu item
 - ArrowUp, ArrowDown, Home, End, Enter, and Space handling
 
-`MenuItem` renders a button with `role="menuitem"`. Disabled items set `aria-disabled="true"` and do not call `onSelect`.
+`Menu` accepts `id`, `ariaLabel`, `ariaLabelledBy`, `class`, and `style` for its popover surface.
+
+`MenuItem` renders a button with `role="menuitem"`. Disabled items set `aria-disabled="true"` and do not call `onSelect`. `MenuItem` accepts `id`, `class`, and `style` for the button.
 
 ### `Tooltip`
 
@@ -110,7 +114,9 @@ Do not open a popover until `anchor()` can return the mounted anchor. Point anch
 
 Useful props:
 
+- `id`
 - `content`
+- `ariaLabel`, `ariaLabelledBy`, `class`, `style`
 - `side` defaults to `"top"`
 - `sideOffset` defaults to 8
 - `openDelay` defaults to 450 ms
