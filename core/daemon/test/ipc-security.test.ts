@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { createBrowserDaemonIpcClient } from "@goddard-ai/daemon-client/browser"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { createLogStore } from "@goddard-ai/logs"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
@@ -91,6 +92,44 @@ test("daemon browser access is unavailable until explicitly enabled", async () =
   expect(await response.json()).toEqual({ error: "Forbidden" })
 })
 
+test("daemon browser access preflight and origin validation fail closed", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    daemon: {
+      browserAccess: {
+        enabled: true,
+        allowedOrigins: [hostedOrigin],
+        desktopWebviewOrigins: [desktopWebviewOrigin],
+      },
+    },
+  })
+  const daemon = await startServer({ useExistingHome: true })
+
+  const preflight = await browserFetch(daemon, "daemon/health", {
+    method: "OPTIONS",
+    origin: hostedOrigin,
+    privateNetwork: true,
+  })
+  expect(preflight.status).toBe(204)
+  expect(preflight.headers.get("access-control-allow-origin")).toBe(hostedOrigin)
+  expect(preflight.headers.get("access-control-allow-private-network")).toBe("true")
+
+  const missingOriginPreflight = await browserFetch(daemon, "daemon/health", {
+    method: "OPTIONS",
+  })
+  expect(missingOriginPreflight.status).toBe(403)
+  expect(missingOriginPreflight.headers.get("access-control-allow-origin")).toBeNull()
+
+  for (const origin of ["null", "not an origin", "*", "https://evil.example"]) {
+    const response = await browserFetch(daemon, "daemon/health", {
+      method: "GET",
+      origin,
+    })
+    expect(response.status).toBe(403)
+    expect(response.headers.get("access-control-allow-origin")).toBeNull()
+  }
+})
+
 test("daemon browser pairing issues origin-bound revocable tokens", async () => {
   await useTempHome()
   await writeGlobalRootConfig({
@@ -177,6 +216,61 @@ test("daemon browser pairing issues origin-bound revocable tokens", async () => 
     token: completed.token,
   })
   expect(whoami.githubUsername).toBe("alec")
+
+  const browserClient = createBrowserDaemonIpcClient({
+    daemonUrl: daemon.daemonUrl,
+    token: () => completed.token,
+    fetch: createOriginFetch(hostedOrigin),
+  })
+  await expect(browserClient.auth.whoami()).resolves.toMatchObject({
+    githubUsername: "alec",
+  })
+
+  seedAuthorizedSession({
+    sessionId: "ses_browser_direct",
+    token: "tok_browser_direct",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+  const browserStreamStatuses: string[] = []
+  const abortController = new AbortController()
+  const browserStream = await browserClient.inbox.streamItems(undefined, {
+    signal: abortController.signal,
+  })
+  const browserStreamDone = (async () => {
+    try {
+      for await (const item of browserStream) {
+        if (item.entityId !== "ses_browser_direct") {
+          continue
+        }
+        browserStreamStatuses.push(item.status)
+        if (browserStreamStatuses.length >= 2) {
+          abortController.abort()
+        }
+      }
+    } catch (error) {
+      if (!abortController.signal.aborted) {
+        throw error
+      }
+    }
+  })()
+  cleanup.push(async () => {
+    abortController.abort()
+    await browserStreamDone.catch(() => {})
+  })
+
+  await send(localClient, "session.reportTurnEnded", {
+    id: "ses_browser_direct",
+    scope: "Browser client",
+    headline: "Direct stream update",
+  })
+  await send(localClient, "inbox.update", {
+    entityId: "ses_browser_direct",
+    status: "read",
+  })
+  await waitFor(async () => browserStreamStatuses.length >= 2)
+  expect(browserStreamStatuses).toEqual(["unread", "read"])
 
   const replayed = await browserFetch(daemon, "auth/whoami", {
     method: "GET",
@@ -840,8 +934,9 @@ function browserFetch(
   daemon: DaemonServer,
   path: string,
   input: {
-    method: "GET" | "POST"
-    origin: string
+    method: "GET" | "OPTIONS" | "POST"
+    origin?: string
+    privateNetwork?: boolean
     token?: string
     body?: unknown
   },
@@ -849,8 +944,13 @@ function browserFetch(
   const url = new URL(path, daemon.daemonUrl)
   const headers: Record<string, string> = {
     Host: url.host,
-    Origin: input.origin,
     Connection: "close",
+  }
+  if (input.origin !== undefined) {
+    headers.Origin = input.origin
+  }
+  if (input.privateNetwork) {
+    headers["Access-Control-Request-Private-Network"] = "true"
   }
   if (input.token) {
     headers.Authorization = `Bearer ${input.token}`
@@ -902,6 +1002,17 @@ function browserFetch(
       )
     })
   })
+}
+
+function createOriginFetch(origin: string): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const headers = new Headers(init?.headers)
+    headers.set("Origin", origin)
+    return await fetch(input, {
+      ...init,
+      headers,
+    })
+  }) as unknown as typeof fetch
 }
 
 function decodeChunkedBody(framedBody: string) {

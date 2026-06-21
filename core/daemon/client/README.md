@@ -8,6 +8,8 @@ Low-level daemon connection helpers shared by Node, the app, and SDK composition
   - Shared daemon IPC client types only.
 - `@goddard-ai/daemon-client/node`
   - Node env/default helpers and the default TCP transport.
+- `@goddard-ai/daemon-client/browser`
+  - Browser Fetch transport for direct loopback daemon IPC with bearer-token authorization.
 - `@goddard-ai/daemon-client/daemon-ipc`
   - The composed default daemon IPC route contract.
 
@@ -20,6 +22,12 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 - Create a daemon IPC client from an explicit daemon URL.
 - Create the default Node TCP client from env/default settings.
 
+Use `@goddard-ai/daemon-client/browser` when you need to:
+
+- Create a browser-safe daemon IPC client from an explicit loopback daemon URL.
+- Attach a hosted-browser pairing token or desktop webview token to direct daemon requests.
+- Consume daemon NDJSON stream routes through browser Fetch.
+
 Use `@goddard-ai/sdk` for explicit browser-safe daemon calls, or `@goddard-ai/sdk/node` when you want the same SDK surface with Node daemon-client injection.
 
 ```ts
@@ -29,6 +37,17 @@ const client = createDaemonIpcClient({
   daemonUrl: "http://127.0.0.1:49827/",
 })
 ```
+
+```ts
+import { createBrowserDaemonIpcClient } from "@goddard-ai/daemon-client/browser"
+
+const client = createBrowserDaemonIpcClient({
+  daemonUrl: "http://127.0.0.1:49827/",
+  token: () => localStorage.getItem("goddard.daemonBrowserToken"),
+})
+```
+
+Browser access is disabled by default at the daemon boundary and requires exact origin allowlisting plus either hosted-browser pairing or desktop webview token bootstrap. See [Browser Access](../docs/concepts/browser-access.md) for the operating model and troubleshooting notes.
 
 ## License
 

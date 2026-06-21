@@ -13,6 +13,8 @@ The daemon has cross-cutting concepts that appear in many feature workflows, suc
   - What the daemon owns and what clients may only observe or request.
 - [Daemon server](./daemon-server.md)
   - The local control surface exposed to app, SDK, and operational clients.
+- [Browser access](./browser-access.md)
+  - How hosted browsers and desktop webviews can reach the local daemon safely.
 - [Feature composition](./feature-composition.md)
   - How the default daemon product surface is assembled from feature-owned capabilities.
 
