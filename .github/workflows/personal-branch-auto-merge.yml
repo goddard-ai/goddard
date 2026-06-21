@@ -25,127 +25,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Find open PR
-        id: pr
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
 
-          pr_number="$(
-            gh pr list \
-              --repo "${{ github.repository }}" \
-              --base "$BASE_BRANCH" \
-              --head "$USER_BRANCH" \
-              --state open \
-              --json number \
-              --jq '.[0].number // empty'
-          )"
-          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+      - name: Resolve Bun version
+        id: bun-version
+        shell: bash
+        run: |
+          version="$(node -e "const v = require('./package.json').catalog?.bun; if (!v) throw new Error('package.json#catalog.bun is required'); process.stdout.write(v)")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: ${{ steps.bun-version.outputs.version }}
 
       - name: Merge when ready
-        if: steps.pr.outputs.number != ''
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          pr_number="${{ steps.pr.outputs.number }}"
-          repo_owner="${GITHUB_REPOSITORY_OWNER}"
-          repo_name="${GITHUB_REPOSITORY#*/}"
-
-          merge_state="$(
-            gh pr view "$pr_number" \
-              --repo "${{ github.repository }}" \
-              --json isDraft,mergeStateStatus \
-              --jq 'if .isDraft then "DRAFT" else .mergeStateStatus end'
-          )"
-
-          if [ "$merge_state" != "CLEAN" ]; then
-            echo "PR #$pr_number is not ready to merge; mergeStateStatus=$merge_state."
-            exit 0
-          fi
-
-          # shellcheck disable=SC2016
-          check_summary="$(
-            gh pr view "$pr_number" \
-              --repo "${{ github.repository }}" \
-              --json statusCheckRollup \
-              --jq '
-                .statusCheckRollup as $checks
-                | if ($checks | length) == 0 then
-                    "NO_CHECKS"
-                  else
-                    [
-                      $checks[]
-                      | select(
-                          if .__typename == "CheckRun" then
-                            .status != "COMPLETED"
-                            or (.conclusion as $conclusion | (["SUCCESS", "SKIPPED", "NEUTRAL"] | index($conclusion)) == null)
-                          elif .__typename == "StatusContext" then
-                            .state != "SUCCESS"
-                          else
-                            true
-                          end
-                        )
-                    ] as $not_passing
-                    | if ($not_passing | length) == 0 then
-                        "PASSING"
-                      else
-                        "NOT_PASSING"
-                      end
-                  end
-              '
-          )"
-
-          if [ "$check_summary" != "PASSING" ]; then
-            echo "PR #$pr_number is not ready to merge; status checks are $check_summary."
-            exit 0
-          fi
-
-          # shellcheck disable=SC2016
-          review_summary="$(
-            gh api graphql \
-              --paginate \
-              -f owner="$repo_owner" \
-              -f name="$repo_name" \
-              -F number="$pr_number" \
-              -f query='
-                query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
-                  repository(owner: $owner, name: $name) {
-                    pullRequest(number: $number) {
-                      reviewDecision
-                      reviewThreads(first: 100, after: $endCursor) {
-                        nodes {
-                          isResolved
-                        }
-                        pageInfo {
-                          hasNextPage
-                          endCursor
-                        }
-                      }
-                    }
-                  }
-                }
-              ' |
-              jq -s '
-                if any(.[].data.repository.pullRequest.reviewDecision; . == "CHANGES_REQUESTED") then
-                    "CHANGES_REQUESTED"
-                  elif any(.[].data.repository.pullRequest.reviewThreads.nodes[]?; .isResolved == false) then
-                    "UNRESOLVED_THREADS"
-                  else
-                    "RESOLVED"
-                  end
-              '
-          )"
-
-          if [ "$review_summary" != "RESOLVED" ]; then
-            echo "PR #$pr_number is not ready to merge; review feedback is $review_summary."
-            exit 0
-          fi
-
-          gh pr merge "$pr_number" \
-            --repo "${{ github.repository }}" \
-            --rebase
+        run: bun run ./scripts/personal-branch-auto-merge.ts
