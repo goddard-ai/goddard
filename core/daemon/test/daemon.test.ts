@@ -12,7 +12,7 @@ import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send } from "./ipc-client-helpers.ts"
+import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -99,12 +99,38 @@ test(
         store: db,
       })
       const stopDaemon = createDaemonStopper()
+      let unsubscribeEvents: (() => void) | undefined
 
       try {
         await waitFor(async () => {
           const healthy = await isDaemonHealthy(port)
           return healthy && backend.subscriptionCount() === 1
         })
+        const client = createDaemonIpcClient({
+          daemonUrl: createDaemonUrl(port),
+        })
+        const feedbackFinishedEvents: Array<{
+          name?: string
+          payload?: {
+            repository?: string
+            prNumber?: number
+            feedbackType?: string
+            exitCode?: number
+          }
+        }> = []
+        unsubscribeEvents = await subscribe(
+          client,
+          {
+            name: "events.stream",
+            filter: {
+              names: ["repo.feedback.finished"],
+              where: [{ path: "repository", equals: "other/repo" }],
+            },
+          },
+          (event) => {
+            feedbackFinishedEvents.push(event)
+          },
+        )
 
         backend.sendEvent({
           type: "comment",
@@ -122,6 +148,14 @@ test(
             const sessions = db.sessions.findMany()
             return (
               sessions.length === 1 &&
+              feedbackFinishedEvents.some(
+                (event) =>
+                  event.name === "repo.feedback.finished" &&
+                  event.payload?.repository === "other/repo" &&
+                  event.payload?.prNumber === 123 &&
+                  event.payload?.feedbackType === "comment" &&
+                  event.payload?.exitCode === 0,
+              ) &&
               parseJsonLogs(output).filter((entry) => entry.event === "pr_feedback.finish")
                 .length === 1
             )
@@ -155,6 +189,7 @@ test(
         await stopDaemon()
         return await daemonPromise
       } finally {
+        unsubscribeEvents?.()
         await stopDaemon()
         await daemonPromise.catch(() => {})
       }

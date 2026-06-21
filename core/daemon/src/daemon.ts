@@ -1,3 +1,4 @@
+import { createDaemonEventBus } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
@@ -10,6 +11,7 @@ import {
 import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
 import { FeedbackEventContext, SetupContext } from "./context.ts"
+import { daemonRuntimeEvents } from "./events.ts"
 import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
@@ -147,6 +149,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
     }
 
     const activeIpcServer = ipcServer
+    const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
     // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
     const runningPrs = new Set<string>()
     let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
@@ -161,6 +164,10 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
         }
 
         logger.log("repo.subscription_degraded", {
+          reason: "unauthenticated",
+          errorMessage: authError.message,
+        })
+        await daemonEvents.emit("repo.subscription.degraded", {
           reason: "unauthenticated",
           errorMessage: authError.message,
         })
@@ -190,10 +197,19 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
             prNumber: event.prNumber,
             feedbackType: event.type,
           }
+          const feedbackEventPayload = {
+            ...feedbackContext,
+            owner: event.owner,
+            repo: event.repo,
+          }
 
           await FeedbackEventContext.run(feedbackContext, async () => {
             if (!activeIpcServer) {
               logger.log("repo.feedback_ignored", {
+                reason: "ipc_disabled",
+              })
+              await daemonEvents.emit("repo.feedback.ignored", {
+                ...feedbackEventPayload,
                 reason: "ipc_disabled",
               })
               return
@@ -219,6 +235,10 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
                 logger.log("repo.feedback_ignored", {
                   reason: "unmanaged_pr",
                 })
+                await daemonEvents.emit("repo.feedback.ignored", {
+                  ...feedbackEventPayload,
+                  reason: "unmanaged_pr",
+                })
                 return
               }
 
@@ -234,6 +254,10 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
                 store,
               })
               logger.log("pr_feedback.finish", {
+                exitCode,
+              })
+              await daemonEvents.emit("repo.feedback.finished", {
+                ...feedbackEventPayload,
                 exitCode,
               })
             } catch (error) {
