@@ -28,7 +28,7 @@ catalog:
   mitt: ^3.0.1
   preact: 11.0.0-beta.1
   radashi: ^12.8.0
-  rouzer: ^5.2.0
+  rouzer: ^5.2.1
   tabbable: ^6.4.0
   zod: ^4.3.6
 
