@@ -24,13 +24,7 @@ test("installed native runtime paths resolve relative manifest paths under the i
       "/installed/runtime",
     ),
   ).toEqual({
-    reviewSyncLibgit2Path: join(
-      "/installed/runtime",
-      "daemon",
-      "native",
-      "libgit2",
-      "libgit2.dylib",
-    ),
+    gitLibgit2Path: join("/installed/runtime", "daemon", "native", "libgit2", "libgit2.dylib"),
   })
 })
 
@@ -40,7 +34,7 @@ test("installed native runtime paths are absent without native library metadata"
   ).toEqual({})
 })
 
-test("daemon runtime args omit review-sync libgit2 path when no native library is installed", () => {
+test("daemon runtime args omit Git libgit2 path when no native library is installed", () => {
   expect(
     createDaemonRunArgs({
       runtime: createPreparedRuntime(),
@@ -59,11 +53,11 @@ test("daemon runtime args omit review-sync libgit2 path when no native library i
   ])
 })
 
-test("daemon runtime args include the installed review-sync libgit2 path", () => {
+test("daemon runtime args include the installed Git libgit2 path", () => {
   expect(
     createDaemonRunArgs({
       runtime: createPreparedRuntime({
-        reviewSyncLibgit2Path: "/runtime/native/libgit2/libgit2.dylib",
+        gitLibgit2Path: "/runtime/native/libgit2/libgit2.dylib",
       }),
       baseUrl: "https://example.test/api",
       daemonPort: 49827,
@@ -78,7 +72,7 @@ test("daemon runtime args include the installed review-sync libgit2 path", () =>
     "49827",
     "--agent-bin-dir",
     "/runtime/agent-bin",
-    "--review-sync-libgit2-path",
+    "--git-libgit2-path",
     "/runtime/native/libgit2/libgit2.dylib",
     "--data-profile",
     "development",

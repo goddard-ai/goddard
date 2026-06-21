@@ -6,7 +6,7 @@ export type PreparedDaemonRuntime = {
   daemonRootDir: string
   agentBinDir: string
   daemonExecutablePath: string
-  reviewSyncLibgit2Path?: string
+  gitLibgit2Path?: string
   runtimeHash: string
 }
 
@@ -16,7 +16,7 @@ export function resolveInstalledNativeRuntimePaths(
 ) {
   return {
     ...(manifest.daemon.nativeLibraries?.libgit2 && {
-      reviewSyncLibgit2Path: join(installDir, manifest.daemon.nativeLibraries.libgit2.path),
+      gitLibgit2Path: join(installDir, manifest.daemon.nativeLibraries.libgit2.path),
     }),
   }
 }
@@ -38,8 +38,8 @@ export function createDaemonRunArgs(input: {
     input.runtime.agentBinDir,
   ]
 
-  if (input.runtime.reviewSyncLibgit2Path) {
-    args.push("--review-sync-libgit2-path", input.runtime.reviewSyncLibgit2Path)
+  if (input.runtime.gitLibgit2Path) {
+    args.push("--git-libgit2-path", input.runtime.gitLibgit2Path)
   }
 
   if (input.dataProfile) {

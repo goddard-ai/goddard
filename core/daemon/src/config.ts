@@ -13,7 +13,7 @@ export type RuntimeConfigInput = {
   baseUrl?: string
   port?: number
   agentBinDir?: string
-  reviewSyncLibgit2Path?: string
+  gitLibgit2Path?: string
   env?: RuntimeEnv
 }
 
@@ -22,7 +22,7 @@ export type ResolvedRuntimeConfig = {
   baseUrl: string
   port: number
   agentBinDir: string
-  reviewSyncLibgit2Path?: string
+  gitLibgit2Path?: string
 }
 
 export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRuntimeConfig {
@@ -35,15 +35,19 @@ export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRu
 
   assertRuntimePort(port, "Daemon port")
 
+  const gitLibgit2Path = resolveGitLibgit2Path(input, env)
+
   return {
     baseUrl: input.baseUrl || env.GODDARD_BASE_URL || "http://127.0.0.1:8787",
     port,
     agentBinDir:
       input.agentBinDir ?? env.GODDARD_AGENT_BIN_DIR ?? join(import.meta.dirname, "../agent-bin"),
-    ...((input.reviewSyncLibgit2Path ?? env.REVIEW_SYNC_LIBGIT2_PATH)
-      ? { reviewSyncLibgit2Path: input.reviewSyncLibgit2Path ?? env.REVIEW_SYNC_LIBGIT2_PATH }
-      : {}),
+    ...(gitLibgit2Path ? { gitLibgit2Path } : {}),
   }
+}
+
+function resolveGitLibgit2Path(input: RuntimeConfigInput, env: RuntimeEnv) {
+  return input.gitLibgit2Path ?? env.GODDARD_GIT_LIBGIT2_PATH ?? env.REVIEW_SYNC_LIBGIT2_PATH
 }
 
 export function prependAgentBinToPath(

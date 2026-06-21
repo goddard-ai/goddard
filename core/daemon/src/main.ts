@@ -65,12 +65,13 @@ function applyDataProfile(value?: (typeof daemonDataProfiles)[number]) {
   process.env.GODDARD_DATA_PROFILE = value
 }
 
-/** Persists packaged review-sync native library location before runtime modules initialize. */
-function applyReviewSyncLibgit2Path(value?: string) {
+/** Persists packaged Git native library location before runtime modules initialize. */
+function applyGitLibgit2Path(value?: string) {
   if (!value) {
     return
   }
 
+  process.env.GODDARD_GIT_LIBGIT2_PATH = value
   process.env.REVIEW_SYNC_LIBGIT2_PATH = value
 }
 
@@ -113,10 +114,15 @@ export async function main(argv = process.argv.slice(2)) {
             long: "agent-bin-dir",
             description: "Directory containing agent executables used by daemon-managed sessions",
           }),
+          gitLibgit2Path: option({
+            type: optional(string),
+            long: "git-libgit2-path",
+            description: "Private packaged libgit2 path used by daemon Git hosts",
+          }),
           reviewSyncLibgit2Path: option({
             type: optional(string),
             long: "review-sync-libgit2-path",
-            description: "Private packaged libgit2 path used by review-sync",
+            description: "Legacy alias for --git-libgit2-path",
           }),
           dataProfile: option({
             type: optional(oneOf(daemonDataProfiles)),
@@ -141,7 +147,8 @@ export async function main(argv = process.argv.slice(2)) {
         },
         handler: async (args) => {
           applyDataProfile(args.dataProfile)
-          applyReviewSyncLibgit2Path(args.reviewSyncLibgit2Path)
+          const gitLibgit2Path = args.gitLibgit2Path ?? args.reviewSyncLibgit2Path
+          applyGitLibgit2Path(gitLibgit2Path)
 
           // Load the runtime only when executing `run` so `--help` stays side-effect free.
           const { runDaemon } = await import("./daemon.ts")
@@ -150,7 +157,7 @@ export async function main(argv = process.argv.slice(2)) {
             baseUrl: args.baseUrl,
             port: resolveCliPort(args.port),
             agentBinDir: args.agentBinDir,
-            reviewSyncLibgit2Path: args.reviewSyncLibgit2Path,
+            gitLibgit2Path,
             enableIpc: featureFlags.enableIpc,
             enableStream: featureFlags.enableStream,
             logMode: resolveLogMode(args),
