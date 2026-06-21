@@ -9,23 +9,28 @@ export function event<TPayload>(): EventDefinition<TPayload> {
 
 /** Creates the in-process event bus shared by one daemon plugin composition. */
 export function createDaemonEventBus(): EventBus<Record<string, EventDefinition<unknown>>> {
-  const listeners = new Map<string, Set<Listener>>()
+  const cache = new Map<string, Set<Listener>>()
 
   return {
     on(eventName, listener) {
-      const eventListeners = listeners.get(eventName) ?? new Set<Listener>()
-      eventListeners.add(listener as Listener)
-      listeners.set(eventName, eventListeners)
+      const listeners = cache.get(eventName) ?? new Set<Listener>()
+      listeners.add(listener)
+      cache.set(eventName, listeners)
 
       return () => {
-        eventListeners.delete(listener as Listener)
-        if (eventListeners.size === 0) {
-          listeners.delete(eventName)
+        listeners.delete(listener)
+        if (listeners.size === 0) {
+          cache.delete(eventName)
         }
       }
     },
     async emit(eventName, payload) {
-      for (const listener of [...(listeners.get(eventName) ?? [])]) {
+      const listeners = cache.get(eventName)
+      if (!listeners) {
+        return
+      }
+      // oxlint-disable-next-line unicorn/no-useless-spread
+      for (const listener of [...listeners]) {
         await listener(payload)
       }
     },
