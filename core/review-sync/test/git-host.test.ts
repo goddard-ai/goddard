@@ -17,14 +17,12 @@ import { runGit } from "./support.ts"
 const originalGitHost = process.env.REVIEW_SYNC_GIT_HOST
 const originalGoddardGitHost = process.env.GODDARD_GIT_HOST
 const originalLibgit2Path = process.env.LIBGIT2_PATH
-const originalReviewSyncLibgit2Path = process.env.REVIEW_SYNC_LIBGIT2_PATH
 const tempRoots: string[] = []
 
 afterEach(async () => {
   restoreEnv("REVIEW_SYNC_GIT_HOST", originalGitHost)
   restoreEnv("GODDARD_GIT_HOST", originalGoddardGitHost)
   restoreEnv("LIBGIT2_PATH", originalLibgit2Path)
-  restoreEnv("REVIEW_SYNC_LIBGIT2_PATH", originalReviewSyncLibgit2Path)
   resetReviewSyncGitHostForTests()
   while (tempRoots.length > 0) {
     await removeTemporaryPath(tempRoots.pop()!)

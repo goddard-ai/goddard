@@ -19,7 +19,6 @@ const originalHome = process.env.HOME
 const originalDaemonPort = process.env.GODDARD_DAEMON_PORT
 const originalBaseUrl = process.env.GODDARD_BASE_URL
 const originalGitLibgit2Path = process.env.GODDARD_GIT_LIBGIT2_PATH
-const originalReviewSyncLibgit2Path = process.env.REVIEW_SYNC_LIBGIT2_PATH
 const agentBinDir = fileURLToPath(new URL("../agent-bin", import.meta.url))
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
@@ -49,12 +48,6 @@ afterEach(async () => {
   } else {
     process.env.GODDARD_GIT_LIBGIT2_PATH = originalGitLibgit2Path
   }
-  if (originalReviewSyncLibgit2Path === undefined) {
-    delete process.env.REVIEW_SYNC_LIBGIT2_PATH
-  } else {
-    process.env.REVIEW_SYNC_LIBGIT2_PATH = originalReviewSyncLibgit2Path
-  }
-
   while (cleanup.length > 0) {
     await cleanup.pop()?.()
   }
@@ -675,7 +668,6 @@ test("daemon runtime backend URL overrides preserve precedence", () => {
 
 test("daemon runtime resolves the daemon-wide libgit2 path from input or env", () => {
   process.env.GODDARD_GIT_LIBGIT2_PATH = "/runtime/native/libgit2/env.dylib"
-  process.env.REVIEW_SYNC_LIBGIT2_PATH = "/runtime/native/libgit2/env.dylib"
 
   expect(resolveRuntimeConfig({ port: 0 }).gitLibgit2Path).toBe(
     "/runtime/native/libgit2/env.dylib",
@@ -688,16 +680,14 @@ test("daemon runtime resolves the daemon-wide libgit2 path from input or env", (
   ).toBe("/runtime/native/libgit2/input.dylib")
 })
 
-test("daemon runtime still accepts the legacy review-sync libgit2 env alias", () => {
+test("daemon runtime ignores the removed review-sync libgit2 env alias", () => {
   delete process.env.GODDARD_GIT_LIBGIT2_PATH
   process.env.REVIEW_SYNC_LIBGIT2_PATH = "/runtime/native/libgit2/legacy-env.dylib"
 
-  expect(resolveRuntimeConfig({ port: 0 }).gitLibgit2Path).toBe(
-    "/runtime/native/libgit2/legacy-env.dylib",
-  )
+  expect(resolveRuntimeConfig({ port: 0 }).gitLibgit2Path).toBeUndefined()
 })
 
-test("daemon startup logs the daemon-wide libgit2 runtime path", async () => {
+test("daemon startup validates the daemon-wide libgit2 runtime path", async () => {
   const gitLibgit2Path = "/runtime/native/libgit2/libgit2.dylib"
   const { logs, result: exitCode } = await captureJsonLogs(() =>
     runDaemon({
@@ -710,11 +700,11 @@ test("daemon startup logs the daemon-wide libgit2 runtime path", async () => {
     }),
   )
 
-  expect(exitCode).toBe(0)
+  expect(exitCode).toBe(1)
   expect(logs).toContainEqual(
     expect.objectContaining({
-      event: "daemon.startup",
-      gitLibgit2Path,
+      event: "daemon.run_failed",
+      errorMessage: expect.stringContaining("Unable to load libgit2"),
     }),
   )
 })

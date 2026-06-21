@@ -47,7 +47,7 @@ export function resolveRuntimeConfig(input: RuntimeConfigInput = {}): ResolvedRu
 }
 
 function resolveGitLibgit2Path(input: RuntimeConfigInput, env: RuntimeEnv) {
-  return input.gitLibgit2Path ?? env.GODDARD_GIT_LIBGIT2_PATH ?? env.REVIEW_SYNC_LIBGIT2_PATH
+  return input.gitLibgit2Path ?? env.GODDARD_GIT_LIBGIT2_PATH
 }
 
 export function prependAgentBinToPath(

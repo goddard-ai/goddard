@@ -6,6 +6,7 @@ import {
   type EventBus,
   type DaemonEventEnvelope as PluginDaemonEventEnvelope,
 } from "@goddard-ai/daemon-plugin"
+import { validateLibgit2Runtime } from "@goddard-ai/git"
 import { toErrorProperties } from "@goddard-ai/logs"
 import { getErrorMessage, isObject } from "radashi"
 
@@ -67,6 +68,11 @@ export async function createDaemonRuntime(
     port: options.port,
     gitLibgit2Path: options.gitLibgit2Path,
   })
+  if (runtime.gitLibgit2Path) {
+    validateLibgit2Runtime({
+      libgit2PathCandidates: [runtime.gitLibgit2Path],
+    })
+  }
   const store =
     options.store ??
     openComposedDaemonStore(undefined, ({ error, filename }) => {

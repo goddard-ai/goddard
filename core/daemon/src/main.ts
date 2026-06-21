@@ -72,7 +72,6 @@ function applyGitLibgit2Path(value?: string) {
   }
 
   process.env.GODDARD_GIT_LIBGIT2_PATH = value
-  process.env.REVIEW_SYNC_LIBGIT2_PATH = value
 }
 
 function resolveCliPort(value?: string) {
@@ -119,11 +118,6 @@ export async function main(argv = process.argv.slice(2)) {
             long: "git-libgit2-path",
             description: "Private packaged libgit2 path used by daemon Git hosts",
           }),
-          reviewSyncLibgit2Path: option({
-            type: optional(string),
-            long: "review-sync-libgit2-path",
-            description: "Legacy alias for --git-libgit2-path",
-          }),
           dataProfile: option({
             type: optional(oneOf(daemonDataProfiles)),
             long: "data-profile",
@@ -147,7 +141,7 @@ export async function main(argv = process.argv.slice(2)) {
         },
         handler: async (args) => {
           applyDataProfile(args.dataProfile)
-          const gitLibgit2Path = args.gitLibgit2Path ?? args.reviewSyncLibgit2Path
+          const gitLibgit2Path = args.gitLibgit2Path
           applyGitLibgit2Path(gitLibgit2Path)
 
           // Load the runtime only when executing `run` so `--help` stays side-effect free.

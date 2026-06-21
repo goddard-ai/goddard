@@ -148,6 +148,9 @@ export function resolveGitHostMode(env: Record<string, string | undefined> = pro
   if (env.GODDARD_GIT_HOST === "libgit2") {
     return "libgit2"
   }
+  if (env.GODDARD_GIT_LIBGIT2_PATH) {
+    return "libgit2"
+  }
   return "auto"
 }
 
@@ -505,6 +508,12 @@ export function createLibgit2GitHost(
   }
 }
 
+export function validateLibgit2Runtime(options: { libgit2PathCandidates?: string[] } = {}) {
+  createLibgit2GitHost(createCliGitHost(), {
+    libgit2PathCandidates: options.libgit2PathCandidates,
+  })
+}
+
 function ensureLibgit2(candidates?: string[]) {
   if (!candidates && initializedLibgit2) {
     return initializedLibgit2
@@ -618,7 +627,6 @@ function libgit2PathCandidates() {
   return [
     process.env.GODDARD_GIT_LIBGIT2_PATH,
     process.env.LIBGIT2_PATH,
-    process.env.REVIEW_SYNC_LIBGIT2_PATH,
     `libgit2.${suffix}`,
     `/opt/homebrew/lib/libgit2.${suffix}`,
     `/usr/local/lib/libgit2.${suffix}`,

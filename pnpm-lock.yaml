@@ -462,6 +462,9 @@ importers:
       '@goddard-ai/default-features':
         specifier: workspace:*
         version: link:../default-features
+      '@goddard-ai/git':
+        specifier: workspace:*
+        version: link:../git
       '@goddard-ai/inbox':
         specifier: workspace:*
         version: link:../../features/inbox

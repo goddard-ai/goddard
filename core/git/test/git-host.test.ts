@@ -17,14 +17,12 @@ import { createFakeGitHost } from "../src/testing.ts"
 const originalGitHost = process.env.GODDARD_GIT_HOST
 const originalGitLibgit2Path = process.env.GODDARD_GIT_LIBGIT2_PATH
 const originalLibgit2Path = process.env.LIBGIT2_PATH
-const originalReviewSyncLibgit2Path = process.env.REVIEW_SYNC_LIBGIT2_PATH
 const tempRoots: string[] = []
 
 afterEach(async () => {
   restoreEnv("GODDARD_GIT_HOST", originalGitHost)
   restoreEnv("GODDARD_GIT_LIBGIT2_PATH", originalGitLibgit2Path)
   restoreEnv("LIBGIT2_PATH", originalLibgit2Path)
-  restoreEnv("REVIEW_SYNC_LIBGIT2_PATH", originalReviewSyncLibgit2Path)
   resetGitHostForTests()
   while (tempRoots.length > 0) {
     await removeTemporaryPath(tempRoots.pop()!)
@@ -35,6 +33,7 @@ test("Git host mode defaults to auto and honors explicit modes", () => {
   expect(resolveGitHostMode({})).toBe("auto")
   expect(resolveGitHostMode({ GODDARD_GIT_HOST: "cli" })).toBe("cli")
   expect(resolveGitHostMode({ GODDARD_GIT_HOST: "libgit2" })).toBe("libgit2")
+  expect(resolveGitHostMode({ GODDARD_GIT_LIBGIT2_PATH: "/runtime/libgit2.dylib" })).toBe("libgit2")
 })
 
 test("forced CLI mode does not require libgit2", async () => {
