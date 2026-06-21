@@ -28,6 +28,19 @@ async function createTestStore(options: { inlineByteLimit?: number } = {}) {
   })
 }
 
+test("opens SQLite memory database without creating a parent directory", () => {
+  const store = createLogStore({ databasePath: ":memory:" })
+
+  store.append({
+    scope: "daemon",
+    level: "info",
+    message: "daemon.startup",
+  })
+
+  expect(store.query().map((entry) => entry.message)).toEqual(["daemon.startup"])
+  store.close()
+})
+
 test("logger writes compact log rows", async () => {
   const store = await createTestStore()
   const logger = createLogger({ scope: "daemon", store, pid: 123 })

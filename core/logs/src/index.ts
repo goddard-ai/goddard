@@ -100,7 +100,12 @@ const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 export function createLogStore(options: { databasePath?: string; inlineByteLimit?: number } = {}) {
   const databasePath = options.databasePath ?? getGoddardLogDatabasePath()
-  mkdirSync(dirname(databasePath), { recursive: true })
+  if (databasePath !== ":memory:") {
+    const databaseDir = dirname(databasePath)
+    if (databaseDir !== ".") {
+      mkdirSync(databaseDir, { recursive: true })
+    }
+  }
   const db = new Database(databasePath, { create: true })
   db.exec("PRAGMA journal_mode = WAL")
   db.exec("PRAGMA busy_timeout = 5000")
