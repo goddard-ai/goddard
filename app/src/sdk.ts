@@ -1,8 +1,8 @@
 import { GoddardSdk } from "@goddard-ai/sdk"
 
-import { desktopDaemonClient } from "./daemon-client.ts"
+import { browserDaemonClient } from "./daemon-client.ts"
 
-/** Shared browser-side SDK instance backed by the Electrobun daemon bridge. */
+/** Shared browser-side SDK instance backed by direct loopback daemon IPC. */
 export const goddardSdk = new GoddardSdk({
-  client: desktopDaemonClient,
+  client: browserDaemonClient,
 })

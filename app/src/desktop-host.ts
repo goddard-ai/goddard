@@ -11,6 +11,7 @@ import type {
   DaemonRequestResponse,
   DaemonSendInput,
   DaemonStreamTargetInput,
+  DaemonWebviewAccess,
   ProjectGitStatus,
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
@@ -79,6 +80,9 @@ export interface DesktopHostBridge {
     name: Name,
     payload: DaemonRequestPayload<Name>,
   ): Promise<DaemonRequestResponse<Name>>
+
+  /** Issues short-lived daemon access for direct IPC from this desktop webview. */
+  createDaemonWebviewAccessToken(origin: string): Promise<DaemonWebviewAccess>
 
   /** Opens one daemon IPC stream subscription through the Bun host bridge. */
   daemonSubscribe<Name extends DaemonStreamName>(
@@ -218,6 +222,11 @@ export async function daemonSend<Name extends DaemonRequestName>(
   return (await rpc.request.daemonSend(input)) as DaemonRequestResponse<Name>
 }
 
+/** Issues short-lived daemon access for direct IPC from this desktop webview. */
+export async function createDaemonWebviewAccessToken(origin: string) {
+  return await rpc.request.daemonWebviewAccess({ origin })
+}
+
 function normalizeDaemonStreamTarget<Name extends DaemonStreamName>(
   target: Name | DaemonStreamTargetInput<Name>,
 ): DaemonStreamTargetInput<Name> {
@@ -258,6 +267,7 @@ export const desktopHost: DesktopHostBridge = {
   mainWindowReady,
   openExternal,
   daemonSend,
+  createDaemonWebviewAccessToken,
   daemonSubscribe,
   // Resolve lazily so the desktop bridge and SDK transport can share a module cycle safely.
   get sdk() {

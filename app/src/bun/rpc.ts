@@ -8,6 +8,7 @@ import {
   daemonSend,
   daemonSubscribe,
   daemonUnsubscribe,
+  daemonWebviewAccess,
 } from "./daemon.ts"
 import { writeAppLog } from "./logging.ts"
 import { getMainWindow, showMainWindow } from "./main-window.ts"
@@ -38,6 +39,7 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
       daemonSubscribe: async (input) => await daemonSubscribe(input),
       daemonUnsubscribe: async (input) => await daemonUnsubscribe(input),
       daemonResetSubscriptions: async (input) => await daemonResetSubscriptions(input),
+      daemonWebviewAccess: async (input) => await daemonWebviewAccess(input),
       mainWindowReady: async () => {
         showMainWindow()
         return {}
