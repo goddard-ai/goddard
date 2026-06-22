@@ -28,7 +28,7 @@ import * as acp from "acp-client/protocol"
 import { clamp, getErrorMessage, unique } from "radashi"
 
 import type { SessionDb } from "../daemon.ts"
-import type { SessionEventDefinitions } from "../events.ts"
+import type { sessionEvents } from "../events.ts"
 import {
   parseSessionIdleShutdownDurationMs,
   SessionErrorCodes,
@@ -58,9 +58,7 @@ import {
   type SessionDraftSuggestionsRequest,
   type SessionLaunchPreviewRequest,
   type SessionLaunchPreviewResponse,
-  type SessionLifecycleEvent,
   type SessionLifecycleField,
-  type SessionMessageEvent,
   type SessionsConfig,
   type SessionSubpackagesRequest,
   type SessionSubpackagesResponse,
@@ -680,7 +678,7 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
 const DEFAULT_SESSION_PAGE_SIZE = 20
 const MAX_SESSION_PAGE_SIZE = 100
 
-export type SessionEventEmitter = EventBus<SessionEventDefinitions>
+export type SessionEventEmitter = EventBus<typeof sessionEvents>
 
 /** Normalizes optional session page sizes to the daemon's supported bounds. */
 function normalizeSessionPageSize(limit?: number): number {
@@ -696,8 +694,6 @@ export function createSessionManager({
   db,
   getDaemonUrl,
   createAgentEnvironment,
-  emitMessage,
-  emitLifecycleEvent,
   events,
   configProvider,
   log,
@@ -709,8 +705,6 @@ export function createSessionManager({
   db: SessionDb
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
-  emitMessage: (id: SessionId, message: SessionMessageEvent) => void
-  emitLifecycleEvent: (event: SessionLifecycleEvent) => void
   events: SessionEventEmitter
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
@@ -775,7 +769,6 @@ export function createSessionManager({
     memory,
     log,
     events,
-    emitMessage,
     activeTurns,
     idleShutdown,
     sessionTitles,
@@ -806,7 +799,7 @@ export function createSessionManager({
       return
     }
 
-    emitLifecycleEvent({
+    void events.emit("session.lifecycle.updated", {
       kind: "sessionUpdated",
       session,
       changed: unique(changed),

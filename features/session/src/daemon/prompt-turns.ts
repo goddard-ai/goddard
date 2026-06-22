@@ -106,7 +106,6 @@ export function createPromptTurnFeature({
   memory,
   log,
   events,
-  emitMessage,
   activeTurns,
   idleShutdown,
   sessionTitles,
@@ -118,7 +117,6 @@ export function createPromptTurnFeature({
   memory: SessionMemory
   log: DaemonLogService
   events: SessionEventEmitter
-  emitMessage: (id: SessionId, message: SessionMessageEvent) => void
   activeTurns: ReturnType<typeof createActiveTurnStore>
   idleShutdown: ReturnType<typeof createIdleShutdownController>
   sessionTitles: ReturnType<typeof createSessionTitleRuntime>
@@ -154,12 +152,12 @@ export function createPromptTurnFeature({
         : null
     const messageEvent = options.messageEvent ?? turnMessage
     if (messageEvent) {
-      emitMessage(active.id, messageEvent)
+      void events.emit("session.message", { id: active.id, message: messageEvent })
       return
     }
 
     if (isContextUsageUpdateMessage(message)) {
-      emitMessage(active.id, message)
+      void events.emit("session.message", { id: active.id, message })
       return
     }
 
