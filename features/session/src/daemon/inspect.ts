@@ -1,7 +1,7 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
 import { delimiter } from "node:path"
-import type { ACPRegistryService } from "@goddard-ai/daemon-plugin"
+import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import { createAcpClient } from "acp-client"
 import * as acp from "acp-client/protocol"
 
@@ -11,7 +11,7 @@ import { spawnAgentProcess } from "./agent-process.ts"
 async function startAdapterInspection(
   adapter: string,
   cwd: string,
-  registryService: ACPRegistryService,
+  managedAgent: ManagedAgentService,
 ) {
   const processHandle = await spawnAgentProcess({
     daemonUrl: "http://localhost:0",
@@ -22,7 +22,7 @@ async function startAdapterInspection(
       ...env,
       PATH: [os.tmpdir(), env?.PATH ?? process.env.PATH].filter(Boolean).join(delimiter),
     }),
-    registryService,
+    managedAgent,
   })
   try {
     const sessionUpdates: acp.AnyMessage[] = []
@@ -65,9 +65,9 @@ async function startAdapterInspection(
 export async function inspectAdapterSession(
   adapter: string,
   cwd: string,
-  registryService: ACPRegistryService,
+  managedAgent: ManagedAgentService,
 ) {
-  const inspection = await startAdapterInspection(adapter, cwd, registryService)
+  const inspection = await startAdapterInspection(adapter, cwd, managedAgent)
 
   try {
     const session = await inspection.client.newSession({
@@ -92,9 +92,9 @@ export async function listAdapterSessions(
   adapter: string,
   cwd: string,
   request: acp.ListSessionsRequest,
-  registryService: ACPRegistryService,
+  managedAgent: ManagedAgentService,
 ) {
-  const inspection = await startAdapterInspection(adapter, cwd, registryService)
+  const inspection = await startAdapterInspection(adapter, cwd, managedAgent)
 
   try {
     const initialize = inspection.client.initialize

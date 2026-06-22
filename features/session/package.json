@@ -71,6 +71,7 @@
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/managed-agent": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",

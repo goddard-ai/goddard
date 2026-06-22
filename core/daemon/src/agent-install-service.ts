@@ -7,6 +7,7 @@ import type {
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import {
+  createAcpRegistryService,
   ensureAgentInstalled,
   getInstalledAgent,
   listInstalledAgents,
@@ -26,7 +27,7 @@ type AcpClientManagedInstallApi = {
 }
 
 type AgentInstallServiceOptions = {
-  registryService: ACPRegistryService
+  registryService?: ACPRegistryService
   cacheDir?: string
   now?: () => number
   usageStore?: ManagedAgentUsageStore
@@ -55,6 +56,7 @@ export function createAgentInstallService(
 ): DaemonAgentInstallService {
   const cacheDir = resolve(options.cacheDir ?? getDaemonAgentInstallCacheDir())
   const managedInstallApi = options.managedInstallApi ?? defaultManagedInstallApi
+  const registryService = options.registryService ?? createAcpRegistryService()
 
   function installOptions(extra: AgentInstallOptions = {}): AgentInstallOptions {
     return {
@@ -74,7 +76,7 @@ export function createAgentInstallService(
       return configuredAgent
     }
 
-    const registryEntry = await options.registryService.getAdapter(input.agent)
+    const registryEntry = await registryService.getAdapter(input.agent)
     if (!registryEntry.adapter) {
       throw new Error(`Managed ACP agent not found: ${input.agent}`)
     }

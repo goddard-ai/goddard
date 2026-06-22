@@ -369,7 +369,6 @@ export type DaemonSetupSubstrate = {
     readonly delete: () => void | Promise<void>
   }
   readonly log: DaemonLogService
-  readonly registryService: ACPRegistryService
   readonly agentInstallService: DaemonAgentInstallService
   readonly sessionContext: DaemonSessionContextService
   readonly ipc: {

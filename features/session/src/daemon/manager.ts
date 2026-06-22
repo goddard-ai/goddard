@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
-  ACPRegistryService,
   DaemonAgentEnvironmentService,
   DaemonAgentInstallService,
   DaemonConfigProvider,
@@ -13,6 +12,7 @@ import type {
   DaemonSessionContextService,
   EventBus,
 } from "@goddard-ai/daemon-plugin"
+import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
@@ -697,7 +697,7 @@ export function createSessionManager({
   events,
   configProvider,
   log,
-  registryService,
+  managedAgent,
   agentInstallService,
   sessionContext: sessionContextService,
   idleSessionShutdownTimeoutMs,
@@ -708,7 +708,7 @@ export function createSessionManager({
   events: SessionEventEmitter
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
-  registryService: ACPRegistryService
+  managedAgent: ManagedAgentService
   agentInstallService: DaemonAgentInstallService
   sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
@@ -782,7 +782,7 @@ export function createSessionManager({
     configProvider,
     getDaemonUrl,
     createAgentEnvironment,
-    registryService,
+    managedAgent,
     agentInstallService,
     getPackageVersion,
     handlePermissionRequest: promptTurns.handlePermissionRequest,
@@ -1497,7 +1497,7 @@ export function createSessionManager({
           createAgentEnvironment: createAgentEnvironment,
           env: resolvedRequest.env,
           envPolicy: resolvedConfig?.sessions?.envPolicy,
-          registryService: registryService,
+          managedAgent,
           agentInstallService: agentInstallService,
           registry: resolvedRegistry,
           managedAgents: resolvedConfig?.agents?.managed,
