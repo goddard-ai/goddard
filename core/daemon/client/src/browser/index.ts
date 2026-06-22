@@ -107,13 +107,7 @@ export function createBrowserDaemonIpcClient(
     fetch: (async (input, init) => {
       if ("access" in options) {
         const access = await options.access()
-        const response = await sendRequest(input, init, access.daemonUrl, access.token)
-        if (response.status !== 401 && response.status !== 403) {
-          return response
-        }
-
-        const refreshedAccess = await options.access()
-        return sendRequest(input, init, refreshedAccess.daemonUrl, refreshedAccess.token)
+        return sendRequest(input, init, access.daemonUrl, access.token)
       }
 
       const token = "token" in options ? await options.token?.() : undefined

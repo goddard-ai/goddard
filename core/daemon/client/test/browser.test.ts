@@ -44,8 +44,7 @@ test("createBrowserDaemonIpcClient resolves lazy browser access before requests"
   expect(requests[0].headers.get("authorization")).toBe("Bearer access-token")
 })
 
-test("createBrowserDaemonIpcClient refreshes lazy browser access once after authorization denial", async () => {
-  const tokens = ["expired-token", "fresh-token"]
+test("createBrowserDaemonIpcClient exposes lazy browser access authorization denial", async () => {
   const requests: Request[] = []
   let accessCalls = 0
   const client = createBrowserDaemonIpcClient({
@@ -53,26 +52,21 @@ test("createBrowserDaemonIpcClient refreshes lazy browser access once after auth
       accessCalls += 1
       return {
         daemonUrl: "http://127.0.0.1:49827/",
-        token: tokens.shift(),
+        token: "expired-token",
       }
     },
     fetch: (async (input, init) => {
       const request = new Request(input, init)
       requests.push(request)
-      if (request.headers.get("authorization") === "Bearer expired-token") {
-        return Response.json({ error: "Forbidden" }, { status: 403 })
-      }
-
-      return Response.json({ ok: true })
+      return Response.json({ error: "Forbidden" }, { status: 403 })
     }) as typeof fetch,
   })
 
-  await expect(client.daemon.health()).resolves.toEqual({ ok: true })
+  await expect(client.daemon.health()).rejects.toBeInstanceOf(BrowserDaemonAuthorizationError)
 
-  expect(accessCalls).toBe(2)
+  expect(accessCalls).toBe(1)
   expect(requests.map((request) => request.headers.get("authorization"))).toEqual([
     "Bearer expired-token",
-    "Bearer fresh-token",
   ])
 })
 

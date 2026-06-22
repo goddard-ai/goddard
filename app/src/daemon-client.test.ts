@@ -1,3 +1,4 @@
+import { BrowserDaemonAuthorizationError } from "@goddard-ai/daemon-client/browser"
 import { afterEach, expect, test, vi } from "vitest"
 
 import { createBrowserDaemonClient } from "./daemon-client.ts"
@@ -25,12 +26,11 @@ test("browser daemon client uses hosted browser pairing inputs when no desktop b
   expect(authorizations).toEqual(["Bearer hosted-token"])
 })
 
-test("desktop browser daemon client refreshes a rejected webview token once", async () => {
-  const tokens = ["expired-token", "fresh-token"]
+test("desktop browser daemon client exposes a rejected webview token", async () => {
   window.__goddardDesktop = {
     createDaemonWebviewAccessToken: vi.fn(async () => ({
       daemonUrl: "http://127.0.0.1:49827/",
-      token: tokens.shift() ?? "unexpected-token",
+      token: "expired-token",
       origin: window.location.origin,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     })),
@@ -41,20 +41,16 @@ test("desktop browser daemon client refreshes a rejected webview token once", as
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const authorization = new Request(input, init).headers.get("authorization")
       authorizations.push(authorization)
-      if (authorization === "Bearer expired-token") {
-        return Response.json({ error: "Forbidden" }, { status: 403 })
-      }
-
-      return Response.json({ ok: true })
+      return Response.json({ error: "Forbidden" }, { status: 403 })
     }),
   )
 
   const client = createBrowserDaemonClient()
 
-  await expect(client.daemon.health()).resolves.toEqual({ ok: true })
-  expect(window.__goddardDesktop.createDaemonWebviewAccessToken).toHaveBeenCalledTimes(2)
+  await expect(client.daemon.health()).rejects.toBeInstanceOf(BrowserDaemonAuthorizationError)
+  expect(window.__goddardDesktop.createDaemonWebviewAccessToken).toHaveBeenCalledTimes(1)
   expect(window.__goddardDesktop.createDaemonWebviewAccessToken).toHaveBeenCalledWith(
     window.location.origin,
   )
-  expect(authorizations).toEqual(["Bearer expired-token", "Bearer fresh-token"])
+  expect(authorizations).toEqual(["Bearer expired-token"])
 })
