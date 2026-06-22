@@ -1,5 +1,5 @@
 import { t } from "@lingui/core/macro"
-import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/sdk"
+import type { ManagedAgentCatalogEntry, ManagedAgentInstallationState } from "@goddard-ai/sdk"
 import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
@@ -21,10 +21,10 @@ import {
 } from "./styled.tsrx"
 import styles from "./adapter-installations-section.style.ts"
 
-const availableAdapterMinimumFuzzyScore = 0.12
+const availableManagedAgentMinimumFuzzyScore = 0.12
 
 export const adapterInstallationsSettingsSectionMetadata = {
-  id: "settings-adapter-installations",
+  id: "settings-managed-agent-installations",
   get description() {
     return t`Choose which agent harnesses are available when launching sessions.`
   },
@@ -33,15 +33,15 @@ export const adapterInstallationsSettingsSectionMetadata = {
   },
 }
 
-type SearchableAdapterCatalogEntry = {
-  adapter: AdapterCatalogEntry;
+type SearchableManagedAgentCatalogEntry = {
+  managedAgent: ManagedAgentCatalogEntry;
   preparedDescription: fuzzysort.PreparedTarget;
   preparedId: fuzzysort.PreparedTarget;
   preparedName: fuzzysort.PreparedTarget;
   preparedVersion: fuzzysort.PreparedTarget;
 }
 
-function getInstallationDetail(installation: AdapterInstallationState) {
+function getInstallationDetail(installation: ManagedAgentInstallationState) {
   if (installation.method === "config") {
     return t`Configured`
   }
@@ -70,45 +70,45 @@ function isGithubRepository(repository: string | null | undefined) {
   }
 }
 
-function prepareAdapterSearchItems(adapters: readonly AdapterCatalogEntry[]) {
-  return adapters.map(
-    (adapter): SearchableAdapterCatalogEntry => ({
-      adapter,
-      preparedDescription: fuzzysort.prepare(adapter.description),
-      preparedId: fuzzysort.prepare(adapter.id),
-      preparedName: fuzzysort.prepare(adapter.name),
-      preparedVersion: fuzzysort.prepare(adapter.version),
+function prepareManagedAgentSearchItems(managedAgents: readonly ManagedAgentCatalogEntry[]) {
+  return managedAgents.map(
+    (managedAgent): SearchableManagedAgentCatalogEntry => ({
+      managedAgent,
+      preparedDescription: fuzzysort.prepare(managedAgent.description),
+      preparedId: fuzzysort.prepare(managedAgent.id),
+      preparedName: fuzzysort.prepare(managedAgent.name),
+      preparedVersion: fuzzysort.prepare(managedAgent.version),
     }),
   )
 }
 
-function filterPreparedAvailableAdapters(
-  adapters: readonly SearchableAdapterCatalogEntry[],
+function filterPreparedAvailableManagedAgents(
+  managedAgents: readonly SearchableManagedAgentCatalogEntry[],
   searchQuery: string,
 ) {
   if (isEmptyQuery(searchQuery)) {
-    return adapters.map((entry) => entry.adapter)
+    return managedAgents.map((entry) => entry.managedAgent)
   }
 
   return fuzzysort.searchFields(
     searchQuery,
-    adapters,
+    managedAgents,
     [
       { key: "name", extract: (entry) => entry.preparedName },
       { key: "id", extract: (entry) => entry.preparedId },
       { key: "description", extract: (entry) => entry.preparedDescription },
       { key: "version", extract: (entry) => entry.preparedVersion },
     ],
-    { threshold: availableAdapterMinimumFuzzyScore },
-  ).items.map((item) => item.value.adapter)
+    { threshold: availableManagedAgentMinimumFuzzyScore },
+  ).items.map((item) => item.value.managedAgent)
 }
 
-function AdapterInstallationRow(props: {
-  adapter: AdapterCatalogEntry;
-  installation: AdapterInstallationState;
+function ManagedAgentInstallationRow(props: {
+  managedAgent: ManagedAgentCatalogEntry;
+  installation: ManagedAgentInstallationState;
   pending: boolean;
-  onInstall: (adapterId: string) => Promise<void>;
-  onUninstall: (adapterId: string) => Promise<void>;
+  onInstall: (managedAgentId: string) => Promise<void>;
+  onUninstall: (managedAgentId: string) => Promise<void>;
 }) @{
   const actionDisabled =
     props.pending || props.installation.method === "config" || !props.installation.installable
@@ -123,29 +123,29 @@ function AdapterInstallationRow(props: {
   <li class={styles.adapterItem}>
     <span class={styles.adapterBody}>
       <span class={styles.adapterTitleRow}>
-        <AcpAgentIcon class={styles.adapterIcon} icon={props.adapter.icon ?? null} />
-        <span class={styles.adapterName}>{props.adapter.name}</span>
+        <AcpAgentIcon class={styles.adapterIcon} icon={props.managedAgent.icon ?? null} />
+        <span class={styles.adapterName}>{props.managedAgent.name}</span>
       </span>
       <span class={styles.adapterMeta}>
-        {props.adapter.version}
+        {props.managedAgent.version}
         {" · "}
         {getInstallationDetail(props.installation)}
-        {props.adapter.unofficial ? ` · ${t`Unofficial`}` : ""}
+        {props.managedAgent.unofficial ? ` · ${t`Unofficial`}` : ""}
       </span>
-      <span class={styles.adapterDescription}>{props.adapter.description}</span>
+      <span class={styles.adapterDescription}>{props.managedAgent.description}</span>
 
-      @if (props.adapter.website || props.adapter.repository) {
+      @if (props.managedAgent.website || props.managedAgent.repository) {
         <span class={styles.adapterLinks}>
-          @if (props.adapter.website) {
-            <ExternalLink class={styles.adapterLink} href={props.adapter.website}>
+          @if (props.managedAgent.website) {
+            <ExternalLink class={styles.adapterLink} href={props.managedAgent.website}>
               <Globe aria-hidden={true} size={14} strokeWidth={2.1} />
               {t`Website`}
             </ExternalLink>
           }
 
-          @if (props.adapter.repository) {
-            <ExternalLink class={styles.adapterLink} href={props.adapter.repository}>
-              @if (isGithubRepository(props.adapter.repository)) {
+          @if (props.managedAgent.repository) {
+            <ExternalLink class={styles.adapterLink} href={props.managedAgent.repository}>
+              @if (isGithubRepository(props.managedAgent.repository)) {
                 <svg aria-hidden={true} class={styles.githubIcon} viewBox="0 0 16 16">
                   <path
                     fill="currentColor"
@@ -168,11 +168,11 @@ function AdapterInstallationRow(props: {
       type="button"
       onClick={async () => {
         if (props.installation.installed) {
-          await props.onUninstall(props.adapter.id)
+          await props.onUninstall(props.managedAgent.id)
           return
         }
 
-        await props.onInstall(props.adapter.id)
+        await props.onInstall(props.managedAgent.id)
       }}
     >
       <ActionIcon aria-hidden={true} size={15} strokeWidth={2.2} />
@@ -181,68 +181,68 @@ function AdapterInstallationRow(props: {
   </li>
 }
 
-function AdapterInstallationList() @{
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+function ManagedAgentInstallationList() @{
+  const managedAgentCatalog = useQuery(goddardSdk.managedAgent.list, {
     params: [{ includeUninstalled: true }],
   })
-  const [pendingAdapterId, setPendingAdapterId] = useState<string | null>(null)
+  const [pendingManagedAgentId, setPendingManagedAgentId] = useState<string | null>(null)
   const [availableAgentSearchQuery, setAvailableAgentSearchQuery] = useState("")
-  const installationsByAdapterId = new Map(adapterCatalog.installations.map(
-    (installation) => [installation.adapterId, installation],
+  const installationsByManagedAgentId = new Map(managedAgentCatalog.installations.map(
+    (installation) => [installation.managedAgentId, installation],
   ))
-  const installedAdapters = adapterCatalog.adapters.filter((adapter) => {
-    return installationsByAdapterId.get(adapter.id)?.installed
+  const installedManagedAgents = managedAgentCatalog.managedAgents.filter((managedAgent) => {
+    return installationsByManagedAgentId.get(managedAgent.id)?.installed
   })
-  const availableAdapters = adapterCatalog.adapters.filter((adapter) => {
-    const installation = installationsByAdapterId.get(adapter.id)
+  const availableManagedAgents = managedAgentCatalog.managedAgents.filter((managedAgent) => {
+    const installation = installationsByManagedAgentId.get(managedAgent.id)
     return installation && !installation.installed
   })
-  const visibleAvailableAdapters = filterPreparedAvailableAdapters(
-    prepareAdapterSearchItems(availableAdapters),
+  const visibleAvailableManagedAgents = filterPreparedAvailableManagedAgents(
+    prepareManagedAgentSearchItems(availableManagedAgents),
     availableAgentSearchQuery,
   )
 
-  async function installAdapter(adapterId: string) {
-    setPendingAdapterId(adapterId)
+  async function installManagedAgent(managedAgentId: string) {
+    setPendingManagedAgentId(managedAgentId)
     try {
-      await goddardSdk.adapter.install({ adapterId })
-      queryClient.invalidate(goddardSdk.adapter.list)
+      await goddardSdk.managedAgent.install({ managedAgentId })
+      queryClient.invalidate(goddardSdk.managedAgent.list)
     } finally {
-      setPendingAdapterId(null)
+      setPendingManagedAgentId(null)
     }
   }
 
-  async function uninstallAdapter(adapterId: string) {
-    setPendingAdapterId(adapterId)
+  async function uninstallManagedAgent(managedAgentId: string) {
+    setPendingManagedAgentId(managedAgentId)
     try {
-      await goddardSdk.adapter.uninstall({ adapterId })
-      queryClient.invalidate(goddardSdk.adapter.list)
+      await goddardSdk.managedAgent.uninstall({ managedAgentId })
+      queryClient.invalidate(goddardSdk.managedAgent.list)
     } finally {
-      setPendingAdapterId(null)
+      setPendingManagedAgentId(null)
     }
   }
 
-  @if (adapterCatalog.adapters.length === 0) {
+  @if (managedAgentCatalog.managedAgents.length === 0) {
     <p class={styles.emptyText}>
       {t`No agent harnesses are available.`}
     </p>
   } @else {
     <div class={styles.agentGroups}>
       <section class={styles.agentGroup}>
-        @if (installedAdapters.length === 0) {
+        @if (installedManagedAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No installed agents.`}
           </p>
         } @else {
           <ul class={styles.adapterList}>
-            @for (const adapter of installedAdapters) {
-              <AdapterInstallationRow
-                key={adapter.id}
-                {adapter}
-                installation={installationsByAdapterId.get(adapter.id)!}
-                pending={pendingAdapterId === adapter.id}
-                onInstall={installAdapter}
-                onUninstall={uninstallAdapter}
+            @for (const managedAgent of installedManagedAgents) {
+              <ManagedAgentInstallationRow
+                key={managedAgent.id}
+                {managedAgent}
+                installation={installationsByManagedAgentId.get(managedAgent.id)!}
+                pending={pendingManagedAgentId === managedAgent.id}
+                onInstall={installManagedAgent}
+                onUninstall={uninstallManagedAgent}
               />
             }
           </ul>
@@ -253,7 +253,7 @@ function AdapterInstallationList() @{
           {t`Available agents`}
         </h3>
 
-        @if (availableAdapters.length > 0) {
+        @if (availableManagedAgents.length > 0) {
           <label class={styles.searchField}>
             <span class={styles.srOnly}>
               {t`Filter available agents`}
@@ -270,24 +270,24 @@ function AdapterInstallationList() @{
             />
           </label>
         }
-        @if (availableAdapters.length === 0) {
+        @if (availableManagedAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No available agents.`}
           </p>
-        } @else if (visibleAvailableAdapters.length === 0) {
+        } @else if (visibleAvailableManagedAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No available agents match this search.`}
           </p>
         } @else {
           <ul class={styles.adapterList}>
-            @for (const adapter of visibleAvailableAdapters) {
-              <AdapterInstallationRow
-                key={adapter.id}
-                {adapter}
-                installation={installationsByAdapterId.get(adapter.id)!}
-                pending={pendingAdapterId === adapter.id}
-                onInstall={installAdapter}
-                onUninstall={uninstallAdapter}
+            @for (const managedAgent of visibleAvailableManagedAgents) {
+              <ManagedAgentInstallationRow
+                key={managedAgent.id}
+                {managedAgent}
+                installation={installationsByManagedAgentId.get(managedAgent.id)!}
+                pending={pendingManagedAgentId === managedAgent.id}
+                onInstall={installManagedAgent}
+                onUninstall={uninstallManagedAgent}
               />
             }
           </ul>
@@ -300,11 +300,11 @@ function AdapterInstallationList() @{
 export function AdapterInstallationsSettingsSection() @{
   <SettingsSection
     id={adapterInstallationsSettingsSectionMetadata.id}
-    aria-labelledby="settings-adapter-installations-heading"
+    aria-labelledby="settings-managed-agent-installations-heading"
   >
     <SettingsSectionHeader>
       <SettingsSectionTitle
-        id="settings-adapter-installations-heading"
+        id="settings-managed-agent-installations-heading"
       >{adapterInstallationsSettingsSectionMetadata.title}</SettingsSectionTitle>
       <SettingsSectionDescription>{adapterInstallationsSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
@@ -317,7 +317,7 @@ export function AdapterInstallationsSettingsSection() @{
       </SettingsHelperText>
 
       @try {
-        <AdapterInstallationList />
+        <ManagedAgentInstallationList />
       } @pending {
         <p class={styles.emptyText}>
           {t`Loading agent harnesses.`}

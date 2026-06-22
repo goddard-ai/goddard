@@ -58,10 +58,10 @@ export function AgentHarnessSelector(props: {
 }) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.managedAgent.list, {
     params: [{ cwd: form.effectiveCwd.value ?? undefined }],
   })
-  const items: SessionInputSelectItem[] = adapterCatalog.adapters.map(
+  const items: SessionInputSelectItem[] = managedAgentCatalog.managedAgents.map(
     (adapter) => ({
       value: adapter.id,
       label: adapter.name,
@@ -75,8 +75,8 @@ export function AgentHarnessSelector(props: {
   )
 
   useEffect(() => {
-    form.adapterCatalog.value = adapterCatalog
-  }, [adapterCatalog, form])
+    form.managedAgentCatalog.value = managedAgentCatalog
+  }, [managedAgentCatalog, form])
 
   <SessionInputSelect
     compact={props.compact}
@@ -85,12 +85,12 @@ export function AgentHarnessSelector(props: {
     iconOnlyTrigger={props.compact}
     {items}
     label={t`Agent harness`}
-    open={form.getPickerOpen("adapter")}
+    open={form.getPickerOpen("managedAgent")}
     placeholder={t`Select agent harness`}
     shortcut={adapterShortcut}
-    value={form.draftAdapterId.value}
+    value={form.draftManagedAgentId.value}
     onValueChange={(value) => {
-      form.draftAdapterId.value = value
+      form.draftManagedAgentId.value = value
       recordSessionLaunchAgentUse(value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
@@ -105,12 +105,14 @@ export function SessionLaunchBranchSelector(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]
@@ -162,12 +164,14 @@ export function SessionLaunchLocationSelector(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]
@@ -348,12 +352,14 @@ export function SessionLaunchPreviewSelectors(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]

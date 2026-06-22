@@ -1,31 +1,31 @@
 import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
-import type { ListAdaptersResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
+import type { ListManagedAgentsResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
 import { expect, test } from "vitest"
 
 import { filterSlashCommandSuggestions, SessionLaunchFormState } from "./launch-form-state.ts"
 import { preferredLaunchAgentId } from "./launch-preferences.ts"
 
-function createAdapterCatalog(input: {
-  adapterIds: readonly string[]
-  defaultAdapterId: string | null
-}): ListAdaptersResponse {
+function createManagedAgentCatalog(input: {
+  managedAgentIds: readonly string[]
+  defaultManagedAgentId: string | null
+}): ListManagedAgentsResponse {
   return {
-    adapters: input.adapterIds.map((id) => ({
+    managedAgents: input.managedAgentIds.map((id) => ({
       id,
       name: id,
       version: "1.0.0",
-      description: `${id} test adapter`,
+      description: `${id} test managed agent`,
       distribution: { npx: { package: id } },
       source: "config",
       unofficial: false,
     })),
-    installations: input.adapterIds.map((id) => ({
-      adapterId: id,
+    installations: input.managedAgentIds.map((id) => ({
+      managedAgentId: id,
       installed: true,
       installable: false,
       method: "config",
     })),
-    defaultAdapterId: input.defaultAdapterId,
+    defaultManagedAgentId: input.defaultManagedAgentId,
     registrySource: "cache",
     lastSuccessfulSyncAt: "2026-06-10T00:00:00.000Z",
     stale: false,
@@ -104,9 +104,9 @@ test("SessionLaunchFormState builds a worktree launch request from selected cont
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex", "pi"],
-    defaultAdapterId: "pi",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    managedAgentIds: ["codex", "pi"],
+    defaultManagedAgentId: "pi",
   })
   form.draftProjectPath.value = "/repo"
   form.draftSubpackagePath.value = "/repo/packages/app"
@@ -152,9 +152,9 @@ test("SessionLaunchFormState keeps launch leases only for unchanged local branch
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    managedAgentIds: ["codex"],
+    defaultManagedAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()
@@ -179,9 +179,9 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    managedAgentIds: ["codex"],
+    defaultManagedAgentId: "codex",
   })
   form.draftProjectPath.value = "/bare-repo"
   form.launchPreview.value = createLaunchPreview({
@@ -201,13 +201,13 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   })
 })
 
-test("SessionLaunchFormState falls back to the first valid model when adapter models change", () => {
+test("SessionLaunchFormState falls back to the first valid model when managed-agent models change", () => {
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    managedAgentIds: ["codex"],
+    defaultManagedAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()

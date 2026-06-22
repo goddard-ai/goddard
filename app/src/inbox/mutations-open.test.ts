@@ -14,13 +14,13 @@ import { queryClient } from "~/lib/query.ts"
 const inboxClient: any = {}
 const sessionClient: any = {}
 const prClient: any = {}
-const adapterClient: any = {}
+const managedAgentClient: any = {}
 const cleanups: Array<() => void> = []
 
 vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
-    adapter: adapterClient,
     inbox: inboxClient,
+    managedAgent: managedAgentClient,
     pr: prClient,
     session: sessionClient,
   },
@@ -73,8 +73,8 @@ function resetSdk() {
   prClient.get = vi.fn(async ({ id }: { id: DaemonPullRequest["id"] }) => ({
     pullRequest: createFixturePullRequest({ id }),
   }))
-  adapterClient.list = vi.fn(async () => ({
-    adapters: [],
+  managedAgentClient.list = vi.fn(async () => ({
+    managedAgents: [],
   }))
 }
 
@@ -190,7 +190,7 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_session_1",
   })
-  expect(adapterClient.list).toHaveBeenCalledWith({
+  expect(managedAgentClient.list).toHaveBeenCalledWith({
     cwd: "/Users/alec/Projects/goddard-ai",
     includeUninstalled: true,
   })
@@ -234,7 +234,7 @@ test("prepareInboxItemWorkbenchTarget eagerly warms session tabs without opening
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_prepared",
   })
-  expect(adapterClient.list).toHaveBeenCalledWith({
+  expect(managedAgentClient.list).toHaveBeenCalledWith({
     cwd: "/Users/alec/Projects/goddard-ai",
     includeUninstalled: true,
   })
@@ -268,7 +268,7 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
   sessionClient.get.mockClear()
   sessionClient.history.mockClear()
   sessionClient.worktree.get.mockClear()
-  adapterClient.list.mockClear()
+  managedAgentClient.list.mockClear()
 
   await openInboxItemInWorkbench({
     item,
@@ -279,7 +279,7 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
   expect(sessionClient.get).not.toHaveBeenCalled()
   expect(sessionClient.history).not.toHaveBeenCalled()
   expect(sessionClient.worktree.get).not.toHaveBeenCalled()
-  expect(adapterClient.list).not.toHaveBeenCalled()
+  expect(managedAgentClient.list).not.toHaveBeenCalled()
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
     id: "session:ses_reused",
     kind: "sessionChat",

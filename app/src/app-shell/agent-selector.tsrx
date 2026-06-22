@@ -22,7 +22,7 @@ const noDragClass = "electrobun-webkit-app-region-no-drag"
 const agentSelectorMinimumFuzzyScore = 0.12
 
 type AgentSelectorItem = {
-  adapter: {
+  managedAgent: {
     id: string;
     icon?: string | null;
     name: string;
@@ -70,7 +70,7 @@ export function AppShellAgentSelector(props: {
   })
   const cwd =
     projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages.subpackages) : null
-  const adapterCatalog = useQuery(cwd ? goddardSdk.adapter.list : null, {
+  const managedAgentCatalog = useQuery(cwd ? goddardSdk.managedAgent.list : null, {
     params: cwd ? [{ cwd }] : null,
   })
 
@@ -81,28 +81,29 @@ export function AppShellAgentSelector(props: {
     }
   }, [highlightedIndex, open.value, search])
 
-  if (!adapterCatalog) {
+  if (!managedAgentCatalog) {
     return null
   }
 
-  const agentId = resolvePreferredLaunchAgentId(adapterCatalog)
-  const selectedAgent = adapterCatalog.adapters.find((adapter) => adapter.id === agentId) ?? null
-  const searchableAdapters: AgentSelectorItem[] = adapterCatalog.adapters.map(
-    (adapter) => ({
-      adapter,
-      preparedId: fuzzysort.prepare(adapter.id),
-      preparedName: fuzzysort.prepare(adapter.name),
-      preparedVersion: fuzzysort.prepare(adapter.version),
-      preparedDescription: fuzzysort.prepare(adapter.description ?? ""),
-      preparedUnofficial: fuzzysort.prepare(adapter.unofficial ? "unofficial" : ""),
+  const agentId = resolvePreferredLaunchAgentId(managedAgentCatalog)
+  const selectedAgent =
+    managedAgentCatalog.managedAgents.find((managedAgent) => managedAgent.id === agentId) ?? null
+  const searchableManagedAgents: AgentSelectorItem[] = managedAgentCatalog.managedAgents.map(
+    (managedAgent) => ({
+      managedAgent,
+      preparedId: fuzzysort.prepare(managedAgent.id),
+      preparedName: fuzzysort.prepare(managedAgent.name),
+      preparedVersion: fuzzysort.prepare(managedAgent.version),
+      preparedDescription: fuzzysort.prepare(managedAgent.description ?? ""),
+      preparedUnofficial: fuzzysort.prepare(managedAgent.unofficial ? "unofficial" : ""),
     }),
   )
-  const filteredAdapters =
+  const filteredManagedAgents =
     isEmptyQuery(search.value)
-      ? adapterCatalog.adapters
+      ? managedAgentCatalog.managedAgents
       : fuzzysort.searchFields(
           search.value,
-          searchableAdapters,
+          searchableManagedAgents,
           [
             { key: "id", extract: (item) => item.preparedId },
             { key: "name", extract: (item) => item.preparedName },
@@ -112,36 +113,38 @@ export function AppShellAgentSelector(props: {
           ],
           { threshold: 0 },
         ).items.filter((item) => isStrongMatch(search.value, item)).map(
-          (item) => item.value.adapter,
+          (item) => item.value.managedAgent,
         )
-  const highlightedAdapterIndex =
-    filteredAdapters.length === 0
+  const highlightedManagedAgentIndex =
+    filteredManagedAgents.length === 0
       ? 0
-      : Math.min(highlightedIndex.value, filteredAdapters.length - 1)
-  const highlightedAdapter = filteredAdapters[highlightedAdapterIndex] ?? null
+      : Math.min(highlightedIndex.value, filteredManagedAgents.length - 1)
+  const highlightedManagedAgent = filteredManagedAgents[highlightedManagedAgentIndex] ?? null
 
-  function moveHighlightedAdapter(step: 1 | -1) {
-    if (filteredAdapters.length === 0) {
+  function moveHighlightedManagedAgent(step: 1 | -1) {
+    if (filteredManagedAgents.length === 0) {
       highlightedIndex.value = 0
       return
     }
 
-    const currentIndex = Math.min(highlightedIndex.value, filteredAdapters.length - 1)
-    highlightedIndex.value = (currentIndex + step + filteredAdapters.length) %
-    filteredAdapters.length
+    const currentIndex = Math.min(highlightedIndex.value, filteredManagedAgents.length - 1)
+    highlightedIndex.value = (currentIndex + step + filteredManagedAgents.length) %
+    filteredManagedAgents.length
   }
 
-  function commitAdapter(adapter: (typeof filteredAdapters)[number] | null) {
-    if (!adapter) {
+  function commitManagedAgent(managedAgent: (typeof filteredManagedAgents)[number] | null) {
+    if (!managedAgent) {
       return
     }
 
-    recordSessionLaunchAgentUse(adapter.id)
+    recordSessionLaunchAgentUse(managedAgent.id)
     open.value = false
   }
 
-  function resetHighlightedAdapter() {
-    const selectedIndex = filteredAdapters.findIndex((adapter) => adapter.id === agentId)
+  function resetHighlightedManagedAgent() {
+    const selectedIndex = filteredManagedAgents.findIndex(
+      (managedAgent) => managedAgent.id === agentId,
+    )
     highlightedIndex.value = !isEmptyQuery(search.value)
       ? 0
       : selectedIndex >= 0
@@ -150,7 +153,7 @@ export function AppShellAgentSelector(props: {
   }
 
   function openSelectorMenu() {
-    resetHighlightedAdapter()
+    resetHighlightedManagedAgent()
     open.value = true
   }
 
@@ -159,14 +162,14 @@ export function AppShellAgentSelector(props: {
   })
 
   useEffect(() => {
-    if (!open.value || !highlightedAdapter) {
+    if (!open.value || !highlightedManagedAgent) {
       return
     }
 
-    itemElementsRef.current[highlightedAdapter.id]?.scrollIntoView({
+    itemElementsRef.current[highlightedManagedAgent.id]?.scrollIntoView({
       block: "nearest",
     })
-  }, [highlightedAdapter?.id, open.value])
+  }, [highlightedManagedAgent?.id, open.value])
 
   <>
     <button
@@ -219,15 +222,15 @@ export function AppShellAgentSelector(props: {
           switch (event.key) {
             case "ArrowDown":
               event.preventDefault()
-              moveHighlightedAdapter(1)
+              moveHighlightedManagedAgent(1)
               return
             case "ArrowUp":
               event.preventDefault()
-              moveHighlightedAdapter(-1)
+              moveHighlightedManagedAgent(-1)
               return
             case "Enter":
               event.preventDefault()
-              commitAdapter(highlightedAdapter)
+              commitManagedAgent(highlightedManagedAgent)
               return
             case "Escape":
               event.preventDefault()
@@ -237,41 +240,43 @@ export function AppShellAgentSelector(props: {
         }}
       />
 
-      @if (filteredAdapters.length === 0) {
+      @if (filteredManagedAgents.length === 0) {
         <div class={styles.empty}>
           {t`No matching agents.`}
         </div>
       } @else {
         <ul class={styles.list}>
-          @for (const adapter of filteredAdapters) {
-            <li key={adapter.id}>
+          @for (const managedAgent of filteredManagedAgents) {
+            <li key={managedAgent.id}>
               <button
                 ref={(element) => {
-                  itemElementsRef.current[adapter.id] = element
+                  itemElementsRef.current[managedAgent.id] = element
                 }}
                 class={styles.item}
-                data-active={adapter.id === agentId ? "true" : undefined}
-                data-highlighted={adapter.id === highlightedAdapter?.id ? "true" : undefined}
+                data-active={managedAgent.id === agentId ? "true" : undefined}
+                data-highlighted={managedAgent.id === highlightedManagedAgent?.id
+                  ? "true"
+                  : undefined}
                 role="menuitemradio"
-                aria-checked={adapter.id === agentId ? "true" : "false"}
+                aria-checked={managedAgent.id === agentId ? "true" : "false"}
                 type="button"
                 onMouseEnter={() => {
-                  highlightedIndex.value = filteredAdapters.findIndex(
-                    (entry) => entry.id === adapter.id,
+                  highlightedIndex.value = filteredManagedAgents.findIndex(
+                    (entry) => entry.id === managedAgent.id,
                   )
                 }}
                 onClick={() => {
-                  commitAdapter(adapter)
+                  commitManagedAgent(managedAgent)
                 }}
               >
-                <AcpAgentIcon class={styles.icon} icon={adapter.icon} />
+                <AcpAgentIcon class={styles.icon} icon={managedAgent.icon} />
 
                 <span class={styles.itemBody}>
-                  <span class={styles.itemLabel}>{adapter.name}</span>
+                  <span class={styles.itemLabel}>{managedAgent.name}</span>
                   <span class={styles.itemDetail}>
-                    {adapter.version}
+                    {managedAgent.version}
 
-                    @if (adapter.unofficial) {
+                    @if (managedAgent.unofficial) {
                       <>
                         ·
                         {t`Unofficial`}

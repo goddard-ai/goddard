@@ -2,7 +2,7 @@ import {
   deriveSessionLaunchModelConfig,
   type CreateSessionRequest,
   type InitialSessionConfigOption,
-  type ListAdaptersResponse,
+  type ListManagedAgentsResponse,
   type SessionLaunchPreviewResponse,
   type SessionPromptRequest,
 } from "@goddard-ai/sdk"
@@ -22,7 +22,7 @@ type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type SessionLaunchPickerId =
   | "project"
   | "subpackage"
-  | "adapter"
+  | "managedAgent"
   | "branch"
   | "model"
   | "mode"
@@ -89,8 +89,8 @@ export function filterSlashCommandSuggestions(
 }
 
 export const SessionLaunchFormState = createModel(function () {
-  const adapterCatalog = signal<ListAdaptersResponse | null>(null)
-  const draftAdapterId = signal<string | null>(null)
+  const managedAgentCatalog = signal<ListManagedAgentsResponse | null>(null)
+  const draftManagedAgentId = signal<string | null>(null)
   const draftBaseBranchName = signal<string | null>(null)
   const draftLocation = signal<SessionLaunchLocation>("local")
   const draftModelId = signal<string | null>(null)
@@ -119,7 +119,7 @@ export const SessionLaunchFormState = createModel(function () {
   const effectiveCwd = computed(() => draftSubpackagePath.value ?? draftProjectPath.value)
 
   const sessionInput = computed<CreateSessionRequest | null>(() => {
-    const agent = draftAdapterId.value
+    const agent = draftManagedAgentId.value
     const cwd = effectiveCwd.value
     const initialPrompt = draftPromptBlocks.value
 
@@ -198,16 +198,16 @@ export const SessionLaunchFormState = createModel(function () {
     }
   })
 
-  function syncAdapterSelection(nextAdapterCatalog: ListAdaptersResponse | null) {
-    if (!nextAdapterCatalog) {
-      draftAdapterId.value = null
+  function syncManagedAgentSelection(nextManagedAgentCatalog: ListManagedAgentsResponse | null) {
+    if (!nextManagedAgentCatalog) {
+      draftManagedAgentId.value = null
       return
     }
 
-    const nextAdapterId = resolvePreferredLaunchAgentId(nextAdapterCatalog)
+    const nextManagedAgentId = resolvePreferredLaunchAgentId(nextManagedAgentCatalog)
 
-    if (draftAdapterId.value !== nextAdapterId) {
-      draftAdapterId.value = nextAdapterId
+    if (draftManagedAgentId.value !== nextManagedAgentId) {
+      draftManagedAgentId.value = nextManagedAgentId
     }
   }
 
@@ -327,17 +327,17 @@ export const SessionLaunchFormState = createModel(function () {
     setLaunchLocation(draftLocation.value === "local" ? "worktree" : "local")
   }
 
-  adapterCatalog.subscribe(syncAdapterSelection)
+  managedAgentCatalog.subscribe(syncManagedAgentSelection)
   preferredLaunchAgentId.subscribe(() => {
-    syncAdapterSelection(adapterCatalog.value)
+    syncManagedAgentSelection(managedAgentCatalog.value)
   })
   launchPreview.subscribe(syncLaunchPreview)
 
   return {
-    adapterCatalog,
+    managedAgentCatalog,
     canSubmit: computed(() => sessionInput.value !== null),
     cycleLaunchLocation,
-    draftAdapterId,
+    draftManagedAgentId,
     draftBaseBranchName,
     draftLocation,
     draftModelId,
@@ -354,7 +354,7 @@ export const SessionLaunchFormState = createModel(function () {
     openPicker,
     reset(preferredProjectPath: string | null = null) {
       const previousProjectPath = draftProjectPath.value
-      draftAdapterId.value = null
+      draftManagedAgentId.value = null
       draftBaseBranchName.value = null
       draftLocation.value = "local"
       draftModelId.value = null
@@ -368,7 +368,7 @@ export const SessionLaunchFormState = createModel(function () {
       openPicker.value = null
 
       if (preferredProjectPath === previousProjectPath) {
-        syncAdapterSelection(adapterCatalog.value)
+        syncManagedAgentSelection(managedAgentCatalog.value)
       }
     },
     sessionInput,

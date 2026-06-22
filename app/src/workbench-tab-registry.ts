@@ -170,7 +170,7 @@ const workbenchTabDefinitions = {
           force: true,
         }),
         props.relatedFilesystemPath
-          ? queryClient.prefetch(goddardSdk.adapter.list, [
+          ? queryClient.prefetch(goddardSdk.managedAgent.list, [
               { cwd: props.relatedFilesystemPath, includeUninstalled: true },
             ])
           : undefined,

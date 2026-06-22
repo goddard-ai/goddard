@@ -444,9 +444,6 @@ importers:
       '@goddard-ai/action':
         specifier: workspace:*
         version: link:../../features/action
-      '@goddard-ai/adapter':
-        specifier: workspace:*
-        version: link:../../features/adapter
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
@@ -477,6 +474,9 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
+      '@goddard-ai/managed-agent':
+        specifier: workspace:*
+        version: link:../../features/managed-agent
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../paths
@@ -583,9 +583,6 @@ importers:
       '@goddard-ai/action':
         specifier: workspace:*
         version: link:../../features/action
-      '@goddard-ai/adapter':
-        specifier: workspace:*
-        version: link:../../features/adapter
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
@@ -604,6 +601,9 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
+      '@goddard-ai/managed-agent':
+        specifier: workspace:*
+        version: link:../../features/managed-agent
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -694,9 +694,6 @@ importers:
       '@goddard-ai/action':
         specifier: workspace:*
         version: link:../../features/action
-      '@goddard-ai/adapter':
-        specifier: workspace:*
-        version: link:../../features/adapter
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
@@ -715,6 +712,9 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
+      '@goddard-ai/managed-agent':
+        specifier: workspace:*
+        version: link:../../features/managed-agent
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
