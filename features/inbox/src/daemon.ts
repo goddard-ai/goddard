@@ -31,9 +31,7 @@ export const inboxPlugin = definePlugin({
   setup({ db, events, session }) {
     const inbox = createInboxManager({
       db,
-      publishEvent: (payload) => {
-        void events.emit("inbox.item.updated", payload.item)
-      },
+      events,
     })
 
     events.on("session.blocked", (event) => {

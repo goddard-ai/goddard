@@ -63,9 +63,7 @@ export const workforcePlugin = definePlugin({
           db.workforces.create(nextWorkforce)
         }
       },
-      publishEvent: (payload) => {
-        void events.emit("workforce.ledger.event", payload)
-      },
+      events,
     })
 
     async function resolveWorkforceActor(token: string | undefined, requestedRootDir: string) {

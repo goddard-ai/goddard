@@ -66,7 +66,7 @@ export function createWorkforceManager({
   session,
   attachSession,
   runSession,
-  publishEvent,
+  events,
   createRuntime,
 }: WorkforceManagerDeps): WorkforceManager {
   const logger = log.createLogger()
@@ -105,7 +105,7 @@ export function createWorkforceManager({
           session,
           attachSession,
           runSession,
-          publishEvent,
+          events,
         })
       } catch (error) {
         logger.log("workforce.runtime_start_failed", {

@@ -1,14 +1,14 @@
 import { join } from "node:path"
-import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
+import type { DaemonLogger, DaemonLogService, EventBus } from "@goddard-ai/daemon-plugin"
 import type { CreateSessionRequest, SessionId } from "@goddard-ai/session/schema"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
+import type { workforceEvents } from "../events.ts"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,
   WorkforceDescription,
-  WorkforceEventEnvelope,
   WorkforceLedgerEvent,
   WorkforceProjection,
   WorkforceRequestIntent,
@@ -28,6 +28,7 @@ import {
 import { buildWorkforcePaths } from "./paths.ts"
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never
+type WorkforceEventEmitter = Pick<EventBus<typeof workforceEvents>, "emit">
 
 /** Input delivered to the daemon-owned session runner for one handled request. */
 export interface WorkforceSessionRunInput {
@@ -63,7 +64,7 @@ export interface WorkforceRuntimeDeps {
     requestId: string
   }) => void | Promise<void>
   runSession?: WorkforceSessionRunner
-  publishEvent?: (payload: WorkforceEventEnvelope) => void
+  events?: WorkforceEventEmitter
 }
 
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
@@ -378,9 +379,9 @@ function assertActorOwnsActiveRequest(
 export class WorkforceRuntime {
   readonly #config: WorkforceConfig
   readonly #events: WorkforceLedgerEvent[]
+  readonly #eventEmitter: WorkforceRuntimeDeps["events"]
   readonly #log: DaemonLogService
   readonly #paths: ReturnType<typeof buildWorkforcePaths>
-  readonly #publishEvent: WorkforceRuntimeDeps["publishEvent"]
   readonly #rootDir: string
   readonly #runSession: WorkforceRuntimeDeps["runSession"]
   readonly #session: WorkforceRuntimeDeps["session"]
@@ -402,12 +403,12 @@ export class WorkforceRuntime {
     this.#config = input.config
     this.#projection = input.projection
     this.#events = input.events
-    const { log, session, attachSession, runSession, publishEvent } = input.runtimeDeps
+    const { log, session, attachSession, runSession, events } = input.runtimeDeps
     this.#log = log
     this.#session = session
     this.#attachSession = attachSession
     this.#runSession = runSession
-    this.#publishEvent = publishEvent
+    this.#eventEmitter = events
     this.#paths = buildWorkforcePaths(input.rootDir)
     this.#logger = log.createLogger()
   }
@@ -697,7 +698,7 @@ export class WorkforceRuntime {
       queues: buildWorkforceQueues(this.#projection.requests),
       summary: summarizeWorkforceProjection(this.#projection.requests),
     }
-    this.#publishEvent?.({
+    void this.#eventEmitter?.emit("workforce.ledger.event", {
       rootDir: this.#rootDir,
       event: eventWithId,
     })

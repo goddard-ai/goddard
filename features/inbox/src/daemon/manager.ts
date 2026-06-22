@@ -1,3 +1,4 @@
+import type { EventBus } from "@goddard-ai/daemon-plugin"
 import {
   IpcClientError,
   type IpcClientErrorPayload,
@@ -8,6 +9,7 @@ import type { SessionId } from "@goddard-ai/session/schema"
 import type { KindInput } from "kindstore"
 
 import type { InboxStore } from "../daemon.ts"
+import type { inboxEvents } from "../events.ts"
 import {
   InboxErrorCodes,
   InboxIpcErrors,
@@ -16,7 +18,6 @@ import {
   type InboxErrorCode,
   type InboxHeadline,
   type InboxItem,
-  type InboxItemEventMutation,
   type InboxPriority,
   type InboxReason,
   type InboxScope,
@@ -36,6 +37,7 @@ const userWorkflowStatuses = new Set<InboxStatus>([
 ])
 
 type InboxItemInput = KindInput<InboxStore["schema"]["inboxItems"]>
+type InboxEventEmitter = Pick<EventBus<typeof inboxEvents>, "emit">
 
 type TouchInboxItemInput = {
   entityId: InboxEntityId
@@ -46,14 +48,9 @@ type TouchInboxItemInput = {
   turnId?: string | null
 }
 
-type InboxItemEventPublisher = (payload: {
-  item: InboxItem
-  mutation: InboxItemEventMutation
-}) => void
-
 type InboxManagerOptions = {
   db: InboxStore
-  publishEvent: InboxItemEventPublisher
+  events: InboxEventEmitter
 }
 
 type InboxIpcErrorDescriptor<TCode extends InboxErrorCode> = IpcErrorDescriptorForCode<
@@ -129,8 +126,8 @@ function withWorkflowStatus(
 export function createInboxManager(options: InboxManagerOptions) {
   const { db } = options
 
-  function publishItem(item: InboxItem, mutation: InboxItemEventMutation) {
-    options.publishEvent({ item, mutation })
+  function publishItem(item: InboxItem) {
+    void options.events.emit("inbox.item.updated", item)
     return item
   }
 
@@ -185,7 +182,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       turnId: input.turnId ?? existing?.turnId ?? null,
     }
 
-    return publishItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem), "touched")
+    return publishItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem))
   }
 
   function updateInboxItem(input: UpdateInboxItemRequest) {
@@ -213,7 +210,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return { item: publishItem(item, "updated") }
+    return { item: publishItem(item) }
   }
 
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
@@ -248,7 +245,7 @@ export function createInboxManager(options: InboxManagerOptions) {
           updatedAt: timestamp,
         })
         if (item) {
-          items.push(publishItem(item, "bulk_updated"))
+          items.push(publishItem(item))
         }
       }
     })
@@ -278,7 +275,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return publishItem(item, "replied")
+    return publishItem(item)
   }
 
   function completeSession(sessionId: SessionId) {
@@ -300,7 +297,7 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return publishItem(item, "completed")
+    return publishItem(item)
   }
 
   return {
