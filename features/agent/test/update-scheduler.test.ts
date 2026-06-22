@@ -1,5 +1,5 @@
+import type { ManagedAgentInstallService } from "@goddard-ai/agent/daemon/install-service"
 import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
-import type { ManagedAgentInstallService } from "@goddard-ai/managed-agent/daemon/install-service"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { expect, test } from "bun:test"
 

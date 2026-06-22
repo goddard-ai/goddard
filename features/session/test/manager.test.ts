@@ -1,11 +1,11 @@
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ManagedAgentInstallService } from "@goddard-ai/managed-agent/daemon/install-service"
+import type { ManagedAgentInstallService } from "@goddard-ai/agent/daemon/install-service"
 import {
   resolveManagedAgentLaunchProcessSpec as resolveLaunchAgentProcessSpec,
   resolveUnmanagedAgentProcessSpec,
-} from "@goddard-ai/managed-agent/daemon/launch-process"
+} from "@goddard-ai/agent/daemon/launch-process"
 import { agentBinaryPlatforms, type AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"

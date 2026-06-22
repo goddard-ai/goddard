@@ -577,6 +577,9 @@ importers:
       '@goddard-ai/action':
         specifier: workspace:*
         version: link:../../features/action
+      '@goddard-ai/agent':
+        specifier: workspace:*
+        version: link:../../features/agent
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
@@ -595,9 +598,6 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
-      '@goddard-ai/managed-agent':
-        specifier: workspace:*
-        version: link:../../features/managed-agent
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -688,6 +688,9 @@ importers:
       '@goddard-ai/action':
         specifier: workspace:*
         version: link:../../features/action
+      '@goddard-ai/agent':
+        specifier: workspace:*
+        version: link:../../features/agent
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
@@ -706,9 +709,6 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
-      '@goddard-ai/managed-agent':
-        specifier: workspace:*
-        version: link:../../features/managed-agent
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -822,6 +822,36 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
+  features/agent:
+    dependencies:
+      '@goddard-ai/config':
+        specifier: workspace:*
+        version: link:../../core/config
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/paths':
+        specifier: workspace:*
+        version: link:../../core/paths
+      '@goddard-ai/schema':
+        specifier: workspace:*
+        version: link:../../core/schema
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
+      acp-client:
+        specifier: 'catalog:'
+        version: 0.5.3(zod@4.4.3)
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
   features/auth:
     dependencies:
       '@goddard-ai/backend-plugin':
@@ -924,36 +954,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
-  features/managed-agent:
-    dependencies:
-      '@goddard-ai/config':
-        specifier: workspace:*
-        version: link:../../core/config
-      '@goddard-ai/daemon-plugin':
-        specifier: workspace:*
-        version: link:../../core/daemon-plugin
-      '@goddard-ai/ipc':
-        specifier: workspace:*
-        version: link:../../core/ipc
-      '@goddard-ai/paths':
-        specifier: workspace:*
-        version: link:../../core/paths
-      '@goddard-ai/schema':
-        specifier: workspace:*
-        version: link:../../core/schema
-      '@goddard-ai/sdk-plugin':
-        specifier: workspace:*
-        version: link:../../core/sdk-plugin
-      acp-client:
-        specifier: 'catalog:'
-        version: 0.5.3(zod@4.4.3)
-      radashi:
-        specifier: 'catalog:'
-        version: 12.9.1
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-
   features/pull-request:
     dependencies:
       '@goddard-ai/auth':
@@ -1049,6 +1049,9 @@ importers:
       '@b9g/async-context':
         specifier: 'catalog:'
         version: 0.2.1
+      '@goddard-ai/agent':
+        specifier: workspace:*
+        version: link:../agent
       '@goddard-ai/config':
         specifier: workspace:*
         version: link:../../core/config
@@ -1058,9 +1061,6 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
-      '@goddard-ai/managed-agent':
-        specifier: workspace:*
-        version: link:../managed-agent
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../../core/paths

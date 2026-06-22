@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
+import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
   DaemonAgentEnvironmentService,
@@ -11,7 +12,6 @@ import type {
   DaemonSessionContextService,
   EventBus,
 } from "@goddard-ai/daemon-plugin"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
