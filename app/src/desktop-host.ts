@@ -1,21 +1,14 @@
 import type { GoddardSdk } from "@goddard-ai/sdk"
 import { Electroview } from "electrobun/view"
-import { listen } from "preact-sigma"
 
 import type { AppStateSnapshot } from "~/shared/app-state.ts"
-import { createDaemonSubscriptionCoordinator } from "~/shared/daemon-subscriptions.ts"
 import type {
   AppDesktopRpc,
-  DaemonRequestName,
-  DaemonRequestPayload,
-  DaemonRequestResponse,
-  DaemonSendInput,
-  DaemonStreamTargetInput,
   DaemonWebviewAccess,
   ProjectGitStatus,
   RuntimeInfo,
 } from "~/shared/desktop-rpc.ts"
-import { globalEventHub, type DaemonStreamName } from "~/shared/global-event-hub.ts"
+import { globalEventHub } from "~/shared/global-event-hub.ts"
 import type { ShortcutKeymapFile } from "~/shared/shortcut-keymap.ts"
 import {
   installRendererLogCapture,
@@ -38,10 +31,6 @@ const rpc = Electroview.defineRPC<AppDesktopRpc>({
 })
 
 let electroview: Electroview<typeof rpc> | undefined
-let daemonSubscriptionCoordinator:
-  | ReturnType<typeof createDaemonSubscriptionCoordinator>
-  | undefined
-let didRegisterDaemonResetOnUnload = false
 
 /** Browser-facing desktop bridge methods used by the app and manual smoke checks. */
 export interface DesktopHostBridge {
@@ -75,22 +64,10 @@ export interface DesktopHostBridge {
   /** Opens one URL through the operating system default browser or URL handler. */
   openExternal(url: string): Promise<boolean>
 
-  /** Forwards one daemon IPC request through the Bun host's default daemon client. */
-  daemonSend<Name extends DaemonRequestName>(
-    name: Name,
-    payload: DaemonRequestPayload<Name>,
-  ): Promise<DaemonRequestResponse<Name>>
-
   /** Issues short-lived daemon access for direct IPC from this desktop webview. */
   createDaemonWebviewAccessToken(origin: string): Promise<DaemonWebviewAccess>
 
-  /** Opens one daemon IPC stream subscription through the Bun host bridge. */
-  daemonSubscribe<Name extends DaemonStreamName>(
-    target: DaemonStreamTargetInput<Name>,
-    onMessage: (payload: any) => void,
-  ): Promise<() => void>
-
-  /** Shared SDK instance backed by the Bun-owned daemon client bridge. */
+  /** Shared SDK instance backed by direct browser-to-daemon IPC. */
   sdk: GoddardSdk
 }
 
@@ -100,53 +77,10 @@ declare global {
   }
 }
 
-function getDaemonSubscriptionCoordinator() {
-  if (daemonSubscriptionCoordinator) {
-    return daemonSubscriptionCoordinator
-  }
-
-  daemonSubscriptionCoordinator = createDaemonSubscriptionCoordinator({
-    webviewId: window.__electrobunWebviewId,
-    onUnsubscribeError(error) {
-      console.error("Failed to unsubscribe from daemon stream.", error)
-    },
-    resetSubscriptions: (input) => rpc.request.daemonResetSubscriptions(input),
-    subscribe: (input) => rpc.request.daemonSubscribe(input),
-    unsubscribe: (input) => rpc.request.daemonUnsubscribe(input),
-  })
-
-  listen(globalEventHub, "daemonStream", (detail) => {
-    daemonSubscriptionCoordinator?.dispatchEvent(detail)
-  })
-
-  return daemonSubscriptionCoordinator
-}
-
 /** Creates the Electrobun view bridge once for the active browser context. */
 export function initializeDesktopHost(): void {
   electroview ??= new Electroview({ rpc })
   installRendererLogCapture(writeRendererLog)
-
-  if (!didRegisterDaemonResetOnUnload) {
-    didRegisterDaemonResetOnUnload = true
-    window.addEventListener(
-      "beforeunload",
-      () => {
-        void rpc.request
-          .daemonResetSubscriptions({ webviewId: window.__electrobunWebviewId })
-          .catch((error) => {
-            console.error("Failed to reset daemon stream subscriptions during unload.", error)
-          })
-      },
-      { once: true },
-    )
-  }
-
-  void getDaemonSubscriptionCoordinator()
-    .reset()
-    .catch((error) => {
-      console.error("Failed to reset daemon stream subscriptions.", error)
-    })
 }
 
 async function writeRendererLog(input: RendererLogCaptureInput) {
@@ -213,45 +147,9 @@ export async function openExternal(url: string): Promise<boolean> {
   return response.opened
 }
 
-/** Forwards one daemon IPC request through the Bun host. */
-export async function daemonSend<Name extends DaemonRequestName>(
-  name: Name,
-  payload: DaemonRequestPayload<Name>,
-): Promise<DaemonRequestResponse<Name>> {
-  const input: DaemonSendInput<Name> = { name, payload }
-  return (await rpc.request.daemonSend(input)) as DaemonRequestResponse<Name>
-}
-
 /** Issues short-lived daemon access for direct IPC from this desktop webview. */
 export async function createDaemonWebviewAccessToken(origin: string) {
   return await rpc.request.daemonWebviewAccess({ origin })
-}
-
-function normalizeDaemonStreamTarget<Name extends DaemonStreamName>(
-  target: Name | DaemonStreamTargetInput<Name>,
-): DaemonStreamTargetInput<Name> {
-  if (typeof target === "string") {
-    return {
-      name: target,
-      filter: undefined,
-    } as DaemonStreamTargetInput<Name>
-  }
-
-  return {
-    name: target.name,
-    filter: target.filter,
-  } as DaemonStreamTargetInput<Name>
-}
-
-/** Opens one daemon IPC stream subscription through the Bun host bridge. */
-export async function daemonSubscribe<Name extends DaemonStreamName>(
-  target: Name | DaemonStreamTargetInput<Name>,
-  onMessage: (payload: any) => void,
-): Promise<() => void> {
-  return await getDaemonSubscriptionCoordinator().subscribe(
-    normalizeDaemonStreamTarget(target),
-    onMessage,
-  )
 }
 
 /** Shared browser-side desktop host adapter for the current webview. */
@@ -266,9 +164,7 @@ export const desktopHost: DesktopHostBridge = {
   maximizeWindow,
   mainWindowReady,
   openExternal,
-  daemonSend,
   createDaemonWebviewAccessToken,
-  daemonSubscribe,
   // Resolve lazily so the desktop bridge and SDK transport can share a module cycle safely.
   get sdk() {
     return goddardSdk

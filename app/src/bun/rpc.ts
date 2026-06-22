@@ -3,13 +3,7 @@ import { BrowserView, Utils } from "electrobun/bun"
 import type { AppDesktopRpc } from "~/shared/desktop-rpc.ts"
 import type { GlobalEventEnvelope } from "~/shared/global-event-hub.ts"
 import { loadAppStateSnapshot, writeAppStateSnapshot } from "./app-state-store.ts"
-import {
-  daemonResetSubscriptions,
-  daemonSend,
-  daemonSubscribe,
-  daemonUnsubscribe,
-  daemonWebviewAccess,
-} from "./daemon.ts"
+import { daemonWebviewAccess } from "./daemon.ts"
 import { writeAppLog } from "./logging.ts"
 import { getMainWindow, showMainWindow } from "./main-window.ts"
 import { getProjectGitStatus } from "./project-git-status.ts"
@@ -35,10 +29,6 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
         await writeShortcutKeymap(keymap)
         return {}
       },
-      daemonSend: async (input) => await daemonSend(input),
-      daemonSubscribe: async (input) => await daemonSubscribe(input),
-      daemonUnsubscribe: async (input) => await daemonUnsubscribe(input),
-      daemonResetSubscriptions: async (input) => await daemonResetSubscriptions(input),
       daemonWebviewAccess: async (input) => await daemonWebviewAccess(input),
       mainWindowReady: async () => {
         showMainWindow()
