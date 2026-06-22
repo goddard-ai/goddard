@@ -3,11 +3,11 @@ import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 import {
-  createGitHost as createSharedGitHost,
   GitNotRepositoryError,
   normalizePath as normalizeSharedPath,
-  resetGitHostForTests,
-  type GitHost as SharedGitHost,
+  resetGitForTests,
+  git as sharedGit,
+  type GitApi as SharedGitApi,
   type WorktreeInfo,
 } from "@goddard-ai/libgit2"
 
@@ -40,13 +40,9 @@ export type GitHost = {
 }
 
 /** Creates the Git host selected for this process. */
-export function createReviewSyncGitHost(options: { libgit2PathCandidates?: string[] } = {}) {
+export function createReviewSyncGitHost() {
   const commandHost = createReviewSyncCommandGitHost()
-  const libgit2Host = adaptSharedGitHost(
-    createSharedGitHost({
-      libgit2PathCandidates: options.libgit2PathCandidates,
-    }),
-  )
+  const libgit2Host = adaptSharedGitHost(sharedGit)
 
   return {
     ...commandHost,
@@ -60,10 +56,10 @@ export function createReviewSyncGitHost(options: { libgit2PathCandidates?: strin
 }
 
 export function resetReviewSyncGitHostForTests() {
-  resetGitHostForTests()
+  resetGitForTests()
 }
 
-function adaptSharedGitHost(shared: SharedGitHost): GitHost {
+function adaptSharedGitHost(shared: SharedGitApi): GitHost {
   return {
     run: runReviewSyncGitCommand,
     resolveRequiredRepoRoot: (cwd) => mapSharedGitErrors(() => shared.repository.resolveRoot(cwd)),

@@ -1,12 +1,12 @@
-import type { GitHost } from "./index.ts"
+import type { GitApi } from "./index.ts"
 
 type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends (...args: never[]) => unknown ? T[K] : DeepPartial<T[K]>
 }
 
-export function createFakeGitHost(overrides: DeepPartial<GitHost> = {}): GitHost {
+export function createFakeGitApi(overrides: DeepPartial<GitApi> = {}): GitApi {
   const fail = async () => {
-    throw new Error("Fake Git host method was not implemented for this test.")
+    throw new Error("Fake Git API method was not implemented for this test.")
   }
 
   return {

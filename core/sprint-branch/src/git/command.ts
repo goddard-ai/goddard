@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process"
-import { createGitHost, type GitHost } from "@goddard-ai/libgit2"
-
-let sharedGitHost: GitHost | undefined
+import { git } from "@goddard-ai/libgit2"
 
 /** Error wrapper that preserves the failed Git argv for diagnostics. */
 export class GitCommandError extends Error {
@@ -58,9 +56,8 @@ export async function gitSucceeds(cwd: string, args: string[]) {
   }
 }
 
-export function getSharedGitHost() {
-  sharedGitHost ??= createGitHost()
-  return sharedGitHost
+export function getSharedGitApi() {
+  return git
 }
 
 async function runGitCommand(

@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto"
 import { userInfo } from "node:os"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 
 const WORKTREE_BRANCH_ADJECTIVES = [
   "brave",
@@ -167,7 +167,7 @@ function readLocalUsername() {
 }
 
 async function gitBranchExists(cwd: string, branchName: string) {
-  return await createGitHost().refs.branchExists(cwd, branchName)
+  return await git.refs.branchExists(cwd, branchName)
 }
 
 function sanitizeBranchPath(value: string, fallback: string) {

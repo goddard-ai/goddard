@@ -1,5 +1,5 @@
 import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
 import { readOriginRef } from "./git/refs.ts"
@@ -76,7 +76,7 @@ async function inferRepoFromGit(cwd: string, parseRepositoryUrl: RepositoryUrlPa
 }
 
 async function inferCurrentBranch(cwd: string): Promise<string> {
-  return (await createGitHost().refs.getCurrentBranch(cwd)) ?? "HEAD"
+  return (await git.refs.getCurrentBranch(cwd)) ?? "HEAD"
 }
 
 async function inferBaseBranch(cwd: string): Promise<string> {

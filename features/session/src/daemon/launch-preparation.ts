@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
 import type { AgentService } from "@goddard-ai/agent/daemon"
 import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"
@@ -57,7 +57,7 @@ export async function inspectLaunchCheckoutDirty(cwd: string): Promise<boolean> 
     return false
   }
 
-  const status = await createGitHost().status.getWorkingTreeStatus(repoRoot)
+  const status = await git.status.getWorkingTreeStatus(repoRoot)
   return status.entries.length > 0
 }
 

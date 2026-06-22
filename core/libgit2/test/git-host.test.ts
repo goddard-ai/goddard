@@ -5,14 +5,9 @@ import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
 
 import { removeTemporaryPath } from "../../test-support/windows-fixtures.ts"
-import {
-  createGitHost,
-  createLibgit2GitHost,
-  normalizePath,
-  resetGitHostForTests,
-} from "../src/index.ts"
+import { git, normalizePath, resetGitForTests, validateLibgit2Runtime } from "../src/index.ts"
 import { nativeLibgit2PathCandidates } from "../src/libgit2/native-artifact.ts"
-import { createFakeGitHost } from "../src/testing.ts"
+import { createFakeGitApi } from "../src/testing.ts"
 
 const originalGitLibgit2Path = process.env.GODDARD_GIT_LIBGIT2_PATH
 const originalLibgit2Path = process.env.LIBGIT2_PATH
@@ -21,15 +16,15 @@ const tempRoots: string[] = []
 afterEach(async () => {
   restoreEnv("GODDARD_GIT_LIBGIT2_PATH", originalGitLibgit2Path)
   restoreEnv("LIBGIT2_PATH", originalLibgit2Path)
-  resetGitHostForTests()
+  resetGitForTests()
   while (tempRoots.length > 0) {
     await removeTemporaryPath(tempRoots.pop()!)
   }
 })
 
-test("Git host fails when libgit2 cannot load", () => {
+test("libgit2 runtime validation fails when libgit2 cannot load", () => {
   expect(() =>
-    createGitHost({
+    validateLibgit2Runtime({
       libgit2PathCandidates: ["/missing/libgit2.dylib"],
     }),
   ).toThrow("Unable to load libgit2")
@@ -67,36 +62,34 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   }
 
   const { branchHead, featureHead, repoDir } = await createRepo({ withFeatureBranch: true })
-  const host = createLibgit2GitHost({
-    libgit2PathCandidates: [libgit2Path],
-  })
+  process.env.LIBGIT2_PATH = libgit2Path
 
-  await expect(host.repository.resolveRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
-  await expect(host.repository.resolveGitDir(repoDir)).resolves.toEndWith(".git")
-  await expect(host.repository.resolveCommonDir(repoDir)).resolves.toEndWith(".git")
-  await expect(host.refs.getCurrentBranch(repoDir)).resolves.toBe("main")
-  await expect(host.refs.branchExists(repoDir, "main")).resolves.toBe(true)
-  await expect(host.refs.resolve(repoDir, "HEAD")).resolves.toBe(branchHead)
-  await expect(host.refs.getBranchHead(repoDir, "main")).resolves.toBe(branchHead)
-  await expect(host.history.resolveHead(repoDir)).resolves.toBe(branchHead)
-  await expect(host.history.isAncestor(repoDir, branchHead, featureHead)).resolves.toBe(true)
-  await expect(host.history.getMergeBase(repoDir, "main", "feature")).resolves.toBe(branchHead)
-  await expect(host.status.isWorktreeClean(repoDir)).rejects.toThrow(
+  await expect(git.repository.resolveRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
+  await expect(git.repository.resolveGitDir(repoDir)).resolves.toEndWith(".git")
+  await expect(git.repository.resolveCommonDir(repoDir)).resolves.toEndWith(".git")
+  await expect(git.refs.getCurrentBranch(repoDir)).resolves.toBe("main")
+  await expect(git.refs.branchExists(repoDir, "main")).resolves.toBe(true)
+  await expect(git.refs.resolve(repoDir, "HEAD")).resolves.toBe(branchHead)
+  await expect(git.refs.getBranchHead(repoDir, "main")).resolves.toBe(branchHead)
+  await expect(git.history.resolveHead(repoDir)).resolves.toBe(branchHead)
+  await expect(git.history.isAncestor(repoDir, branchHead, featureHead)).resolves.toBe(true)
+  await expect(git.history.getMergeBase(repoDir, "main", "feature")).resolves.toBe(branchHead)
+  await expect(git.status.isWorktreeClean(repoDir)).rejects.toThrow(
     "libgit2 host does not support status.isWorktreeClean",
   )
 })
 
-test("fake Git host exposes deterministic method overrides", async () => {
-  const host = createFakeGitHost({
+test("fake Git API exposes deterministic method overrides", async () => {
+  const fakeGit = createFakeGitApi({
     refs: {
       branchExists: async (_cwd, branch) => branch === "main",
     },
   })
 
-  await expect(host.refs.branchExists("/repo", "main")).resolves.toBe(true)
-  await expect(host.refs.branchExists("/repo", "other")).resolves.toBe(false)
-  await expect(host.refs.resolve("/repo", "HEAD")).rejects.toThrow(
-    "Fake Git host method was not implemented",
+  await expect(fakeGit.refs.branchExists("/repo", "main")).resolves.toBe(true)
+  await expect(fakeGit.refs.branchExists("/repo", "other")).resolves.toBe(false)
+  await expect(fakeGit.refs.resolve("/repo", "HEAD")).rejects.toThrow(
+    "Fake Git API method was not implemented",
   )
 })
 

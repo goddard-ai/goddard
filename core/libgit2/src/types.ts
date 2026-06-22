@@ -8,10 +8,6 @@ export type WorkingTreeStatus = {
   entries: string[]
 }
 
-export type GitHostOptions = {
-  libgit2PathCandidates?: string[]
-}
-
 export type GitRepositoryApi = {
   resolveRoot: (cwd: string) => Promise<string>
   resolveGitDir: (cwd: string) => Promise<string>
@@ -49,7 +45,7 @@ export type GitStashApi = {
   list: (cwd: string) => Promise<Map<string, string>>
 }
 
-export type GitHost = {
+export type GitApi = {
   repository: GitRepositoryApi
   refs: GitRefsApi
   history: GitHistoryApi

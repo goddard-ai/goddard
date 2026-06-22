@@ -1,7 +1,7 @@
 /** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../../schema.ts"
@@ -283,7 +283,7 @@ async function assertLinkedWorktree(params: {
  */
 async function resolveGitDir(cwd: string) {
   try {
-    return normalizeExistingPath(await createGitHost().repository.resolveGitDir(cwd))
+    return normalizeExistingPath(await git.repository.resolveGitDir(cwd))
   } catch {
     return null
   }
@@ -294,7 +294,7 @@ async function resolveGitDir(cwd: string) {
  */
 async function resolveGitCommonDir(cwd: string) {
   try {
-    return normalizeExistingPath(await createGitHost().repository.resolveCommonDir(cwd))
+    return normalizeExistingPath(await git.repository.resolveCommonDir(cwd))
   } catch {
     return null
   }
@@ -336,7 +336,7 @@ async function assertGitRepository(cwd: string) {
   }
 
   try {
-    await createGitHost().repository.resolveGitDir(cwd)
+    await git.repository.resolveGitDir(cwd)
   } catch {
     throw new Error(`Not a git repository: ${cwd}`)
   }

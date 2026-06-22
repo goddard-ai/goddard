@@ -1,22 +1,22 @@
 # libgit2 Package
 
-The libgit2 package owns Goddard's direct `libgit2` integration. It loads the packaged native library, exposes the libgit2-backed host contract, and keeps command-line Git outside this package.
+The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a lazy Git API backed by the packaged native library and keeps command-line Git outside this package.
 
 ## Package Entrypoints
 
 - `@goddard-ai/libgit2` is the primary package entrypoint for runtime Git access.
-- `@goddard-ai/libgit2/testing` provides `createFakeGitHost` for tests that need a deterministic in-memory implementation of the host contract.
+- `@goddard-ai/libgit2/testing` provides `createFakeGitApi` for tests that need a deterministic in-memory implementation of the Git API contract.
 
-## Host Creation
+## Runtime Access
 
-- `createGitHost(options)` creates a libgit2-backed `GitHost`.
-- `createLibgit2GitHost(options)` creates the same libgit2-backed host directly.
+- `git` is the shared libgit2-backed Git API namespace.
+- Accessing a direct namespace such as `git.repository` or `git.refs` lazily loads the libgit2 runtime once and reuses it.
 - `validateLibgit2Runtime(options)` verifies that a libgit2 runtime can be loaded from the supplied candidates.
-- `resetGitHostForTests()` clears cached libgit2 state between tests.
+- `resetGitForTests()` clears cached libgit2 and Git API state between tests.
 
-## Host Contract
+## Git API Contract
 
-- `GitHost` groups the supported Git capability areas:
+- `GitApi` groups the supported Git capability areas:
   - `repository` resolves repository roots, Git directories, common directories, Git paths, and bare repository status.
   - `refs` resolves refs, checks ref and branch existence, updates refs, deletes refs, reads the current branch, and reads branch heads.
   - `history` resolves `HEAD`, checks ancestor relationships, and finds merge bases.
@@ -29,8 +29,8 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It loads the pa
 
 - `WorktreeInfo` describes a worktree path and its branch name when one is available.
 - `WorkingTreeStatus` describes whether a worktree is clean and includes raw porcelain status entries.
-- `GitHostOptions` configures libgit2 path candidates.
-- `GitRepositoryApi`, `GitRefsApi`, `GitHistoryApi`, `GitStatusApi`, `GitWorktreeApi`, and `GitStashApi` describe each section of the host contract.
+- `GitApi` describes the shared `git` namespace shape.
+- `GitRepositoryApi`, `GitRefsApi`, `GitHistoryApi`, `GitStatusApi`, `GitWorktreeApi`, and `GitStashApi` describe each section of the Git API contract.
 
 ## Errors
 

@@ -1,7 +1,7 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
@@ -78,7 +78,7 @@ export async function cleanupSessionWorktree(
  */
 export async function resolveGitRepoRoot(cwd: string) {
   try {
-    return resolve(await createGitHost().repository.resolveRoot(cwd))
+    return resolve(await git.repository.resolveRoot(cwd))
   } catch {
     return null
   }
@@ -86,7 +86,7 @@ export async function resolveGitRepoRoot(cwd: string) {
 
 /** Returns true when the requested cwd points at a bare git repository. */
 export async function inspectGitBareRepository(cwd: string) {
-  return await createGitHost().repository.isBareRepository(cwd)
+  return await git.repository.isBareRepository(cwd)
 }
 
 /** Resolves the git source directory that can create linked worktrees for one launch cwd. */
@@ -115,12 +115,12 @@ export async function resolveGitWorktreeSource(cwd: string) {
 export async function resolveGitHeadRef(cwd: string) {
   const resolvedCwd = resolve(realpathSync.native(cwd))
   try {
-    await createGitHost().repository.resolveGitDir(resolvedCwd)
+    await git.repository.resolveGitDir(resolvedCwd)
   } catch {
     throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
   }
 
-  return await createGitHost().refs.getCurrentBranch(resolvedCwd)
+  return await git.refs.getCurrentBranch(resolvedCwd)
 }
 
 /**
@@ -143,8 +143,8 @@ export async function inspectWorktreeCompletionState(
   worktree: SessionWorktreeState,
 ): Promise<SessionWorktreeCompletionState> {
   const [status, primaryHead] = await Promise.all([
-    createGitHost().status.getWorkingTreeStatus(worktree.worktreeDir),
-    createGitHost().history.resolveHead(worktree.repoRoot),
+    git.status.getWorkingTreeStatus(worktree.worktreeDir),
+    git.history.resolveHead(worktree.repoRoot),
   ])
   if (!primaryHead) {
     throw new Error("Unable to inspect primary checkout HEAD")

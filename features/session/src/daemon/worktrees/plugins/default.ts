@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { createGitHost } from "@goddard-ai/libgit2"
+import { git } from "@goddard-ai/libgit2"
 import type {
   WorktreeCleanupOptions,
   WorktreePlugin,
@@ -104,5 +104,5 @@ function resolveHomeDir() {
 }
 
 async function isBareRepository(cwd: string) {
-  return await createGitHost().repository.isBareRepository(cwd)
+  return await git.repository.isBareRepository(cwd)
 }

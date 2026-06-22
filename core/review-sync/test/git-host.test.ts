@@ -24,14 +24,6 @@ afterEach(async () => {
   }
 })
 
-test("review-sync Git host fails when libgit2 cannot load", () => {
-  expect(() =>
-    createReviewSyncGitHost({
-      libgit2PathCandidates: ["/missing/libgit2.dylib"],
-    }),
-  ).toThrow("Unable to load libgit2")
-})
-
 test("review-sync libgit2 host uses a valid libgit2 candidate when available", async () => {
   const libgit2Path = await findLocalLibgit2Path()
   if (!libgit2Path) {
@@ -40,9 +32,8 @@ test("review-sync libgit2 host uses a valid libgit2 candidate when available", a
   }
 
   const repoDir = await createRepo()
-  const host = createReviewSyncGitHost({
-    libgit2PathCandidates: [libgit2Path],
-  })
+  process.env.LIBGIT2_PATH = libgit2Path
+  const host = createReviewSyncGitHost()
 
   await expect(host.resolveRequiredRepoRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
 })
