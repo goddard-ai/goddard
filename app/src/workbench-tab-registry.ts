@@ -1,4 +1,3 @@
-import { inboxAppPlugin } from "@goddard-ai/inbox/app"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { lazy } from "preact/compat"
 
@@ -91,7 +90,7 @@ const workbenchTabDefinitions = {
         : "surface:inbox",
     getTitle: (props: { projectName?: string }) =>
       props.projectName ? `Inbox · ${props.projectName}` : "Inbox",
-    icon: inboxAppPlugin.workbenchTab.icon,
+    icon: "tabs/inbox",
     getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   projects: {

@@ -54,19 +54,10 @@ Unless stated otherwise, commands below are run from `./app`.
 
 ## Feature Composition
 
-App feature entrypoints live in internal feature packages under
-`features/<name>/src/app.tsx` and export static metadata directly. The app
-composition root owns shell placement, navigation slots, command routing,
-shortcut conflict semantics, desktop bridge boundaries, and the actual SDK
-instance.
-
-Feature app entrypoints should not import `@goddard-ai/sdk`. When a feature
-also contributes an SDK namespace, the app entrypoint can express type-level SDK
-requirements from its own SDK plugin while staying package-acyclic.
-
-`features/inbox` is the current reference app feature package. It contributes
-Inbox navigation, workbench tab, and command metadata while the app shell keeps
-ownership of primary navigation placement.
+Internal feature packages do not expose app entrypoints. The app composition
+root owns shell placement, navigation slots, command routing, shortcut conflict
+semantics, desktop bridge boundaries, app state, query cache, app-only UI
+composition, and the actual SDK instance.
 
 ## License
 
