@@ -1169,12 +1169,6 @@ importers:
       '@goddard-ai/sdk-plugin':
         specifier: workspace:*
         version: link:../../core/sdk-plugin
-      '@goddard-ai/styled-system':
-        specifier: workspace:*
-        version: link:../../app/styled-system
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
 
   features/workforce:
     dependencies:

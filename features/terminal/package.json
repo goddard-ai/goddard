@@ -5,14 +5,6 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./app": {
-      "types": {
-        "source": "./src/app.tsx",
-        "default": "./dist/app.d.mts"
-      },
-      "bun": "./src/app.tsx",
-      "import": "./dist/app.mjs"
-    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -28,14 +20,6 @@
       },
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
-    },
-    "./schema": {
-      "types": {
-        "source": "./src/schema.ts",
-        "default": "./dist/schema.d.mts"
-      },
-      "bun": "./src/schema.ts",
-      "import": "./dist/schema.mjs"
     },
     "./sdk": {
       "types": {
@@ -57,8 +41,6 @@
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
-    "@goddard-ai/sdk-plugin": "workspace:*",
-    "@goddard-ai/styled-system": "workspace:*",
-    "zod": "catalog:"
+    "@goddard-ai/sdk-plugin": "workspace:*"
   }
 }
