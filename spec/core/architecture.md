@@ -30,6 +30,8 @@ Boundaries:
 - Production persistence is Turso-backed.
 - Local in-memory mode is development-only convenience.
 - Real-time delivery follows authenticated ownership rather than repository-scoped subscription state.
+- GitHub identity may be the only user-facing sign-in model, but protected backend streams and actions still require a backend-issued session for a stable authenticated principal.
+- Client-provided event filters reduce delivered volume only; the control plane remains responsible for deciding whether the authenticated principal may receive each event.
 
 ### SDK
 Design rule: daemon control capabilities live here first.
@@ -59,7 +61,7 @@ Boundaries:
 - Discovery may use an explicit connection URL, custom protocol, or manual port entry, but must not silently perform broad port scanning.
 
 ### Background Runtime
-- Own authenticated event stream consumption as part of supervised automation behavior.
+- Consume authenticated event streams as part of supervised automation behavior when enabled capabilities require backend-originated events.
 - Launch PR feedback flows for managed feedback.
 - Host or cooperate with workforce orchestration for repository delegation.
 - Operate as background automation rather than a user-facing command surface.
