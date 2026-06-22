@@ -2,10 +2,8 @@ import { t } from "@lingui/core/macro"
 import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
-  CompleteSessionInboxItemRequest,
   InboxEntityId,
   InboxItem,
-  UpdateInboxItemRequest,
 } from "@goddard-ai/inbox/schema"
 import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
@@ -24,11 +22,11 @@ import {
 } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import {
-  bulkUpdateInboxItems as runBulkUpdateInboxItems,
-  completeSessionInboxItem as runCompleteSessionInboxItem,
+  bulkUpdateInboxItems,
+  completeSessionInboxItem,
   InboxPageMutations,
   invalidateInboxQueries,
-  updateInboxItem as runUpdateInboxItem,
+  updateInboxItem,
 } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
@@ -220,13 +218,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     })
   }
 
-  function runBulkActionFromControls(
-    label: string,
-    input: Omit<BulkUpdateInboxItemsRequest, "entityIds">,
-  ) {
-    void runBulkInboxAction(label, input)
-  }
-
   function updateSearchQuery(value: string) {
     clearSelectedInboxItems()
     setSearchQuery(value)
@@ -266,18 +257,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     }
   }
 
-  async function updateInboxItem(input: UpdateInboxItemRequest) {
-    return await runUpdateInboxItem(input)
-  }
-
-  async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
-    return await runBulkUpdateInboxItems(input)
-  }
-
-  async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
-    return await runCompleteSessionInboxItem(input)
-  }
-
   async function openInboxItem(item: InboxItem) {
     try {
       await openInboxItemInWorkbench({ item, workbenchTabSet })
@@ -307,13 +286,11 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
           {searchQuery}
           {selectedEntityIds}
           showProjectNames={!props.projectPath}
-          onBulkAction={runBulkActionFromControls}
+          onBulkAction={runBulkInboxAction}
           onClearSelectedItems={clearSelectedInboxItems}
           onFilterSelect={selectInboxFilter}
           onItemSelectionChange={setInboxItemSelected}
-          onOpenItem={(item) => {
-            void openInboxItem(item)
-          }}
+          onOpenItem={openInboxItem}
           onSearchInput={updateSearchQuery}
         />
       } @pending {
@@ -322,7 +299,7 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             {filterId}
             {searchQuery}
             selectedCount={selectedEntityIds.size}
-            onBulkAction={runBulkActionFromControls}
+            onBulkAction={runBulkInboxAction}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
             onSearchInput={updateSearchQuery}
@@ -352,7 +329,7 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             {filterId}
             {searchQuery}
             selectedCount={selectedEntityIds.size}
-            onBulkAction={runBulkActionFromControls}
+            onBulkAction={runBulkInboxAction}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
             onSearchInput={updateSearchQuery}
