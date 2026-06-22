@@ -69,4 +69,62 @@ describe("github feature package", () => {
       }),
     ).toBe(false)
   })
+
+  test("backend event definition enforces repo authorization before filters", async () => {
+    const event = normalizeGitHubWebhookDelivery(
+      GitHubWebhookDeliveryInput.parse({
+        deliveryId: "delivery-1",
+        event: {
+          type: "pull_request_review",
+          owner: "goddard-ai",
+          repo: "core",
+          prNumber: 12,
+          author: "reviewer",
+          state: "approved",
+          body: "ship it",
+        },
+      }),
+    )
+    const definition = githubBackendEvents["remote_repo.event.received"]
+
+    await expect(
+      Promise.resolve(
+        definition.authorize({
+          principal: {
+            kind: "github_user",
+            githubUserId: 42,
+            githubLogin: "alec",
+            repositories: [{ owner: "goddard-ai", repo: "core" }],
+          },
+          event,
+        }),
+      ),
+    ).resolves.toBe(true)
+
+    await expect(
+      Promise.resolve(
+        definition.authorize({
+          principal: {
+            kind: "github_user",
+            githubUserId: 43,
+            githubLogin: "bob",
+            repositories: [{ owner: "goddard-ai", repo: "other" }],
+          },
+          event,
+        }),
+      ),
+    ).resolves.toBe(false)
+    expect(
+      definition.matchesFilter?.({
+        event,
+        filter: { owner: "goddard-ai", repo: "core" },
+      }),
+    ).toBe(true)
+    expect(
+      definition.matchesFilter?.({
+        event,
+        filter: { owner: "goddard-ai", repo: "other" },
+      }),
+    ).toBe(false)
+  })
 })
