@@ -5,7 +5,7 @@ import { createGitHost } from "@goddard-ai/libgit2"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
-import { countCommitsAhead } from "./git/worktree-state.ts"
+import { countCommitsAhead } from "./git/history.ts"
 import { deleteWorktree } from "./worktrees/index.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])

@@ -2,7 +2,8 @@ import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
 import { createGitHost } from "@goddard-ai/libgit2"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
-import { readOriginHeadRef, readOriginRemoteUrl } from "./git/config.ts"
+import { readOriginRef } from "./git/refs.ts"
+import { readOriginRemoteUrl } from "./git/remotes.ts"
 
 type PrCreateInput = {
   provider: string
@@ -80,7 +81,7 @@ async function inferCurrentBranch(cwd: string): Promise<string> {
 
 async function inferBaseBranch(cwd: string): Promise<string> {
   try {
-    const headRef = await readOriginHeadRef(cwd)
+    const headRef = await readOriginRef(cwd, "HEAD")
     return headRef.replace(/^refs\/remotes\/origin\//, "") || "main"
   } catch {
     return "main"

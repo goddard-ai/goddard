@@ -46,25 +46,6 @@ export async function listUntrackedEntriesMatchedByExcludeFile(
   return parseGitPathOutput(result.stdout).map((relativePath) => ({ relativePath }))
 }
 
-export async function filterGitignoredPaths(repoRoot: string, relativePaths: string[]) {
-  if (relativePaths.length === 0) {
-    return new Set<string>()
-  }
-
-  const normalizedPaths = relativePaths.map((relativePath) =>
-    trimTrailingPathSeparator(relativePath),
-  )
-  const result = await runGitCommand(repoRoot, ["check-ignore", "--stdin", "-z"], {
-    stdin: `${normalizedPaths.join("\0")}\0`,
-  })
-
-  if (result.status !== 0 && result.status !== 1) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "git check-ignore failed")
-  }
-
-  return new Set(parseGitPathOutput(result.stdout).map(trimTrailingPathSeparator))
-}
-
 function parseGitPathOutput(stdout: string) {
   return stdout
     .split("\0")

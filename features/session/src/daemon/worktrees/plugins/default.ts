@@ -18,7 +18,7 @@ import {
   checkoutWorktreeBranch,
   fetchPullRequestHead,
   removeWorktree,
-} from "../../git/worktree-plugin.ts"
+} from "../../git/worktrees.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",

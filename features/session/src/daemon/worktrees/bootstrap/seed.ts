@@ -4,11 +4,11 @@ import { cp, mkdir, stat } from "node:fs/promises"
 import * as path from "node:path"
 
 import {
-  filterGitignoredPaths,
   listUntrackedEntries,
   listUntrackedEntriesMatchedByExcludeFile,
   type UntrackedEntry,
-} from "../../git/seed.ts"
+} from "../../git/files.ts"
+import { filterGitignoredPaths } from "../../git/ignore.ts"
 
 const worktreeIncludeFileName = ".worktreeinclude"
 

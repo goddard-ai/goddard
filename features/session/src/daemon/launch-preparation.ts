@@ -19,7 +19,8 @@ import {
   getSlashComposerSuggestions,
   MAX_COMPOSER_SUGGESTION_LIMIT,
 } from "./composer-suggestions.ts"
-import { checkoutBranch, listLocalBranches } from "./git/branches.ts"
+import { checkoutBranch } from "./git/checkout.ts"
+import { listLocalBranches } from "./git/refs.ts"
 import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"

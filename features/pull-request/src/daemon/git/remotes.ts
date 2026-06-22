@@ -4,10 +4,6 @@ export async function readOriginRemoteUrl(cwd: string) {
   return await runGit(cwd, ["config", "--get", "remote.origin.url"])
 }
 
-export async function readOriginHeadRef(cwd: string) {
-  return await runGit(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD"])
-}
-
 async function runGit(cwd: string, args: string[]): Promise<string> {
   const result = await runGitCommand(cwd, args)
   if (result.status !== 0) {

@@ -33,9 +33,3 @@ export async function listLocalBranches(sourcePath: string) {
     currentBranch,
   }
 }
-
-export async function checkoutBranch(repoRoot: string, branchName: string) {
-  return await runGitCommand(repoRoot, ["checkout", branchName], {
-    stdin: "ignore",
-  })
-}

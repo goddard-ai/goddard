@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
-import { checkoutWorktreeBranch, findWorktrunkBranchWorktree } from "../../git/worktree-plugin.ts"
+import { checkoutWorktreeBranch, findWorktrunkBranchWorktree } from "../../git/worktrees.ts"
 import { runCommand } from "../process.ts"
 
 export const worktrunkPlugin: WorktreePlugin = {
