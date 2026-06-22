@@ -87,7 +87,7 @@ export function createPullRequestFeedbackHandler(input: {
       const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
 
       if (runningPrs.has(requestKey)) {
-        logger.log("repo.feedback_coalesced", {
+        logger.log("pull_request.feedback_coalesced", {
           feedbackEvent: feedbackContext,
         })
         return
@@ -102,7 +102,7 @@ export function createPullRequestFeedbackHandler(input: {
           prNumber: event.prNumber,
         })
         if (!managed) {
-          logger.log("repo.feedback_ignored", {
+          logger.log("pull_request.feedback_ignored", {
             feedbackEvent: feedbackContext,
             reason: "unmanaged_pr",
           })
