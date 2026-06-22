@@ -23,6 +23,7 @@ export function createBrowserDaemonClient(): GoddardClient {
 }
 
 async function resolveDaemonAccess(): Promise<DaemonAccess> {
+  // Do not import from ~/desktop-host.ts here; the app may be running in an actual browser.
   const desktopBridge = globalThis.window?.__goddardDesktop
   if (desktopBridge) {
     const access = await desktopBridge.createDaemonWebviewAccessToken(window.location.origin)
