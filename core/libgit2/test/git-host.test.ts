@@ -10,18 +10,15 @@ import {
   createLibgit2GitHost,
   normalizePath,
   resetGitHostForTests,
-  resolveGitHostMode,
 } from "../src/index.ts"
 import { nativeLibgit2PathCandidates } from "../src/libgit2/native-artifact.ts"
 import { createFakeGitHost } from "../src/testing.ts"
 
-const originalGitHost = process.env.GODDARD_GIT_HOST
 const originalGitLibgit2Path = process.env.GODDARD_GIT_LIBGIT2_PATH
 const originalLibgit2Path = process.env.LIBGIT2_PATH
 const tempRoots: string[] = []
 
 afterEach(async () => {
-  restoreEnv("GODDARD_GIT_HOST", originalGitHost)
   restoreEnv("GODDARD_GIT_LIBGIT2_PATH", originalGitLibgit2Path)
   restoreEnv("LIBGIT2_PATH", originalLibgit2Path)
   resetGitHostForTests()
@@ -30,38 +27,7 @@ afterEach(async () => {
   }
 })
 
-test("Git host mode defaults to auto and honors explicit modes", () => {
-  expect(resolveGitHostMode({})).toBe("auto")
-  expect(resolveGitHostMode({ GODDARD_GIT_HOST: "cli" })).toBe("cli")
-  expect(resolveGitHostMode({ GODDARD_GIT_HOST: "libgit2" })).toBe("libgit2")
-  expect(resolveGitHostMode({ GODDARD_GIT_LIBGIT2_PATH: "/runtime/libgit2.dylib" })).toBe("libgit2")
-})
-
-test("forced CLI mode does not require libgit2", async () => {
-  process.env.GODDARD_GIT_HOST = "cli"
-  process.env.GODDARD_GIT_LIBGIT2_PATH = "/missing/libgit2.dylib"
-  const { repoDir } = await createRepo()
-
-  const host = createGitHost({
-    libgit2PathCandidates: ["/missing/libgit2.dylib"],
-  })
-
-  await expect(host.repository.resolveRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
-})
-
-test("auto mode falls back to CLI when libgit2 cannot load", async () => {
-  const { repoDir } = await createRepo()
-
-  const host = createGitHost({
-    libgit2PathCandidates: ["/missing/libgit2.dylib"],
-  })
-
-  await expect(host.repository.resolveRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
-})
-
-test("forced libgit2 mode fails when libgit2 cannot load", () => {
-  process.env.GODDARD_GIT_HOST = "libgit2"
-
+test("Git host fails when libgit2 cannot load", () => {
   expect(() =>
     createGitHost({
       libgit2PathCandidates: ["/missing/libgit2.dylib"],
@@ -101,43 +67,7 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   }
 
   const { branchHead, featureHead, repoDir } = await createRepo({ withFeatureBranch: true })
-  const fallback = createFakeGitHost({
-    repository: {
-      resolveGitPath: async () => {
-        throw new Error("fallback should not be used")
-      },
-      isBareRepository: async () => {
-        throw new Error("fallback should not be used")
-      },
-    },
-    refs: {
-      getBranchHead: async () => branchHead,
-      update: async () => {
-        throw new Error("fallback should not be used")
-      },
-      delete: async () => {
-        throw new Error("fallback should not be used")
-      },
-    },
-    history: {
-      resolveHead: async () => branchHead,
-    },
-    status: {
-      getWorkingTreeStatus: async () => ({ clean: true, entries: [] }),
-      isWorktreeClean: async () => true,
-    },
-    worktrees: {
-      list: async () => {
-        throw new Error("fallback should not be used")
-      },
-    },
-    stash: {
-      list: async () => {
-        throw new Error("fallback should not be used")
-      },
-    },
-  })
-  const host = createLibgit2GitHost(fallback, {
+  const host = createLibgit2GitHost({
     libgit2PathCandidates: [libgit2Path],
   })
 
@@ -147,9 +77,13 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   await expect(host.refs.getCurrentBranch(repoDir)).resolves.toBe("main")
   await expect(host.refs.branchExists(repoDir, "main")).resolves.toBe(true)
   await expect(host.refs.resolve(repoDir, "HEAD")).resolves.toBe(branchHead)
+  await expect(host.refs.getBranchHead(repoDir, "main")).resolves.toBe(branchHead)
+  await expect(host.history.resolveHead(repoDir)).resolves.toBe(branchHead)
   await expect(host.history.isAncestor(repoDir, branchHead, featureHead)).resolves.toBe(true)
   await expect(host.history.getMergeBase(repoDir, "main", "feature")).resolves.toBe(branchHead)
-  await expect(host.status.isWorktreeClean(repoDir)).resolves.toBe(true)
+  await expect(host.status.isWorktreeClean(repoDir)).rejects.toThrow(
+    "libgit2 host does not support status.isWorktreeClean",
+  )
 })
 
 test("fake Git host exposes deterministic method overrides", async () => {

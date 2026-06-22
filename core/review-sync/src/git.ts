@@ -3,14 +3,10 @@ import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 import {
-  createCliGitHost as createSharedCliGitHost,
   createGitHost as createSharedGitHost,
-  createLibgit2GitHost as createSharedLibgit2GitHost,
   GitNotRepositoryError,
   normalizePath as normalizeSharedPath,
   resetGitHostForTests,
-  resolveGitHostMode,
-  type GitHostMode,
   type GitHost as SharedGitHost,
   type WorktreeInfo,
 } from "@goddard-ai/libgit2"
@@ -43,37 +39,28 @@ export type GitHost = {
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
-type ReviewSyncGitHostMode = GitHostMode
-
 /** Creates the Git host selected for this process. */
 export function createReviewSyncGitHost(options: { libgit2PathCandidates?: string[] } = {}) {
-  return adaptSharedGitHost(
+  const commandHost = createReviewSyncCommandGitHost()
+  const libgit2Host = adaptSharedGitHost(
     createSharedGitHost({
-      mode: resolveReviewSyncGitHostMode(),
       libgit2PathCandidates: options.libgit2PathCandidates,
     }),
   )
-}
 
-export function resolveReviewSyncGitHostMode(): ReviewSyncGitHostMode {
-  return resolveGitHostMode()
+  return {
+    ...commandHost,
+    resolveRequiredRepoRoot: libgit2Host.resolveRequiredRepoRoot,
+    resolveRequiredGitCommonDir: libgit2Host.resolveRequiredGitCommonDir,
+    resolveRequiredGitDir: libgit2Host.resolveRequiredGitDir,
+    resolveCurrentBranch: libgit2Host.resolveCurrentBranch,
+    branchExists: libgit2Host.branchExists,
+    resolveRef: libgit2Host.resolveRef,
+  }
 }
 
 export function resetReviewSyncGitHostForTests() {
   resetGitHostForTests()
-}
-
-/** Creates the default Git host backed by Git CLI subprocesses. */
-export function createCliGitHost() {
-  return adaptSharedGitHost(createSharedCliGitHost())
-}
-
-/** Creates an experimental Git host that uses libgit2 for read-heavy lookups. */
-export function createLibgit2GitHost(
-  fallback: GitHost,
-  options: { fallbackOnOperationError?: boolean; libgit2PathCandidates?: string[] } = {},
-) {
-  return adaptSharedGitHost(createSharedLibgit2GitHost(toSharedGitHost(fallback), options))
 }
 
 function adaptSharedGitHost(shared: SharedGitHost): GitHost {
@@ -93,77 +80,76 @@ function adaptSharedGitHost(shared: SharedGitHost): GitHost {
   }
 }
 
-function toSharedGitHost(host: GitHost): SharedGitHost {
+function createReviewSyncCommandGitHost(): GitHost {
   return {
-    repository: {
-      resolveRoot: (cwd) => host.resolveRequiredRepoRoot(cwd),
-      resolveGitDir: (cwd) => host.resolveRequiredGitDir(cwd),
-      resolveCommonDir: (cwd) => host.resolveRequiredGitCommonDir(cwd),
-      resolveGitPath: async (cwd, gitPath) => {
-        const result = await host.run(cwd, ["rev-parse", "--git-path", gitPath])
-        return resolveGitOutputPath(cwd, result.stdout.trim())
-      },
-      isBareRepository: async (cwd) => {
-        const result = await host.run(cwd, ["rev-parse", "--is-bare-repository"], {
-          allowFailure: true,
-        })
-        return result.status === 0 && result.stdout.trim() === "true"
-      },
+    run: runReviewSyncGitCommand,
+    resolveRequiredRepoRoot: async (cwd) => {
+      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--show-toplevel"], {
+        allowFailure: true,
+      })
+      if (result.status !== 0 || !result.stdout.trim()) {
+        throw new UserError(`Not a Git worktree: ${cwd}`)
+      }
+      return await normalizePath(result.stdout.trim())
     },
-    refs: {
-      resolve: (cwd, refName) => host.resolveRef(cwd, refName),
-      exists: async (cwd, refName) => (await host.resolveRef(cwd, refName)) !== null,
-      update: (cwd, refName, oid) => host.updateRef(cwd, refName, oid),
-      delete: (cwd, refName) => host.deleteRef(cwd, refName),
-      getCurrentBranch: (cwd) => host.resolveCurrentBranch(cwd),
-      branchExists: (cwd, branch) => host.branchExists(cwd, branch),
-      getBranchHead: (cwd, branch) => host.resolveRef(cwd, `refs/heads/${branch}`),
+    resolveRequiredGitCommonDir: async (cwd) => {
+      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--git-common-dir"])
+      return await normalizePath(resolveGitOutputPath(cwd, result.stdout.trim()))
     },
-    history: {
-      resolveHead: (cwd) => host.resolveRef(cwd, "HEAD"),
-      isAncestor: async (cwd, ancestor, descendant) => {
-        const result = await host.run(cwd, ["merge-base", "--is-ancestor", ancestor, descendant], {
-          allowFailure: true,
-        })
-        return result.status === 0
-      },
-      getMergeBase: async (cwd, left, right) => {
-        const result = await host.run(cwd, ["merge-base", left, right], {
-          allowFailure: true,
-        })
-        return result.status === 0 ? result.stdout.trim() || null : null
-      },
+    resolveRequiredGitDir: async (cwd) => {
+      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--git-dir"])
+      return await normalizePath(resolveGitOutputPath(cwd, result.stdout.trim()))
     },
-    status: {
-      getWorkingTreeStatus: async (cwd) => {
-        const result = await host.run(cwd, ["status", "--porcelain=v1", "--untracked-files=all"])
-        const entries = result.stdout
+    resolveCurrentBranch: async (cwd) => {
+      const result = await runReviewSyncGitCommand(
+        cwd,
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        {
+          allowFailure: true,
+        },
+      )
+      return result.status === 0 ? result.stdout.trim() || null : null
+    },
+    branchExists: async (cwd, branch) => {
+      const result = await runReviewSyncGitCommand(
+        cwd,
+        ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+        {
+          allowFailure: true,
+        },
+      )
+      return result.status === 0
+    },
+    isWorktreeClean: async (cwd) => {
+      const result = await runReviewSyncGitCommand(cwd, [
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+      ])
+      return (
+        result.stdout
           .split("\n")
           .map((entry) => entry.trimEnd())
-          .filter(Boolean)
-        return {
-          clean: entries.length === 0,
-          entries,
-        }
-      },
-      isWorktreeClean: (cwd) => host.isWorktreeClean(cwd),
+          .filter(Boolean).length === 0
+      )
     },
-    worktrees: {
-      list: (cwd) => host.listWorktrees(cwd),
+    resolveRef: async (cwd, refName) => {
+      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--verify", "-q", refName], {
+        allowFailure: true,
+      })
+      return result.status === 0 ? result.stdout.trim() || null : null
     },
-    stash: {
-      list: async (cwd) => {
-        const result = await host.run(cwd, ["stash", "list", "--format=%gd%x00%s"])
-        return new Map(
-          result.stdout
-            .split("\n")
-            .filter(Boolean)
-            .map((line) => {
-              const [ref, message = ""] = line.split("\0")
-              return [ref, message] as const
-            }),
-        )
-      },
+    updateRef: async (cwd, refName, oid) => {
+      await runReviewSyncGitCommand(cwd, ["update-ref", refName, oid])
+    },
+    deleteRef: async (cwd, refName) => {
+      await runReviewSyncGitCommand(cwd, ["update-ref", "-d", refName], {
+        allowFailure: true,
+      })
+    },
+    listWorktrees: async (cwd) => {
+      const result = await runReviewSyncGitCommand(cwd, ["worktree", "list", "--porcelain"])
+      return parseGitWorktrees(result.stdout)
     },
   }
 }
@@ -341,6 +327,31 @@ export function isProcessAlive(pid: number) {
 /** Parses Git's porcelain worktree list into path and branch records. */
 export async function listGitWorktrees(cwd: string, context: RuntimeContext) {
   return await context.gitHost.listWorktrees(cwd)
+}
+
+function parseGitWorktrees(output: string): WorktreeInfo[] {
+  const entries: WorktreeInfo[] = []
+  let current: WorktreeInfo | null = null
+
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      if (current) {
+        entries.push(current)
+      }
+      current = { path: line.slice("worktree ".length), branch: null }
+      continue
+    }
+
+    if (current && line.startsWith("branch refs/heads/")) {
+      current.branch = line.slice("branch refs/heads/".length)
+    }
+  }
+
+  if (current) {
+    entries.push(current)
+  }
+
+  return entries
 }
 
 function resolveGitOutputPath(cwd: string, value: string) {

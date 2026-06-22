@@ -1,4 +1,3 @@
-import { createCliGitHost } from "../cli/host.ts"
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
 import { normalizePath } from "../paths.ts"
 import type { GitHost } from "../types.ts"
@@ -13,25 +12,15 @@ import {
   withLibgit2Repository,
 } from "./ffi.ts"
 
-export function createLibgit2GitHost(
-  fallback: GitHost,
-  options: { fallbackOnOperationError?: boolean; libgit2PathCandidates?: string[] } = {},
-): GitHost {
+export function createLibgit2GitHost(options: { libgit2PathCandidates?: string[] } = {}): GitHost {
   const libgit2 = ensureLibgit2(options.libgit2PathCandidates)
+  const unsupported = createUnsupportedGitHost()
 
   const runLibgit2 = async <T>(
-    operation: () => Promise<T>,
-    fallbackOperation: () => Promise<T>,
+    operation: () => Promise<T> | T,
+    _unsupportedOperation?: () => Promise<T> | T,
   ) => {
-    if (!options.fallbackOnOperationError) {
-      return await operation()
-    }
-
-    try {
-      return await operation()
-    } catch {
-      return await fallbackOperation()
-    }
+    return await operation()
   }
 
   return {
@@ -46,7 +35,7 @@ export function createLibgit2GitHost(
               }
               return await normalizePath(String(workdir))
             }),
-          () => fallback.repository.resolveRoot(cwd),
+          () => unsupported.repository.resolveRoot(cwd),
         ),
       resolveGitDir: (cwd) =>
         runLibgit2(
@@ -58,7 +47,7 @@ export function createLibgit2GitHost(
               }
               return await normalizePath(String(gitDir))
             }),
-          () => fallback.repository.resolveGitDir(cwd),
+          () => unsupported.repository.resolveGitDir(cwd),
         ),
       resolveCommonDir: (cwd) =>
         runLibgit2(
@@ -70,10 +59,10 @@ export function createLibgit2GitHost(
               }
               return await normalizePath(String(commonDir))
             }),
-          () => fallback.repository.resolveCommonDir(cwd),
+          () => unsupported.repository.resolveCommonDir(cwd),
         ),
-      resolveGitPath: (cwd, gitPath) => fallback.repository.resolveGitPath(cwd, gitPath),
-      isBareRepository: (cwd) => fallback.repository.isBareRepository(cwd),
+      resolveGitPath: (cwd, gitPath) => unsupported.repository.resolveGitPath(cwd, gitPath),
+      isBareRepository: (cwd) => unsupported.repository.isBareRepository(cwd),
     },
     refs: {
       resolve: (cwd, refName) =>
@@ -92,15 +81,15 @@ export function createLibgit2GitHost(
                 libgit2.git_object_free(object)
               }
             }),
-          () => fallback.refs.resolve(cwd, refName),
+          () => unsupported.refs.resolve(cwd, refName),
         ),
       exists: (cwd, refName) =>
         runLibgit2(
           async () => (await createLibgit2RefResolver(libgit2, cwd, refName)) !== null,
-          () => fallback.refs.exists(cwd, refName),
+          () => unsupported.refs.exists(cwd, refName),
         ),
-      update: (cwd, refName, oid) => fallback.refs.update(cwd, refName, oid),
-      delete: (cwd, refName) => fallback.refs.delete(cwd, refName),
+      update: (cwd, refName, oid) => unsupported.refs.update(cwd, refName, oid),
+      delete: (cwd, refName) => unsupported.refs.delete(cwd, refName),
       getCurrentBranch: (cwd) =>
         runLibgit2(
           () =>
@@ -122,7 +111,7 @@ export function createLibgit2GitHost(
                 libgit2.git_reference_free(head)
               }
             }),
-          () => fallback.refs.getCurrentBranch(cwd),
+          () => unsupported.refs.getCurrentBranch(cwd),
         ),
       branchExists: (cwd, branch) =>
         runLibgit2(
@@ -137,19 +126,19 @@ export function createLibgit2GitHost(
                   toFfiPointer(cString(`refs/heads/${branch}`)),
                 ) === 0,
             ),
-          () => fallback.refs.branchExists(cwd, branch),
+          () => unsupported.refs.branchExists(cwd, branch),
         ),
       getBranchHead: (cwd, branch) =>
         runLibgit2(
-          () => fallback.refs.getBranchHead(cwd, branch),
-          () => fallback.refs.getBranchHead(cwd, branch),
+          () => resolveRefWithLibgit2(libgit2, cwd, `refs/heads/${branch}`),
+          () => unsupported.refs.getBranchHead(cwd, branch),
         ),
     },
     history: {
       resolveHead: (cwd) =>
         runLibgit2(
-          () => fallback.history.resolveHead(cwd),
-          () => fallback.history.resolveHead(cwd),
+          () => resolveRefWithLibgit2(libgit2, cwd, "HEAD"),
+          () => unsupported.history.resolveHead(cwd),
         ),
       isAncestor: (cwd, ancestor, descendant) =>
         runLibgit2(
@@ -183,7 +172,7 @@ export function createLibgit2GitHost(
                 libgit2.git_object_free(descendantObject)
               }
             }),
-          () => fallback.history.isAncestor(cwd, ancestor, descendant),
+          () => unsupported.history.isAncestor(cwd, ancestor, descendant),
         ),
       getMergeBase: (cwd, left, right) =>
         runLibgit2(
@@ -215,24 +204,82 @@ export function createLibgit2GitHost(
                 libgit2.git_object_free(rightObject)
               }
             }),
-          () => fallback.history.getMergeBase(cwd, left, right),
+          () => unsupported.history.getMergeBase(cwd, left, right),
         ),
     },
     status: {
-      getWorkingTreeStatus: (cwd) => fallback.status.getWorkingTreeStatus(cwd),
-      isWorktreeClean: (cwd) => fallback.status.isWorktreeClean(cwd),
+      getWorkingTreeStatus: (cwd) => unsupported.status.getWorkingTreeStatus(cwd),
+      isWorktreeClean: (cwd) => unsupported.status.isWorktreeClean(cwd),
     },
     worktrees: {
-      list: (cwd) => fallback.worktrees.list(cwd),
+      list: (cwd) => unsupported.worktrees.list(cwd),
     },
     stash: {
-      list: (cwd) => fallback.stash.list(cwd),
+      list: (cwd) => unsupported.stash.list(cwd),
     },
   }
 }
 
 export function validateLibgit2Runtime(options: { libgit2PathCandidates?: string[] } = {}) {
-  createLibgit2GitHost(createCliGitHost(), {
-    libgit2PathCandidates: options.libgit2PathCandidates,
+  ensureLibgit2(options.libgit2PathCandidates)
+}
+
+function resolveRefWithLibgit2(
+  libgit2: ReturnType<typeof ensureLibgit2>,
+  cwd: string,
+  refName: string,
+) {
+  return withLibgit2Repository(libgit2, cwd, (repo) => {
+    const object = resolveLibgit2Object(libgit2, repo, refName)
+    if (!object) {
+      return null
+    }
+
+    try {
+      const oid = libgit2.git_object_id(object)
+      return oid ? String(libgit2.git_oid_tostr_s(oid)) : null
+    } finally {
+      libgit2.git_object_free(object)
+    }
   })
+}
+
+function createUnsupportedGitHost(): GitHost {
+  return {
+    repository: {
+      resolveRoot: () => unsupported("repository.resolveRoot"),
+      resolveGitDir: () => unsupported("repository.resolveGitDir"),
+      resolveCommonDir: () => unsupported("repository.resolveCommonDir"),
+      resolveGitPath: () => unsupported("repository.resolveGitPath"),
+      isBareRepository: () => unsupported("repository.isBareRepository"),
+    },
+    refs: {
+      resolve: () => unsupported("refs.resolve"),
+      exists: () => unsupported("refs.exists"),
+      update: () => unsupported("refs.update"),
+      delete: () => unsupported("refs.delete"),
+      getCurrentBranch: () => unsupported("refs.getCurrentBranch"),
+      branchExists: () => unsupported("refs.branchExists"),
+      getBranchHead: () => unsupported("refs.getBranchHead"),
+    },
+    history: {
+      resolveHead: () => unsupported("history.resolveHead"),
+      isAncestor: () => unsupported("history.isAncestor"),
+      getMergeBase: () => unsupported("history.getMergeBase"),
+    },
+    status: {
+      getWorkingTreeStatus: () => unsupported("status.getWorkingTreeStatus"),
+      isWorktreeClean: () => unsupported("status.isWorktreeClean"),
+    },
+    worktrees: {
+      list: () => unsupported("worktrees.list"),
+    },
+    stash: {
+      list: () => unsupported("stash.list"),
+    },
+  }
+}
+
+async function unsupported<T>(operation: string): Promise<T> {
+  throw new GitHostError(`libgit2 host does not support ${operation}`)
 }

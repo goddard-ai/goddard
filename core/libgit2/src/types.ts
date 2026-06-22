@@ -8,22 +8,7 @@ export type WorkingTreeStatus = {
   entries: string[]
 }
 
-export type GitCommandResult = {
-  status: number
-  stdout: string
-  stderr: string
-}
-
-export type GitRunOptions = {
-  allowFailure?: boolean
-  stdin?: string | "ignore"
-  env?: Record<string, string | undefined>
-}
-
-export type GitHostMode = "auto" | "cli" | "libgit2"
-
 export type GitHostOptions = {
-  mode?: GitHostMode
   libgit2PathCandidates?: string[]
 }
 
