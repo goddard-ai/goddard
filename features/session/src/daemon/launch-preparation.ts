@@ -19,7 +19,7 @@ import {
   getSlashComposerSuggestions,
   MAX_COMPOSER_SUGGESTION_LIMIT,
 } from "./composer-suggestions.ts"
-import { runGitCommand } from "./git-command.ts"
+import { checkoutBranch, listLocalBranches } from "./git/branches.ts"
 import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"
@@ -45,37 +45,7 @@ export async function listLaunchBranches(cwd: string) {
     return { branches: [], currentBranch: null }
   }
 
-  const result = await runGitCommand(source.path, [
-    "for-each-ref",
-    "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)",
-    "refs/heads",
-  ])
-  if (result.status !== 0) {
-    return { branches: [], currentBranch: null }
-  }
-
-  const branches: string[] = []
-  let currentBranch: string | null = null
-
-  for (const rawLine of result.stdout.split("\n")) {
-    const line = rawLine.trim()
-    if (!line) {
-      continue
-    }
-
-    const current = line.startsWith("*")
-    const name = current ? line.slice(1) : line
-    if (current) {
-      currentBranch = name
-    }
-
-    branches.push(name)
-  }
-
-  return {
-    branches,
-    currentBranch,
-  }
+  return await listLocalBranches(source.path)
 }
 
 /** Returns true when branch switching in the requested local checkout would risk user work. */
@@ -105,9 +75,7 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
     })
   }
 
-  const result = await runGitCommand(repoRoot, ["checkout", params.branchName], {
-    stdin: "ignore",
-  })
+  const result = await checkoutBranch(repoRoot, params.branchName)
 
   if (result.status !== 0) {
     throw createSessionIpcError(SessionErrorCodes.LaunchCheckoutFailed, {

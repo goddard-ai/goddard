@@ -3,7 +3,12 @@ import { constants as fsConstants } from "node:fs"
 import { cp, mkdir, stat } from "node:fs/promises"
 import * as path from "node:path"
 
-import { runGitCommand } from "../../git-command.ts"
+import {
+  filterGitignoredPaths,
+  listUntrackedEntries,
+  listUntrackedEntriesMatchedByExcludeFile,
+  type UntrackedEntry,
+} from "../../git/seed.ts"
 
 const worktreeIncludeFileName = ".worktreeinclude"
 
@@ -135,72 +140,6 @@ async function listWorktreeIncludeCandidates(repoRoot: string) {
 }
 
 /**
- * Lists the repository-relative untracked entries Git currently exposes for one checkout.
- */
-async function listUntrackedEntries(repoRoot: string) {
-  const result = await runGitCommand(
-    repoRoot,
-    ["ls-files", "--others", "--exclude-standard", "--directory"],
-    { stdin: "ignore" },
-  )
-
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "git ls-files failed")
-  }
-
-  return result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const isDir = line.endsWith("/")
-      return {
-        relativePath: isDir ? line.slice(0, -1) : line,
-        isDir,
-      }
-    })
-}
-
-/**
- * Lists untracked entries matched by one Git exclude-pattern file.
- */
-async function listUntrackedEntriesMatchedByExcludeFile(repoRoot: string, excludeFile: string) {
-  const result = await runGitCommand(
-    repoRoot,
-    ["ls-files", "--others", "--ignored", "--directory", "-z", `--exclude-from=${excludeFile}`],
-    { stdin: "ignore" },
-  )
-
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "git ls-files failed")
-  }
-
-  return parseGitPathOutput(result.stdout).map((relativePath) => ({ relativePath }))
-}
-
-/**
- * Filters repository-relative paths down to those ignored by the repository's standard Git rules.
- */
-async function filterGitignoredPaths(repoRoot: string, relativePaths: string[]) {
-  if (relativePaths.length === 0) {
-    return new Set<string>()
-  }
-
-  const normalizedPaths = relativePaths.map((relativePath) =>
-    trimTrailingPathSeparator(relativePath),
-  )
-  const result = await runGitCommand(repoRoot, ["check-ignore", "--stdin", "-z"], {
-    stdin: `${normalizedPaths.join("\0")}\0`,
-  })
-
-  if (result.status !== 0 && result.status !== 1) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "git check-ignore failed")
-  }
-
-  return new Set(parseGitPathOutput(result.stdout).map(trimTrailingPathSeparator))
-}
-
-/**
  * Copies one seed candidate, preferring copy-on-write before falling back to a normal copy.
  */
 async function copySeedCandidate(sourcePath: string, targetPath: string) {
@@ -246,10 +185,7 @@ function normalizeSeedPath(repoRoot: string, configuredPath: string) {
 /**
  * Returns true when one repo-relative path is covered by the current Git untracked listing.
  */
-function isCoveredByUntrackedEntries(
-  relativePath: string,
-  entries: Array<{ relativePath: string; isDir: boolean }>,
-) {
+function isCoveredByUntrackedEntries(relativePath: string, entries: UntrackedEntry[]) {
   return entries.some((entry) => {
     if (entry.relativePath === relativePath) {
       return true
@@ -257,25 +193,6 @@ function isCoveredByUntrackedEntries(
 
     return entry.isDir && relativePath.startsWith(`${entry.relativePath}/`)
   })
-}
-
-/**
- * Parses Git path output that may be NUL-delimited.
- */
-function parseGitPathOutput(stdout: string) {
-  return stdout
-    .split("\0")
-    .filter((line) => line.length > 0)
-    .map(trimTrailingPathSeparator)
-}
-
-/**
- * Normalizes Git directory output to the repo-relative path used by copy targets.
- */
-function trimTrailingPathSeparator(relativePath: string) {
-  return relativePath.endsWith("/") || relativePath.endsWith("\\")
-    ? relativePath.slice(0, -1)
-    : relativePath
 }
 
 /**

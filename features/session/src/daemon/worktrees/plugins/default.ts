@@ -11,7 +11,14 @@ import type {
   WorktreeSetupOptions,
 } from "@goddard-ai/worktree-plugin"
 
-import { runGitCommand } from "../../git-command.ts"
+import {
+  addDetachedWorktree,
+  checkoutBranchFromFetchHead,
+  checkoutExistingBranch,
+  checkoutWorktreeBranch,
+  fetchPullRequestHead,
+  removeWorktree,
+} from "../../git/worktree-plugin.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",
@@ -47,47 +54,28 @@ export const defaultPlugin: WorktreePlugin = {
     }
     await mkdir(path.dirname(worktreeDir), { recursive: true })
 
-    const wtResult = await runGitCommand(
-      options.cwd,
-      ["worktree", "add", "--detach", worktreeDir],
-      {
-        stdin: "ignore",
-      },
-    )
-
-    if (wtResult.status !== 0) {
-      throw new Error(
-        `Failed to create linked worktree at ${worktreeDir}: ${wtResult.stderr.trim() || wtResult.stdout.trim() || "git worktree add exited unsuccessfully"}`,
-      )
-    }
+    await addDetachedWorktree(options.cwd, worktreeDir)
 
     try {
       const prNumberMatch = options.branchName.match(/(?:^pr-|\/pr\/)(\d+)$/)
       if (prNumberMatch) {
-        await runGitCommand(
+        await fetchPullRequestHead({
           worktreeDir,
-          ["fetch", "origin", `pull/${prNumberMatch[1]}/head:${options.branchName}`],
-          { stdin: "ignore" },
-        )
-
-        await runGitCommand(worktreeDir, ["checkout", "-B", options.branchName, "FETCH_HEAD"], {
-          stdin: "ignore",
+          prNumber: prNumberMatch[1],
+          branchName: options.branchName,
         })
+        await checkoutBranchFromFetchHead(worktreeDir, options.branchName)
         return worktreeDir
       }
 
-      await runGitCommand(
+      await checkoutWorktreeBranch({
         worktreeDir,
-        options.baseBranchName
-          ? ["checkout", "-B", options.branchName, options.baseBranchName]
-          : ["checkout", "-B", options.branchName],
-        { stdin: "ignore" },
-      )
+        branchName: options.branchName,
+        baseBranchName: options.baseBranchName,
+      })
     } catch {
       try {
-        await runGitCommand(worktreeDir, ["checkout", options.branchName], {
-          stdin: "ignore",
-        })
+        await checkoutExistingBranch(worktreeDir, options.branchName)
       } catch {
         // Ignore error.
       }
@@ -98,13 +86,7 @@ export const defaultPlugin: WorktreePlugin = {
 
   async cleanup(options: WorktreeCleanupOptions) {
     try {
-      const wtResult = await runGitCommand(
-        options.cwd,
-        ["worktree", "remove", "--force", options.worktreeDir],
-        { stdin: "ignore" },
-      )
-
-      if (wtResult.status !== 0) {
+      if (!(await removeWorktree(options.cwd, options.worktreeDir))) {
         await rm(options.worktreeDir, { recursive: true, force: true })
       }
       return true

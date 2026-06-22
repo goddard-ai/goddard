@@ -2,7 +2,7 @@ import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
 import { createGitHost } from "@goddard-ai/git"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
-import { runGitCommand } from "./git-command.ts"
+import { readOriginHeadRef, readOriginRemoteUrl } from "./git/config.ts"
 
 type PrCreateInput = {
   provider: string
@@ -65,7 +65,7 @@ export async function resolveReplyRequestFromGit(
 }
 
 async function inferRepoFromGit(cwd: string, parseRepositoryUrl: RepositoryUrlParser) {
-  const remote = await runGit(cwd, ["config", "--get", "remote.origin.url"])
+  const remote = await readOriginRemoteUrl(cwd)
   const repository = parseRepositoryUrl(remote)
   if (repository) {
     return repository
@@ -80,7 +80,7 @@ async function inferCurrentBranch(cwd: string): Promise<string> {
 
 async function inferBaseBranch(cwd: string): Promise<string> {
   try {
-    const headRef = await runGit(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD"])
+    const headRef = await readOriginHeadRef(cwd)
     return headRef.replace(/^refs\/remotes\/origin\//, "") || "main"
   } catch {
     return "main"
@@ -95,14 +95,4 @@ async function inferPrNumberFromGit(cwd: string): Promise<number> {
   }
 
   return Number.parseInt(match[1], 10)
-}
-
-async function runGit(cwd: string, args: string[]): Promise<string> {
-  const result = await runGitCommand(cwd, args)
-  if (result.status !== 0) {
-    const stderr = result.stderr.trim()
-    throw new Error(stderr || `git ${args.join(" ")} failed in ${cwd}`)
-  }
-
-  return result.stdout.trim()
 }

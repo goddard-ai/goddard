@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
-import { runGitCommand } from "../../git-command.ts"
+import { checkoutWorktreeBranch, findWorktrunkBranchWorktree } from "../../git/worktree-plugin.ts"
 import { runCommand } from "../process.ts"
 
 export const worktrunkPlugin: WorktreePlugin = {
@@ -32,26 +32,18 @@ export const worktrunkPlugin: WorktreePlugin = {
       })
 
       if (switchResult.status === 0) {
-        const worktreeListResult = await runGitCommand(options.cwd, ["worktree", "list"])
+        const wtPath = await findWorktrunkBranchWorktree(options.cwd, options.branchName)
 
-        if (worktreeListResult.status === 0) {
-          const lines = worktreeListResult.stdout.split("\n")
-          for (const line of lines) {
-            if (line.includes(`[${options.branchName}]`)) {
-              const wtPath = line.split(" ")[0]
-              if (wtPath) {
-                if (options.baseBranchName) {
-                  await runGitCommand(
-                    wtPath,
-                    ["checkout", "-B", options.branchName, options.baseBranchName],
-                    { stdin: "ignore" },
-                  )
-                }
-
-                return wtPath
-              }
-            }
+        if (wtPath) {
+          if (options.baseBranchName) {
+            await checkoutWorktreeBranch({
+              worktreeDir: wtPath,
+              branchName: options.branchName,
+              baseBranchName: options.baseBranchName,
+            })
           }
+
+          return wtPath
         }
       }
 

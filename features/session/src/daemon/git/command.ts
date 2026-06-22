@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process"
 
-type GitCommandResult = {
+export type GitCommandResult = {
   status: number
   stdout: string
   stderr: string
 }
 
-type GitRunOptions = {
+export type GitRunOptions = {
   stdin?: string | "ignore"
   env?: Record<string, string | undefined>
 }

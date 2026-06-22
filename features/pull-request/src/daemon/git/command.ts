@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 
-type GitCommandResult = {
+export type GitCommandResult = {
   status: number
   stdout: string
   stderr: string

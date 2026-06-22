@@ -4,7 +4,7 @@ import { readdir, realpath, stat } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
 
 import type { SessionSubpackage } from "../schema.ts"
-import { runGitCommand } from "./git-command.ts"
+import { isGitIgnoredDirectory } from "./git/ignore.ts"
 import { resolveGitRepoRoot } from "./worktree.ts"
 
 const BUILT_IN_SUBPACKAGE_MANIFESTS = [
@@ -92,14 +92,7 @@ async function isGitIgnoredPath(params: { gitRoot: string | null; path: string }
     return false
   }
 
-  const result = await runGitCommand(
-    params.gitRoot,
-    ["check-ignore", "-q", "--", `${relativePath}/`],
-    {
-      stdin: "ignore",
-    },
-  )
-  return result.status === 0
+  return await isGitIgnoredDirectory({ gitRoot: params.gitRoot, path: checkedPath })
 }
 
 /** Finds the first configured manifest present in one candidate subpackage directory. */

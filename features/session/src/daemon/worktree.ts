@@ -5,7 +5,7 @@ import { createGitHost } from "@goddard-ai/git"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
-import { runGitCommand } from "./git-command.ts"
+import { countCommitsAhead } from "./git/worktree-state.ts"
 import { deleteWorktree } from "./worktrees/index.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
@@ -150,17 +150,8 @@ export async function inspectWorktreeCompletionState(
     throw new Error("Unable to inspect primary checkout HEAD")
   }
 
-  const ahead = await runGitCommand(worktree.worktreeDir, [
-    "rev-list",
-    "--count",
-    `${primaryHead}..HEAD`,
-  ])
-  if (ahead.status !== 0) {
-    throw new Error("Unable to inspect worktree commits")
-  }
-
   return {
     dirty: status.entries.length > 0,
-    unmergedCommits: Number(ahead.stdout.trim()) > 0,
+    unmergedCommits: (await countCommitsAhead(worktree.worktreeDir, primaryHead)) > 0,
   }
 }
