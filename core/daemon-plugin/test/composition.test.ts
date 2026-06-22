@@ -122,6 +122,31 @@ describe("daemon plugin composition", () => {
     expect(Object.keys(composition.backendRoutes).sort()).toEqual(["auth", "pullRequests"])
   })
 
+  test("types backend event handler setup contributions", () => {
+    const pullRequest = definePlugin({
+      name: "pull-request",
+      setup() {
+        return {
+          backendEventHandlers: [
+            {
+              name: "pull-request.feedback",
+              canHandle: (event: unknown): event is { type: "feedback"; prNumber: number } =>
+                typeof event === "object" &&
+                event != null &&
+                "type" in event &&
+                event.type === "feedback",
+              handle: (event) => event.prNumber,
+            },
+          ],
+        }
+      },
+    })
+
+    const composition = composePlugins([pullRequest])
+
+    expect(composition.plugins.map((plugin) => plugin.name)).toEqual(["pull-request"])
+  })
+
   test("rejects duplicate plugin names", () => {
     const first = definePlugin({ name: "session" })
     const second = definePlugin({ name: "session" })

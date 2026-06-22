@@ -2,6 +2,7 @@ import type { HttpRouteTree as BackendRouteTree } from "@goddard-ai/backend-plug
 import type { HttpRouteTree as IpcRouteTree } from "@goddard-ai/ipc"
 
 import type {
+  BackendEventHandler,
   ConfigDefinitions,
   DaemonLogContextDefinition,
   DbDefinition,
@@ -133,6 +134,7 @@ type SetupContributions<
   TProvides extends FeatureExtensions | undefined,
 > = IpcHandlerContributions<TIpcRoutes> &
   ProvidesContribution<TProvides> & {
+    readonly backendEventHandlers?: readonly BackendEventHandler[]
     readonly close?: () => void | Promise<void>
   }
 

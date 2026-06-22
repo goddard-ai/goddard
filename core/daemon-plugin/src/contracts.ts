@@ -40,6 +40,13 @@ export type EventDefinition<TPayload = unknown> = {
 /** One or more event payloads owned by a daemon plugin. */
 export type EventDefinitions = Record<string, EventDefinition<any>>
 
+/** Feature-owned handler for backend-originated events delivered by the daemon host stream. */
+export type BackendEventHandler<TEvent = unknown> = {
+  readonly name: string
+  readonly canHandle: (event: unknown) => event is TEvent
+  readonly handle: (event: TEvent) => void | Promise<void>
+}
+
 export type InferEventPayload<TDefinition> =
   TDefinition extends EventDefinition<infer TPayload> ? TPayload : never
 
@@ -283,6 +290,7 @@ export type IpcHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
 
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
+  readonly backendEventHandlers?: readonly BackendEventHandler[]
   readonly ipcHandlers?: Record<string, unknown>
   readonly provides?: FeatureExtensions
   readonly close?: () => void | Promise<void>

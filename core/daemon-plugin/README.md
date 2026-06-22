@@ -16,6 +16,8 @@ Daemon plugins that call backend APIs declare `backendRoutes`. During setup, `co
 
 Daemon plugins that own IPC streams implement those stream handlers directly. The daemon IPC server owns transport mechanics and socket cancellation, while the feature package decides how each stream subscribes to its internal data source and how generator cleanup should run when the client disconnects.
 
+Daemon plugins may return `backendEventHandlers` from `setup()` when a feature owns product behavior derived from backend-originated events. The daemon host owns the backend stream connection and dispatch lifecycle; feature handlers own event matching and handling for their product surface.
+
 ## Contract Shape
 
 Use `definePlugin()` from `features/<name>/src/daemon.ts` to preserve exact plugin metadata for static composition:
