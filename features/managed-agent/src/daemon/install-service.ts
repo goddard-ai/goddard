@@ -12,6 +12,8 @@ import {
   type AgentInstallOptions,
 } from "acp-client/node"
 
+import { recordManagedAgentUsed, type ManagedAgentUsageStore } from "./usage-store.ts"
+
 export type ManagedAgentProcessSpec = {
   readonly cmd: string
   readonly args: readonly string[]
@@ -67,18 +69,6 @@ export type ManagedAgentInstallService = {
   readonly resolveInstalledAgentProcessSpec: (
     input: ManagedAgentInput & { readonly installIfMissing?: boolean },
   ) => Promise<ManagedAgentProcessSpec>
-}
-
-export type ManagedAgentUsageState = Record<
-  string,
-  {
-    readonly lastUsedAt: string
-  }
->
-
-export type ManagedAgentUsageStore = {
-  readonly get: () => ManagedAgentUsageState | undefined
-  readonly set: (state: ManagedAgentUsageState) => void
 }
 
 type AcpClientManagedInstallApi = {
@@ -186,17 +176,6 @@ export function createManagedAgentInstallService(
       return processSpec
     },
   }
-}
-
-function recordManagedAgentUsed(
-  usageStore: ManagedAgentUsageStore,
-  agentId: string,
-  lastUsedAt: string,
-) {
-  usageStore.set({
-    ...usageStore.get(),
-    [agentId]: { lastUsedAt },
-  })
 }
 
 function readNowIso(now?: () => number) {

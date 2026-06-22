@@ -12,7 +12,6 @@ import {
 } from "@goddard-ai/daemon-plugin"
 import { composeIpcRoutes } from "@goddard-ai/ipc"
 import { createServer } from "@goddard-ai/ipc/node"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import {
   coreDaemonIpcRoutes,
   type BrowserAccessClientRevokeRequest,
@@ -26,7 +25,6 @@ import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
 import { getErrorMessage, isObject } from "radashi"
 
-import { createManagedAgentUpdateScheduler } from "../agent-update-scheduler.ts"
 import type { BackendClient } from "../backend.ts"
 import {
   createBrowserAccessService,
@@ -47,7 +45,6 @@ import {
   type DaemonDebugLogger,
   type DaemonLogger,
 } from "../logging.ts"
-import type { ManagedAgentUsageStore } from "../managed-agent-usage.ts"
 import {
   getDaemonPluginComposition,
   openComposedDaemonStore,
@@ -97,12 +94,6 @@ export async function startDaemonServer(
   })
   observeDaemonEventsForLogging(events, logger)
 
-  const managedAgentUsageStore: ManagedAgentUsageStore = {
-    get: () => store.metadata.get("managedAgentUsage") ?? {},
-    set: (state) => {
-      store.metadata.set("managedAgentUsage", state)
-    },
-  }
   let daemonUrl: string | undefined
 
   function requireIpcRequestContext() {
@@ -173,25 +164,6 @@ export async function startDaemonServer(
     composition.plugins,
     events,
   )
-  const managedAgent = pluginSetup.extensions.managedAgent as ManagedAgentService | undefined
-  if (!managedAgent) {
-    throw new Error("Managed-agent plugin did not provide a managed-agent service.")
-  }
-  const agentUpdateScheduler = createManagedAgentUpdateScheduler({
-    configProvider: {
-      getRootConfig: configManager.getRootConfig,
-      getLastKnownRootConfig: configManager.getLastKnownRootConfig,
-    },
-    agentInstallService: managedAgent,
-    updateCheckStore: {
-      get: () => store.metadata.get("managedAgentUpdateChecks") ?? {},
-      set: (state) => {
-        store.metadata.set("managedAgentUpdateChecks", state)
-      },
-    },
-    usageStore: managedAgentUsageStore,
-    logger,
-  })
   const ipcHandlers = {
     daemon: {
       health: async () => ({ ok: true }),
@@ -280,8 +252,6 @@ export async function startDaemonServer(
     port,
     daemonUrl,
   })
-  agentUpdateScheduler.start()
-
   let closed = false
 
   return {
@@ -297,7 +267,6 @@ export async function startDaemonServer(
         port,
         daemonUrl,
       })
-      agentUpdateScheduler.close()
       await pluginSetup.close().catch(() => {})
       if (ownsConfigManager) {
         await configManager.close().catch(() => {})

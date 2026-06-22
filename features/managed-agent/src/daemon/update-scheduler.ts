@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto"
 import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { getErrorMessage } from "radashi"
 
+import type { ManagedAgentInstallService } from "./install-service.ts"
 import {
   isManagedAgentActiveForProactiveUpdate,
   type ManagedAgentUsageStore,
-} from "./managed-agent-usage.ts"
+} from "./usage-store.ts"
 
 type ManagedAgentUpdateRootConfig = {
   agents?: AgentsConfig
@@ -37,7 +37,7 @@ type ManagedAgentUpdateClearTimeout = (timer: ManagedAgentUpdateTimer) => void
 
 type ManagedAgentUpdateSchedulerOptions = {
   readonly configProvider: DaemonConfigProvider<ManagedAgentUpdateRootConfig>
-  readonly agentInstallService: ManagedAgentService
+  readonly agentInstallService: ManagedAgentInstallService
   readonly updateCheckStore: ManagedAgentUpdateCheckStore
   readonly usageStore: ManagedAgentUsageStore
   readonly logger: DaemonLogger

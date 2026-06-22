@@ -7,8 +7,8 @@ import {
   createManagedAgentUpdateScheduler,
   runManagedAgentUpdateChecks,
   type ManagedAgentUpdateCheckState,
-} from "../src/agent-update-scheduler.ts"
-import type { ManagedAgentUsageState } from "../src/managed-agent-usage.ts"
+} from "../src/daemon/update-scheduler.ts"
+import type { ManagedAgentUsageState } from "../src/daemon/usage-store.ts"
 
 type TestRootConfig = Awaited<ReturnType<DaemonConfigProvider["getRootConfig"]>>["config"]
 
