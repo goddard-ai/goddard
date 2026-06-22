@@ -822,36 +822,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
-  features/adapter:
-    dependencies:
-      '@goddard-ai/config':
-        specifier: workspace:*
-        version: link:../../core/config
-      '@goddard-ai/daemon-plugin':
-        specifier: workspace:*
-        version: link:../../core/daemon-plugin
-      '@goddard-ai/ipc':
-        specifier: workspace:*
-        version: link:../../core/ipc
-      '@goddard-ai/managed-agent':
-        specifier: workspace:*
-        version: link:../managed-agent
-      '@goddard-ai/paths':
-        specifier: workspace:*
-        version: link:../../core/paths
-      '@goddard-ai/schema':
-        specifier: workspace:*
-        version: link:../../core/schema
-      '@goddard-ai/sdk-plugin':
-        specifier: workspace:*
-        version: link:../../core/sdk-plugin
-      acp-client:
-        specifier: 'catalog:'
-        version: 0.5.3(zod@4.4.3)
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-
   features/auth:
     dependencies:
       '@goddard-ai/backend-plugin':
