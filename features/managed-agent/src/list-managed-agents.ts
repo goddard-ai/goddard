@@ -1,9 +1,4 @@
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
-import type {
-  DaemonAgentInstallService,
-  DaemonAgentInstallStatus,
-  DaemonInstalledAgent,
-} from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 import { omit } from "radashi"
@@ -12,6 +7,11 @@ import {
   createConfigManagedAgentCatalogEntries,
   mergeManagedAgentCatalogEntries,
 } from "./catalog.ts"
+import type {
+  InstalledManagedAgent,
+  ManagedAgentInstallService,
+  ManagedAgentInstallStatus,
+} from "./daemon/install-service.ts"
 import {
   getManagedAgentInstallationStates,
   installManagedAgent,
@@ -54,7 +54,7 @@ export type ManagedAgentConfigManager = {
 export type ListManagedAgentsContext = {
   registryService: ManagedAgentRegistryService
   configProvider: ManagedAgentConfigManager
-  agentInstallService: DaemonAgentInstallService
+  agentInstallService: ManagedAgentInstallService
 }
 
 function orderAdaptersByInstallationState(
@@ -175,7 +175,7 @@ export async function uninstallCatalogManagedAgent(
 
 async function attachManagedInstallStatus(input: {
   adapters: ManagedAgentCatalogEntry[]
-  agentInstallService: DaemonAgentInstallService
+  agentInstallService: ManagedAgentInstallService
   managedAgents?: AgentsConfig["managed"]
   registry?: Record<string, AgentDistribution>
 }) {
@@ -208,7 +208,7 @@ async function attachManagedInstallStatus(input: {
   )
 }
 
-function toAdapterManagedInstallState(state: DaemonAgentInstallStatus): ManagedAgentInstallState {
+function toAdapterManagedInstallState(state: ManagedAgentInstallStatus): ManagedAgentInstallState {
   if (state.status === "missing") {
     return { status: "missing" }
   }
@@ -228,6 +228,6 @@ function toAdapterManagedInstallState(state: DaemonAgentInstallStatus): ManagedA
   }
 }
 
-function toAdapterManagedInstallAgent(agent: DaemonInstalledAgent): ManagedAgentInstallAgent {
+function toAdapterManagedInstallAgent(agent: InstalledManagedAgent): ManagedAgentInstallAgent {
   return omit(agent, ["distributionHash", "platform", "installDir"])
 }

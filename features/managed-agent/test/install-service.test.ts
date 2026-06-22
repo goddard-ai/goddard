@@ -5,8 +5,10 @@ import type { ACPRegistryService } from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { expect, test } from "bun:test"
 
-import { createAgentInstallService } from "../src/agent-install-service.ts"
-import type { ManagedAgentUsageState } from "../src/managed-agent-usage.ts"
+import {
+  createManagedAgentInstallService,
+  type ManagedAgentUsageState,
+} from "../src/daemon/install-service.ts"
 
 function createAgent(id: string): AgentDistribution {
   return {
@@ -88,7 +90,7 @@ async function waitForCondition(condition: () => boolean) {
 test("agent install service resolves configured and registry agents", async () => {
   const registryAgent = createAgent("registry-agent")
   const configuredAgent = createAgent("configured-agent")
-  const service = createAgentInstallService({
+  const service = createManagedAgentInstallService({
     registryService: createRegistryService({ "registry-agent": registryAgent }),
     cacheDir: await mkdtemp(join(tmpdir(), "goddard-agent-install-service-")),
   })
@@ -111,7 +113,7 @@ test("agent install service forwards deterministic cache options and launch fall
   const agent = createAgent("cache-agent")
   const cacheDir = await mkdtemp(join(tmpdir(), "goddard-agent-install-service-"))
   const calls: unknown[] = []
-  const service = createAgentInstallService({
+  const service = createManagedAgentInstallService({
     registryService: createRegistryService({}),
     cacheDir,
     now: () => 1780848000000,
@@ -170,7 +172,7 @@ test("agent install service forwards deterministic cache options and launch fall
 test("agent install service records usage after resolving a managed launch", async () => {
   const agent = createAgent("usage-agent")
   const usageStore = createUsageStore()
-  const service = createAgentInstallService({
+  const service = createManagedAgentInstallService({
     registryService: createRegistryService({}),
     cacheDir: await mkdtemp(join(tmpdir(), "goddard-agent-install-service-")),
     now: () => Date.parse("2026-06-08T00:00:00.000Z"),
@@ -214,7 +216,7 @@ test("agent install service does not gate launch resolution behind background up
   const updateReleased = new Promise<void>((resolve) => {
     releaseUpdate = resolve
   })
-  const service = createAgentInstallService({
+  const service = createManagedAgentInstallService({
     registryService: createRegistryService({}),
     cacheDir: await mkdtemp(join(tmpdir(), "goddard-agent-install-service-")),
     managedInstallApi: {

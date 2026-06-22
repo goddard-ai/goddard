@@ -1,10 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
-import type {
-  DaemonAgentEnvironmentService,
-  DaemonAgentInstallService,
-  DaemonConfigProvider,
-} from "@goddard-ai/daemon-plugin"
+import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
 import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
@@ -147,7 +143,6 @@ export function createLaunchPreparationFeature({
   getDaemonUrl,
   createAgentEnvironment,
   managedAgent,
-  agentInstallService,
   getPackageVersion,
   handlePermissionRequest,
   handleSessionUpdate,
@@ -158,7 +153,6 @@ export function createLaunchPreparationFeature({
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   managedAgent: ManagedAgentService
-  agentInstallService: DaemonAgentInstallService
   getPackageVersion: () => string
   handlePermissionRequest: (
     active: ActiveSession,
@@ -215,7 +209,6 @@ export function createLaunchPreparationFeature({
       createAgentEnvironment,
       envPolicy: resolvedConfig?.sessions?.envPolicy,
       managedAgent,
-      agentInstallService,
       registry: resolvedRegistry,
       managedAgents: resolvedConfig?.agents?.managed,
     })

@@ -1,54 +1,38 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
-import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import { definePlugin, type DaemonMetadataStore } from "@goddard-ai/daemon-plugin"
 import { createAcpRegistryService } from "acp-client/node"
 
 import { managedAgentIpcRoutes } from "./daemon-ipc.ts"
+import {
+  createManagedAgentInstallService,
+  type ManagedAgentInstallService,
+  type ManagedAgentUsageState,
+} from "./daemon/install-service.ts"
 import {
   installCatalogManagedAgent,
   listManagedAgents,
   uninstallCatalogManagedAgent,
 } from "./list-managed-agents.ts"
 
-export type ManagedAgentService = {
-  readonly resolveAgent: (input: {
-    readonly agent: string | AgentDistribution
-    readonly registry?: Record<string, AgentDistribution>
-  }) => Promise<AgentDistribution>
-}
+export type ManagedAgentService = ManagedAgentInstallService
 
 export const managedAgentPlugin = definePlugin({
   name: "managed-agent",
   ipcRoutes: managedAgentIpcRoutes,
-  setup({ agentInstallService, configProvider }) {
+  setup({ configProvider, metadataStore }) {
     const registryService = createAcpRegistryService()
+    const managedAgent = createManagedAgentInstallService({
+      registryService,
+      usageStore: createManagedAgentUsageStore(metadataStore),
+    })
     const managedAgentContext = {
-      agentInstallService,
+      agentInstallService: managedAgent,
       configProvider,
       registryService,
-    }
-    const managedAgentService: ManagedAgentService = {
-      async resolveAgent({ agent, registry }) {
-        if (typeof agent !== "string") {
-          return agent
-        }
-
-        const configuredAgent = registry?.[agent]
-        if (configuredAgent) {
-          return configuredAgent
-        }
-
-        const registryEntry = await registryService.getAdapter(agent)
-        if (!registryEntry.adapter) {
-          throw new Error(`ACP agent not found: ${agent}`)
-        }
-
-        return registryEntry.adapter
-      },
     }
 
     return {
       provides: {
-        managedAgent: managedAgentService,
+        managedAgent,
       },
       ipcHandlers: {
         managedAgent: {
@@ -60,3 +44,12 @@ export const managedAgentPlugin = definePlugin({
     }
   },
 })
+
+function createManagedAgentUsageStore(metadataStore: DaemonMetadataStore) {
+  return {
+    get: () => (metadataStore.get("managedAgentUsage") as ManagedAgentUsageState | undefined) ?? {},
+    set: (state: ManagedAgentUsageState) => {
+      metadataStore.set("managedAgentUsage", state)
+    },
+  }
+}
