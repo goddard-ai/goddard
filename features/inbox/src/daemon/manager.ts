@@ -123,14 +123,7 @@ function withWorkflowStatus(
 }
 
 /** Creates the daemon-owned inbox manager that centralizes all inbox writes. */
-export function createInboxManager(options: InboxManagerOptions) {
-  const { db } = options
-
-  function publishItem(item: InboxItem) {
-    void options.events.emit("inbox.item.updated", item)
-    return item
-  }
-
+export function createInboxManager({ db, events }: InboxManagerOptions) {
   function listInboxItems(params: ListInboxRequest) {
     const pageSize = normalizeInboxPageSize(params.limit)
     const statuses = params.statuses ?? ["unread"]
@@ -182,7 +175,9 @@ export function createInboxManager(options: InboxManagerOptions) {
       turnId: input.turnId ?? existing?.turnId ?? null,
     }
 
-    return publishItem(db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem))
+    const item = db.inboxItems.putByUnique({ entityId: input.entityId }, nextItem)
+    void events.emit("inbox.item.updated", item)
+    return item
   }
 
   function updateInboxItem(input: UpdateInboxItemRequest) {
@@ -210,7 +205,8 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return { item: publishItem(item) }
+    void events.emit("inbox.item.updated", item)
+    return { item }
   }
 
   function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
@@ -245,7 +241,8 @@ export function createInboxManager(options: InboxManagerOptions) {
           updatedAt: timestamp,
         })
         if (item) {
-          items.push(publishItem(item))
+          void events.emit("inbox.item.updated", item)
+          items.push(item)
         }
       }
     })
@@ -275,7 +272,8 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return publishItem(item)
+    void events.emit("inbox.item.updated", item)
+    return item
   }
 
   function completeSession(sessionId: SessionId) {
@@ -297,7 +295,8 @@ export function createInboxManager(options: InboxManagerOptions) {
       })
     }
 
-    return publishItem(item)
+    void events.emit("inbox.item.updated", item)
+    return item
   }
 
   return {
