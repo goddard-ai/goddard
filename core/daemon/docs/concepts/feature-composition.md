@@ -26,7 +26,7 @@ The daemon provides shared local runtime substrate, while feature packages contr
 - Actions.
 - Loops.
 - Workforce.
-- Adapters.
+- Managed agents.
 - Auth.
 
 ## Feature ownership

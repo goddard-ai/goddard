@@ -33,9 +33,10 @@ contribute namespaced config schemas through daemon plugins, but config files,
 scope precedence, validation errors, persistence, and hot reload remain daemon
 or core config responsibilities.
 
-The adapter feature owns adapter catalog request handling and catalog
-merge/parsing helpers. The daemon still owns the registry cache service and
-root-config manager that supply substrate data to that feature.
+The managed-agent feature owns launchable ACP agent discovery, catalog request
+handling, local launch visibility markers, managed install process resolution,
+and proactive managed-agent update policy. The daemon still owns the root
+config and persistence substrate that supply shared data to that feature.
 
 `features/inbox` is the current reference daemon feature package. It owns the
 inbox IPC contract and request-handler factory while the daemon composition root
