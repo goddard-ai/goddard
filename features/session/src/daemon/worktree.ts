@@ -1,10 +1,11 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
-import { createGitHost, runGitCommand } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/git"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
+import { runGitCommand } from "./git-command.ts"
 import { deleteWorktree } from "./worktrees/index.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])

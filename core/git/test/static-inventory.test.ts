@@ -4,7 +4,11 @@ import { expect, test } from "bun:test"
 
 const repoRoot = resolve(import.meta.dirname, "../../..")
 const scannedRoots = ["core/daemon/src", "features", "workforce/src"]
-const allowedMatches = new Set(["workforce/src/main.ts"])
+const allowedMatches = new Set([
+  "features/pull-request/src/daemon/git-command.ts",
+  "features/session/src/daemon/git-command.ts",
+  "workforce/src/main.ts",
+])
 const directGitSubprocessPatterns = [
   /Bun\.spawn(?:Sync)?\(\s*\[\s*["']git["']/,
   /runCommand\(\s*["']git["']/,

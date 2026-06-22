@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
 import type { AgentService } from "@goddard-ai/agent/daemon"
 import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
-import { createGitHost, runGitCommand } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/git"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"
@@ -19,6 +19,7 @@ import {
   getSlashComposerSuggestions,
   MAX_COMPOSER_SUGGESTION_LIMIT,
 } from "./composer-suggestions.ts"
+import { runGitCommand } from "./git-command.ts"
 import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"

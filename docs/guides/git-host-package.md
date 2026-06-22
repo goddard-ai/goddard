@@ -1,6 +1,6 @@
 # Git Host Package
 
-The Git host package provides Goddard's shared Git access boundary so daemon capabilities can use one consistent contract for repository discovery, refs, history, status, worktrees, stashes, and exact Git command fallback.
+The Git host package provides Goddard's shared Git access boundary so daemon capabilities can use one consistent contract for repository discovery, refs, history, status, worktrees, and stashes.
 
 ## Package Entrypoints
 
@@ -36,12 +36,6 @@ The Git host package provides Goddard's shared Git access boundary so daemon cap
   - `worktrees` lists known worktrees with paths and branch names.
   - `stash` lists stashes by ref and message.
 
-## Command Fallback
-
-- `runGitCommand(cwd, args, options)` runs an exact Git CLI command and returns status, stdout, and stderr.
-- `GitRunOptions` supports optional stdin, additional environment values, and `allowFailure` for callers that want to inspect non-zero results.
-- `GitCommandResult` represents the raw command result returned by `runGitCommand`.
-
 ## Public Data Types
 
 - `WorktreeInfo` describes a worktree path and its branch name when one is available.
@@ -54,7 +48,7 @@ The Git host package provides Goddard's shared Git access boundary so daemon cap
 
 - `GitHostError` is the base package error.
 - `GitNotRepositoryError` reports that a path is not a Git worktree.
-- `GitCommandError` reports a failed CLI Git command and keeps the command arguments, cwd, stdout, stderr, and status available to callers.
+- `GitCommandError` reports failed host operations backed by CLI Git and keeps the command arguments, cwd, stdout, stderr, and status available to callers.
 
 ## Path Handling
 

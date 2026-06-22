@@ -1,9 +1,9 @@
 /** Worktrunk-backed worktree plugin used when a repository is managed by `wt`. */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { runGitCommand } from "@goddard-ai/git"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
+import { runGitCommand } from "../../git-command.ts"
 import { runCommand } from "../process.ts"
 
 export const worktrunkPlugin: WorktreePlugin = {

@@ -2,7 +2,8 @@
 import { constants as fsConstants } from "node:fs"
 import { cp, mkdir, stat } from "node:fs/promises"
 import * as path from "node:path"
-import { runGitCommand } from "@goddard-ai/git"
+
+import { runGitCommand } from "../../git-command.ts"
 
 const worktreeIncludeFileName = ".worktreeinclude"
 

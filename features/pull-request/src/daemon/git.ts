@@ -1,7 +1,8 @@
 import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
-import { createGitHost, runGitCommand } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/git"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
+import { runGitCommand } from "./git-command.ts"
 
 type PrCreateInput = {
   provider: string

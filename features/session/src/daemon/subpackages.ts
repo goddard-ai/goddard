@@ -2,9 +2,9 @@
 import { type Dirent } from "node:fs"
 import { readdir, realpath, stat } from "node:fs/promises"
 import { basename, isAbsolute, join, relative, resolve } from "node:path"
-import { runGitCommand } from "@goddard-ai/git"
 
 import type { SessionSubpackage } from "../schema.ts"
+import { runGitCommand } from "./git-command.ts"
 import { resolveGitRepoRoot } from "./worktree.ts"
 
 const BUILT_IN_SUBPACKAGE_MANIFESTS = [

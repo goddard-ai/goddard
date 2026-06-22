@@ -1,5 +1,4 @@
-import { runGitCommand } from "@goddard-ai/git"
-
+import { runGitCommand } from "./git-command.ts"
 import { resolveGitRepoRoot, type SessionWorktreeState } from "./worktree.ts"
 
 /**

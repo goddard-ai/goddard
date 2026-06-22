@@ -4,12 +4,14 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { createGitHost, runGitCommand } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/git"
 import type {
   WorktreeCleanupOptions,
   WorktreePlugin,
   WorktreeSetupOptions,
 } from "@goddard-ai/worktree-plugin"
+
+import { runGitCommand } from "../../git-command.ts"
 
 export const defaultPlugin: WorktreePlugin = {
   name: "default",

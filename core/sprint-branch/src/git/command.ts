@@ -1,4 +1,5 @@
-import { createGitHost, runGitCommand, type GitHost } from "@goddard-ai/git"
+import { spawn } from "node:child_process"
+import { createGitHost, type GitHost } from "@goddard-ai/git"
 
 let sharedGitHost: GitHost | undefined
 
@@ -60,4 +61,42 @@ export async function gitSucceeds(cwd: string, args: string[]) {
 export function getSharedGitHost() {
   sharedGitHost ??= createGitHost()
   return sharedGitHost
+}
+
+async function runGitCommand(
+  cwd: string,
+  args: string[],
+  options: { env?: Record<string, string | undefined> } = {},
+) {
+  return await new Promise<{ status: number; stdout: string; stderr: string }>(
+    (resolvePromise, rejectPromise) => {
+      const child = spawn("git", args, {
+        cwd,
+        env: {
+          ...process.env,
+          ...options.env,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+
+      let stdout = ""
+      let stderr = ""
+      child.stdout.setEncoding("utf8")
+      child.stderr.setEncoding("utf8")
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk
+      })
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk
+      })
+      child.on("error", rejectPromise)
+      child.on("close", (status) => {
+        resolvePromise({
+          status: status ?? 1,
+          stdout,
+          stderr,
+        })
+      })
+    },
+  )
 }
