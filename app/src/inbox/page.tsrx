@@ -61,7 +61,6 @@ function InboxQueryContent(props: {
   onFilterSelect: (id: InboxFilterId) => void;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
   onOpenItem: (item: InboxItem) => void;
-  onRefresh: () => void;
   onSearchInput: (value: string) => void;
 }) @{
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
@@ -109,10 +108,6 @@ function InboxQueryContent(props: {
       onBulkAction={props.onBulkAction}
       onClearSelectedItems={props.onClearSelectedItems}
       onFilterSelect={props.onFilterSelect}
-      onRefresh={() => {
-        navigation.resetActiveIndex()
-        props.onRefresh()
-      }}
       onSearchInput={props.onSearchInput}
     />
     <div class={styles.listBody}>
@@ -137,7 +132,6 @@ function InboxPageControls(props: {
   onBulkAction: (label: string, input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) => void;
   onClearSelectedItems: () => void;
   onFilterSelect: (id: InboxFilterId) => void;
-  onRefresh: () => void;
   onSearchInput: (value: string) => void;
 }) @{
   <>
@@ -146,7 +140,6 @@ function InboxPageControls(props: {
       inputRef={props.inputRef}
       searchQuery={props.searchQuery}
       onFilterSelect={props.onFilterSelect}
-      onRefresh={props.onRefresh}
       onSearchInput={props.inputRef ? undefined : props.onSearchInput}
     />
     <InboxBulkToolbar
@@ -232,11 +225,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     input: Omit<BulkUpdateInboxItemsRequest, "entityIds">,
   ) {
     void runBulkInboxAction(label, input)
-  }
-
-  function refreshInboxList() {
-    clearSelectedInboxItems()
-    invalidateInboxQueries()
   }
 
   function updateSearchQuery(value: string) {
@@ -326,7 +314,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
           onOpenItem={(item) => {
             void openInboxItem(item)
           }}
-          onRefresh={refreshInboxList}
           onSearchInput={updateSearchQuery}
         />
       } @pending {
@@ -338,7 +325,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             onBulkAction={runBulkActionFromControls}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
-            onRefresh={refreshInboxList}
             onSearchInput={updateSearchQuery}
           />
           <div class={styles.listBody}>
@@ -355,7 +341,8 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
         </>
       } @catch (error, retry) {
         const resetInboxBoundary = () => {
-          refreshInboxList()
+          clearSelectedInboxItems()
+          invalidateInboxQueries()
           retry()
         }
         useErrorBoundaryReset(resetInboxBoundary)
@@ -368,7 +355,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             onBulkAction={runBulkActionFromControls}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
-            onRefresh={refreshInboxList}
             onSearchInput={updateSearchQuery}
           />
           <div class={styles.listBody}>

@@ -209,12 +209,6 @@ export default function InboxDebugView(props: InboxDebugViewProps) @{
               clearSelectedInboxItems()
               setSelectedItem(null)
             }}
-            onRefresh={() => {
-              setItems(props.items ?? INBOX_DEBUG_ITEMS)
-              clearSelectedInboxItems()
-              setSearchQuery("")
-              setSelectedItem(null)
-            }}
             onSearchInput={(value) => {
               setSearchQuery(value)
               clearSelectedInboxItems()
