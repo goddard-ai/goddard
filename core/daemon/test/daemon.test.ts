@@ -228,7 +228,7 @@ test(
       port,
       agentBinDir,
     })
-    expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(true)
+    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(true)
     expect(
       logs
         .filter((entry) => entry.event === "pr_feedback.launch")
@@ -283,7 +283,7 @@ test(
 
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
-    expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
+    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
     expect(logs.some((entry) => entry.event === "ipc.server_listening")).toBe(true)
     expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
@@ -321,7 +321,7 @@ test(
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
     expect(db.sessions.findMany()).toHaveLength(0)
-    expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
+    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
   },
   { timeout: 10000 },
 )
@@ -355,7 +355,7 @@ test(
             healthy &&
             parseJsonLogs(output).some(
               (entry) =>
-                entry.event === "repo.subscription_degraded" && entry.reason === "unauthenticated",
+                entry.event === "backend.stream_degraded" && entry.reason === "unauthenticated",
             )
           )
         })
@@ -371,11 +371,10 @@ test(
     expect(backend.subscriptionCount()).toBe(0)
     expect(
       logs.some(
-        (entry) =>
-          entry.event === "repo.subscription_degraded" && entry.reason === "unauthenticated",
+        (entry) => entry.event === "backend.stream_degraded" && entry.reason === "unauthenticated",
       ),
     ).toBe(true)
-    expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
+    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
     expect(logs.some((entry) => entry.event === "daemon.run_failed")).toBe(false)
     expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },

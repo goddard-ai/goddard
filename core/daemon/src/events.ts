@@ -16,7 +16,7 @@ export type RepoFeedbackFinishedEvent = RepoFeedbackEventPayload & {
   exitCode: number
 }
 
-export type RepoSubscriptionDegradedEvent = {
+export type BackendStreamDegradedEvent = {
   reason: "unauthenticated"
   errorMessage: string
 }
@@ -25,5 +25,5 @@ export type RepoSubscriptionDegradedEvent = {
 export const daemonRuntimeEvents = {
   "repo.feedback.ignored": event<RepoFeedbackIgnoredEvent>(),
   "repo.feedback.finished": event<RepoFeedbackFinishedEvent>(),
-  "repo.subscription.degraded": event<RepoSubscriptionDegradedEvent>(),
+  "backend.stream.degraded": event<BackendStreamDegradedEvent>(),
 }
