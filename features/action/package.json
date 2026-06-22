@@ -53,6 +53,7 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
+    "radashi": "catalog:",
     "zod": "catalog:"
   }
 }

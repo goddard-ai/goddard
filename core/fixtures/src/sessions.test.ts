@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { isObject } from "radashi"
 
 import {
   createAcpSessionUpdateMatrixScenario,
@@ -114,14 +115,15 @@ test("ACP update matrix fixture covers every routed session/update discriminator
 })
 
 function getSessionUpdateDiscriminator(message: unknown) {
-  if (!isRecord(message) || !isRecord(message.params) || !isRecord(message.params.update)) {
+  if (!isObject(message) || !("params" in message) || !isObject(message.params)) {
     return null
   }
 
-  const { sessionUpdate } = message.params.update
-  return typeof sessionUpdate === "string" ? sessionUpdate : null
-}
+  const { params } = message
+  if (!("update" in params) || !isObject(params.update) || !("sessionUpdate" in params.update)) {
+    return null
+  }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  const { sessionUpdate } = params.update
+  return typeof sessionUpdate === "string" ? sessionUpdate : null
 }

@@ -24,7 +24,7 @@ import {
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
 import { createAcpRegistryService } from "acp-client/node"
-import { getErrorMessage } from "radashi"
+import { getErrorMessage, isObject } from "radashi"
 
 import { createAgentInstallService } from "../agent-install-service.ts"
 import { createManagedAgentUpdateScheduler } from "../agent-update-scheduler.ts"
@@ -390,7 +390,7 @@ function createAndRememberDebugLogger(loggers: Map<string, DaemonDebugLogger>, d
 }
 
 function createDaemonEventLogFields(event: PluginDaemonEventEnvelope): Record<string, unknown> {
-  const payloadFields = isRecord(event.payload) ? event.payload : { payload: event.payload }
+  const payloadFields = isObject(event.payload) ? event.payload : { payload: event.payload }
   return {
     ...sanitizeEventLogFields(payloadFields),
     eventId: event.id,
@@ -398,16 +398,12 @@ function createDaemonEventLogFields(event: PluginDaemonEventEnvelope): Record<st
   }
 }
 
-function sanitizeEventLogFields(fields: Record<string, unknown>) {
+function sanitizeEventLogFields(fields: object) {
   const sanitized: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(fields)) {
     sanitized[key] = value instanceof Error ? { errorMessage: getErrorMessage(value) } : value
   }
   return sanitized
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function createPluginBackendContext(plugin: ComposedDaemonPlugin, client: BackendClient) {

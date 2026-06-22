@@ -24,6 +24,7 @@
   "dependencies": {
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
-    "@goddard-ai/session": "workspace:*"
+    "@goddard-ai/session": "workspace:*",
+    "radashi": "catalog:"
   }
 }
