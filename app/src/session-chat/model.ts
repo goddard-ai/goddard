@@ -1086,10 +1086,6 @@ export class SessionChat extends Sigma<SessionChatState> {
           { signal: controller.signal },
         )
         for await (const event of messages) {
-          if (controller.signal.aborted) {
-            break
-          }
-
           const { message } = event.payload
           this.receiveMessage(message)
         }
