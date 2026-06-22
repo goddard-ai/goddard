@@ -25,7 +25,7 @@ The review-sync status command is part of the local review-sync workflow. This p
 
 - `--json` prints the same session information as structured JSON.
 - JSON mode is intended for agents and wrappers that need stable fields
-    instead of human-readable text.
+  instead of human-readable text.
 
 ## What it changes
 
@@ -35,8 +35,8 @@ The review-sync status command is part of the local review-sync workflow. This p
 ## Guardrails and recovery
 
 - If no session matches the current worktree, run from a recorded worktree or
-    start a session first.
+  start a session first.
 - If multiple sessions match, keep the intended session and move stale saved
-    sessions aside only after checking their saved patch inventory.
+  sessions aside only after checking their saved patch inventory.
 - A paused status means later sync mutations are blocked until `resume`,
-    `start`, or `watch` reactivates the session.
+  `start`, or `watch` reactivates the session.

@@ -14,7 +14,7 @@ The sprint-branch unpark command is part of the local sprint-branch workflow. Th
 
 - Marks the sprint as active for default selection.
 - If the sprint is already active, reports that state without changing branch
-    or task content.
+  or task content.
 
 ## What it changes
 
@@ -27,7 +27,7 @@ The sprint-branch unpark command is part of the local sprint-branch workflow. Th
 ## Guardrails
 
 - Is blocked while another sprint transition is waiting for conflict
-    recovery.
+  recovery.
 
 ## Dry run
 
@@ -37,4 +37,4 @@ The sprint-branch unpark command is part of the local sprint-branch workflow. Th
 ## Why it exists
 
 - It restores a paused sprint to the normal command-selection flow without
-    reconstructing state.
+  reconstructing state.

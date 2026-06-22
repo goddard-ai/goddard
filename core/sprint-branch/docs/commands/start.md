@@ -12,7 +12,7 @@ The sprint-branch start --task <task> command is part of the local sprint-branch
 - `--task <task>` identifies a task file in the sprint folder.
   - The task may be named by its task-file stem or matching task filename.
   - The task must still be the next unassigned task in sprint task-file order
-      unless it is already assigned to a rolling branch.
+    unless it is already assigned to a rolling branch.
 
 ## What it does
 
@@ -21,11 +21,11 @@ The sprint-branch start --task <task> command is part of the local sprint-branch
   - If no task is on `review`, the task starts on `review`.
     - `review` is reset to the current `approved` boundary before work begins.
   - If the task is already on `review`, the command continues that review
-      task.
+    task.
   - If `review` is occupied and `next` is empty, the task starts as
-      work-ahead on `next`.
+    work-ahead on `next`.
     - `next` is reset to the current `review` boundary before work-ahead
-        begins.
+      begins.
   - If the task is already on `next`, the command continues that next task.
 
 ## What it changes
@@ -37,16 +37,16 @@ The sprint-branch start --task <task> command is part of the local sprint-branch
 ## Guardrails
 
 - The requested task must be the next unassigned task in sprint task-file
-    order.
+  order.
 - The workflow supports at most two active tasks:
   - One on `review`.
   - One on `next`.
 - Starting a third task is blocked until review, feedback, resume, or approval
-    moves the queue forward.
+  moves the queue forward.
 - Requires a clean working tree because it may switch branches and update
-    task-to-branch assignment.
+  task-to-branch assignment.
 - Is blocked while another sprint transition is waiting for conflict
-    recovery.
+  recovery.
 
 ## Dry run
 
@@ -59,4 +59,4 @@ The sprint-branch start --task <task> command is part of the local sprint-branch
 
 - It keeps sprint work ordered.
 - It prevents agents from inventing extra branch roles that humans cannot
-    review predictably.
+  review predictably.

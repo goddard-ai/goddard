@@ -10,7 +10,7 @@ The review-sync start <agent-branch> command is part of the local review-sync wo
 
 - `<agent-branch>` names the agent branch that is already checked out in another worktree.
 - In an interactive terminal, omitting the branch can open a prompt for
-    eligible checked-out agent branches.
+  eligible checked-out agent branches.
 - Non-interactive callers must provide the agent branch.
 
 ## What it does
@@ -27,9 +27,9 @@ The review-sync start <agent-branch> command is part of the local review-sync wo
 - Review worktree index and working tree content.
 - Review-sync session state.
 - If the review branch already contained human work, a clean human patch may
-    be accepted into the agent worktree.
+  be accepted into the agent worktree.
 - If that existing human work conflicts, the patch is saved as rejected and
-    the agent worktree is left unchanged by it.
+  the agent worktree is left unchanged by it.
 
 ## Guardrails
 
@@ -39,7 +39,7 @@ The review-sync start <agent-branch> command is part of the local review-sync wo
 - The agent and review worktrees must be in the same Git repository.
 - The derived review branch must not be checked out in another unrelated worktree.
 - The review worktree must be clean before `start` switches it to the review
-    branch or refreshes without a known baseline.
+  branch or refreshes without a known baseline.
 - In-progress Git operations that make branch movement unsafe are refused.
 
 ## Common next actions

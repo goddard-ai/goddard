@@ -10,12 +10,12 @@ The sprint-branch finalize [--override-base <ref>] [--ignore-next-branch] comman
 
 - Uses [standard sprint selection](../sprint-selection.md).
 - `--override-base <ref>` is available for recovery when the recorded base is
-    not the target humans intend to land onto.
+  not the target humans intend to land onto.
 - `--ignore-next-branch` is available for recovery when an obsolete dormant
-    `next` branch differs from finalized `review`.
+  `next` branch differs from finalized `review`.
   - After a successful finalization, the accepted `review` and `next`
-      commits are recorded so later finalized-sprint commands keep treating
-      that same divergence as a warning.
+    commits are recorded so later finalized-sprint commands keep treating
+    that same divergence as a warning.
 
 ## What it does
 
@@ -41,14 +41,14 @@ The sprint-branch finalize [--override-base <ref>] [--ignore-next-branch] comman
 - `next` must not contain different work.
   - `--ignore-next-branch` downgrades only this check to a warning.
   - The downgrade is preserved only for the exact `review` and `next`
-      commits accepted during successful finalization.
+    commits accepted during successful finalization.
 - The working tree must be clean.
 - The base ref must resolve.
 - If a finalize conflict occurs:
   - Sprint state remains at the pre-finalize boundary.
   - `finalize` must be retried after conflict resolution.
 - On retry, `--override-base` can replace the base used for the finalization
-    attempt.
+  attempt.
 
 ## Dry run
 

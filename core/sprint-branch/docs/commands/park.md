@@ -5,7 +5,7 @@ The sprint-branch park command is part of the local sprint-branch workflow. This
 ## Question it answers
 
 - How can this sprint stay recorded but stop appearing in default active
-    selection?
+  selection?
 
 ## Inputs and selection
 
@@ -25,13 +25,13 @@ The sprint-branch park command is part of the local sprint-branch workflow. This
 - Sprint visibility state only.
 - No branches move.
 - If the sprint is already parked, reports that state without changing branch
-    or task content.
+  or task content.
 
 ## Guardrails
 
 - A clean working tree is not required.
 - Is blocked while another sprint transition is waiting for conflict
-    recovery.
+  recovery.
 
 ## Dry run
 
@@ -41,4 +41,4 @@ The sprint-branch park command is part of the local sprint-branch workflow. This
 ## Why it exists
 
 - Parking keeps inactive or paused sprint state available without making
-    agents choose among stale active candidates.
+  agents choose among stale active candidates.

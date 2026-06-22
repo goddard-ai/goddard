@@ -10,22 +10,22 @@ The sprint-branch land <target> [name] command is part of the local sprint-branc
 
 - `<target>` is the branch that should receive finalized sprint content.
 - The target branch is validated before sprint selection, so an invalid target
-    reports directly instead of prompting for or inferring a sprint.
+  reports directly instead of prompting for or inferring a sprint.
 - Uses [standard sprint selection](../sprint-selection.md).
 - The optional `name` argument is this command's explicit sprint selector.
 - When prompting interactively, only finalized active sprints are listed.
 - `--ignore-next-branch` allows selecting and landing a sprint whose dormant
-    `next` branch differs from finalized `review`.
+  `next` branch differs from finalized `review`.
   - If successful finalization already accepted that exact `next`
-      divergence, the flag is not required again.
+    divergence, the flag is not required again.
 
 ## What it does
 
 - Fast-forwards a human-selected target branch to finalized sprint review
-    content.
+  content.
 - Common target: `main`.
 - If the target branch is already checked out in another linked worktree,
-    landing runs the fast-forward merge in that target worktree.
+  landing runs the fast-forward merge in that target worktree.
 
 ## What it changes
 
@@ -43,7 +43,7 @@ The sprint-branch land <target> [name] command is part of the local sprint-branc
 - `next`, if present, must not contain different work.
   - `--ignore-next-branch` downgrades only this check to a warning.
   - A divergence accepted by successful finalization remains a warning as
-      long as the recorded `review` and `next` commits have not changed.
+    long as the recorded `review` and `next` commits have not changed.
 - The target branch must exist.
 - The target branch must not itself be a sprint branch.
 - The target must be able to fast-forward to the finalized review content.
@@ -60,4 +60,4 @@ The sprint-branch land <target> [name] command is part of the local sprint-branc
 
 - It separates final human merge authority from agent workflow approval.
 - Agents can prepare a sprint, but landing remains a deliberate human
-    operation.
+  operation.

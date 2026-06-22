@@ -5,7 +5,7 @@ The sprint-branch feedback command is part of the local sprint-branch workflow. 
 ## Question it answers
 
 - How can the agent stop work-ahead and return to the review branch for
-    human-requested changes?
+  human-requested changes?
 
 ## Inputs and selection
 
@@ -34,10 +34,10 @@ The sprint-branch feedback command is part of the local sprint-branch workflow. 
 
 - Dirty work outside the recorded `next` branch is blocked.
 - Dirty `next` work is allowed because preserving that interruption is the
-    command's purpose.
+  command's purpose.
 - If the `next` branch is checked out, a next task must be recorded.
 - Is blocked while another sprint transition is waiting for conflict
-    recovery.
+  recovery.
 - If preserving interrupted work fails:
   - The working tree remains in place.
   - Sprint state is not updated.
@@ -54,4 +54,4 @@ The sprint-branch feedback command is part of the local sprint-branch workflow. 
 
 - Human feedback often arrives while an agent is working ahead.
 - The command protects work-ahead changes while making the review branch
-    available for the feedback response.
+  available for the feedback response.

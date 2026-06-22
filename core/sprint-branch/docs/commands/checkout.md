@@ -5,7 +5,7 @@ The sprint-branch checkout [name] command is part of the local sprint-branch wor
 ## Question it answers
 
 - How can a human inspect the sprint review branch without taking over the
-    live branch?
+  live branch?
 
 ## What it does
 
@@ -34,7 +34,7 @@ The sprint-branch checkout [name] command is part of the local sprint-branch wor
 
 - The snapshot represents the review branch commit at checkout time.
 - If the agent changes review later, run `checkout` again to inspect a fresh
-    snapshot.
+  snapshot.
 
 ## Why it exists
 

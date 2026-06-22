@@ -19,14 +19,14 @@ The sprint-branch rebase <target> command is part of the local sprint-branch wor
   - `review`.
   - `next`.
 - Records the new base only after every relevant sprint branch has moved
-    successfully.
+  successfully.
 
 ## What it changes
 
 - Recorded sprint branch commits.
 - Sprint base state after all branch movement succeeds.
 - Returns the checkout to the branch that was current before the rebase when
-    possible.
+  possible.
 
 ## Guardrails
 
@@ -39,7 +39,7 @@ The sprint-branch rebase <target> command is part of the local sprint-branch wor
   - `review` must descend from `approved`.
   - `next`, when present, must descend from `review`.
     - A dormant `next` divergence that was explicitly accepted by a
-        successful `finalize --ignore-next-branch` is skipped instead.
+      successful `finalize --ignore-next-branch` is skipped instead.
 - If a conflict interrupts the transition:
   - The prior base remains recorded.
   - `rebase` can be retried after conflict resolution.
@@ -55,4 +55,4 @@ The sprint-branch rebase <target> command is part of the local sprint-branch wor
 
 - It keeps long-running sprint work current with the target branch.
 - It avoids collapsing the review boundary or losing the work-ahead
-    relationship.
+  relationship.

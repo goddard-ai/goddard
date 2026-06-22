@@ -17,9 +17,9 @@ The sprint-branch finish --task <task> command is part of the local sprint-branc
 - Marks an active `review` or `next` task as `finished-unreviewed`.
 - Requires the task markdown to contain a complete Review Report.
 - If the task is already marked `finished-unreviewed`, the command reports
-    that state without adding a duplicate record.
+  that state without adding a duplicate record.
 - When this makes the current review branch ready, attempts a best-effort
-    desktop notification for the human reviewer.
+  desktop notification for the human reviewer.
 
 ## What it changes
 
@@ -35,9 +35,9 @@ The sprint-branch finish --task <task> command is part of the local sprint-branc
   - This matches the two active branch slots.
   - This keeps the human review queue bounded.
 - A clean working tree is not required because the command only records review
-    readiness after the Review Report is complete.
+  readiness after the Review Report is complete.
 - Is blocked while another sprint transition is waiting for conflict
-    recovery.
+  recovery.
 
 ## Dry run
 
@@ -47,4 +47,4 @@ The sprint-branch finish --task <task> command is part of the local sprint-branc
 ## Why it exists
 
 - It separates "the agent says this task is done" from "the human has
-    approved this task."
+  approved this task."

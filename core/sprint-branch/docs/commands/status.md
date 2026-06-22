@@ -18,7 +18,7 @@ The sprint-branch status command is part of the local sprint-branch workflow. Th
 - Sprint visibility.
 - Branch roles, existence, and ancestry.
   - Machine-readable ancestry uses explicit states for `descends`,
-      `does_not_descend`, or `not_applicable` when a branch is missing.
+    `does_not_descend`, or `not_applicable` when a branch is missing.
 - Working tree cleanliness.
 - Task assignments and task queue.
 - Finished-but-unreviewed tasks.
@@ -29,7 +29,7 @@ The sprint-branch status command is part of the local sprint-branch workflow. Th
 
 - Nothing.
 - It does not change branches, task state, review state, or working tree
-    files.
+  files.
 
 ## Guardrails
 
@@ -37,13 +37,13 @@ The sprint-branch status command is part of the local sprint-branch workflow. Th
   - The sprint cannot be inferred.
   - The recorded state is too invalid to read.
 - Missing task files for active, unreviewed, or reviewable local tasks;
-    missing branches; dirty worktrees; broken ancestry; and recorded recovery
-    state are reported as diagnostics rather than hidden.
+  missing branches; dirty worktrees; broken ancestry; and recorded recovery
+  state are reported as diagnostics rather than hidden.
 - Already approved historical tasks are archival metadata:
   - Their local task files are useful context.
   - Missing local files do not create task-file diagnostics.
 - A dormant `next` branch that is only behind `review` is reported as stale
-    and safe, not as blocked work.
+  and safe, not as blocked work.
 - When the sprint is blocked:
   - The report identifies why.
   - The next safe command is included when one can be determined.
@@ -51,6 +51,6 @@ The sprint-branch status command is part of the local sprint-branch workflow. Th
 ## Why it exists
 
 - Agents use it as the basic orientation command before choosing a workflow
-    action.
+  action.
 - Humans use it to understand whether a sprint is ready for review, blocked,
-    or safe to continue.
+  or safe to continue.

@@ -15,7 +15,7 @@ The sprint-branch view [--task <task>] command is part of the local sprint-branc
 - The concise approval view for a finished task.
 - By default, the task currently assigned to `review`.
 - With `--task`, a specific finished task by task-file stem or matching task
-    filename.
+  filename.
 - The approval view includes:
   - Task identity.
   - Current task state.
@@ -24,13 +24,13 @@ The sprint-branch view [--task <task>] command is part of the local sprint-branc
   - Recommended diff command.
   - The task's Review Report.
 - The task markdown is read from the sprint's recorded working tree, so the
-    approval packet reflects the sprint plan text the agent prepared.
+  approval packet reflects the sprint plan text the agent prepared.
 
 ## What it changes
 
 - Nothing.
 - It does not change branches, task state, review state, or working tree
-    files.
+  files.
 
 ## Guardrails
 
@@ -38,7 +38,7 @@ The sprint-branch view [--task <task>] command is part of the local sprint-branc
 - The selected task must exist in sprint state.
 - The selected task must be marked `finished-unreviewed`.
 - Explicit task selection can view a finished task even when it is not the
-    current review task.
+  current review task.
 - The task markdown must contain a complete Review Report with:
   - `Plain-English Summary`.
   - `How To Verify Without Reading Code`.

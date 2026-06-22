@@ -6,9 +6,9 @@ The standard sprint workflow shows how planned task branches move from setup thr
 
 - Create the sprint branch scaffold with `init`.
 - Restore an accidentally removed sprint folder with `restore-sprint` when a
-    local backup exists.
+  local backup exists.
 - Restore or realign private sprint state with `reset-state` when a sprint
-    plan has changed or state needs recovery.
+  plan has changed or state needs recovery.
 
 ## Task loop
 
@@ -32,7 +32,7 @@ The standard sprint workflow shows how planned task branches move from setup thr
 ## Work-ahead interruptions
 
 - Use `feedback` when human feedback needs the review branch while the agent
-    is working ahead.
+  is working ahead.
   - Dirty `next` work is preserved as interrupted sprint work.
   - The working context returns to `review`.
 - Use `resume` after review feedback is handled.
@@ -42,7 +42,7 @@ The standard sprint workflow shows how planned task branches move from setup thr
 ## Completion
 
 - Use `finalize` when no review task, next task, or finished-unreviewed task
-    remains.
+  remains.
   - The fully approved sprint is prepared for human landing.
 - Use `land` to fast-forward the target branch to the finalized sprint work.
   - This is a human command.

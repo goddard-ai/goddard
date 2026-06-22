@@ -6,7 +6,7 @@ Review-sync is a local workflow for reviewing an agent-owned branch from a separ
 
 - This directory describes what `review-sync` supports at a conceptual level.
 - It is written for agents and humans, including reviewers who need to
-    understand the review loop without reading source code.
+  understand the review loop without reading source code.
 - It stays at the public product-concept level:
   - Supported outcomes, guardrails, ownership boundaries, and recovery paths belong here.
   - Code layout, low-level storage mechanics, and step-by-step execution order do not.
@@ -46,7 +46,7 @@ Review-sync is a local workflow for reviewing an agent-owned branch from a separ
   - Keep syncing when either worktree or the agent branch changes.
   - Audience: humans reviewing live agent work.
   - Mutates: delegates to `start`, `sync`, review-branch preparation, and
-      session pause-on-exit behavior.
+    session pause-on-exit behavior.
 
 ## Session control
 

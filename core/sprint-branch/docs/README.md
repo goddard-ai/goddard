@@ -5,9 +5,9 @@ Sprint-branch is a local workflow for splitting a larger agent effort into task 
 ## Purpose
 
 - This directory describes what `sprint-branch` supports at a conceptual
-    level.
+  level.
 - It is written for agents and humans, including people who need to
-    understand the sprint review process without reading source code.
+  understand the sprint review process without reading source code.
 - It stays at the public product-concept level:
   - Outcomes, guardrails, and procedural shape belong here.
   - Code layout, lock mechanics, and command internals do not.
@@ -71,11 +71,11 @@ Sprint-branch is a local workflow for splitting a larger agent effort into task 
   - Mutates: target branch.
 - [`cleanup`](./commands/cleanup.md)
   - Detach sprint branch worktrees, then remove landed sprint branches and
-      state.
+    state.
   - Interactive prompts can select multiple sprints for cleanup.
   - Audience: humans.
   - Mutates: local sprint branches, sprint branch worktree checkouts, and
-      sprint state.
+    sprint state.
 
 ## Setup, recovery, and visibility commands
 
@@ -89,7 +89,7 @@ Sprint-branch is a local workflow for splitting a larger agent effort into task 
   - Mutates: sprint state only.
 - [`restore-sprint`](./commands/restore-sprint.md)
   - Restore an accidentally removed `sprints/<name>/` folder from the latest
-      local backup.
+    local backup.
   - Audience: agents and humans recovering local sprint plans.
   - Mutates: working tree sprint task files.
 - [`park`](./commands/park.md)
@@ -119,7 +119,7 @@ Sprint-branch is a local workflow for splitting a larger agent effort into task 
   - Return to interrupted or dependent `next` work.
   - Audience: agents.
   - Mutates: checkout state, dependent branch content, and recorded
-      interrupted work.
+    interrupted work.
 - [`approve`](./commands/approve.md)
   - Promote reviewed work into `approved` and roll the queue forward.
   - Audience: agents after human approval.

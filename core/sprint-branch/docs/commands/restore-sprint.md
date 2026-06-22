@@ -5,7 +5,7 @@ The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of 
 ## Question it answers
 
 - How can an accidentally removed `sprints/<name>/` folder be restored from
-    the latest local backup?
+  the latest local backup?
 
 ## Inputs and selection
 
@@ -15,9 +15,9 @@ The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of 
 ## What it does
 
 - Restores task markdown files from the latest Git-private backup for the
-    selected sprint.
+  selected sprint.
 - Restores into the sprint worktree recorded by private sprint state when
-    that state is readable.
+  that state is readable.
 - If private sprint state is missing, restores into the current worktree.
 - Does not recreate, rewrite, or move sprint branch state.
 - Does not move Git branches.
@@ -25,7 +25,7 @@ The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of 
 ## Backup source
 
 - Successful sprint state writes keep one latest local backup of
-    `sprints/<name>/` while that folder exists.
+  `sprints/<name>/` while that folder exists.
 - Backups are local Git-private metadata and are not review history.
 - Only the latest backup is retained.
 
@@ -34,7 +34,7 @@ The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of 
 - Requires an existing local backup.
 - Refuses to overwrite an existing sprint folder unless `--force` is passed.
 - If both the live sprint folder and backup are missing, restore is not
-    possible.
+  possible.
 
 ## Dry run
 
@@ -44,6 +44,6 @@ The sprint-branch restore-sprint [--sprint <name>] [--force] command is part of 
 ## Why it exists
 
 - `sprints/` is intentionally ignored by Git so sprint plans stay out of
-    review diffs.
+  review diffs.
 - The restore command covers accidental local folder loss without changing
-    the branch workflow.
+  the branch workflow.

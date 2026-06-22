@@ -8,14 +8,14 @@ Review-sync keeps agent work and human review work separate while still letting 
 - The agent keeps ownership of the agent branch.
 - The human works on a disposable review branch derived from the agent branch.
 - Sync turns review-side changes into patches and keeps the review worktree
-    refreshed from the agent's current content.
+  refreshed from the agent's current content.
 
 ## Branch and worktree roles
 
 - `Agent Branch`
   - The branch the agent is actively changing.
   - It must be checked out in a separate agent worktree for normal start and
-      one-shot sync operations.
+    one-shot sync operations.
 - `Agent Worktree`
   - The worktree that owns the agent branch during a review-sync session.
   - Accepted human patches are applied here.
@@ -23,8 +23,8 @@ Review-sync keeps agent work and human review work separate while still letting 
   - The human-facing branch named by adding `review-sync/` before the full agent branch name.
   - For example, `codex/example` reviews through `review-sync/codex/example`.
   - It is disposable: its content matters, but humans should not rely on its
-      commit history as the durable review record except for clean commits that
-      sync can promote onto the agent branch.
+    commit history as the durable review record except for clean commits that
+    sync can promote onto the agent branch.
 - `Review Worktree`
   - The separate local worktree a human opens in an editor.
   - It is where the review branch is checked out and synchronized content is rendered.
@@ -38,38 +38,38 @@ Review-sync keeps agent work and human review work separate while still letting 
   - One review worktree.
   - One shared Git repository.
 - Commands that do not name an agent branch infer the session from the current
-    worktree or checked-out branch.
+  worktree or checked-out branch.
 - If more than one saved session matches the current worktree, commands refuse to guess.
   - The safe recovery is to run from a worktree that clearly belongs to one
-      session, name the agent branch where supported, or remove stale saved
-      sessions only after checking their saved patches.
+    session, name the agent branch where supported, or remove stale saved
+    sessions only after checking their saved patches.
 
 ## Rendered snapshot
 
 - A rendered snapshot is the synthetic content last written into the review
-    worktree's index and working tree.
+  worktree's index and working tree.
 - It is the baseline used to decide whether the human changed the review worktree.
 - It may appear as staged or unstaged changes relative to the visible review
-    branch `HEAD` when synchronized agent content has not been committed on the
-    review branch.
+  branch `HEAD` when synchronized agent content has not been committed on the
+  review branch.
 - When synchronized agent content includes real agent commits, the disposable
-    review branch may advance to the latest real agent commit while any
-    remaining uncommitted content stays rendered in the index and working tree.
+  review branch may advance to the latest real agent commit while any
+  remaining uncommitted content stays rendered in the index and working tree.
 - It is not a user-facing branch role; it exists so the next sync can
-    distinguish review edits from agent edits.
+  distinguish review edits from agent edits.
 
 ## Human patches
 
 - A human patch is the visible difference between the last rendered snapshot
-    and the current review worktree.
+  and the current review worktree.
 - Human patches include tracked changes and untracked files that Git does not ignore.
 - Ignored files are not synchronized.
 - Human commits on the review branch are treated as review content:
   - The resulting file changes can be accepted.
   - Clean review commits can be promoted onto the agent branch when their
-      content matches the synchronized agent content.
+    content matches the synchronized agent content.
   - Review branch history that cannot be promoted is not preserved as the
-      durable record.
+    durable record.
 
 ## Patch outcomes
 
@@ -82,7 +82,7 @@ Review-sync keeps agent work and human review work separate while still letting 
   - The patch is saved for recovery.
   - The agent worktree is not changed by that patch.
   - The review worktree is refreshed back to the agent content so review can
-      continue from a coherent state.
+    continue from a coherent state.
 - `paused`
   - The session is intentionally blocked from sync mutations.
   - Existing worktree edits are not discarded by pausing.
@@ -99,7 +99,7 @@ Review-sync keeps agent work and human review work separate while still letting 
 - In-progress Git operations that make branch or patch movement ambiguous are blocked.
 - Paused sessions block sync mutations until resumed.
 - Review branch checkout or render operations protect local review edits
-    instead of silently discarding them.
+  instead of silently discarding them.
 
 ## Human and agent ownership
 
@@ -107,5 +107,5 @@ Review-sync keeps agent work and human review work separate while still letting 
 - The review branch is the human review surface, but it is still managed by `review-sync`.
 - Human review edits are durable when saved as accepted or rejected patches.
 - Agents and humans may run commands from either recorded worktree after a
-    session exists, except setup flows that need a review worktree to prepare
-    the review branch.
+  session exists, except setup flows that need a review worktree to prepare
+  the review branch.

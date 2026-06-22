@@ -32,10 +32,10 @@ The sprint-branch init [--base <ref>] command is part of the local sprint-branch
 - The expected sprint branches must not already exist.
 - A bare branch at the sprint namespace must not already exist.
   - This avoids ambiguity between the namespace used for sprint branches and a
-      real branch with the same prefix.
+    real branch with the same prefix.
 - The sprint state must not already exist.
 - A clean working tree is not required because the command creates the
-    scaffold rather than moving existing work between sprint branches.
+  scaffold rather than moving existing work between sprint branches.
 
 ## Dry run
 

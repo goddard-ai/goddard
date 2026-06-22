@@ -18,20 +18,20 @@ The sprint-branch doctor command is part of the local sprint-branch workflow. Th
   - Unexpected branch ancestry.
   - Unrecorded branch work.
   - Dormant `next` branches that are stale behind `review` but contain no
-      unique commits.
+    unique commits.
   - Dirty working trees that make branch movement unsafe.
   - Task ordering problems.
   - Duplicate task assignments.
   - Tasks assigned to more than one role.
   - Finished-unreviewed tasks that are missing, duplicated, already approved,
-      or otherwise outside the active review queue.
+    or otherwise outside the active review queue.
   - Incomplete Review Reports for finished tasks.
   - Recorded conflicts.
   - Active Git operations.
   - Stale recovery state.
   - Active sprint stashes.
   - Stash records that no longer match the recorded branch, task, or stash
-      entry.
+    entry.
   - Task files with ambiguous ordering or unusual names.
   - Extra sprint namespace branches.
   - Current-branch situations that make deletion or mutation unsafe.
@@ -41,7 +41,7 @@ The sprint-branch doctor command is part of the local sprint-branch workflow. Th
 - Nothing.
 - It does not repair state by itself.
 - It does not change branches, task state, review state, or working tree
-    files.
+  files.
 
 ## Recovery guidance
 
@@ -53,7 +53,7 @@ The sprint-branch doctor command is part of the local sprint-branch workflow. Th
   - `rebase`.
   - `finalize`.
 - It can also direct the user back to `doctor` when manual cleanup or conflict
-    resolution is still required before a workflow command is safe.
+  resolution is still required before a workflow command is safe.
 
 ## Why it exists
 

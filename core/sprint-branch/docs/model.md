@@ -51,7 +51,7 @@ The sprint-branch model describes the local branch stack used to move agent task
 
 - Most commands first resolve the active sprint.
 - Shared selectors, prompted ordering, parked sprint handling, and activity
-    tracking are defined in [Sprint selection](./sprint-selection.md).
+  tracking are defined in [Sprint selection](./sprint-selection.md).
 
 ## Planning and output
 
@@ -59,16 +59,16 @@ The sprint-branch model describes the local branch stack used to move agent task
 - Mutating workflow commands support `--dry-run`.
   - Dry runs report the intended transition.
   - Dry runs do not change branches, task state, activity timestamps, or
-      working tree files.
+    working tree files.
 - Human landing commands support JSON only for dry-run inspection.
   - Real landing and cleanup require interactive confirmation.
 
 ## Clean-working-tree guardrails
 
 - Commands that switch, move, rebase, or finalize branches usually require a
-    clean working tree.
+  clean working tree.
 - The guardrail exists so unrelated local edits are not stranded inside a
-    sprint transition.
+  sprint transition.
 - Commands with narrower requirements include:
   - Read-only reporting commands.
   - Private sprint metadata updates.

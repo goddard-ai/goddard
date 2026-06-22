@@ -5,7 +5,7 @@ The sprint-branch reset-state [--task <task>] [--base <ref>] [--force] command i
 ## Question it answers
 
 - How can private sprint state be recreated after a sprint plan is reworked
-    or state is missing?
+  or state is missing?
 
 ## Inputs and selection
 
@@ -13,12 +13,12 @@ The sprint-branch reset-state [--task <task>] [--base <ref>] [--force] command i
 - `--task <task>` selects the next task that `start` should accept.
   - The task may be named by its task-file stem or matching task filename.
   - If no task is selected, the first task in sprint task-file order becomes
-      next.
+    next.
 - `--base <ref>` records a base when existing state cannot supply one.
   - If neither `--base` nor existing readable state supplies a base, the base
-      defaults to `main`.
+    defaults to `main`.
 - `--force` allows certain active-work and branch-drift blockers to become
-    warnings.
+  warnings.
 
 ## What it does
 
@@ -28,7 +28,7 @@ The sprint-branch reset-state [--task <task>] [--base <ref>] [--force] command i
 - Tasks before the selected task are recorded as already approved.
 - Preserves existing sprint visibility when readable state exists.
 - Clears active task assignments, finished-unreviewed records, interrupted
-    sprint work, and recorded conflicts.
+  sprint work, and recorded conflicts.
 - If existing private state is missing or unreadable:
   - Creates a replacement state record.
   - Reports the state problem as a diagnostic.
@@ -47,7 +47,7 @@ The sprint-branch reset-state [--task <task>] [--base <ref>] [--force] command i
   - Interrupted sprint work.
   - Recorded conflict recovery.
 - `--force` should only be used after preserving or intentionally discarding
-    the work described by warnings.
+  the work described by warnings.
 - `--force` does not move branches.
   - The command may still leave branch content that `doctor` reports later.
 

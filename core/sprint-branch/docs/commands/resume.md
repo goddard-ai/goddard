@@ -5,7 +5,7 @@ The sprint-branch resume command is part of the local sprint-branch workflow. Th
 ## Question it answers
 
 - How does the agent return to interrupted or dependent work-ahead after
-    feedback?
+  feedback?
 
 ## Inputs and selection
 
@@ -30,13 +30,13 @@ The sprint-branch resume command is part of the local sprint-branch workflow. Th
 
 - Normally requires a clean working tree.
 - The exception is the final step of resolving a previously recorded resume
-    conflict, where resolved files may remain in the working tree.
+  conflict, where resolved files may remain in the working tree.
 - If a `next` task is recorded, the `next` branch must still exist.
 - When a resume-related conflict occurs:
   - Sprint state remains at the pre-resume boundary.
   - The command must be retried after conflict resolution.
 - If the interrupted work was already applied and the user has resolved the
-    conflict:
+  conflict:
   - Retrying `resume` clears the recorded interruption.
   - The restored work may remain as local edits for the agent to continue.
 
@@ -46,10 +46,10 @@ The sprint-branch resume command is part of the local sprint-branch workflow. Th
 - Reports whether dependent work would be brought forward.
 - Reports whether recorded interrupted work would be restored.
 - Does not switch branches, move branch content, restore work, or update
-    sprint state.
+  sprint state.
 
 ## Why it exists
 
 - Work-ahead depends on review.
 - After feedback changes review, dependent next work must be brought forward
-    before it can safely continue.
+  before it can safely continue.

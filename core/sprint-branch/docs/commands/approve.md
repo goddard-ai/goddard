@@ -27,7 +27,7 @@ The sprint-branch approve command is part of the local sprint-branch workflow. T
   - Empties the `next` slot.
   - Leaves `review` checked out for the rolled-forward task.
   - If that rolled-forward task is already finished, attempts a best-effort
-      desktop notification for the human reviewer.
+    desktop notification for the human reviewer.
 
 ## What it changes
 
@@ -58,4 +58,4 @@ The sprint-branch approve command is part of the local sprint-branch workflow. T
 ## Why it exists
 
 - Approval is the transition from "ready for human review" to "accepted as the
-    baseline for future sprint work."
+  baseline for future sprint work."

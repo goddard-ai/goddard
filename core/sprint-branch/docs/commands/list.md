@@ -11,7 +11,7 @@ The sprint-branch list [--all] [-l|--last] command is part of the local sprint-b
 - Active sprints by default.
 - Parked sprints when `--all` is supplied.
 - Sprints in most-recent activity order, with stable name order as the
-    fallback for untouched sprints.
+  fallback for untouched sprints.
 - Only the latest acted-upon sprint when `-l` / `--last` is supplied.
 - For each sprint:
   - Sprint name.
@@ -30,11 +30,11 @@ The sprint-branch list [--all] [-l|--last] command is part of the local sprint-b
 ## Guardrails
 
 - Unreadable sprint state appears as diagnostics rather than stopping the
-    entire listing.
+  entire listing.
 - Listing remains a discovery command even when some sprint records are
-    unhealthy.
+  unhealthy.
 
 ## Why it exists
 
 - It is the low-risk discovery command for choosing a sprint when the current
-    directory or branch does not identify one.
+  directory or branch does not identify one.
