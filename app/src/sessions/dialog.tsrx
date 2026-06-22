@@ -34,7 +34,7 @@ export default function SessionLaunchDialog(props: {
   const titleId = useId()
   const projects = projectRegistry.projectList
   const initialProjectPath = activeProjectPath ?? projects[0]?.path ?? null
-  const hasAdapterSelector = (form.adapterCatalog.value?.adapters.length ?? 0) > 0
+  const hasAdapterSelector = (form.managedAgentCatalog.value?.managedAgents.length ?? 0) > 0
   const hasBranchSelector =
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
       !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true) &&
@@ -67,7 +67,7 @@ export default function SessionLaunchDialog(props: {
     try {
       const projectPath = form.draftProjectPath.value
       const launchLeaseId = form.launchPreview.value?.launchLeaseId
-      recordSessionLaunchAgentUse(form.draftAdapterId.value)
+      recordSessionLaunchAgentUse(form.draftManagedAgentId.value)
       const { session } = await createSession(sessionInput)
       const sessionTitle = getSessionDisplayTitle(session)
 
@@ -165,7 +165,7 @@ export default function SessionLaunchDialog(props: {
     form.setOpenPicker("subpackage")
   }, { active: hasSubpackageSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
-    form.setOpenPicker("adapter")
+    form.setOpenPicker("managedAgent")
   }, { active: hasAdapterSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.cycleLaunchLocation()

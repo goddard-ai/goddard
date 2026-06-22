@@ -112,7 +112,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "daemon")).toBe(true)
     expect(Object.hasOwn(sdk, "events")).toBe(true)
     expect(Object.hasOwn(sdk, "auth")).toBe(true)
-    expect(Object.hasOwn(sdk, "adapter")).toBe(true)
+    expect(Object.hasOwn(sdk, "managedAgent")).toBe(true)
     expect(Object.hasOwn(sdk, "fileSearch")).toBe(true)
     expect(Object.hasOwn(sdk, "pr")).toBe(true)
     expect(Object.hasOwn(sdk, "inbox")).toBe(true)
@@ -155,11 +155,11 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  test("adapter.list forwards to adapter.list", async () => {
+  test("managedAgent.list forwards to managedAgent.list", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
-      adapters: [
+      managedAgents: [
         {
           id: "pi-acp",
           name: "Pi ACP",
@@ -178,15 +178,15 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
       installations: [],
-      defaultAdapterId: "pi-acp",
+      defaultManagedAgentId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
       stale: false,
       lastError: null,
     })
 
-    await expect(sdk.adapter.list({ cwd: "/tmp/project" })).resolves.toEqual({
-      adapters: [
+    await expect(sdk.managedAgent.list({ cwd: "/tmp/project" })).resolves.toEqual({
+      managedAgents: [
         {
           id: "pi-acp",
           name: "Pi ACP",
@@ -205,14 +205,14 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
       installations: [],
-      defaultAdapterId: "pi-acp",
+      defaultManagedAgentId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
       stale: false,
       lastError: null,
     })
 
-    expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
+    expect(send).toHaveBeenCalledWith("managedAgent.list", { cwd: "/tmp/project" })
   })
 
   test("fileSearch.composerEntries forwards to fileSearch.composerEntries", async () => {

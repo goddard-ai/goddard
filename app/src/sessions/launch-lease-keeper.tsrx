@@ -23,11 +23,11 @@ export function SessionLaunchLeaseKeeper(props: {
     props.currentProjectPath
       ? resolvePreferredLaunchCwd(props.currentProjectPath, subpackages.subpackages)
       : null
-  const adapterCatalog = useQuery(cwd ? goddardSdk.adapter.list : null, {
+  const managedAgentCatalog = useQuery(cwd ? goddardSdk.managedAgent.list : null, {
     params: cwd ? [{ cwd }] : null,
   })
   const agentId =
-    props.currentProjectPath ? resolvePreferredLaunchAgentId(adapterCatalog) : null
+    props.currentProjectPath ? resolvePreferredLaunchAgentId(managedAgentCatalog) : null
   const launchPreview = useQuery(cwd && agentId ? goddardSdk.session.launchPreview : null, {
     params: cwd && agentId
       ? [

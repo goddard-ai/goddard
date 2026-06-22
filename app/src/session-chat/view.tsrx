@@ -434,14 +434,16 @@ function SessionChatComposerDock(props: {
   const sessionModelConfig = deriveSessionLaunchModelConfig({
     configOptions: props.chat.session.configOptions,
   })
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.managedAgent.list, {
     params: [
       { cwd: props.chat.session.cwd, includeUninstalled: true },
     ],
   })
   const agentAdapter =
     typeof props.chat.session.agent === "string"
-      ? adapterCatalog.adapters.find((adapter) => adapter.id === props.chat.session.agent) ?? null
+      ? managedAgentCatalog.managedAgents.find(
+        (adapter) => adapter.id === props.chat.session.agent,
+      ) ?? null
       : null
   const agentIcon =
     typeof props.chat.session.agent === "string"
