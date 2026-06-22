@@ -888,6 +888,18 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
+  features/github:
+    dependencies:
+      '@goddard-ai/backend-plugin':
+        specifier: workspace:*
+        version: link:../../core/backend-plugin
+      '@goddard-ai/remote-repo':
+        specifier: workspace:*
+        version: link:../remote-repo
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
   features/inbox:
     dependencies:
       '@agentclientprotocol/sdk':
