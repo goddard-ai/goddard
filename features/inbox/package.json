@@ -21,6 +21,14 @@
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
     },
+    "./events": {
+      "types": {
+        "source": "./src/events.ts",
+        "default": "./dist/events.d.mts"
+      },
+      "bun": "./src/events.ts",
+      "import": "./dist/events.mjs"
+    },
     "./schema": {
       "types": {
         "source": "./src/schema.ts",

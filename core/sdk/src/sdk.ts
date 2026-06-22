@@ -7,7 +7,14 @@ import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
 import type { DaemonEventsStreamRequest } from "@goddard-ai/schema/daemon-ipc"
-import { composeSdkPlugins, type InferSdkNamespaces } from "@goddard-ai/sdk-plugin"
+import {
+  composeSdkPlugins,
+  type EventDefinition,
+  type EventDefinitions,
+  type EventLogMetadata,
+  type InferSdkEvents,
+  type InferSdkNamespaces,
+} from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 import type * as acp from "acp-client/protocol"
@@ -36,6 +43,47 @@ const sdkPlugins = composeSdkPlugins([
 ])
 
 type FeatureSdkNamespaces = InferSdkNamespaces<typeof sdkPlugins>
+type FeatureSdkEvents = InferSdkEvents<typeof sdkPlugins>
+type InferEventPayload<TDefinition> =
+  TDefinition extends EventDefinition<infer TPayload> ? TPayload : never
+type EventName<TEvents extends EventDefinitions> = keyof TEvents & string
+type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
+  [TName in keyof TEvents & string]: {
+    readonly id: string
+    readonly at: string
+    readonly name: TName
+    readonly payload: InferEventPayload<TEvents[TName]>
+    readonly log?: EventLogMetadata
+  }
+}[keyof TEvents & string]
+type EventStreamRequest<TEvents extends EventDefinitions> = Omit<
+  DaemonEventsStreamRequest,
+  "names"
+> & {
+  readonly names?: readonly EventName<TEvents>[]
+}
+type EventStreamRequestForNames<
+  TEvents extends EventDefinitions,
+  TNames extends readonly EventName<TEvents>[],
+> = Omit<DaemonEventsStreamRequest, "names"> & {
+  readonly names: TNames
+}
+type EventEnvelopeForNames<
+  TEvents extends EventDefinitions,
+  TNames extends readonly EventName<TEvents>[],
+> = EventEnvelopeUnion<Pick<TEvents, TNames[number]>>
+type EventsNamespace<TEvents extends EventDefinitions> = {
+  stream<const TNames extends readonly EventName<TEvents>[]>(
+    input: EventStreamRequestForNames<TEvents, TNames>,
+    options?: { signal?: AbortSignal },
+  ): Promise<AsyncIterable<EventEnvelopeForNames<TEvents, TNames>>>
+  stream(
+    input?: EventStreamRequest<TEvents>,
+    options?: { signal?: AbortSignal },
+  ): Promise<AsyncIterable<EventEnvelopeUnion<TEvents>>>
+}
+
+export type GoddardEventEnvelope = EventEnvelopeUnion<FeatureSdkEvents>
 
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
@@ -49,12 +97,14 @@ function createDaemonNamespace(client: any) {
 }
 
 /** Builds the daemon event namespace with one thin method for the unified event stream. */
-function createEventsNamespace(client: any) {
+function createEventsNamespace<TEvents extends EventDefinitions>(
+  client: any,
+): EventsNamespace<TEvents> {
   return {
     /** Streams composed daemon events with optional payload-relative exact-match filters. */
     stream: (input: DaemonEventsStreamRequest = {}, options?: { signal?: AbortSignal }) =>
       client.events.stream(input, options),
-  }
+  } as EventsNamespace<TEvents>
 }
 
 /** Builds the session namespace with one thin method per daemon session IPC action. */
@@ -91,7 +141,7 @@ export class GoddardSdk {
   readonly #client: GoddardClient
 
   readonly daemon: ReturnType<typeof createDaemonNamespace>
-  readonly events: ReturnType<typeof createEventsNamespace>
+  readonly events: EventsNamespace<FeatureSdkEvents>
   readonly auth: FeatureSdkNamespaces["auth"]
   readonly adapter: FeatureSdkNamespaces["adapter"]
   readonly fileSearch: FeatureSdkNamespaces["fileSearch"]
@@ -110,7 +160,7 @@ export class GoddardSdk {
     }) as FeatureSdkNamespaces
 
     this.daemon = createDaemonNamespace(this.#client)
-    this.events = createEventsNamespace(this.#client)
+    this.events = createEventsNamespace<FeatureSdkEvents>(this.#client)
     this.auth = features.auth
     this.adapter = features.adapter
     this.fileSearch = features.fileSearch

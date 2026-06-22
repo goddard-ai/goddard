@@ -1,20 +1,10 @@
-import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { kind } from "kindstore"
 import { isObject } from "radashi"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import {
-  createSessionManager,
-  type SessionActivatedEvent,
-  type SessionAttentionEvent,
-  type SessionBlockedEvent,
-  type SessionIdEvent,
-  type SessionLaunchFailedEvent,
-  type SessionLaunchFinishedEvent,
-  type SessionPersistedEvent,
-  type SessionStoppingEvent,
-  type SessionWorktreePreparedEvent,
-} from "./daemon/manager.ts"
+import { createSessionManager } from "./daemon/manager.ts"
+import { sessionEvents } from "./events.ts"
 import {
   DaemonLaunchWorktree,
   DaemonSession,
@@ -29,14 +19,8 @@ import {
   WorktreesConfig,
   type SessionId,
   type SessionLifecycleEvent,
-  type SessionMessageEvent,
   type SessionTurnMessage,
 } from "./schema.ts"
-
-export type RoutedSessionMessageEvent = {
-  id: SessionId
-  message: SessionMessageEvent
-}
 
 export { resolveUnmanagedAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
@@ -295,25 +279,7 @@ export const sessionPlugin = definePlugin({
       })
     },
   },
-  events: {
-    "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
-    "session.persisted": event<SessionPersistedEvent>(),
-    "session.activated": event<SessionActivatedEvent>(),
-    "session.launch.finished": event<SessionLaunchFinishedEvent>(),
-    "session.launch.failed": event<SessionLaunchFailedEvent>(),
-    "session.stopping": event<SessionStoppingEvent>(),
-    "session.blocked": event<SessionBlockedEvent>(),
-    "session.turn.ended": event<SessionAttentionEvent>(),
-    "session.replied": event<SessionIdEvent>(),
-    "session.completed": event<SessionIdEvent>(),
-    "session.message": event<RoutedSessionMessageEvent>({ debug: "session.stream" }),
-    "session.lifecycle.updated": event<Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>>({
-      debug: "session.lifecycle",
-    }),
-    "session.lifecycle.deleted": event<Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>>({
-      debug: "session.lifecycle",
-    }),
-  },
+  events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const streamDebug = context.log.createDebug("session.stream")

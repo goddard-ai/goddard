@@ -2,11 +2,26 @@
 import { composeIpcRoutes, type HttpRouteTree, type RouzerClient } from "@goddard-ai/ipc"
 
 type SdkNamespaces = Record<string, Record<string, unknown>>
+
+export type EventLogMetadata = {
+  readonly debug?: string
+}
+export type EventDefinition<TPayload = unknown> = {
+  readonly payload?: TPayload
+  readonly log?: EventLogMetadata
+}
+export type EventDefinitions = Record<string, EventDefinition<any>>
 type HttpNode = HttpRouteTree[string]
+
+/** Declares one daemon event payload type without adding runtime behavior. */
+export function event<TPayload>(options: EventLogMetadata = {}): EventDefinition<TPayload> {
+  return Object.keys(options).length > 0 ? { log: options } : {}
+}
 
 type RuntimeSdkPlugin = {
   readonly name: string
   readonly ipcRoutes: HttpRouteTree
+  readonly events?: EventDefinitions
   readonly wrap?: (input: { readonly client: any }) => SdkNamespaces
 }
 
@@ -27,6 +42,12 @@ type UnionToIntersection<T> = (T extends unknown ? (value: T) => void : never) e
   ? TResult
   : never
 
+type InferPluginEvents<TPlugin> = TPlugin extends {
+  readonly events?: infer TEvents extends EventDefinitions
+}
+  ? NonNullable<TEvents>
+  : {}
+
 /** Infers the merged namespace surface returned by an SDK plugin composition. */
 export type InferSdkNamespaces<TComposition> = TComposition extends {
   readonly plugins: readonly RuntimeSdkPlugin[]
@@ -34,13 +55,22 @@ export type InferSdkNamespaces<TComposition> = TComposition extends {
   ? UnionToIntersection<InferPluginNamespaces<TComposition["plugins"][number]>>
   : {}
 
+/** Infers the merged daemon event declarations owned by an SDK plugin composition. */
+export type InferSdkEvents<TComposition> = TComposition extends {
+  readonly plugins: readonly RuntimeSdkPlugin[]
+}
+  ? UnionToIntersection<InferPluginEvents<TComposition["plugins"][number]>>
+  : {}
+
 /** SDK plugin shape used to constrain feature plugin values without widening them. */
 export type SdkPluginDefinition<
   TRoutes extends HttpRouteTree = HttpRouteTree,
   TNamespaces extends SdkNamespaces = SdkNamespaces,
+  TEvents extends EventDefinitions = EventDefinitions,
 > = {
   readonly name: string
   readonly ipcRoutes: TRoutes
+  readonly events?: TEvents
   readonly wrap?: (input: { readonly client: RouzerClient<TRoutes> }) => TNamespaces
 }
 
@@ -49,13 +79,16 @@ export function defineSdkPlugin<
   const TName extends string,
   const TRoutes extends HttpRouteTree,
   const TNamespaces extends SdkNamespaces,
+  const TEvents extends EventDefinitions,
 >(plugin: {
   readonly name: TName
   readonly ipcRoutes: TRoutes
+  readonly events?: TEvents
   readonly wrap?: (input: { readonly client: RouzerClient<TRoutes> }) => TNamespaces
 }): {
   readonly name: TName
   readonly ipcRoutes: TRoutes
+  readonly events?: TEvents
   readonly wrap?: (input: { readonly client: any }) => TNamespaces
 } {
   return plugin as any
@@ -68,6 +101,7 @@ export function composeSdkPlugins<const TPlugins extends readonly RuntimeSdkPlug
   return {
     plugins,
     ipcRoutes: composeIpcRoutes(plugins.map((plugin) => plugin.ipcRoutes)),
+    events: composeEvents(plugins),
 
     wrap(input: { readonly client: any }) {
       const namespaces: SdkNamespaces = {}
@@ -81,6 +115,22 @@ export function composeSdkPlugins<const TPlugins extends readonly RuntimeSdkPlug
       return namespaces
     },
   }
+}
+
+function composeEvents(plugins: readonly RuntimeSdkPlugin[]) {
+  const events: EventDefinitions = {}
+
+  for (const plugin of plugins) {
+    for (const [name, definition] of Object.entries(plugin.events ?? {})) {
+      if (Object.hasOwn(events, name)) {
+        throw new Error(`Duplicate SDK event: ${name}`)
+      }
+
+      events[name] = definition
+    }
+  }
+
+  return events
 }
 
 function mergeNamespaces(

@@ -1090,7 +1090,7 @@ export class SessionChat extends Sigma<SessionChatState> {
             break
           }
 
-          const { message } = event.payload as { message: SessionMessageEvent }
+          const { message } = event.payload
           this.receiveMessage(message)
         }
       } catch (error) {
