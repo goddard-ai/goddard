@@ -6,13 +6,19 @@ import { installCatalogAdapter, listAdapters, uninstallCatalogAdapter } from "./
 export const adapterPlugin = definePlugin({
   name: "adapter",
   ipcRoutes: adapterIpcRoutes,
-  setup(context) {
+  setup({ agentInstallService, configProvider, registryService }) {
+    const adapterContext = {
+      agentInstallService,
+      configProvider,
+      registryService,
+    }
+
     return {
       ipcHandlers: {
         adapter: {
-          list: async ({ body }) => listAdapters(context, body),
-          install: async ({ body }) => installCatalogAdapter(context, body),
-          uninstall: async ({ body }) => uninstallCatalogAdapter(context, body),
+          list: async ({ body }) => listAdapters(adapterContext, body),
+          install: async ({ body }) => installCatalogAdapter(adapterContext, body),
+          uninstall: async ({ body }) => uninstallCatalogAdapter(adapterContext, body),
         },
       },
     }
