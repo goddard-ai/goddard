@@ -225,7 +225,7 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
           signal: controller.signal,
         })
         const iterator = events[Symbol.asyncIterator]()
-        while (!controller.signal.aborted) {
+        while (true) {
           const result = await iterator.next()
           if (result.done) {
             break

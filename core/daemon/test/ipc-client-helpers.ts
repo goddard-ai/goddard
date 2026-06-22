@@ -17,21 +17,15 @@ export async function subscribe(
   const stream = (await selectRouteFunction(client, name)(filter, {
     signal: abortController.signal,
   })) as AsyncIterable<unknown>
-  const iterator = stream[Symbol.asyncIterator]()
   const done = (async () => {
-    while (true) {
-      const result = await iterator.next()
-      if (result.done) {
-        return
-      }
-      const payload = result.value
+    for await (const payload of stream) {
       onMessage(payload)
     }
   })()
 
   return () => {
     abortController.abort()
-    return Promise.all([iterator.return?.(), done.catch(() => {})]).then(() => {})
+    return done.catch(() => {})
   }
 }
 

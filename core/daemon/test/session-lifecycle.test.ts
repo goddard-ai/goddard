@@ -98,19 +98,13 @@ function subscribeDaemonSessionMessages(
     },
     abortController.signal,
   )
-  const iterator = stream[Symbol.asyncIterator]()
   const done = (async () => {
-    while (true) {
-      const result = await iterator.next()
-      if (result.done) {
-        return
-      }
-      onMessage((result.value.payload as { message: unknown }).message)
+    for await (const event of stream) {
+      onMessage((event.payload as { message: unknown }).message)
     }
   })()
 
   return async () => {
-    await iterator.return?.()
     abortController.abort()
     await done.catch(() => {})
   }

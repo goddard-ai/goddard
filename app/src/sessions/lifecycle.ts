@@ -12,10 +12,6 @@ export function startSessionLifecycleSubscription() {
         { signal: controller.signal },
       )
       for await (const event of events) {
-        if (controller.signal.aborted) {
-          break
-        }
-
         invalidateSessionLifecycleEvent(event.payload)
       }
     } catch (error) {
