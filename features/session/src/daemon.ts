@@ -18,7 +18,6 @@ import {
   SubpackagesConfig,
   WorktreesConfig,
   type SessionId,
-  type SessionLifecycleEvent,
   type SessionTurnMessage,
 } from "./schema.ts"
 
@@ -294,12 +293,6 @@ export const sessionPlugin = definePlugin({
       sessionContext: context.sessionContext,
       events: context.events,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
-      emitMessage(id, message) {
-        void context.events.emit("session.message", { id, message })
-      },
-      emitLifecycleEvent(event) {
-        void context.events.emit(getSessionLifecycleEventName(event), event)
-      },
     })
 
     context.events.onSubscription(async (subscription) => {
@@ -420,12 +413,6 @@ export const sessionPlugin = definePlugin({
     }
   },
 })
-
-function getSessionLifecycleEventName(event: SessionLifecycleEvent) {
-  return event.kind === "sessionUpdated"
-    ? ("session.lifecycle.updated" as const)
-    : ("session.lifecycle.deleted" as const)
-}
 
 function readSessionMessageSubscriptionId(filter: {
   readonly names?: readonly string[]

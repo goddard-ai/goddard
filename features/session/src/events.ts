@@ -91,5 +91,3 @@ export const sessionEvents = {
     debug: "session.lifecycle",
   }),
 }
-
-export type SessionEventDefinitions = typeof sessionEvents
