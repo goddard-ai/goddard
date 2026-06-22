@@ -1,6 +1,7 @@
 import { dlopen, FFIType, ptr, suffix } from "bun:ffi"
 
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
+import { nativeLibgit2PathCandidates } from "./native-artifact.ts"
 
 export type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
 export type FfiPointer = Parameters<Libgit2Symbols["git_repository_free"]>[0]
@@ -124,6 +125,7 @@ function libgit2PathCandidates() {
   return [
     process.env.GODDARD_GIT_LIBGIT2_PATH,
     process.env.LIBGIT2_PATH,
+    ...nativeLibgit2PathCandidates(),
     `libgit2.${suffix}`,
     `/opt/homebrew/lib/libgit2.${suffix}`,
     `/usr/local/lib/libgit2.${suffix}`,

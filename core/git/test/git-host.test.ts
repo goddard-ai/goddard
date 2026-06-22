@@ -12,6 +12,7 @@ import {
   resetGitHostForTests,
   resolveGitHostMode,
 } from "../src/index.ts"
+import { nativeLibgit2PathCandidates } from "../src/libgit2/native-artifact.ts"
 import { createFakeGitHost } from "../src/testing.ts"
 
 const originalGitHost = process.env.GODDARD_GIT_HOST
@@ -66,6 +67,28 @@ test("forced libgit2 mode fails when libgit2 cannot load", () => {
       libgit2PathCandidates: ["/missing/libgit2.dylib"],
     }),
   ).toThrow("Unable to load libgit2")
+})
+
+test("native libgit2 candidates include the repo-local artifact for supported targets", () => {
+  const candidates = nativeLibgit2PathCandidates({
+    platform: "darwin",
+    arch: "arm64",
+    moduleDir: "/repo/core/git/src/libgit2",
+    cwd: "/repo",
+  })
+
+  expect(candidates).toEqual(["/repo/native/libgit2/dist/darwin-arm64/lib/libgit2.dylib"])
+})
+
+test("native libgit2 candidates are empty for unsupported targets", () => {
+  expect(
+    nativeLibgit2PathCandidates({
+      platform: "linux",
+      arch: "x64",
+      moduleDir: "/repo/core/git/src/libgit2",
+      cwd: "/repo",
+    }),
+  ).toEqual([])
 })
 
 test("libgit2 host uses a valid libgit2 candidate for read operations", async () => {
@@ -170,6 +193,7 @@ async function createRepo(options: { withFeatureBranch?: boolean } = {}) {
 async function findLocalLibgit2Path() {
   const candidates = [
     process.env.LIBGIT2_TEST_PATH,
+    ...nativeLibgit2PathCandidates(),
     "/opt/homebrew/lib/libgit2.dylib",
     "/usr/local/lib/libgit2.dylib",
   ].filter((path) => typeof path === "string")
