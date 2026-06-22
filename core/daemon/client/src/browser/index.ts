@@ -19,6 +19,8 @@ export type BrowserDaemonAccess = {
   token?: string | null | undefined
 }
 
+type BrowserFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
 /** Access callback used when the browser host must resolve daemon access lazily. */
 export type BrowserDaemonAccessProvider = () => Promise<BrowserDaemonAccess> | BrowserDaemonAccess
 
@@ -43,7 +45,7 @@ export class BrowserDaemonAuthorizationError extends Error {
 
 export type BrowserDaemonIpcClientOptions = {
   ipcHook?: IpcClientHook
-  fetch?: typeof globalThis.fetch
+  fetch?: BrowserFetch
 } & (
   | {
       daemonUrl: string
@@ -70,45 +72,53 @@ export function createBrowserDaemonIpcClient(
 export function createBrowserDaemonIpcClient(
   options: BrowserDaemonIpcClientOptions,
 ): DaemonIpcClient {
-  const fetchImpl = options.fetch ?? globalThis.fetch
+  const fetchImpl: BrowserFetch = options.fetch ?? globalThis.fetch
+  const sendRequest = async (
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    origin: string,
+    token: string | null | undefined,
+  ) => {
+    let url = new URL(input instanceof Request ? input.url : String(input))
+    url = new URL(url.pathname + url.search, origin)
+
+    const headers = new Headers(init?.headers)
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`)
+    }
+
+    try {
+      return await fetchImpl(url, {
+        ...init,
+        headers,
+      })
+    } catch (error) {
+      throw new BrowserDaemonConnectionError(`Could not connect to Goddard daemon at ${origin}.`, {
+        cause: error,
+      })
+    }
+  }
 
   return createRouteClient({
     baseURL: "http://goddard-daemon.local",
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
     clientHook: options.ipcHook,
-    fetch: async (input, init) => {
-      let origin: string
-      let token: string | null | undefined
+    fetch: (async (input, init) => {
       if ("access" in options) {
         const access = await options.access()
-        origin = access.daemonUrl
-        token = access.token
-      } else {
-        origin = options.daemonUrl
-        token = "token" in options ? await options.token?.() : undefined
+        const response = await sendRequest(input, init, access.daemonUrl, access.token)
+        if (response.status !== 401 && response.status !== 403) {
+          return response
+        }
+
+        const refreshedAccess = await options.access()
+        return sendRequest(input, init, refreshedAccess.daemonUrl, refreshedAccess.token)
       }
 
-      let url = new URL(input instanceof Request ? input.url : String(input))
-      url = new URL(url.pathname + url.search, origin)
-
-      const headers = new Headers(init?.headers)
-      if (token) {
-        headers.set("Authorization", `Bearer ${token}`)
-      }
-
-      try {
-        return await fetchImpl(url, {
-          ...init,
-          headers,
-        })
-      } catch (error) {
-        throw new BrowserDaemonConnectionError(
-          `Could not connect to Goddard daemon at ${origin}.`,
-          { cause: error },
-        )
-      }
-    },
+      const token = "token" in options ? await options.token?.() : undefined
+      return sendRequest(input, init, options.daemonUrl, token)
+    }) as typeof globalThis.fetch,
     onJsonError: async (response) => {
       const body = (await response.json().catch(() => undefined)) as
         | {
