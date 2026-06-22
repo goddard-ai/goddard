@@ -1,5 +1,6 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
+import { composeBackendRoutes, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
+import { GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
 import {
   pullRequestBackendRoutes,
   pullRequestRemoteRepoEventHandler,
@@ -9,7 +10,7 @@ import {
   remoteRepoBackendRoutes,
   type RemoteRepoEventHandler,
 } from "@goddard-ai/remote-repo/backend"
-import { GitHubWebhookInput, type RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
 import { createRouter } from "rouzer"
@@ -17,6 +18,9 @@ import { createRouter } from "rouzer"
 import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
+import type { BackendPrincipal } from "./events.ts"
+
+type RemoteRepoBackendEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
 
 const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
@@ -27,8 +31,8 @@ const backendRoutes = composeBackendRoutes([
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
-  handleUserStream?: (env: Env, githubUsername: string, request: Request) => Promise<Response>
+  broadcastEvent?: (env: Env, event: RemoteRepoBackendEvent) => Promise<void>
+  handleUserStream?: (env: Env, principal: BackendPrincipal, request: Request) => Promise<Response>
   remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
 
@@ -82,13 +86,16 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const pr = await controlPlane.createPr(token, ctx.body, env)
 
           await broadcastEvent(env, {
-            type: "pr.created",
-            owner: pr.owner,
-            repo: pr.repo,
-            prNumber: pr.number,
-            title: pr.title,
-            author: pr.createdBy,
-            createdAt: pr.createdAt,
+            name: "remote_repo.event.received",
+            payload: {
+              type: "pr.created",
+              owner: pr.owner,
+              repo: pr.repo,
+              prNumber: pr.number,
+              title: pr.title,
+              author: pr.createdBy,
+              createdAt: pr.createdAt,
+            },
           })
 
           return pr
@@ -133,9 +140,10 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         try {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
-          const input = GitHubWebhookInput.parse(await ctx.request.json())
+          const body = await readVerifiedGitHubWebhookBody(ctx.request, env)
+          const input = GitHubWebhookDeliveryInput.parse(JSON.parse(body))
           const event = await controlPlane.handleGitHubWebhook(input)
-          await dispatchRemoteRepoEvent(event, remoteRepoEventHandlers)
+          await dispatchRemoteRepoEvent(event.payload, remoteRepoEventHandlers)
           await broadcastEvent(env, event)
           return event
         } catch (error) {
@@ -149,9 +157,9 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const env = readEnv(ctx)
           const controlPlane = createControlPlane(env)
           const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
+          const principal = await controlPlane.getPrincipal(token)
 
-          return await handleUserStream(env, session.githubUsername, ctx.request)
+          return await handleUserStream(env, principal, ctx.request)
         } catch (error) {
           return toErrorResponse(error)
         }
@@ -171,14 +179,14 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 }
 
 /** Provides a safe default when the worker host does not supply event broadcasting. */
-async function noopBroadcast(_env: Env, _event: RepoEvent): Promise<void> {
+async function noopBroadcast(_env: Env, _event: RemoteRepoBackendEvent): Promise<void> {
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 
 /** Returns a clear placeholder response when server-sent events are not wired in. */
 async function defaultHandleUserStream(
   _env: Env,
-  _githubUsername: string,
+  _principal: BackendPrincipal,
   _request: Request,
 ): Promise<Response> {
   return new Response("SSE handler not configured", { status: 501 })
@@ -191,6 +199,7 @@ function readEnv(ctx: { env: <K extends keyof Env>(key: K) => Env[K] }): Env {
     TURSO_DB_AUTH_TOKEN: ctx.env("TURSO_DB_AUTH_TOKEN"),
     GITHUB_APP_ID: ctx.env("GITHUB_APP_ID"),
     GITHUB_APP_PRIVATE_KEY: ctx.env("GITHUB_APP_PRIVATE_KEY"),
+    GITHUB_WEBHOOK_SECRET: ctx.env("GITHUB_WEBHOOK_SECRET"),
     USER_STREAM: ctx.env("USER_STREAM"),
   }
 }
@@ -202,6 +211,54 @@ function readBearerToken(header: string): string {
   }
 
   return header.slice("Bearer ".length)
+}
+
+async function readVerifiedGitHubWebhookBody(request: Request, env: Env): Promise<string> {
+  const body = await request.text()
+  if (!env.GITHUB_WEBHOOK_SECRET) {
+    return body
+  }
+
+  const signature = request.headers.get("x-hub-signature-256")
+  if (!signature?.startsWith("sha256=")) {
+    throw new HttpError(401, "Missing GitHub webhook signature")
+  }
+
+  const expected = await signGitHubWebhookBody(env.GITHUB_WEBHOOK_SECRET, body)
+  if (!constantTimeEqual(signature, expected)) {
+    throw new HttpError(401, "Invalid GitHub webhook signature")
+  }
+
+  return body
+}
+
+async function signGitHubWebhookBody(secret: string, body: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
+  const hex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+  return `sha256=${hex}`
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  let difference = 0
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index)
+  }
+
+  return difference === 0
 }
 
 /** Converts thrown backend errors into consistent JSON HTTP responses. */

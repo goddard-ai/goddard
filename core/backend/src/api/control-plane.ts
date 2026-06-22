@@ -4,17 +4,20 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
+import type { GitHubRemoteRepoEvent } from "@goddard-ai/github/backend"
+import type { GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"
+import type { BackendPrincipal } from "./events.ts"
 
 /** Backend operations that the HTTP router can delegate to a storage implementation. */
 export interface BackendControlPlane {
   startDeviceFlow(input?: DeviceFlowStart): Promise<DeviceFlowSession> | DeviceFlowSession
   completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> | AuthSession
   getSession(token: string): Promise<AuthSession> | AuthSession
+  getPrincipal(token: string): Promise<BackendPrincipal> | BackendPrincipal
   createPr(
     token: string,
     input: CreatePrInput,
@@ -31,7 +34,9 @@ export interface BackendControlPlane {
     input: { owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> | void
-  handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent
+  handleGitHubWebhook(
+    delivery: GitHubWebhookDeliveryInput,
+  ): Promise<GitHubRemoteRepoEvent> | GitHubRemoteRepoEvent
 }
 
 /** HTTP-friendly error type that preserves the intended response status code. */

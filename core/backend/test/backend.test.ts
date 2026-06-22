@@ -206,12 +206,15 @@ test("sse stream receives webhook events for a managed PR", async () => {
     const eventPromise = readFirstSseEvent(streamResponse)
 
     await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 1,
-      author: "teammate",
-      body: "looks good",
+      deliveryId: "delivery-1",
+      event: {
+        type: "issue_comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
+        body: "looks good",
+      },
     })
 
     const parsed = (await eventPromise) as {
@@ -283,12 +286,15 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     })
 
     await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 1,
-      author: "teammate",
-      body: "looks good",
+      deliveryId: "delivery-1",
+      event: {
+        type: "issue_comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
+        body: "looks good",
+      },
     })
 
     const alecEvent = (await readFirstSseEvent(alecStream)) as {
@@ -324,12 +330,15 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
     })
 
     await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 99,
-      author: "teammate",
-      body: "looks good",
+      deliveryId: "delivery-1",
+      event: {
+        type: "issue_comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 99,
+        author: "teammate",
+        body: "looks good",
+      },
     })
 
     await assertNoSseEvent(streamResponse, 100)

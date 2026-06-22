@@ -1,5 +1,10 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
-import { $type, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
+import {
+  $type,
+  defineBackendRoutes,
+  http,
+  type BackendEventEnvelope,
+} from "@goddard-ai/backend-plugin"
 
 import type { RepoEvent } from "../schema.ts"
 
@@ -13,7 +18,7 @@ export const remoteRepoBackendRoutes = defineBackendRoutes({
   webhooks: http.resource("webhooks", {
     github: http.post("github", {
       body: http.rawBody(),
-      response: $type<RepoEvent>(),
+      response: $type<BackendEventEnvelope<"remote_repo.event.received", RepoEvent>>(),
     }),
   }),
 })

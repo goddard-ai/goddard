@@ -3,6 +3,7 @@ import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
 
+import { getPrincipalStreamKey } from "./api/events.ts"
 import { createBackendRouter } from "./api/router.ts"
 import { TursoBackendControlPlane } from "./db/persistence.ts"
 import type { Env } from "./env.ts"
@@ -10,19 +11,27 @@ import { createSseSession } from "./utils.ts"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, event) => {
-    const githubUsername = await createWorkerStreamService(env).resolveEventOwner(event)
+    const githubUsername = await createWorkerStreamService(env).resolveEventOwner(event.payload)
     if (!githubUsername) {
       return
     }
 
-    await getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/publish", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ event }),
-    })
+    const controlPlane = createWorkerControlPlane(env)
+    const principal = await controlPlane.getPrincipalForGithubUsername(githubUsername)
+
+    await getUserStreamStub(env, getPrincipalStreamKey(principal)).fetch(
+      "https://user-stream.internal/publish",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event: event.payload }),
+      },
+    )
   },
-  handleUserStream: async (env, githubUsername, _request) => {
-    return getUserStreamStub(env, githubUsername).fetch("https://user-stream.internal/subscribe")
+  handleUserStream: async (env, principal, _request) => {
+    return getUserStreamStub(env, getPrincipalStreamKey(principal)).fetch(
+      "https://user-stream.internal/subscribe",
+    )
   },
 })
 
@@ -85,6 +94,10 @@ export class UserStream {
 }
 
 function createWorkerStreamService(env: Env): Pick<RemoteRepoStreamService, "resolveEventOwner"> {
+  return createWorkerControlPlane(env)
+}
+
+function createWorkerControlPlane(env: Env): TursoBackendControlPlane {
   return new TursoBackendControlPlane(
     createClient({
       url: env.TURSO_DB_URL,

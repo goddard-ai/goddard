@@ -5,12 +5,14 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
-  normalizeGitHubWebhookEvent,
-  type RemoteRepoStreamService,
-} from "@goddard-ai/remote-repo/backend"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
+  normalizeGitHubWebhookDelivery,
+  type GitHubRemoteRepoEvent,
+} from "@goddard-ai/github/backend"
+import type { GitHubRepositoryRef, GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
+import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
+import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
@@ -22,6 +24,7 @@ import {
   postPrCommentViaApp,
   type BackendControlPlane,
 } from "../api/control-plane.ts"
+import { sessionToPrincipal, type BackendPrincipal } from "../api/events.ts"
 import type { Env } from "../env.ts"
 import { hashToInteger } from "../utils.ts"
 import * as schema from "./schema.ts"
@@ -107,6 +110,32 @@ export class TursoBackendControlPlane
     }
   }
 
+  async getPrincipal(token: string): Promise<BackendPrincipal> {
+    const session = await this.getSession(token)
+    return sessionToPrincipal(session, await this.#listRepositoriesForUser(session.githubUsername))
+  }
+
+  async getPrincipalForGithubUsername(githubUsername: string): Promise<BackendPrincipal> {
+    const [user] = await this.#db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.githubUsername, githubUsername))
+      .limit(1)
+
+    if (!user) {
+      throw new HttpError(401, "Unknown GitHub user")
+    }
+
+    return sessionToPrincipal(
+      {
+        token: "",
+        githubUsername: user.githubUsername,
+        githubUserId: user.githubUserId,
+      },
+      await this.#listRepositoriesForUser(user.githubUsername),
+    )
+  }
+
   async createPr(token: string, input: CreatePrInput, env?: Env): Promise<PullRequestRecord> {
     const session = await this.getSession(token)
     assertRepo(input.owner, input.repo)
@@ -189,10 +218,10 @@ export class TursoBackendControlPlane
     return Boolean(match)
   }
 
-  async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {
-    assertRepo(event.owner, event.repo)
+  async handleGitHubWebhook(delivery: GitHubWebhookDeliveryInput): Promise<GitHubRemoteRepoEvent> {
+    assertRepo(delivery.event.owner, delivery.event.repo)
 
-    return normalizeGitHubWebhookEvent(event)
+    return normalizeGitHubWebhookDelivery(delivery)
   }
 
   async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {
@@ -213,5 +242,22 @@ export class TursoBackendControlPlane
       .limit(1)
 
     return match?.createdBy
+  }
+
+  async #listRepositoriesForUser(githubUsername: string): Promise<GitHubRepositoryRef[]> {
+    const rows = await this.#db
+      .select({
+        owner: schema.pullRequests.owner,
+        repo: schema.pullRequests.repo,
+      })
+      .from(schema.pullRequests)
+      .where(eq(schema.pullRequests.createdBy, githubUsername))
+
+    const repositories = new Map<string, GitHubRepositoryRef>()
+    for (const row of rows) {
+      repositories.set(`${row.owner}/${row.repo}`, row)
+    }
+
+    return [...repositories.values()]
   }
 }
