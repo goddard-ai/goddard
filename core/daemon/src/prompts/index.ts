@@ -1,4 +1,0 @@
-export { default as BACKGROUND } from "./background.md?raw"
-export { default as CMD_DECLARE_INITIATIVE } from "./cmd-declare-initiative.md?raw"
-export { default as CMD_REPORT_BLOCKER } from "./cmd-report-blocker.md?raw"
-export { default as GLOBAL_RULES } from "./global-rules.md?raw"

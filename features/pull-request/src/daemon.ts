@@ -7,6 +7,7 @@ import { kind } from "kindstore"
 
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
+import { createPullRequestFeedbackHandler } from "./daemon/feedback.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
 import { pullRequestEvents } from "./events.ts"
 import { DaemonPullRequest } from "./schema.ts"
@@ -69,7 +70,7 @@ export const pullRequestPlugin = definePlugin({
   events: pullRequestEvents,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
-  setup({ backend, configProvider, db, events, ipc, session }) {
+  setup({ backend, configProvider, db, events, ipc, log, session }) {
     async function recordPullRequest(record: Omit<DaemonPullRequest, "id" | "updatedAt">) {
       return db.pullRequests.putByUnique(
         {
@@ -176,6 +177,15 @@ export const pullRequestPlugin = definePlugin({
           },
         },
       },
+      backendEventHandlers: [
+        createPullRequestFeedbackHandler({
+          backend,
+          db,
+          events,
+          log,
+          session,
+        }),
+      ],
     }
   },
 })

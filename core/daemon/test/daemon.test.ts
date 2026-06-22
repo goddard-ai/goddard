@@ -123,7 +123,7 @@ test(
           {
             name: "events.stream",
             filter: {
-              names: ["repo.feedback.finished"],
+              names: ["pull_request.feedback.finished"],
               where: [{ path: "repository", equals: "other/repo" }],
             },
           },
@@ -150,7 +150,7 @@ test(
               sessions.length === 1 &&
               feedbackFinishedEvents.some(
                 (event) =>
-                  event.name === "repo.feedback.finished" &&
+                  event.name === "pull_request.feedback.finished" &&
                   event.payload?.repository === "other/repo" &&
                   event.payload?.prNumber === 123 &&
                   event.payload?.feedbackType === "comment" &&
@@ -291,14 +291,14 @@ test(
 )
 
 test(
-  "daemon run can subscribe without IPC and ignores feedback that requires the PR feedback flow",
+  "daemon run skips backend stream without IPC-owned backend event handlers",
   async () => {
     await useTempHome()
     const backend = await startBackendHarness()
     cleanup.push(() => backend.close())
     db.metadata.set("authToken", "tok")
 
-    const { logs, result: exitCode } = await captureJsonLogs(async (output) => {
+    const { logs, result: exitCode } = await captureJsonLogs(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
         enableIpc: false,
@@ -309,22 +309,7 @@ test(
       const stopDaemon = createDaemonStopper()
 
       try {
-        await waitFor(() => backend.subscriptionCount() === 1)
-        backend.sendEvent({
-          type: "comment",
-          owner: "test",
-          repo: "repo",
-          prNumber: 456,
-          author: "alice",
-          body: "fix it",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString(),
-        })
-        await waitFor(() =>
-          parseJsonLogs(output).some(
-            (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
-          ),
-        )
+        await new Promise((resolve) => setTimeout(resolve, 100))
         await stopDaemon()
         return await daemonPromise
       } finally {
@@ -334,13 +319,9 @@ test(
     })
 
     expect(exitCode).toBe(0)
-    expect(backend.subscriptionCount()).toBe(1)
+    expect(backend.subscriptionCount()).toBe(0)
     expect(db.sessions.findMany()).toHaveLength(0)
-    expect(
-      logs.some(
-        (entry) => entry.event === "repo.feedback_ignored" && entry.reason === "ipc_disabled",
-      ),
-    ).toBe(true)
+    expect(logs.some((entry) => entry.event === "repo.subscription_started")).toBe(false)
   },
   { timeout: 10000 },
 )

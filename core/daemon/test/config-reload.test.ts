@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterEach, expect, test } from "bun:test"
 
@@ -12,10 +13,8 @@ import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { SetupContext } from "../src/context.ts"
-import type { FeedbackEvent } from "../src/feedback.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { send } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
@@ -213,7 +212,7 @@ test(
 )
 
 test(
-  "runPrFeedbackFlow picks up updated root-config agent defaults without restarting the daemon",
+  "pull request feedback handler picks up updated root-config agent defaults without restarting the daemon",
   async () => {
     await useTempHome()
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-pr-feedback-reload-repo-"))
@@ -231,17 +230,27 @@ test(
     cleanup.push(() => closeConfigManager(configManager))
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+    const feedbackHandler = daemon.backendEventHandlers.find(
+      (handler) => handler.name === "pull-request.feedback",
+    )
+    expect(feedbackHandler).toBeDefined()
+    db.pullRequests.putByUnique(
+      {
+        host: "github",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+      },
+      {
+        host: "github",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        cwd: repoDir,
+      },
+    )
 
-    const firstExitCode = await runPrFeedbackFlow({
-      event: createFeedbackEvent(),
-      prompt: "Reply briefly.",
-      daemonUrl: daemon.daemonUrl,
-      agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
-      configManager,
-      store: db,
-      resolveProjectDir: () => repoDir,
-    })
-    expect(firstExitCode).toBe(0)
+    await feedbackHandler?.handle(createFeedbackEvent())
 
     const firstSessions = db.sessions.findMany()
     const firstSessionIds = new Set(firstSessions.map((session: DaemonSession) => session.id))
@@ -260,16 +269,7 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    const secondExitCode = await runPrFeedbackFlow({
-      event: createFeedbackEvent(),
-      prompt: "Reply briefly.",
-      daemonUrl: daemon.daemonUrl,
-      agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
-      configManager,
-      store: db,
-      resolveProjectDir: () => repoDir,
-    })
-    expect(secondExitCode).toBe(0)
+    await feedbackHandler?.handle(createFeedbackEvent())
 
     const secondSession = db.sessions
       .findMany()
@@ -293,7 +293,7 @@ function createFixtureAgent(name: string) {
   }
 }
 
-function createFeedbackEvent(): FeedbackEvent {
+function createFeedbackEvent(): Extract<RepoEvent, { type: "comment" }> {
   return {
     type: "comment",
     owner: "acme",

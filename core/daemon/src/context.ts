@@ -3,7 +3,6 @@ import { AsyncContext } from "@b9g/async-context"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import type { ConfigManager } from "./config-manager.ts"
-import type { FeedbackEvent } from "./feedback.ts"
 
 /** Setup-only dependencies installed while daemon construction is running. */
 export type SetupContext = {
@@ -37,7 +36,7 @@ export type SessionContext = {
 export type FeedbackEventContext = {
   repository: string
   prNumber: number
-  feedbackType: FeedbackEvent["type"]
+  feedbackType: "comment" | "review"
 }
 
 export const SetupContext = new AsyncContext.Variable<SetupContext>()
