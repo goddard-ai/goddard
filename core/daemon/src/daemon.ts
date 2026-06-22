@@ -183,11 +183,11 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
               throw authError
             }
 
-            logger.log("repo.subscription_degraded", {
+            logger.log("backend.stream_degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
             })
-            await daemonEvents.emit("repo.subscription.degraded", {
+            await daemonEvents.emit("backend.stream.degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
             })
@@ -195,7 +195,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
           }
 
           logger.log(
-            "repo.subscription_started",
+            "backend.stream_started",
             activeIpcServer
               ? {
                   daemonUrl: activeIpcServer.daemonUrl,

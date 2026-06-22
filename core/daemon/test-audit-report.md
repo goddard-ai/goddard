@@ -121,8 +121,11 @@ Rows below that recommend `replace-log-with-event` should first check whether th
 | `daemon.test.ts:50` | daemon package ships agent-bin wrappers for goddard and workforce | test-harness-infrastructure | Packaged daemon includes agent wrappers. | filesystem | none | package artifact check | keep |
 | `daemon.test.ts:61` | daemon run subscribes once and launches managed PR feedback sessions across repositories | missing-seam | Stream feedback creates completed sessions for matching repositories. | backend harness, DB sessions, logs, partial event assertion | log-proxy, db-proxy, time-sensitive | use existing `repo.feedback.finished`; add feedback started/failed events only if launch/failure is a contract | replace-log-with-event |
 | `daemon.test.ts:215` | daemon run can start only the IPC server when stream is disabled | missing-seam | IPC starts without stream subscription. | health check, backend count, logs | log-proxy | IPC health already covers listening; remove log assertions | remove-incidental-assertion |
-| `daemon.test.ts:258` | daemon run skips backend stream without IPC-owned backend event handlers | missing-seam | Backend stream does not start when no feature-owned handler can run. | backend harness, DB sessions, logs | log-proxy, db-proxy | backend stream lifecycle event plus no sessions | replace-log-with-event |
-| `daemon.test.ts:313` | daemon run keeps IPC available when stream startup is unauthenticated | missing-seam | IPC remains available when stream subscription degrades. | health check, backend count, logs | log-proxy | backend stream degraded event if degraded state is contract | replace-log-with-event |
+<<<<<<< HEAD
+| `daemon.test.ts:258` | daemon run skips backend stream without IPC-owned backend event handlers | missing-seam | Backend stream does not start when no feature-owned handler can run. | backend harness, DB sessions, logs | log-proxy, db-proxy | stream lifecycle event plus no sessions | replace-log-with-event |
+| `daemon.test.ts:313` | daemon run keeps IPC available when stream startup is unauthenticated | missing-seam | IPC remains available when stream subscription degrades. | health check, backend count, logs | log-proxy | `backend.stream.degraded` event if degraded state is contract | replace-log-with-event |
+| `daemon.test.ts:258` | daemon run skips backend stream without IPC-owned backend event handlers | missing-seam | Backend stream does not start when no feature-owned handler can run. | backend harness, DB sessions, logs | log-proxy, db-proxy | `backend.stream.started` plus no sessions | replace-log-with-event |
+| `daemon.test.ts:313` | daemon run keeps IPC available when stream startup is unauthenticated | missing-seam | IPC remains available when stream subscription degrades. | health check, backend count, logs | log-proxy | `backend.stream.degraded` event if degraded state is contract | replace-log-with-event |
 | `daemon.test.ts:369` | daemon run defaults to compact terminal logs | diagnostic-contract | Default terminal log mode is compact. | stdout | none | log output is contract | keep |
 | `daemon.test.ts:385` | daemon run supports raw json terminal logs when requested | diagnostic-contract | JSON log mode writes raw JSON entries. | stdout JSON | none | log output is contract | keep |
 | `daemon.test.ts:402` | daemon run supports verbose terminal logs with expanded fields | diagnostic-contract | Verbose log mode expands fields. | stdout | none | log output is contract | keep |
@@ -216,7 +219,7 @@ Rows below that recommend `replace-log-with-event` should first check whether th
   - IPC `events.stream` for end-to-end daemon-client behavior.
 - Add or complete missing events:
   - `config.reload.failed`,
-  - `repo.subscription.started`,
+  - `backend.stream.started`,
   - `repo.feedback.started` or `repo.feedback.launched`,
   - `repo.feedback.failed`,
   - `repo.feedback.coalesced`,
