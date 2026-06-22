@@ -1,4 +1,4 @@
-import { createDaemonEventBus } from "@goddard-ai/daemon-plugin"
+import { createDaemonEventBus, type BackendEventHandler } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
@@ -12,7 +12,7 @@ import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
 import { FeedbackEventContext, SetupContext } from "./context.ts"
 import { daemonRuntimeEvents } from "./events.ts"
-import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
+import { buildPrompt, isFeedbackEvent, type FeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
@@ -150,126 +150,98 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
 
     const activeIpcServer = ipcServer
     const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
-    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
-    const runningPrs = new Set<string>()
+    const backendEventHandlers = createBackendEventHandlerRegistry()
     let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
+    let startingSubscription: Promise<void> | null = null
 
-    if (enableStream) {
-      try {
-        subscription = await client.stream.subscribe()
-      } catch (error) {
-        const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
-        if (!isBackendUnauthenticatedError(authError)) {
-          throw authError
-        }
-
-        logger.log("repo.subscription_degraded", {
-          reason: "unauthenticated",
-          errorMessage: authError.message,
-        })
-        await daemonEvents.emit("repo.subscription.degraded", {
-          reason: "unauthenticated",
-          errorMessage: authError.message,
-        })
+    if (activeIpcServer) {
+      for (const handler of activeIpcServer.backendEventHandlers) {
+        backendEventHandlers.register(handler)
       }
     }
 
-    if (subscription) {
-      logger.log(
-        "repo.subscription_started",
-        activeIpcServer
-          ? {
-              daemonUrl: activeIpcServer.daemonUrl,
-              port: activeIpcServer.port,
-            }
-          : {},
-      )
+    backendEventHandlers.register(
+      createDaemonPrFeedbackBackendEventHandler({
+        activeIpcServer,
+        agentBinDir,
+        client,
+        configManager,
+        daemonEvents,
+        logger,
+        store,
+      }),
+    )
 
-      subscription.on("event", async (payload) => {
-        try {
-          const event = payload as RepoEvent
-          if (!isFeedbackEvent(event)) {
+    async function closeBackendStream() {
+      if (!subscription) {
+        return
+      }
+
+      const closingSubscription = subscription
+      subscription = null
+      await Promise.resolve(closingSubscription.close()).catch((error) => {
+        logger.log("backend.stream_close_failed", toErrorProperties(error))
+      })
+    }
+
+    async function startBackendStream() {
+      if (!enableStream || subscription || startingSubscription || !backendEventHandlers.hasAny()) {
+        return
+      }
+
+      startingSubscription = Promise.resolve()
+        .then(async () => {
+          try {
+            subscription = await client.stream.subscribe()
+          } catch (error) {
+            const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
+            if (!isBackendUnauthenticatedError(authError)) {
+              throw authError
+            }
+
+            logger.log("repo.subscription_degraded", {
+              reason: "unauthenticated",
+              errorMessage: authError.message,
+            })
+            await daemonEvents.emit("repo.subscription.degraded", {
+              reason: "unauthenticated",
+              errorMessage: authError.message,
+            })
             return
           }
 
-          const feedbackContext = {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
-          }
-          const feedbackEventPayload = {
-            ...feedbackContext,
-            owner: event.owner,
-            repo: event.repo,
-          }
+          logger.log(
+            "repo.subscription_started",
+            activeIpcServer
+              ? {
+                  daemonUrl: activeIpcServer.daemonUrl,
+                  port: activeIpcServer.port,
+                }
+              : {},
+          )
 
-          await FeedbackEventContext.run(feedbackContext, async () => {
-            if (!activeIpcServer) {
-              logger.log("repo.feedback_ignored", {
-                reason: "ipc_disabled",
-              })
-              await daemonEvents.emit("repo.feedback.ignored", {
-                ...feedbackEventPayload,
-                reason: "ipc_disabled",
-              })
-              return
-            }
-
-            const prompt = buildPrompt(event)
-            const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-            if (runningPrs.has(requestKey)) {
-              logger.log("repo.feedback_coalesced")
-              return
-            }
-
-            runningPrs.add(requestKey)
-
-            try {
-              const { managed } = await client.pullRequests.managed({
-                owner: event.owner,
-                repo: event.repo,
-                prNumber: event.prNumber,
-              })
-              if (!managed) {
-                logger.log("repo.feedback_ignored", {
-                  reason: "unmanaged_pr",
-                })
-                await daemonEvents.emit("repo.feedback.ignored", {
-                  ...feedbackEventPayload,
-                  reason: "unmanaged_pr",
-                })
-                return
-              }
-
-              logger.log("pr_feedback.launch", {
-                prompt: createPayloadPreview(prompt),
-              })
-              const exitCode = await runPrFeedbackFlow({
-                event,
-                prompt,
-                daemonUrl: activeIpcServer.daemonUrl,
-                agentBinDir,
-                configManager,
-                store,
-              })
-              logger.log("pr_feedback.finish", {
-                exitCode,
-              })
-              await daemonEvents.emit("repo.feedback.finished", {
-                ...feedbackEventPayload,
-                exitCode,
-              })
-            } catch (error) {
-              logger.log("pr_feedback.failed", toErrorProperties(error))
-            } finally {
-              runningPrs.delete(requestKey)
-            }
+          subscription.on("event", (payload) => {
+            void dispatchBackendEvent(payload, backendEventHandlers, logger)
           })
-        } catch (error) {
-          logger.log("repo.event_failed", toErrorProperties(error))
-        }
-      })
+        })
+        .finally(() => {
+          startingSubscription = null
+        })
+
+      await startingSubscription
+    }
+
+    backendEventHandlers.onChange(() => {
+      if (!backendEventHandlers.hasAny()) {
+        void closeBackendStream()
+        return
+      }
+
+      void startBackendStream()
+    })
+
+    if (enableStream) {
+      await startBackendStream()
     }
 
     await waitForShutdown(() =>
@@ -290,6 +262,158 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
     if (ownsStore) {
       store.close()
     }
+  }
+}
+
+type BackendEventHandlerRegistry = {
+  readonly getHandlers: () => readonly BackendEventHandler<any>[]
+  readonly hasAny: () => boolean
+  readonly onChange: (listener: () => void) => () => void
+  readonly register: (handler: BackendEventHandler<any>) => () => void
+}
+
+function createBackendEventHandlerRegistry(): BackendEventHandlerRegistry {
+  const handlers = new Set<BackendEventHandler<any>>()
+  const listeners = new Set<() => void>()
+
+  function notifyChanged() {
+    for (const listener of listeners) {
+      listener()
+    }
+  }
+
+  return {
+    getHandlers: () => [...handlers],
+    hasAny: () => handlers.size > 0,
+    onInput(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    register(handler) {
+      handlers.add(handler)
+      notifyChanged()
+      return () => {
+        if (handlers.delete(handler)) {
+          notifyChanged()
+        }
+      }
+    },
+  }
+}
+
+async function dispatchBackendEvent(
+  payload: unknown,
+  handlers: BackendEventHandlerRegistry,
+  logger: DaemonLogger,
+) {
+  for (const handler of handlers.getHandlers()) {
+    try {
+      if (handler.canHandle(payload)) {
+        await handler.handle(payload)
+      }
+    } catch (error) {
+      logger.log("backend.event_handler_failed", {
+        handlerName: handler.name,
+        ...toErrorProperties(error),
+      })
+    }
+  }
+}
+
+function createDaemonPrFeedbackBackendEventHandler(input: {
+  activeIpcServer: DaemonServer | undefined
+  agentBinDir: string
+  client: BackendClient
+  configManager: ReturnType<typeof createConfigManager>
+  daemonEvents: ReturnType<typeof createDaemonEventBus>
+  logger: DaemonLogger
+  store: ComposedDaemonStore
+}): BackendEventHandler<FeedbackEvent> {
+  // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
+  const runningPrs = new Set<string>()
+
+  return {
+    name: "daemon.pr-feedback",
+    canHandle: (event): event is FeedbackEvent =>
+      typeof event === "object" && event != null && isFeedbackEvent(event as RepoEvent),
+    async handle(event) {
+      const feedbackContext = {
+        repository: `${event.owner}/${event.repo}`,
+        prNumber: event.prNumber,
+        feedbackType: event.type,
+      }
+      const feedbackEventPayload = {
+        ...feedbackContext,
+        owner: event.owner,
+        repo: event.repo,
+      }
+
+      await FeedbackEventContext.run(feedbackContext, async () => {
+        if (!input.activeIpcServer) {
+          input.logger.log("repo.feedback_ignored", {
+            reason: "ipc_disabled",
+          })
+          await input.daemonEvents.emit("repo.feedback.ignored", {
+            ...feedbackEventPayload,
+            reason: "ipc_disabled",
+          })
+          return
+        }
+
+        const prompt = buildPrompt(event)
+        const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
+
+        if (runningPrs.has(requestKey)) {
+          input.logger.log("repo.feedback_coalesced")
+          return
+        }
+
+        runningPrs.add(requestKey)
+
+        try {
+          const { managed } = await input.client.pullRequests.managed({
+            owner: event.owner,
+            repo: event.repo,
+            prNumber: event.prNumber,
+          })
+          if (!managed) {
+            input.logger.log("repo.feedback_ignored", {
+              reason: "unmanaged_pr",
+            })
+            await input.daemonEvents.emit("repo.feedback.ignored", {
+              ...feedbackEventPayload,
+              reason: "unmanaged_pr",
+            })
+            return
+          }
+
+          input.logger.log("pr_feedback.launch", {
+            prompt: createPayloadPreview(prompt),
+          })
+          const exitCode = await runPrFeedbackFlow({
+            event,
+            prompt,
+            daemonUrl: input.activeIpcServer.daemonUrl,
+            agentBinDir: input.agentBinDir,
+            configManager: input.configManager,
+            store: input.store,
+          })
+          input.logger.log("pr_feedback.finish", {
+            exitCode,
+          })
+          await input.daemonEvents.emit("repo.feedback.finished", {
+            ...feedbackEventPayload,
+            exitCode,
+          })
+        } catch (error) {
+          input.logger.log("pr_feedback.failed", toErrorProperties(error))
+        } finally {
+          runningPrs.delete(requestKey)
+        }
+      })
+    },
   }
 }
 

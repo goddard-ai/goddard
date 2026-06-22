@@ -4,6 +4,7 @@ import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
   createDaemonEventBus,
+  type BackendEventHandler,
   type DaemonConfigProvider,
   type DaemonSetupSubstrate,
   type EventBus,
@@ -255,6 +256,7 @@ export async function startDaemonServer(
   let closed = false
 
   return {
+    backendEventHandlers: pluginSetup.backendEventHandlers,
     daemonUrl,
     events,
     port,
@@ -301,6 +303,7 @@ async function setupDaemonPlugins(
 ) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
+  const backendEventHandlers: BackendEventHandler<any>[] = []
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
@@ -324,6 +327,10 @@ async function setupDaemonPlugins(
       mergeIpcHandlers(ipcHandlers, setup.ipcHandlers as Record<string, unknown>)
     }
 
+    if (setup?.backendEventHandlers) {
+      backendEventHandlers.push(...setup.backendEventHandlers)
+    }
+
     if (setup?.close) {
       closeHandlers.push(setup.close)
     }
@@ -335,6 +342,7 @@ async function setupDaemonPlugins(
   }
 
   return {
+    backendEventHandlers,
     extensions,
     ipcHandlers,
     close: async () => {
