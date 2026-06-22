@@ -5,10 +5,8 @@ import type { ACPRegistryService } from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { expect, test } from "bun:test"
 
-import {
-  createManagedAgentInstallService,
-  type ManagedAgentUsageState,
-} from "../src/daemon/install-service.ts"
+import { createManagedAgentInstallService } from "../src/daemon/install-service.ts"
+import type { ManagedAgentUsageState } from "../src/daemon/usage-store.ts"
 
 function createAgent(id: string): AgentDistribution {
   return {

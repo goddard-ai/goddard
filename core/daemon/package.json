@@ -39,7 +39,6 @@
     "@goddard-ai/default-features": "workspace:*",
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
-    "@goddard-ai/managed-agent": "workspace:*",
     "@goddard-ai/logs": "workspace:*",
     "@goddard-ai/loop": "workspace:*",
     "@goddard-ai/paths": "workspace:*",

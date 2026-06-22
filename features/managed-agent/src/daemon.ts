@@ -5,8 +5,12 @@ import { managedAgentIpcRoutes } from "./daemon-ipc.ts"
 import {
   createManagedAgentInstallService,
   type ManagedAgentInstallService,
-  type ManagedAgentUsageState,
 } from "./daemon/install-service.ts"
+import {
+  createManagedAgentUpdateScheduler,
+  type ManagedAgentUpdateCheckState,
+} from "./daemon/update-scheduler.ts"
+import type { ManagedAgentUsageState } from "./daemon/usage-store.ts"
 import {
   installCatalogManagedAgent,
   listManagedAgents,
@@ -18,17 +22,26 @@ export type ManagedAgentService = ManagedAgentInstallService
 export const managedAgentPlugin = definePlugin({
   name: "managed-agent",
   ipcRoutes: managedAgentIpcRoutes,
-  setup({ configProvider, metadataStore }) {
+  setup({ configProvider, log, metadataStore }) {
     const registryService = createAcpRegistryService()
+    const usageStore = createManagedAgentUsageStore(metadataStore)
     const managedAgent = createManagedAgentInstallService({
       registryService,
-      usageStore: createManagedAgentUsageStore(metadataStore),
+      usageStore,
+    })
+    const updateScheduler = createManagedAgentUpdateScheduler({
+      configProvider,
+      agentInstallService: managedAgent,
+      updateCheckStore: createManagedAgentUpdateCheckStore(metadataStore),
+      usageStore,
+      logger: log.createLogger(),
     })
     const managedAgentContext = {
       agentInstallService: managedAgent,
       configProvider,
       registryService,
     }
+    updateScheduler.start()
 
     return {
       provides: {
@@ -41,6 +54,9 @@ export const managedAgentPlugin = definePlugin({
           uninstall: async ({ body }) => uninstallCatalogManagedAgent(managedAgentContext, body),
         },
       },
+      close: () => {
+        updateScheduler.close()
+      },
     }
   },
 })
@@ -50,6 +66,17 @@ function createManagedAgentUsageStore(metadataStore: DaemonMetadataStore) {
     get: () => (metadataStore.get("managedAgentUsage") as ManagedAgentUsageState | undefined) ?? {},
     set: (state: ManagedAgentUsageState) => {
       metadataStore.set("managedAgentUsage", state)
+    },
+  }
+}
+
+function createManagedAgentUpdateCheckStore(metadataStore: DaemonMetadataStore) {
+  return {
+    get: () =>
+      (metadataStore.get("managedAgentUpdateChecks") as ManagedAgentUpdateCheckState | undefined) ??
+      {},
+    set: (state: ManagedAgentUpdateCheckState) => {
+      metadataStore.set("managedAgentUpdateChecks", state)
     },
   }
 }

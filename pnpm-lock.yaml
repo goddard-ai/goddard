@@ -474,9 +474,6 @@ importers:
       '@goddard-ai/loop':
         specifier: workspace:*
         version: link:../../features/loop
-      '@goddard-ai/managed-agent':
-        specifier: workspace:*
-        version: link:../../features/managed-agent
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../paths
