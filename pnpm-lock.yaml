@@ -957,6 +957,18 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
+  features/managed-agent:
+    dependencies:
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
+
   features/pull-request:
     dependencies:
       '@goddard-ai/auth':
