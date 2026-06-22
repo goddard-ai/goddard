@@ -5,6 +5,14 @@
   "license": "MIT",
   "type": "module",
   "exports": {
+    "./catalog": {
+      "types": {
+        "source": "./src/catalog.ts",
+        "default": "./dist/catalog.d.mts"
+      },
+      "bun": "./src/catalog.ts",
+      "import": "./dist/catalog.mjs"
+    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -29,6 +37,22 @@
       "bun": "./src/schema.ts",
       "import": "./dist/schema.mjs"
     },
+    "./installations": {
+      "types": {
+        "source": "./src/installations.ts",
+        "default": "./dist/installations.d.mts"
+      },
+      "bun": "./src/installations.ts",
+      "import": "./dist/installations.mjs"
+    },
+    "./list-managed-agents": {
+      "types": {
+        "source": "./src/list-managed-agents.ts",
+        "default": "./dist/list-managed-agents.d.mts"
+      },
+      "bun": "./src/list-managed-agents.ts",
+      "import": "./dist/list-managed-agents.mjs"
+    },
     "./sdk": {
       "types": {
         "source": "./src/sdk.ts",
@@ -43,11 +67,17 @@
     "lint": "oxlint",
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
-    "test": "bun test --dots --pass-with-no-tests"
+    "test": "bun test --dots"
   },
   "dependencies": {
+    "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
-    "@goddard-ai/sdk-plugin": "workspace:*"
+    "@goddard-ai/paths": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/sdk-plugin": "workspace:*",
+    "acp-client": "catalog:",
+    "radashi": "catalog:",
+    "zod": "catalog:"
   }
 }

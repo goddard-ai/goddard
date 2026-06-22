@@ -1,99 +1,65 @@
-import { AdapterCatalogEntry as AcpAdapterCatalogEntry } from "acp-client"
+import {
+  ListManagedAgentsRequest,
+  ManagedAgentCatalogEntry,
+  ManagedAgentInstall,
+  ManagedAgentInstallAgent,
+  ManagedAgentInstallState,
+  type ListManagedAgentsRequest as ListManagedAgentsRequestType,
+  type ListManagedAgentsResponse,
+  type ManagedAgentCatalogEntry as ManagedAgentCatalogEntryType,
+  type ManagedAgentInstallAgent as ManagedAgentInstallAgentType,
+  type ManagedAgentInstallationState,
+  type ManagedAgentInstallState as ManagedAgentInstallStateType,
+  type ManagedAgentInstall as ManagedAgentInstallType,
+} from "@goddard-ai/managed-agent/schema"
 import { z } from "zod"
 
-/** Request payload used to list adapters available to one project or global session launch flow. */
-export const ListAdaptersRequest = z.strictObject({
-  cwd: z.string().optional(),
-  includeUninstalled: z.boolean().optional(),
-})
-
-export type ListAdaptersRequest = z.infer<typeof ListAdaptersRequest>
+export const ListAdaptersRequest = ListManagedAgentsRequest
+export type ListAdaptersRequest = ListManagedAgentsRequestType
 export type ListAdaptersRequestType = ListAdaptersRequest
 
-/** One adapter entry surfaced to SDK and app consumers for launch selection and install flows. */
-export const AdapterManagedInstallAgent = z.strictObject({
-  agentId: z.string(),
-  version: z.string(),
-  method: z.enum(["binary", "npx", "uvx"]),
-  installedAt: z.string(),
-  updatedAt: z.string(),
-})
+export const AdapterManagedInstallAgent = ManagedAgentInstallAgent
+export type AdapterManagedInstallAgent = ManagedAgentInstallAgentType
 
-export type AdapterManagedInstallAgent = z.infer<typeof AdapterManagedInstallAgent>
+export const AdapterManagedInstallState = ManagedAgentInstallState
+export type AdapterManagedInstallState = ManagedAgentInstallStateType
 
-export const AdapterManagedInstallState = z.discriminatedUnion("status", [
-  z.strictObject({
-    status: z.literal("missing"),
-  }),
-  z.strictObject({
-    status: z.literal("installed"),
-    agent: AdapterManagedInstallAgent,
-  }),
-  z.strictObject({
-    status: z.literal("failed"),
-    lastError: z.string(),
-    checkedAt: z.string(),
-    agent: AdapterManagedInstallAgent.optional(),
-  }),
-])
+export const AdapterManagedInstall = ManagedAgentInstall
+export type AdapterManagedInstall = ManagedAgentInstallType
 
-export type AdapterManagedInstallState = z.infer<typeof AdapterManagedInstallState>
+export const AdapterCatalogEntry = ManagedAgentCatalogEntry
+export type AdapterCatalogEntry = ManagedAgentCatalogEntryType
 
-export const AdapterManagedInstall = z.strictObject({
-  managed: z.literal(true),
-  install: z.literal("beforeUse").optional(),
-  update: z.literal("daily").optional(),
-  state: AdapterManagedInstallState,
-})
-
-export type AdapterManagedInstall = z.infer<typeof AdapterManagedInstall>
-
-export const AdapterCatalogEntry = AcpAdapterCatalogEntry.extend({
-  managedInstall: AdapterManagedInstall.optional(),
-})
-
-export type AdapterCatalogEntry = z.infer<typeof AdapterCatalogEntry>
-
-/** Installation state for one ACP adapter catalog entry. */
-export type AdapterInstallationState = {
+export type AdapterInstallationState = Omit<ManagedAgentInstallationState, "managedAgentId"> & {
   adapterId: string
-  installed: boolean
-  installable: boolean
-  method: "binary" | "config" | "npx" | "unsupported" | "uvx"
 }
 
-/** Response payload returned after reading the effective adapter catalog for one launch context. */
-export type ListAdaptersResponse = {
+export type ListAdaptersResponse = Omit<
+  ListManagedAgentsResponse,
+  "defaultManagedAgentId" | "installations" | "managedAgents"
+> & {
   adapters: AdapterCatalogEntry[]
   installations: AdapterInstallationState[]
   defaultAdapterId: string | null
-  registrySource: "cache" | "fallback"
-  lastSuccessfulSyncAt: string | null
-  stale: boolean
-  lastError: string | null
 }
 
-/** Request payload used to install one registry adapter into the local launch catalog. */
 export const InstallAdapterRequest = z.strictObject({
   adapterId: z.string().min(1),
 })
 
 export type InstallAdapterRequest = z.infer<typeof InstallAdapterRequest>
 
-/** Response payload returned after installing one adapter. */
 export type InstallAdapterResponse = {
   adapter: AdapterCatalogEntry
   installation: AdapterInstallationState
 }
 
-/** Request payload used to remove one adapter from the local launch catalog. */
 export const UninstallAdapterRequest = z.strictObject({
   adapterId: z.string().min(1),
 })
 
 export type UninstallAdapterRequest = z.infer<typeof UninstallAdapterRequest>
 
-/** Response payload returned after uninstalling one adapter. */
 export type UninstallAdapterResponse = {
   adapterId: string
 }
