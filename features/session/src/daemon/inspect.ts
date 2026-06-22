@@ -1,18 +1,14 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
 import { delimiter } from "node:path"
-import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
+import type { AgentService } from "@goddard-ai/agent/daemon"
 import { createAcpClient } from "acp-client"
 import * as acp from "acp-client/protocol"
 
 import { spawnAgentProcess } from "./agent-process.ts"
 
 /** Starts one raw ACP adapter and returns a client connection for inspection commands. */
-async function startAdapterInspection(
-  adapter: string,
-  cwd: string,
-  managedAgent: ManagedAgentService,
-) {
+async function startAdapterInspection(adapter: string, cwd: string, agentService: AgentService) {
   const processHandle = await spawnAgentProcess({
     daemonUrl: "http://localhost:0",
     token: "test-token",
@@ -22,7 +18,7 @@ async function startAdapterInspection(
       ...env,
       PATH: [os.tmpdir(), env?.PATH ?? process.env.PATH].filter(Boolean).join(delimiter),
     }),
-    managedAgent,
+    agentService,
   })
   try {
     const sessionUpdates: acp.AnyMessage[] = []
@@ -65,9 +61,9 @@ async function startAdapterInspection(
 export async function inspectAdapterSession(
   adapter: string,
   cwd: string,
-  managedAgent: ManagedAgentService,
+  agentService: AgentService,
 ) {
-  const inspection = await startAdapterInspection(adapter, cwd, managedAgent)
+  const inspection = await startAdapterInspection(adapter, cwd, agentService)
 
   try {
     const session = await inspection.client.newSession({
@@ -92,9 +88,9 @@ export async function listAdapterSessions(
   adapter: string,
   cwd: string,
   request: acp.ListSessionsRequest,
-  managedAgent: ManagedAgentService,
+  agentService: AgentService,
 ) {
-  const inspection = await startAdapterInspection(adapter, cwd, managedAgent)
+  const inspection = await startAdapterInspection(adapter, cwd, agentService)
 
   try {
     const initialize = inspection.client.initialize

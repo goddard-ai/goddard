@@ -1,4 +1,4 @@
-import { managedAgentPlugin } from "@goddard-ai/agent/daemon"
+import { agentPlugin } from "@goddard-ai/agent/daemon"
 import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { kind } from "kindstore"
 import { isObject } from "radashi"
@@ -280,8 +280,8 @@ export const sessionPlugin = definePlugin({
   },
   events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
-  consumes: [managedAgentPlugin],
-  setup({ configProvider, daemonRuntime, db, events, ipc, log, managedAgent, sessionContext }) {
+  consumes: [agentPlugin],
+  setup({ configProvider, daemonRuntime, db, events, ipc, log, agent, sessionContext }) {
     const streamDebug = log.createDebug("session.stream")
     const sessionManager = createSessionManager({
       db,
@@ -289,7 +289,7 @@ export const sessionPlugin = definePlugin({
       createAgentEnvironment: daemonRuntime.createAgentEnvironment,
       configProvider,
       log,
-      managedAgent,
+      agentService: agent,
       sessionContext,
       events,
       idleSessionShutdownTimeoutMs: daemonRuntime.idleSessionShutdownTimeoutMs,

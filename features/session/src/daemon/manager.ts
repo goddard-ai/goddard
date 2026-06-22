@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import treeKill from "@alloc/tree-kill"
-import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
+import type { AgentService } from "@goddard-ai/agent/daemon"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
   DaemonAgentEnvironmentService,
@@ -695,7 +695,7 @@ export function createSessionManager({
   events,
   configProvider,
   log,
-  managedAgent,
+  agentService,
   sessionContext: sessionContextService,
   idleSessionShutdownTimeoutMs,
 }: {
@@ -705,7 +705,7 @@ export function createSessionManager({
   events: SessionEventEmitter
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
-  managedAgent: ManagedAgentService
+  agentService: AgentService
   sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
 }) {
@@ -778,7 +778,7 @@ export function createSessionManager({
     configProvider,
     getDaemonUrl,
     createAgentEnvironment,
-    managedAgent,
+    agentService,
     getPackageVersion,
     handlePermissionRequest: promptTurns.handlePermissionRequest,
     handleSessionUpdate: promptTurns.handleSessionUpdate,
@@ -1492,7 +1492,7 @@ export function createSessionManager({
           createAgentEnvironment: createAgentEnvironment,
           env: resolvedRequest.env,
           envPolicy: resolvedConfig?.sessions?.envPolicy,
-          managedAgent,
+          agentService,
           registry: resolvedRegistry,
           managedAgents: resolvedConfig?.agents?.managed,
         })

@@ -1,5 +1,5 @@
 import { actionPlugin } from "@goddard-ai/action/daemon"
-import { managedAgentPlugin } from "@goddard-ai/agent/daemon"
+import { agentPlugin } from "@goddard-ai/agent/daemon"
 import { authPlugin } from "@goddard-ai/auth/daemon"
 import { composePlugins } from "@goddard-ai/daemon-plugin"
 import { fileSearchPlugin } from "@goddard-ai/file-search/daemon"
@@ -14,7 +14,7 @@ const defaultDaemonPlugins = [
   actionPlugin,
   authPlugin,
   fileSearchPlugin,
-  managedAgentPlugin,
+  agentPlugin,
   sessionPlugin,
   inboxPlugin,
   pullRequestPlugin,

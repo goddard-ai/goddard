@@ -21,14 +21,14 @@ import {
   uninstallCatalogManagedAgent,
 } from "./list-managed-agents.ts"
 
-export type ManagedAgentService = ManagedAgentInstallService & {
+export type AgentService = ManagedAgentInstallService & {
   readonly resolveLaunchProcessSpec: (
     input: ResolveManagedAgentLaunchProcessSpecInput,
   ) => ReturnType<typeof resolveManagedAgentLaunchProcessSpec>
 }
 
-export const managedAgentPlugin = definePlugin({
-  name: "managed-agent",
+export const agentPlugin = definePlugin({
+  name: "agent",
   ipcRoutes: managedAgentIpcRoutes,
   setup({ configProvider, log, metadataStore }) {
     const registryService = createAcpRegistryService()
@@ -37,20 +37,20 @@ export const managedAgentPlugin = definePlugin({
       registryService,
       usageStore,
     })
-    const managedAgent: ManagedAgentService = {
+    const agent: AgentService = {
       ...managedAgentInstallService,
       resolveLaunchProcessSpec: (input) =>
         resolveManagedAgentLaunchProcessSpec(managedAgentInstallService, input),
     }
     const updateScheduler = createManagedAgentUpdateScheduler({
       configProvider,
-      agentInstallService: managedAgent,
+      agentInstallService: agent,
       updateCheckStore: createManagedAgentUpdateCheckStore(metadataStore),
       usageStore,
       logger: log.createLogger(),
     })
-    const managedAgentContext = {
-      agentInstallService: managedAgent,
+    const agentContext = {
+      agentInstallService: agent,
       configProvider,
       registryService,
     }
@@ -58,13 +58,13 @@ export const managedAgentPlugin = definePlugin({
 
     return {
       provides: {
-        managedAgent,
+        agent,
       },
       ipcHandlers: {
         managedAgent: {
-          list: async ({ body }) => listManagedAgents(managedAgentContext, body),
-          install: async ({ body }) => installCatalogManagedAgent(managedAgentContext, body),
-          uninstall: async ({ body }) => uninstallCatalogManagedAgent(managedAgentContext, body),
+          list: async ({ body }) => listManagedAgents(agentContext, body),
+          install: async ({ body }) => installCatalogManagedAgent(agentContext, body),
+          uninstall: async ({ body }) => uninstallCatalogManagedAgent(agentContext, body),
         },
       },
       close: () => {
