@@ -37,7 +37,7 @@
     "@goddard-ai/inbox": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/loop": "workspace:*",
-    "@goddard-ai/managed-agent": "workspace:*",
+    "@goddard-ai/agent": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/review-session": "workspace:*",
     "@goddard-ai/schema": "workspace:*",

@@ -1,4 +1,4 @@
-# @goddard-ai/managed-agent
+# @goddard-ai/agent
 
 The managed-agent feature owns launchable ACP agent discovery and runtime readiness.
 

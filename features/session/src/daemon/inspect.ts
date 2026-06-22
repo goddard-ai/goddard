@@ -1,7 +1,7 @@
 /** ACP adapter inspection helpers used by the repo-level `acp` development CLI. */
 import * as os from "node:os"
 import { delimiter } from "node:path"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
+import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
 import { createAcpClient } from "acp-client"
 import * as acp from "acp-client/protocol"
 

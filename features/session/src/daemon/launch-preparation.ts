@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
+import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
 import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"

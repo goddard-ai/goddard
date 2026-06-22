@@ -1,5 +1,5 @@
+import { managedAgentPlugin } from "@goddard-ai/agent/daemon"
 import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
-import { managedAgentPlugin } from "@goddard-ai/managed-agent/daemon"
 import { kind } from "kindstore"
 import { isObject } from "radashi"
 

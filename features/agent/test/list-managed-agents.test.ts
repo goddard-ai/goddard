@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ManagedAgentInstallService } from "@goddard-ai/managed-agent/daemon/install-service"
+import type { ManagedAgentInstallService } from "@goddard-ai/agent/daemon/install-service"
 import { createAcpRegistryService } from "acp-client/node"
 import { describe, expect, test } from "bun:test"
 
