@@ -25,6 +25,7 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 Use `@goddard-ai/daemon-client/browser` when you need to:
 
 - Create a browser-safe daemon IPC client from an explicit loopback daemon URL.
+- Resolve browser daemon access lazily from a host or pairing layer.
 - Attach a hosted-browser pairing token or desktop webview token to direct daemon requests.
 - Consume daemon NDJSON stream routes through browser Fetch.
 
@@ -44,6 +45,14 @@ import { createBrowserDaemonIpcClient } from "@goddard-ai/daemon-client/browser"
 const client = createBrowserDaemonIpcClient({
   daemonUrl: "http://127.0.0.1:49827/",
   token: () => localStorage.getItem("goddard.daemonBrowserToken"),
+})
+```
+
+```ts
+import { createBrowserDaemonIpcClient } from "@goddard-ai/daemon-client/browser"
+
+const client = createBrowserDaemonIpcClient({
+  access: () => window.__goddardDesktop.createDaemonWebviewAccessToken(window.location.origin),
 })
 ```
 
