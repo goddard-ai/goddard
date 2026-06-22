@@ -26,6 +26,7 @@
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "kindstore": "catalog:",
+    "radashi": "catalog:",
     "zod": "catalog:"
   }
 }

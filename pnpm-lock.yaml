@@ -553,6 +553,9 @@ importers:
       kindstore:
         specifier: 'catalog:'
         version: 0.4.5(zod@4.4.3)
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -628,6 +631,9 @@ importers:
       '@goddard-ai/session':
         specifier: workspace:*
         version: link:../../features/session
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
 
   core/ipc:
     dependencies:
@@ -815,6 +821,9 @@ importers:
       '@goddard-ai/session':
         specifier: workspace:*
         version: link:../session
+      radashi:
+        specifier: 'catalog:'
+        version: 12.9.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3

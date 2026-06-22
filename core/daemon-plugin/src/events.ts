@@ -1,3 +1,5 @@
+import { isObject } from "radashi"
+
 import type {
   DaemonEventEnvelope,
   DaemonEventFilter,
@@ -197,10 +199,10 @@ function readPayloadPath(payload: unknown, path: string) {
 
   let current = payload
   for (const segment of path.split(".")) {
-    if (!isRecord(current) || !(segment in current)) {
+    if (!isObject(current) || !(segment in current)) {
       return undefined
     }
-    current = current[segment]
+    current = current[segment as keyof typeof current]
   }
   return current
 }
@@ -217,7 +219,7 @@ function isExactMatch(actual: unknown, expected: unknown): boolean {
     return actual.every((value, index) => isExactMatch(value, expected[index]))
   }
 
-  if (!isRecord(actual) || !isRecord(expected)) {
+  if (!isObject(actual) || !isObject(expected)) {
     return false
   }
 
@@ -227,9 +229,9 @@ function isExactMatch(actual: unknown, expected: unknown): boolean {
     return false
   }
 
-  return expectedKeys.every((key) => key in actual && isExactMatch(actual[key], expected[key]))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
+  return expectedKeys.every(
+    (key) =>
+      key in actual &&
+      isExactMatch(actual[key as keyof typeof actual], expected[key as keyof typeof expected]),
+  )
 }
