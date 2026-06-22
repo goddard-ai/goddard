@@ -215,7 +215,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
       await startingSubscription
     }
 
-    backendEventHandlers.onChange(() => {
+    backendEventHandlers.onHandlersChanged(() => {
       if (!backendEventHandlers.hasAny()) {
         void closeBackendStream()
         return
@@ -252,7 +252,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
 type BackendEventHandlerRegistry = {
   readonly getHandlers: () => readonly BackendEventHandler<any>[]
   readonly hasAny: () => boolean
-  readonly onChange: (listener: () => void) => () => void
+  readonly onHandlersChanged: (listener: () => void) => () => void
   readonly register: (handler: BackendEventHandler<any>) => () => void
 }
 
@@ -269,7 +269,7 @@ function createBackendEventHandlerRegistry(): BackendEventHandlerRegistry {
   return {
     getHandlers: () => [...handlers],
     hasAny: () => handlers.size > 0,
-    onInput(listener) {
+    onHandlersChanged(listener) {
       listeners.add(listener)
       return () => {
         listeners.delete(listener)
