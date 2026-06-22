@@ -1,42 +1,22 @@
-import { createHash } from "node:crypto"
-import { createWriteStream, constants as fsConstants } from "node:fs"
-import { access, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises"
+import { createWriteStream } from "node:fs"
+import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
 import type { DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
 import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
-import { getGoddardGlobalDir, getGoddardTempLogDir } from "@goddard-ai/paths/node"
-import {
-  agentBinaryPlatforms,
-  type AgentBinaryPlatform,
-  type AgentBinaryTarget,
-  type AgentDistribution,
-} from "@goddard-ai/schema/agent-distribution"
+import type { ManagedAgentProcessSpec } from "@goddard-ai/managed-agent/daemon/install-service"
+import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { ManagedAgentsConfig } from "@goddard-ai/schema/config"
 import type { AcpAdapterId, AgentInputStream, AgentOutputStream } from "acp-client"
-import {
-  binaryInstallMarkerFileName,
-  installBinaryTargetPayload,
-  resolveInstalledBinaryCommand,
-} from "acp-client/node"
 import { getErrorMessage } from "radashi"
 
 import type { SessionEnvPolicyConfig } from "../schema.ts"
 
 /** Describes the concrete child-process invocation for a resolved agent distribution. */
-export type AgentProcessSpec = {
-  cmd: string
-  args: string[]
-  env?: Record<string, string>
-}
-
-/** Couples a binary target with the platform key that selected it. */
-type ResolvedBinaryTarget = {
-  platformKey: AgentBinaryPlatform
-  target: AgentBinaryTarget
-}
+export type AgentProcessSpec = ManagedAgentProcessSpec
 
 /** Callback fired when one Bun-managed agent process exits. */
 type AgentProcessExitHandler = (code: number | null, signal: NodeJS.Signals | null) => void
@@ -46,16 +26,6 @@ export type AgentProcessHandle = ProcessLike & {
   stdin: AgentInputStream
   stdout: AgentOutputStream
   onceExit: (handler: AgentProcessExitHandler) => void
-}
-
-/** Returns true when one filesystem path currently exists. */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path, fsConstants.F_OK)
-    return true
-  } catch {
-    return false
-  }
 }
 
 /** Builds the child-process environment expected by session agents. */
@@ -242,16 +212,15 @@ export async function spawnAgentProcess(params: {
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessHandle> {
-  const { cmd, args, env } = await resolveLaunchAgentProcessSpec({
+  const { cmd, args, env } = await params.managedAgent.resolveLaunchProcessSpec({
     agent: params.agent,
-    managedAgent: params.managedAgent,
     registry: params.registry,
     managedAgents: params.managedAgents,
   })
 
   return createAgentProcessHandle({
     cmd,
-    args,
+    args: [...args],
     cwd: params.cwd,
     env: buildAgentProcessEnv({
       daemonUrl: params.daemonUrl,
@@ -262,215 +231,4 @@ export async function spawnAgentProcess(params: {
       envPolicy: params.envPolicy,
     }),
   })
-}
-
-/** Resolves the command used for one session launch, honoring user-managed install policy. */
-export async function resolveLaunchAgentProcessSpec(params: {
-  agent: AcpAdapterId | AgentDistribution
-  managedAgent: ManagedAgentService
-  registry?: Record<string, AgentDistribution>
-  managedAgents?: ManagedAgentsConfig
-}): Promise<AgentProcessSpec> {
-  if (shouldUseManagedInstall(params.agent, params.managedAgents)) {
-    const processSpec = await params.managedAgent.resolveInstalledAgentProcessSpec({
-      agent: params.agent,
-      registry: params.registry,
-      installIfMissing: true,
-    })
-
-    return {
-      ...processSpec,
-      args: [...processSpec.args],
-    }
-  }
-
-  const agent = await resolveLaunchAgent({
-    agent: params.agent,
-    managedAgent: params.managedAgent,
-    registry: params.registry,
-  })
-
-  return resolveUnmanagedAgentProcessSpec(agent)
-}
-
-function shouldUseManagedInstall(
-  agent: AcpAdapterId | AgentDistribution,
-  managedAgents?: ManagedAgentsConfig,
-) {
-  const agentId = typeof agent === "string" ? agent : agent.id
-  return managedAgents?.[agentId]?.install === "beforeUse"
-}
-
-async function resolveLaunchAgent(params: {
-  agent: AcpAdapterId | AgentDistribution
-  managedAgent: ManagedAgentService
-  registry?: Record<string, AgentDistribution>
-}) {
-  return params.managedAgent.resolveAgent({
-    agent: params.agent,
-    registry: params.registry,
-  })
-}
-
-/** Chooses the concrete command invocation for an unmanaged resolved agent distribution. */
-export async function resolveUnmanagedAgentProcessSpec(
-  agent: AgentDistribution,
-): Promise<AgentProcessSpec> {
-  const binaryTarget = resolveBinaryTarget(agent)
-  if (binaryTarget) {
-    return {
-      cmd: await resolveBinaryCommand(agent, binaryTarget),
-      args: binaryTarget.target.args ?? [],
-      env: binaryTarget.target.env,
-    }
-  }
-
-  if (agent.distribution.npx) {
-    return {
-      cmd: "npx",
-      args: ["-y", agent.distribution.npx.package, ...(agent.distribution.npx.args ?? [])],
-      env: agent.distribution.npx.env,
-    }
-  }
-
-  if (agent.distribution.uvx) {
-    return {
-      cmd: "uvx",
-      args: [agent.distribution.uvx.package, ...(agent.distribution.uvx.args ?? [])],
-      env: agent.distribution.uvx.env,
-    }
-  }
-
-  throw new Error(`Unsupported agent distribution for ${agent.id}`)
-}
-
-/** Selects the platform-specific binary target for the current runtime when available. */
-function resolveBinaryTarget(agent: AgentDistribution): ResolvedBinaryTarget | null {
-  const platformKey = toAgentBinaryPlatform(process.platform, process.arch)
-  if (!platformKey) {
-    return null
-  }
-
-  const target = agent.distribution.binary?.[platformKey]
-  if (!target) {
-    return null
-  }
-
-  return {
-    platformKey,
-    target,
-  }
-}
-
-/** Converts Node platform metadata into the registry's binary target keys. */
-function toAgentBinaryPlatform(
-  platform: NodeJS.Platform,
-  arch: string,
-): AgentBinaryPlatform | null {
-  const normalizedPlatform =
-    platform === "win32"
-      ? "windows"
-      : platform === "darwin"
-        ? "darwin"
-        : platform === "linux"
-          ? "linux"
-          : null
-  const normalizedArch = arch === "arm64" ? "aarch64" : arch === "x64" ? "x86_64" : null
-  if (!normalizedPlatform || !normalizedArch) {
-    return null
-  }
-
-  const key = `${normalizedPlatform}-${normalizedArch}`
-  return agentBinaryPlatforms.includes(key as AgentBinaryPlatform)
-    ? (key as AgentBinaryPlatform)
-    : null
-}
-
-/** Resolves the runnable binary path for an unmanaged archive-backed target. */
-async function resolveBinaryCommand(
-  agent: AgentDistribution,
-  binaryTarget: ResolvedBinaryTarget,
-): Promise<string> {
-  const installDir = getBinaryInstallDir(agent, binaryTarget)
-  const installMarkerPath = join(installDir, binaryInstallMarkerFileName)
-
-  if (!(await pathExists(installMarkerPath))) {
-    await installBinaryArchive(
-      agent.id,
-      binaryTarget.target.archive,
-      binaryTarget.target.cmd,
-      installDir,
-    )
-  }
-
-  await cleanupOtherAgentBinaryInstalls(agent.id, installDir)
-
-  return await resolveInstalledBinaryCommand(installDir, binaryTarget.target.cmd)
-}
-
-/** Computes the global cache directory for one archive-backed binary target. */
-function getBinaryInstallDir(agent: AgentDistribution, binaryTarget: ResolvedBinaryTarget): string {
-  const archiveHash = createHash("sha256")
-    .update(binaryTarget.target.archive)
-    .digest("hex")
-    .slice(0, 12)
-
-  return join(
-    getGoddardGlobalDir(),
-    "binaries",
-    `${agent.id}-${agent.version}-${binaryTarget.platformKey}-${archiveHash}`,
-  )
-}
-
-/** Downloads and installs one unmanaged archive-backed or raw binary target. */
-async function installBinaryArchive(
-  agentId: string,
-  archiveUrl: string,
-  cmd: string,
-  installDir: string,
-): Promise<void> {
-  const binariesDir = join(getGoddardGlobalDir(), "binaries")
-  await mkdir(binariesDir, { recursive: true })
-  await rm(installDir, { recursive: true, force: true })
-
-  const stagingParentDir = await mkdtemp(join(binariesDir, "install-"))
-  const stagedInstallDir = join(stagingParentDir, "install")
-
-  try {
-    await installBinaryTargetPayload({
-      archiveUrl,
-      cmd,
-      installDir: stagedInstallDir,
-    })
-    await writeFile(join(stagedInstallDir, binaryInstallMarkerFileName), `${archiveUrl}\n`, "utf8")
-    await rename(stagedInstallDir, installDir)
-    await cleanupOtherAgentBinaryInstalls(agentId, installDir)
-  } finally {
-    await rm(stagingParentDir, { recursive: true, force: true })
-  }
-}
-
-/** Removes unmanaged cached binary installs for the same agent id except for the active install directory. */
-async function cleanupOtherAgentBinaryInstalls(
-  agentId: string,
-  activeInstallDir: string,
-): Promise<void> {
-  const binariesDir = join(getGoddardGlobalDir(), "binaries")
-  if (!(await pathExists(binariesDir))) {
-    return
-  }
-
-  const agentPrefix = `${agentId}-`
-  const installs = await readdir(binariesDir, { withFileTypes: true })
-
-  await Promise.all(
-    installs
-      .filter(
-        (entry) =>
-          entry.isDirectory() &&
-          entry.name.startsWith(agentPrefix) &&
-          join(binariesDir, entry.name) !== activeInstallDir,
-      )
-      .map((entry) => rm(join(binariesDir, entry.name), { recursive: true, force: true })),
-  )
 }
