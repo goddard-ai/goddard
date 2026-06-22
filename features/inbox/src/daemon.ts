@@ -1,11 +1,11 @@
-import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { kind } from "kindstore"
 
 import { inboxIpcRoutes } from "./daemon-ipc.ts"
 import { createInboxManager } from "./daemon/manager.ts"
-import { InboxItem, type InboxItemEvent } from "./schema.ts"
+import { InboxItem } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
 
@@ -25,48 +25,17 @@ export const inboxPlugin = definePlugin({
   db: {
     schema: inboxDb,
   },
+  events: {
+    "inbox.item.updated": event<InboxItem>({ debug: "inbox.stream" }),
+  },
   ipcRoutes: inboxIpcRoutes,
   setup({ db, events, session }) {
-    const itemListeners = new Set<(event: InboxItemEvent) => void>()
     const inbox = createInboxManager({
       db,
       publishEvent: (payload) => {
-        for (const listener of itemListeners) {
-          listener(payload)
-        }
+        void events.emit("inbox.item.updated", payload.item)
       },
     })
-
-    async function* subscribeInboxItems(signal: AbortSignal) {
-      const queue: InboxItem[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: InboxItemEvent) => {
-        queue.push(event.item)
-        wake?.()
-      }
-      const abort = () => {
-        wake?.()
-      }
-
-      itemListeners.add(listener)
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        itemListeners.delete(listener)
-      }
-    }
 
     events.on("session.blocked", (event) => {
       inbox.touchInboxItem({
@@ -119,9 +88,6 @@ export const inboxPlugin = definePlugin({
             return {
               item: inbox.completeSession(id),
             }
-          },
-          streamItems: async function* (ctx) {
-            yield* subscribeInboxItems(ctx.request.signal)
           },
         },
       },

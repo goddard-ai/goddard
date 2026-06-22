@@ -127,7 +127,7 @@ export function createBrowserDaemonIpcClient(
           details: body.error.details,
         })
       }
-      if (response.status === 401 || response.status === 403) {
+      if (isAuthorizationDenied(response)) {
         throw new BrowserDaemonAuthorizationError(
           resolveErrorMessage(body, response),
           response.status,
@@ -137,6 +137,10 @@ export function createBrowserDaemonIpcClient(
       throw new Error(resolveErrorMessage(body, response))
     },
   })
+}
+
+function isAuthorizationDenied(response: Response) {
+  return response.status === 401 || response.status === 403
 }
 
 function isStructuredIpcError(value: unknown): value is {

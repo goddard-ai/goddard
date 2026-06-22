@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 
 import {
   CancelSessionRequest,
@@ -20,8 +20,6 @@ import {
   SessionDraftSuggestionsRequest,
   SessionIdParams,
   SessionLaunchPreviewRequest,
-  SessionLifecycleEvent,
-  SessionMessageEvent,
   SessionSubpackagesRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
@@ -195,15 +193,6 @@ export const sessionIpcRoutes = defineIpcRoutes({
     resolveToken: http.post("resolve-token", {
       body: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
-    }),
-    /** Streams live daemon-published ACP messages for one daemon-managed session id. */
-    streamMessages: http.get("stream-messages", {
-      query: SessionIdParams,
-      response: ndjson.$type<SessionMessageEvent>(),
-    }),
-    /** Streams app-wide daemon session lifecycle updates without observing transcript messages. */
-    streamLifecycle: http.get("stream-lifecycle", {
-      response: ndjson.$type<SessionLifecycleEvent>(),
     }),
   }),
 })

@@ -94,26 +94,6 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
 })
 
-test("daemon workforce event stream rejects inactive repositories", async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
-  cleanup.push(() => removeTemporaryPath(rootDir))
-
-  const daemon = await startDaemonServer(createTestBackendClient(), {
-    port: 0,
-    store: db,
-  })
-  cleanup.push(async () => {
-    await daemon.close()
-  })
-
-  const client = createDaemonClient(daemon.daemonUrl)
-  const normalizedRootDir = await realpath(rootDir)
-
-  await expect(client.workforce.streamEvents({ rootDir })).rejects.toThrow(
-    `No workforce is running for ${normalizedRootDir}`,
-  )
-})
-
 function createDaemonClient(daemonUrl: string) {
   return createNodeClient(
     readDaemonTcpAddressFromDaemonUrl(daemonUrl),

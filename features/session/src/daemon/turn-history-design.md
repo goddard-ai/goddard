@@ -14,7 +14,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 ## Context
 
 - The daemon already serializes prompt dispatch so one session has at most one active prompt turn at a time.
-- The live `session.streamMessages` route remains the real-time streaming surface. This design does not change the live stream contract.
+- The live `session.message event stream` route remains the real-time streaming surface. This design does not change the live stream contract.
 - The app transcript and planned turn summary UI already think in prompt-turn units rather than one flat message log.
 - The daemon currently derives slash-command suggestions from `available_commands_update` messages found in session history. If history stops being a raw audit log, that state must move elsewhere.
 - ACP `loadSession` is optional. The installed ACP SDK documents that agents with `loadSession` should restore session context and stream conversation history back via notifications.
@@ -29,7 +29,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 - Coalesce high-frequency streamed agent text chunks in memory before persistence.
 - Bound crash loss for the active turn to at most the most recent unflushed draft window, not the entire turn.
 - Preserve enough ACP fidelity inside each turn record for transcript rendering, debugging, and turn-summary derivation.
-- Keep live streaming behavior unchanged for `session.streamMessages` subscribers.
+- Keep live streaming behavior unchanged for `session.message event stream` subscribers.
 
 ## Non-Goals
 
@@ -250,7 +250,7 @@ The daemon coalesces consecutive `agent_message_chunk` updates with `content.typ
 
 Coalescing is applied before draft writes and before completed-turn persistence:
 
-- the live `session.streamMessages` route still emits each raw chunk
+- the live `session.message event stream` route still emits each raw chunk
 - the durable draft stores the coalesced form
 - persisted completed turns store the coalesced form
 
@@ -397,7 +397,7 @@ Required invariants:
 - the latest history page appends the newest in-progress turn at most once
 - at most one draft exists per session
 - a completed turn wins over a stale same-turn draft
-- active-turn coalescing never changes the live `session.streamMessages` stream
+- active-turn coalescing never changes the live `session.message event stream` stream
 
 Required tests:
 

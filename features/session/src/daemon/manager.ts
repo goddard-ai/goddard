@@ -743,6 +743,13 @@ type SessionEventDefinitions = {
   "session.turn.ended": EventDefinition<SessionAttentionEvent>
   "session.replied": EventDefinition<SessionIdEvent>
   "session.completed": EventDefinition<SessionIdEvent>
+  "session.message": EventDefinition<{ id: SessionId; message: SessionMessageEvent }>
+  "session.lifecycle.updated": EventDefinition<
+    Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>
+  >
+  "session.lifecycle.deleted": EventDefinition<
+    Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>
+  >
 }
 
 export type SessionEventEmitter = EventBus<SessionEventDefinitions>
@@ -1071,13 +1078,13 @@ export function createSessionManager({
     publishSessionUpdated(sessionId, ["connection"])
   }
 
-  /** Records one new `session.streamMessages` subscriber so idle shutdown waits for attached clients. */
+  /** Records one new `session.message event stream` subscriber so idle shutdown waits for attached clients. */
   async function sessionSubscriberConnected(id: SessionId): Promise<void> {
     await ready
     idleShutdown.sessionSubscriberConnected(id)
   }
 
-  /** Records one departing `session.streamMessages` subscriber and starts the timer when none remain. */
+  /** Records one departing `session.message event stream` subscriber and starts the timer when none remain. */
   async function sessionSubscriberDisconnected(id: SessionId): Promise<void> {
     await ready
     idleShutdown.sessionSubscriberDisconnected(id)

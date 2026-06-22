@@ -155,52 +155,6 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  test("inbox.streamItems streams daemon inbox item updates", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("inbox.streamItems")
-        handler({
-          id: "inb_1",
-          entityId: "ses_1",
-          reason: "session.turn_ended",
-          status: "unread",
-          priority: "normal",
-          updatedAt: 1,
-          readAt: null,
-          scope: "Checkout flow",
-          headline: "Review needed",
-          turnId: "turn-1",
-        })
-        return unsubscribe
-      },
-    )
-
-    const events = await sdk.inbox.streamItems(undefined, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith("inbox.streamItems", expect.any(Function))
-    expect(result.value).toEqual({
-      id: "inb_1",
-      entityId: "ses_1",
-      reason: "session.turn_ended",
-      status: "unread",
-      priority: "normal",
-      updatedAt: 1,
-      readAt: null,
-      scope: "Checkout flow",
-      headline: "Review needed",
-      turnId: "turn-1",
-    })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
-  })
-
   test("adapter.list forwards to adapter.list", async () => {
     const { sdk, send } = createSdkWithClient()
 
@@ -491,106 +445,6 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(send).toHaveBeenNthCalledWith(3, "reviewSession.unmount", {
       id: "ses_1",
     })
-  })
-
-  test("session.streamMessages streams daemon-side session messages", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toEqual({
-          name: "session.streamMessages",
-          filter: { id: "ses_1" },
-        })
-        handler({
-          jsonrpc: "2.0",
-          method: acp.CLIENT_METHODS.session_update,
-          params: { value: "kept" },
-        })
-        return unsubscribe
-      },
-    )
-
-    const events = await sdk.session.streamMessages({ id: "ses_1" }, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.streamMessages", filter: { id: "ses_1" } },
-      expect.any(Function),
-    )
-    expect(result.value).toEqual({
-      jsonrpc: "2.0",
-      method: acp.CLIENT_METHODS.session_update,
-      params: { value: "kept" },
-    })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
-  })
-
-  test("session.streamLifecycle streams daemon session lifecycle events", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("session.streamLifecycle")
-        handler({
-          kind: "sessionUpdated",
-          session: {
-            id: "ses_1",
-            createdAt: 1,
-            lastSessionActivityAt: 2,
-            acpSessionId: "acp_1",
-            status: "done",
-            stopReason: "end_turn",
-            agent: null,
-            agentName: "Agent",
-            cwd: "/repo",
-            title: "Session",
-            titleState: "generated",
-            mcpServers: [],
-            connectionMode: "history",
-            supportsLoadSession: true,
-            activeDaemonSession: false,
-            completedHidden: false,
-            errorMessage: null,
-            blockedReason: null,
-            initiative: null,
-            inboxScope: null,
-            lastAgentMessage: "Finished",
-            repository: null,
-            prNumber: null,
-            token: null,
-            permissions: null,
-            metadata: null,
-            configOptions: [],
-            availableCommands: [],
-            contextUsage: null,
-          },
-          changed: ["status", "connection"],
-        })
-        return unsubscribe
-      },
-    )
-
-    const events = await sdk.session.streamLifecycle(undefined, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith("session.streamLifecycle", expect.any(Function))
-    expect(result.value).toMatchObject({
-      kind: "sessionUpdated",
-      session: { id: "ses_1", status: "done" },
-      changed: ["status", "connection"],
-    })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
@@ -1095,7 +949,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.streamMessages", filter: { id: "ses_1" } },
+      {
+        name: "events.stream",
+        filter: {
+          names: ["session.message"],
+          where: [{ path: "id", equals: "ses_1" }],
+        },
+      },
       expect.any(Function),
     )
     expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
@@ -1176,33 +1036,41 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     publishStreamMessage?.({
-      jsonrpc: "2.0",
-      id: "prompt-1",
-      method: acp.AGENT_METHODS.session_prompt,
-      params: {
-        sessionId: "acp-session-1",
-        prompt: [{ type: "text", text: "Review the diff." }],
+      payload: {
+        message: {
+          jsonrpc: "2.0",
+          id: "prompt-1",
+          method: acp.AGENT_METHODS.session_prompt,
+          params: {
+            sessionId: "acp-session-1",
+            prompt: [{ type: "text", text: "Review the diff." }],
+          },
+        },
       },
     })
     publishStreamMessage?.({
-      jsonrpc: "2.0",
-      id: "permission-1",
-      method: acp.CLIENT_METHODS.session_request_permission,
-      params: {
-        sessionId: "acp-session-1",
-        options: [
-          {
-            optionId: "reject-once",
-            name: "Reject once",
-            kind: "reject_once",
+      payload: {
+        message: {
+          jsonrpc: "2.0",
+          id: "permission-1",
+          method: acp.CLIENT_METHODS.session_request_permission,
+          params: {
+            sessionId: "acp-session-1",
+            options: [
+              {
+                optionId: "reject-once",
+                name: "Reject once",
+                kind: "reject_once",
+              },
+            ],
+            toolCall: {
+              toolCallId: "tool-1",
+              title: "Read file",
+              kind: "read",
+              status: "pending",
+              locations: [],
+            },
           },
-        ],
-        toolCall: {
-          toolCallId: "tool-1",
-          title: "Read file",
-          kind: "read",
-          status: "pending",
-          locations: [],
         },
       },
     })
@@ -1240,57 +1108,6 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     await session!.stop()
-  })
-
-  test("workforce.streamEvents streams ledger events", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toEqual({
-          name: "workforce.streamEvents",
-          filter: { rootDir: "/repo" },
-        })
-        handler({
-          id: "evt-1",
-          at: "2026-03-31T00:00:00.000Z",
-          type: "request",
-          requestId: "req-1",
-          toAgentId: "root",
-          fromAgentId: null,
-          intent: "default",
-          input: "Review the queue.",
-        })
-        return unsubscribe
-      },
-    )
-
-    const events = await sdk.workforce.streamEvents(
-      { rootDir: "/repo" },
-      { signal: controller.signal },
-    )
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith(
-      { name: "workforce.streamEvents", filter: { rootDir: "/repo" } },
-      expect.any(Function),
-    )
-    expect(result.value).toEqual({
-      id: "evt-1",
-      at: "2026-03-31T00:00:00.000Z",
-      type: "request",
-      requestId: "req-1",
-      toAgentId: "root",
-      fromAgentId: null,
-      intent: "default",
-      input: "Review the queue.",
-    })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("AgentSession.setAgentModel uses the daemon-owned model path", async () => {

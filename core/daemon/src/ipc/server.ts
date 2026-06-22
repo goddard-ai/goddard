@@ -4,7 +4,6 @@ import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
   createDaemonEventBus,
-  matchesDaemonEventFilter,
   type DaemonConfigProvider,
   type DaemonSetupSubstrate,
   type EventBus,
@@ -208,8 +207,8 @@ export async function startDaemonServer(
     },
     ...pluginSetup.ipcHandlers,
     events: {
-      stream: async function* (ctx: { body: DaemonEventsStreamRequest; request: Request }) {
-        yield* subscribeDaemonEvents(events, ctx.body ?? {}, ctx.request.signal)
+      stream: (ctx: { body: DaemonEventsStreamRequest; request: Request }) => {
+        return events.stream(ctx.body ?? {}, ctx.request.signal)
       },
     },
   }
@@ -364,44 +363,6 @@ async function setupDaemonPlugins(
         await closeHandlers[index]?.()
       }
     },
-  }
-}
-
-async function* subscribeDaemonEvents(
-  events: ComposedDaemonEvents,
-  filter: DaemonEventsStreamRequest,
-  signal: AbortSignal,
-) {
-  const queue: PluginDaemonEventEnvelope[] = []
-  let wake: (() => void) | undefined
-  const listener = (event: PluginDaemonEventEnvelope) => {
-    if (!matchesDaemonEventFilter(event, filter)) {
-      return
-    }
-    queue.push(event)
-    wake?.()
-  }
-  const abort = () => {
-    wake?.()
-  }
-
-  const unsubscribe = events.observe(listener)
-  signal.addEventListener("abort", abort)
-  try {
-    while (!signal.aborted) {
-      const event = queue.shift()
-      if (event) {
-        yield event
-        continue
-      }
-      await new Promise<void>((resolve) => {
-        wake = resolve
-      })
-      wake = undefined
-    }
-  } finally {
-    signal.removeEventListener("abort", abort)
-    unsubscribe()
   }
 }
 

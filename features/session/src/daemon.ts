@@ -33,7 +33,7 @@ import {
   type SessionTurnMessage,
 } from "./schema.ts"
 
-type RoutedSessionMessageEvent = {
+export type RoutedSessionMessageEvent = {
   id: SessionId
   message: SessionMessageEvent
 }
@@ -306,12 +306,17 @@ export const sessionPlugin = definePlugin({
     "session.turn.ended": event<SessionAttentionEvent>(),
     "session.replied": event<SessionIdEvent>(),
     "session.completed": event<SessionIdEvent>(),
+    "session.message": event<RoutedSessionMessageEvent>({ debug: "session.stream" }),
+    "session.lifecycle.updated": event<Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>>({
+      debug: "session.lifecycle",
+    }),
+    "session.lifecycle.deleted": event<Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>>({
+      debug: "session.lifecycle",
+    }),
   },
   ipcRoutes: sessionIpcRoutes,
   setup(context) {
     const streamDebug = context.log.createDebug("session.stream")
-    const messageListeners = new Set<(event: RoutedSessionMessageEvent) => void>()
-    const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>()
     const sessionManager = createSessionManager({
       db: context.db,
       getDaemonUrl: context.daemonRuntime.getDaemonUrl,
@@ -324,126 +329,28 @@ export const sessionPlugin = definePlugin({
       events: context.events,
       idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
       emitMessage(id, message) {
-        for (const listener of messageListeners) {
-          listener({ id, message })
-        }
+        void context.events.emit("session.message", { id, message })
       },
       emitLifecycleEvent(event) {
-        for (const listener of lifecycleListeners) {
-          listener(event)
-        }
+        void context.events.emit(getSessionLifecycleEventName(event), event)
       },
     })
 
-    async function* subscribeSessionMessages(id: SessionId, signal: AbortSignal) {
-      const queue: SessionMessageEvent[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: RoutedSessionMessageEvent) => {
-        if (event.id !== id) {
-          return
-        }
-        queue.push(event.message)
-        streamDebug("session.stream.message_queued", {
-          sessionId: id,
-          queueLength: queue.length,
-          listenerCount: messageListeners.size,
-        })
-        wake?.()
-      }
-      const abort = () => {
-        streamDebug("session.stream.message_abort_signaled", {
-          sessionId: id,
-          queueLength: queue.length,
-        })
-        wake?.()
+    context.events.onSubscription(async (subscription) => {
+      const id = readSessionMessageSubscriptionId(subscription.filter)
+      if (!id) {
+        return
       }
 
-      await sessionManager.sessionSubscriberConnected(id)
-      messageListeners.add(listener)
-      streamDebug("session.stream.message_subscriber_attached", {
-        sessionId: id,
-        listenerCount: messageListeners.size,
-      })
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            streamDebug("session.stream.message_yielded", {
-              sessionId: id,
-              queueLength: queue.length,
-            })
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        messageListeners.delete(listener)
-        streamDebug("session.stream.message_subscriber_detached", {
-          sessionId: id,
-          listenerCount: messageListeners.size,
-          aborted: signal.aborted,
-          queueLength: queue.length,
-        })
-        await sessionManager.sessionSubscriberDisconnected(id)
-      }
-    }
-
-    async function* subscribeSessionLifecycle(signal: AbortSignal) {
-      const queue: SessionLifecycleEvent[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: SessionLifecycleEvent) => {
-        queue.push(event)
-        streamDebug("session.stream.lifecycle_queued", {
-          eventKind: event.kind,
-          queueLength: queue.length,
-          listenerCount: lifecycleListeners.size,
-        })
-        wake?.()
-      }
-      const abort = () => {
-        streamDebug("session.stream.lifecycle_abort_signaled", {
-          queueLength: queue.length,
-        })
-        wake?.()
+      if (subscription.state === "started") {
+        await sessionManager.sessionSubscriberConnected(id)
+        streamDebug("session.stream.message_subscriber_attached", { sessionId: id })
+        return
       }
 
-      lifecycleListeners.add(listener)
-      streamDebug("session.stream.lifecycle_subscriber_attached", {
-        listenerCount: lifecycleListeners.size,
-      })
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            streamDebug("session.stream.lifecycle_yielded", {
-              eventKind: event.kind,
-              queueLength: queue.length,
-            })
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        lifecycleListeners.delete(listener)
-        streamDebug("session.stream.lifecycle_subscriber_detached", {
-          listenerCount: lifecycleListeners.size,
-          aborted: signal.aborted,
-          queueLength: queue.length,
-        })
-      }
-    }
+      await sessionManager.sessionSubscriberDisconnected(id)
+      streamDebug("session.stream.message_subscriber_detached", { sessionId: id })
+    })
 
     return {
       provides: {
@@ -542,17 +449,28 @@ export const sessionPlugin = definePlugin({
               id,
             }
           },
-          streamMessages: async function* (ctx) {
-            const { query } = ctx
-            yield* subscribeSessionMessages(query.id, ctx.request.signal)
-          },
-          streamLifecycle: async function* (ctx) {
-            yield* subscribeSessionLifecycle(ctx.request.signal)
-          },
         },
       },
     }
   },
 })
+
+function getSessionLifecycleEventName(event: SessionLifecycleEvent) {
+  return event.kind === "sessionUpdated"
+    ? ("session.lifecycle.updated" as const)
+    : ("session.lifecycle.deleted" as const)
+}
+
+function readSessionMessageSubscriptionId(filter: {
+  readonly names?: readonly string[]
+  readonly where?: readonly { readonly path: string; readonly equals: unknown }[]
+}) {
+  if (!filter.names?.includes("session.message")) {
+    return null
+  }
+
+  const id = filter.where?.find((condition) => condition.path === "id")?.equals
+  return typeof id === "string" && id.startsWith("ses_") ? (id as SessionId) : null
+}
 
 export type SessionDb = DbContext<typeof sessionDb>

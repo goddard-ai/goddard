@@ -7,11 +7,13 @@ import { SESSION_LIST_LIMIT } from "./queries.ts"
 
 const sessionClient: any = {}
 const inboxClient: any = {}
+const eventsClient: any = {}
 const cleanups: Array<() => void> = []
 
 vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
     inbox: inboxClient,
+    events: eventsClient,
     session: sessionClient,
   },
 }))
@@ -76,7 +78,7 @@ function resetSdk() {
       released: true,
     })),
   }
-  sessionClient.streamLifecycle = vi.fn()
+  eventsClient.stream = vi.fn()
 
   inboxClient.list = vi.fn(async () => ({
     items: [],
@@ -339,7 +341,7 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
   let pushEvent!: (event: SessionLifecycleEvent) => void
   let wakeAbort!: () => void
 
-  sessionClient.streamLifecycle = vi.fn(async (_input, options: { signal: AbortSignal }) => {
+  eventsClient.stream = vi.fn(async (_input, options: { signal: AbortSignal }) => {
     const queue: SessionLifecycleEvent[] = []
     let wakeEvent: (() => void) | null = null
     pushEvent = (event) => {
@@ -364,7 +366,7 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
 
         const event = queue.shift()
         if (event) {
-          yield event
+          yield { payload: event }
         }
       }
     })()
@@ -373,7 +375,7 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
   await activateSessionViewQueries(sessionId)
 
   const stop = startSessionLifecycleSubscription()
-  await waitFor(() => sessionClient.streamLifecycle.mock.calls.length === 1)
+  await waitFor(() => eventsClient.stream.mock.calls.length === 1)
 
   sessionClient.list.mockClear()
   sessionClient.get.mockClear()
@@ -388,5 +390,5 @@ test("startSessionLifecycleSubscription refreshes caches for streamed lifecycle 
 
   stop()
 
-  expect(sessionClient.streamLifecycle.mock.calls[0][1].signal.aborted).toBe(true)
+  expect(eventsClient.stream.mock.calls[0][1].signal.aborted).toBe(true)
 })

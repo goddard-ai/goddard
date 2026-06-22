@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { SessionIdParams } from "@goddard-ai/session/schema"
 
 import {
@@ -10,7 +10,6 @@ import {
   RespondWorkforceRequest,
   ShutdownWorkforceRequest,
   StartWorkforceRequest,
-  SubscribeWorkforceEventsRequest,
   SuspendWorkforceRequest,
   TruncateWorkforceRequest,
   UpdateWorkforceRequest,
@@ -22,7 +21,6 @@ import {
   type MutateWorkforceResponse,
   type ShutdownWorkforceResponse,
   type StartWorkforceResponse,
-  type WorkforceLedgerEvent,
 } from "./schema.ts"
 
 export const workforceIpcRoutes = defineIpcRoutes({
@@ -94,11 +92,6 @@ export const workforceIpcRoutes = defineIpcRoutes({
     suspend: http.post("suspend", {
       body: SuspendWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
-    }),
-    /** Streams live daemon-published workforce ledger events for one repository root. */
-    streamEvents: http.get("stream-events", {
-      query: SubscribeWorkforceEventsRequest,
-      response: ndjson.$type<WorkforceLedgerEvent>(),
     }),
   }),
 })

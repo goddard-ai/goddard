@@ -16,6 +16,7 @@ import {
   type DaemonSessionDiagnosticEvent,
   type GetSessionHistoryResponse,
   type SessionId,
+  type SessionLifecycleEvent,
   type SessionTurnMessage,
 } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
@@ -62,6 +63,75 @@ function findSessionPromptRequest(history: GetSessionHistoryResponse) {
 
 function readStreamMessagePayload(payload: unknown) {
   return getSessionTurnMessagePayload(payload as AcpMessage | SessionTurnMessage)
+}
+
+function subscribeSessionMessages(
+  client: DaemonIpcClient,
+  id: SessionId,
+  onMessage: (payload: unknown) => void,
+) {
+  return subscribe(
+    client,
+    {
+      name: "events.stream",
+      filter: {
+        names: ["session.message"],
+        where: [{ path: "id", equals: id }],
+      },
+    },
+    (event) => {
+      onMessage(event.payload.message)
+    },
+  )
+}
+
+function subscribeDaemonSessionMessages(
+  daemon: DaemonServer,
+  id: SessionId,
+  onMessage: (payload: unknown) => void,
+) {
+  const abortController = new AbortController()
+  const stream = daemon.events.stream(
+    {
+      names: ["session.message"],
+      where: [{ path: "id", equals: id }],
+    },
+    abortController.signal,
+  )
+  const iterator = stream[Symbol.asyncIterator]()
+  const done = (async () => {
+    while (true) {
+      const result = await iterator.next()
+      if (result.done) {
+        return
+      }
+      onMessage((result.value.payload as { message: unknown }).message)
+    }
+  })()
+
+  return async () => {
+    await iterator.return?.()
+    abortController.abort()
+    await done.catch(() => {})
+  }
+}
+
+function subscribeSessionLifecycle(
+  client: DaemonIpcClient,
+  onEvent: (payload: SessionLifecycleEvent) => void,
+) {
+  return subscribe(
+    client,
+    {
+      name: "events.stream",
+      filter: {
+        names: ["session.lifecycle.updated", "session.lifecycle.deleted"],
+      },
+    },
+    (event) => {
+      onEvent(event.payload)
+    },
+  )
 }
 
 async function expectIpcErrorCode<T>(
@@ -361,28 +431,24 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   })
   const promptStarts: string[] = []
   const promptStops: string[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        method?: string
-        params?: { update?: { content?: { text?: string } } }
-        result?: { stopReason?: string }
-      }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      method?: string
+      params?: { update?: { content?: { text?: string } } }
+      result?: { stopReason?: string }
+    }
 
-      if (message.method === "session/update") {
-        const updateText = message.params?.update?.content?.text ?? ""
-        if (updateText.startsWith("prompt_started:")) {
-          promptStarts.push(updateText.slice("prompt_started:".length))
-        }
+    if (message.method === "session/update") {
+      const updateText = message.params?.update?.content?.text ?? ""
+      if (updateText.startsWith("prompt_started:")) {
+        promptStarts.push(updateText.slice("prompt_started:".length))
       }
+    }
 
-      if (message.result?.stopReason) {
-        promptStops.push(message.result.stopReason)
-      }
-    },
-  )
+    if (message.result?.stopReason) {
+      promptStops.push(message.result.stopReason)
+    }
+  })
 
   expect(session.session.connectionMode).toBe("live")
   expect(session.session.activeDaemonSession).toBe(false)
@@ -571,29 +637,25 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
   })
 
   const liveChunks: string[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        method?: string
-        params?: {
-          update?: {
-            content?: { text?: string }
-            sessionUpdate?: string
-          }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      method?: string
+      params?: {
+        update?: {
+          content?: { text?: string }
+          sessionUpdate?: string
         }
       }
+    }
 
-      if (message.method !== "session/update") {
-        return
-      }
+    if (message.method !== "session/update") {
+      return
+    }
 
-      if (message.params?.update?.sessionUpdate === "agent_message_chunk") {
-        liveChunks.push(message.params.update.content?.text ?? "")
-      }
-    },
-  )
+    if (message.params?.update?.sessionUpdate === "agent_message_chunk") {
+      liveChunks.push(message.params.update.content?.text ?? "")
+    }
+  })
 
   await send(client, "session.send", {
     id: created.session.id,
@@ -668,21 +730,17 @@ test("daemon stores usage updates on the session instead of durable turn history
   })
 
   const liveUsageUpdates: unknown[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const update = matchAcpRequest<{
-        update?: {
-          sessionUpdate?: string
-        }
-      }>(readStreamMessagePayload(payload), "session/update")?.update
-
-      if (update?.sessionUpdate === "usage_update") {
-        liveUsageUpdates.push(update)
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const update = matchAcpRequest<{
+      update?: {
+        sessionUpdate?: string
       }
-    },
-  )
+    }>(readStreamMessagePayload(payload), "session/update")?.update
+
+    if (update?.sessionUpdate === "usage_update") {
+      liveUsageUpdates.push(update)
+    }
+  })
 
   await send(client, "session.send", {
     id: created.session.id,
@@ -1021,20 +1079,12 @@ test("multiple clients can observe the same live session stream independently", 
 
   const clientAMessages: unknown[] = []
   const clientBMessages: unknown[] = []
-  const unsubscribeA = await subscribe(
-    clientA,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      clientAMessages.push(readStreamMessagePayload(payload))
-    },
-  )
-  const unsubscribeB = await subscribe(
-    clientB,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      clientBMessages.push(readStreamMessagePayload(payload))
-    },
-  )
+  const unsubscribeA = await subscribeSessionMessages(clientA, created.session.id, (payload) => {
+    clientAMessages.push(readStreamMessagePayload(payload))
+  })
+  const unsubscribeB = await subscribeSessionMessages(clientB, created.session.id, (payload) => {
+    clientBMessages.push(readStreamMessagePayload(payload))
+  })
 
   await send(clientA, "session.send", {
     id: created.session.id,
@@ -1116,7 +1166,7 @@ test("session idle auto-shutdown uses configured duration", async () => {
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
-test("session.streamMessages subscribers cancel idle auto-shutdown before expiry", async () => {
+test("session.message event stream subscribers cancel idle auto-shutdown before expiry", async () => {
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
@@ -1127,11 +1177,7 @@ test("session.streamMessages subscribers cancel idle auto-shutdown before expiry
     systemPrompt: "Keep responses short.",
   })
 
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    () => {},
-  )
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, () => {})
   await waitFor(async () =>
     getDiagnosticEventTypes(created.session.id).includes("session_idle_shutdown_timer_cancelled"),
   )
@@ -1155,7 +1201,7 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
     session?: { id?: string; activeDaemonSession?: boolean }
     changed?: string[]
   }> = []
-  const unsubscribe = await subscribe(client, "session.streamLifecycle", (event) => {
+  const unsubscribe = await subscribeSessionLifecycle(client, (event) => {
     lifecycleEvents.push(event)
   })
   cleanup.push(async () => {
@@ -1241,11 +1287,10 @@ test("daemon event stream emits filtered composed event envelopes", async () => 
   await send(client, "session.shutdown", { id: created.session.id })
 })
 
-test("idle auto-shutdown waits for the last session.streamMessages subscriber to disconnect", async () => {
+test("idle auto-shutdown waits for the last session.message event stream subscriber to disconnect", async () => {
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const clientB = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const created = await send(clientA, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1255,20 +1300,12 @@ test("idle auto-shutdown waits for the last session.streamMessages subscriber to
 
   const clientAMessages: AcpMessage[] = []
   const clientBMessages: AcpMessage[] = []
-  const unsubscribeA = await subscribe(
-    clientA,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      clientAMessages.push(readStreamMessagePayload(payload))
-    },
-  )
-  const unsubscribeB = await subscribe(
-    clientB,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      clientBMessages.push(readStreamMessagePayload(payload))
-    },
-  )
+  const unsubscribeA = subscribeDaemonSessionMessages(daemon, created.session.id, (payload) => {
+    clientAMessages.push(readStreamMessagePayload(payload))
+  })
+  const unsubscribeB = subscribeDaemonSessionMessages(daemon, created.session.id, (payload) => {
+    clientBMessages.push(readStreamMessagePayload(payload))
+  })
 
   await send(clientA, "session.send", {
     id: created.session.id,
@@ -1468,33 +1505,29 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
   const promptStarts: string[] = []
   const promptErrors: string[] = []
   const promptStops: string[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        method?: string
-        params?: { update?: { content?: { text?: string } } }
-        error?: { message?: string }
-        result?: { stopReason?: string }
-      }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      method?: string
+      params?: { update?: { content?: { text?: string } } }
+      error?: { message?: string }
+      result?: { stopReason?: string }
+    }
 
-      if (message.method === "session/update") {
-        const updateText = message.params?.update?.content?.text ?? ""
-        if (updateText.startsWith("prompt_started:")) {
-          promptStarts.push(updateText.slice("prompt_started:".length))
-        }
+    if (message.method === "session/update") {
+      const updateText = message.params?.update?.content?.text ?? ""
+      if (updateText.startsWith("prompt_started:")) {
+        promptStarts.push(updateText.slice("prompt_started:".length))
       }
+    }
 
-      if (message.error?.message) {
-        promptErrors.push(message.error.message)
-      }
+    if (message.error?.message) {
+      promptErrors.push(message.error.message)
+    }
 
-      if (message.result?.stopReason) {
-        promptStops.push(message.result.stopReason)
-      }
-    },
-  )
+    if (message.result?.stopReason) {
+      promptStops.push(message.result.stopReason)
+    }
+  })
 
   await Promise.all([
     send(client, "session.send", {
@@ -1535,33 +1568,29 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
     id?: string
     message?: string
   }> = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        id?: string
-        method?: string
-        params?: { update?: { content?: { text?: string } } }
-        error?: { code?: number; message?: string }
-      }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      id?: string
+      method?: string
+      params?: { update?: { content?: { text?: string } } }
+      error?: { code?: number; message?: string }
+    }
 
-      if (message.method === "session/update") {
-        const updateText = message.params?.update?.content?.text ?? ""
-        if (updateText.startsWith("prompt_started:")) {
-          promptStarts.push(updateText.slice("prompt_started:".length))
-        }
+    if (message.method === "session/update") {
+      const updateText = message.params?.update?.content?.text ?? ""
+      if (updateText.startsWith("prompt_started:")) {
+        promptStarts.push(updateText.slice("prompt_started:".length))
       }
+    }
 
-      if (message.error) {
-        promptErrors.push({
-          code: message.error.code,
-          id: message.id,
-          message: message.error.message,
-        })
-      }
-    },
-  )
+    if (message.error) {
+      promptErrors.push({
+        code: message.error.code,
+        id: message.id,
+        message: message.error.message,
+      })
+    }
+  })
 
   await send(client, "session.send", {
     id: created.session.id,
@@ -1624,44 +1653,40 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
   })
 
   const events: string[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        id?: string
-        method?: string
-        params?: {
-          prompt?: Array<{ type?: string; text?: string }>
-          update?: {
-            content?: { text?: string }
-            sessionUpdate?: string
-            title?: string
-          }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      id?: string
+      method?: string
+      params?: {
+        prompt?: Array<{ type?: string; text?: string }>
+        update?: {
+          content?: { text?: string }
+          sessionUpdate?: string
+          title?: string
         }
-        result?: { stopReason?: string }
       }
+      result?: { stopReason?: string }
+    }
 
-      if (message.method === "session/update") {
-        const update = message.params?.update
-        if (update?.sessionUpdate === "agent_message_chunk") {
-          events.push(`chunk:${update.content?.text ?? ""}`)
-        }
-        if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
-          events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
-        }
-      } else if (message.method === "session/prompt") {
-        const promptText =
-          message.params?.prompt
-            ?.map((block) => (block.type === "text" ? (block.text ?? "") : ""))
-            .filter(Boolean)
-            .join("\n") ?? ""
-        events.push(`prompt:${promptText}`)
-      } else if (message.result?.stopReason && message.id) {
-        events.push(`result:${message.id}:${message.result.stopReason}`)
+    if (message.method === "session/update") {
+      const update = message.params?.update
+      if (update?.sessionUpdate === "agent_message_chunk") {
+        events.push(`chunk:${update.content?.text ?? ""}`)
       }
-    },
-  )
+      if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
+        events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
+      }
+    } else if (message.method === "session/prompt") {
+      const promptText =
+        message.params?.prompt
+          ?.map((block) => (block.type === "text" ? (block.text ?? "") : ""))
+          .filter(Boolean)
+          .join("\n") ?? ""
+      events.push(`prompt:${promptText}`)
+    } else if (message.result?.stopReason && message.id) {
+      events.push(`result:${message.id}:${message.result.stopReason}`)
+    }
+  })
 
   await send(client, "session.send", {
     id: created.session.id,
@@ -1714,36 +1739,32 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
   })
 
   const events: string[] = []
-  const unsubscribe = await subscribe(
-    client,
-    { name: "session.streamMessages", filter: { id: created.session.id } },
-    (payload) => {
-      const message = readStreamMessagePayload(payload) as {
-        id?: string
-        method?: string
-        params?: {
-          update?: {
-            content?: { text?: string }
-            sessionUpdate?: string
-            title?: string
-          }
+  const unsubscribe = await subscribeSessionMessages(client, created.session.id, (payload) => {
+    const message = readStreamMessagePayload(payload) as {
+      id?: string
+      method?: string
+      params?: {
+        update?: {
+          content?: { text?: string }
+          sessionUpdate?: string
+          title?: string
         }
-        result?: { stopReason?: string }
       }
+      result?: { stopReason?: string }
+    }
 
-      if (message.method === "session/update") {
-        const update = message.params?.update
-        if (update?.sessionUpdate === "agent_message_chunk") {
-          events.push(`chunk:${update.content?.text ?? ""}`)
-        }
-        if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
-          events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
-        }
-      } else if (message.result?.stopReason && message.id) {
-        events.push(`result:${message.id}:${message.result.stopReason}`)
+    if (message.method === "session/update") {
+      const update = message.params?.update
+      if (update?.sessionUpdate === "agent_message_chunk") {
+        events.push(`chunk:${update.content?.text ?? ""}`)
       }
-    },
-  )
+      if (update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update") {
+        events.push(`${update.sessionUpdate}:${update.title ?? ""}`)
+      }
+    } else if (message.result?.stopReason && message.id) {
+      events.push(`result:${message.id}:${message.result.stopReason}`)
+    }
+  })
 
   await send(client, "session.send", {
     id: created.session.id,
