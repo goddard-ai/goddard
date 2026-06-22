@@ -15,9 +15,15 @@
 - `Repo Stream`
   - The backend's user-scoped event feed for repository activity.
   - Why: so local daemons can react to relevant repository changes without polling.
+- `Backend Principal`
+  - The authenticated subject the backend uses to authorize API calls and event streams.
+  - Why: so GitHub can be the user-facing login while backend sessions remain revocable and scoped to Goddard.
 - `Repo Event Broadcast`
   - The backend act of publishing a repository event to interested local consumers.
   - Why: so one backend-side state change can drive downstream automation promptly.
+- `Backend Event Envelope`
+  - The named event wrapper produced by backend event plugins before stream fanout.
+  - Why: so provider-specific webhook input can become stable product-normalized backend events.
 - `GitHub App Installation`
   - The repository-level authority the backend uses to act on GitHub resources.
   - Why: so pull request creation and replies happen under explicit app-managed permissions rather than user tokens.
