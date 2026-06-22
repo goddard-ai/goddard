@@ -40,7 +40,7 @@ export type EventDefinition<TPayload = unknown> = {
 /** One or more event payloads owned by a daemon plugin. */
 export type EventDefinitions = Record<string, EventDefinition<any>>
 
-type InferEventPayload<TDefinition> =
+export type InferEventPayload<TDefinition> =
   TDefinition extends EventDefinition<infer TPayload> ? TPayload : never
 
 /** Streamable envelope produced whenever one daemon plugin event is emitted. */
@@ -52,7 +52,7 @@ export type DaemonEventEnvelope<TName extends string = string, TPayload = unknow
   readonly log?: EventLogMetadata
 }
 
-type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
+export type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
   [TName in keyof TEvents & string]: DaemonEventEnvelope<TName, InferEventPayload<TEvents[TName]>>
 }[keyof TEvents & string]
 

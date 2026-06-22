@@ -16,9 +16,7 @@ export function startSessionLifecycleSubscription() {
           break
         }
 
-        invalidateSessionLifecycleEvent(
-          event.payload as Parameters<typeof invalidateSessionLifecycleEvent>[0],
-        )
+        invalidateSessionLifecycleEvent(event.payload)
       }
     } catch (error) {
       if (!controller.signal.aborted) {

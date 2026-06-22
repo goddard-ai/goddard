@@ -12,14 +12,9 @@ import type {
   DaemonSessionContext,
   DaemonSessionContextService,
   EventBus,
-  EventDefinition,
 } from "@goddard-ai/daemon-plugin"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type {
-  AttentionHeadline,
-  AttentionMetadataInput,
-  AttentionScope,
-} from "@goddard-ai/schema/attention"
+import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 import {
@@ -33,6 +28,7 @@ import * as acp from "acp-client/protocol"
 import { clamp, getErrorMessage, unique } from "radashi"
 
 import type { SessionDb } from "../daemon.ts"
+import type { SessionEventDefinitions } from "../events.ts"
 import {
   parseSessionIdleShutdownDurationMs,
   SessionErrorCodes,
@@ -683,74 +679,6 @@ function rejectPendingPrompts(active: ActiveSession, error: Error): void {
 
 const DEFAULT_SESSION_PAGE_SIZE = 20
 const MAX_SESSION_PAGE_SIZE = 100
-
-export type SessionAttentionEvent = {
-  sessionId: SessionId
-  scope: AttentionScope
-  headline: AttentionHeadline
-  turnId: string | null
-}
-
-export type SessionWorktreeLifecycleEvent = {
-  sessionId: SessionId
-  worktree: SessionWorktreeLifecycleState
-}
-
-export type SessionWorktreePreparedEvent = SessionWorktreeLifecycleEvent & {
-  request: CreateSessionRequest
-}
-
-export type SessionPersistedEvent = {
-  sessionId: SessionId
-  request: CreateSessionRequest
-}
-
-export type SessionActivatedEvent = {
-  sessionId: SessionId
-  worktree: SessionWorktreeLifecycleState | null
-}
-
-export type SessionLaunchFinishedEvent = SessionWorktreeLifecycleEvent & {
-  reason: "one_shot_completed"
-}
-
-export type SessionLaunchFailedEvent = SessionWorktreeLifecycleEvent & {
-  error: unknown
-}
-
-export type SessionStoppingEvent = {
-  sessionId: SessionId
-  reason: "agent_process_exit" | "session_shutdown" | "daemon_shutdown"
-  worktree: SessionWorktreeLifecycleState | null
-}
-
-export type SessionBlockedEvent = SessionAttentionEvent & {
-  reason: string
-}
-
-export type SessionIdEvent = {
-  sessionId: SessionId
-}
-
-type SessionEventDefinitions = {
-  "session.worktree.prepared": EventDefinition<SessionWorktreePreparedEvent>
-  "session.persisted": EventDefinition<SessionPersistedEvent>
-  "session.activated": EventDefinition<SessionActivatedEvent>
-  "session.launch.finished": EventDefinition<SessionLaunchFinishedEvent>
-  "session.launch.failed": EventDefinition<SessionLaunchFailedEvent>
-  "session.stopping": EventDefinition<SessionStoppingEvent>
-  "session.blocked": EventDefinition<SessionBlockedEvent>
-  "session.turn.ended": EventDefinition<SessionAttentionEvent>
-  "session.replied": EventDefinition<SessionIdEvent>
-  "session.completed": EventDefinition<SessionIdEvent>
-  "session.message": EventDefinition<{ id: SessionId; message: SessionMessageEvent }>
-  "session.lifecycle.updated": EventDefinition<
-    Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>
-  >
-  "session.lifecycle.deleted": EventDefinition<
-    Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>
-  >
-}
 
 export type SessionEventEmitter = EventBus<SessionEventDefinitions>
 

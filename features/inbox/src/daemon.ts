@@ -1,10 +1,11 @@
-import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { kind } from "kindstore"
 
 import { inboxIpcRoutes } from "./daemon-ipc.ts"
 import { createInboxManager } from "./daemon/manager.ts"
+import { inboxEvents } from "./events.ts"
 import { InboxItem } from "./schema.ts"
 
 export { createInboxManager, type InboxManager } from "./daemon/manager.ts"
@@ -25,9 +26,7 @@ export const inboxPlugin = definePlugin({
   db: {
     schema: inboxDb,
   },
-  events: {
-    "inbox.item.updated": event<InboxItem>({ debug: "inbox.stream" }),
-  },
+  events: inboxEvents,
   ipcRoutes: inboxIpcRoutes,
   setup({ db, events, session }) {
     const inbox = createInboxManager({

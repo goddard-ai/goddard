@@ -1,7 +1,7 @@
 import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 import { describe, expect, test } from "bun:test"
 
-import { composeSdkPlugins, defineSdkPlugin } from "../src/index.ts"
+import { composeSdkPlugins, defineSdkPlugin, type InferSdkEvents } from "../src/index.ts"
 
 const testIpcRoutes = defineIpcRoutes({
   inbox: http.resource("inbox", {
@@ -125,5 +125,48 @@ describe("SDK plugin composition", () => {
     ).toEqual({
       inbox: { list },
     })
+  })
+
+  test("composes plugin event definitions for SDK event inference", () => {
+    const first = defineSdkPlugin({
+      name: "first",
+      ipcRoutes: testIpcRoutes,
+      events: {
+        "inbox.item.updated": {},
+      },
+    })
+    const second = defineSdkPlugin({
+      name: "second",
+      ipcRoutes: moreTestIpcRoutes,
+      events: {
+        "session.message": {},
+      },
+    })
+
+    const composition = composeSdkPlugins([first, second])
+    type Events = InferSdkEvents<typeof composition>
+    const eventName: keyof Events = "session.message"
+
+    expect(eventName).toBe("session.message")
+    expect(Object.keys(composition.events)).toEqual(["inbox.item.updated", "session.message"])
+  })
+
+  test("rejects duplicate event definitions", () => {
+    const first = defineSdkPlugin({
+      name: "first",
+      ipcRoutes: testIpcRoutes,
+      events: {
+        "session.message": {},
+      },
+    })
+    const second = defineSdkPlugin({
+      name: "second",
+      ipcRoutes: moreTestIpcRoutes,
+      events: {
+        "session.message": {},
+      },
+    })
+
+    expect(() => composeSdkPlugins([first, second])).toThrow("Duplicate SDK event: session.message")
   })
 })
