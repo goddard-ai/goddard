@@ -1,6 +1,5 @@
 import { createDaemonEventBus, type BackendEventHandler } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import {
@@ -10,20 +9,17 @@ import {
 } from "./backend.ts"
 import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
-import { FeedbackEventContext, SetupContext } from "./context.ts"
+import { SetupContext } from "./context.ts"
 import { daemonRuntimeEvents } from "./events.ts"
-import { buildPrompt, isFeedbackEvent, type FeedbackEvent } from "./feedback.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
   createLogger,
-  createPayloadPreview,
   installDaemonFatalErrorCapture,
   type DaemonLogger,
   type LogMode,
 } from "./logging.ts"
 import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
-import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
@@ -159,18 +155,6 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
         backendEventHandlers.register(handler)
       }
     }
-
-    backendEventHandlers.register(
-      createDaemonPrFeedbackBackendEventHandler({
-        activeIpcServer,
-        agentBinDir,
-        client,
-        configManager,
-        daemonEvents,
-        logger,
-        store,
-      }),
-    )
 
     async function closeBackendStream() {
       if (!subscription) {
@@ -319,101 +303,6 @@ async function dispatchBackendEvent(
         ...toErrorProperties(error),
       })
     }
-  }
-}
-
-function createDaemonPrFeedbackBackendEventHandler(input: {
-  activeIpcServer: DaemonServer | undefined
-  agentBinDir: string
-  client: BackendClient
-  configManager: ReturnType<typeof createConfigManager>
-  daemonEvents: ReturnType<typeof createDaemonEventBus>
-  logger: DaemonLogger
-  store: ComposedDaemonStore
-}): BackendEventHandler<FeedbackEvent> {
-  // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
-  const runningPrs = new Set<string>()
-
-  return {
-    name: "daemon.pr-feedback",
-    canHandle: (event): event is FeedbackEvent =>
-      typeof event === "object" && event != null && isFeedbackEvent(event as RepoEvent),
-    async handle(event) {
-      const feedbackContext = {
-        repository: `${event.owner}/${event.repo}`,
-        prNumber: event.prNumber,
-        feedbackType: event.type,
-      }
-      const feedbackEventPayload = {
-        ...feedbackContext,
-        owner: event.owner,
-        repo: event.repo,
-      }
-
-      await FeedbackEventContext.run(feedbackContext, async () => {
-        if (!input.activeIpcServer) {
-          input.logger.log("repo.feedback_ignored", {
-            reason: "ipc_disabled",
-          })
-          await input.daemonEvents.emit("repo.feedback.ignored", {
-            ...feedbackEventPayload,
-            reason: "ipc_disabled",
-          })
-          return
-        }
-
-        const prompt = buildPrompt(event)
-        const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-        if (runningPrs.has(requestKey)) {
-          input.logger.log("repo.feedback_coalesced")
-          return
-        }
-
-        runningPrs.add(requestKey)
-
-        try {
-          const { managed } = await input.client.pullRequests.managed({
-            owner: event.owner,
-            repo: event.repo,
-            prNumber: event.prNumber,
-          })
-          if (!managed) {
-            input.logger.log("repo.feedback_ignored", {
-              reason: "unmanaged_pr",
-            })
-            await input.daemonEvents.emit("repo.feedback.ignored", {
-              ...feedbackEventPayload,
-              reason: "unmanaged_pr",
-            })
-            return
-          }
-
-          input.logger.log("pr_feedback.launch", {
-            prompt: createPayloadPreview(prompt),
-          })
-          const exitCode = await runPrFeedbackFlow({
-            event,
-            prompt,
-            daemonUrl: input.activeIpcServer.daemonUrl,
-            agentBinDir: input.agentBinDir,
-            configManager: input.configManager,
-            store: input.store,
-          })
-          input.logger.log("pr_feedback.finish", {
-            exitCode,
-          })
-          await input.daemonEvents.emit("repo.feedback.finished", {
-            ...feedbackEventPayload,
-            exitCode,
-          })
-        } catch (error) {
-          input.logger.log("pr_feedback.failed", toErrorProperties(error))
-        } finally {
-          runningPrs.delete(requestKey)
-        }
-      })
-    },
   }
 }
 
