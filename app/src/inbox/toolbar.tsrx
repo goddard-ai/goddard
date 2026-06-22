@@ -1,5 +1,5 @@
 import { t } from "@lingui/core/macro"
-import { RefreshCcw, Search } from "lucide-react"
+import { Search } from "lucide-react"
 
 import { inboxFilterDefinitions, inboxFilterOrder, type InboxFilterId } from "./filters.ts"
 import { getInboxSearchActiveFilterIds } from "./search.ts"
@@ -10,7 +10,6 @@ export function InboxToolbar(props: {
   inputRef?: (element: HTMLInputElement | null) => void | (() => void);
   searchQuery: string;
   onFilterSelect: (id: InboxFilterId) => void;
-  onRefresh: () => void;
   onSearchInput?: (value: string) => void;
 }) @{
   const hasSearchQuery = props.searchQuery.trim().length > 0
@@ -57,17 +56,6 @@ export function InboxToolbar(props: {
           }}
         />
       </label>
-      <button
-        class={styles.iconButton}
-        aria-label={t`Refresh inbox`}
-        title={t`Refresh inbox`}
-        type="button"
-        onClick={() => {
-          props.onRefresh()
-        }}
-      >
-        <RefreshCcw size={16} strokeWidth={2.1} />
-      </button>
     </div>
   </div>
 }
