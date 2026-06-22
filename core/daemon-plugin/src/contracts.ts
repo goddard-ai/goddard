@@ -290,7 +290,7 @@ export type IpcHandlers<TIpcRoutes> = TIpcRoutes extends HttpRouteTree
 
 /** Runtime setup contribution shape used after plugin definitions are erased. */
 export type RuntimeSetupContributions = {
-  readonly backendEventHandlers?: readonly BackendEventHandler[]
+  readonly backendEventHandlers?: readonly BackendEventHandler<any>[]
   readonly ipcHandlers?: Record<string, unknown>
   readonly provides?: FeatureExtensions
   readonly close?: () => void | Promise<void>

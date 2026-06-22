@@ -134,7 +134,7 @@ type SetupContributions<
   TProvides extends FeatureExtensions | undefined,
 > = IpcHandlerContributions<TIpcRoutes> &
   ProvidesContribution<TProvides> & {
-    readonly backendEventHandlers?: readonly BackendEventHandler[]
+    readonly backendEventHandlers?: readonly BackendEventHandler<any>[]
     readonly close?: () => void | Promise<void>
   }
 
