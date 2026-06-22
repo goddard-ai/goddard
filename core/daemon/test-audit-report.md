@@ -1,23 +1,28 @@
 # Core Daemon Test Audit Report
 
-Audited with `sem entities core/daemon/test/*.test.ts` against current `core/daemon/test` files.
+Initial audit used `sem entities core/daemon/test/*.test.ts` against the daemon test files at the time.
+
+Event-system refresh on 2026-06-22 used the current daemon event catalog and test inventory. Current `sem entities core/daemon/test/*.test.ts` reports 129 daemon test cases; the detailed table below still contains the original 125-row inventory and should be fully regenerated before using row counts or line numbers as authoritative.
 
 This report maps current test cases to the contract they appear to protect, the assertion surfaces they use, and whether better seams would make the tests less coupled to daemon internals or logs. It is an audit only; it does not refactor tests.
 
 ## Summary
 
 - Test files audited: 12.
-- Test cases audited: 125.
+- Detailed table rows: 125 original audit rows.
+- Current test inventory: 129 test cases.
 - Strongest immediate refactor candidates:
   - `core/daemon/test/daemon.test.ts` runtime tests that use logs as lifecycle assertions or synchronization.
   - `core/daemon/test/config-reload.test.ts` config reload failure detection through logs.
   - `core/daemon/test/ipc-security.test.ts` mixed behavior tests with embedded logging/correlation assertions.
 - Most DB assertions in `session-lifecycle.test.ts` are defensible when the test explicitly covers persistence, restart recovery, stored records, or hidden state transitions. Some are `db-proxy` candidates where a follow-up IPC query would express the contract better.
-- A recurring missing seam is a typed daemon event recorder for operational lifecycle events. Logs often appear where tests need a stable event such as feedback ignored, feedback flow completed, stream degraded, config reload failed, or IPC correlation recorded.
+- The daemon now has a unified event system with both IPC `events.stream` and an in-process `daemon.events.stream` test seam. Runtime events are logged automatically by `observeDaemonEventsForLogging` when emitted through the daemon event bus.
+- Several previously proposed seams now exist, including `repo.feedback.ignored`, `repo.feedback.finished`, `repo.subscription.degraded`, `session.message`, `session.lifecycle.updated`, `session.lifecycle.deleted`, and session lifecycle/worktree events.
+- Remaining likely event gaps are `config.reload.failed`, repo subscription started, PR feedback launch/coalesced/failed/session-create-failed, explicit idle-shutdown timer state events, and structured worktree bootstrap failure events.
 
 ## Counts
 
-Primary contract categories from the table:
+Primary contract categories from the original table:
 
 | Contract type | Count | Notes |
 |---|---:|---|
@@ -38,6 +43,41 @@ Common smells:
 | `fake-first-party` | Agent install/update service tests use local fake service collaborators. |
 | `time-sensitive` | Long-running daemon/session lifecycle tests use polling and timeouts. |
 | `multi-contract` | Several daemon runtime and session lifecycle tests combine behavior, persistence, and diagnostics. |
+
+## Current Unified Event Status
+
+Current daemon event infrastructure:
+
+- `startDaemonServer()` composes `daemonRuntimeEvents` with plugin events and returns `daemon.events`, so integration tests can observe events in-process without going through logs.
+- IPC exposes the same composed stream through `events.stream`, with name and exact payload-property filters.
+- The IPC server observes daemon events and logs them automatically with `eventId` and `eventAt`, using debug scopes when event definitions request debug logging.
+
+Events that already cover earlier audit suggestions:
+
+| Earlier need | Current event status | Notes |
+|---|---|---|
+| feedback ignored | `repo.feedback.ignored` exists | Covers `ipc_disabled` and `unmanaged_pr`. |
+| feedback flow completed | `repo.feedback.finished` exists | Earlier report used the proposed name `repo.feedback.finish`; current code uses `finished`. |
+| stream subscription degraded | `repo.subscription.degraded` exists | Covers unauthenticated stream startup. |
+| session message stream | `session.message` exists | Replaces older session message stream-specific IPC routes and is used by idle-shutdown subscriber tests. |
+| session lifecycle updates | `session.lifecycle.updated` and `session.lifecycle.deleted` exist | Useful for connection/status/list invalidation behavior. |
+| session worktree and launch lifecycle | `session.worktree.prepared`, `session.persisted`, `session.activated`, `session.launch.finished`, `session.launch.failed`, `session.stopping` exist | Covers many launch/worktree/restart observations. |
+| inbox updates | `inbox.item.updated` exists | Good replacement for some direct inbox DB assertions. |
+| pull request attention updates | `pull_request.created` and `pull_request.updated` exist | Good replacement for some PR/inbox coupling assertions when attention is the contract. |
+
+Remaining event gaps to consider:
+
+| Missing or incomplete event | Tests/behavior it would help | Suggested payload |
+|---|---|---|
+| `config.reload.failed` | `config-reload.test.ts` invalid local config recovery currently counts logs. | scope, cwd or config path, error message, previous version if available. |
+| `repo.subscription.started` | `daemon.test.ts` IPC-only/stream-enabled startup assertions still inspect subscription-start logs. | daemon URL/port when IPC is active; backend base URL if useful. |
+| `repo.feedback.started` or `repo.feedback.launched` | Runtime feedback flow still asserts `pr_feedback.launch` logs. | repository, owner, repo, prNumber, feedbackType. Avoid prompt text unless explicitly needed. |
+| `repo.feedback.failed` | Runtime feedback flow still checks absence of `pr_feedback.session_create_failed`/failed logs. | repository, owner, repo, prNumber, feedbackType, failure phase, error message. |
+| `repo.feedback.coalesced` | Current coalescing is log-only. | repository, owner, repo, prNumber, feedbackType. |
+| idle shutdown timer events | Idle shutdown tests still assert persisted diagnostics for timer started/cancelled/expired. | sessionId, action (`started`, `cancelled`, `expired`, `skipped`), reason, timeoutMs. |
+| worktree bootstrap failure event | Bootstrap failure tests still lean on diagnostics and launch failure behavior. | sessionId if allocated, requested cwd, worktree info when available, phase, exit code/error message. |
+
+Rows below that recommend `replace-log-with-event` should first check whether the current event already exists. If it does, prefer converting assertions to `events.stream` or `daemon.events.stream` before adding new events.
 
 ## Audit Table
 
@@ -79,10 +119,10 @@ Common smells:
 | `config-schema.test.ts:78` | root config merging rejects non-object config fragments before merging | test-harness-infrastructure | Config merging rejects invalid fragments. | merge helper | internal-import | helper is schema/config boundary | keep |
 | `config-schema.test.ts:95` | root config merging keeps managed agents global only | test-harness-infrastructure | Config merging preserves global-only managed agents. | merge helper | internal-import | helper is schema/config boundary | keep |
 | `daemon.test.ts:50` | daemon package ships agent-bin wrappers for goddard and workforce | test-harness-infrastructure | Packaged daemon includes agent wrappers. | filesystem | none | package artifact check | keep |
-| `daemon.test.ts:61` | daemon run subscribes once and launches managed PR feedback sessions across repositories | missing-seam | Stream feedback creates completed sessions for matching repositories. | backend harness, DB sessions, logs | log-proxy, db-proxy, time-sensitive | feedback/session lifecycle event plus public session query | replace-log-with-event |
+| `daemon.test.ts:61` | daemon run subscribes once and launches managed PR feedback sessions across repositories | missing-seam | Stream feedback creates completed sessions for matching repositories. | backend harness, DB sessions, logs, partial event assertion | log-proxy, db-proxy, time-sensitive | use existing `repo.feedback.finished`; add feedback started/failed events only if launch/failure is a contract | replace-log-with-event |
 | `daemon.test.ts:215` | daemon run can start only the IPC server when stream is disabled | missing-seam | IPC starts without stream subscription. | health check, backend count, logs | log-proxy | IPC health already covers listening; remove log assertions | remove-incidental-assertion |
-| `daemon.test.ts:258` | daemon run can subscribe without IPC and ignores feedback that requires the PR feedback flow | missing-seam | Stream feedback is ignored when IPC is disabled. | backend harness, DB sessions, logs | log-proxy, db-proxy | `repo.feedback.ignored` daemon event or backend delivery ack plus no sessions | replace-log-with-event |
-| `daemon.test.ts:313` | daemon run keeps IPC available when stream startup is unauthenticated | missing-seam | IPC remains available when stream subscription degrades. | health check, backend count, logs | log-proxy | `repo.subscription.degraded` event if degraded state is contract | replace-log-with-event |
+| `daemon.test.ts:258` | daemon run can subscribe without IPC and ignores feedback that requires the PR feedback flow | missing-seam | Stream feedback is ignored when IPC is disabled. | backend harness, DB sessions, logs | log-proxy, db-proxy | use existing `repo.feedback.ignored`; backend delivery ack may still help | replace-log-with-event |
+| `daemon.test.ts:313` | daemon run keeps IPC available when stream startup is unauthenticated | missing-seam | IPC remains available when stream subscription degrades. | health check, backend count, logs | log-proxy | use existing `repo.subscription.degraded` event | replace-log-with-event |
 | `daemon.test.ts:369` | daemon run defaults to compact terminal logs | diagnostic-contract | Default terminal log mode is compact. | stdout | none | log output is contract | keep |
 | `daemon.test.ts:385` | daemon run supports raw json terminal logs when requested | diagnostic-contract | JSON log mode writes raw JSON entries. | stdout JSON | none | log output is contract | keep |
 | `daemon.test.ts:402` | daemon run supports verbose terminal logs with expanded fields | diagnostic-contract | Verbose log mode expands fields. | stdout | none | log output is contract | keep |
@@ -125,9 +165,9 @@ Common smells:
 | `session-lifecycle.test.ts:1008` | multiple clients can observe the same live session stream independently | public-daemon-behavior | Multiple stream subscribers receive same live session updates. | IPC subscriptions | time-sensitive | public stream | keep |
 | `session-lifecycle.test.ts:1061` | daemon auto-shuts down idle loadable sessions with no connected clients | diagnostic-contract | Idle shutdown occurs and records diagnostics. | IPC, DB, diagnostics | time-sensitive, diagnostics | session lifecycle event plus diagnostics if accepted | split-diagnostic-contract |
 | `session-lifecycle.test.ts:1091` | session idle auto-shutdown uses configured duration | diagnostic-contract | Configured idle timeout controls shutdown and diagnostics. | IPC, DB, diagnostics | time-sensitive, diagnostics | lifecycle event plus public session state | split-diagnostic-contract |
-| `session-lifecycle.test.ts:1119` | session.streamMessages subscribers cancel idle auto-shutdown before expiry | diagnostic-contract | Stream subscribers cancel idle timer. | IPC stream, DB, diagnostics | time-sensitive, diagnostics | lifecycle/idle timer event if operational contract | split-diagnostic-contract |
+| `session-lifecycle.test.ts:1119` | session.message event stream subscribers cancel idle auto-shutdown before expiry | diagnostic-contract | Stream subscribers cancel idle timer. | daemon event stream, DB, diagnostics | time-sensitive, diagnostics | add idle timer events if operational contract | split-diagnostic-contract |
 | `session-lifecycle.test.ts:1149` | session lifecycle subscribers do not cancel idle auto-shutdown | diagnostic-contract | Lifecycle subscribers do not hold sessions alive. | IPC subscription, DB, diagnostics | time-sensitive, diagnostics | lifecycle/idle event | split-diagnostic-contract |
-| `session-lifecycle.test.ts:1195` | idle auto-shutdown waits for the last session.streamMessages subscriber to disconnect | diagnostic-contract | Idle timer starts after last stream subscriber disconnects. | IPC stream, DB, diagnostics | time-sensitive, diagnostics | lifecycle/idle event | split-diagnostic-contract |
+| `session-lifecycle.test.ts:1195` | idle auto-shutdown waits for the last session.message event stream subscriber to disconnect | diagnostic-contract | Idle timer starts after last stream subscriber disconnects. | daemon event stream, DB, diagnostics | time-sensitive, diagnostics | add idle timer events if operational contract | split-diagnostic-contract |
 | `session-lifecycle.test.ts:1254` | busy loadable sessions do not time out until they become quiescent | diagnostic-contract | Active turn delays idle shutdown. | IPC, DB, diagnostics | time-sensitive, diagnostics | lifecycle/idle event | split-diagnostic-contract |
 | `session-lifecycle.test.ts:1278` | sessions waiting on permission responses do not time out until the permission resolves | diagnostic-contract | Pending permission delays idle shutdown. | IPC, DB, diagnostics | time-sensitive, diagnostics | lifecycle/idle event | split-diagnostic-contract |
 | `session-lifecycle.test.ts:1316` | sessions without session/load support never use idle auto-shutdown | diagnostic-contract | Unsupported sessions skip idle timer. | IPC, DB, diagnostics | time-sensitive, diagnostics | diagnostics may be explicit contract | split-diagnostic-contract |
@@ -171,24 +211,27 @@ Common smells:
 
 ## Proposed Seams
 
-- Typed daemon event recorder for tests:
-  - `repo.feedback.ignored`
-  - `repo.feedback.launch`
-  - `repo.feedback.finish`
-  - `repo.subscription.started`
-  - `repo.subscription.degraded`
-  - `config.reload.failed`
-  - idle shutdown timer state changes
-  - worktree bootstrap failure
-- Backend harness delivery acknowledgement for stream events, so tests can know an event was delivered without polling logs.
+- Use existing daemon event streams in tests:
+  - in-process `daemon.events.stream(...)` for integration tests that start a daemon server directly,
+  - IPC `events.stream` for end-to-end daemon-client behavior.
+- Add or complete missing events:
+  - `config.reload.failed`,
+  - `repo.subscription.started`,
+  - `repo.feedback.started` or `repo.feedback.launched`,
+  - `repo.feedback.failed`,
+  - `repo.feedback.coalesced`,
+  - idle shutdown timer state changes,
+  - structured worktree bootstrap failure.
+- Backend harness delivery acknowledgement for stream events, so tests can know a backend event was delivered without polling logs.
 - Public IPC follow-up queries for inbox/session state currently asserted directly through DB rows.
-- Automatic logging from daemon events where the event is operationally meaningful, avoiding adjacent manual log calls used only for observability.
+- Continue deriving operational logs from daemon events where practical, avoiding adjacent manual log calls used only for observability.
 
 ## Recommended Work Order
 
-1. Add a daemon event capture seam for tests and automatic event logging for accepted operational events.
-2. Refactor `daemon.test.ts` runtime log-proxy tests to use events, public IPC, and backend delivery acknowledgement.
-3. Refactor `config-reload.test.ts` invalid config reload detection to use a typed reload-failed event.
-4. Split `ipc-security.test.ts` so redaction/correlation/crash-detail assertions live in explicit diagnostic-contract tests.
-5. Revisit `session-lifecycle.test.ts` DB assertions opportunistically, replacing `db-proxy` cases with public IPC where it clarifies the contract.
-6. Tighten `.agents/rules/testing.md` after the refactors settle, so future behavior tests do not use logs as convenient proxies.
+1. Convert `daemon.test.ts` assertions that can already use `repo.feedback.finished`, `repo.feedback.ignored`, and `repo.subscription.degraded`.
+2. Add missing repo/config events for remaining log-proxy assertions: subscription started, feedback launched/coalesced/failed, and config reload failed.
+3. Refactor `config-reload.test.ts` invalid config reload detection to use `config.reload.failed` once available.
+4. Decide whether idle shutdown timer diagnostics should become daemon events; if yes, add those events and update idle-shutdown tests to assert them.
+5. Split `ipc-security.test.ts` so redaction/correlation/crash-detail assertions live in explicit diagnostic-contract tests.
+6. Revisit `session-lifecycle.test.ts` DB assertions opportunistically, replacing `db-proxy` cases with public IPC or existing events where it clarifies the contract.
+7. Fully regenerate this audit table after the event-based refactors land, since the current table predates browser-access tests and line-number drift.
