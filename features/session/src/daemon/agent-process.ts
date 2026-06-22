@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
-import type { ManagedAgentService } from "@goddard-ai/agent/daemon"
+import type { AgentService } from "@goddard-ai/agent/daemon"
 import type { ManagedAgentProcessSpec } from "@goddard-ai/agent/daemon/install-service"
 import type { DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
 import { getGoddardTempLogDir } from "@goddard-ai/paths/node"
@@ -208,11 +208,11 @@ export async function spawnAgentProcess(params: {
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>
   envPolicy?: SessionEnvPolicyConfig
-  managedAgent: ManagedAgentService
+  agentService: AgentService
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessHandle> {
-  const { cmd, args, env } = await params.managedAgent.resolveLaunchProcessSpec({
+  const { cmd, args, env } = await params.agentService.resolveLaunchProcessSpec({
     agent: params.agent,
     registry: params.registry,
     managedAgents: params.managedAgents,
