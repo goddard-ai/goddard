@@ -4,16 +4,10 @@ import { access, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/p
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-export type TargetConfig = {
-  platform: string
-  arch: string
-  bunTarget: string
-  library: string
-}
+import { nativeLibgit2Manifest } from "../manifest.ts"
 
-type NativeManifest = {
-  targets: Record<string, TargetConfig>
-}
+export type TargetConfig =
+  (typeof nativeLibgit2Manifest.targets)[keyof typeof nativeLibgit2Manifest.targets]
 
 type Versions = {
   libgit2: {
@@ -32,20 +26,15 @@ export const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)))
 export const sourceDir = join(rootDir, "source", "libgit2")
 export const generatedRootNames = ["source", "build", "dist"] as const
 
-export async function readManifest() {
-  return JSON.parse(await readFile(join(rootDir, "manifest.json"), "utf8")) as NativeManifest
-}
-
 export async function readVersions() {
   return JSON.parse(await readFile(join(rootDir, "versions.json"), "utf8")) as Versions
 }
 
 export async function resolveTarget(target: string) {
-  const manifest = await readManifest()
-  const config = manifest.targets[target]
+  const config = nativeLibgit2Manifest.targets[target as keyof typeof nativeLibgit2Manifest.targets]
   if (!config) {
     throw new Error(
-      `Unsupported libgit2 target "${target}". Supported: ${Object.keys(manifest.targets).join(", ")}`,
+      `Unsupported libgit2 target "${target}". Supported: ${Object.keys(nativeLibgit2Manifest.targets).join(", ")}`,
     )
   }
   return config

@@ -1,5 +1,5 @@
 {
-  "name": "@goddard-native/libgit2",
+  "name": "@goddard-ai/git-vendor-libgit2",
   "version": "0.1.0",
   "private": true,
   "license": "FSL-1.1-ALv2",

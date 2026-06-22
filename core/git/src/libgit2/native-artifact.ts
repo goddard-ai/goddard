@@ -1,9 +1,10 @@
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import nativeManifest from "../../../../native/libgit2/manifest.json" with { type: "json" }
-
-type NativeLibgit2Target = keyof typeof nativeManifest.targets
+import {
+  nativeLibgit2Manifest,
+  type NativeLibgit2Target,
+} from "../../vendor/libgit2/manifest.ts"
 
 type NativeLibgit2PathInput = {
   platform?: NodeJS.Platform
@@ -23,10 +24,10 @@ export function nativeLibgit2PathCandidates(input: NativeLibgit2PathInput = {}) 
     return []
   }
 
-  const artifact = nativeManifest.targets[target].library
+  const artifact = nativeLibgit2Manifest.targets[target].library
   const roots = [
-    resolve(input.moduleDir ?? moduleDir, "../../../../native/libgit2"),
-    resolve(input.cwd ?? process.cwd(), "native/libgit2"),
+    resolve(input.moduleDir ?? moduleDir, "../../vendor/libgit2"),
+    resolve(input.cwd ?? process.cwd(), "core/git/vendor/libgit2"),
   ]
 
   return [...new Set(roots.map((root) => resolve(root, "dist", target, artifact)))]

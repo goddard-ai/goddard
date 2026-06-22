@@ -77,7 +77,9 @@ test("native libgit2 candidates include the repo-local artifact for supported ta
     cwd: "/repo",
   })
 
-  expect(candidates).toEqual(["/repo/native/libgit2/dist/darwin-arm64/lib/libgit2.dylib"])
+  expect(candidates).toEqual([
+    "/repo/core/git/vendor/libgit2/dist/darwin-arm64/lib/libgit2.dylib",
+  ])
 })
 
 test("native libgit2 candidates are empty for unsupported targets", () => {
