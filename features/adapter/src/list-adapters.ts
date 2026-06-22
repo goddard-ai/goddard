@@ -1,138 +1,64 @@
-import { resolveDefaultAgent } from "@goddard-ai/config/node"
-import type {
-  DaemonAgentInstallService,
-  DaemonAgentInstallStatus,
-  DaemonInstalledAgent,
-} from "@goddard-ai/daemon-plugin"
-import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
-import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
-import { omit } from "radashi"
-
-import { createConfigAdapterCatalogEntries, mergeAdapterCatalogEntries } from "./catalog.ts"
-import { getAdapterInstallationStates, installAdapter, uninstallAdapter } from "./installations.ts"
 import {
-  AdapterCatalogEntry,
-  type AdapterManagedInstall,
-  type AdapterManagedInstallAgent,
-  type AdapterManagedInstallState,
-  type InstallAdapterRequest,
-  type InstallAdapterResponse,
-  type ListAdaptersRequestType,
-  type ListAdaptersResponse,
-  type UninstallAdapterRequest,
-  type UninstallAdapterResponse,
+  installCatalogManagedAgent,
+  listManagedAgents,
+  uninstallCatalogManagedAgent,
+  type ListManagedAgentsContext,
+  type ManagedAgentConfigManager,
+  type ManagedAgentRegistryService,
+} from "@goddard-ai/managed-agent/list-managed-agents"
+import type {
+  InstallManagedAgentResponse,
+  ListManagedAgentsResponse,
+  ManagedAgentInstallationState,
+} from "@goddard-ai/managed-agent/schema"
+
+import type {
+  AdapterInstallationState,
+  InstallAdapterRequest,
+  InstallAdapterResponse,
+  ListAdaptersRequestType,
+  ListAdaptersResponse,
+  UninstallAdapterRequest,
+  UninstallAdapterResponse,
 } from "./schema.ts"
 
-type AdapterRegistrySnapshot = Omit<
-  ListAdaptersResponse,
-  "adapters" | "defaultAdapterId" | "installations"
-> & {
-  adapters: readonly unknown[]
-}
+export type AdapterRegistryService = ManagedAgentRegistryService
+export type AdapterConfigManager = ManagedAgentConfigManager
+export type ListAdaptersContext = ListManagedAgentsContext
 
-export type AdapterRegistryService = {
-  listAdapters: () => Promise<AdapterRegistrySnapshot>
-}
-
-export type AdapterConfigManager = {
-  getRootConfig: (cwd?: string) => Promise<{
-    config: {
-      agents?: AgentsConfig
-      session?: StaticSessionParams
-      registry?: Record<string, AgentDistribution>
-    }
-  }>
-}
-
-export type ListAdaptersContext = {
-  registryService: AdapterRegistryService
-  configProvider: AdapterConfigManager
-  agentInstallService: DaemonAgentInstallService
-}
-
-function orderAdaptersByInstallationState(
-  adapters: AdapterCatalogEntry[],
-  installedAdapterIds: Set<string>,
-) {
-  return [
-    ...adapters.filter((adapter) => installedAdapterIds.has(adapter.id)),
-    ...adapters.filter((adapter) => !installedAdapterIds.has(adapter.id)),
-  ]
-}
-
-function isManagedAdapter(adapter: AdapterCatalogEntry, managedAgents?: AgentsConfig["managed"]) {
-  return managedAgents?.[adapter.id] !== undefined
-}
-
-async function readMergedAdapterCatalog(
-  { registryService, configProvider }: ListAdaptersContext,
-  cwd?: string,
-) {
-  const [registrySnapshot, resolvedConfig] = await Promise.all([
-    registryService.listAdapters(),
-    configProvider.getRootConfig(cwd).then((snapshot) => snapshot.config),
-  ])
-  const registryAdapters = registrySnapshot.adapters.map((adapter) =>
-    AdapterCatalogEntry.parse(adapter),
-  )
-  const mergedAdapters = mergeAdapterCatalogEntries(
-    registryAdapters,
-    createConfigAdapterCatalogEntries(resolvedConfig?.registry),
-  )
-
+function toAdapterInstallationState(
+  state: ManagedAgentInstallationState,
+): AdapterInstallationState {
+  const { managedAgentId, ...rest } = state
   return {
-    registrySnapshot,
-    resolvedConfig,
-    mergedAdapters,
+    adapterId: managedAgentId,
+    ...rest,
   }
 }
 
-/** Lists adapters from registry and config substrate using adapter feature merge semantics. */
+function toListAdaptersResponse(response: ListManagedAgentsResponse): ListAdaptersResponse {
+  const { defaultManagedAgentId, managedAgents, installations, ...rest } = response
+  return {
+    ...rest,
+    adapters: managedAgents,
+    installations: installations.map(toAdapterInstallationState),
+    defaultAdapterId: defaultManagedAgentId,
+  }
+}
+
+function toInstallAdapterResponse(response: InstallManagedAgentResponse): InstallAdapterResponse {
+  return {
+    adapter: response.managedAgent,
+    installation: toAdapterInstallationState(response.installation),
+  }
+}
+
+/** Lists adapters using the managed-agent catalog implementation. */
 export async function listAdapters(
   context: ListAdaptersContext,
-  { cwd, includeUninstalled }: ListAdaptersRequestType,
-) {
-  const { registrySnapshot, resolvedConfig, mergedAdapters } = await readMergedAdapterCatalog(
-    context,
-    cwd,
-  )
-  const installations = await getAdapterInstallationStates(mergedAdapters)
-  const installedAdapterIds = new Set(
-    installations
-      .filter((installation) => installation.installed)
-      .map((installation) => installation.adapterId),
-  )
-  const listedAdapters = orderAdaptersByInstallationState(
-    includeUninstalled
-      ? mergedAdapters
-      : mergedAdapters.filter(
-          (adapter) =>
-            installedAdapterIds.has(adapter.id) ||
-            isManagedAdapter(adapter, resolvedConfig?.agents?.managed),
-        ),
-    installedAdapterIds,
-  )
-  const adapters = await attachManagedInstallStatus({
-    adapters: listedAdapters,
-    agentInstallService: context.agentInstallService,
-    managedAgents: resolvedConfig?.agents?.managed,
-    registry: resolvedConfig?.registry,
-  })
-  const defaultAgent = await resolveDefaultAgent(resolvedConfig).catch(() => null)
-
-  return {
-    ...registrySnapshot,
-    adapters,
-    installations,
-    defaultAdapterId:
-      typeof defaultAgent === "string" &&
-      mergedAdapters.some((adapter) => adapter.id === defaultAgent) &&
-      (includeUninstalled ||
-        installedAdapterIds.has(defaultAgent) ||
-        resolvedConfig?.agents?.managed?.[defaultAgent] !== undefined)
-        ? defaultAgent
-        : null,
-  }
+  request: ListAdaptersRequestType,
+): Promise<ListAdaptersResponse> {
+  return toListAdaptersResponse(await listManagedAgents(context, request))
 }
 
 /** Installs one adapter from the daemon-visible catalog into the local launch set. */
@@ -140,84 +66,16 @@ export async function installCatalogAdapter(
   context: ListAdaptersContext,
   { adapterId }: InstallAdapterRequest,
 ): Promise<InstallAdapterResponse> {
-  const { mergedAdapters } = await readMergedAdapterCatalog(context)
-  const adapter = mergedAdapters.find((adapter) => adapter.id === adapterId)
-
-  if (!adapter) {
-    throw new Error(`Unknown adapter: ${adapterId}`)
-  }
-
-  return {
-    adapter,
-    installation: await installAdapter(adapter),
-  }
+  return toInstallAdapterResponse(
+    await installCatalogManagedAgent(context, { managedAgentId: adapterId }),
+  )
 }
 
 /** Removes one adapter from the local launch set. */
 export async function uninstallCatalogAdapter(
-  _context: ListAdaptersContext,
+  context: ListAdaptersContext,
   { adapterId }: UninstallAdapterRequest,
 ): Promise<UninstallAdapterResponse> {
-  await uninstallAdapter(adapterId)
-
+  await uninstallCatalogManagedAgent(context, { managedAgentId: adapterId })
   return { adapterId }
-}
-
-async function attachManagedInstallStatus(input: {
-  adapters: AdapterCatalogEntry[]
-  agentInstallService: DaemonAgentInstallService
-  managedAgents?: AgentsConfig["managed"]
-  registry?: Record<string, AgentDistribution>
-}) {
-  if (!input.managedAgents) {
-    return input.adapters
-  }
-
-  return Promise.all(
-    input.adapters.map(async (adapter) => {
-      const managedAgent = input.managedAgents?.[adapter.id]
-      if (!managedAgent) {
-        return adapter
-      }
-
-      const state = await input.agentInstallService.getInstalledAgent({
-        agent: adapter.id,
-        registry: input.registry,
-      })
-
-      return {
-        ...adapter,
-        managedInstall: {
-          managed: true,
-          install: managedAgent.install,
-          update: managedAgent.update,
-          state: toAdapterManagedInstallState(state),
-        } satisfies AdapterManagedInstall,
-      }
-    }),
-  )
-}
-
-function toAdapterManagedInstallState(state: DaemonAgentInstallStatus): AdapterManagedInstallState {
-  if (state.status === "missing") {
-    return { status: "missing" }
-  }
-
-  if (state.status === "installed") {
-    return {
-      status: "installed",
-      agent: toAdapterManagedInstallAgent(state.agent),
-    }
-  }
-
-  return {
-    status: "failed",
-    lastError: state.lastError,
-    checkedAt: state.checkedAt,
-    agent: state.agent ? toAdapterManagedInstallAgent(state.agent) : undefined,
-  }
-}
-
-function toAdapterManagedInstallAgent(agent: DaemonInstalledAgent): AdapterManagedInstallAgent {
-  return omit(agent, ["distributionHash", "platform", "installDir"])
 }
