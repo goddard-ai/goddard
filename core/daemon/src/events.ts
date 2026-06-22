@@ -1,21 +1,5 @@
 import { event } from "@goddard-ai/daemon-plugin"
 
-export type RepoFeedbackEventPayload = {
-  repository: string
-  owner: string
-  repo: string
-  prNumber: number
-  feedbackType: "comment" | "review"
-}
-
-export type RepoFeedbackIgnoredEvent = RepoFeedbackEventPayload & {
-  reason: "ipc_disabled" | "unmanaged_pr"
-}
-
-export type RepoFeedbackFinishedEvent = RepoFeedbackEventPayload & {
-  exitCode: number
-}
-
 export type BackendStreamDegradedEvent = {
   reason: "unauthenticated"
   errorMessage: string
@@ -23,7 +7,5 @@ export type BackendStreamDegradedEvent = {
 
 /** Daemon-owned events produced outside feature plugin setup. */
 export const daemonRuntimeEvents = {
-  "repo.feedback.ignored": event<RepoFeedbackIgnoredEvent>(),
-  "repo.feedback.finished": event<RepoFeedbackFinishedEvent>(),
   "backend.stream.degraded": event<BackendStreamDegradedEvent>(),
 }

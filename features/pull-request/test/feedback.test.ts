@@ -46,7 +46,7 @@ test("pull request feedback handler emits ignored events for unmanaged pull requ
       },
     },
   ])
-  expect(logs.some((entry) => entry.event === "repo.feedback_ignored")).toBe(true)
+  expect(logs.some((entry) => entry.event === "pull_request.feedback_ignored")).toBe(true)
 })
 
 test("pull request feedback handler launches one-shot sessions for managed feedback", async () => {
