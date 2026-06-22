@@ -36,6 +36,16 @@ The daemon provides shared local runtime substrate, while feature packages contr
 - Feature-owned persistence belongs behind feature-owned substrate boundaries when a feature owns that data.
 - When a feature fails or is unavailable, clients should treat that as a capability-specific outcome rather than as permission to recreate runtime state outside the daemon.
 
+## Backend events
+
+- The daemon owns the backend stream transport lifecycle.
+- The daemon starts one backend stream only when feature-owned backend event handlers are registered.
+- The daemon stops the stream when the handler registry becomes empty.
+- Feature packages own backend event handlers and any daemon events emitted from those handlers.
+- Host-level stream health is emitted as `backend.stream.degraded`.
+- Pull request feedback automation emits `pull_request.feedback.ignored` and `pull_request.feedback.finished` from the pull-request feature.
+- GitHub-originated webhook facts are normalized by `features/github`; pull request workflow behavior does not belong there.
+
 ## Boundary
 
 - Feature composition is not a user configuration system for arbitrary runtime extension.
