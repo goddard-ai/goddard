@@ -82,6 +82,67 @@ test("WorkbenchTabSet can refocus the main tab after closing the active tab", ()
   expect(tabSet.activeTabId).toBe(WORKBENCH_MAIN_TAB.id)
 })
 
+test("WorkbenchTabSet navigates backward and forward between main workbench locations", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  tabSet.activateMainTab("sessions")
+  tabSet.activateMainTab("search")
+
+  expect(tabSet.canNavigateBack).toBe(true)
+  expect(tabSet.canNavigateForward).toBe(false)
+
+  expect(tabSet.navigateBack()).toEqual({
+    kind: "main",
+    mainTabKind: "sessions",
+  })
+  expect(tabSet.activeTabId).toBe(WORKBENCH_MAIN_TAB.id)
+  expect(tabSet.canNavigateForward).toBe(true)
+
+  expect(tabSet.navigateForward()).toEqual({
+    kind: "main",
+    mainTabKind: "search",
+  })
+})
+
+test("WorkbenchTabSet clears forward navigation after normal navigation", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  openSessionTabs(tabSet, 2)
+  expect(tabSet.navigateBack()).toEqual({
+    kind: "detail",
+    tabId: "session:session-1",
+  })
+
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-3",
+    },
+  } as any)
+
+  expect(tabSet.canNavigateForward).toBe(false)
+  expect(tabSet.navigateBack()).toEqual({
+    kind: "detail",
+    tabId: "session:session-1",
+  })
+})
+
+test("WorkbenchTabSet skips closed detail tabs during navigation", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  openSessionTabs(tabSet, 2)
+  expect(tabSet.navigateBack()).toEqual({
+    kind: "detail",
+    tabId: "session:session-1",
+  })
+
+  tabSet.closeTab("session:session-2")
+
+  expect(tabSet.canNavigateForward).toBe(false)
+  expect(tabSet.navigateForward()).toBeNull()
+})
+
 test("WorkbenchTabSet moves a tab before another visible tab", () => {
   const tabSet = new WorkbenchTabSet()
 

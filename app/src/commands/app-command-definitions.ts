@@ -4,6 +4,8 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Command,
   FileDiff,
@@ -37,6 +39,20 @@ export const AppCommand = defineAppCommands({
         },
         icon: PanelTopClose,
         when: "workbench.hasClosableActiveTab",
+      },
+      navigateBack: {
+        get label() {
+          return t`Navigate Back`
+        },
+        icon: ChevronLeft,
+        when: "workbench.canNavigateBack",
+      },
+      navigateForward: {
+        get label() {
+          return t`Navigate Forward`
+        },
+        icon: ChevronRight,
+        when: "workbench.canNavigateForward",
       },
     },
   },

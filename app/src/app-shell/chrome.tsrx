@@ -24,7 +24,7 @@ import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
-import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
+import { WORKBENCH_MAIN_TAB, type WorkbenchNavigationLocation } from "~/workbench-tab-set.ts"
 import { AppShellAgentSelector } from "./agent-selector.tsrx"
 import styles from "./chrome.style.ts"
 import {
@@ -58,13 +58,27 @@ export function AppShellChrome() @{
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
-    workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
+    workbenchTabSet.activateMainTab(id)
+  }
+
+  function applyWorkbenchNavigation(location: WorkbenchNavigationLocation | null) {
+    if (location?.kind === "main") {
+      mainTab.selectKind(location.mainTabKind)
+    }
   }
 
   useAppCommand(AppCommand.workbench.closeActiveTab, () => {
     if (workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id) {
       workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
     }
+  })
+
+  useAppCommand(AppCommand.workbench.navigateBack, () => {
+    applyWorkbenchNavigation(workbenchTabSet.navigateBack())
+  })
+
+  useAppCommand(AppCommand.workbench.navigateForward, () => {
+    applyWorkbenchNavigation(workbenchTabSet.navigateForward())
   })
 
   useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
@@ -238,15 +252,27 @@ export function AppShellChrome() @{
     <div class={styles.main}>
       <AppShellTabStrip
         activeTabId={workbenchTabSet.activeTabId}
+        canNavigateBack={workbenchTabSet.canNavigateBack}
+        canNavigateForward={workbenchTabSet.canNavigateForward}
         endAccessory={<AppShellNextInboxAttentionSlot {workbenchTabSet} />}
         selectedMainTabId={mainTab.selectedKind}
         selectedMainTabTitle={selectedMainTab?.label ?? WORKBENCH_MAIN_TAB.title}
         tabs={workbenchTabSet.tabList}
         onActivateTab={(id) => {
-          workbenchTabSet.activateTab(id)
+          if (id === WORKBENCH_MAIN_TAB.id) {
+            workbenchTabSet.activateMainTab(mainTab.selectedKind)
+          } else {
+            workbenchTabSet.activateTab(id)
+          }
         }}
         onCloseTab={(id) => {
           workbenchTabSet.closeTab(id)
+        }}
+        onNavigateBack={() => {
+          applyWorkbenchNavigation(workbenchTabSet.navigateBack())
+        }}
+        onNavigateForward={() => {
+          applyWorkbenchNavigation(workbenchTabSet.navigateForward())
         }}
         onMoveTab={(sourceId, targetId, placement) => {
           workbenchTabSet.moveTab(sourceId, targetId, placement)

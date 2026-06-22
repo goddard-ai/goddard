@@ -188,6 +188,48 @@ export default {
     backgroundColor: "surface",
     boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
   }),
+  tabNavigationGroup: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "1px",
+    height: "31px",
+    paddingLeft: "5px",
+    paddingRight: "4px",
+    flexShrink: "0",
+    backgroundColor: "surface",
+  }),
+  tabNavigationButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "23px",
+    height: "23px",
+    padding: "0",
+    border: "none",
+    borderRadius: "6px",
+    backgroundColor: "transparent",
+    color: `color-mix(in srgb, ${textColor} 48%, transparent)`,
+    cursor: "pointer",
+    transition:
+      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _disabled: {
+      color: `color-mix(in srgb, ${textColor} 20%, transparent)`,
+      cursor: "default",
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "-2px",
+    },
+    _hover: {
+      backgroundColor: `color-mix(in srgb, ${textColor} 8%, transparent)`,
+      color: "text",
+      _disabled: {
+        backgroundColor: "transparent",
+        color: `color-mix(in srgb, ${textColor} 20%, transparent)`,
+      },
+    },
+  }),
   tabStrip: css({
     position: "relative",
     flex: "1 1 auto",

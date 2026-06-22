@@ -1,6 +1,7 @@
 import { t } from "@lingui/core/macro"
 import { Sigma, type Immutable } from "preact-sigma"
 
+import type { MainTabItemId } from "./main-tab-items.ts"
 import {
   createWorkbenchTab,
   getWorkbenchTabRelatedFilesystemPath,
@@ -29,7 +30,20 @@ export type WorkbenchTabSetState = {
   orderedTabIds: string[]
   activeTabId: string
   recency: string[]
+  navigationHistory: WorkbenchNavigationLocation[]
+  navigationIndex: number
 }
+
+/** One user-visible workbench location tracked by back/forward navigation. */
+export type WorkbenchNavigationLocation =
+  | {
+      kind: "main"
+      mainTabKind: MainTabItemId
+    }
+  | {
+      kind: "detail"
+      tabId: string
+    }
 
 /** Immutable runtime value for the always-present main workbench tab. */
 export const WORKBENCH_MAIN_TAB: WorkbenchMainTab = {
@@ -44,6 +58,57 @@ export const WORKBENCH_TAB_LIMIT = 20
 
 function isFocusableWorkbenchTab(tabSet: WorkbenchTabSetState, tabId: string) {
   return tabId === WORKBENCH_MAIN_TAB.id || tabId in tabSet.tabs
+}
+
+function isAvailableNavigationLocation(
+  tabSet: WorkbenchTabSetState,
+  location: WorkbenchNavigationLocation,
+) {
+  return location.kind === "main" || location.tabId in tabSet.tabs
+}
+
+function areNavigationLocationsEqual(
+  left: WorkbenchNavigationLocation,
+  right: WorkbenchNavigationLocation,
+) {
+  if (left.kind !== right.kind) {
+    return false
+  }
+
+  if (left.kind === "main") {
+    return right.kind === "main" && left.mainTabKind === right.mainTabKind
+  }
+
+  return right.kind === "detail" && left.tabId === right.tabId
+}
+
+function findNavigableHistoryIndex(tabSet: WorkbenchTabSetState, direction: -1 | 1) {
+  for (
+    let index = tabSet.navigationIndex + direction;
+    index >= 0 && index < tabSet.navigationHistory.length;
+    index += direction
+  ) {
+    if (isAvailableNavigationLocation(tabSet, tabSet.navigationHistory[index])) {
+      return index
+    }
+  }
+
+  return null
+}
+
+function getInitialNavigationLocation(
+  activeTabId: string,
+  mainTabKind: MainTabItemId,
+): WorkbenchNavigationLocation {
+  return activeTabId === WORKBENCH_MAIN_TAB.id
+    ? {
+        kind: "main",
+        mainTabKind,
+      }
+    : {
+        kind: "detail",
+        tabId: activeTabId,
+      }
 }
 
 function findLeastRecentClosableTabId(tabSet: WorkbenchTabSetState) {
@@ -61,6 +126,7 @@ function findLeastRecentClosableTabId(tabSet: WorkbenchTabSetState) {
 /** Returns the subset of a tab snapshot that should survive app reloads. */
 export function getRestorableWorkbenchTabSetState(
   tabSet: Immutable<WorkbenchTabSetState>,
+  mainTabKind: MainTabItemId = "inbox",
 ): WorkbenchTabSetState {
   const tabs = Object.fromEntries(
     Object.entries(tabSet.tabs)
@@ -80,6 +146,8 @@ export function getRestorableWorkbenchTabSetState(
     recency: [activeTabId, ...recency.filter((tabId) => tabId !== activeTabId)].filter(
       isFocusableTabId,
     ),
+    navigationHistory: [getInitialNavigationLocation(activeTabId, mainTabKind)],
+    navigationIndex: 0,
   }
 }
 
@@ -94,6 +162,8 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       orderedTabIds: [],
       activeTabId: WORKBENCH_MAIN_TAB.id,
       recency: [WORKBENCH_MAIN_TAB.id],
+      navigationHistory: [getInitialNavigationLocation(WORKBENCH_MAIN_TAB.id, "inbox")],
+      navigationIndex: 0,
     })
 
     this.#onCloseTab = input.onCloseTab ?? (() => {})
@@ -116,6 +186,16 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     return this.activeTabId === WORKBENCH_MAIN_TAB.id ? null : (this.tabs[this.activeTabId] ?? null)
   }
 
+  /** Returns whether back navigation can reach an available workbench location. */
+  get canNavigateBack() {
+    return findNavigableHistoryIndex(this, -1) !== null
+  }
+
+  /** Returns whether forward navigation can reach an available workbench location. */
+  get canNavigateForward() {
+    return findNavigableHistoryIndex(this, 1) !== null
+  }
+
   /** Opens one closable tab or focuses the existing tab with the same stable id. */
   openOrFocusTab(input: WorkbenchOpenTabInput) {
     const tab = createWorkbenchTab(input)
@@ -133,23 +213,37 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
 
     this.tabs[tab.id] = tab
     this.orderedTabIds.push(tab.id)
-    this.activeTabId = tab.id
-    this.recency = [
-      tab.id,
-      previousActiveTabId,
-      ...this.recency.filter((tabId) => tabId !== tab.id && tabId !== previousActiveTabId),
-    ].filter((tabId) => isFocusableWorkbenchTab(this, tabId))
+    this.#focusTab(tab.id, previousActiveTabId)
+    this.#recordNavigationLocation({
+      kind: "detail",
+      tabId: tab.id,
+    })
   }
 
   /** Activates one visible tab and updates the recency stack used for LRU eviction. */
-  activateTab(tabId: string) {
+  activateTab(tabId: string, options: { recordHistory?: boolean } = {}) {
     const previousActiveTabId = this.activeTabId
-    this.activeTabId = tabId
-    this.recency = [
-      tabId,
-      previousActiveTabId,
-      ...this.recency.filter((id) => id !== tabId && id !== previousActiveTabId),
-    ].filter((id) => isFocusableWorkbenchTab(this, id))
+    this.#focusTab(tabId, previousActiveTabId)
+
+    if (options.recordHistory !== false && tabId !== WORKBENCH_MAIN_TAB.id) {
+      this.#recordNavigationLocation({
+        kind: "detail",
+        tabId,
+      })
+    }
+  }
+
+  /** Activates the primary workbench tab and records its selected main view. */
+  activateMainTab(mainTabKind: MainTabItemId, options: { recordHistory?: boolean } = {}) {
+    const previousActiveTabId = this.activeTabId
+    this.#focusTab(WORKBENCH_MAIN_TAB.id, previousActiveTabId)
+
+    if (options.recordHistory !== false) {
+      this.#recordNavigationLocation({
+        kind: "main",
+        mainTabKind,
+      })
+    }
   }
 
   /** Closes one closable tab and falls back to the most recently used remaining tab when needed. */
@@ -163,6 +257,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     delete this.tabs[tabId]
     this.orderedTabIds = this.orderedTabIds.filter((id) => id !== tabId)
     this.recency = this.recency.filter((id) => id !== tabId && isFocusableWorkbenchTab(this, id))
+    this.#removeDetailNavigationLocation(tabId)
     this.#onCloseTab(tabId)
 
     if (this.activeTabId === tabId) {
@@ -205,6 +300,86 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
 
     nextOrder.splice(insertIndex, 0, fromId)
     this.orderedTabIds = nextOrder
+  }
+
+  /** Navigates backward through available workbench locations. */
+  navigateBack() {
+    return this.#navigateHistory(-1)
+  }
+
+  /** Navigates forward through available workbench locations. */
+  navigateForward() {
+    return this.#navigateHistory(1)
+  }
+
+  #focusTab(tabId: string, previousActiveTabId: string) {
+    this.activeTabId = tabId
+    this.recency = [
+      tabId,
+      previousActiveTabId,
+      ...this.recency.filter((id) => id !== tabId && id !== previousActiveTabId),
+    ].filter((id) => isFocusableWorkbenchTab(this, id))
+  }
+
+  #recordNavigationLocation(location: WorkbenchNavigationLocation) {
+    if (!isAvailableNavigationLocation(this, location)) {
+      return
+    }
+
+    const currentLocation = this.navigationHistory[this.navigationIndex]
+
+    if (currentLocation && areNavigationLocationsEqual(currentLocation, location)) {
+      return
+    }
+
+    this.navigationHistory = [
+      ...this.navigationHistory.slice(0, this.navigationIndex + 1),
+      location,
+    ]
+    this.navigationIndex = this.navigationHistory.length - 1
+  }
+
+  #removeDetailNavigationLocation(tabId: string) {
+    let removedBeforeOrAtIndex = 0
+    this.navigationHistory = this.navigationHistory.filter((location, index) => {
+      const keep = location.kind !== "detail" || location.tabId !== tabId
+
+      if (!keep && index <= this.navigationIndex) {
+        removedBeforeOrAtIndex += 1
+      }
+
+      return keep
+    })
+    this.navigationIndex = Math.max(0, this.navigationIndex - removedBeforeOrAtIndex)
+  }
+
+  #navigateHistory(direction: -1 | 1) {
+    const nextIndex = findNavigableHistoryIndex(this, direction)
+
+    if (nextIndex === null) {
+      return null
+    }
+
+    const location = this.navigationHistory[nextIndex]
+    const nextLocation: WorkbenchNavigationLocation =
+      location.kind === "main"
+        ? {
+            kind: "main",
+            mainTabKind: location.mainTabKind,
+          }
+        : {
+            kind: "detail",
+            tabId: location.tabId,
+          }
+    this.navigationIndex = nextIndex
+
+    if (nextLocation.kind === "main") {
+      this.activateMainTab(nextLocation.mainTabKind, { recordHistory: false })
+    } else {
+      this.activateTab(nextLocation.tabId, { recordHistory: false })
+    }
+
+    return nextLocation
   }
 }
 

@@ -26,6 +26,7 @@ function createTestRegistry() {
 
   return {
     commandContext,
+    mainTab,
     registry,
     runtimeDocument,
     workbenchTabSet,
@@ -99,6 +100,8 @@ test("app commands expose stable ids and shortcut groups", () => {
   expect(AppCommand.inbox.selectUnreadFilter.group).toBe("navigation")
   expect(AppCommand.sessionInput.openModelSelector.group).toBe("session")
   expect(AppCommand.workbench.closeActiveTab.group).toBe("workbench")
+  expect(AppCommand.workbench.navigateBack.id).toBe("workbench.navigateBack")
+  expect(AppCommand.workbench.navigateForward.group).toBe("workbench")
 })
 
 test("keydown dispatches one typed app command event", async () => {
@@ -478,6 +481,108 @@ test("closable tab drives runtime availability for closeActiveTab", async () => 
     })
 
     expect(isCommandAvailable(registry.runtime, AppCommand.workbench.closeActiveTab)).toBe(true)
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("workbench history drives runtime availability for navigation commands", async () => {
+  const { registry, workbenchTabSet, cleanup } = createTestRegistry()
+  const container = document.createElement("div")
+  document.body.append(container)
+
+  render(
+    h(
+      Fragment,
+      {},
+      h(TestCommandHandler, {
+        command: AppCommand.workbench.navigateBack,
+        onMatch() {},
+      }),
+      h(TestCommandHandler, {
+        command: AppCommand.workbench.navigateForward,
+        onMatch() {},
+      }),
+    ),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateBack)).toBe(false)
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateForward)).toBe(false)
+
+    workbenchTabSet.activateMainTab("sessions")
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateBack)).toBe(true)
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateForward)).toBe(false)
+
+    workbenchTabSet.navigateBack()
+
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateBack)).toBe(false)
+    expect(isCommandAvailable(registry.runtime, AppCommand.workbench.navigateForward)).toBe(true)
+  } finally {
+    render(null, container)
+    cleanup()
+  }
+})
+
+test("default keymap dispatches workbench back and forward navigation", async () => {
+  const { registry, runtimeDocument, workbenchTabSet, cleanup } = createTestRegistry()
+  const backMatches: unknown[] = []
+  const forwardMatches: unknown[] = []
+  const container = runtimeDocument.createElement("div")
+  runtimeDocument.body.append(container)
+
+  render(
+    h(
+      Fragment,
+      {},
+      h(TestCommandHandler, {
+        command: AppCommand.workbench.navigateBack,
+        onMatch(match) {
+          backMatches.push(match)
+          workbenchTabSet.navigateBack()
+        },
+      }),
+      h(TestCommandHandler, {
+        command: AppCommand.workbench.navigateForward,
+        onMatch(match) {
+          forwardMatches.push(match)
+          workbenchTabSet.navigateForward()
+        },
+      }),
+    ),
+    container,
+  )
+
+  try {
+    await flushRenderEffects()
+    registry.applyKeymapSnapshot("goddard", {})
+    workbenchTabSet.activateMainTab("sessions")
+
+    dispatchKeydown(runtimeDocument, {
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+      altKey: true,
+      ctrlKey: true,
+    })
+    dispatchKeydown(runtimeDocument, {
+      key: "ArrowRight",
+      code: "ArrowRight",
+      altKey: true,
+      ctrlKey: true,
+    })
+
+    expect(backMatches).toHaveLength(1)
+    expect(backMatches[0]).toMatchObject({
+      combo: "Ctrl+Alt+ArrowLeft",
+    })
+    expect(forwardMatches).toHaveLength(1)
+    expect(forwardMatches[0]).toMatchObject({
+      combo: "Ctrl+Alt+ArrowRight",
+    })
   } finally {
     render(null, container)
     cleanup()

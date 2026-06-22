@@ -57,6 +57,8 @@ export const shortcutKeymapProfiles = {
       "sessionChat.skipToPreviousPrompt": ["Mod+ArrowUp"],
       "sessionChat.skipToNextPrompt": ["Mod+ArrowDown"],
       "workbench.closeActiveTab": ["Mod+w"],
+      "workbench.navigateBack": ["Mod+Alt+ArrowLeft"],
+      "workbench.navigateForward": ["Mod+Alt+ArrowRight"],
     },
   },
 } satisfies Record<string, ShortcutKeymapProfile>
