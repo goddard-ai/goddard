@@ -1,7 +1,7 @@
 /** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { createGitHost } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/libgit2"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../../schema.ts"

@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto"
 import { userInfo } from "node:os"
-import { createGitHost } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/libgit2"
 
 const WORKTREE_BRANCH_ADJECTIVES = [
   "brave",

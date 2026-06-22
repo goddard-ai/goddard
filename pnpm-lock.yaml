@@ -462,15 +462,15 @@ importers:
       '@goddard-ai/default-features':
         specifier: workspace:*
         version: link:../default-features
-      '@goddard-ai/git':
-        specifier: workspace:*
-        version: link:../git
       '@goddard-ai/inbox':
         specifier: workspace:*
         version: link:../../features/inbox
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../ipc
+      '@goddard-ai/libgit2':
+        specifier: workspace:*
+        version: link:../libgit2
       '@goddard-ai/logs':
         specifier: workspace:*
         version: link:../logs
@@ -658,8 +658,6 @@ importers:
         specifier: 'catalog:'
         version: 12.9.1
 
-  core/git: {}
-
   core/ipc:
     dependencies:
       rouzer:
@@ -672,6 +670,8 @@ importers:
       radashi:
         specifier: 'catalog:'
         version: 12.9.1
+
+  core/libgit2: {}
 
   core/logs:
     dependencies:
@@ -692,9 +692,9 @@ importers:
       '@clack/prompts':
         specifier: 'catalog:'
         version: 1.5.0
-      '@goddard-ai/git':
+      '@goddard-ai/libgit2':
         specifier: workspace:*
-        version: link:../git
+        version: link:../libgit2
       cmd-ts:
         specifier: 'catalog:'
         version: 0.15.0
@@ -789,9 +789,9 @@ importers:
       '@clack/prompts':
         specifier: 'catalog:'
         version: 1.5.0
-      '@goddard-ai/git':
+      '@goddard-ai/libgit2':
         specifier: workspace:*
-        version: link:../git
+        version: link:../libgit2
       '@goddard-ai/review-sync':
         specifier: workspace:*
         version: link:../review-sync
@@ -1026,15 +1026,15 @@ importers:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
-      '@goddard-ai/git':
-        specifier: workspace:*
-        version: link:../../core/git
       '@goddard-ai/github':
         specifier: workspace:*
         version: link:../github
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      '@goddard-ai/libgit2':
+        specifier: workspace:*
+        version: link:../../core/libgit2
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../../core/paths
@@ -1125,12 +1125,12 @@ importers:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
-      '@goddard-ai/git':
-        specifier: workspace:*
-        version: link:../../core/git
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      '@goddard-ai/libgit2':
+        specifier: workspace:*
+        version: link:../../core/libgit2
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../../core/paths
@@ -1228,12 +1228,12 @@ importers:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
-      '@goddard-ai/git':
-        specifier: workspace:*
-        version: link:../../core/git
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      '@goddard-ai/libgit2':
+        specifier: workspace:*
+        version: link:../../core/libgit2
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../../core/schema

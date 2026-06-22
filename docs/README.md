@@ -4,4 +4,4 @@ Goddard documentation explains supported capabilities and integration boundaries
 
 ## Guides
 
-- [Git host package](./guides/git-host-package.md): Understand the public capabilities exposed by the shared Git package.
+- [libgit2 package](./guides/libgit2-package.md): Understand the public capabilities exposed by the shared libgit2 package.

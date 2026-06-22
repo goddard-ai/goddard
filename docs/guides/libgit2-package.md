@@ -1,11 +1,11 @@
-# Git Host Package
+# libgit2 Package
 
-The Git host package provides Goddard's shared Git access boundary so daemon capabilities can use one consistent contract for repository discovery, refs, history, status, worktrees, and stashes.
+The libgit2 package provides Goddard's shared libgit2-backed Git access boundary so daemon capabilities can use one consistent contract for repository discovery, refs, history, status, worktrees, and stashes.
 
 ## Package Entrypoints
 
-- `@goddard-ai/git` is the primary package entrypoint for runtime Git access.
-- `@goddard-ai/git/testing` provides `createFakeGitHost` for tests that need a deterministic in-memory implementation of the host contract.
+- `@goddard-ai/libgit2` is the primary package entrypoint for runtime Git access.
+- `@goddard-ai/libgit2/testing` provides `createFakeGitHost` for tests that need a deterministic in-memory implementation of the host contract.
 
 ## Host Creation
 

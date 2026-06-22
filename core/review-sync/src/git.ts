@@ -13,7 +13,7 @@ import {
   type GitHostMode,
   type GitHost as SharedGitHost,
   type WorktreeInfo,
-} from "@goddard-ai/git"
+} from "@goddard-ai/libgit2"
 
 import { UserError } from "./errors.ts"
 import {

@@ -24,7 +24,7 @@ export function nativeLibgit2PathCandidates(input: NativeLibgit2PathInput = {}) 
   const artifact = nativeLibgit2Manifest.targets[target].library
   const roots = [
     resolve(input.moduleDir ?? moduleDir, "../../vendor/libgit2"),
-    resolve(input.cwd ?? process.cwd(), "core/git/vendor/libgit2"),
+    resolve(input.cwd ?? process.cwd(), "core/libgit2/vendor/libgit2"),
   ]
 
   return [...new Set(roots.map((root) => resolve(root, "dist", target, artifact)))]

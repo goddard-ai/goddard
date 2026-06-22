@@ -62,7 +62,7 @@
     "@b9g/async-context": "catalog:",
     "@goddard-ai/config": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
-    "@goddard-ai/git": "workspace:*",
+    "@goddard-ai/libgit2": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/agent": "workspace:*",
     "@goddard-ai/paths": "workspace:*",

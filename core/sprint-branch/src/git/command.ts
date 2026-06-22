@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { createGitHost, type GitHost } from "@goddard-ai/git"
+import { createGitHost, type GitHost } from "@goddard-ai/libgit2"
 
 let sharedGitHost: GitHost | undefined
 

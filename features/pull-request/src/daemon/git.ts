@@ -1,5 +1,5 @@
 import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
-import { createGitHost } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/libgit2"
 
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
 import { readOriginHeadRef, readOriginRemoteUrl } from "./git/config.ts"

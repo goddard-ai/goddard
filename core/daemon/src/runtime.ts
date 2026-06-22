@@ -6,7 +6,7 @@ import {
   type EventBus,
   type DaemonEventEnvelope as PluginDaemonEventEnvelope,
 } from "@goddard-ai/daemon-plugin"
-import { validateLibgit2Runtime } from "@goddard-ai/git"
+import { validateLibgit2Runtime } from "@goddard-ai/libgit2"
 import { toErrorProperties } from "@goddard-ai/logs"
 import { getErrorMessage, isObject } from "radashi"
 

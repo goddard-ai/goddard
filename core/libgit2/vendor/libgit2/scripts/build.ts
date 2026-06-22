@@ -25,7 +25,7 @@ const versions = await readVersions()
 
 if (!(await pathExists(sourceDir))) {
   throw new Error(
-    `Missing libgit2 source at ${sourceDir}. Run pnpm --dir core/git/vendor/libgit2 run fetch first.`,
+    `Missing libgit2 source at ${sourceDir}. Run pnpm --dir core/libgit2/vendor/libgit2 run fetch first.`,
   )
 }
 

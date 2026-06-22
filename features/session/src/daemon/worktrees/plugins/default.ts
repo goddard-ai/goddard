@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
 import * as os from "node:os"
 import * as path from "node:path"
-import { createGitHost } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/libgit2"
 import type {
   WorktreeCleanupOptions,
   WorktreePlugin,

@@ -1,7 +1,7 @@
 /** Session-owned preparation helpers for fresh linked session worktrees. */
 import { readFile, stat } from "node:fs/promises"
 import * as path from "node:path"
-import { createGitHost } from "@goddard-ai/git"
+import { createGitHost } from "@goddard-ai/libgit2"
 
 import type { WorktreeBootstrapConfig, WorktreeBootstrapPackageManager } from "../../schema.ts"
 import { seedUntrackedPaths } from "./bootstrap/seed.ts"
