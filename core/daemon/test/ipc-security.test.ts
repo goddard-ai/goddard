@@ -235,12 +235,16 @@ test("daemon browser pairing issues origin-bound revocable tokens", async () => 
   })
   const browserStreamStatuses: string[] = []
   const abortController = new AbortController()
-  const browserStream = await browserClient.inbox.streamItems(undefined, {
-    signal: abortController.signal,
-  })
+  const browserStream = await browserClient.events.stream(
+    { names: ["inbox.item.updated"] },
+    {
+      signal: abortController.signal,
+    },
+  )
   const browserStreamDone = (async () => {
     try {
-      for await (const item of browserStream) {
+      for await (const event of browserStream) {
+        const item = event.payload as { entityId?: string; status: string }
         if (item.entityId !== "ses_browser_direct") {
           continue
         }
@@ -656,13 +660,21 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   const inboxEvents: Array<{
     status: string
   }> = []
-  const unsubscribe = await subscribe(client, "inbox.streamItems", (item) => {
-    if (item.entityId === "ses_inbox") {
-      inboxEvents.push({
-        status: item.status,
-      })
-    }
-  })
+  const unsubscribe = await subscribe(
+    client,
+    {
+      name: "events.stream",
+      filter: { names: ["inbox.item.updated"] },
+    },
+    (event) => {
+      const item = event.payload
+      if (item.entityId === "ses_inbox") {
+        inboxEvents.push({
+          status: item.status,
+        })
+      }
+    },
+  )
   cleanup.push(async () => {
     unsubscribe()
   })

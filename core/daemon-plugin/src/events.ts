@@ -1,5 +1,8 @@
 import type {
   DaemonEventEnvelope,
+  DaemonEventFilter,
+  DaemonEventPropertyFilter,
+  DaemonEventSubscriptionEvent,
   EventBus,
   EventDefinition,
   EventLogMetadata,
@@ -7,18 +10,10 @@ import type {
 
 type Listener<TPayload = unknown> = (payload: TPayload) => void | Promise<void>
 type Observer = (event: DaemonEventEnvelope) => void | Promise<void>
+type SubscriptionObserver = (event: DaemonEventSubscriptionEvent) => void | Promise<void>
 
 export type EventDefinitionOptions = EventLogMetadata
-
-export type DaemonEventFilter = {
-  readonly names?: readonly string[]
-  readonly where?: readonly DaemonEventPropertyFilter[]
-}
-
-export type DaemonEventPropertyFilter = {
-  readonly path: string
-  readonly equals: unknown
-}
+export type { DaemonEventFilter, DaemonEventPropertyFilter }
 
 /** Declares one daemon plugin event payload type without adding runtime behavior. */
 export function event<TPayload>(options: EventDefinitionOptions = {}): EventDefinition<TPayload> {
@@ -31,6 +26,7 @@ export function createDaemonEventBus(
 ): EventBus<Record<string, EventDefinition<unknown>>> {
   const cache = new Map<string, Set<Listener>>()
   const observers = new Set<Observer>()
+  const subscriptionObservers = new Set<SubscriptionObserver>()
 
   return {
     on(eventName, listener) {
@@ -50,6 +46,96 @@ export function createDaemonEventBus(
 
       return () => {
         observers.delete(listener as Observer)
+      }
+    },
+    onSubscription(listener) {
+      subscriptionObservers.add(listener as SubscriptionObserver)
+
+      return () => {
+        subscriptionObservers.delete(listener as SubscriptionObserver)
+      }
+    },
+    stream(filter, signal) {
+      const queue: DaemonEventEnvelope[] = []
+      let wake: (() => void) | undefined
+      let started = false
+      let closed = false
+      const listener = (event: DaemonEventEnvelope) => {
+        if (closed) {
+          return
+        }
+        if (!matchesDaemonEventFilter(event, filter)) {
+          return
+        }
+        queue.push(event)
+        wake?.()
+      }
+      const abort = () => {
+        void close()
+      }
+
+      async function start() {
+        if (started) {
+          return
+        }
+        started = true
+        await notifySubscriptionObservers(subscriptionObservers, {
+          state: "started",
+          filter,
+        })
+        observers.add(listener)
+        signal.addEventListener("abort", abort)
+      }
+
+      async function close() {
+        if (closed) {
+          return
+        }
+        closed = true
+        signal.removeEventListener("abort", abort)
+        if (started) {
+          observers.delete(listener)
+        }
+        wake?.()
+        wake = undefined
+        if (started) {
+          await notifySubscriptionObservers(subscriptionObservers, {
+            state: "ended",
+            filter,
+          })
+        }
+      }
+
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              await start()
+              if (closed || signal.aborted) {
+                await close()
+                return { done: true, value: undefined }
+              }
+
+              while (queue.length === 0) {
+                await new Promise<void>((resolve) => {
+                  wake = resolve
+                })
+                wake = undefined
+
+                if (closed || signal.aborted) {
+                  await close()
+                  return { done: true, value: undefined }
+                }
+              }
+
+              return { done: false, value: queue.shift()! }
+            },
+            async return() {
+              await close()
+              return { done: true, value: undefined }
+            },
+          }
+        },
       }
     },
     async emit(eventName, payload) {
@@ -74,6 +160,15 @@ export function createDaemonEventBus(
         await listener(payload)
       }
     },
+  }
+}
+
+async function notifySubscriptionObservers(
+  observers: Set<SubscriptionObserver>,
+  event: DaemonEventSubscriptionEvent,
+) {
+  for (const observer of [...observers]) {
+    await observer(event)
   }
 }
 

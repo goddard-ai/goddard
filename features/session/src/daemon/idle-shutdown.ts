@@ -23,7 +23,7 @@ export function createIdleShutdownController({
   ) => void
   shutdownSession: (id: SessionId) => Promise<boolean>
 }) {
-  /** Returns how many `session.streamMessages` stream subscribers are attached to one session id. */
+  /** Returns how many `session.message event stream` stream subscribers are attached to one session id. */
   function getSessionSubscriberCount(id: SessionId): number {
     return memory.sessionSubscriberCounts.get(id) ?? 0
   }
@@ -110,13 +110,13 @@ export function createIdleShutdownController({
     await shutdownSession(id)
   }
 
-  /** Records one new `session.streamMessages` subscriber so idle shutdown waits for attached clients. */
+  /** Records one new `session.message event stream` subscriber so idle shutdown waits for attached clients. */
   function sessionSubscriberConnected(id: SessionId): void {
     memory.sessionSubscriberCounts.set(id, getSessionSubscriberCount(id) + 1)
     refreshIdleShutdownState(id, "subscriber_connected")
   }
 
-  /** Records one departing `session.streamMessages` subscriber and starts the timer when none remain. */
+  /** Records one departing `session.message event stream` subscriber and starts the timer when none remain. */
   function sessionSubscriberDisconnected(id: SessionId): void {
     const current = getSessionSubscriberCount(id)
     if (current <= 1) {

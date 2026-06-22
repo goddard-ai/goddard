@@ -4,7 +4,7 @@
 
 Keep the SDK daemon-backed ACP bridge private and minimal until acp-client exposes a composable primitive for already-initialized, daemon-routed sessions.
 
-`sdk.session.run(...)` returns an `AgentSession` wrapper for callers that want to interact with a live daemon-owned ACP session. The daemon owns the real agent process, ACP initialization, persistence, permissions, and message history. The SDK only attaches a client-side bridge to the daemon's `session.send` and `session.streamMessages` routes.
+`sdk.session.run(...)` returns an `AgentSession` wrapper for callers that want to interact with a live daemon-owned ACP session. The daemon owns the real agent process, ACP initialization, persistence, permissions, and message history. The SDK only attaches a client-side bridge to the daemon's `session.send` and `session.message event stream` routes.
 
 ## Current Duplication
 

@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
@@ -7,7 +7,6 @@ import {
   UpdateInboxItemRequest,
   type BulkUpdateInboxItemsResponse,
   type CompleteSessionInboxItemResponse,
-  type InboxItem,
   type ListInboxResponse,
   type UpdateInboxItemResponse,
 } from "./schema.ts"
@@ -33,10 +32,6 @@ export const inboxIpcRoutes = defineIpcRoutes({
     completeSession: http.post("complete-session", {
       body: CompleteSessionInboxItemRequest,
       response: $type<CompleteSessionInboxItemResponse>(),
-    }),
-    /** Streams daemon-published inbox item updates. */
-    streamItems: http.get("stream-items", {
-      response: ndjson.$type<InboxItem>(),
     }),
   }),
 })

@@ -871,6 +871,7 @@ function createTestLogService(
   }
 
   return {
+    createDebug: () => () => {},
     createLogger: () => logger,
     isVerboseLogging: () => false,
     createPayloadPreview: (value) => value,

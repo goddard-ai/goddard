@@ -7,15 +7,18 @@ export function startSessionLifecycleSubscription() {
 
   void (async () => {
     try {
-      const events = await goddardSdk.session.streamLifecycle(undefined, {
-        signal: controller.signal,
-      })
+      const events = await goddardSdk.events.stream(
+        { names: ["session.lifecycle.updated", "session.lifecycle.deleted"] },
+        { signal: controller.signal },
+      )
       for await (const event of events) {
         if (controller.signal.aborted) {
           break
         }
 
-        invalidateSessionLifecycleEvent(event)
+        invalidateSessionLifecycleEvent(
+          event.payload as Parameters<typeof invalidateSessionLifecycleEvent>[0],
+        )
       }
     } catch (error) {
       if (!controller.signal.aborted) {

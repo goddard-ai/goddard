@@ -190,15 +190,17 @@ export async function main(argv: string[]) {
           const termination = createTerminationSignal()
 
           try {
-            const events = await sdk.workforce.streamEvents(
+            const events = await sdk.events.stream(
               {
-                rootDir: repositoryRoot,
+                names: ["workforce.ledger.event"],
+                where: [{ path: "rootDir", equals: repositoryRoot }],
               },
               { signal: termination.signal },
             )
 
             for await (const event of events) {
-              process.stdout.write(`${JSON.stringify(event)}\n`)
+              const payload = event.payload as { event: unknown }
+              process.stdout.write(`${JSON.stringify(payload.event)}\n`)
             }
           } finally {
             termination.cleanup()

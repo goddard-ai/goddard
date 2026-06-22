@@ -221,15 +221,17 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
 
     void (async () => {
       try {
-        const items = await goddardSdk.inbox.streamItems(undefined, { signal: controller.signal })
-        const iterator = items[Symbol.asyncIterator]()
+        const events = await goddardSdk.events.stream({ names: ["inbox.item.updated"] }, {
+          signal: controller.signal,
+        })
+        const iterator = events[Symbol.asyncIterator]()
         while (!controller.signal.aborted) {
           const result = await iterator.next()
           if (result.done) {
             break
           }
 
-          const item = result.value
+          const item = result.value.payload
           setRealtimeErrorMessage(null)
           handleInboxItemsLoaded([item])
           invalidateInboxQueries()

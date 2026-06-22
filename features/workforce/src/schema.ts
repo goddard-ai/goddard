@@ -245,14 +245,6 @@ export const GetWorkforceRequest = z.strictObject({
 
 export type GetWorkforceRequest = z.infer<typeof GetWorkforceRequest>
 
-/** Request payload used to subscribe to live daemon-published workforce events for one repo. */
-export const SubscribeWorkforceEventsRequest = z.strictObject({
-  rootDir: z.string(),
-})
-
-/** Compile-time shape used to subscribe to live daemon-published workforce events for one repo. */
-export type SubscribeWorkforceEventsRequest = z.infer<typeof SubscribeWorkforceEventsRequest>
-
 /** Response payload returned after workforce initialization candidates are discovered. */
 export type DiscoverWorkforceCandidatesResponse = {
   rootDir: string

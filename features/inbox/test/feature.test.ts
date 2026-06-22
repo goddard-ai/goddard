@@ -16,7 +16,6 @@ describe("inbox feature package", () => {
       "update",
       "bulkUpdate",
       "completeSession",
-      "streamItems",
     ])
     expect(inboxSdkPlugin.name).toBe("inbox")
     expect(InboxItemId.parse("inb_test")).toBe("inb_test")

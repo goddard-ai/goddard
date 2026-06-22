@@ -1078,15 +1078,19 @@ export class SessionChat extends Sigma<SessionChatState> {
 
     void (async () => {
       try {
-        const messages = await goddardSdk.session.streamMessages(
-          { id: this.session.id },
+        const messages = await goddardSdk.events.stream(
+          {
+            names: ["session.message"],
+            where: [{ path: "id", equals: this.session.id }],
+          },
           { signal: controller.signal },
         )
-        for await (const message of messages) {
+        for await (const event of messages) {
           if (controller.signal.aborted) {
             break
           }
 
+          const { message } = event.payload as { message: SessionMessageEvent }
           this.receiveMessage(message)
         }
       } catch (error) {

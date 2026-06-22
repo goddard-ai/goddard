@@ -34,7 +34,7 @@ Use `@goddard-ai/sdk` when you need to:
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, daemon-owned turn cancellation, steering, history, shutdown, and model changes.
 - Stream live daemon-filtered session updates through generated stream routes such as
-  `sdk.session.streamMessages(...)`.
+  `sdk.session.message event stream(...)`.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -103,7 +103,7 @@ const loop = await sdk.loop.get({
   loopName: "triage",
 })
 const abortController = new AbortController()
-const messages = await sdk.session.streamMessages(
+const messages = await sdk.session.message event stream(
   { id: "session-1" },
   { signal: abortController.signal },
 )

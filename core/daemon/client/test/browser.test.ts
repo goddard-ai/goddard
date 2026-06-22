@@ -122,9 +122,12 @@ test("createBrowserDaemonIpcClient consumes daemon ndjson streams in browser run
   })
 
   const events: unknown[] = []
-  for await (const event of await client.session.streamLifecycle(undefined, {
-    signal: new AbortController().signal,
-  })) {
+  for await (const event of await client.events.stream(
+    { names: ["session.lifecycle.updated", "session.lifecycle.deleted"] },
+    {
+      signal: new AbortController().signal,
+    },
+  )) {
     events.push(event)
   }
 

@@ -315,17 +315,22 @@ async function createMessageOutputTransport(
   let closed = false
   const abortController = new AbortController()
 
-  const events = await client.session.streamMessages(
-    { id },
+  const events = await client.events.stream(
+    {
+      names: ["session.message"],
+      where: [{ path: "id", equals: id }],
+    },
     {
       signal: abortController.signal,
     },
   )
   const done = (async () => {
-    for await (const message of events) {
+    for await (const event of events) {
       if (closed) {
         return
       }
+      const payload = event.payload as { message?: unknown }
+      const message = payload.message
 
       if (
         typeof message === "object" &&
