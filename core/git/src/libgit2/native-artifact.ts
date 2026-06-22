@@ -1,10 +1,7 @@
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import {
-  nativeLibgit2Manifest,
-  type NativeLibgit2Target,
-} from "../../vendor/libgit2/manifest.ts"
+import { nativeLibgit2Manifest, type NativeLibgit2Target } from "../../vendor/libgit2/manifest.ts"
 
 type NativeLibgit2PathInput = {
   platform?: NodeJS.Platform
