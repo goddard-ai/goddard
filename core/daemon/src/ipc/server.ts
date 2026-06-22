@@ -23,7 +23,6 @@ import {
 } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
-import { createAcpRegistryService } from "acp-client/node"
 import { getErrorMessage, isObject } from "radashi"
 
 import { createAgentInstallService } from "../agent-install-service.ts"
@@ -93,7 +92,6 @@ export async function startDaemonServer(
   })
   observeDaemonEventsForLogging(events, logger)
 
-  const registryService = createAcpRegistryService()
   const managedAgentUsageStore: ManagedAgentUsageStore = {
     get: () => store.metadata.get("managedAgentUsage") ?? {},
     set: (state) => {
@@ -101,7 +99,6 @@ export async function startDaemonServer(
     },
   }
   const agentInstallService = createAgentInstallService({
-    registryService,
     usageStore: managedAgentUsageStore,
   })
   const agentUpdateScheduler = createManagedAgentUpdateScheduler({
@@ -159,7 +156,6 @@ export async function startDaemonServer(
       createPayloadPreview,
       createChunkPreview,
     },
-    registryService,
     agentInstallService,
     sessionContext: {
       run: (context, callback) => SessionContext.run(context, callback),

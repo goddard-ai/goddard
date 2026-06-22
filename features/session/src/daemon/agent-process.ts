@@ -6,10 +6,10 @@ import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
 import type {
-  ACPRegistryService,
   DaemonAgentEnvironmentService,
   DaemonAgentInstallService,
 } from "@goddard-ai/daemon-plugin"
+import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import { getGoddardGlobalDir, getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import {
   agentBinaryPlatforms,
@@ -241,14 +241,14 @@ export async function spawnAgentProcess(params: {
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
   env?: Record<string, string>
   envPolicy?: SessionEnvPolicyConfig
-  registryService: ACPRegistryService
+  managedAgent: ManagedAgentService
   agentInstallService?: DaemonAgentInstallService
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessHandle> {
   const { cmd, args, env } = await resolveLaunchAgentProcessSpec({
     agent: params.agent,
-    registryService: params.registryService,
+    managedAgent: params.managedAgent,
     agentInstallService: params.agentInstallService,
     registry: params.registry,
     managedAgents: params.managedAgents,
@@ -272,7 +272,7 @@ export async function spawnAgentProcess(params: {
 /** Resolves the command used for one session launch, honoring user-managed install policy. */
 export async function resolveLaunchAgentProcessSpec(params: {
   agent: AcpAdapterId | AgentDistribution
-  registryService: ACPRegistryService
+  managedAgent: ManagedAgentService
   agentInstallService?: DaemonAgentInstallService
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
@@ -296,7 +296,7 @@ export async function resolveLaunchAgentProcessSpec(params: {
 
   const agent = await resolveLaunchAgent({
     agent: params.agent,
-    registryService: params.registryService,
+    managedAgent: params.managedAgent,
     registry: params.registry,
   })
 
@@ -313,24 +313,13 @@ function shouldUseManagedInstall(
 
 async function resolveLaunchAgent(params: {
   agent: AcpAdapterId | AgentDistribution
-  registryService: ACPRegistryService
+  managedAgent: ManagedAgentService
   registry?: Record<string, AgentDistribution>
 }) {
-  if (typeof params.agent !== "string") {
-    return params.agent
-  }
-
-  const configuredAgent = params.registry?.[params.agent]
-  if (configuredAgent) {
-    return configuredAgent
-  }
-
-  const registryEntry = await params.registryService.getAdapter(params.agent)
-  if (!registryEntry.adapter) {
-    throw new Error(`Agent not found: ${params.agent}`)
-  }
-
-  return registryEntry.adapter
+  return params.managedAgent.resolveAgent({
+    agent: params.agent,
+    registry: params.registry,
+  })
 }
 
 /** Chooses the concrete command invocation for an unmanaged resolved agent distribution. */

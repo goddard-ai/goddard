@@ -1,4 +1,5 @@
 import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { createAcpRegistryService } from "acp-client/node"
 
 import { adapterIpcRoutes } from "./daemon-ipc.ts"
 import { installCatalogAdapter, listAdapters, uninstallCatalogAdapter } from "./list-adapters.ts"
@@ -6,7 +7,8 @@ import { installCatalogAdapter, listAdapters, uninstallCatalogAdapter } from "./
 export const adapterPlugin = definePlugin({
   name: "adapter",
   ipcRoutes: adapterIpcRoutes,
-  setup({ agentInstallService, configProvider, registryService }) {
+  setup({ agentInstallService, configProvider }) {
+    const registryService = createAcpRegistryService()
     const adapterContext = {
       agentInstallService,
       configProvider,

@@ -1094,6 +1094,9 @@ importers:
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc
+      '@goddard-ai/managed-agent':
+        specifier: workspace:*
+        version: link:../managed-agent
       '@goddard-ai/paths':
         specifier: workspace:*
         version: link:../../core/paths
