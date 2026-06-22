@@ -280,22 +280,32 @@ export const sessionPlugin = definePlugin({
   },
   events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
-  setup(context) {
-    const streamDebug = context.log.createDebug("session.stream")
+  setup({
+    agentInstallService,
+    configProvider,
+    daemonRuntime,
+    db,
+    events,
+    ipc,
+    log,
+    registryService,
+    sessionContext,
+  }) {
+    const streamDebug = log.createDebug("session.stream")
     const sessionManager = createSessionManager({
-      db: context.db,
-      getDaemonUrl: context.daemonRuntime.getDaemonUrl,
-      createAgentEnvironment: context.daemonRuntime.createAgentEnvironment,
-      configProvider: context.configProvider,
-      log: context.log,
-      registryService: context.registryService,
-      agentInstallService: context.agentInstallService,
-      sessionContext: context.sessionContext,
-      events: context.events,
-      idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
+      db,
+      getDaemonUrl: daemonRuntime.getDaemonUrl,
+      createAgentEnvironment: daemonRuntime.createAgentEnvironment,
+      configProvider,
+      log,
+      registryService,
+      agentInstallService,
+      sessionContext,
+      events,
+      idleSessionShutdownTimeoutMs: daemonRuntime.idleSessionShutdownTimeoutMs,
     })
 
-    context.events.onSubscription(async (subscription) => {
+    events.onSubscription(async (subscription) => {
       const id = readSessionMessageSubscriptionId(subscription.filter)
       if (!id) {
         return
@@ -338,7 +348,7 @@ export const sessionPlugin = definePlugin({
             const response = {
               session: await sessionManager.newSession({ request: body }),
             }
-            context.ipc.requestContext.setSessionId(response.session.id)
+            ipc.requestContext.setSessionId(response.session.id)
             return response
           },
           list: async ({ body }) => sessionManager.listSessions(body),
@@ -403,7 +413,7 @@ export const sessionPlugin = definePlugin({
           }),
           resolveToken: async ({ body: { token } }) => {
             const id = await sessionManager.resolveSessionIdByToken(token)
-            context.ipc.requestContext.setSessionId(id)
+            ipc.requestContext.setSessionId(id)
             return {
               id,
             }
