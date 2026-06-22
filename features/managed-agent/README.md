@@ -2,7 +2,7 @@
 
 The managed-agent feature owns launchable ACP agent discovery and runtime readiness.
 
-This package replaces the adapter feature boundary. ACP registry entries, config-declared
+This package replaces the old adapter-named boundary. ACP registry entries, config-declared
 agents, Goddard-owned launch visibility markers, acp-client managed install state, and
 managed-agent update policy are one product capability: deciding which agents can be
 shown for launch and how a selected agent resolves to a runnable process.

@@ -14,7 +14,7 @@ The daemon server is the local control surface that approved clients use to star
 - Inbox listing, workflow updates, completion, and streams.
 - Pull request submission, lookup, and replies.
 - Review-session mount, run, and unmount behavior.
-- Adapter catalog management and auth session operations.
+- Managed-agent catalog management and auth session operations.
 - Action, loop, and workforce controls.
 
 ## Streaming behavior

@@ -21,7 +21,7 @@ Managed agent installs let user-owned daemon policy decide when an ACP agent may
 
 ## Launch visibility
 
-- A managed agent can appear in launch listings even without a Goddard adapter-install marker.
+- A managed agent can appear in launch listings even without a Goddard launch-visibility marker.
 - The entry should expose managed install status so users understand whether the agent is installed, installable, or pending update.
 - Launch UI should treat install status as part of the user's launch decision, not as hidden background state.
 - If installation or update is required before launch, failure should be reported as a launch availability problem.

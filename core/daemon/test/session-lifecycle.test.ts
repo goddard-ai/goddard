@@ -2251,7 +2251,7 @@ test("session.draftSuggestions reads launch-dialog `$` suggestions without a ses
   ])
 })
 
-test("session.launchPreview loads adapter capabilities and repository branches for the launch dialog", async () => {
+test("session.launchPreview loads agent capabilities and repository branches for the launch dialog", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
