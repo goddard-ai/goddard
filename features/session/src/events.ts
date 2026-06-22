@@ -1,5 +1,5 @@
 import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
-import { event, type EventDefinition } from "@goddard-ai/sdk-plugin"
+import { event } from "@goddard-ai/sdk-plugin"
 
 import type {
   CreateSessionRequest,
@@ -72,26 +72,6 @@ export type SessionIdEvent = {
   sessionId: SessionId
 }
 
-export type SessionEventDefinitions = {
-  "session.worktree.prepared": EventDefinition<SessionWorktreePreparedEvent>
-  "session.persisted": EventDefinition<SessionPersistedEvent>
-  "session.activated": EventDefinition<SessionActivatedEvent>
-  "session.launch.finished": EventDefinition<SessionLaunchFinishedEvent>
-  "session.launch.failed": EventDefinition<SessionLaunchFailedEvent>
-  "session.stopping": EventDefinition<SessionStoppingEvent>
-  "session.blocked": EventDefinition<SessionBlockedEvent>
-  "session.turn.ended": EventDefinition<SessionAttentionEvent>
-  "session.replied": EventDefinition<SessionIdEvent>
-  "session.completed": EventDefinition<SessionIdEvent>
-  "session.message": EventDefinition<RoutedSessionMessageEvent>
-  "session.lifecycle.updated": EventDefinition<
-    Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>
-  >
-  "session.lifecycle.deleted": EventDefinition<
-    Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>
-  >
-}
-
 export const sessionEvents = {
   "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
   "session.persisted": event<SessionPersistedEvent>(),
@@ -110,4 +90,6 @@ export const sessionEvents = {
   "session.lifecycle.deleted": event<Extract<SessionLifecycleEvent, { kind: "sessionDeleted" }>>({
     debug: "session.lifecycle",
   }),
-} satisfies SessionEventDefinitions
+}
+
+export type SessionEventDefinitions = typeof sessionEvents
