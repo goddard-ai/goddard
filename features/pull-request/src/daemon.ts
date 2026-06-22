@@ -1,6 +1,5 @@
-import { definePlugin, event } from "@goddard-ai/daemon-plugin"
+import { definePlugin } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
-import type { AttentionHeadline, AttentionScope } from "@goddard-ai/schema/attention"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import type { DaemonSession } from "@goddard-ai/session/schema"
@@ -9,7 +8,8 @@ import { kind } from "kindstore"
 import { pullRequestBackendRoutes } from "./backend.ts"
 import { pullRequestIpcRoutes } from "./daemon-ipc.ts"
 import { resolveReplyRequestFromGit, resolveSubmitRequestFromGit } from "./daemon/git.ts"
-import { DaemonPullRequest, type PullRequestId } from "./schema.ts"
+import { pullRequestEvents } from "./events.ts"
+import { DaemonPullRequest } from "./schema.ts"
 
 type PullRequestSessionRecord = {
   sessionId: DaemonSession["id"]
@@ -19,12 +19,6 @@ type PullRequestSessionRecord = {
 }
 type PullRequestRootConfig = {
   security?: SecurityConfig
-}
-export type PullRequestAttentionEvent = {
-  pullRequestId: PullRequestId
-  scope: AttentionScope
-  headline: AttentionHeadline
-  turnId: string | null
 }
 function requireRepositorySession(session: PullRequestSessionRecord | null) {
   if (!session) {
@@ -72,10 +66,7 @@ export const pullRequestPlugin = definePlugin({
       ),
     },
   },
-  events: {
-    "pull_request.created": event<PullRequestAttentionEvent>(),
-    "pull_request.updated": event<PullRequestAttentionEvent>(),
-  },
+  events: pullRequestEvents,
   backendRoutes: pullRequestBackendRoutes,
   ipcRoutes: pullRequestIpcRoutes,
   setup({ backend, configProvider, db, events, ipc, session }) {

@@ -1,14 +1,14 @@
 import { join } from "node:path"
-import type { DaemonLogger, DaemonLogService } from "@goddard-ai/daemon-plugin"
+import type { DaemonLogger, DaemonLogService, EventBus } from "@goddard-ai/daemon-plugin"
 import type { CreateSessionRequest, SessionId } from "@goddard-ai/session/schema"
 import { concat, dedent, getErrorMessage } from "radashi"
 import { ulid } from "ulid"
 
+import type { workforceEvents } from "../events.ts"
 import type {
   WorkforceAgentConfig,
   WorkforceConfig,
   WorkforceDescription,
-  WorkforceEventEnvelope,
   WorkforceLedgerEvent,
   WorkforceProjection,
   WorkforceRequestIntent,
@@ -28,6 +28,7 @@ import {
 import { buildWorkforcePaths } from "./paths.ts"
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never
+type WorkforceEventEmitter = Pick<EventBus<typeof workforceEvents>, "emit">
 
 /** Input delivered to the daemon-owned session runner for one handled request. */
 export interface WorkforceSessionRunInput {
@@ -61,7 +62,7 @@ export interface WorkforceRuntimeDeps {
     requestId: string
   }) => void | Promise<void>
   runSession?: WorkforceSessionRunner
-  publishEvent?: (payload: WorkforceEventEnvelope) => void
+  events?: WorkforceEventEmitter
 }
 
 /** Collects the most relevant recent ledger activity for the agent about to handle a request. */
@@ -683,7 +684,7 @@ export class WorkforceRuntime {
       queues: buildWorkforceQueues(this.#projection.requests),
       summary: summarizeWorkforceProjection(this.#projection.requests),
     }
-    this.#deps.publishEvent?.({
+    void this.#deps.events?.emit("workforce.ledger.event", {
       rootDir: this.#rootDir,
       event: eventWithId,
     })

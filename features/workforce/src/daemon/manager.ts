@@ -98,7 +98,7 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
           session: deps.session,
           attachSession: deps.attachSession,
           runSession: deps.runSession,
-          publishEvent: deps.publishEvent,
+          events: deps.events,
         })
       } catch (error) {
         logger.log("workforce.runtime_start_failed", {
