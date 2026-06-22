@@ -41,6 +41,8 @@ export interface WorkforceSessionRunInput {
 /** Session runner abstraction used by tests and the real daemon session bridge. */
 export type WorkforceSessionRunner = (input: WorkforceSessionRunInput) => Promise<void>
 
+type WorkforceSessionLauncherDeps = Pick<WorkforceRuntimeDeps, "session" | "attachSession">
+
 /** Mutable runtime dependencies shared by one workload host. */
 export interface WorkforceRuntimeDeps {
   log: DaemonLogService
@@ -276,7 +278,7 @@ function buildVerboseTextField(
 
 /** Launches one daemon session for a workforce request using the runtime's ownership rules. */
 async function defaultRunWorkforceSession(
-  deps: WorkforceRuntimeDeps,
+  { session, attachSession }: WorkforceSessionLauncherDeps,
   logger: DaemonLogger,
   input: WorkforceSessionRunInput,
 ): Promise<void> {
@@ -289,9 +291,9 @@ async function defaultRunWorkforceSession(
     cwd,
   })
 
-  const session = await deps.session.newSession({
+  const createdSession = await session.newSession({
     onPersisted: ({ sessionId }) =>
-      deps.attachSession?.({
+      attachSession?.({
         sessionId,
         rootDir: input.rootDir,
         agentId: input.agent.id,
@@ -312,9 +314,9 @@ async function defaultRunWorkforceSession(
   })
 
   logger.log("workforce.session_completed", {
-    sessionId: session.id,
-    acpSessionId: session.acpSessionId,
-    status: session.status,
+    sessionId: createdSession.id,
+    acpSessionId: createdSession.acpSessionId,
+    status: createdSession.status,
   })
 }
 
@@ -375,10 +377,14 @@ function assertActorOwnsActiveRequest(
 /** A daemon-managed repo-local workforce runtime and its active queue state. */
 export class WorkforceRuntime {
   readonly #config: WorkforceConfig
-  readonly #deps: WorkforceRuntimeDeps
   readonly #events: WorkforceLedgerEvent[]
+  readonly #log: DaemonLogService
   readonly #paths: ReturnType<typeof buildWorkforcePaths>
+  readonly #publishEvent: WorkforceRuntimeDeps["publishEvent"]
   readonly #rootDir: string
+  readonly #runSession: WorkforceRuntimeDeps["runSession"]
+  readonly #session: WorkforceRuntimeDeps["session"]
+  readonly #attachSession: WorkforceRuntimeDeps["attachSession"]
   readonly #runningAgents = new Set<string>()
   readonly #stopped = { value: false }
   readonly #logger: DaemonLogger
@@ -390,19 +396,27 @@ export class WorkforceRuntime {
     config: WorkforceConfig
     projection: WorkforceProjection
     events: WorkforceLedgerEvent[]
-    deps: WorkforceRuntimeDeps
+    runtimeDeps: WorkforceRuntimeDeps
   }) {
     this.#rootDir = input.rootDir
     this.#config = input.config
     this.#projection = input.projection
     this.#events = input.events
-    this.#deps = input.deps
+    const { log, session, attachSession, runSession, publishEvent } = input.runtimeDeps
+    this.#log = log
+    this.#session = session
+    this.#attachSession = attachSession
+    this.#runSession = runSession
+    this.#publishEvent = publishEvent
     this.#paths = buildWorkforcePaths(input.rootDir)
-    this.#logger = input.deps.log.createLogger()
+    this.#logger = log.createLogger()
   }
 
   /** Rehydrates one repository workforce and resumes draining any queued requests. */
-  static async start(rootDir: string, deps: WorkforceRuntimeDeps): Promise<WorkforceRuntime> {
+  static async start(
+    rootDir: string,
+    runtimeDeps: WorkforceRuntimeDeps,
+  ): Promise<WorkforceRuntime> {
     await ensureWorkforceFiles(rootDir)
     const [config, projection, events] = await Promise.all([
       readWorkforceConfig(rootDir),
@@ -415,7 +429,7 @@ export class WorkforceRuntime {
       config,
       projection,
       events,
-      deps,
+      runtimeDeps,
     })
 
     runtime.#logger.log("workforce.runtime_started", {
@@ -494,7 +508,7 @@ export class WorkforceRuntime {
         targetAgentId: input.targetAgentId,
         intent: input.intent ?? "default",
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField(this.#deps.log, "input", input.payload),
+        ...buildVerboseTextField(this.#log, "input", input.payload),
       })
     })
 
@@ -531,7 +545,7 @@ export class WorkforceRuntime {
         previousStatus,
         nextStatus: assertRequestExists(this.#projection, input.requestId).status,
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField(this.#deps.log, "input", input.payload),
+        ...buildVerboseTextField(this.#log, "input", input.payload),
       })
     })
   }
@@ -630,7 +644,7 @@ export class WorkforceRuntime {
         requestId: input.requestId,
         agentId: request.toAgentId,
         ...buildWorkforceSummaryFields(this.#projection.summary),
-        ...buildVerboseTextField(this.#deps.log, "output", input.output),
+        ...buildVerboseTextField(this.#log, "output", input.output),
       })
     })
   }
@@ -683,7 +697,7 @@ export class WorkforceRuntime {
       queues: buildWorkforceQueues(this.#projection.requests),
       summary: summarizeWorkforceProjection(this.#projection.requests),
     }
-    this.#deps.publishEvent?.({
+    this.#publishEvent?.({
       rootDir: this.#rootDir,
       event: eventWithId,
     })
@@ -762,8 +776,13 @@ export class WorkforceRuntime {
 
         try {
           const runSession =
-            this.#deps.runSession ??
-            ((input) => defaultRunWorkforceSession(this.#deps, this.#logger, input))
+            this.#runSession ??
+            ((input) =>
+              defaultRunWorkforceSession(
+                { session: this.#session, attachSession: this.#attachSession },
+                this.#logger,
+                input,
+              ))
           await runSession({
             rootDir: this.#rootDir,
             agent,
