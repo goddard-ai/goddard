@@ -282,17 +282,7 @@ export const sessionPlugin = definePlugin({
   events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
   consumes: [managedAgentPlugin],
-  setup({
-    agentInstallService,
-    configProvider,
-    daemonRuntime,
-    db,
-    events,
-    ipc,
-    log,
-    managedAgent,
-    sessionContext,
-  }) {
+  setup({ configProvider, daemonRuntime, db, events, ipc, log, managedAgent, sessionContext }) {
     const streamDebug = log.createDebug("session.stream")
     const sessionManager = createSessionManager({
       db,
@@ -301,7 +291,6 @@ export const sessionPlugin = definePlugin({
       configProvider,
       log,
       managedAgent,
-      agentInstallService,
       sessionContext,
       events,
       idleSessionShutdownTimeoutMs: daemonRuntime.idleSessionShutdownTimeoutMs,

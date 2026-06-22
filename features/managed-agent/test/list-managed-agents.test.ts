@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { DaemonAgentInstallService } from "@goddard-ai/daemon-plugin"
+import type { ManagedAgentInstallService } from "@goddard-ai/managed-agent/daemon/install-service"
 import { createAcpRegistryService } from "acp-client/node"
 import { describe, expect, test } from "bun:test"
 
@@ -34,9 +34,9 @@ async function withIsolatedHome(callback: () => Promise<void>) {
 function createAgentInstallService(
   statuses: Record<
     string,
-    Awaited<ReturnType<DaemonAgentInstallService["getInstalledAgent"]>>
+    Awaited<ReturnType<ManagedAgentInstallService["getInstalledAgent"]>>
   > = {},
-): DaemonAgentInstallService {
+): ManagedAgentInstallService {
   return {
     cacheDir: "/tmp/acp-client",
     async resolveAgent({ agent }) {

@@ -1,9 +1,5 @@
 import { dirname, join, resolve } from "node:path"
-import type {
-  ACPRegistryService,
-  DaemonAgentInstallService,
-  DaemonManagedAgentInput,
-} from "@goddard-ai/daemon-plugin"
+import type { ACPRegistryService } from "@goddard-ai/daemon-plugin"
 import { getDatabasePath } from "@goddard-ai/paths/node"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import {
@@ -16,7 +12,74 @@ import {
   type AgentInstallOptions,
 } from "acp-client/node"
 
-import { recordManagedAgentUsed, type ManagedAgentUsageStore } from "./managed-agent-usage.ts"
+export type ManagedAgentProcessSpec = {
+  readonly cmd: string
+  readonly args: readonly string[]
+  readonly env?: Record<string, string>
+}
+
+export type InstalledManagedAgent = {
+  readonly agentId: string
+  readonly version: string
+  readonly distributionHash: string
+  readonly method: "binary" | "npx" | "uvx"
+  readonly platform?: string
+  readonly installDir: string
+  readonly installedAt: string
+  readonly updatedAt: string
+}
+
+export type ManagedAgentInstallStatus =
+  | { readonly status: "missing" }
+  | { readonly status: "installed"; readonly agent: InstalledManagedAgent }
+  | {
+      readonly status: "failed"
+      readonly lastError: string
+      readonly checkedAt: string
+      readonly agent?: InstalledManagedAgent
+    }
+
+export type ManagedAgentInstallResult = {
+  readonly agent: InstalledManagedAgent
+  readonly installed: boolean
+  readonly updated: boolean
+}
+
+export type ManagedAgentUpdateResult = {
+  readonly agent: InstalledManagedAgent
+  readonly checkedAt: string
+  readonly updated: boolean
+  readonly previous?: InstalledManagedAgent
+}
+
+export type ManagedAgentInput = {
+  readonly agent: string | AgentDistribution
+  readonly registry?: Record<string, AgentDistribution>
+}
+
+export type ManagedAgentInstallService = {
+  readonly cacheDir: string
+  readonly resolveAgent: (input: ManagedAgentInput) => Promise<AgentDistribution>
+  readonly getInstalledAgent: (input: ManagedAgentInput) => Promise<ManagedAgentInstallStatus>
+  readonly listInstalledAgents: () => Promise<readonly InstalledManagedAgent[]>
+  readonly ensureAgentInstalled: (input: ManagedAgentInput) => Promise<ManagedAgentInstallResult>
+  readonly updateAgent: (input: ManagedAgentInput) => Promise<ManagedAgentUpdateResult>
+  readonly resolveInstalledAgentProcessSpec: (
+    input: ManagedAgentInput & { readonly installIfMissing?: boolean },
+  ) => Promise<ManagedAgentProcessSpec>
+}
+
+export type ManagedAgentUsageState = Record<
+  string,
+  {
+    readonly lastUsedAt: string
+  }
+>
+
+export type ManagedAgentUsageStore = {
+  readonly get: () => ManagedAgentUsageState | undefined
+  readonly set: (state: ManagedAgentUsageState) => void
+}
 
 type AcpClientManagedInstallApi = {
   getInstalledAgent: typeof getInstalledAgent
@@ -26,7 +89,7 @@ type AcpClientManagedInstallApi = {
   resolveInstalledAgentProcessSpec: typeof resolveInstalledAgentProcessSpec
 }
 
-type AgentInstallServiceOptions = {
+type ManagedAgentInstallServiceOptions = {
   registryService?: ACPRegistryService
   cacheDir?: string
   now?: () => number
@@ -50,10 +113,10 @@ export function getDaemonAgentInstallCacheDir() {
   return join(dirname(getDatabasePath()), "acp-client")
 }
 
-/** Creates the daemon policy wrapper around acp-client managed install operations. */
-export function createAgentInstallService(
-  options: AgentInstallServiceOptions,
-): DaemonAgentInstallService {
+/** Creates the managed-agent policy wrapper around acp-client install operations. */
+export function createManagedAgentInstallService(
+  options: ManagedAgentInstallServiceOptions,
+): ManagedAgentInstallService {
   const cacheDir = resolve(options.cacheDir ?? getDaemonAgentInstallCacheDir())
   const managedInstallApi = options.managedInstallApi ?? defaultManagedInstallApi
   const registryService = options.registryService ?? createAcpRegistryService()
@@ -66,7 +129,7 @@ export function createAgentInstallService(
     }
   }
 
-  async function resolveAgent(input: DaemonManagedAgentInput): Promise<AgentDistribution> {
+  async function resolveAgent(input: ManagedAgentInput): Promise<AgentDistribution> {
     if (typeof input.agent !== "string") {
       return input.agent
     }
@@ -118,13 +181,24 @@ export function createAgentInstallService(
         }),
       )
       if (options.usageStore) {
-        recordManagedAgentUsed(
-          options.usageStore,
-          agent.id,
-          new Date(options.now?.() ?? Date.now()).toISOString(),
-        )
+        recordManagedAgentUsed(options.usageStore, agent.id, readNowIso(options.now))
       }
       return processSpec
     },
   }
+}
+
+function recordManagedAgentUsed(
+  usageStore: ManagedAgentUsageStore,
+  agentId: string,
+  lastUsedAt: string,
+) {
+  usageStore.set({
+    ...usageStore.get(),
+    [agentId]: { lastUsedAt },
+  })
+}
+
+function readNowIso(now?: () => number) {
+  return new Date(now?.() ?? Date.now()).toISOString()
 }

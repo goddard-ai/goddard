@@ -5,10 +5,7 @@ import { join } from "node:path"
 import { Readable, Writable } from "node:stream"
 import { ReadableStream } from "node:stream/web"
 import type { ProcessLike } from "@alloc/tree-kill"
-import type {
-  DaemonAgentEnvironmentService,
-  DaemonAgentInstallService,
-} from "@goddard-ai/daemon-plugin"
+import type { DaemonAgentEnvironmentService } from "@goddard-ai/daemon-plugin"
 import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import { getGoddardGlobalDir, getGoddardTempLogDir } from "@goddard-ai/paths/node"
 import {
@@ -242,14 +239,12 @@ export async function spawnAgentProcess(params: {
   env?: Record<string, string>
   envPolicy?: SessionEnvPolicyConfig
   managedAgent: ManagedAgentService
-  agentInstallService?: DaemonAgentInstallService
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessHandle> {
   const { cmd, args, env } = await resolveLaunchAgentProcessSpec({
     agent: params.agent,
     managedAgent: params.managedAgent,
-    agentInstallService: params.agentInstallService,
     registry: params.registry,
     managedAgents: params.managedAgents,
   })
@@ -273,16 +268,11 @@ export async function spawnAgentProcess(params: {
 export async function resolveLaunchAgentProcessSpec(params: {
   agent: AcpAdapterId | AgentDistribution
   managedAgent: ManagedAgentService
-  agentInstallService?: DaemonAgentInstallService
   registry?: Record<string, AgentDistribution>
   managedAgents?: ManagedAgentsConfig
 }): Promise<AgentProcessSpec> {
   if (shouldUseManagedInstall(params.agent, params.managedAgents)) {
-    if (!params.agentInstallService) {
-      throw new Error("Managed ACP agent install service is unavailable.")
-    }
-
-    const processSpec = await params.agentInstallService.resolveInstalledAgentProcessSpec({
+    const processSpec = await params.managedAgent.resolveInstalledAgentProcessSpec({
       agent: params.agent,
       registry: params.registry,
       installIfMissing: true,

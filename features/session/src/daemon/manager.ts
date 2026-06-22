@@ -4,7 +4,6 @@ import treeKill from "@alloc/tree-kill"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type {
   DaemonAgentEnvironmentService,
-  DaemonAgentInstallService,
   DaemonConfigProvider,
   DaemonLogger,
   DaemonLogService,
@@ -698,7 +697,6 @@ export function createSessionManager({
   configProvider,
   log,
   managedAgent,
-  agentInstallService,
   sessionContext: sessionContextService,
   idleSessionShutdownTimeoutMs,
 }: {
@@ -709,7 +707,6 @@ export function createSessionManager({
   configProvider: DaemonConfigProvider<SessionManagerRootConfig>
   log: DaemonLogService
   managedAgent: ManagedAgentService
-  agentInstallService: DaemonAgentInstallService
   sessionContext: DaemonSessionContextService
   idleSessionShutdownTimeoutMs?: number
 }) {
@@ -783,7 +780,6 @@ export function createSessionManager({
     getDaemonUrl,
     createAgentEnvironment,
     managedAgent,
-    agentInstallService,
     getPackageVersion,
     handlePermissionRequest: promptTurns.handlePermissionRequest,
     handleSessionUpdate: promptTurns.handleSessionUpdate,
@@ -1498,7 +1494,6 @@ export function createSessionManager({
           env: resolvedRequest.env,
           envPolicy: resolvedConfig?.sessions?.envPolicy,
           managedAgent,
-          agentInstallService: agentInstallService,
           registry: resolvedRegistry,
           managedAgents: resolvedConfig?.agents?.managed,
         })

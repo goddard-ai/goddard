@@ -1,8 +1,5 @@
-import type {
-  DaemonAgentInstallService,
-  DaemonConfigProvider,
-  DaemonLogger,
-} from "@goddard-ai/daemon-plugin"
+import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
+import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import { expect, test } from "bun:test"
 
@@ -49,8 +46,8 @@ function createConfigProvider(config: TestRootConfig): DaemonConfigProvider {
 }
 
 function createAgentInstallService(
-  updateAgent: DaemonAgentInstallService["updateAgent"],
-): DaemonAgentInstallService {
+  updateAgent: ManagedAgentService["updateAgent"],
+): ManagedAgentService {
   return {
     cacheDir: "/tmp/acp-client",
     async resolveAgent({ agent }) {

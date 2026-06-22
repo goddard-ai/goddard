@@ -29,6 +29,14 @@
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
     },
+    "./daemon/install-service": {
+      "types": {
+        "source": "./src/daemon/install-service.ts",
+        "default": "./dist/daemon/install-service.d.mts"
+      },
+      "bun": "./src/daemon/install-service.ts",
+      "import": "./dist/daemon/install-service.mjs"
+    },
     "./schema": {
       "types": {
         "source": "./src/schema.ts",

@@ -532,9 +532,6 @@ importers:
       '@types/hash-sum':
         specifier: 'catalog:'
         version: 1.0.2
-      acp-client:
-        specifier: 'catalog:'
-        version: 0.5.3(zod@4.4.3)
       hash-sum:
         specifier: 'catalog:'
         version: 2.0.0
