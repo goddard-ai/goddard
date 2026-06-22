@@ -7,6 +7,10 @@ import {
   type ManagedAgentInstallService,
 } from "./daemon/install-service.ts"
 import {
+  resolveManagedAgentLaunchProcessSpec,
+  type ResolveManagedAgentLaunchProcessSpecInput,
+} from "./daemon/launch-process.ts"
+import {
   createManagedAgentUpdateScheduler,
   type ManagedAgentUpdateCheckState,
 } from "./daemon/update-scheduler.ts"
@@ -17,7 +21,11 @@ import {
   uninstallCatalogManagedAgent,
 } from "./list-managed-agents.ts"
 
-export type ManagedAgentService = ManagedAgentInstallService
+export type ManagedAgentService = ManagedAgentInstallService & {
+  readonly resolveLaunchProcessSpec: (
+    input: ResolveManagedAgentLaunchProcessSpecInput,
+  ) => ReturnType<typeof resolveManagedAgentLaunchProcessSpec>
+}
 
 export const managedAgentPlugin = definePlugin({
   name: "managed-agent",
@@ -25,10 +33,15 @@ export const managedAgentPlugin = definePlugin({
   setup({ configProvider, log, metadataStore }) {
     const registryService = createAcpRegistryService()
     const usageStore = createManagedAgentUsageStore(metadataStore)
-    const managedAgent = createManagedAgentInstallService({
+    const managedAgentInstallService = createManagedAgentInstallService({
       registryService,
       usageStore,
     })
+    const managedAgent: ManagedAgentService = {
+      ...managedAgentInstallService,
+      resolveLaunchProcessSpec: (input) =>
+        resolveManagedAgentLaunchProcessSpec(managedAgentInstallService, input),
+    }
     const updateScheduler = createManagedAgentUpdateScheduler({
       configProvider,
       agentInstallService: managedAgent,

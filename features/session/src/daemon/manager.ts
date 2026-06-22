@@ -136,7 +136,6 @@ import { createWorktree } from "./worktrees/index.ts"
 import { createWorktreePluginManager } from "./worktrees/plugin-manager.ts"
 import { defaultPlugin } from "./worktrees/plugins/default.ts"
 
-export { resolveUnmanagedAgentProcessSpec } from "./agent-process.ts"
 export { injectSystemPrompt } from "./prompt-turns.ts"
 export type { SessionWorktreeLifecycleState } from "./session-worktrees.ts"
 

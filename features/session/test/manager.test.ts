@@ -1,13 +1,16 @@
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { ManagedAgentService } from "@goddard-ai/managed-agent/daemon"
+import type { ManagedAgentInstallService } from "@goddard-ai/managed-agent/daemon/install-service"
+import {
+  resolveManagedAgentLaunchProcessSpec as resolveLaunchAgentProcessSpec,
+  resolveUnmanagedAgentProcessSpec,
+} from "@goddard-ai/managed-agent/daemon/launch-process"
 import { agentBinaryPlatforms, type AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import * as acp from "acp-client/protocol"
 import { afterEach, expect, test, vi } from "bun:test"
 
-import { resolveLaunchAgentProcessSpec } from "../src/daemon/agent-process.ts"
-import { injectSystemPrompt, resolveUnmanagedAgentProcessSpec } from "../src/daemon/manager.ts"
+import { injectSystemPrompt } from "../src/daemon/manager.ts"
 
 const cleanupDirs: string[] = []
 const originalHome = process.env.HOME
@@ -43,13 +46,13 @@ function createAgent(id: string): AgentDistribution {
 
 function createManagedAgentService(
   registry: Record<string, AgentDistribution>,
-  resolveInstalledAgentProcessSpec: ManagedAgentService["resolveInstalledAgentProcessSpec"] = async ({
+  resolveInstalledAgentProcessSpec: ManagedAgentInstallService["resolveInstalledAgentProcessSpec"] = async ({
     agent,
   }) => ({
     cmd: typeof agent === "string" ? agent : agent.id,
     args: [],
   }),
-): ManagedAgentService {
+): ManagedAgentInstallService {
   return {
     cacheDir: "/tmp/acp-client",
     async resolveAgent({ agent, registry: configuredRegistry }) {
@@ -156,9 +159,8 @@ test("resolveLaunchAgentProcessSpec uses managed installs before launching confi
   })
 
   await expect(
-    resolveLaunchAgentProcessSpec({
+    resolveLaunchAgentProcessSpec(managedAgent, {
       agent: "managed-agent",
-      managedAgent,
       managedAgents: {
         "managed-agent": {
           install: "beforeUse",
@@ -191,9 +193,8 @@ test("resolveLaunchAgentProcessSpec forwards configured registry overrides to ma
     }
   })
 
-  await resolveLaunchAgentProcessSpec({
+  await resolveLaunchAgentProcessSpec(managedAgent, {
     agent: "configured-agent",
-    managedAgent,
     registry: {
       "configured-agent": configuredAgent,
     },
@@ -226,9 +227,8 @@ test("resolveLaunchAgentProcessSpec preserves unmanaged launch resolution", asyn
   )
 
   await expect(
-    resolveLaunchAgentProcessSpec({
+    resolveLaunchAgentProcessSpec(managedAgent, {
       agent: "unmanaged-agent",
-      managedAgent,
       managedAgents: {
         "other-agent": {
           install: "beforeUse",
@@ -248,9 +248,8 @@ test("resolveLaunchAgentProcessSpec propagates managed install failures", async 
   })
 
   await expect(
-    resolveLaunchAgentProcessSpec({
+    resolveLaunchAgentProcessSpec(managedAgent, {
       agent: "managed-agent",
-      managedAgent,
       managedAgents: {
         "managed-agent": {
           install: "beforeUse",

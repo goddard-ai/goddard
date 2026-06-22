@@ -37,6 +37,14 @@
       "bun": "./src/daemon/install-service.ts",
       "import": "./dist/daemon/install-service.mjs"
     },
+    "./daemon/launch-process": {
+      "types": {
+        "source": "./src/daemon/launch-process.ts",
+        "default": "./dist/daemon/launch-process.d.mts"
+      },
+      "bun": "./src/daemon/launch-process.ts",
+      "import": "./dist/daemon/launch-process.mjs"
+    },
     "./schema": {
       "types": {
         "source": "./src/schema.ts",

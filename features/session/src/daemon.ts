@@ -22,7 +22,6 @@ import {
   type SessionTurnMessage,
 } from "./schema.ts"
 
-export { resolveUnmanagedAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type {
   LoadSessionParams,
