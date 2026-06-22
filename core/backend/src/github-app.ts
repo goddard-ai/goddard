@@ -1,4 +1,5 @@
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { App } from "octokit"
 
 type FetchLike = typeof fetch
@@ -18,7 +19,7 @@ export type GitHubWebhookResult = {
 
 export type GoddardGitHubApp = {
   app?: App
-  handleWebhook(input: GitHubWebhookInput): Promise<GitHubWebhookResult>
+  handleWebhook(input: GitHubWebhookDeliveryInput): Promise<GitHubWebhookResult>
 }
 
 export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
@@ -42,15 +43,24 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
         return
       }
 
+      const delivery = normalizeGitHubAppWebhook(id, name, payload)
+      if (!delivery) {
+        return
+      }
+
       try {
+        const body = JSON.stringify(delivery)
         await fetchImpl(new URL("/webhooks/github", baseUrl), {
           method: "POST",
           headers: {
             "content-type": "application/json",
             "x-github-event": name,
             "x-github-delivery": id,
+            ...(options.webhookSecret
+              ? { "x-hub-signature-256": await signGitHubWebhookBody(options.webhookSecret, body) }
+              : {}),
           },
-          body: JSON.stringify(payload),
+          body,
         })
       } catch (error) {
         console.error(`Failed to forward webhook ${name} to backend:`, error)
@@ -102,23 +112,27 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
     })
   }
 
-  const handleWebhook = async (input: GitHubWebhookInput): Promise<GitHubWebhookResult> => {
+  const handleWebhook = async (input: GitHubWebhookDeliveryInput): Promise<GitHubWebhookResult> => {
+    const body = JSON.stringify(input)
     const response = await fetchImpl(new URL("/webhooks/github", baseUrl), {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        ...(options.webhookSecret
+          ? { "x-hub-signature-256": await signGitHubWebhookBody(options.webhookSecret, body) }
+          : {}),
       },
-      body: JSON.stringify(input),
+      body,
     })
 
     if (!response.ok) {
       throw new Error(`Webhook handling failed (${response.status})`)
     }
 
-    const event = (await response.json()) as RepoEvent
+    const envelope = (await response.json()) as { payload: RepoEvent }
     return {
       handled: true,
-      event,
+      event: envelope.payload,
     }
   }
 
@@ -126,4 +140,66 @@ export function createGitHubApp(options: GitHubAppOptions): GoddardGitHubApp {
     app,
     handleWebhook,
   }
+}
+
+function normalizeGitHubAppWebhook(
+  deliveryId: string,
+  eventName: string,
+  payload: any,
+): GitHubWebhookDeliveryInput | undefined {
+  if (eventName === "issue_comment" && payload.action === "created") {
+    if (!payload.issue?.pull_request) {
+      return undefined
+    }
+
+    return {
+      deliveryId,
+      event: {
+        type: "issue_comment",
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+        prNumber: payload.issue.number,
+        author: payload.comment.user.login,
+        body: payload.comment.body ?? "",
+      },
+    }
+  }
+
+  if (eventName === "pull_request_review" && payload.action === "submitted") {
+    const state = String(payload.review.state).toLowerCase()
+    if (!["approved", "changes_requested", "commented"].includes(state)) {
+      return undefined
+    }
+
+    return {
+      deliveryId,
+      event: {
+        type: "pull_request_review",
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+        prNumber: payload.pull_request.number,
+        author: payload.review.user.login,
+        state: state as "approved" | "changes_requested" | "commented",
+        body: payload.review.body ?? "",
+      },
+    }
+  }
+
+  return undefined
+}
+
+async function signGitHubWebhookBody(secret: string, body: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
+  const hex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+  return `sha256=${hex}`
 }

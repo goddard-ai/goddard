@@ -20,18 +20,21 @@ test("github-app forwards webhooks to backend and returns handled event", async 
     expect(url.endsWith("/webhooks/github")).toBe(true)
 
     const body = JSON.parse(String(init?.body))
-    expect(body.type).toBe("issue_comment")
+    expect(body.event.type).toBe("issue_comment")
 
     return new Response(
       JSON.stringify({
-        type: "comment",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 1,
-        author: "teammate",
-        body: "nice",
-        reactionAdded: "eyes",
-        createdAt: new Date().toISOString(),
+        name: "remote_repo.event.received",
+        payload: {
+          type: "comment",
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+          author: "teammate",
+          body: "nice",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
+        },
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     )
@@ -42,12 +45,15 @@ test("github-app forwards webhooks to backend and returns handled event", async 
     fetchImpl: fetchImpl as typeof fetch,
   })
   const result = await app.handleWebhook({
-    type: "issue_comment",
-    owner: "goddard-ai",
-    repo: "sdk",
-    prNumber: 1,
-    author: "teammate",
-    body: "nice",
+    deliveryId: "delivery-1",
+    event: {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "teammate",
+      body: "nice",
+    },
   })
 
   expect(result.handled).toBe(true)

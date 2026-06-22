@@ -8,6 +8,7 @@ import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
 
 import { type BackendControlPlane } from "./api/control-plane.ts"
+import { getPrincipalStreamKey } from "./api/events.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
 import { createSseSession } from "./utils.ts"
@@ -40,23 +41,24 @@ export async function startBackendServer(
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
     broadcastEvent: async (_env, event) => {
-      broadcastToInMemoryStreams(controlPlane, event)
+      broadcastToInMemoryStreams(controlPlane, event.payload)
     },
-    handleUserStream: async (_env, githubUsername, request) => {
+    handleUserStream: async (_env, principal, request) => {
+      const streamKey = getPrincipalStreamKey(principal)
       const sseSession = createSseSession(() => {
         if (isRemoteRepoStreamService(controlPlane)) {
-          controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
+          controlPlane.removeStreamSocket(streamKey, sseSession.sink)
         }
       })
 
       if (isRemoteRepoStreamService(controlPlane)) {
-        controlPlane.addStreamSocket(githubUsername, sseSession.sink)
+        controlPlane.addStreamSocket(streamKey, sseSession.sink)
       }
       request.signal.addEventListener(
         "abort",
         () => {
           if (isRemoteRepoStreamService(controlPlane)) {
-            controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
+            controlPlane.removeStreamSocket(streamKey, sseSession.sink)
           }
           sseSession.sink.close?.()
         },

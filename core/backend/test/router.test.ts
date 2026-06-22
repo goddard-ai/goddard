@@ -12,6 +12,7 @@ const stubControlPlane: BackendControlPlane = {
   startDeviceFlow: notUsed,
   completeDeviceFlow: notUsed,
   getSession: notUsed,
+  getPrincipal: notUsed,
   createPr: notUsed,
   isManagedPr: notUsed,
   replyToPr: notUsed,
@@ -53,20 +54,25 @@ test("createBackendRouter handles auth device start via rouzer route map", async
 })
 
 test("createBackendRouter delegates stream route to injected handleUserStream", async () => {
-  let capturedGithubUsername = ""
+  let capturedGithubLogin = ""
 
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
-    getSession(token) {
+    getPrincipal(token) {
       expect(token).toBe("tok_1")
-      return { token, githubUsername: "alec", githubUserId: 1 }
+      return {
+        kind: "github_user",
+        githubLogin: "alec",
+        githubUserId: 1,
+        repositories: [],
+      }
     },
   }
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    handleUserStream: async (_env, githubUsername, _request) => {
-      capturedGithubUsername = githubUsername
+    handleUserStream: async (_env, principal, _request) => {
+      capturedGithubLogin = principal.githubLogin
       return new Response("stream-ok", { status: 200 })
     },
   })
@@ -81,23 +87,31 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
 
   expect(response.status).toBe(200)
   expect(await response.text()).toBe("stream-ok")
-  expect(capturedGithubUsername).toBe("alec")
+  expect(capturedGithubLogin).toBe("alec")
 })
 
 test("createBackendRouter dispatches normalized remote-repo webhook events", async () => {
   const handled: string[] = []
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
-    handleGitHubWebhook(input) {
+    handleGitHubWebhook(delivery) {
       return {
-        type: "comment",
-        owner: input.owner,
-        repo: input.repo,
-        prNumber: input.prNumber,
-        author: input.author,
-        body: input.body,
-        reactionAdded: "eyes",
-        createdAt: "2026-01-01T00:00:00.000Z",
+        name: "remote_repo.event.received",
+        payload: {
+          type: "comment",
+          owner: delivery.event.owner,
+          repo: delivery.event.repo,
+          prNumber: delivery.event.prNumber,
+          author: delivery.event.author,
+          body: delivery.event.body,
+          reactionAdded: "eyes",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        provenance: {
+          provider: "github",
+          deliveryId: delivery.deliveryId,
+          webhookType: delivery.event.type,
+        },
       }
     },
   }
@@ -121,12 +135,15 @@ test("createBackendRouter dispatches normalized remote-repo webhook events", asy
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          type: "issue_comment",
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: 1,
-          author: "alec",
-          body: "looks good",
+          deliveryId: "delivery-1",
+          event: {
+            type: "issue_comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "alec",
+            body: "looks good",
+          },
         }),
       }),
     ) as any,
@@ -134,6 +151,40 @@ test("createBackendRouter dispatches normalized remote-repo webhook events", asy
 
   expect(response.status).toBe(200)
   expect(handled).toEqual(["comment"])
+})
+
+test("createBackendRouter rejects GitHub webhooks with invalid configured signatures", async () => {
+  const router = createBackendRouter({
+    createControlPlane: () => stubControlPlane,
+  })
+
+  const response = await router(
+    createContext(
+      new Request("https://example.test/webhooks/github", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-hub-signature-256": "sha256=bad",
+        },
+        body: JSON.stringify({
+          deliveryId: "delivery-1",
+          event: {
+            type: "issue_comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "alec",
+            body: "looks good",
+          },
+        }),
+      }),
+      createEnv({ GITHUB_WEBHOOK_SECRET: "secret" }),
+    ) as any,
+  )
+
+  expect(response.status).toBe(401)
+  const payload = (await response.json()) as { error: string }
+  expect(payload.error).toBe("Invalid GitHub webhook signature")
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {

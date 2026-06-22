@@ -5,15 +5,20 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
+import {
+  canGitHubPrincipalAccessRepository,
+  normalizeGitHubWebhookDelivery,
+  type GitHubRemoteRepoEvent,
+} from "@goddard-ai/github/backend"
+import type { GitHubRepositoryRef, GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
   isRemoteRepoStreamSink,
-  normalizeGitHubWebhookEvent,
   type RemoteRepoEventBroadcaster,
   type RemoteRepoStreamService,
   type RemoteRepoStreamSink,
 } from "@goddard-ai/remote-repo/backend"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
@@ -23,6 +28,7 @@ import {
   postPrCommentViaApp,
   type BackendControlPlane,
 } from "./control-plane.ts"
+import { getPrincipalStreamKey, sessionToPrincipal, type BackendPrincipal } from "./events.ts"
 
 /** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }
@@ -113,6 +119,11 @@ export class InMemoryBackendControlPlane
     return toPublicSession(session)
   }
 
+  getPrincipal(token: string): BackendPrincipal {
+    const session = this.getSession(token)
+    return sessionToPrincipal(session, this.#listRepositoriesForUser(session.githubUsername))
+  }
+
   createPr(token: string, input: CreatePrInput): PullRequestRecord {
     const session = this.getSession(token)
     assertRepo(input.owner, input.repo)
@@ -181,41 +192,41 @@ export class InMemoryBackendControlPlane
     )
   }
 
-  handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
-    assertRepo(event.owner, event.repo)
+  handleGitHubWebhook(delivery: GitHubWebhookDeliveryInput): GitHubRemoteRepoEvent {
+    assertRepo(delivery.event.owner, delivery.event.repo)
 
-    return normalizeGitHubWebhookEvent(event)
+    return normalizeGitHubWebhookDelivery(delivery)
   }
 
-  addStreamSocket(githubUsername: string, socket: unknown): void {
+  addStreamSocket(streamKey: string, socket: unknown): void {
     if (!isRemoteRepoStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByUser.get(githubUsername) ?? new Set<RemoteRepoStreamSink>()
+    const room = this.#streamsByUser.get(streamKey) ?? new Set<RemoteRepoStreamSink>()
     room.add(socket)
-    this.#streamsByUser.set(githubUsername, room)
+    this.#streamsByUser.set(streamKey, room)
   }
 
-  removeStreamSocket(githubUsername: string, socket: unknown): void {
+  removeStreamSocket(streamKey: string, socket: unknown): void {
     if (!isRemoteRepoStreamSink(socket)) {
       return
     }
 
-    const room = this.#streamsByUser.get(githubUsername)
+    const room = this.#streamsByUser.get(streamKey)
     room?.delete(socket)
     if (room && room.size === 0) {
-      this.#streamsByUser.delete(githubUsername)
+      this.#streamsByUser.delete(streamKey)
     }
   }
 
   broadcastRemoteRepoEvent(event: RepoEvent): void {
-    const githubUsername = this.resolveEventOwner(event)
-    if (!githubUsername) {
+    const streamKey = this.#resolveAuthorizedStreamKey(event)
+    if (!streamKey) {
       return
     }
 
-    const sockets = this.#streamsByUser.get(githubUsername)
+    const sockets = this.#streamsByUser.get(streamKey)
     if (!sockets) {
       return
     }
@@ -231,7 +242,7 @@ export class InMemoryBackendControlPlane
     }
 
     if (sockets.size === 0) {
-      this.#streamsByUser.delete(githubUsername)
+      this.#streamsByUser.delete(streamKey)
     }
   }
 
@@ -246,5 +257,42 @@ export class InMemoryBackendControlPlane
         pullRequest.repo === event.repo &&
         pullRequest.number === event.prNumber,
     )?.createdBy
+  }
+
+  #listRepositoriesForUser(githubUsername: string): GitHubRepositoryRef[] {
+    const repositories = new Map<string, GitHubRepositoryRef>()
+
+    for (const pullRequest of this.#pullRequests) {
+      if (pullRequest.createdBy !== githubUsername) {
+        continue
+      }
+
+      const key = `${pullRequest.owner}/${pullRequest.repo}`
+      repositories.set(key, {
+        owner: pullRequest.owner,
+        repo: pullRequest.repo,
+      })
+    }
+
+    return [...repositories.values()]
+  }
+
+  #resolveAuthorizedStreamKey(event: RepoEvent): string | undefined {
+    const githubUsername = this.resolveEventOwner(event)
+    if (!githubUsername) {
+      return undefined
+    }
+
+    const session = {
+      token: "",
+      githubUsername,
+      githubUserId: hashToInteger(githubUsername),
+    }
+    const principal = sessionToPrincipal(session, this.#listRepositoriesForUser(githubUsername))
+    if (!canGitHubPrincipalAccessRepository(principal, event)) {
+      return undefined
+    }
+
+    return getPrincipalStreamKey(principal)
   }
 }
