@@ -20,9 +20,20 @@ type PrReplyInput = {
   body: string
 }
 
+type RepositoryUrlParser = (remote: string) =>
+  | {
+      provider: string
+      owner: string
+      repo: string
+    }
+  | undefined
+
 /** Resolves PR creation defaults from the local Git checkout. */
-export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promise<PrCreateInput> {
-  const { provider, owner, repo } = inferRepoFromGit(input.cwd)
+export async function resolveSubmitRequestFromGit(
+  input: SubmitPrRequest,
+  parseRepositoryUrl: RepositoryUrlParser = parseGitHubRepositoryUrl,
+): Promise<PrCreateInput> {
+  const { provider, owner, repo } = inferRepoFromGit(input.cwd, parseRepositoryUrl)
 
   return {
     provider,
@@ -36,8 +47,11 @@ export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promi
 }
 
 /** Resolves PR reply defaults from the local Git checkout. */
-export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise<PrReplyInput> {
-  const { provider, owner, repo } = inferRepoFromGit(input.cwd)
+export async function resolveReplyRequestFromGit(
+  input: ReplyPrRequest,
+  parseRepositoryUrl: RepositoryUrlParser = parseGitHubRepositoryUrl,
+): Promise<PrReplyInput> {
+  const { provider, owner, repo } = inferRepoFromGit(input.cwd, parseRepositoryUrl)
 
   return {
     provider,
@@ -48,9 +62,9 @@ export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise
   }
 }
 
-function inferRepoFromGit(cwd: string) {
+function inferRepoFromGit(cwd: string, parseRepositoryUrl: RepositoryUrlParser) {
   const remote = runGit(cwd, ["config", "--get", "remote.origin.url"])
-  const repository = parseGitHubRepositoryUrl(remote)
+  const repository = parseRepositoryUrl(remote)
   if (repository) {
     return repository
   }
