@@ -60,18 +60,18 @@ test("owns the remote repository backend event contract", () => {
 test("owns remote repository backend event source authorization", async () => {
   const source = remoteRepoBackendEventSources["remote-repo"]
   const principal = {
-    id: "github:2997745",
+    id: "example:user-1",
     providerIdentities: [
       {
-        provider: "github",
-        subject: "2997745",
+        provider: "example",
+        subject: "user-1",
         displayName: "alec",
       },
     ],
   }
   const event = createRemoteRepoBackendEvent({
     type: "comment",
-    provider: "github",
+    provider: "example",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,
@@ -87,7 +87,7 @@ test("owns remote repository backend event source authorization", async () => {
         principal,
         event,
         providers: {
-          github: {
+          example: {
             authorizeRemoteRepositoryAccess: ({ repository }) =>
               repository.owner === "goddard-ai" && repository.repo === "sdk",
           },
@@ -110,7 +110,7 @@ test("creates provider-qualified remote repository events", () => {
   expect(
     createRemoteRepoBackendEvent({
       type: "comment",
-      provider: "github",
+      provider: "example",
       owner: "goddard-ai",
       repo: "sdk",
       prNumber: 12,
@@ -121,7 +121,7 @@ test("creates provider-qualified remote repository events", () => {
     }).payload,
   ).toEqual({
     type: "comment",
-    provider: "github",
+    provider: "example",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,
@@ -136,7 +136,7 @@ test("dispatches remote repository events to matching feature handlers", async (
   const handled: string[] = []
   const event = {
     type: "comment",
-    provider: "github",
+    provider: "example",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,

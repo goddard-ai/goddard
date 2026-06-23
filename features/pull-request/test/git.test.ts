@@ -25,7 +25,7 @@ test("pull request git helpers infer repository and branch defaults", async () =
   runGit(repoDir, ["add", "README.md"])
   runGit(repoDir, ["commit", "-m", "init"])
   runGit(repoDir, ["checkout", "-b", "feature/ipc"])
-  runGit(repoDir, ["remote", "add", "origin", "git@github.com:acme/widgets.git"])
+  runGit(repoDir, ["remote", "add", "origin", "example://acme/widgets"])
   await mkdir(join(repoDir, ".git", "refs", "remotes", "origin"), {
     recursive: true,
   })
@@ -34,13 +34,16 @@ test("pull request git helpers infer repository and branch defaults", async () =
     "ref: refs/remotes/origin/main\n",
   )
 
-  const submit = await resolveSubmitRequestFromGit({
-    cwd: repoDir,
-    title: "Implement IPC routing",
-    body: "Done.",
-  })
+  const submit = await resolveSubmitRequestFromGit(
+    {
+      cwd: repoDir,
+      title: "Implement IPC routing",
+      body: "Done.",
+    },
+    parseExampleRepositoryUrl,
+  )
   expect(submit).toEqual({
-    provider: "github",
+    provider: "example",
     owner: "acme",
     repo: "widgets",
     title: "Implement IPC routing",
@@ -50,12 +53,15 @@ test("pull request git helpers infer repository and branch defaults", async () =
   })
 
   runGit(repoDir, ["checkout", "-B", "pr-12"])
-  const reply = await resolveReplyRequestFromGit({
-    cwd: repoDir,
-    message: "Updated per review",
-  })
+  const reply = await resolveReplyRequestFromGit(
+    {
+      cwd: repoDir,
+      message: "Updated per review",
+    },
+    parseExampleRepositoryUrl,
+  )
   expect(reply).toEqual({
-    provider: "github",
+    provider: "example",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,
@@ -71,5 +77,18 @@ function runGit(cwd: string, args: string[]) {
 
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`)
+  }
+}
+
+function parseExampleRepositoryUrl(remote: string) {
+  const match = remote.match(/^example:\/\/(.+?)\/(.+?)$/)
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    provider: "example",
+    owner: match[1],
+    repo: match[2],
   }
 }
