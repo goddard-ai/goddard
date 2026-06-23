@@ -109,7 +109,15 @@ function createFeedbackEvent(): FeedbackEvent {
 function createFeedbackStore(cwd: string) {
   return {
     pullRequests: {
-      first: () => ({ cwd }),
+      first: () => ({
+        id: "pr_1" as const,
+        host: "github" as const,
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        cwd,
+        updatedAt: Date.now(),
+      }),
     },
   }
 }

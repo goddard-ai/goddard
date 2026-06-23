@@ -1,4 +1,4 @@
-import { definePlugin } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { IpcClientError } from "@goddard-ai/ipc"
 import type { SecurityConfig } from "@goddard-ai/schema/config"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
@@ -50,22 +50,24 @@ async function assertPullRequestOperationAllowed(
   }
 }
 
+export const pullRequestDb = {
+  pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
+    "host_owner_repo_prNumber",
+    {
+      host: "asc",
+      owner: "asc",
+      repo: "asc",
+      prNumber: "asc",
+    },
+    { unique: true },
+  ),
+}
+
 export const pullRequestPlugin = definePlugin({
   name: "pull-request",
   consumes: [sessionPlugin],
   db: {
-    schema: {
-      pullRequests: kind("pr", DaemonPullRequest).updatedAt().multi(
-        "host_owner_repo_prNumber",
-        {
-          host: "asc",
-          owner: "asc",
-          repo: "asc",
-          prNumber: "asc",
-        },
-        { unique: true },
-      ),
-    },
+    schema: pullRequestDb,
   },
   events: pullRequestEvents,
   backendRoutes: pullRequestBackendRoutes,
@@ -189,3 +191,5 @@ export const pullRequestPlugin = definePlugin({
     }
   },
 })
+
+export type PullRequestDb = DbContext<typeof pullRequestDb>
