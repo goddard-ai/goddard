@@ -30,6 +30,7 @@
     "test": "bun test --dots"
   },
   "dependencies": {
+    "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/remote-repo": "workspace:*",
     "octokit": "^5.0.5",
