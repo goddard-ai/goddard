@@ -23,7 +23,7 @@ test("createBackendRouter handles auth device start via rouzer route map", async
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
     startDeviceFlow(input) {
-      expect(input?.githubUsername).toBe("alec")
+      expect(input?.loginHint).toBe("alec")
       return {
         deviceCode: "dev_1",
         userCode: "ABCD1234",
@@ -43,7 +43,7 @@ test("createBackendRouter handles auth device start via rouzer route map", async
       new Request("https://example.test/auth/device/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ githubUsername: "alec" }),
+        body: JSON.stringify(githubStart("alec")),
       }),
     ) as any,
   )
@@ -54,16 +54,14 @@ test("createBackendRouter handles auth device start via rouzer route map", async
 })
 
 test("createBackendRouter delegates stream route to injected handleUserStream", async () => {
-  let capturedGithubLogin = ""
+  let capturedPrincipalId = ""
 
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
     getPrincipal(token) {
       expect(token).toBe("tok_1")
       return {
-        kind: "github_user",
-        githubLogin: "alec",
-        githubUserId: 1,
+        ...githubPrincipal("alec"),
         repositories: [],
       }
     },
@@ -72,7 +70,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
     handleUserStream: async (_env, principal, _request) => {
-      capturedGithubLogin = principal.githubLogin
+      capturedPrincipalId = principal.id
       return new Response("stream-ok", { status: 200 })
     },
   })
@@ -87,7 +85,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
 
   expect(response.status).toBe(200)
   expect(await response.text()).toBe("stream-ok")
-  expect(capturedGithubLogin).toBe("alec")
+  expect(capturedPrincipalId).toBe("github:2997745")
 })
 
 test("createBackendRouter publishes remote-repo events from the composed GitHub route", async () => {
@@ -167,9 +165,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
   await expect(
     authorizeBackendEventPublication(
       {
-        kind: "github_user",
-        githubUserId: 1,
-        githubLogin: "alec",
+        ...githubPrincipal("alec"),
         repositories: [{ owner: "goddard-ai", repo: "sdk" }],
       },
       publication,
@@ -178,9 +174,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
   await expect(
     authorizeBackendEventPublication(
       {
-        kind: "github_user",
-        githubUserId: 2,
-        githubLogin: "bob",
+        ...githubPrincipal("bob"),
         repositories: [{ owner: "goddard-ai", repo: "other" }],
       },
       publication,
@@ -190,9 +184,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
 
 test("authorizeBackendEventPublication rejects invalid source and event pairs", async () => {
   const principal = {
-    kind: "github_user" as const,
-    githubUserId: 1,
-    githubLogin: "alec",
+    ...githubPrincipal("alec"),
     repositories: [{ owner: "goddard-ai", repo: "sdk" }],
   }
   const event = {
@@ -272,4 +264,35 @@ function createEnv(overrides: Partial<Env> = {}): Env {
     TURSO_DB_AUTH_TOKEN: "token",
     ...overrides,
   }
+}
+
+function githubStart(login: string) {
+  return {
+    provider: "github",
+    loginHint: login,
+  }
+}
+
+function githubPrincipal(login: string) {
+  return {
+    id: `github:${hashTestIdentity(login)}`,
+    providerIdentities: [githubIdentity(login)],
+  }
+}
+
+function githubIdentity(login: string) {
+  return {
+    provider: "github",
+    subject: String(hashTestIdentity(login)),
+    displayName: login,
+  }
+}
+
+function hashTestIdentity(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash) + 1000
 }

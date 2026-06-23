@@ -1,5 +1,5 @@
-import type { AuthSession } from "@goddard-ai/auth/schema"
-import type { GitHubRepositoryRef, GitHubUserPrincipal } from "@goddard-ai/github/schema"
+import type { BackendPrincipal as AuthBackendPrincipal, AuthSession } from "@goddard-ai/auth/schema"
+import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import {
   remoteRepoBackendEventSources,
   type RemoteRepoBackendEvent,
@@ -7,11 +7,13 @@ import {
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 /** Authenticated backend stream principal resolved from a backend session token. */
-export type BackendPrincipal = GitHubUserPrincipal
+export type BackendPrincipal = AuthBackendPrincipal & {
+  readonly repositories?: readonly GitHubRepositoryRef[]
+}
 
 /** Returns the stable durable stream key for a backend principal. */
 export function getPrincipalStreamKey(principal: BackendPrincipal): string {
-  return `github-user:${principal.githubUserId}`
+  return principal.id
 }
 
 /** Converts a public auth session into the backend principal shape used for event auth. */
@@ -20,11 +22,18 @@ export function sessionToPrincipal(
   repositories?: readonly GitHubRepositoryRef[],
 ): BackendPrincipal {
   return {
-    kind: "github_user",
-    githubUserId: session.githubUserId,
-    githubLogin: session.githubUsername,
+    ...session.principal,
     repositories: repositories ? [...repositories] : undefined,
   }
+}
+
+/** Returns the best user-facing identity label for local PR text and tests. */
+export function getPrincipalDisplayName(principal: AuthBackendPrincipal): string {
+  return (
+    principal.providerIdentities.find((identity) => identity.displayName)?.displayName ??
+    principal.providerIdentities[0]?.subject ??
+    principal.id
+  )
 }
 
 /** Returns the repository identity carried by a normalized remote-repo event. */
