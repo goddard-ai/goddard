@@ -1,14 +1,14 @@
-import { defineBackendEventSources, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import {
+  createRemoteRepoBackendEvent,
+  type RemoteRepoBackendEvent,
+} from "@goddard-ai/remote-repo/backend"
 import { z } from "zod"
 
-import type { GitHubEventProvenance, GitHubRepositoryRef, GitHubUserPrincipal } from "../schema.ts"
+import type { GitHubEventProvenance } from "../schema.ts"
 
-export type GitHubRemoteRepoEvent = BackendEventEnvelope<
-  "remote_repo.event.received",
-  RepoEvent,
-  GitHubEventProvenance
->
+export type GitHubRemoteRepoEvent = RemoteRepoBackendEvent & {
+  readonly provenance: GitHubEventProvenance
+}
 
 export type GitHubWebhookRequestInput = {
   deliveryId: string
@@ -103,9 +103,8 @@ export function normalizeGitHubWebhookRequest(
       return undefined
     }
 
-    return {
-      name: "remote_repo.event.received",
-      payload: {
+    return withGitHubProvenance(
+      createRemoteRepoBackendEvent({
         type: "comment",
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
@@ -114,13 +113,13 @@ export function normalizeGitHubWebhookRequest(
         body: payload.comment.body ?? "",
         reactionAdded: "eyes",
         createdAt,
-      },
-      provenance: {
+      }),
+      {
         provider: "github",
         deliveryId: input.deliveryId,
         webhookType: input.eventName,
       },
-    }
+    )
   }
 
   if (input.eventName === "pull_request_review") {
@@ -134,9 +133,8 @@ export function normalizeGitHubWebhookRequest(
       return undefined
     }
 
-    return {
-      name: "remote_repo.event.received",
-      payload: {
+    return withGitHubProvenance(
+      createRemoteRepoBackendEvent({
         type: "review",
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
@@ -146,46 +144,30 @@ export function normalizeGitHubWebhookRequest(
         body: payload.review.body ?? "",
         reactionAdded: "eyes",
         createdAt,
-      },
-      provenance: {
+      }),
+      {
         provider: "github",
         deliveryId: input.deliveryId,
         webhookType: input.eventName,
       },
-    }
+    )
   }
 
   return undefined
 }
 
-export function canGitHubPrincipalAccessRepository(
-  principal: GitHubUserPrincipal,
-  repository: GitHubRepositoryRef,
-) {
-  if (!principal.repositories) {
-    return false
-  }
-
-  return principal.repositories.some(
-    (allowed) => allowed.owner === repository.owner && allowed.repo === repository.repo,
-  )
-}
-
-export const githubBackendEventSources = defineBackendEventSources({
-  github: {
-    produces: ["remote_repo.event.received"],
-    authorize: ({
-      principal,
-      event,
-    }: {
-      principal: GitHubUserPrincipal
-      event: GitHubRemoteRepoEvent
-    }) => canGitHubPrincipalAccessRepository(principal, event.payload),
-  },
-})
-
 function isBot(user: { type?: string } | null | undefined) {
   return user?.type === "Bot"
+}
+
+function withGitHubProvenance(
+  event: RemoteRepoBackendEvent,
+  provenance: GitHubEventProvenance,
+): GitHubRemoteRepoEvent {
+  return {
+    ...event,
+    provenance,
+  }
 }
 
 async function assertGitHubWebhookSignature(request: Request, webhookSecret: string, body: string) {

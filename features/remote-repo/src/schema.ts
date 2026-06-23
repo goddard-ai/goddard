@@ -13,7 +13,7 @@ export const RepoRef = RemoteRepositoryRef
 
 export type RepoRef = z.infer<typeof RepoRef>
 
-const repoCommentEvent = RemoteRepositoryRef.extend({
+export const RepoPullRequestCommentCreatedEvent = RemoteRepositoryRef.extend({
   type: z.literal("comment"),
   prNumber: z.number(),
   author: z.string(),
@@ -22,7 +22,7 @@ const repoCommentEvent = RemoteRepositoryRef.extend({
   createdAt: z.string(),
 })
 
-const repoReviewEvent = RemoteRepositoryRef.extend({
+export const RepoPullRequestReviewSubmittedEvent = RemoteRepositoryRef.extend({
   type: z.literal("review"),
   prNumber: z.number(),
   author: z.string(),
@@ -32,7 +32,7 @@ const repoReviewEvent = RemoteRepositoryRef.extend({
   createdAt: z.string(),
 })
 
-const repoPullRequestCreatedEvent = RemoteRepositoryRef.extend({
+export const RepoPullRequestCreatedEvent = RemoteRepositoryRef.extend({
   type: z.literal("pr.created"),
   prNumber: z.number(),
   title: z.string(),
@@ -42,12 +42,17 @@ const repoPullRequestCreatedEvent = RemoteRepositoryRef.extend({
 
 /** Normalized remote repository activity event emitted by backend workflows. */
 export const RepoEvent = z.discriminatedUnion("type", [
-  repoCommentEvent,
-  repoReviewEvent,
-  repoPullRequestCreatedEvent,
+  RepoPullRequestCommentCreatedEvent,
+  RepoPullRequestReviewSubmittedEvent,
+  RepoPullRequestCreatedEvent,
 ])
 
 export type RepoEvent = z.infer<typeof RepoEvent>
+export type RepoPullRequestCommentCreatedEvent = z.infer<typeof RepoPullRequestCommentCreatedEvent>
+export type RepoPullRequestReviewSubmittedEvent = z.infer<
+  typeof RepoPullRequestReviewSubmittedEvent
+>
+export type RepoPullRequestCreatedEvent = z.infer<typeof RepoPullRequestCreatedEvent>
 
 /** SSE payload delivered over the backend remote repository stream. */
 export const StreamMessage = z.object({

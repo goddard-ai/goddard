@@ -5,11 +5,12 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import { canGitHubPrincipalAccessRepository } from "@goddard-ai/github/backend"
 import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
+  createRemoteRepoBackendEvent,
   isRemoteRepoStreamSink,
+  remoteRepoBackendEventSources,
   type RemoteRepoEventBroadcaster,
   type RemoteRepoStreamEvent,
   type RemoteRepoStreamService,
@@ -280,7 +281,12 @@ export class InMemoryBackendControlPlane
       githubUserId: hashToInteger(githubUsername),
     }
     const principal = sessionToPrincipal(session, this.#listRepositoriesForUser(githubUsername))
-    if (!canGitHubPrincipalAccessRepository(principal, event)) {
+    if (
+      !remoteRepoBackendEventSources["remote-repo"].authorize({
+        principal,
+        event: createRemoteRepoBackendEvent(event),
+      })
+    ) {
       return undefined
     }
 

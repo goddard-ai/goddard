@@ -6,6 +6,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { afterEach, expect, test } from "bun:test"
 
 import { resolveRuntimeConfig } from "../src/config.ts"
@@ -133,7 +134,7 @@ test(
         )
 
         backend.sendEvent({
-          name: "remote_repo.event.received",
+          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
             owner: "other",
@@ -167,7 +168,7 @@ test(
         )
 
         backend.sendEvent({
-          name: "remote_repo.event.received",
+          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
             owner: "test",

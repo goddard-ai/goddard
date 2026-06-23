@@ -1,3 +1,4 @@
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { UserStream } from "../src/worker.ts"
@@ -19,7 +20,7 @@ test("user stream durable object fans out published events to subscribers", asyn
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event: {
-          name: "remote_repo.event.received",
+          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
             owner: "goddard-ai",
@@ -40,7 +41,7 @@ test("user stream durable object fans out published events to subscribers", asyn
     name: string
     payload: { type: string; prNumber: number }
   }
-  expect(payload.name).toBe("remote_repo.event.received")
+  expect(payload.name).toBe(REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED)
   expect(payload.payload.type).toBe("comment")
   expect(payload.payload.prNumber).toBe(1)
 
@@ -53,13 +54,13 @@ test("user stream durable object applies envelope filters", async () => {
   const ignoredController = new AbortController()
   const filter = encodeURIComponent(
     JSON.stringify({
-      names: ["remote_repo.event.received"],
+      names: [REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED],
       where: [{ path: "repo", equals: "sdk" }],
     }),
   )
   const ignoredFilter = encodeURIComponent(
     JSON.stringify({
-      names: ["remote_repo.event.received"],
+      names: [REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED],
       where: [{ path: "repo", equals: "other" }],
     }),
   )
@@ -83,7 +84,7 @@ test("user stream durable object applies envelope filters", async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event: {
-          name: "remote_repo.event.received",
+          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
             owner: "goddard-ai",

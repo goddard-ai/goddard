@@ -16,7 +16,7 @@ import {
 describe("backend event composition", () => {
   test("composes provider-agnostic event definitions", () => {
     const remoteRepo = defineBackendEvents({
-      "remote_repo.event.received": {
+      "example.event.received": {
         payload: z.object({
           owner: z.string(),
           repo: z.string(),
@@ -41,10 +41,10 @@ describe("backend event composition", () => {
 
     expect(Object.keys(composition).sort()).toEqual([
       "backend.stream.degraded",
-      "remote_repo.event.received",
+      "example.event.received",
     ])
     expect(
-      composition["remote_repo.event.received"].payload.safeParse({
+      composition["example.event.received"].payload.safeParse({
         owner: "acme",
         repo: "widgets",
         prNumber: 12,
@@ -54,13 +54,13 @@ describe("backend event composition", () => {
 
   test("composes source-owned authorization separately from event definitions", async () => {
     type RemoteRepoEvent = BackendEventEnvelope<
-      "remote_repo.event.received",
+      "example.event.received",
       { owner: string; repo: string; prNumber: number },
       { provider: "github"; deliveryId: string }
     >
     const events = composeBackendEvents([
       defineBackendEvents({
-        "remote_repo.event.received": {
+        "example.event.received": {
           payload: z.object({
             owner: z.string(),
             repo: z.string(),
@@ -71,7 +71,7 @@ describe("backend event composition", () => {
     ])
     const github = defineBackendEventSources({
       github: {
-        produces: ["remote_repo.event.received"],
+        produces: ["example.event.received"],
         authorize: ({ principal, event }: { principal: string; event: RemoteRepoEvent }) =>
           principal === `${event.payload.owner}/${event.payload.repo}`,
       },
@@ -79,7 +79,7 @@ describe("backend event composition", () => {
 
     const sources = composeBackendEventSources([github], events)
     const event: RemoteRepoEvent = {
-      name: "remote_repo.event.received",
+      name: "example.event.received",
       payload: {
         owner: "acme",
         repo: "widgets",
@@ -98,38 +98,38 @@ describe("backend event composition", () => {
 
   test("rejects duplicate backend event names", () => {
     const first = defineBackendEvents({
-      "remote_repo.event.received": {
+      "example.event.received": {
         payload: z.object({}),
       },
     })
     const second = defineBackendEvents({
-      "remote_repo.event.received": {
+      "example.event.received": {
         payload: z.object({}),
       },
     })
 
     expect(() => composeBackendEvents([first, second])).toThrow(
-      "Duplicate backend event: remote_repo.event.received",
+      "Duplicate backend event: example.event.received",
     )
   })
 
   test("rejects duplicate backend event source names", () => {
     const events = composeBackendEvents([
       defineBackendEvents({
-        "remote_repo.event.received": {
+        "example.event.received": {
           payload: z.object({}),
         },
       }),
     ])
     const first = defineBackendEventSources({
       github: {
-        produces: ["remote_repo.event.received"],
+        produces: ["example.event.received"],
         authorize: () => true,
       },
     })
     const second = defineBackendEventSources({
       github: {
-        produces: ["remote_repo.event.received"],
+        produces: ["example.event.received"],
         authorize: () => true,
       },
     })
@@ -142,7 +142,7 @@ describe("backend event composition", () => {
   test("rejects sources that claim unknown event names", () => {
     const events = composeBackendEvents([
       defineBackendEvents({
-        "remote_repo.event.received": {
+        "example.event.received": {
           payload: z.object({}),
         },
       }),

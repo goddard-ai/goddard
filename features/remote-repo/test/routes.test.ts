@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test"
 
 import {
+  createRemoteRepoBackendEvent,
   defineRemoteRepoEventHandler,
   dispatchRemoteRepoEvent,
   normalizeGitHubWebhookEvent,
+  REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+  REMOTE_REPO_PULL_REQUEST_CREATED,
+  REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
   remoteRepoBackendEvents,
+  remoteRepoBackendEventSources,
   remoteRepoBackendRoutes,
 } from "../src/backend.ts"
 
@@ -26,10 +31,56 @@ test("owns the remote repository backend event contract", () => {
     createdAt: "2026-01-01T00:00:00.000Z",
   }
 
-  expect(Object.keys(remoteRepoBackendEvents)).toEqual(["remote_repo.event.received"])
+  expect(Object.keys(remoteRepoBackendEvents)).toEqual([
+    REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+    REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
+    REMOTE_REPO_PULL_REQUEST_CREATED,
+  ])
   expect(
-    remoteRepoBackendEvents["remote_repo.event.received"].payload.safeParse(event).success,
+    remoteRepoBackendEvents[REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED].payload.safeParse(event)
+      .success,
   ).toBe(true)
+  expect(createRemoteRepoBackendEvent(event)).toEqual({
+    name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+    payload: event,
+  })
+})
+
+test("owns remote repository backend event source authorization", async () => {
+  const source = remoteRepoBackendEventSources["remote-repo"]
+  const event = createRemoteRepoBackendEvent({
+    type: "comment",
+    owner: "goddard-ai",
+    repo: "sdk",
+    prNumber: 12,
+    author: "alec",
+    body: "looks good",
+    reactionAdded: "eyes",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  })
+
+  await expect(
+    Promise.resolve(
+      source.authorize({
+        principal: {
+          githubLogin: "alec",
+          repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+        },
+        event,
+      }),
+    ),
+  ).resolves.toBe(true)
+  await expect(
+    Promise.resolve(
+      source.authorize({
+        principal: {
+          githubLogin: "alec",
+          repositories: [{ owner: "goddard-ai", repo: "other" }],
+        },
+        event,
+      }),
+    ),
+  ).resolves.toBe(false)
 })
 
 test("normalizes GitHub comment webhooks into remote repository events", () => {

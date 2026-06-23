@@ -3,27 +3,21 @@ import {
   composeBackendEvents,
   composeBackendEventSources,
   composeBackendRoutes,
-  type BackendEventEnvelope,
 } from "@goddard-ai/backend-plugin"
 import {
-  githubBackendEventSources,
   githubBackendRoutes,
   GitHubWebhookError,
   normalizeGitHubWebhookRequest,
   readGitHubWebhookRequest,
 } from "@goddard-ai/github/backend"
+import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import {
-  pullRequestBackendEventSources,
-  pullRequestBackendRoutes,
-  pullRequestRemoteRepoEventHandler,
-} from "@goddard-ai/pull-request/backend"
-import {
-  dispatchRemoteRepoEvent,
+  createRemoteRepoBackendEvent,
   remoteRepoBackendEvents,
+  remoteRepoBackendEventSources,
   remoteRepoBackendRoutes,
-  type RemoteRepoEventHandler,
+  type RemoteRepoBackendEvent,
 } from "@goddard-ai/remote-repo/backend"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
 import { createRouter } from "rouzer"
@@ -33,8 +27,6 @@ import type { Env } from "../env.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
 import type { BackendPrincipal } from "./events.ts"
 
-type RemoteRepoBackendEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
-
 const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
   githubBackendRoutes,
@@ -43,7 +35,7 @@ const backendRoutes = composeBackendRoutes([
 ])
 const backendEvents = composeBackendEvents([remoteRepoBackendEvents])
 const backendEventSources = composeBackendEventSources(
-  [githubBackendEventSources, pullRequestBackendEventSources],
+  [remoteRepoBackendEventSources],
   backendEvents,
 )
 
@@ -57,7 +49,6 @@ type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
   broadcastEvent?: (env: Env, publication: BackendEventPublication) => Promise<void>
   handleUserStream?: (env: Env, principal: BackendPrincipal, request: Request) => Promise<Response>
-  remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
 
 /** Creates the backend HTTP router over the current control-plane implementation. */
@@ -65,10 +56,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
   const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
-  const remoteRepoEventHandlers = dependencies.remoteRepoEventHandlers ?? [
-    pullRequestRemoteRepoEventHandler,
-  ]
-  const publishEvent = createBackendEventPublisher(remoteRepoEventHandlers, broadcastEvent)
+  const publishEvent = createBackendEventPublisher(broadcastEvent)
 
   return createRouter<Env>({ debug: false }).use(backendRoutes, {
     auth: {
@@ -111,19 +99,16 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const pr = await controlPlane.createPr(token, ctx.body, env)
 
           await publishEvent(env, {
-            source: "pull-request",
-            event: {
-              name: "remote_repo.event.received",
-              payload: {
-                type: "pr.created",
-                owner: pr.owner,
-                repo: pr.repo,
-                prNumber: pr.number,
-                title: pr.title,
-                author: pr.createdBy,
-                createdAt: pr.createdAt,
-              },
-            },
+            source: "remote-repo",
+            event: createRemoteRepoBackendEvent({
+              type: "pr.created",
+              owner: pr.owner,
+              repo: pr.repo,
+              prNumber: pr.number,
+              title: pr.title,
+              author: pr.createdBy,
+              createdAt: pr.createdAt,
+            }),
           })
 
           return pr
@@ -174,7 +159,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           }
 
           await publishEvent(env, {
-            source: "github",
+            source: "remote-repo",
             event,
           })
           return event
@@ -211,12 +196,10 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 }
 
 function createBackendEventPublisher(
-  remoteRepoEventHandlers: readonly RemoteRepoEventHandler[],
   broadcastEvent: (env: Env, publication: BackendEventPublication) => Promise<void>,
 ) {
   return async (env: Env, publication: BackendEventPublication) => {
     assertBackendEventPublication(publication)
-    await dispatchRemoteRepoEvent(publication.event.payload, remoteRepoEventHandlers)
     await broadcastEvent(env, publication)
   }
 }

@@ -1,4 +1,5 @@
 import { signGitHubWebhookBody } from "@goddard-ai/github/backend"
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { HttpError, type BackendControlPlane } from "../src/api/control-plane.ts"
@@ -90,19 +91,14 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   expect(capturedGithubLogin).toBe("alec")
 })
 
-test("createBackendRouter dispatches raw GitHub webhook events", async () => {
-  const handled: string[] = []
+test("createBackendRouter publishes raw GitHub webhook events", async () => {
+  const publications: unknown[] = []
 
   const router = createBackendRouter({
     createControlPlane: () => stubControlPlane,
-    remoteRepoEventHandlers: [
-      {
-        name: "pull-request",
-        handle: (event) => {
-          handled.push(event.type)
-        },
-      },
-    ],
+    broadcastEvent: async (_env, publication) => {
+      publications.push(publication)
+    },
   })
 
   const response = await router(
@@ -135,7 +131,20 @@ test("createBackendRouter dispatches raw GitHub webhook events", async () => {
   )
 
   expect(response.status).toBe(200)
-  expect(handled).toEqual(["comment"])
+  expect(publications).toMatchObject([
+    {
+      source: "remote-repo",
+      event: {
+        name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+        payload: {
+          type: "comment",
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+        },
+      },
+    },
+  ])
 })
 
 test("createBackendRouter rejects GitHub webhooks with invalid configured signatures", async () => {
@@ -215,9 +224,9 @@ test("createBackendRouter accepts GitHub webhooks with valid configured signatur
 
 test("authorizeBackendEventPublication enforces source-owned repository access", async () => {
   const publication = {
-    source: "github",
+    source: "remote-repo",
     event: {
-      name: "remote_repo.event.received",
+      name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
       payload: {
         type: "comment",
         owner: "goddard-ai",

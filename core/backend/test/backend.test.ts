@@ -1,3 +1,7 @@
+import {
+  REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+  REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
+} from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
@@ -226,7 +230,7 @@ test("sse stream receives webhook events for a managed PR", async () => {
       name: string
       payload: { type: string; reactionAdded: string }
     }
-    expect(parsed.name).toBe("remote_repo.event.received")
+    expect(parsed.name).toBe(REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED)
     expect(parsed.payload.type).toBe("comment")
     expect(parsed.payload.reactionAdded).toBe("eyes")
   } finally {
@@ -295,7 +299,7 @@ test("sse stream receives pull request review webhook events for a managed PR", 
       name: string
       payload: { type: string; state: string; reactionAdded: string }
     }
-    expect(parsed.name).toBe("remote_repo.event.received")
+    expect(parsed.name).toBe(REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED)
     expect(parsed.payload.type).toBe("review")
     expect(parsed.payload.state).toBe("approved")
     expect(parsed.payload.reactionAdded).toBe("eyes")

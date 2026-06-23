@@ -1,6 +1,9 @@
 import type { AuthSession } from "@goddard-ai/auth/schema"
-import { githubBackendEventSources, type GitHubRemoteRepoEvent } from "@goddard-ai/github/backend"
 import type { GitHubRepositoryRef, GitHubUserPrincipal } from "@goddard-ai/github/schema"
+import {
+  remoteRepoBackendEventSources,
+  type RemoteRepoBackendEvent,
+} from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 /** Authenticated backend stream principal resolved from a backend session token. */
@@ -32,12 +35,12 @@ export function getRepoEventRepository(event: RepoEvent): GitHubRepositoryRef {
   }
 }
 
-/** Applies the GitHub feature's backend event authorization contract. */
-export async function authorizeGitHubRemoteRepoEvent(
+/** Applies the remote-repo feature's backend event authorization contract. */
+export async function authorizeRemoteRepoBackendEvent(
   principal: BackendPrincipal,
-  event: GitHubRemoteRepoEvent,
+  event: RemoteRepoBackendEvent,
 ): Promise<boolean> {
-  return githubBackendEventSources.github.authorize({
+  return remoteRepoBackendEventSources["remote-repo"].authorize({
     principal,
     event,
   })

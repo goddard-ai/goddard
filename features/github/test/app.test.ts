@@ -1,3 +1,4 @@
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { createGitHubApp } from "../src/backend.ts"
@@ -28,7 +29,7 @@ test("github-app forwards webhooks to backend and returns handled event", async 
 
     return new Response(
       JSON.stringify({
-        name: "remote_repo.event.received",
+        name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
         payload: {
           type: "comment",
           owner: "goddard-ai",
