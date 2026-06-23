@@ -95,8 +95,20 @@ describe("backend event composition", () => {
     }
 
     expect(Object.keys(sources)).toEqual(["github"])
-    expect(await sources.github.authorize({ principal: "acme/widgets", event })).toBe(true)
-    expect(await sources.github.authorize({ principal: "acme/other", event })).toBe(false)
+    expect(
+      await sources.github.authorize({
+        principal: "acme/widgets",
+        event,
+        providers: {},
+      }),
+    ).toBe(true)
+    expect(
+      await sources.github.authorize({
+        principal: "acme/other",
+        event,
+        providers: {},
+      }),
+    ).toBe(false)
   })
 
   test("rejects duplicate backend event names", () => {

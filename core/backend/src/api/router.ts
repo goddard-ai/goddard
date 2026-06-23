@@ -21,6 +21,7 @@ const backendPlugins = getDefaultBackendPluginComposition()
 const backendRoutes = backendPlugins.routes
 const backendEvents = backendPlugins.events
 const backendEventSources = backendPlugins.eventSources
+const backendProviders = backendPlugins.providers
 
 export type BackendEventPublication = {
   readonly source: keyof typeof backendEventSources & string
@@ -197,11 +198,13 @@ export async function authorizeBackendEventPublication(
     authorize: (input: {
       readonly principal: BackendPrincipal
       readonly event: RemoteRepoBackendEvent
+      readonly providers: typeof backendProviders
     }) => boolean | Promise<boolean>
   }
   return source.authorize({
     principal,
     event: publication.event,
+    providers: backendProviders,
   })
 }
 

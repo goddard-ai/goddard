@@ -1,4 +1,5 @@
 import type { BackendPrincipal as AuthBackendPrincipal, AuthSession } from "@goddard-ai/auth/schema"
+import type { BackendProviderCapabilityDefinitions } from "@goddard-ai/backend-plugin"
 import {
   remoteRepoBackendEventSources,
   type RemoteRepoBackendEvent,
@@ -48,9 +49,11 @@ export function getRepoEventRepository(event: RepoEvent): RemoteRepositoryRef {
 export async function authorizeRemoteRepoBackendEvent(
   principal: BackendPrincipal,
   event: RemoteRepoBackendEvent,
+  providers: BackendProviderCapabilityDefinitions,
 ): Promise<boolean> {
   return remoteRepoBackendEventSources["remote-repo"].authorize({
     principal,
     event,
+    providers,
   })
 }

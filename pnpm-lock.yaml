@@ -380,6 +380,9 @@ importers:
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
+      '@goddard-ai/backend-plugin':
+        specifier: workspace:*
+        version: link:../backend-plugin
       '@goddard-ai/default-features':
         specifier: workspace:*
         version: link:../default-features

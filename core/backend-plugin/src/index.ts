@@ -37,6 +37,7 @@ export type BackendEventSourceDefinition<
   readonly authorize: (input: {
     readonly principal: TPrincipal
     readonly event: TEvent
+    readonly providers: BackendProviderCapabilityDefinitions
   }) => boolean | Promise<boolean>
 }
 
