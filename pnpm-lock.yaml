@@ -910,6 +910,9 @@ importers:
 
   features/github:
     dependencies:
+      '@goddard-ai/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@goddard-ai/backend-plugin':
         specifier: workspace:*
         version: link:../../core/backend-plugin

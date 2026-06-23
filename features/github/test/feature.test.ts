@@ -11,6 +11,7 @@ import {
   readGitHubWebhookRequest,
   signGitHubWebhookBody,
 } from "../src/backend.ts"
+import { canGitHubPrincipalAccessRepository, createGitHubBackendPrincipal } from "../src/schema.ts"
 
 describe("github feature package", () => {
   test("exports selected feature entrypoints", () => {
@@ -20,6 +21,49 @@ describe("github feature package", () => {
     expect(githubBackendPlugin.routes?.webhooks.children.github.path?.source).toBe("/github")
     expect("events" in githubBackendPlugin).toBe(false)
     expect("eventSources" in githubBackendPlugin).toBe(false)
+  })
+
+  test("creates provider-neutral principals from GitHub identity", () => {
+    expect(
+      createGitHubBackendPrincipal({
+        provider: "github",
+        githubUserId: 42,
+        githubLogin: "alec",
+      }),
+    ).toEqual({
+      id: "github:42",
+      providerIdentities: [
+        {
+          provider: "github",
+          subject: "42",
+          displayName: "alec",
+        },
+      ],
+    })
+  })
+
+  test("authorizes GitHub repository grants", () => {
+    const grants = {
+      identity: {
+        provider: "github" as const,
+        githubUserId: 42,
+        githubLogin: "alec",
+      },
+      repositories: [{ owner: "goddard-ai", repo: "core" }],
+    }
+
+    expect(
+      canGitHubPrincipalAccessRepository(grants, {
+        owner: "goddard-ai",
+        repo: "core",
+      }),
+    ).toBe(true)
+    expect(
+      canGitHubPrincipalAccessRepository(grants, {
+        owner: "goddard-ai",
+        repo: "other",
+      }),
+    ).toBe(false)
   })
 
   test("normalizes raw GitHub webhook deliveries with provider provenance", () => {
