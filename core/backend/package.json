@@ -32,6 +32,7 @@
   "dependencies": {
     "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
+    "@goddard-ai/event-filter": "workspace:*",
     "@goddard-ai/github": "workspace:*",
     "@goddard-ai/pull-request": "workspace:*",
     "@goddard-ai/remote-repo": "workspace:*",

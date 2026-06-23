@@ -47,7 +47,7 @@ const backendEventSources = composeBackendEventSources(
   backendEvents,
 )
 
-type BackendEventPublication = {
+export type BackendEventPublication = {
   readonly source: keyof typeof backendEventSources & string
   readonly event: RemoteRepoBackendEvent
 }
@@ -55,7 +55,7 @@ type BackendEventPublication = {
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastEvent?: (env: Env, event: RemoteRepoBackendEvent) => Promise<void>
+  broadcastEvent?: (env: Env, publication: BackendEventPublication) => Promise<void>
   handleUserStream?: (env: Env, principal: BackendPrincipal, request: Request) => Promise<Response>
   remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
@@ -212,13 +212,30 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
 
 function createBackendEventPublisher(
   remoteRepoEventHandlers: readonly RemoteRepoEventHandler[],
-  broadcastEvent: (env: Env, event: RemoteRepoBackendEvent) => Promise<void>,
+  broadcastEvent: (env: Env, publication: BackendEventPublication) => Promise<void>,
 ) {
   return async (env: Env, publication: BackendEventPublication) => {
     assertBackendEventPublication(publication)
     await dispatchRemoteRepoEvent(publication.event.payload, remoteRepoEventHandlers)
-    await broadcastEvent(env, publication.event)
+    await broadcastEvent(env, publication)
   }
+}
+
+export async function authorizeBackendEventPublication(
+  principal: BackendPrincipal,
+  publication: BackendEventPublication,
+) {
+  assertBackendEventPublication(publication)
+  const source = backendEventSources[publication.source] as {
+    authorize: (input: {
+      readonly principal: BackendPrincipal
+      readonly event: RemoteRepoBackendEvent
+    }) => boolean | Promise<boolean>
+  }
+  return source.authorize({
+    principal,
+    event: publication.event,
+  })
 }
 
 function assertBackendEventPublication(publication: BackendEventPublication) {
@@ -246,7 +263,7 @@ function assertBackendEventPublication(publication: BackendEventPublication) {
 }
 
 /** Provides a safe default when the worker host does not supply event broadcasting. */
-async function noopBroadcast(_env: Env, _event: RemoteRepoBackendEvent): Promise<void> {
+async function noopBroadcast(_env: Env, _publication: BackendEventPublication): Promise<void> {
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 

@@ -383,6 +383,9 @@ importers:
       '@goddard-ai/backend-plugin':
         specifier: workspace:*
         version: link:../backend-plugin
+      '@goddard-ai/event-filter':
+        specifier: workspace:*
+        version: link:../event-filter
       '@goddard-ai/github':
         specifier: workspace:*
         version: link:../../features/github
