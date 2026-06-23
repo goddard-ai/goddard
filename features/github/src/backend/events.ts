@@ -1,13 +1,8 @@
-import { defineBackendEvents, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
+import { defineBackendEventSources, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import { z } from "zod"
 
-import type {
-  GitHubEventProvenance,
-  GitHubRepositoryRef,
-  GitHubUserPrincipal,
-  GitHubWebhookDeliveryInput,
-  GitHubWebhookInput,
-} from "../schema.ts"
+import type { GitHubEventProvenance, GitHubRepositoryRef, GitHubUserPrincipal } from "../schema.ts"
 
 export type GitHubRemoteRepoEvent = BackendEventEnvelope<
   "remote_repo.event.received",
@@ -15,48 +10,152 @@ export type GitHubRemoteRepoEvent = BackendEventEnvelope<
   GitHubEventProvenance
 >
 
-export function normalizeGitHubWebhookEvent(
-  event: GitHubWebhookInput,
-  createdAt = new Date().toISOString(),
-): RepoEvent {
-  if (event.type === "issue_comment") {
-    return {
-      type: "comment",
-      owner: event.owner,
-      repo: event.repo,
-      prNumber: event.prNumber,
-      author: event.author,
-      body: event.body,
-      reactionAdded: "eyes",
-      createdAt,
-    }
-  }
+export type GitHubWebhookRequestInput = {
+  deliveryId: string
+  eventName: string
+  payload: unknown
+  receivedAt?: string
+}
 
-  return {
-    type: "review",
-    owner: event.owner,
-    repo: event.repo,
-    prNumber: event.prNumber,
-    author: event.author,
-    state: event.state,
-    body: event.body,
-    reactionAdded: "eyes",
-    createdAt,
+export class GitHubWebhookError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message)
   }
 }
 
-export function normalizeGitHubWebhookDelivery(
-  delivery: GitHubWebhookDeliveryInput,
-): GitHubRemoteRepoEvent {
-  return {
-    name: "remote_repo.event.received",
-    payload: normalizeGitHubWebhookEvent(delivery.event, delivery.receivedAt),
-    provenance: {
-      provider: "github",
-      deliveryId: delivery.deliveryId,
-      webhookType: delivery.event.type,
-    },
+export async function readGitHubWebhookRequest(
+  request: Request,
+  webhookSecret?: string,
+): Promise<GitHubWebhookRequestInput> {
+  const body = await request.text()
+  if (webhookSecret) {
+    await assertGitHubWebhookSignature(request, webhookSecret, body)
   }
+
+  const eventName = request.headers.get("x-github-event")
+  if (!eventName) {
+    throw new GitHubWebhookError(400, "Missing GitHub webhook event")
+  }
+
+  const deliveryId = request.headers.get("x-github-delivery")
+  if (!deliveryId) {
+    throw new GitHubWebhookError(400, "Missing GitHub webhook delivery")
+  }
+
+  return {
+    deliveryId,
+    eventName,
+    payload: JSON.parse(body) as unknown,
+  }
+}
+
+const githubUser = z.object({
+  login: z.string().min(1),
+  type: z.string().optional(),
+})
+
+const githubRepository = z.object({
+  name: z.string().min(1),
+  owner: z.object({
+    login: z.string().min(1),
+  }),
+})
+
+const issueCommentPayload = z.object({
+  action: z.literal("created"),
+  issue: z.object({
+    number: z.number().int().positive(),
+    pull_request: z.unknown().optional(),
+  }),
+  comment: z.object({
+    body: z.string().nullable().optional(),
+    user: githubUser.nullable().optional(),
+  }),
+  repository: githubRepository,
+  sender: githubUser.nullable().optional(),
+})
+
+const pullRequestReviewPayload = z.object({
+  action: z.literal("submitted"),
+  pull_request: z.object({
+    number: z.number().int().positive(),
+  }),
+  review: z.object({
+    body: z.string().nullable().optional(),
+    state: z.string(),
+    user: githubUser.nullable().optional(),
+  }),
+  repository: githubRepository,
+  sender: githubUser.nullable().optional(),
+})
+
+export function normalizeGitHubWebhookRequest(
+  input: GitHubWebhookRequestInput,
+): GitHubRemoteRepoEvent | undefined {
+  const createdAt = input.receivedAt ?? new Date().toISOString()
+
+  if (input.eventName === "issue_comment") {
+    const payload = issueCommentPayload.parse(input.payload)
+    if (!payload.issue.pull_request || isBot(payload.sender) || isBot(payload.comment.user)) {
+      return undefined
+    }
+
+    return {
+      name: "remote_repo.event.received",
+      payload: {
+        type: "comment",
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+        prNumber: payload.issue.number,
+        author: payload.comment.user?.login ?? "unknown",
+        body: payload.comment.body ?? "",
+        reactionAdded: "eyes",
+        createdAt,
+      },
+      provenance: {
+        provider: "github",
+        deliveryId: input.deliveryId,
+        webhookType: input.eventName,
+      },
+    }
+  }
+
+  if (input.eventName === "pull_request_review") {
+    const payload = pullRequestReviewPayload.parse(input.payload)
+    const state = payload.review.state.toLowerCase()
+    if (
+      !["approved", "changes_requested", "commented"].includes(state) ||
+      isBot(payload.sender) ||
+      isBot(payload.review.user)
+    ) {
+      return undefined
+    }
+
+    return {
+      name: "remote_repo.event.received",
+      payload: {
+        type: "review",
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+        prNumber: payload.pull_request.number,
+        author: payload.review.user?.login ?? "unknown",
+        state: state as "approved" | "changes_requested" | "commented",
+        body: payload.review.body ?? "",
+        reactionAdded: "eyes",
+        createdAt,
+      },
+      provenance: {
+        provider: "github",
+        deliveryId: input.deliveryId,
+        webhookType: input.eventName,
+      },
+    }
+  }
+
+  return undefined
 }
 
 export function canGitHubPrincipalAccessRepository(
@@ -72,21 +171,60 @@ export function canGitHubPrincipalAccessRepository(
   )
 }
 
-export const githubBackendEvents = defineBackendEvents({
-  "remote_repo.event.received": {
-    normalizeWebhook: normalizeGitHubWebhookDelivery,
-    authorize: ({ principal, event }) =>
-      canGitHubPrincipalAccessRepository(principal, event.payload),
-    matchesFilter: ({ event, filter }) => {
-      if (!filter || typeof filter !== "object") {
-        return true
-      }
-
-      const repo = filter as Partial<GitHubRepositoryRef>
-      return (
-        (repo.owner === undefined || repo.owner === event.payload.owner) &&
-        (repo.repo === undefined || repo.repo === event.payload.repo)
-      )
-    },
+export const githubBackendEventSources = defineBackendEventSources({
+  github: {
+    produces: ["remote_repo.event.received"],
+    authorize: ({
+      principal,
+      event,
+    }: {
+      principal: GitHubUserPrincipal
+      event: GitHubRemoteRepoEvent
+    }) => canGitHubPrincipalAccessRepository(principal, event.payload),
   },
 })
+
+function isBot(user: { type?: string } | null | undefined) {
+  return user?.type === "Bot"
+}
+
+async function assertGitHubWebhookSignature(request: Request, webhookSecret: string, body: string) {
+  const signature = request.headers.get("x-hub-signature-256")
+  if (!signature?.startsWith("sha256=")) {
+    throw new GitHubWebhookError(401, "Missing GitHub webhook signature")
+  }
+
+  const expected = await signGitHubWebhookBody(webhookSecret, body)
+  if (!constantTimeEqual(signature, expected)) {
+    throw new GitHubWebhookError(401, "Invalid GitHub webhook signature")
+  }
+}
+
+export async function signGitHubWebhookBody(secret: string, body: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
+  const hex = [...new Uint8Array(signature)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+  return `sha256=${hex}`
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  let difference = 0
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index)
+  }
+
+  return difference === 0
+}

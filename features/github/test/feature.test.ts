@@ -2,33 +2,43 @@ import { describe, expect, test } from "bun:test"
 
 import {
   canGitHubPrincipalAccessRepository,
-  githubBackendEvents,
+  githubBackendEventSources,
   githubBackendRoutes,
-  normalizeGitHubWebhookDelivery,
+  normalizeGitHubWebhookRequest,
 } from "../src/backend.ts"
-import { GitHubWebhookDeliveryInput } from "../src/schema.ts"
 
 describe("github feature package", () => {
   test("exports selected feature entrypoints", () => {
-    expect(githubBackendRoutes).toEqual({})
-    expect(Object.keys(githubBackendEvents)).toEqual(["remote_repo.event.received"])
+    expect(githubBackendRoutes.webhooks.path.source).toBe("/webhooks")
+    expect(githubBackendRoutes.webhooks.children.github.path?.source).toBe("/github")
+    expect(Object.keys(githubBackendEventSources)).toEqual(["github"])
+    expect(githubBackendEventSources.github.produces).toEqual(["remote_repo.event.received"])
   })
 
-  test("normalizes GitHub webhook deliveries with provider provenance", () => {
-    const delivery = GitHubWebhookDeliveryInput.parse({
-      deliveryId: "delivery-1",
-      receivedAt: "2026-01-01T00:00:00.000Z",
-      event: {
-        type: "issue_comment",
-        owner: "goddard-ai",
-        repo: "core",
-        prNumber: 12,
-        author: "alec",
-        body: "please update",
-      },
-    })
-
-    expect(normalizeGitHubWebhookDelivery(delivery)).toEqual({
+  test("normalizes raw GitHub webhook deliveries with provider provenance", () => {
+    expect(
+      normalizeGitHubWebhookRequest({
+        deliveryId: "delivery-1",
+        receivedAt: "2026-01-01T00:00:00.000Z",
+        eventName: "issue_comment",
+        payload: {
+          action: "created",
+          issue: {
+            number: 12,
+            pull_request: {},
+          },
+          comment: {
+            user: { login: "alec", type: "User" },
+            body: "please update",
+          },
+          repository: {
+            name: "core",
+            owner: { login: "goddard-ai" },
+          },
+          sender: { login: "alec", type: "User" },
+        },
+      }),
+    ).toEqual({
       name: "remote_repo.event.received",
       payload: {
         type: "comment",
@@ -44,6 +54,82 @@ describe("github feature package", () => {
         provider: "github",
         deliveryId: "delivery-1",
         webhookType: "issue_comment",
+      },
+    })
+  })
+
+  test("ignores unsupported and bot-originated webhooks", () => {
+    expect(
+      normalizeGitHubWebhookRequest({
+        deliveryId: "delivery-1",
+        eventName: "pull_request",
+        payload: {},
+      }),
+    ).toBeUndefined()
+    expect(
+      normalizeGitHubWebhookRequest({
+        deliveryId: "delivery-2",
+        eventName: "issue_comment",
+        payload: {
+          action: "created",
+          issue: {
+            number: 12,
+            pull_request: {},
+          },
+          comment: {
+            user: { login: "bot", type: "Bot" },
+            body: "please update",
+          },
+          repository: {
+            name: "core",
+            owner: { login: "goddard-ai" },
+          },
+          sender: { login: "bot", type: "Bot" },
+        },
+      }),
+    ).toBeUndefined()
+  })
+
+  test("normalizes pull request review webhooks", () => {
+    expect(
+      normalizeGitHubWebhookRequest({
+        deliveryId: "delivery-1",
+        receivedAt: "2026-01-01T00:00:00.000Z",
+        eventName: "pull_request_review",
+        payload: {
+          action: "submitted",
+          pull_request: {
+            number: 12,
+          },
+          review: {
+            user: { login: "reviewer", type: "User" },
+            state: "approved",
+            body: "ship it",
+          },
+          repository: {
+            name: "core",
+            owner: { login: "goddard-ai" },
+          },
+          sender: { login: "reviewer", type: "User" },
+        },
+      }),
+    ).toEqual({
+      name: "remote_repo.event.received",
+      payload: {
+        type: "review",
+        owner: "goddard-ai",
+        repo: "core",
+        prNumber: 12,
+        author: "reviewer",
+        state: "approved",
+        body: "ship it",
+        reactionAdded: "eyes",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      provenance: {
+        provider: "github",
+        deliveryId: "delivery-1",
+        webhookType: "pull_request_review",
       },
     })
   })
@@ -70,26 +156,35 @@ describe("github feature package", () => {
     ).toBe(false)
   })
 
-  test("backend event definition enforces repo authorization before filters", async () => {
-    const event = normalizeGitHubWebhookDelivery(
-      GitHubWebhookDeliveryInput.parse({
-        deliveryId: "delivery-1",
-        event: {
-          type: "pull_request_review",
-          owner: "goddard-ai",
-          repo: "core",
-          prNumber: 12,
-          author: "reviewer",
+  test("backend event source enforces repo authorization", async () => {
+    const event = normalizeGitHubWebhookRequest({
+      deliveryId: "delivery-1",
+      eventName: "pull_request_review",
+      payload: {
+        action: "submitted",
+        pull_request: {
+          number: 12,
+        },
+        review: {
+          user: { login: "reviewer", type: "User" },
           state: "approved",
           body: "ship it",
         },
-      }),
-    )
-    const definition = githubBackendEvents["remote_repo.event.received"]
+        repository: {
+          name: "core",
+          owner: { login: "goddard-ai" },
+        },
+        sender: { login: "reviewer", type: "User" },
+      },
+    })
+    if (!event) {
+      throw new Error("expected GitHub webhook to normalize")
+    }
+    const source = githubBackendEventSources.github
 
     await expect(
       Promise.resolve(
-        definition.authorize({
+        source.authorize({
           principal: {
             kind: "github_user",
             githubUserId: 42,
@@ -103,7 +198,7 @@ describe("github feature package", () => {
 
     await expect(
       Promise.resolve(
-        definition.authorize({
+        source.authorize({
           principal: {
             kind: "github_user",
             githubUserId: 43,
@@ -114,17 +209,5 @@ describe("github feature package", () => {
         }),
       ),
     ).resolves.toBe(false)
-    expect(
-      definition.matchesFilter?.({
-        event,
-        filter: { owner: "goddard-ai", repo: "core" },
-      }),
-    ).toBe(true)
-    expect(
-      definition.matchesFilter?.({
-        event,
-        filter: { owner: "goddard-ai", repo: "other" },
-      }),
-    ).toBe(false)
   })
 })

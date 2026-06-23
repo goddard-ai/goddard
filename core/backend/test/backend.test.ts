@@ -205,16 +205,21 @@ test("sse stream receives webhook events for a managed PR", async () => {
     expect(streamResponse.status).toBe(200)
     const eventPromise = readFirstSseEvent(streamResponse)
 
-    await postJson(`${baseUrl}/webhooks/github`, {
-      deliveryId: "delivery-1",
-      event: {
-        type: "issue_comment",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 1,
-        author: "teammate",
+    await postGitHubWebhook(baseUrl, "delivery-1", {
+      action: "created",
+      issue: {
+        number: 1,
+        pull_request: {},
+      },
+      comment: {
+        user: { login: "teammate", type: "User" },
         body: "looks good",
       },
+      repository: {
+        name: "sdk",
+        owner: { login: "goddard-ai" },
+      },
+      sender: { login: "teammate", type: "User" },
     })
 
     const parsed = (await eventPromise) as {
@@ -285,16 +290,21 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       },
     })
 
-    await postJson(`${baseUrl}/webhooks/github`, {
-      deliveryId: "delivery-1",
-      event: {
-        type: "issue_comment",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 1,
-        author: "teammate",
+    await postGitHubWebhook(baseUrl, "delivery-1", {
+      action: "created",
+      issue: {
+        number: 1,
+        pull_request: {},
+      },
+      comment: {
+        user: { login: "teammate", type: "User" },
         body: "looks good",
       },
+      repository: {
+        name: "sdk",
+        owner: { login: "goddard-ai" },
+      },
+      sender: { login: "teammate", type: "User" },
     })
 
     const alecEvent = (await readFirstSseEvent(alecStream)) as {
@@ -329,16 +339,21 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       },
     })
 
-    await postJson(`${baseUrl}/webhooks/github`, {
-      deliveryId: "delivery-1",
-      event: {
-        type: "issue_comment",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 99,
-        author: "teammate",
+    await postGitHubWebhook(baseUrl, "delivery-1", {
+      action: "created",
+      issue: {
+        number: 99,
+        pull_request: {},
+      },
+      comment: {
+        user: { login: "teammate", type: "User" },
         body: "looks good",
       },
+      repository: {
+        name: "sdk",
+        owner: { login: "goddard-ai" },
+      },
+      sender: { login: "teammate", type: "User" },
     })
 
     await assertNoSseEvent(streamResponse, 100)
@@ -423,11 +438,17 @@ async function readWithTimeout(
   }
 }
 
-async function postJson(url: string, payload: unknown, token?: string): Promise<any> {
+async function postJson(
+  url: string,
+  payload: unknown,
+  token?: string,
+  headers: Record<string, string> = {},
+): Promise<any> {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      ...headers,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(payload),
@@ -438,4 +459,11 @@ async function postJson(url: string, payload: unknown, token?: string): Promise<
   }
 
   return response.json()
+}
+
+async function postGitHubWebhook(baseUrl: string, deliveryId: string, payload: unknown) {
+  return postJson(`${baseUrl}/webhooks/github`, payload, undefined, {
+    "x-github-event": "issue_comment",
+    "x-github-delivery": deliveryId,
+  })
 }

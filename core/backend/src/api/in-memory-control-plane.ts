@@ -5,12 +5,8 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import {
-  canGitHubPrincipalAccessRepository,
-  normalizeGitHubWebhookDelivery,
-  type GitHubRemoteRepoEvent,
-} from "@goddard-ai/github/backend"
-import type { GitHubRepositoryRef, GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
+import { canGitHubPrincipalAccessRepository } from "@goddard-ai/github/backend"
+import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
   isRemoteRepoStreamSink,
@@ -190,12 +186,6 @@ export class InMemoryBackendControlPlane
         pullRequest.number === prNumber &&
         pullRequest.createdBy === githubUsername,
     )
-  }
-
-  handleGitHubWebhook(delivery: GitHubWebhookDeliveryInput): GitHubRemoteRepoEvent {
-    assertRepo(delivery.event.owner, delivery.event.repo)
-
-    return normalizeGitHubWebhookDelivery(delivery)
   }
 
   addStreamSocket(streamKey: string, socket: unknown): void {
