@@ -4,8 +4,12 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
+import {
+  createPullRequestCommentWithGitHubApp,
+  createPullRequestWithGitHubApp,
+  GitHubProviderError,
+} from "@goddard-ai/github/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import { getErrorMessage } from "radashi"
 
 import type { Env } from "../env.ts"
 import type { BackendPrincipal } from "./events.ts"
@@ -59,17 +63,17 @@ export async function postPrCommentViaApp(
   prNumber: number,
   body: string,
 ): Promise<void> {
-  const octokit = await createInstallationOctokit(env, owner, repo)
-
   try {
-    await octokit.rest.issues.createComment({
+    await createPullRequestCommentWithGitHubApp({
+      env,
+      provider: "github",
       owner,
       repo,
-      issue_number: prNumber,
+      prNumber,
       body,
     })
   } catch (error) {
-    throw new HttpError(500, `Failed to post comment to GitHub: ${getErrorMessage(error)}`)
+    throw toHttpError(error)
   }
 }
 
@@ -79,10 +83,10 @@ export async function createPrViaApp(
   input: CreatePrInput,
   body: string,
 ): Promise<{ number: number; url: string; createdAt: string }> {
-  const octokit = await createInstallationOctokit(env, input.owner, input.repo)
-
   try {
-    const { data } = await octokit.rest.pulls.create({
+    return await createPullRequestWithGitHubApp({
+      env,
+      provider: "github",
       owner: input.owner,
       repo: input.repo,
       title: input.title,
@@ -90,36 +94,17 @@ export async function createPrViaApp(
       head: input.head,
       base: input.base,
     })
-
-    return {
-      number: data.number,
-      url: data.html_url,
-      createdAt: data.created_at,
-    }
   } catch (error) {
-    throw new HttpError(500, `Failed to create pull request on GitHub: ${getErrorMessage(error)}`)
+    throw toHttpError(error)
   }
 }
 
-/** Resolves the GitHub App installation that grants backend authority for one repository. */
-async function createInstallationOctokit(env: Env | undefined, owner: string, repo: string) {
-  if (!env?.GITHUB_APP_ID || !env?.GITHUB_APP_PRIVATE_KEY) {
-    throw new HttpError(500, "GitHub App credentials are not configured on the backend")
+function toHttpError(error: unknown): HttpError {
+  if (error instanceof HttpError) {
+    return error
   }
-
-  const { App } = await import("octokit")
-  const app = new App({
-    appId: env.GITHUB_APP_ID,
-    privateKey: env.GITHUB_APP_PRIVATE_KEY,
-  })
-
-  try {
-    const { data } = await app.octokit.request("GET /repos/{owner}/{repo}/installation", {
-      owner,
-      repo,
-    })
-    return app.getInstallationOctokit(data.id)
-  } catch {
-    throw new HttpError(500, `Failed to get GitHub App installation for ${owner}/${repo}`)
+  if (error instanceof GitHubProviderError) {
+    return new HttpError(error.statusCode, error.message)
   }
+  return new HttpError(500, error instanceof Error ? error.message : String(error))
 }
