@@ -131,31 +131,61 @@ export const coreDaemonIpcRoutes = defineIpcRoutes({
       response: $type<{ ok: boolean }>(),
     }),
     browserAccess: http.resource("browser-access", {
+      ...ipcMetadata({
+        description: "Browser-access pairing and client authorization control.",
+      }),
       pairing: http.resource("pairing", {
+        ...ipcMetadata({
+          description: "Browser-access pairing flow control.",
+        }),
         start: http.post("start", {
+          ...ipcMetadata({
+            description: "Starts one browser-access pairing flow.",
+          }),
           body: BrowserAccessPairingStartRequest,
           response: $type<BrowserAccessPairingStartResponse>(),
         }),
         confirm: http.post("confirm", {
+          ...ipcMetadata({
+            description: "Confirms one browser-access pairing code.",
+          }),
           body: BrowserAccessPairingConfirmRequest,
           response: $type<BrowserAccessPairingConfirmResponse>(),
         }),
         complete: http.post("complete", {
+          ...ipcMetadata({
+            description: "Completes one confirmed browser-access pairing flow.",
+          }),
           body: BrowserAccessPairingCompleteRequest,
           response: $type<BrowserAccessPairingCompleteResponse>(),
         }),
       }),
       client: http.resource("client", {
+        ...ipcMetadata({
+          description: "Browser-access client authorization management.",
+        }),
         list: http.get("list", {
+          ...ipcMetadata({
+            description: "Lists browser-access client authorizations.",
+          }),
           response: $type<BrowserAccessClientListResponse>(),
         }),
         revoke: http.post("revoke", {
+          ...ipcMetadata({
+            description: "Revokes one browser-access client authorization.",
+          }),
           body: BrowserAccessClientRevokeRequest,
           response: $type<BrowserAccessClientRevokeResponse>(),
         }),
       }),
       webviewToken: http.resource("webview-token", {
+        ...ipcMetadata({
+          description: "Browser webview access-token creation.",
+        }),
         create: http.post("create", {
+          ...ipcMetadata({
+            description: "Creates one browser webview access token.",
+          }),
           body: BrowserAccessWebviewTokenCreateRequest,
           response: $type<BrowserAccessWebviewTokenCreateResponse>(),
         }),
