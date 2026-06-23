@@ -76,8 +76,7 @@ export class InMemoryBackendControlPlane
     return {
       deviceCode,
       userCode,
-      verificationUri:
-        provider === "github" ? "https://github.com/login/device" : "https://auth.local/device",
+      verificationUri: `https://auth.local/${provider}/device`,
       expiresIn: DEVICE_FLOW_EXPIRES_IN_SECONDS,
       interval: DEVICE_FLOW_INTERVAL_SECONDS,
     }
@@ -152,7 +151,7 @@ export class InMemoryBackendControlPlane
       body,
       head: input.head,
       base: input.base,
-      url: `https://github.com/${input.owner}/${input.repo}/pull/${prNumber}`,
+      url: `https://remote-repo.local/${input.provider}/${input.owner}/${input.repo}/pull/${prNumber}`,
       createdBy: session.principal.id,
       createdAt: new Date().toISOString(),
     }

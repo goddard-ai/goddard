@@ -50,7 +50,7 @@ export class TursoBackendControlPlane
     return {
       deviceCode,
       userCode,
-      verificationUri: "https://github.com/login/device",
+      verificationUri: "https://auth.local/device",
       expiresIn,
       interval: 5,
     }
