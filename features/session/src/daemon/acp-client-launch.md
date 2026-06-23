@@ -17,14 +17,14 @@ Goddard daemon launch currently needs:
 - Managed-agent launch process resolution when `agents.managed[agent].install === "beforeUse"`.
 - Explicit process ownership so persisted session state, active-session maps, shutdown, and daemon reconciliation stay under the session manager boundary.
 
-`createNodeAcpClient()` accepts `env`, registry inputs, binary cache location, and close policy, but it does not expose hooks for Goddard's environment assembly, stderr logging, launch-lease handoff, or managed-agent process-spec resolution.
+`createNodeAcpClient()` accepts `env`, registry inputs, binary cache location, and close policy, but it does not expose hooks for Goddard's environment assembly, stderr logging, launch-lease handoff, or agent process-spec resolution.
 
 ## Safe Delegation Boundary
 
 The daemon should continue to use acp-client for:
 
 - ACP protocol client/session lifecycle via `createAcpClient()`.
-- Registry lookup and runnable process-spec resolution through the managed-agent feature.
+- Registry lookup and runnable process-spec resolution through the agent feature.
 - Managed install/update/status/process-spec operations through `acp-client/node` managed install APIs.
 - Low-level archive helpers only where Goddard still owns an explicit unmanaged binary cache path.
 

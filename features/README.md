@@ -63,10 +63,10 @@ entry discovery for app composer suggestions. App composer UI, prompt chip
 serialization, and session execution remain outside the file-search feature
 boundary.
 
-`features/managed-agent` owns launchable ACP agent discovery, registry and
+`features/agent` owns launchable ACP agent discovery, registry and
 config-declared catalog merge behavior, local launch visibility markers,
-managed install status and process-spec resolution, managed-agent usage/update
-policy, daemon IPC handlers, and SDK managed-agent namespace construction.
+managed install status and process-spec resolution, managed install usage/update
+policy, daemon IPC handlers, and SDK agent namespace construction.
 Root config file loading, daemon process lifecycle, generic persistence, and
 session process lifecycle remain core or session-feature substrate.
 

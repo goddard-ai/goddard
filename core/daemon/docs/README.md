@@ -15,7 +15,7 @@ The daemon is Goddard's local background process for running and coordinating ag
 - [Daemon model](./model.md)
   - Defines the daemon process, daemon server, feature composition, runtime ownership, live and historical state, and restart recovery.
 - [Core concepts](./concepts/README.md)
-  - Launch, runtime ownership, data profiles, configuration refresh, auth, managed agents, and managed agent installs.
+  - Launch, runtime ownership, data profiles, configuration refresh, auth, agents, and managed agent installs.
 - [Launch](./concepts/launch.md)
   - Backend URL, local port, agent wrapper directory, runtime feature selection, and agent launch environment.
 - [Sessions](./sessions/README.md)
@@ -33,7 +33,7 @@ The daemon is Goddard's local background process for running and coordinating ag
   - Explains the command tools exposed to daemon-launched agents for initiatives, blockers, turn endings, pull requests, and workforce delegation.
 - [Auth sessions](./concepts/auth-session.md)
   - Explains daemon-owned authentication state, device flow, identity reads, and logout.
-- [Managed agents](./concepts/managed-agents.md)
+- [Agents](./concepts/agents.md)
   - Explains launch catalog visibility, local launch state, and managed install status.
 
 ## Automation surfaces

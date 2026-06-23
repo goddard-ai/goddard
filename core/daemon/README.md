@@ -33,9 +33,9 @@ contribute namespaced config schemas through daemon plugins, but config files,
 scope precedence, validation errors, persistence, and hot reload remain daemon
 or core config responsibilities.
 
-The managed-agent feature owns launchable ACP agent discovery, catalog request
+The agent feature owns launchable ACP agent discovery, catalog request
 handling, local launch visibility markers, managed install process resolution,
-and proactive managed-agent update policy. The daemon still owns the root
+and proactive managed install update policy. The daemon still owns the root
 config and persistence substrate that supply shared data to that feature.
 
 `features/inbox` is the current reference daemon feature package. It owns the

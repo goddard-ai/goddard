@@ -1,11 +1,11 @@
-# Managed Agents
+# Agents
 
-Managed agents are ACP agents that can be shown or selected when starting daemon-managed sessions. This page explains how the daemon presents catalog entries, local launch visibility, managed install status, and runnable process resolution.
+Agents are ACP launch targets that can be shown or selected when starting daemon-managed sessions. This page explains how the daemon presents catalog entries, local launch visibility, managed install status, and runnable process resolution.
 
 ## Core idea
 
-- Managed agents describe launchable ACP agents for daemon-managed sessions.
-- The managed-agent catalog answers which agents can be shown or selected in a global or project launch context.
+- Agents describe launchable ACP targets for daemon-managed sessions.
+- The agent catalog answers which agents can be shown or selected in a global or project launch context.
 
 ## Catalog sources
 
@@ -22,13 +22,13 @@ Managed agents are ACP agents that can be shown or selected when starting daemon
 
 ## Install and uninstall
 
-- Installing a catalog managed agent changes local launch catalog visibility.
+- Installing a catalog agent changes local launch catalog visibility.
 - Uninstalling it removes that local launch catalog marker.
 - Neither action starts an agent session by itself.
 - If an installed entry later cannot resolve a runnable process, launch should fail as a launch problem rather than treating the catalog marker as proof of runtime readiness.
 
 ## Boundaries
 
-- Listing a managed agent does not guarantee launch until the managed-agent feature can resolve a runnable process.
+- Listing an agent does not guarantee launch until the agent feature can resolve a runnable process.
 - Local launch visibility state is separate from acp-client managed install state.
 - Repository-local catalog entries should not silently grant executable extension authority beyond the configured agent behavior.
