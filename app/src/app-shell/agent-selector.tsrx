@@ -70,7 +70,7 @@ export function AppShellAgentSelector(props: {
   })
   const cwd =
     projectPath ? resolvePreferredLaunchCwd(projectPath, subpackages.subpackages) : null
-  const managedAgentCatalog = useQuery(cwd ? goddardSdk.managedAgent.list : null, {
+  const managedAgentCatalog = useQuery(cwd ? goddardSdk.agent.list : null, {
     params: cwd ? [{ cwd }] : null,
   })
 
@@ -87,8 +87,8 @@ export function AppShellAgentSelector(props: {
 
   const agentId = resolvePreferredLaunchAgentId(managedAgentCatalog)
   const selectedAgent =
-    managedAgentCatalog.managedAgents.find((managedAgent) => managedAgent.id === agentId) ?? null
-  const searchableManagedAgents: AgentSelectorItem[] = managedAgentCatalog.managedAgents.map(
+    managedAgentCatalog.agents.find((managedAgent) => managedAgent.id === agentId) ?? null
+  const searchableManagedAgents: AgentSelectorItem[] = managedAgentCatalog.agents.map(
     (managedAgent) => ({
       managedAgent,
       preparedId: fuzzysort.prepare(managedAgent.id),
@@ -100,7 +100,7 @@ export function AppShellAgentSelector(props: {
   )
   const filteredManagedAgents =
     isEmptyQuery(search.value)
-      ? managedAgentCatalog.managedAgents
+      ? managedAgentCatalog.agents
       : fuzzysort.searchFields(
           search.value,
           searchableManagedAgents,

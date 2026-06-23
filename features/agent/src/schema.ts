@@ -1,14 +1,14 @@
 import { AdapterCatalogEntry as AcpAdapterCatalogEntry } from "acp-client"
 import { z } from "zod"
 
-/** Request payload used to list managed agents available to one launch flow. */
-export const ListManagedAgentsRequest = z.strictObject({
+/** Request payload used to list agents available to one launch flow. */
+export const ListAgentsRequest = z.strictObject({
   cwd: z.string().optional(),
   includeUninstalled: z.boolean().optional(),
 })
 
-export type ListManagedAgentsRequest = z.infer<typeof ListManagedAgentsRequest>
-export type ListManagedAgentsRequestType = ListManagedAgentsRequest
+export type ListAgentsRequest = z.infer<typeof ListAgentsRequest>
+export type ListAgentsRequestType = ListAgentsRequest
 
 /** Sanitized installed-agent metadata surfaced with managed install status. */
 export const ManagedAgentInstallAgent = z.strictObject({
@@ -48,25 +48,25 @@ export const ManagedAgentInstall = z.strictObject({
 
 export type ManagedAgentInstall = z.infer<typeof ManagedAgentInstall>
 
-export const ManagedAgentCatalogEntry = AcpAdapterCatalogEntry.extend({
+export const AgentCatalogEntry = AcpAdapterCatalogEntry.extend({
   managedInstall: ManagedAgentInstall.optional(),
 })
 
-export type ManagedAgentCatalogEntry = z.infer<typeof ManagedAgentCatalogEntry>
+export type AgentCatalogEntry = z.infer<typeof AgentCatalogEntry>
 
-/** Local launch visibility and installability state for one managed-agent catalog entry. */
-export type ManagedAgentInstallationState = {
-  managedAgentId: string
+/** Local launch visibility and installability state for one agent catalog entry. */
+export type AgentInstallationState = {
+  agentId: string
   installed: boolean
   installable: boolean
   method: "binary" | "config" | "npx" | "unsupported" | "uvx"
 }
 
-/** Response payload returned after reading the effective managed-agent catalog. */
-export type ListManagedAgentsResponse = {
-  managedAgents: ManagedAgentCatalogEntry[]
-  installations: ManagedAgentInstallationState[]
-  defaultManagedAgentId: string | null
+/** Response payload returned after reading the effective agent catalog. */
+export type ListAgentsResponse = {
+  agents: AgentCatalogEntry[]
+  installations: AgentInstallationState[]
+  defaultAgentId: string | null
   registrySource: "cache" | "fallback"
   lastSuccessfulSyncAt: string | null
   stale: boolean
@@ -74,26 +74,26 @@ export type ListManagedAgentsResponse = {
 }
 
 /** Request payload used to install one registry agent into the local launch catalog. */
-export const InstallManagedAgentRequest = z.strictObject({
-  managedAgentId: z.string().min(1),
+export const InstallAgentRequest = z.strictObject({
+  agentId: z.string().min(1),
 })
 
-export type InstallManagedAgentRequest = z.infer<typeof InstallManagedAgentRequest>
+export type InstallAgentRequest = z.infer<typeof InstallAgentRequest>
 
-/** Response payload returned after installing one managed agent. */
-export type InstallManagedAgentResponse = {
-  managedAgent: ManagedAgentCatalogEntry
-  installation: ManagedAgentInstallationState
+/** Response payload returned after installing one agent. */
+export type InstallAgentResponse = {
+  agent: AgentCatalogEntry
+  installation: AgentInstallationState
 }
 
 /** Request payload used to remove one agent from the local launch catalog. */
-export const UninstallManagedAgentRequest = z.strictObject({
-  managedAgentId: z.string().min(1),
+export const UninstallAgentRequest = z.strictObject({
+  agentId: z.string().min(1),
 })
 
-export type UninstallManagedAgentRequest = z.infer<typeof UninstallManagedAgentRequest>
+export type UninstallAgentRequest = z.infer<typeof UninstallAgentRequest>
 
-/** Response payload returned after uninstalling one managed agent. */
-export type UninstallManagedAgentResponse = {
-  managedAgentId: string
+/** Response payload returned after uninstalling one agent. */
+export type UninstallAgentResponse = {
+  agentId: string
 }

@@ -34,7 +34,7 @@ export default function SessionLaunchDialog(props: {
   const titleId = useId()
   const projects = projectRegistry.projectList
   const initialProjectPath = activeProjectPath ?? projects[0]?.path ?? null
-  const hasAdapterSelector = (form.managedAgentCatalog.value?.managedAgents.length ?? 0) > 0
+  const hasAdapterSelector = (form.managedAgentCatalog.value?.agents.length ?? 0) > 0
   const hasBranchSelector =
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
       !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true) &&
@@ -165,7 +165,7 @@ export default function SessionLaunchDialog(props: {
     form.setOpenPicker("subpackage")
   }, { active: hasSubpackageSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
-    form.setOpenPicker("managedAgent")
+    form.setOpenPicker("agent")
   }, { active: hasAdapterSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.cycleLaunchLocation()

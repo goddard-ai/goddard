@@ -13,7 +13,7 @@ import {
 } from "acp-client/node"
 import { z } from "zod"
 
-import type { ManagedAgentInstallationState } from "./schema.ts"
+import type { AgentInstallationState } from "./schema.ts"
 
 function getAdapterInstallationsPath() {
   return join(getGoddardGlobalDir(), "adapter-installations.json")
@@ -164,13 +164,13 @@ async function removeBinaryInstalls(adapterId: string) {
   }
 }
 
-export async function getManagedAgentInstallationState(
+export async function getAgentInstallationState(
   adapter: AdapterCatalogEntry,
   installedAdapterIds: Set<string>,
-): Promise<ManagedAgentInstallationState> {
+): Promise<AgentInstallationState> {
   if (adapter.source === "config") {
     return {
-      managedAgentId: adapter.id,
+      agentId: adapter.id,
       installable: false,
       installed: true,
       method: "config",
@@ -182,24 +182,24 @@ export async function getManagedAgentInstallationState(
     method?.type === "binary" ? await isBinaryInstalled(adapter, method) : false
 
   return {
-    managedAgentId: adapter.id,
+    agentId: adapter.id,
     installable: method !== null,
     installed: installedAdapterIds.has(adapter.id) || binaryInstalled,
     method: method?.type ?? "unsupported",
   }
 }
 
-export async function getManagedAgentInstallationStates(adapters: AdapterCatalogEntry[]) {
+export async function getAgentInstallationStates(adapters: AdapterCatalogEntry[]) {
   const installedAdapterIds = await readInstalledAdapterIds()
 
   return await Promise.all(
-    adapters.map((adapter) => getManagedAgentInstallationState(adapter, installedAdapterIds)),
+    adapters.map((adapter) => getAgentInstallationState(adapter, installedAdapterIds)),
   )
 }
 
 export async function installManagedAgent(adapter: AdapterCatalogEntry) {
   if (adapter.source === "config") {
-    return await getManagedAgentInstallationState(adapter, await readInstalledAdapterIds())
+    return await getAgentInstallationState(adapter, await readInstalledAdapterIds())
   }
 
   const method = resolveAdapterInstallMethod(adapter)
@@ -227,12 +227,12 @@ export async function installManagedAgent(adapter: AdapterCatalogEntry) {
   installedAdapterIds.add(adapter.id)
   await writeInstalledAdapterIds(installedAdapterIds)
 
-  return await getManagedAgentInstallationState(adapter, installedAdapterIds)
+  return await getAgentInstallationState(adapter, installedAdapterIds)
 }
 
-export async function uninstallManagedAgent(managedAgentId: string) {
+export async function uninstallManagedAgent(agentId: string) {
   const installedAdapterIds = await readInstalledAdapterIds()
-  installedAdapterIds.delete(managedAgentId)
+  installedAdapterIds.delete(agentId)
   await writeInstalledAdapterIds(installedAdapterIds)
-  await removeBinaryInstalls(managedAgentId)
+  await removeBinaryInstalls(agentId)
 }

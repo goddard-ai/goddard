@@ -13,26 +13,26 @@ import type {
   ManagedAgentInstallStatus,
 } from "./daemon/install-service.ts"
 import {
-  getManagedAgentInstallationStates,
+  getAgentInstallationStates,
   installManagedAgent,
   uninstallManagedAgent,
 } from "./installations.ts"
 import {
-  ManagedAgentCatalogEntry,
-  type InstallManagedAgentRequest,
-  type InstallManagedAgentResponse,
-  type ListManagedAgentsRequestType,
-  type ListManagedAgentsResponse,
+  AgentCatalogEntry,
+  type InstallAgentRequest,
+  type InstallAgentResponse,
+  type ListAgentsRequestType,
+  type ListAgentsResponse,
   type ManagedAgentInstall,
   type ManagedAgentInstallAgent,
   type ManagedAgentInstallState,
-  type UninstallManagedAgentRequest,
-  type UninstallManagedAgentResponse,
+  type UninstallAgentRequest,
+  type UninstallAgentResponse,
 } from "./schema.ts"
 
 type ManagedAgentRegistrySnapshot = Omit<
-  ListManagedAgentsResponse,
-  "managedAgents" | "defaultManagedAgentId" | "installations"
+  ListAgentsResponse,
+  "agents" | "defaultAgentId" | "installations"
 > & {
   adapters: readonly unknown[]
 }
@@ -51,14 +51,14 @@ export type ManagedAgentConfigManager = {
   }>
 }
 
-export type ListManagedAgentsContext = {
+export type ListAgentsContext = {
   registryService: ManagedAgentRegistryService
   configProvider: ManagedAgentConfigManager
   agentInstallService: ManagedAgentInstallService
 }
 
 function orderAdaptersByInstallationState(
-  adapters: ManagedAgentCatalogEntry[],
+  adapters: AgentCatalogEntry[],
   installedAdapterIds: Set<string>,
 ) {
   return [
@@ -67,15 +67,12 @@ function orderAdaptersByInstallationState(
   ]
 }
 
-function isManagedAgent(
-  adapter: ManagedAgentCatalogEntry,
-  managedAgents?: AgentsConfig["managed"],
-) {
-  return managedAgents?.[adapter.id] !== undefined
+function isManagedAgent(adapter: AgentCatalogEntry, agents?: AgentsConfig["managed"]) {
+  return agents?.[adapter.id] !== undefined
 }
 
 async function readMergedAdapterCatalog(
-  { registryService, configProvider }: ListManagedAgentsContext,
+  { registryService, configProvider }: ListAgentsContext,
   cwd?: string,
 ) {
   const [registrySnapshot, resolvedConfig] = await Promise.all([
@@ -83,7 +80,7 @@ async function readMergedAdapterCatalog(
     configProvider.getRootConfig(cwd).then((snapshot) => snapshot.config),
   ])
   const registryAdapters = registrySnapshot.adapters.map((adapter) =>
-    ManagedAgentCatalogEntry.parse(adapter),
+    AgentCatalogEntry.parse(adapter),
   )
   const mergedAdapters = mergeManagedAgentCatalogEntries(
     registryAdapters,
@@ -99,18 +96,18 @@ async function readMergedAdapterCatalog(
 
 /** Lists managed agents from registry and config substrate using managed-agent merge semantics. */
 export async function listManagedAgents(
-  context: ListManagedAgentsContext,
-  { cwd, includeUninstalled }: ListManagedAgentsRequestType,
+  context: ListAgentsContext,
+  { cwd, includeUninstalled }: ListAgentsRequestType,
 ) {
   const { registrySnapshot, resolvedConfig, mergedAdapters } = await readMergedAdapterCatalog(
     context,
     cwd,
   )
-  const installations = await getManagedAgentInstallationStates(mergedAdapters)
+  const installations = await getAgentInstallationStates(mergedAdapters)
   const installedAdapterIds = new Set(
     installations
       .filter((installation) => installation.installed)
-      .map((installation) => installation.managedAgentId),
+      .map((installation) => installation.agentId),
   )
   const listedAdapters = orderAdaptersByInstallationState(
     includeUninstalled
@@ -122,19 +119,19 @@ export async function listManagedAgents(
         ),
     installedAdapterIds,
   )
-  const managedAgents = await attachManagedInstallStatus({
+  const agents = await attachManagedInstallStatus({
     adapters: listedAdapters,
     agentInstallService: context.agentInstallService,
-    managedAgents: resolvedConfig?.agents?.managed,
+    agents: resolvedConfig?.agents?.managed,
     registry: resolvedConfig?.registry,
   })
   const defaultAgent = await resolveDefaultAgent(resolvedConfig).catch(() => null)
 
   return {
     ...registrySnapshot,
-    managedAgents,
+    agents,
     installations,
-    defaultManagedAgentId:
+    defaultAgentId:
       typeof defaultAgent === "string" &&
       mergedAdapters.some((adapter) => adapter.id === defaultAgent) &&
       (includeUninstalled ||
@@ -147,45 +144,45 @@ export async function listManagedAgents(
 
 /** Installs one managed agent from the daemon-visible catalog into the local launch set. */
 export async function installCatalogManagedAgent(
-  context: ListManagedAgentsContext,
-  { managedAgentId }: InstallManagedAgentRequest,
-): Promise<InstallManagedAgentResponse> {
+  context: ListAgentsContext,
+  { agentId }: InstallAgentRequest,
+): Promise<InstallAgentResponse> {
   const { mergedAdapters } = await readMergedAdapterCatalog(context)
-  const adapter = mergedAdapters.find((adapter) => adapter.id === managedAgentId)
+  const adapter = mergedAdapters.find((adapter) => adapter.id === agentId)
 
   if (!adapter) {
-    throw new Error(`Unknown managed agent: ${managedAgentId}`)
+    throw new Error(`Unknown managed agent: ${agentId}`)
   }
 
   return {
-    managedAgent: adapter,
+    agent: adapter,
     installation: await installManagedAgent(adapter),
   }
 }
 
 /** Removes one managed agent from the local launch set. */
 export async function uninstallCatalogManagedAgent(
-  _context: ListManagedAgentsContext,
-  { managedAgentId }: UninstallManagedAgentRequest,
-): Promise<UninstallManagedAgentResponse> {
-  await uninstallManagedAgent(managedAgentId)
+  _context: ListAgentsContext,
+  { agentId }: UninstallAgentRequest,
+): Promise<UninstallAgentResponse> {
+  await uninstallManagedAgent(agentId)
 
-  return { managedAgentId }
+  return { agentId }
 }
 
 async function attachManagedInstallStatus(input: {
-  adapters: ManagedAgentCatalogEntry[]
+  adapters: AgentCatalogEntry[]
   agentInstallService: ManagedAgentInstallService
-  managedAgents?: AgentsConfig["managed"]
+  agents?: AgentsConfig["managed"]
   registry?: Record<string, AgentDistribution>
 }) {
-  if (!input.managedAgents) {
+  if (!input.agents) {
     return input.adapters
   }
 
   return Promise.all(
     input.adapters.map(async (adapter) => {
-      const managedAgent = input.managedAgents?.[adapter.id]
+      const managedAgent = input.agents?.[adapter.id]
       if (!managedAgent) {
         return adapter
       }

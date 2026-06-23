@@ -145,9 +145,9 @@ describe("managed-agent listing", () => {
         { cwd: "/repo", includeUninstalled: true },
       ),
     ).resolves.toMatchObject({
-      defaultManagedAgentId: "local-acp",
+      defaultAgentId: "local-acp",
       registrySource: "cache",
-      managedAgents: [
+      agents: [
         {
           id: "local-acp",
           source: "config",
@@ -204,20 +204,20 @@ describe("managed-agent listing", () => {
       )
 
       expect(response.registrySource).toBe("fallback")
-      expect(response.defaultManagedAgentId).toBe("project-acp")
-      expect(response.managedAgents).toContainEqual(
+      expect(response.defaultAgentId).toBe("project-acp")
+      expect(response.agents).toContainEqual(
         expect.objectContaining({
           id: "service-acp",
           source: "config",
         }),
       )
-      expect(response.managedAgents).toContainEqual(
+      expect(response.agents).toContainEqual(
         expect.objectContaining({
           id: "project-acp",
           source: "config",
         }),
       )
-      expect(response.managedAgents.length).toBeGreaterThan(2)
+      expect(response.agents.length).toBeGreaterThan(2)
     } finally {
       await rm(cacheDir, { recursive: true, force: true })
     }
@@ -263,7 +263,7 @@ describe("managed-agent listing", () => {
         { cwd: "/repo" },
       ),
     ).resolves.toMatchObject({
-      defaultManagedAgentId: "local-acp",
+      defaultAgentId: "local-acp",
     })
   })
 
@@ -321,8 +321,8 @@ describe("managed-agent listing", () => {
       }
 
       await expect(listManagedAgents(context, { cwd: "/repo" })).resolves.toMatchObject({
-        defaultManagedAgentId: null,
-        managedAgents: [
+        defaultAgentId: null,
+        agents: [
           {
             id: "local-acp",
             source: "config",
@@ -330,19 +330,19 @@ describe("managed-agent listing", () => {
         ],
         installations: expect.arrayContaining([
           {
-            managedAgentId: "aaa-agent",
+            agentId: "aaa-agent",
             installable: true,
             installed: false,
             method: "npx",
           },
           {
-            managedAgentId: "registry-agent",
+            agentId: "registry-agent",
             installable: true,
             installed: false,
             method: "npx",
           },
           {
-            managedAgentId: "local-acp",
+            agentId: "local-acp",
             installable: false,
             installed: true,
             method: "config",
@@ -350,7 +350,7 @@ describe("managed-agent listing", () => {
         ]),
       })
 
-      await installCatalogManagedAgent(context, { managedAgentId: "registry-agent" })
+      await installCatalogManagedAgent(context, { agentId: "registry-agent" })
 
       const installedResponse = await listManagedAgents(context, { cwd: "/repo" })
       const settingsResponse = await listManagedAgents(context, {
@@ -358,10 +358,10 @@ describe("managed-agent listing", () => {
         includeUninstalled: true,
       })
 
-      expect(installedResponse.managedAgents.map((managedAgent) => managedAgent.id)).toContain(
+      expect(installedResponse.agents.map((managedAgent) => managedAgent.id)).toContain(
         "registry-agent",
       )
-      expect(settingsResponse.managedAgents.map((managedAgent) => managedAgent.id)).toEqual([
+      expect(settingsResponse.agents.map((managedAgent) => managedAgent.id)).toEqual([
         "local-acp",
         "registry-agent",
         "aaa-agent",
@@ -400,8 +400,8 @@ describe("managed-agent listing", () => {
         { cwd: "/repo" },
       ),
     ).resolves.toMatchObject({
-      defaultManagedAgentId: null,
-      managedAgents: [],
+      defaultAgentId: null,
+      agents: [],
     })
   })
 
@@ -456,7 +456,7 @@ describe("managed-agent listing", () => {
         { cwd: "/repo" },
       ),
     ).resolves.toMatchObject({
-      managedAgents: [
+      agents: [
         {
           id: "managed-acp",
           managedInstall: {
@@ -533,17 +533,17 @@ describe("managed-agent listing", () => {
         { cwd: "/repo" },
       )
 
-      expect(response.managedAgents.map((managedAgent) => managedAgent.id)).toEqual(["managed-acp"])
+      expect(response.agents.map((managedAgent) => managedAgent.id)).toEqual(["managed-acp"])
       expect(response.installations).toEqual(
         expect.arrayContaining([
           {
-            managedAgentId: "managed-acp",
+            agentId: "managed-acp",
             installable: true,
             installed: false,
             method: "npx",
           },
           {
-            managedAgentId: "ordinary-acp",
+            agentId: "ordinary-acp",
             installable: true,
             installed: false,
             method: "npx",
@@ -604,7 +604,7 @@ describe("managed-agent listing", () => {
       { cwd: "/repo" },
     )
 
-    expect(response.managedAgents[0]?.managedInstall).toEqual({
+    expect(response.agents[0]?.managedInstall).toEqual({
       managed: true,
       update: "daily",
       state: {
