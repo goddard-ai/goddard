@@ -389,9 +389,6 @@ importers:
       '@goddard-ai/event-filter':
         specifier: workspace:*
         version: link:../event-filter
-      '@goddard-ai/github':
-        specifier: workspace:*
-        version: link:../../features/github
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
@@ -413,9 +410,6 @@ importers:
       drizzle-orm:
         specifier: 1.0.0-beta.22-41a7d21
         version: 1.0.0-beta.22-41a7d21(@cloudflare/workers-types@4.20260529.1)(@libsql/client@0.17.3)(@opentelemetry/api@1.9.1)(@types/mssql@9.1.11(@azure/core-client@1.10.2))(bun-types@1.3.14)(mssql@11.0.1(@azure/core-client@1.10.2))(zod@4.4.3)
-      octokit:
-        specifier: ^5.0.5
-        version: 5.0.5
       radashi:
         specifier: 'catalog:'
         version: 12.9.1

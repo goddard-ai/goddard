@@ -48,7 +48,7 @@ export class HttpError extends Error {
   }
 }
 
-/** Validates that a GitHub repository reference contains both owner and repo names. */
+/** Validates that a repository reference contains both owner and repo names. */
 export function assertRepo(owner: string, repo: string): void {
   if (!owner?.trim() || !repo?.trim()) {
     throw new HttpError(400, "owner and repo are required")

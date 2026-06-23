@@ -27,7 +27,7 @@ test("createBackendRouter handles auth device start via rouzer route map", async
       return {
         deviceCode: "dev_1",
         userCode: "ABCD1234",
-        verificationUri: "https://github.com/login/device",
+        verificationUri: "https://auth.local/github/device",
         expiresIn: 900,
         interval: 5,
       }

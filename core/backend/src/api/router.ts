@@ -1,9 +1,7 @@
-import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import {
-  GitHubWebhookError,
-  normalizeGitHubWebhookRequest,
-  readGitHubWebhookRequest,
-} from "@goddard-ai/github/backend"
+  getDefaultBackendPluginComposition,
+  handleDefaultGitHubWebhookRequest,
+} from "@goddard-ai/default-features/backend"
 import {
   createRemoteRepoBackendEvent,
   type RemoteRepoBackendEvent,
@@ -138,8 +136,10 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
       github: async (ctx) => {
         try {
           const env = readEnv(ctx)
-          const input = await readGitHubWebhookRequest(ctx.request, env.GITHUB_WEBHOOK_SECRET)
-          const event = normalizeGitHubWebhookRequest(input)
+          const event = await handleDefaultGitHubWebhookRequest(
+            ctx.request,
+            env.GITHUB_WEBHOOK_SECRET,
+          )
           if (!event) {
             return { ignored: true }
           }
@@ -271,9 +271,18 @@ function readBearerToken(header: string): string {
 /** Converts thrown backend errors into consistent JSON HTTP responses. */
 function toErrorResponse(error: unknown): Response {
   const statusCode =
-    error instanceof HttpError || error instanceof GitHubWebhookError ? error.statusCode : 500
+    error instanceof HttpError ? error.statusCode : hasStatusCode(error) ? error.statusCode : 500
   const message = getErrorMessage(error)
   return Response.json({ error: message }, { status: statusCode })
+}
+
+function hasStatusCode(error: unknown): error is { statusCode: number } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof (error as { statusCode: unknown }).statusCode === "number"
+  )
 }
 
 const router = createBackendRouter()
