@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, join, relative, resolve } from "node:path"
@@ -49,7 +48,7 @@ async function main() {
     },
   ]
 
-  runBun(["run", "build"], packageDir)
+  await runBun(["run", "build"], packageDir)
   await rm(outputDir, { recursive: true, force: true })
 
   for (const artifact of artifacts) {
@@ -58,7 +57,7 @@ async function main() {
     if (artifact.runtime === "shared-bun") {
       await writeSharedBunHelper(artifact)
     } else {
-      runBun(buildCompileArgs(target, artifact.sourcePath, artifact.outputPath), packageDir)
+      await runBun(buildCompileArgs(target, artifact.sourcePath, artifact.outputPath), packageDir)
     }
   }
 
@@ -185,15 +184,18 @@ function buildCompileArgs(target: string, sourcePath: string, outputPath: string
 }
 
 /** Runs one Bun subprocess and fails the build immediately on non-zero exit. */
-function runBun(args: string[], cwd: string) {
-  const result = spawnSync(process.execPath, args, {
+async function runBun(args: string[], cwd: string) {
+  const subprocess = Bun.spawn([process.execPath, ...args], {
     cwd,
-    stdio: "inherit",
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
     env: process.env,
   })
+  const exitCode = await subprocess.exited
 
-  if (result.status !== 0) {
-    throw new Error(`bun ${args.join(" ")} failed with exit code ${result.status ?? 1}`)
+  if (exitCode !== 0) {
+    throw new Error(`bun ${args.join(" ")} failed with exit code ${exitCode}`)
   }
 }
 

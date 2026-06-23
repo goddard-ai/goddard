@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { connect } from "node:net"
 import { tmpdir } from "node:os"
@@ -449,6 +448,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     {
       owner: "trusted",
       repo: "widgets",
+      provider: "github",
       title: "Ship daemon security",
       body: "Done.",
       head: "feature/secure-daemon",
@@ -1159,13 +1159,13 @@ async function createGitRepoFixture(input: {
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-daemon-ipc-repo-"))
   cleanup.push(() => removeTemporaryPath(repoDir))
   await writeFile(join(repoDir, "README.md"), "# fixture\n", "utf8")
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.email", "bot@example.com"])
-  runGit(repoDir, ["config", "user.name", "Bot"])
-  runGit(repoDir, ["add", "README.md"])
-  runGit(repoDir, ["commit", "-m", "init"])
-  runGit(repoDir, ["checkout", "-b", input.branch])
-  runGit(repoDir, [
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Bot"])
+  await runGit(repoDir, ["add", "README.md"])
+  await runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["checkout", "-b", input.branch])
+  await runGit(repoDir, [
     "remote",
     "add",
     "origin",
@@ -1174,13 +1174,16 @@ async function createGitRepoFixture(input: {
   return repoDir
 }
 
-function runGit(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
+async function runGit(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const exitCode = await subprocess.exited
 
-  expect(result.status).toBe(0)
+  expect(exitCode).toBe(0)
 }
 
 async function captureLogs(

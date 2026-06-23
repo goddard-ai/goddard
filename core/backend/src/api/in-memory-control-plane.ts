@@ -20,7 +20,7 @@ import {
 import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
-import { hashToInteger, toPublicSession } from "../utils.ts"
+import { toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
@@ -257,7 +257,7 @@ export class InMemoryBackendControlPlane
 
   resolveEventOwner(event: RepoEvent): string | undefined {
     if (event.type === "pr.created") {
-      return toDefaultPrincipalId(event.author)
+      return event.author
     }
 
     return this.#pullRequests.find(
@@ -331,8 +331,4 @@ function createPrincipalFromId(principalId: string): AuthSession["principal"] {
       },
     ],
   }
-}
-
-function toDefaultPrincipalId(login: string): string {
-  return `github:${hashToInteger(login)}`
 }

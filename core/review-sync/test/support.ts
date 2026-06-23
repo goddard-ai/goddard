@@ -260,12 +260,12 @@ export async function runProcessUntilOutput(
     let stderr = ""
     const timeout = setTimeout(() => {
       timedOut = true
-      terminateProcessTree(child)
+      void terminateProcessTree(child)
     }, WATCH_TEST_TIMEOUT_MS)
     const stopWhenMatched = () => {
       if (!matched && `${stdout}\n${stderr}`.includes(expectedOutput)) {
         matched = true
-        terminateProcessTree(child)
+        void terminateProcessTree(child)
       }
     }
 

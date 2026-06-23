@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
@@ -1938,8 +1937,8 @@ test("session completion enforces worktree cleanliness without blocking local di
     "committed\n",
     "utf-8",
   )
-  runGit(committedWorktree!.worktreeDir, ["add", "committed-note.txt"])
-  runGit(committedWorktree!.worktreeDir, ["commit", "-m", "session work"])
+  await runGit(committedWorktree!.worktreeDir, ["add", "committed-note.txt"])
+  await runGit(committedWorktree!.worktreeDir, ["commit", "-m", "session work"])
   await expectIpcErrorCode(
     send(client, "session.complete", { id: committed.session.id }),
     SessionErrorCodes.CannotCompleteUnmergedCommits,
@@ -1953,14 +1952,14 @@ test("session worktree launch branches from the selected base branch", async () 
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture()
-  const defaultBranch = readGitOutput(repoDir, ["branch", "--show-current"])
+  const defaultBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
 
   await writeFile(join(repoDir, "branch-source.txt"), "feature-base\n", "utf-8")
-  runGit(repoDir, ["checkout", "-b", "feature-base"])
-  runGit(repoDir, ["add", "branch-source.txt"])
-  runGit(repoDir, ["commit", "-m", "feature-base"])
-  const featureHead = readGitOutput(repoDir, ["rev-parse", "HEAD"])
-  runGit(repoDir, ["checkout", defaultBranch])
+  await runGit(repoDir, ["checkout", "-b", "feature-base"])
+  await runGit(repoDir, ["add", "branch-source.txt"])
+  await runGit(repoDir, ["commit", "-m", "feature-base"])
+  const featureHead = await readGitOutput(repoDir, ["rev-parse", "HEAD"])
+  await runGit(repoDir, ["checkout", defaultBranch])
 
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -1975,9 +1974,13 @@ test("session worktree launch branches from the selected base branch", async () 
   })
   expect(fetchedWorktree.worktree).toBeTruthy()
   expect(
-    readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    await readGitOutput(fetchedWorktree.worktree!.worktreeDir, [
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    ]),
   ).toBe(fetchedWorktree.worktree!.branchName)
-  expect(readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "HEAD"])).toBe(
+  expect(await readGitOutput(fetchedWorktree.worktree!.worktreeDir, ["rev-parse", "HEAD"])).toBe(
     featureHead,
   )
 
@@ -2255,9 +2258,9 @@ test("session.launchPreview loads agent capabilities and repository branches for
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
-  const currentBranch = readGitOutput(repoDir, ["branch", "--show-current"])
+  const currentBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
 
-  runGit(repoDir, ["branch", "feature-a"])
+  await runGit(repoDir, ["branch", "feature-a"])
 
   const preview = await send(client, "session.launchPreview", {
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
@@ -2312,14 +2315,14 @@ test("session.create checks out the selected local branch before the initial pro
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
-  const defaultBranch = readGitOutput(repoDir, ["branch", "--show-current"])
+  const defaultBranch = await readGitOutput(repoDir, ["branch", "--show-current"])
   const agent = createWrappedNodeAgent(launchPreviewAgentPath)
 
-  runGit(repoDir, ["checkout", "-b", "feature-launch"])
+  await runGit(repoDir, ["checkout", "-b", "feature-launch"])
   await writeFile(join(repoDir, "feature.txt"), "feature\n", "utf-8")
-  runGit(repoDir, ["add", "feature.txt"])
-  runGit(repoDir, ["commit", "-m", "feature"])
-  runGit(repoDir, ["checkout", defaultBranch])
+  await runGit(repoDir, ["add", "feature.txt"])
+  await runGit(repoDir, ["commit", "-m", "feature"])
+  await runGit(repoDir, ["checkout", defaultBranch])
 
   const preview = await send(client, "session.launchPreview", {
     agent,
@@ -2340,7 +2343,7 @@ test("session.create checks out the selected local branch before the initial pro
   const events = await readLaunchPreviewAgentEvents(logPath)
   const promptEvent = events.find((event) => event.type === "prompt")
 
-  expect(readGitOutput(repoDir, ["branch", "--show-current"])).toBe("feature-launch")
+  expect(await readGitOutput(repoDir, ["branch", "--show-current"])).toBe("feature-launch")
   expect(promptEvent).toMatchObject({
     branchName: "feature-launch",
   })
@@ -2351,7 +2354,7 @@ test("session.create refuses local branch checkout with uncommitted changes", as
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  runGit(repoDir, ["branch", "feature-launch"])
+  await runGit(repoDir, ["branch", "feature-launch"])
   await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
 
   await expectIpcErrorCode(
@@ -2800,8 +2803,8 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
       },
     },
   })
-  runGit(repoDir, ["add", ".goddard/config.json"])
-  runGit(repoDir, ["commit", "-m", "add local goddard config"])
+  await runGit(repoDir, ["add", ".goddard/config.json"])
+  await runGit(repoDir, ["commit", "-m", "add local goddard config"])
 
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(exampleAgentPath),
@@ -2957,33 +2960,42 @@ async function createRepoFixture(options: { includeSrc?: boolean } = {}): Promis
     await writeFile(join(repoDir, "src", "index.ts"), "export const ready = true\n", "utf-8")
   }
 
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "core.autocrlf", "false"])
-  runGit(repoDir, ["config", "user.email", "bot@example.com"])
-  runGit(repoDir, ["config", "user.name", "Bot"])
-  runGit(repoDir, ["add", "."])
-  runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "core.autocrlf", "false"])
+  await runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Bot"])
+  await runGit(repoDir, ["add", "."])
+  await runGit(repoDir, ["commit", "-m", "init"])
 
   return repoDir
 }
 
-function runGit(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
+async function runGit(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const exitCode = await subprocess.exited
 
-  expect(result.status).toBe(0)
+  expect(exitCode).toBe(0)
 }
 
-function readGitOutput(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
+async function readGitOutput(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [exitCode, stdout] = await Promise.all([
+    subprocess.exited,
+    new Response(subprocess.stdout).text(),
+  ])
 
-  expect(result.status).toBe(0)
-  return result.stdout.trim()
+  expect(exitCode).toBe(0)
+  return stdout.trim()
 }
 
 function normalizeLineEndings(value: string) {

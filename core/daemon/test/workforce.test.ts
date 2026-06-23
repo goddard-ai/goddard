@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -54,7 +53,7 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     JSON.stringify({ name: "@repo/ui", private: true }, null, 2),
     "utf-8",
   )
-  expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
+  await runGit(repoDir, ["init"])
 
   const daemon = await startDaemonServer(createTestBackendClient(), {
     port: 0,
@@ -161,4 +160,15 @@ function createTestBackendClient(): BackendClient {
       },
     },
   } as unknown as BackendClient
+}
+
+async function runGit(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const exitCode = await subprocess.exited
+  expect(exitCode).toBe(0)
 }
