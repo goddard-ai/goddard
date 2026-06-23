@@ -10,6 +10,7 @@ import {
   REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
   remoteRepoBackendEvents,
   remoteRepoBackendEventSources,
+  remoteRepoBackendPlugin,
   remoteRepoBackendRoutes,
 } from "../src/backend.ts"
 
@@ -17,6 +18,10 @@ test("backend routes keep their logical remote-repo resource grouping", () => {
   expect(remoteRepoBackendRoutes.remoteRepo.path.source).toBe("/remote-repo")
   expect(remoteRepoBackendRoutes.remoteRepo.children.stream.path?.source).toBe("/stream")
   expect("webhooks" in remoteRepoBackendRoutes).toBe(false)
+  expect(remoteRepoBackendPlugin.name).toBe("remote-repo")
+  expect(remoteRepoBackendPlugin.routes?.remoteRepo.path.source).toBe("/remote-repo")
+  expect(remoteRepoBackendPlugin.events).toBe(remoteRepoBackendEvents)
+  expect(remoteRepoBackendPlugin.eventSources).toBe(remoteRepoBackendEventSources)
 })
 
 test("owns the remote repository backend event contract", () => {
