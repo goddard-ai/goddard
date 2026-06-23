@@ -15,11 +15,17 @@ loading.
 - `@goddard-ai/default-features/daemon`
   - Composes the default daemon feature plugins.
 - `@goddard-ai/default-features/backend`
-  - Composes the default backend route tree, backend event definitions, and
-    backend event sources from backend-capable feature plugins.
+  - Composes the default backend route tree, backend event definitions, backend
+    event sources, and provider capabilities from backend-capable feature
+    plugins.
 - `@goddard-ai/default-features/daemon-ipc`
   - Composes the default daemon IPC route contract from core and feature route
     fragments.
+
+The default backend composition includes the GitHub provider plugin as the
+current bundled provider implementation. Core backend consumes the composed
+provider capabilities through this package instead of importing provider
+internals directly.
 
 ## License
 
