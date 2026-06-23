@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown"
 
 export default defineConfig({
-  entry: ["./src/daemon.ts", "./src/daemon-ipc.ts"],
+  entry: ["./src/backend.ts", "./src/daemon.ts", "./src/daemon-ipc.ts"],
   format: "esm",
   target: "node18",
   clean: true,
