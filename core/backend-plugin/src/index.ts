@@ -47,6 +47,18 @@ export type BackendEventSourceDefinitions = Record<
   BackendEventSourceDefinition<string, any, any>
 >
 
+export type BackendPluginDefinition<
+  TName extends string = string,
+  TRoutes extends HttpRouteTree = HttpRouteTree,
+  TEvents extends BackendEventDefinitions = BackendEventDefinitions,
+  TSources extends BackendEventSourceDefinitions = BackendEventSourceDefinitions,
+> = {
+  readonly name: TName
+  readonly routes?: TRoutes
+  readonly events?: TEvents
+  readonly eventSources?: TSources
+}
+
 export type BackendEventPublisher = {
   readonly publish: (input: {
     readonly source: string
@@ -62,9 +74,48 @@ export type ComposeBackendEvents<TEvents extends readonly BackendEventDefinition
 export type ComposeBackendEventSources<TSources extends readonly BackendEventSourceDefinitions[]> =
   UnionToIntersection<TSources[number]>
 
+export type ComposeBackendPlugins<TPlugins extends readonly BackendPluginDefinition[]> = {
+  readonly routes: ComposeBackendRoutes<ExtractBackendPluginRoutes<TPlugins>>
+  readonly events: ComposeBackendEvents<ExtractBackendPluginEvents<TPlugins>>
+  readonly eventSources: ComposeBackendEventSources<ExtractBackendPluginSources<TPlugins>>
+}
+
+type ExtractBackendPluginRoutes<TPlugins extends readonly BackendPluginDefinition[]> = {
+  readonly [TIndex in keyof TPlugins]: TPlugins[TIndex] extends { readonly routes?: infer TRoutes }
+    ? TRoutes extends HttpRouteTree
+      ? TRoutes
+      : {}
+    : {}
+}
+
+type ExtractBackendPluginEvents<TPlugins extends readonly BackendPluginDefinition[]> = {
+  readonly [TIndex in keyof TPlugins]: TPlugins[TIndex] extends { readonly events?: infer TEvents }
+    ? TEvents extends BackendEventDefinitions
+      ? TEvents
+      : {}
+    : {}
+}
+
+type ExtractBackendPluginSources<TPlugins extends readonly BackendPluginDefinition[]> = {
+  readonly [TIndex in keyof TPlugins]: TPlugins[TIndex] extends {
+    readonly eventSources?: infer TSources
+  }
+    ? TSources extends BackendEventSourceDefinitions
+      ? TSources
+      : {}
+    : {}
+}
+
 /** Preserves the exact Rouzer route tree object for backend route inference. */
 export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes: TRoutes) {
   return routes
+}
+
+/** Preserves one feature-owned backend plugin contribution object. */
+export function defineBackendPlugin<const TPlugin extends BackendPluginDefinition>(
+  plugin: TPlugin,
+) {
+  return plugin
 }
 
 /** Preserves the exact backend event definition object for backend event inference. */
@@ -136,6 +187,35 @@ export function composeBackendEventSources<
   }
 
   return composed as ComposeBackendEventSources<TSources>
+}
+
+/** Composes backend plugin contributions and rejects ambiguous plugin ownership. */
+export function composeBackendPlugins<const TPlugins extends readonly BackendPluginDefinition[]>(
+  plugins: TPlugins,
+) {
+  const pluginNames = new Set<string>()
+  const routes: HttpRouteTree[] = []
+  const eventSets: BackendEventDefinitions[] = []
+  const sourceSets: BackendEventSourceDefinitions[] = []
+
+  for (const plugin of plugins) {
+    if (pluginNames.has(plugin.name)) {
+      throw new Error(`Duplicate backend plugin: ${plugin.name}`)
+    }
+    pluginNames.add(plugin.name)
+
+    routes.push(plugin.routes ?? {})
+    eventSets.push(plugin.events ?? {})
+    sourceSets.push(plugin.eventSources ?? {})
+  }
+
+  const events = composeBackendEvents(eventSets)
+
+  return {
+    routes: composeBackendRoutes(routes),
+    events,
+    eventSources: composeBackendEventSources(sourceSets, events),
+  } as ComposeBackendPlugins<TPlugins>
 }
 
 function mergeRouteTree(target: HttpRouteTree, source: HttpRouteTree, path: readonly string[]) {
