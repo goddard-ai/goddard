@@ -15,7 +15,7 @@ Rules live in `.agents/rules/`. Read every matching ruleset before acting:
 - `product-contracts.md`: MUST read when touching product behavior, `spec/`, SDK/app parity, shared data loading or mutation, system configuration, or user-visible capabilities.
 - `implementation.md`: MUST read when editing production code, refactoring, changing architecture, adding abstractions or exports, or changing dependencies.
 - `defaults.md`: MUST read when adding or changing config, normalization, persisted data shapes, SDK inputs, domain defaults, or resolved values.
-- `features.md`: MUST read when adding or changing cross-layer feature packages, feature schemas, daemon plugins, SDK/app feature wiring, or scaffolded features.
+- `features.md`: MUST read when adding or changing feature packages, feature-owned schemas, runtime predicates/type guards, event handlers, persistence, daemon plugins, SDK feature wiring, or scaffolded features.
 - `ipc-errors.md`: MUST read when adding, changing, or handling daemon IPC errors, SDK/app-visible failures, client-safe error messages, diagnostic codes, or localization of daemon-backed errors.
 - `testing.md`: MUST read when adding, changing, reviewing, or deciding whether to add tests, and when verifying behavior changes.
 - `logs.md`: MUST read when debugging Goddard daemon behavior, app behavior, daemon/app interactions, IPC flows, runtime persistence, or failures where runtime logs may explain what happened.
