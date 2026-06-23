@@ -61,13 +61,13 @@
       "bun": "./src/installations.ts",
       "import": "./dist/installations.mjs"
     },
-    "./list-managed-agents": {
+    "./list-agents": {
       "types": {
-        "source": "./src/list-managed-agents.ts",
-        "default": "./dist/list-managed-agents.d.mts"
+        "source": "./src/list-agents.ts",
+        "default": "./dist/list-agents.d.mts"
       },
-      "bun": "./src/list-managed-agents.ts",
-      "import": "./dist/list-managed-agents.mjs"
+      "bun": "./src/list-agents.ts",
+      "import": "./dist/list-agents.mjs"
     },
     "./sdk": {
       "types": {

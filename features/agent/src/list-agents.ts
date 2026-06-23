@@ -3,20 +3,13 @@ import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig, StaticSessionParams } from "@goddard-ai/schema/config"
 import { omit } from "radashi"
 
-import {
-  createConfigManagedAgentCatalogEntries,
-  mergeManagedAgentCatalogEntries,
-} from "./catalog.ts"
+import { createConfigAgentCatalogEntries, mergeAgentCatalogEntries } from "./catalog.ts"
 import type {
   InstalledManagedAgent,
   ManagedAgentInstallService,
   ManagedAgentInstallStatus,
 } from "./daemon/install-service.ts"
-import {
-  getAgentInstallationStates,
-  installManagedAgent,
-  uninstallManagedAgent,
-} from "./installations.ts"
+import { getAgentInstallationStates, installAgent, uninstallAgent } from "./installations.ts"
 import {
   AgentCatalogEntry,
   type InstallAgentRequest,
@@ -30,18 +23,18 @@ import {
   type UninstallAgentResponse,
 } from "./schema.ts"
 
-type ManagedAgentRegistrySnapshot = Omit<
+type AgentRegistrySnapshot = Omit<
   ListAgentsResponse,
   "agents" | "defaultAgentId" | "installations"
 > & {
   adapters: readonly unknown[]
 }
 
-export type ManagedAgentRegistryService = {
-  listAdapters: () => Promise<ManagedAgentRegistrySnapshot>
+export type AgentRegistryService = {
+  listAdapters: () => Promise<AgentRegistrySnapshot>
 }
 
-export type ManagedAgentConfigManager = {
+export type AgentConfigManager = {
   getRootConfig: (cwd?: string) => Promise<{
     config: {
       agents?: AgentsConfig
@@ -51,9 +44,9 @@ export type ManagedAgentConfigManager = {
   }>
 }
 
-export type ListAgentsContext = {
-  registryService: ManagedAgentRegistryService
-  configProvider: ManagedAgentConfigManager
+export type AgentCatalogContext = {
+  registryService: AgentRegistryService
+  configProvider: AgentConfigManager
   agentInstallService: ManagedAgentInstallService
 }
 
@@ -72,7 +65,7 @@ function isManagedAgent(adapter: AgentCatalogEntry, agents?: AgentsConfig["manag
 }
 
 async function readMergedAdapterCatalog(
-  { registryService, configProvider }: ListAgentsContext,
+  { registryService, configProvider }: AgentCatalogContext,
   cwd?: string,
 ) {
   const [registrySnapshot, resolvedConfig] = await Promise.all([
@@ -82,9 +75,9 @@ async function readMergedAdapterCatalog(
   const registryAdapters = registrySnapshot.adapters.map((adapter) =>
     AgentCatalogEntry.parse(adapter),
   )
-  const mergedAdapters = mergeManagedAgentCatalogEntries(
+  const mergedAdapters = mergeAgentCatalogEntries(
     registryAdapters,
-    createConfigManagedAgentCatalogEntries(resolvedConfig?.registry),
+    createConfigAgentCatalogEntries(resolvedConfig?.registry),
   )
 
   return {
@@ -94,9 +87,9 @@ async function readMergedAdapterCatalog(
   }
 }
 
-/** Lists managed agents from registry and config substrate using managed-agent merge semantics. */
-export async function listManagedAgents(
-  context: ListAgentsContext,
+/** Lists agents from registry and config substrate using agent merge semantics. */
+export async function listAgents(
+  context: AgentCatalogContext,
   { cwd, includeUninstalled }: ListAgentsRequestType,
 ) {
   const { registrySnapshot, resolvedConfig, mergedAdapters } = await readMergedAdapterCatalog(
@@ -142,30 +135,30 @@ export async function listManagedAgents(
   }
 }
 
-/** Installs one managed agent from the daemon-visible catalog into the local launch set. */
-export async function installCatalogManagedAgent(
-  context: ListAgentsContext,
+/** Installs one agent from the daemon-visible catalog into the local launch set. */
+export async function installCatalogAgent(
+  context: AgentCatalogContext,
   { agentId }: InstallAgentRequest,
 ): Promise<InstallAgentResponse> {
   const { mergedAdapters } = await readMergedAdapterCatalog(context)
   const adapter = mergedAdapters.find((adapter) => adapter.id === agentId)
 
   if (!adapter) {
-    throw new Error(`Unknown managed agent: ${agentId}`)
+    throw new Error(`Unknown agent: ${agentId}`)
   }
 
   return {
     agent: adapter,
-    installation: await installManagedAgent(adapter),
+    installation: await installAgent(adapter),
   }
 }
 
-/** Removes one managed agent from the local launch set. */
-export async function uninstallCatalogManagedAgent(
-  _context: ListAgentsContext,
+/** Removes one agent from the local launch set. */
+export async function uninstallCatalogAgent(
+  _context: AgentCatalogContext,
   { agentId }: UninstallAgentRequest,
 ): Promise<UninstallAgentResponse> {
-  await uninstallManagedAgent(agentId)
+  await uninstallAgent(agentId)
 
   return { agentId }
 }
