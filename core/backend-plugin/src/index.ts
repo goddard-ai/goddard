@@ -356,3 +356,4 @@ export { $type, metadata, createClient, createRouter, type RouzerClient } from "
 export type { HttpRouteTree } from "rouzer/http"
 
 export * as http from "rouzer/http"
+export * as ndjson from "rouzer/ndjson"

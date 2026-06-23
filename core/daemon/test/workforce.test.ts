@@ -151,24 +151,10 @@ function createTestBackendClient(): BackendClient {
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    remoteRepo: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
+    events: {
+      stream: async () => emptyBackendEvents(),
     },
   } as unknown as BackendClient
 }
 
-async function runGit(cwd: string, args: string[]) {
-  const subprocess = Bun.spawn(["git", ...args], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const exitCode = await subprocess.exited
-  expect(exitCode).toBe(0)
-}
+async function* emptyBackendEvents(): AsyncIterable<never> {}

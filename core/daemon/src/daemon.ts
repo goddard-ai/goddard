@@ -155,86 +155,129 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
     }
 
     const activeIpcServer = ipcServer
-    const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
-    bindConfigReloadFailed((event) => daemonEvents.emit("config.reload.failed", event))
-    const backendEventHandlers = createBackendEventHandlerRegistry()
-    let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
-    let startingSubscription: Promise<void> | null = null
+    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
+    const runningPrs = new Set<string>()
+    const eventStreamAbort = new AbortController()
+    let eventStreamTask: Promise<void> | null = null
 
-    if (activeIpcServer) {
-      for (const handler of activeIpcServer.backendEventHandlers) {
-        backendEventHandlers.register(handler)
-      }
-    }
-
-    async function closeBackendStream() {
-      if (!subscription) {
-        return
-      }
-
-      const closingSubscription = subscription
-      subscription = null
-      await Promise.resolve(closingSubscription.close()).catch((error) => {
-        logger.log("backend.stream_close_failed", toErrorProperties(error))
-      })
-    }
-
-    async function startBackendStream() {
-      if (!enableStream || subscription || startingSubscription || !backendEventHandlers.hasAny()) {
-        return
-      }
-
-      startingSubscription = Promise.resolve()
+    if (enableStream) {
+      eventStreamTask = Promise.resolve()
         .then(async () => {
-          try {
-            subscription = await client.stream.subscribe()
-          } catch (error) {
-            const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
-            if (!isBackendUnauthenticatedError(authError)) {
-              throw authError
-            }
+          const events = await client.events.stream(
+            {
+              names: ["comment", "review"],
+            },
+            {
+              signal: eventStreamAbort.signal,
+            },
+          )
+          logger.log(
+            "repo.subscription_started",
+            activeIpcServer
+              ? {
+                  daemonUrl: activeIpcServer.daemonUrl,
+                  port: activeIpcServer.port,
+                }
+              : {},
+          )
 
-            await daemonEvents.emit("backend.stream.degraded", {
+          await consumeBackendEvents(
+            events,
+            async (event) => {
+              if (!isFeedbackEvent(event)) {
+                return
+              }
+
+              const feedbackContext = {
+                repository: `${event.owner}/${event.repo}`,
+                prNumber: event.prNumber,
+                feedbackType: event.type,
+              }
+
+              await FeedbackEventContext.run(feedbackContext, async () => {
+                if (!activeIpcServer) {
+                  logger.log("repo.feedback_ignored", {
+                    reason: "ipc_disabled",
+                  })
+                  return
+                }
+
+                const prompt = buildPrompt(event)
+                const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
+
+                if (runningPrs.has(requestKey)) {
+                  logger.log("repo.feedback_coalesced")
+                  return
+                }
+
+                runningPrs.add(requestKey)
+
+                try {
+                  const { managed } = await client.pullRequests.managed({
+                    owner: event.owner,
+                    repo: event.repo,
+                    prNumber: event.prNumber,
+                  })
+                  if (!managed) {
+                    logger.log("repo.feedback_ignored", {
+                      reason: "unmanaged_pr",
+                    })
+                    return
+                  }
+
+                  logger.log("pr_feedback.launch", {
+                    prompt: createPayloadPreview(prompt),
+                  })
+                  const exitCode = await runPrFeedbackFlow({
+                    event,
+                    prompt,
+                    daemonUrl: activeIpcServer.daemonUrl,
+                    agentBinDir,
+                    configManager,
+                    store,
+                  })
+                  logger.log("pr_feedback.finish", {
+                    exitCode,
+                  })
+                } catch (error) {
+                  logger.log("pr_feedback.failed", toErrorProperties(error))
+                } finally {
+                  runningPrs.delete(requestKey)
+                }
+              })
+            },
+            (error) => {
+              logger.log("repo.event_failed", toErrorProperties(error))
+            },
+            eventStreamAbort.signal,
+          )
+        })
+        .catch((error) => {
+          if (eventStreamAbort.signal.aborted) {
+            return
+          }
+
+          const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
+          if (isBackendUnauthenticatedError(authError)) {
+            logger.log("repo.subscription_degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
             })
             return
           }
 
-          if (activeIpcServer) {
-            await daemonEvents.emit("backend.stream.started", {
-              daemonUrl: activeIpcServer.daemonUrl,
-              port: activeIpcServer.port,
-            })
-          }
-
-          subscription.on("event", (payload) => {
-            void dispatchBackendEvent(payload, backendEventHandlers, logger)
-          })
+          logger.log("repo.event_stream_failed", toErrorProperties(error))
         })
-        .finally(() => {
-          startingSubscription = null
-        })
-
-      await startingSubscription
-    }
-
-    backendEventHandlers.onHandlersChanged(() => {
-      if (!backendEventHandlers.hasAny()) {
-        void closeBackendStream()
-        return
-      }
-
-      void startBackendStream()
-    })
-
-    if (enableStream) {
-      await startBackendStream()
     }
 
     await waitForShutdown(() =>
       Promise.all([
-        subscription ? Promise.resolve(subscription.close()) : Promise.resolve(),
+        eventStreamTask
+          ? Promise.resolve()
+              .then(() => eventStreamAbort.abort())
+              .then(() => eventStreamTask)
+              .catch(() => {})
+          : Promise.resolve(),
         activeIpcServer ? activeIpcServer.close() : Promise.resolve(),
       ]).then(() => {}),
     )
@@ -253,60 +296,34 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
   }
 }
 
-type BackendEventHandlerRegistry = {
-  readonly getHandlers: () => readonly BackendEventHandler<any>[]
-  readonly hasAny: () => boolean
-  readonly onHandlersChanged: (listener: () => void) => () => void
-  readonly register: (handler: BackendEventHandler<any>) => () => void
-}
-
-function createBackendEventHandlerRegistry(): BackendEventHandlerRegistry {
-  const handlers = new Set<BackendEventHandler<any>>()
-  const listeners = new Set<() => void>()
-
-  function notifyChanged() {
-    for (const listener of listeners) {
-      listener()
-    }
-  }
-
-  return {
-    getHandlers: () => [...handlers],
-    hasAny: () => handlers.size > 0,
-    onHandlersChanged(listener) {
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
-    register(handler) {
-      handlers.add(handler)
-      notifyChanged()
-      return () => {
-        if (handlers.delete(handler)) {
-          notifyChanged()
-        }
-      }
-    },
-  }
-}
-
-async function dispatchBackendEvent(
-  payload: unknown,
-  handlers: BackendEventHandlerRegistry,
-  logger: DaemonLogger,
+async function consumeBackendEvents(
+  events: AsyncIterable<RepoEvent>,
+  handleEvent: (event: RepoEvent) => Promise<void>,
+  handleError: (error: unknown) => void,
+  signal: AbortSignal,
 ) {
-  for (const handler of handlers.getHandlers()) {
-    try {
-      if (handler.canHandle(payload)) {
-        await handler.handle(payload)
+  const iterator = events[Symbol.asyncIterator]()
+  const abort = () => {
+    void iterator.return?.()
+  }
+
+  signal.addEventListener("abort", abort, { once: true })
+  try {
+    while (true) {
+      const { done, value } = await iterator.next()
+      if (done) {
+        return
       }
-    } catch (error) {
-      logger.log("backend.event_handler_failed", {
-        handlerName: handler.name,
-        ...toErrorProperties(error),
-      })
+
+      try {
+        await handleEvent(value)
+      } catch (error) {
+        handleError(error)
+      }
     }
+  } finally {
+    signal.removeEventListener("abort", abort)
+    await iterator.return?.()
   }
 }
 

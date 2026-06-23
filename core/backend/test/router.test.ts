@@ -53,8 +53,9 @@ test("createBackendRouter handles auth device start via rouzer route map", async
   expect(payload.deviceCode).toBe("dev_1")
 })
 
-test("createBackendRouter delegates stream route to injected handleUserStream", async () => {
-  let capturedPrincipalId = ""
+test("createBackendRouter delegates event stream route to injected handleUserEvents", async () => {
+  let capturedGithubUsername = ""
+  let capturedFilter: unknown
 
   const controlPlane: BackendControlPlane = {
     ...stubControlPlane,
@@ -69,23 +70,41 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    handleUserStream: async (_env, principal, _request) => {
-      capturedPrincipalId = principal.id
-      return new Response("stream-ok", { status: 200 })
+    handleUserEvents: (_env, githubUsername, filter, _request) => {
+      capturedGithubUsername = githubUsername
+      capturedFilter = filter
+      return (async function* () {
+        yield {
+          type: "comment" as const,
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+          author: "teammate",
+          body: "looks good",
+          reactionAdded: "eyes" as const,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }
+      })()
     },
   })
 
-  const response = await router(
+  const streamResponse = await router(
     createContext(
-      new Request("https://example.test/remote-repo/stream", {
-        headers: { authorization: "Bearer tok_1" },
+      new Request("https://example.test/events/stream", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer tok_1",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ names: ["comment"] }),
       }),
     ) as any,
   )
 
-  expect(response.status).toBe(200)
-  expect(await response.text()).toBe("stream-ok")
-  expect(capturedPrincipalId).toBe("github:2997745")
+  expect(streamResponse.status).toBe(200)
+  expect(await readFirstNdjsonLine(streamResponse)).toMatchObject({ type: "comment" })
+  expect(capturedGithubUsername).toBe("alec")
+  expect(capturedFilter).toEqual({ names: ["comment"] })
 })
 
 test("createBackendRouter publishes remote-repo events from the composed GitHub route", async () => {
@@ -269,33 +288,28 @@ function createEnv(overrides: Partial<Env> = {}): Env {
   }
 }
 
-function githubStart(login: string) {
-  return {
-    provider: "github",
-    loginHint: login,
+async function readFirstNdjsonLine(response: Response): Promise<unknown> {
+  if (!response.body) {
+    throw new Error("Missing NDJSON response body")
   }
-}
 
-function githubPrincipal(login: string) {
-  return {
-    id: `github:${hashTestIdentity(login)}`,
-    providerIdentities: [githubIdentity(login)],
-  }
-}
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
 
-function githubIdentity(login: string) {
-  return {
-    provider: "github",
-    subject: String(hashTestIdentity(login)),
-    displayName: login,
-  }
-}
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) {
+      break
+    }
 
-function hashTestIdentity(value: string): number {
-  let hash = 0
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i)
-    hash |= 0
+    buffer += decoder.decode(value, { stream: true })
+    const newline = buffer.indexOf("\n")
+    if (newline !== -1) {
+      await reader.cancel()
+      return JSON.parse(buffer.slice(0, newline))
+    }
   }
-  return Math.abs(hash) + 1000
+
+  throw new Error("NDJSON stream ended before emitting data")
 }

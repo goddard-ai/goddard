@@ -3140,16 +3140,13 @@ function createTestBackendClient(): BackendClient {
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    remoteRepo: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
+    events: {
+      stream: async () => emptyBackendEvents(),
     },
   } as unknown as BackendClient
 }
+
+async function* emptyBackendEvents(): AsyncIterable<never> {}
 
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-home-"))

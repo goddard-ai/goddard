@@ -166,6 +166,65 @@ test("invalid JSON body returns 400", async () => {
   }
 })
 
+test("ndjson event stream receives webhook events for a managed PR", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
+    const session = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: flow.deviceCode,
+      githubUsername: "alec",
+    })
+
+    await postJson(
+      `${baseUrl}/pull-requests/create`,
+      {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Add CLI",
+        head: "feat/cli",
+        base: "main",
+      },
+      session.token,
+    )
+
+    const streamResponsePromise = fetch(`${baseUrl}/events/stream`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({ names: ["comment"] }),
+    })
+
+    await Bun.sleep(10)
+    const eventPromise = streamResponsePromise.then((streamResponse) => {
+      expect(streamResponse.status).toBe(200)
+      return readFirstNdjsonEvent(streamResponse)
+    })
+
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "teammate",
+      body: "looks good",
+    })
+
+    const parsed = (await eventPromise) as { type: string; reactionAdded: string }
+    expect(parsed.type).toBe("comment")
+    expect(parsed.reactionAdded).toBe("eyes")
+  } finally {
+    await server.close()
+  }
+})
+
 test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
   const backend = new InMemoryBackendControlPlane()
   const server = await startBackendServer(backend, {
@@ -210,38 +269,40 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       bobSession.token,
     )
 
-    const alecStream = await fetch(`${baseUrl}/remote-repo/stream`, {
+    const alecStreamPromise = fetch(`${baseUrl}/events/stream`, {
+      method: "POST",
       headers: {
-        accept: "text/event-stream",
+        "content-type": "application/json",
         authorization: `Bearer ${alecSession.token}`,
       },
+      body: JSON.stringify({ where: { repo: "sdk" } }),
     })
-    const bobStream = await fetch(`${baseUrl}/remote-repo/stream`, {
+    const bobAbort = new AbortController()
+    const bobStreamPromise = fetch(`${baseUrl}/events/stream`, {
+      method: "POST",
       headers: {
-        accept: "text/event-stream",
+        "content-type": "application/json",
         authorization: `Bearer ${bobSession.token}`,
       },
+      body: JSON.stringify({ where: { repo: "sdk" } }),
+      signal: bobAbort.signal,
     })
 
-    backend.broadcastRemoteRepoEvent(
-      createRemoteRepoBackendEvent({
-        type: "comment",
-        provider: "github",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 1,
-        author: "teammate",
-        body: "looks good",
-        reactionAdded: "eyes",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }),
-    )
+    await Bun.sleep(10)
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "teammate",
+      body: "looks good",
+    })
 
-    const alecEvent = (await readFirstSseEvent(alecStream)) as {
-      payload: { prNumber: number }
-    }
-    expect(alecEvent.payload.prNumber).toBe(1)
-    await assertNoSseEvent(bobStream, 100)
+    const alecEvent = (await alecStreamPromise.then(readFirstNdjsonEvent)) as { prNumber: number }
+    expect(alecEvent.prNumber).toBe(1)
+    await assertNoStreamResponse(bobStreamPromise, 100)
+    bobAbort.abort()
+    await bobStreamPromise.catch(() => {})
   } finally {
     await server.close()
   }
@@ -261,36 +322,38 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       providerIdentity: githubIdentity("alec"),
     })
 
-    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
+    const streamAbort = new AbortController()
+    const streamResponsePromise = fetch(`${baseUrl}/events/stream`, {
+      method: "POST",
       headers: {
-        accept: "text/event-stream",
+        "content-type": "application/json",
         authorization: `Bearer ${session.token}`,
       },
+      body: JSON.stringify({ names: ["comment"] }),
+      signal: streamAbort.signal,
     })
 
-    backend.broadcastRemoteRepoEvent(
-      createRemoteRepoBackendEvent({
-        type: "comment",
-        provider: "github",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 99,
-        author: "teammate",
-        body: "looks good",
-        reactionAdded: "eyes",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }),
-    )
+    await Bun.sleep(10)
+    await postJson(`${baseUrl}/webhooks/github`, {
+      type: "issue_comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 99,
+      author: "teammate",
+      body: "looks good",
+    })
 
-    await assertNoSseEvent(streamResponse, 100)
+    await assertNoStreamResponse(streamResponsePromise, 100)
+    streamAbort.abort()
+    await streamResponsePromise.catch(() => {})
   } finally {
     await server.close()
   }
 })
 
-async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
+async function readFirstNdjsonEvent(response: Response, timeoutMs = 1000): Promise<unknown> {
   if (!response.body) {
-    throw new Error("Missing SSE response body")
+    throw new Error("Missing NDJSON response body")
   }
 
   const reader = response.body.getReader()
@@ -305,39 +368,34 @@ async function readFirstSseEvent(response: Response, timeoutMs = 1000): Promise<
 
     buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.indexOf("\n\n")
+    let separatorIndex = buffer.indexOf("\n")
     while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex)
-      buffer = buffer.slice(separatorIndex + 2)
+      const line = buffer.slice(0, separatorIndex).trim()
+      buffer = buffer.slice(separatorIndex + 1)
 
-      const dataLines = rawEvent
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trimStart())
-
-      if (dataLines.length > 0) {
+      if (line) {
         await reader.cancel()
-        return JSON.parse(dataLines.join("\n"))
+        return JSON.parse(line)
       }
 
-      separatorIndex = buffer.indexOf("\n\n")
+      separatorIndex = buffer.indexOf("\n")
     }
   }
 
-  throw new Error("SSE stream ended before emitting data")
+  throw new Error("NDJSON stream ended before emitting data")
 }
 
-async function assertNoSseEvent(response: Response, timeoutMs: number): Promise<void> {
-  try {
-    await readFirstSseEvent(response, timeoutMs)
-  } catch (error) {
-    expect(String(error)).toMatch(
-      /(Timed out waiting for SSE event|SSE stream ended before emitting data)/,
-    )
-    return
-  }
+async function assertNoStreamResponse(
+  response: Promise<Response>,
+  timeoutMs: number,
+): Promise<void> {
+  const marker = Symbol("timeout")
+  const result = await Promise.race([
+    response.then(() => "resolved" as const),
+    Bun.sleep(timeoutMs).then(() => marker),
+  ])
 
-  throw new Error(`Expected no SSE event within ${timeoutMs}ms`)
+  expect(result).toBe(marker)
 }
 
 async function readWithTimeout(
@@ -353,7 +411,7 @@ async function readWithTimeout(
       new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
         timeoutId = setTimeout(() => {
           void reader.cancel().catch(() => {})
-          reject(new Error(`Timed out waiting for SSE event after ${timeoutMs}ms`))
+          reject(new Error(`Timed out waiting for NDJSON event after ${timeoutMs}ms`))
         }, timeoutMs)
       }),
     ])

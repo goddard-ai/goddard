@@ -1,5 +1,5 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import { composeBackendRoutes, createRouter } from "@goddard-ai/backend-plugin"
+import { composeBackendRoutes, createRouter, ndjson } from "@goddard-ai/backend-plugin"
 import {
   getDefaultBackendPluginComposition,
   handleDefaultGitHubWebhookRequest,
@@ -8,168 +8,174 @@ import {
   createRemoteRepoBackendEvent,
   type RemoteRepoBackendEvent,
 } from "@goddard-ai/remote-repo/backend"
+import {
+  GitHubWebhookInput,
+  type BackendEventStreamRequest,
+  type RepoEvent,
+} from "@goddard-ai/remote-repo/schema"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
 
 import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
+import { createReadyNdjsonResponse } from "../utils.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
 import type { BackendPrincipal } from "./events.ts"
 
-const backendPlugins = getDefaultBackendPluginComposition()
-const backendRoutes = backendPlugins.routes
-const backendEvents = backendPlugins.events
-const backendEventSources = backendPlugins.eventSources
-const backendProviders = backendPlugins.providers
-
-export type BackendEventPublication = {
-  readonly source: keyof typeof backendEventSources & string
-  readonly event: RemoteRepoBackendEvent
+const backendRoutes = composeBackendRoutes([
+  authBackendRoutes,
+  pullRequestBackendRoutes,
+  remoteRepoBackendRoutes,
+])
+const backendNdjsonRouterPlugin = {
+  ...ndjson.routerPlugin,
+  encode(value: unknown) {
+    return createReadyNdjsonResponse(value as ndjson.NdjsonSource)
+  },
 }
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastEvent?: (env: Env, publication: BackendEventPublication) => Promise<void>
-  handleUserStream?: (env: Env, principal: BackendPrincipal, request: Request) => Promise<Response>
+  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
+  handleUserEvents?: (
+    env: Env,
+    githubUsername: string,
+    filter: BackendEventStreamRequest,
+    request: Request,
+  ) => Promise<AsyncIterable<RepoEvent>> | AsyncIterable<RepoEvent>
+  remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
 
 /** Creates the backend HTTP router over the current control-plane implementation. */
 export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
-  const handleUserStream = dependencies.handleUserStream ?? defaultHandleUserStream
-  const publishEvent = createBackendEventPublisher(broadcastEvent)
+  const handleUserEvents = dependencies.handleUserEvents ?? defaultHandleUserEvents
+  const remoteRepoEventHandlers = dependencies.remoteRepoEventHandlers ?? [
+    pullRequestRemoteRepoEventHandler,
+  ]
 
-  return createRouter<Env>({ debug: false }).use(backendRoutes, {
-    auth: {
-      device: {
-        start: async (ctx) => {
-          try {
-            const controlPlane = createControlPlane(readEnv(ctx))
-            return await controlPlane.startDeviceFlow(ctx.body)
-          } catch (error) {
-            return toErrorResponse(error)
-          }
+  return createRouter<Env>({ debug: false, plugins: [backendNdjsonRouterPlugin] }).use(
+    backendRoutes,
+    {
+      auth: {
+        device: {
+          start: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              return await controlPlane.startDeviceFlow(ctx.body)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+          complete: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              return await controlPlane.completeDeviceFlow(ctx.body)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
         },
-        complete: async (ctx) => {
-          try {
-            const controlPlane = createControlPlane(readEnv(ctx))
-            return await controlPlane.completeDeviceFlow(ctx.body)
-          } catch (error) {
-            return toErrorResponse(error)
-          }
+        session: {
+          current: async (ctx) => {
+            try {
+              const controlPlane = createControlPlane(readEnv(ctx))
+              const token = readBearerToken(ctx.headers.authorization)
+              return await controlPlane.getSession(token)
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
         },
       },
-      session: {
-        current: async (ctx) => {
+      pullRequests: {
+        create: async (ctx) => {
           try {
-            const controlPlane = createControlPlane(readEnv(ctx))
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
             const token = readBearerToken(ctx.headers.authorization)
-            return await controlPlane.getSession(token)
-          } catch (error) {
-            return toErrorResponse(error)
-          }
-        },
-      },
-    },
-    pullRequests: {
-      create: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const pr = await controlPlane.createPr(token, ctx.body, env)
+            const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await publishEvent(env, {
-            source: "remote-repo",
-            event: createRemoteRepoBackendEvent({
+            await broadcastEvent(env, {
               type: "pr.created",
-              provider: pr.provider,
               owner: pr.owner,
               repo: pr.repo,
               prNumber: pr.number,
               title: pr.title,
               author: pr.createdBy,
               createdAt: pr.createdAt,
-            }),
-          })
+            })
 
-          return pr
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+            return pr
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+        managed: async (ctx) => {
+          try {
+            const controlPlane = createControlPlane(readEnv(ctx))
+            const token = readBearerToken(ctx.headers.authorization)
+            const session = await controlPlane.getSession(token)
+            const { owner, repo, prNumber } = ctx.query
+            assertRepo(owner, repo)
+            const managed = await controlPlane.isManagedPr(
+              owner,
+              repo,
+              prNumber,
+              session.githubUsername,
+            )
+            return { managed }
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
+        comments: {
+          create: async (ctx) => {
+            try {
+              const env = readEnv(ctx)
+              const controlPlane = createControlPlane(env)
+              const token = readBearerToken(ctx.headers.authorization)
+              await controlPlane.replyToPr(token, ctx.body, env)
+              return { success: true }
+            } catch (error) {
+              return toErrorResponse(error)
+            }
+          },
+        },
       },
-      managed: async (ctx) => {
-        try {
-          const controlPlane = createControlPlane(readEnv(ctx))
-          const token = readBearerToken(ctx.headers.authorization)
-          const session = await controlPlane.getSession(token)
-          const { provider, owner, repo, prNumber } = ctx.query
-          assertRepo(owner, repo)
-          const managed = await controlPlane.isManagedPr(
-            provider,
-            owner,
-            repo,
-            prNumber,
-            session.principal.id,
-          )
-          return { managed }
-        } catch (error) {
-          return toErrorResponse(error)
-        }
+      webhooks: {
+        github: async (ctx) => {
+          try {
+            const env = readEnv(ctx)
+            const controlPlane = createControlPlane(env)
+            const input = GitHubWebhookInput.parse(await ctx.request.json())
+            const event = await controlPlane.handleGitHubWebhook(input)
+            await dispatchRemoteRepoEvent(event, remoteRepoEventHandlers)
+            await broadcastEvent(env, event)
+            return event
+          } catch (error) {
+            return toErrorResponse(error)
+          }
+        },
       },
-      comments: {
-        create: async (ctx) => {
+      events: {
+        stream: async (ctx) => {
           try {
             const env = readEnv(ctx)
             const controlPlane = createControlPlane(env)
             const token = readBearerToken(ctx.headers.authorization)
-            await controlPlane.replyToPr(token, ctx.body, env)
-            return { success: true }
+            const session = await controlPlane.getSession(token)
+
+            return await handleUserEvents(env, session.githubUsername, ctx.body, ctx.request)
           } catch (error) {
             return toErrorResponse(error)
           }
         },
       },
     },
-    webhooks: {
-      github: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const event = await handleDefaultGitHubWebhookRequest(
-            ctx.request,
-            env.GITHUB_WEBHOOK_SECRET,
-          )
-          if (!event) {
-            return { ignored: true }
-          }
-
-          await publishEvent(env, {
-            source: "remote-repo",
-            event,
-          })
-          return event
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-    },
-    remoteRepo: {
-      stream: async (ctx) => {
-        try {
-          const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const token = readBearerToken(ctx.headers.authorization)
-          const principal = await controlPlane.getPrincipal(token)
-
-          return await handleUserStream(env, principal, ctx.request)
-        } catch (error) {
-          return toErrorResponse(error)
-        }
-      },
-    },
-  })
+  )
 }
 
 /** Builds the default Turso-backed control-plane implementation for one request environment. */
@@ -239,13 +245,14 @@ async function noopBroadcast(_env: Env, _publication: BackendEventPublication): 
   // No-op: the caller (e.g. worker.js) should provide a real implementation.
 }
 
-/** Returns a clear placeholder response when server-sent events are not wired in. */
-async function defaultHandleUserStream(
+/** Returns a clear placeholder error when backend event streaming is not wired in. */
+async function defaultHandleUserEvents(
   _env: Env,
-  _principal: BackendPrincipal,
+  _githubUsername: string,
+  _filter: BackendEventStreamRequest,
   _request: Request,
-): Promise<Response> {
-  return new Response("SSE handler not configured", { status: 501 })
+): Promise<AsyncIterable<RepoEvent>> {
+  throw new HttpError(501, "Event stream handler not configured")
 }
 
 /** Rehydrates the worker environment values used by the backend control plane. */

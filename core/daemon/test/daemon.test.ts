@@ -596,29 +596,26 @@ async function startBackendHarness(
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`)
 
-    if (url.pathname === "/remote-repo/stream") {
-      void (async () => {
-        await options.beforeStreamResponse?.()
-        if (options.rejectStreamUnauthorized || !request.headers.authorization) {
-          response.writeHead(401, { "content-type": "text/plain" })
-          response.end("unauthorized")
-          return
-        }
+    if (url.pathname === "/events/stream") {
+      if (options.rejectStreamUnauthorized || !request.headers.authorization) {
+        response.writeHead(401, { "content-type": "text/plain" })
+        response.end("unauthorized")
+        return
+      }
 
+      request.resume()
+      request.on("end", () => {
         subscriptionCount += 1
         response.writeHead(200, {
-          "content-type": "text/event-stream",
+          "content-type": "application/x-ndjson; charset=utf-8",
           "cache-control": "no-cache",
           connection: "keep-alive",
         })
-        response.write(": connected\n\n")
+        response.flushHeaders()
         streams.add(response)
-        request.on("close", () => {
+        response.on("close", () => {
           streams.delete(response)
         })
-      })().catch((error) => {
-        response.writeHead(500, { "content-type": "text/plain" })
-        response.end(error instanceof Error ? error.message : String(error))
       })
       return
     }
@@ -669,7 +666,7 @@ async function startBackendHarness(
       return subscriptionCount
     },
     sendEvent(event: unknown) {
-      const frame = `data: ${JSON.stringify(event)}\n\n`
+      const frame = `${JSON.stringify(event)}\n`
       for (const stream of streams) {
         stream.write(frame)
       }

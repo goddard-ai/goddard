@@ -75,9 +75,6 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   const server = await startBackendServer(controlPlane, { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
   let authorization: string | null = null
-  let subscription: Awaited<
-    ReturnType<ReturnType<typeof createBackendClient>["stream"]["subscribe"]>
-  > | null = null
 
   try {
     const flow = controlPlane.startDeviceFlow(githubStart("alec"))
@@ -91,11 +88,9 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    subscription = await client.stream.subscribe()
-
-    const eventPromise = new Promise<unknown>((resolve) => {
-      subscription!.on("event", resolve)
-    })
+    const eventsPromise = client.events.stream({ names: ["pr.created"] })
+    const eventPromise = eventsPromise.then(readFirstEvent)
+    await Bun.sleep(10)
 
     const pr = await client.pullRequests.create({
       provider: "github",
@@ -107,17 +102,12 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       base: "main",
     })
 
-    const event = (await eventPromise) as {
-      name: string
-      payload: { type: string; prNumber: number }
-    }
+    const event = await eventPromise
     expect(pr.number).toBe(1)
     expect(event.name).toBe(REMOTE_REPO_PULL_REQUEST_CREATED)
     expect(event.payload.type).toBe("pr.created")
     expect(event.payload.prNumber).toBe(1)
   } finally {
-    subscription?.close()
-    await Bun.sleep(10)
     await server.close()
   }
 })
@@ -149,10 +139,11 @@ function hashTestIdentity(value: string): number {
 test("daemon backend client reports missing stream auth as unauthenticated errors", async () => {
   const client = createBackendClient({
     baseUrl: "https://goddardai.org/api",
+    fetchImpl: async () => new Response("unauthorized", { status: 401 }),
     getAuthorizationHeader: () => null,
   })
 
-  await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+  await expect(client.events.stream({})).rejects.toBeInstanceOf(BackendUnauthenticatedError)
 })
 
 test("daemon backend client reports stream auth failures as unauthenticated errors", async () => {
@@ -166,8 +157,16 @@ test("daemon backend client reports stream auth failures as unauthenticated erro
       getAuthorizationHeader: () => "Bearer invalid-token",
     })
 
-    await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+    await expect(client.events.stream({})).rejects.toBeInstanceOf(BackendUnauthenticatedError)
   } finally {
     await server.close()
   }
 })
+
+async function readFirstEvent<T>(events: AsyncIterable<T>): Promise<T> {
+  for await (const event of events) {
+    return event
+  }
+
+  throw new Error("Backend event stream ended before emitting data")
+}

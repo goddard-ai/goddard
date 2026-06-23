@@ -55,9 +55,45 @@ export type RepoPullRequestReviewSubmittedEvent = z.infer<
 >
 export type RepoPullRequestCreatedEvent = z.infer<typeof RepoPullRequestCreatedEvent>
 
-/** SSE payload delivered over the backend remote repository stream. */
-export const StreamMessage = z.object({
-  event: RepoEvent,
+export const RepoEventName = z.enum(["comment", "review", "pr.created"])
+
+export type RepoEventName = z.infer<typeof RepoEventName>
+
+export const RepoEventFilter = z.object({
+  owner: z.string().optional(),
+  repo: z.string().optional(),
+  prNumber: z.number().optional(),
 })
 
-export type StreamMessage = z.infer<typeof StreamMessage>
+export type RepoEventFilter = z.infer<typeof RepoEventFilter>
+
+/** Request body accepted by the backend remote repository event stream. */
+export const BackendEventStreamRequest = z.object({
+  names: z.array(RepoEventName).optional(),
+  where: RepoEventFilter.optional(),
+})
+
+export type BackendEventStreamRequest = z.infer<typeof BackendEventStreamRequest>
+
+const issueCommentWebhook = RemoteRepositoryRef.extend({
+  type: z.literal("issue_comment"),
+  prNumber: z.number(),
+  author: z.string(),
+  body: z.string(),
+})
+
+const pullRequestReviewWebhook = RemoteRepositoryRef.extend({
+  type: z.literal("pull_request_review"),
+  prNumber: z.number(),
+  author: z.string(),
+  state: z.enum(["approved", "changes_requested", "commented"]),
+  body: z.string(),
+})
+
+/** Normalized GitHub webhook payload accepted by remote-repo backend webhook handlers. */
+export const GitHubWebhookInput = z.discriminatedUnion("type", [
+  issueCommentWebhook,
+  pullRequestReviewWebhook,
+])
+
+export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInput>

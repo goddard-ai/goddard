@@ -1,5 +1,6 @@
-import { matchesEventEnvelopeFilter, type EventEnvelopeFilter } from "@goddard-ai/event-filter"
+import { ndjson } from "@goddard-ai/backend-plugin"
 import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
+import type { BackendEventStreamRequest, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import adapter from "@hattip/adapter-cloudflare-workers/no-static"
 import { createClient } from "@libsql/client/web"
 
@@ -11,7 +12,12 @@ import {
 } from "./api/router.ts"
 import { TursoBackendControlPlane } from "./db/persistence.ts"
 import type { Env } from "./env.ts"
-import { createSseSession } from "./utils.ts"
+import {
+  createEventQueue,
+  createReadyNdjsonResponse,
+  filterRepoEvent,
+  type EventQueue,
+} from "./utils.ts"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, publication) => {
@@ -37,11 +43,25 @@ const router = createBackendRouter({
       },
     )
   },
-  handleUserStream: async (env, principal, _request) => {
-    const requestUrl = new URL(_request.url)
-    return getUserStreamStub(env, getPrincipalStreamKey(principal)).fetch(
-      `https://user-stream.internal/subscribe${requestUrl.search}`,
+  handleUserEvents: async (env, githubUsername, filter, request) => {
+    const response = await getUserStreamStub(env, githubUsername).fetch(
+      "https://user-stream.internal/subscribe",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(filter ?? {}),
+        signal: request.signal,
+      },
     )
+
+    if (!response.ok) {
+      throw new Error(`User stream subscription failed: ${response.status}`)
+    }
+    if (!response.body) {
+      throw new Error("User stream subscription did not include a body")
+    }
+
+    return ndjson.decodeNdjson<RepoEvent>(response.body)
   },
 })
 
@@ -52,19 +72,16 @@ const worker = {
 
 export default worker
 
-/** User-scoped Durable Object that owns SSE subscribers for one Goddard user. */
+/** User-scoped Durable Object that owns NDJSON subscribers for one Goddard user. */
 export class UserStream {
-  readonly #subscriptions = new Set<{
-    readonly sink: ReturnType<typeof createSseSession>["sink"]
-    readonly filter: EventEnvelopeFilter
-  }>()
+  readonly #queues = new Set<EventQueue<RepoEvent>>()
 
   fetch(request: Request): Promise<Response> | Response {
     const url = new URL(request.url)
     if (request.method === "POST" && url.pathname === "/publish") {
       return this.#publish(request)
     }
-    if (request.method === "GET" && url.pathname === "/subscribe") {
+    if (request.method === "POST" && url.pathname === "/subscribe") {
       return this.#subscribe(request)
     }
 
@@ -72,44 +89,27 @@ export class UserStream {
   }
 
   async #publish(request: Request): Promise<Response> {
-    const payload = (await request.json()) as { event: BackendEventPublication["event"] }
-    const frame = JSON.stringify(payload.event)
+    const payload = (await request.json()) as { event: RepoEvent }
 
-    for (const subscription of this.#subscriptions) {
-      if (!matchesEventEnvelopeFilter(payload.event, subscription.filter)) {
-        continue
-      }
-      try {
-        subscription.sink.send(frame)
-      } catch {
-        this.#subscriptions.delete(subscription)
-        subscription.sink.close?.()
-      }
+    for (const queue of this.#queues) {
+      queue.publish(payload.event)
     }
 
     return new Response(null, { status: 204 })
   }
 
-  #subscribe(request: Request): Response {
-    const session = createSseSession(() => {
-      this.#deleteSink(session.sink)
-    })
-    const subscription = {
-      sink: session.sink,
-      filter: readStreamFilter(request),
-    }
-
-    this.#subscriptions.add(subscription)
-    request.signal.addEventListener(
-      "abort",
+  async #subscribe(request: Request): Promise<Response> {
+    const filter = (await request.json().catch(() => ({}))) as BackendEventStreamRequest
+    const queue = createEventQueue<RepoEvent>(
+      (event) => filterRepoEvent(event, filter),
       () => {
-        this.#subscriptions.delete(subscription)
-        session.sink.close?.()
+        this.#queues.delete(queue)
       },
-      { once: true },
     )
 
-    return session.response
+    this.#queues.add(queue)
+
+    return createReadyNdjsonResponse(queue)
   }
 
   #deleteSink(sink: ReturnType<typeof createSseSession>["sink"]) {

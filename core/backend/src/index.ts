@@ -11,7 +11,6 @@ import { type BackendControlPlane } from "./api/control-plane.ts"
 import { getPrincipalStreamKey } from "./api/events.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
-import { createSseSession } from "./utils.ts"
 
 export * from "./api/control-plane.ts"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
@@ -42,29 +41,12 @@ export async function startBackendServer(
     broadcastEvent: async (_env, publication) => {
       broadcastToInMemoryStreams(controlPlane, publication.event)
     },
-    handleUserStream: async (_env, principal, request) => {
-      const streamKey = getPrincipalStreamKey(principal)
-      const sseSession = createSseSession(() => {
-        if (isRemoteRepoStreamService(controlPlane)) {
-          controlPlane.removeStreamSocket(streamKey, sseSession.sink)
-        }
-      })
-
+    handleUserEvents: (_env, githubUsername, filter) => {
       if (isRemoteRepoStreamService(controlPlane)) {
-        controlPlane.addStreamSocket(streamKey, sseSession.sink)
+        return controlPlane.subscribeRemoteRepoEvents(githubUsername, filter)
       }
-      request.signal.addEventListener(
-        "abort",
-        () => {
-          if (isRemoteRepoStreamService(controlPlane)) {
-            controlPlane.removeStreamSocket(streamKey, sseSession.sink)
-          }
-          sseSession.sink.close?.()
-        },
-        { once: true },
-      )
 
-      return sseSession.response
+      return emptyRemoteRepoEvents()
     },
   })
 
@@ -127,3 +109,5 @@ function broadcastToInMemoryStreams(
     controlPlane.broadcastRemoteRepoEvent(event)
   }
 }
+
+async function* emptyRemoteRepoEvents(): AsyncIterable<RepoEvent> {}

@@ -9,18 +9,19 @@ import type {
 import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
-  createRemoteRepoBackendEvent,
-  isRemoteRepoStreamSink,
-  remoteRepoBackendEventSources,
+  normalizeGitHubWebhookEvent,
   type RemoteRepoEventBroadcaster,
   type RemoteRepoStreamEvent,
   type RemoteRepoStreamService,
-  type RemoteRepoStreamSink,
 } from "@goddard-ai/remote-repo/backend"
-import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type {
+  BackendEventStreamRequest,
+  GitHubWebhookInput,
+  RepoEvent,
+} from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
-import { toPublicSession } from "../utils.ts"
+import { filterRepoEvent, hashToInteger, toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
@@ -56,7 +57,7 @@ export class InMemoryBackendControlPlane
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
-  #streamsByUser = new Map<string, Set<RemoteRepoStreamSink>>()
+  #streamsByUser = new Map<string, Set<RemoteRepoEventSubscription>>()
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
@@ -207,26 +208,28 @@ export class InMemoryBackendControlPlane
     )
   }
 
-  addStreamSocket(streamKey: string, socket: unknown): void {
-    if (!isRemoteRepoStreamSink(socket)) {
-      return
-    }
+  handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
+    assertRepo(event.owner, event.repo)
 
-    const room = this.#streamsByUser.get(streamKey) ?? new Set<RemoteRepoStreamSink>()
-    room.add(socket)
-    this.#streamsByUser.set(streamKey, room)
+    return normalizeGitHubWebhookEvent(event)
   }
 
-  removeStreamSocket(streamKey: string, socket: unknown): void {
-    if (!isRemoteRepoStreamSink(socket)) {
-      return
-    }
-
-    const room = this.#streamsByUser.get(streamKey)
-    room?.delete(socket)
-    if (room && room.size === 0) {
-      this.#streamsByUser.delete(streamKey)
-    }
+  subscribeRemoteRepoEvents(
+    githubUsername: string,
+    filter: BackendEventStreamRequest = {},
+  ): AsyncIterable<RepoEvent> {
+    const subscription = new RemoteRepoEventSubscription(filter, () => {
+      const subscriptions = this.#streamsByUser.get(githubUsername)
+      subscriptions?.delete(subscription)
+      if (subscriptions && subscriptions.size === 0) {
+        this.#streamsByUser.delete(githubUsername)
+      }
+    })
+    const subscriptions =
+      this.#streamsByUser.get(githubUsername) ?? new Set<RemoteRepoEventSubscription>()
+    subscriptions.add(subscription)
+    this.#streamsByUser.set(githubUsername, subscriptions)
+    return subscription
   }
 
   broadcastRemoteRepoEvent(event: RemoteRepoStreamEvent): void {
@@ -235,23 +238,17 @@ export class InMemoryBackendControlPlane
       return
     }
 
-    const sockets = this.#streamsByUser.get(streamKey)
-    if (!sockets) {
+    const subscriptions = this.#streamsByUser.get(githubUsername)
+    if (!subscriptions) {
       return
     }
 
-    const payload = JSON.stringify(event)
-    for (const socket of sockets) {
-      try {
-        socket.send(payload)
-      } catch {
-        sockets.delete(socket)
-        socket.close?.()
-      }
+    for (const subscription of subscriptions) {
+      subscription.publish(event)
     }
 
-    if (sockets.size === 0) {
-      this.#streamsByUser.delete(streamKey)
+    if (subscriptions.size === 0) {
+      this.#streamsByUser.delete(githubUsername)
     }
   }
 
@@ -330,5 +327,63 @@ function createPrincipalFromId(principalId: string): AuthSession["principal"] {
         subject,
       },
     ],
+  }
+}
+
+class RemoteRepoEventSubscription implements AsyncIterable<RepoEvent> {
+  #pendingEvents: RepoEvent[] = []
+  #pendingReads: ((result: IteratorResult<RepoEvent>) => void)[] = []
+  #closed = false
+
+  constructor(
+    readonly filter: BackendEventStreamRequest,
+    readonly onClose: () => void,
+  ) {}
+
+  publish(event: RepoEvent): void {
+    if (this.#closed || !filterRepoEvent(event, this.filter)) {
+      return
+    }
+
+    const resolve = this.#pendingReads.shift()
+    if (resolve) {
+      resolve({ done: false, value: event })
+      return
+    }
+
+    this.#pendingEvents.push(event)
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<RepoEvent> {
+    return {
+      next: async () => {
+        if (this.#pendingEvents.length > 0) {
+          return { done: false, value: this.#pendingEvents.shift()! }
+        }
+        if (this.#closed) {
+          return { done: true, value: undefined }
+        }
+
+        return new Promise<IteratorResult<RepoEvent>>((resolve) => {
+          this.#pendingReads.push(resolve)
+        })
+      },
+      return: async () => {
+        this.close()
+        return { done: true, value: undefined }
+      },
+    }
+  }
+
+  close(): void {
+    if (this.#closed) {
+      return
+    }
+
+    this.#closed = true
+    this.onClose()
+    for (const resolve of this.#pendingReads.splice(0)) {
+      resolve({ done: true, value: undefined })
+    }
   }
 }
