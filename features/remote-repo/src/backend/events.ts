@@ -19,7 +19,11 @@ export const REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED =
 export const REMOTE_REPO_PULL_REQUEST_CREATED = "remote_repo.pull_request.created" as const
 
 type RemoteRepoPrincipal = BackendPrincipal & {
-  readonly repositories?: readonly { readonly owner: string; readonly repo: string }[]
+  readonly repositories?: readonly {
+    readonly provider: string
+    readonly owner: string
+    readonly repo: string
+  }[]
 }
 
 export type RemoteRepoPullRequestCommentCreatedEvent = BackendEventEnvelope<
@@ -99,11 +103,14 @@ export function createRemoteRepoBackendEvent(event: RepoEvent): RemoteRepoBacken
 
 function canPrincipalAccessRepository(
   principal: RemoteRepoPrincipal,
-  repository: { readonly owner: string; readonly repo: string },
+  repository: { readonly provider: string; readonly owner: string; readonly repo: string },
 ) {
   return (
     principal.repositories?.some(
-      (allowed) => allowed.owner === repository.owner && allowed.repo === repository.repo,
+      (allowed) =>
+        allowed.provider === repository.provider &&
+        allowed.owner === repository.owner &&
+        allowed.repo === repository.repo,
     ) ?? false
   )
 }

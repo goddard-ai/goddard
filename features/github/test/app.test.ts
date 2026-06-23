@@ -32,6 +32,7 @@ test("github-app forwards webhooks to backend and returns handled event", async 
         name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
         payload: {
           type: "comment",
+          provider: "github",
           owner: "goddard-ai",
           repo: "sdk",
           prNumber: 1,

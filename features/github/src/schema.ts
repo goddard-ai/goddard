@@ -2,6 +2,7 @@ import { BackendPrincipal, ProviderIdentity } from "@goddard-ai/auth/schema"
 import { z } from "zod"
 
 export const GitHubRepositoryRef = z.strictObject({
+  provider: z.literal("github"),
   owner: z.string().min(1),
   repo: z.string().min(1),
 })
@@ -22,15 +23,13 @@ export const GitHubProviderIdentity = ProviderIdentity.extend({
 
 export type GitHubProviderIdentity = z.infer<typeof GitHubProviderIdentity>
 
-export const GitHubRepositoryGrant = GitHubRepositoryRef.extend({
-  provider: z.literal("github"),
-})
+export const GitHubRepositoryGrant = GitHubRepositoryRef
 
 export type GitHubRepositoryGrant = z.infer<typeof GitHubRepositoryGrant>
 
 export const GitHubPrincipalGrants = z.strictObject({
   identity: GitHubIdentity,
-  repositories: z.array(GitHubRepositoryRef).optional(),
+  repositories: z.array(GitHubRepositoryGrant).optional(),
 })
 
 export type GitHubPrincipalGrants = z.infer<typeof GitHubPrincipalGrants>
@@ -64,7 +63,10 @@ export function canGitHubPrincipalAccessRepository(
 ) {
   return (
     grants.repositories?.some(
-      (allowed) => allowed.owner === repository.owner && allowed.repo === repository.repo,
+      (allowed) =>
+        allowed.provider === repository.provider &&
+        allowed.owner === repository.owner &&
+        allowed.repo === repository.repo,
     ) ?? false
   )
 }

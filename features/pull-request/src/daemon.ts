@@ -98,6 +98,7 @@ export const pullRequestPlugin = definePlugin({
             const resolvedInput = await resolveSubmitRequestFromGit(payload)
             const pr = await backend.pullRequests.create({
               ...resolvedInput,
+              provider: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })
@@ -150,6 +151,7 @@ export const pullRequestPlugin = definePlugin({
 
             const response = await backend.pullRequests.comments.create({
               ...resolvedInput,
+              provider: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })

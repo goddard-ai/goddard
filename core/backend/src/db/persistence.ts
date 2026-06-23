@@ -6,10 +6,9 @@ import type {
   DeviceFlowStart,
   ProviderIdentity,
 } from "@goddard-ai/auth/schema"
-import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
@@ -157,6 +156,7 @@ export class TursoBackendControlPlane
       .insert(schema.pullRequests)
       .values({
         number: createdPr.number,
+        provider: input.provider,
         owner: input.owner,
         repo: input.repo,
         title: input.title,
@@ -243,18 +243,23 @@ export class TursoBackendControlPlane
     return match?.createdBy
   }
 
-  async #listRepositoriesForPrincipal(principalId: string): Promise<GitHubRepositoryRef[]> {
+  async #listRepositoriesForPrincipal(principalId: string): Promise<RemoteRepositoryRef[]> {
     const rows = await this.#db
       .select({
+        provider: schema.pullRequests.provider,
         owner: schema.pullRequests.owner,
         repo: schema.pullRequests.repo,
       })
       .from(schema.pullRequests)
       .where(eq(schema.pullRequests.createdBy, principalId))
 
-    const repositories = new Map<string, GitHubRepositoryRef>()
+    const repositories = new Map<string, RemoteRepositoryRef>()
     for (const row of rows) {
-      repositories.set(`${row.owner}/${row.repo}`, row)
+      repositories.set(`${row.owner}/${row.repo}`, {
+        provider: row.provider,
+        owner: row.owner,
+        repo: row.repo,
+      })
     }
 
     return [...repositories.values()]

@@ -6,7 +6,6 @@ import type {
   DeviceFlowStart,
   ProviderIdentity,
 } from "@goddard-ai/auth/schema"
-import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
   createRemoteRepoBackendEvent,
@@ -17,7 +16,7 @@ import {
   type RemoteRepoStreamService,
   type RemoteRepoStreamSink,
 } from "@goddard-ai/remote-repo/backend"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
 import { hashToInteger, toPublicSession } from "../utils.ts"
@@ -145,6 +144,7 @@ export class InMemoryBackendControlPlane
     const record: PullRequestRecord = {
       id: this.#nextPrId++,
       number: prNumber,
+      provider: input.provider,
       owner: input.owner,
       repo: input.repo,
       title: input.title,
@@ -255,8 +255,8 @@ export class InMemoryBackendControlPlane
     )?.createdBy
   }
 
-  #listRepositoriesForPrincipal(principalId: string): GitHubRepositoryRef[] {
-    const repositories = new Map<string, GitHubRepositoryRef>()
+  #listRepositoriesForPrincipal(principalId: string): RemoteRepositoryRef[] {
+    const repositories = new Map<string, RemoteRepositoryRef>()
 
     for (const pullRequest of this.#pullRequests) {
       if (pullRequest.createdBy !== principalId) {
@@ -265,6 +265,7 @@ export class InMemoryBackendControlPlane
 
       const key = `${pullRequest.owner}/${pullRequest.repo}`
       repositories.set(key, {
+        provider: pullRequest.provider,
         owner: pullRequest.owner,
         repo: pullRequest.repo,
       })

@@ -104,6 +104,7 @@ test("pull request feedback handler launches one-shot sessions for managed feedb
 function createFeedbackEvent(): RepoPullRequestCommentCreatedEvent {
   return {
     type: "comment",
+    provider: "github",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,

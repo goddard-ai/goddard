@@ -85,6 +85,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             source: "remote-repo",
             event: createRemoteRepoBackendEvent({
               type: "pr.created",
+              provider: pr.provider,
               owner: pr.owner,
               repo: pr.repo,
               prNumber: pr.number,
