@@ -22,6 +22,7 @@
     "test": "bun test --pass-with-no-tests --dots"
   },
   "dependencies": {
-    "rouzer": "catalog:"
+    "rouzer": "catalog:",
+    "zod": "catalog:"
   }
 }
