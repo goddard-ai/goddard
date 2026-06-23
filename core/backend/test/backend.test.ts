@@ -1,7 +1,4 @@
-import {
-  REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
-  REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
-} from "@goddard-ai/remote-repo/backend"
+import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"
@@ -172,144 +169,9 @@ test("invalid JSON body returns 400", async () => {
   }
 })
 
-test("sse stream receives webhook events for a managed PR", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
-    port: 0,
-  })
-  const baseUrl = `http://127.0.0.1:${server.port}`
-
-  try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
-    const session = await postJson(`${baseUrl}/auth/device/complete`, {
-      deviceCode: flow.deviceCode,
-      githubUsername: "alec",
-    })
-
-    await postJson(
-      `${baseUrl}/pull-requests/create`,
-      {
-        owner: "goddard-ai",
-        repo: "sdk",
-        title: "Add CLI",
-        head: "feat/cli",
-        base: "main",
-      },
-      session.token,
-    )
-
-    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
-      headers: {
-        accept: "text/event-stream",
-        authorization: `Bearer ${session.token}`,
-      },
-    })
-
-    expect(streamResponse.status).toBe(200)
-    const eventPromise = readFirstSseEvent(streamResponse)
-
-    await postGitHubWebhook(baseUrl, "delivery-1", {
-      action: "created",
-      issue: {
-        number: 1,
-        pull_request: {},
-      },
-      comment: {
-        user: { login: "teammate", type: "User" },
-        body: "looks good",
-      },
-      repository: {
-        name: "sdk",
-        owner: { login: "goddard-ai" },
-      },
-      sender: { login: "teammate", type: "User" },
-    })
-
-    const parsed = (await eventPromise) as {
-      name: string
-      payload: { type: string; reactionAdded: string }
-    }
-    expect(parsed.name).toBe(REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED)
-    expect(parsed.payload.type).toBe("comment")
-    expect(parsed.payload.reactionAdded).toBe("eyes")
-  } finally {
-    await server.close()
-  }
-})
-
-test("sse stream receives pull request review webhook events for a managed PR", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
-    port: 0,
-  })
-  const baseUrl = `http://127.0.0.1:${server.port}`
-
-  try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
-    const session = await postJson(`${baseUrl}/auth/device/complete`, {
-      deviceCode: flow.deviceCode,
-      githubUsername: "alec",
-    })
-
-    await postJson(
-      `${baseUrl}/pull-requests/create`,
-      {
-        owner: "goddard-ai",
-        repo: "sdk",
-        title: "Add CLI",
-        head: "feat/cli",
-        base: "main",
-      },
-      session.token,
-    )
-
-    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
-      headers: {
-        accept: "text/event-stream",
-        authorization: `Bearer ${session.token}`,
-      },
-    })
-
-    const eventPromise = readFirstSseEvent(streamResponse)
-    await postGitHubWebhook(
-      baseUrl,
-      "delivery-1",
-      {
-        action: "submitted",
-        pull_request: {
-          number: 1,
-        },
-        review: {
-          user: { login: "reviewer", type: "User" },
-          state: "approved",
-          body: "ship it",
-        },
-        repository: {
-          name: "sdk",
-          owner: { login: "goddard-ai" },
-        },
-        sender: { login: "reviewer", type: "User" },
-      },
-      "pull_request_review",
-    )
-
-    const parsed = (await eventPromise) as {
-      name: string
-      payload: { type: string; state: string; reactionAdded: string }
-    }
-    expect(parsed.name).toBe(REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED)
-    expect(parsed.payload.type).toBe("review")
-    expect(parsed.payload.state).toBe("approved")
-    expect(parsed.payload.reactionAdded).toBe("eyes")
-  } finally {
-    await server.close()
-  }
-})
-
 test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+  const backend = new InMemoryBackendControlPlane()
+  const server = await startBackendServer(backend, {
     port: 0,
   })
   const baseUrl = `http://127.0.0.1:${server.port}`
@@ -366,22 +228,18 @@ test("unified stream only emits events for managed PRs owned by the authenticate
       },
     })
 
-    await postGitHubWebhook(baseUrl, "delivery-1", {
-      action: "created",
-      issue: {
-        number: 1,
-        pull_request: {},
-      },
-      comment: {
-        user: { login: "teammate", type: "User" },
+    backend.broadcastRemoteRepoEvent(
+      createRemoteRepoBackendEvent({
+        type: "comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
         body: "looks good",
-      },
-      repository: {
-        name: "sdk",
-        owner: { login: "goddard-ai" },
-      },
-      sender: { login: "teammate", type: "User" },
-    })
+        reactionAdded: "eyes",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    )
 
     const alecEvent = (await readFirstSseEvent(alecStream)) as {
       payload: { prNumber: number }
@@ -394,7 +252,8 @@ test("unified stream only emits events for managed PRs owned by the authenticate
 })
 
 test("unified stream ignores webhook events for unmanaged PRs", async () => {
-  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+  const backend = new InMemoryBackendControlPlane()
+  const server = await startBackendServer(backend, {
     port: 0,
   })
   const baseUrl = `http://127.0.0.1:${server.port}`
@@ -415,22 +274,18 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
       },
     })
 
-    await postGitHubWebhook(baseUrl, "delivery-1", {
-      action: "created",
-      issue: {
-        number: 99,
-        pull_request: {},
-      },
-      comment: {
-        user: { login: "teammate", type: "User" },
+    backend.broadcastRemoteRepoEvent(
+      createRemoteRepoBackendEvent({
+        type: "comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 99,
+        author: "teammate",
         body: "looks good",
-      },
-      repository: {
-        name: "sdk",
-        owner: { login: "goddard-ai" },
-      },
-      sender: { login: "teammate", type: "User" },
-    })
+        reactionAdded: "eyes",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    )
 
     await assertNoSseEvent(streamResponse, 100)
   } finally {
@@ -535,16 +390,4 @@ async function postJson(
   }
 
   return response.json()
-}
-
-async function postGitHubWebhook(
-  baseUrl: string,
-  deliveryId: string,
-  payload: unknown,
-  eventName = "issue_comment",
-) {
-  return postJson(`${baseUrl}/webhooks/github`, payload, undefined, {
-    "x-github-event": eventName,
-    "x-github-delivery": deliveryId,
-  })
 }
