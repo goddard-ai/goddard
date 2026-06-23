@@ -39,8 +39,8 @@ export async function startBackendServer(
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    broadcastEvent: async (_env, event) => {
-      broadcastToInMemoryStreams(controlPlane, event.payload)
+    broadcastEvent: async (_env, publication) => {
+      broadcastToInMemoryStreams(controlPlane, publication.event.payload)
     },
     handleUserStream: async (_env, principal, request) => {
       const streamKey = getPrincipalStreamKey(principal)

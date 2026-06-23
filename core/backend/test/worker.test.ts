@@ -19,14 +19,17 @@ test("user stream durable object fans out published events to subscribers", asyn
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event: {
-          type: "comment",
-          owner: "goddard-ai",
-          repo: "sdk",
-          prNumber: 1,
-          author: "teammate",
-          body: "looks good",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString(),
+          name: "remote_repo.event.received",
+          payload: {
+            type: "comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "teammate",
+            body: "looks good",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          },
         },
       }),
     }),
@@ -34,12 +37,74 @@ test("user stream durable object fans out published events to subscribers", asyn
 
   expect(publishResponse.status).toBe(204)
   const payload = (await eventPromise) as {
-    event: { type: string; prNumber: number }
+    name: string
+    payload: { type: string; prNumber: number }
   }
-  expect(payload.event.type).toBe("comment")
-  expect(payload.event.prNumber).toBe(1)
+  expect(payload.name).toBe("remote_repo.event.received")
+  expect(payload.payload.type).toBe("comment")
+  expect(payload.payload.prNumber).toBe(1)
 
   controller.abort()
+})
+
+test("user stream durable object applies envelope filters", async () => {
+  const stream = new UserStream()
+  const matchingController = new AbortController()
+  const ignoredController = new AbortController()
+  const filter = encodeURIComponent(
+    JSON.stringify({
+      names: ["remote_repo.event.received"],
+      where: [{ path: "repo", equals: "sdk" }],
+    }),
+  )
+  const ignoredFilter = encodeURIComponent(
+    JSON.stringify({
+      names: ["remote_repo.event.received"],
+      where: [{ path: "repo", equals: "other" }],
+    }),
+  )
+  const matchingResponse = await stream.fetch(
+    new Request(`https://user-stream.internal/subscribe?filter=${filter}`, {
+      signal: matchingController.signal,
+    }),
+  )
+  const ignoredResponse = await stream.fetch(
+    new Request(`https://user-stream.internal/subscribe?filter=${ignoredFilter}`, {
+      signal: ignoredController.signal,
+    }),
+  )
+
+  const matchingEvent = readFirstSseEvent(matchingResponse)
+  const ignoredEvent = readFirstSseEvent(ignoredResponse)
+
+  await stream.fetch(
+    new Request("https://user-stream.internal/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        event: {
+          name: "remote_repo.event.received",
+          payload: {
+            type: "comment",
+            owner: "goddard-ai",
+            repo: "sdk",
+            prNumber: 1,
+            author: "teammate",
+            body: "looks good",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          },
+        },
+      }),
+    }),
+  )
+
+  const payload = (await matchingEvent) as { payload: { repo: string } }
+  expect(payload.payload.repo).toBe("sdk")
+  await expectNoEvent(ignoredEvent, 25)
+
+  matchingController.abort()
+  ignoredController.abort()
 })
 
 async function readFirstSseEvent(response: Response): Promise<unknown> {
@@ -79,4 +144,12 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
   }
 
   throw new Error("SSE stream ended before emitting data")
+}
+
+async function expectNoEvent(promise: Promise<unknown>, timeoutMs: number) {
+  const result = await Promise.race([
+    promise.then(() => "event"),
+    new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
+  ])
+  expect(result).toBe("timeout")
 }
