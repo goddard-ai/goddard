@@ -46,6 +46,7 @@
     "smoke:workforce": "bun run ./scripts/smoke-workforce.ts",
     "acp": "bun run ./scripts/acp-session.ts",
     "goddard:daemon": "NODE_ENV=development bun run ./scripts/runtime-bun.ts run ./core/daemon/src/main.ts",
+    "goddard:ipc": "bun run ./core/daemon/src/bin/goddard-tool.ts ipc",
     "goddard:logs": "bun run ./core/logs/src/cli.ts",
     "goddard:workforce": "NODE_ENV=development bun run ./workforce/src/main.ts",
     "check:bun-runtime": "bun run ./scripts/check-bun-runtime.ts",
