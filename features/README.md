@@ -57,6 +57,12 @@ handlers, and SDK auth namespace construction. Backend storage, GitHub device
 flow persistence, daemon token persistence, and HTTP/router substrate remain in
 core packages.
 
+`features/github` owns GitHub provider integration: the `/webhooks/github`
+backend route, raw webhook parsing, signature verification, bot filtering,
+provider provenance, GitHub App helpers, and GitHub source authorization. It
+produces provider-agnostic backend event envelopes but does not own pull request
+workflow behavior.
+
 `features/file-search` owns file search schemas, file-search daemon IPC
 handlers, SDK file-search namespace construction, and daemon-local file/folder
 entry discovery for app composer suggestions. App composer UI, prompt chip
@@ -80,9 +86,14 @@ loop manager/runtime modules. JSON config file loading/persistence, daemon
 process lifecycle, and session lifecycle mechanics remain core or
 session-feature substrate.
 
-`features/pull-request` owns pull-request schemas, backend PR route and webhook
-contracts, daemon PR IPC handlers, SDK PR namespace construction, git-backed PR
-request resolution, and PR inbox attention behavior. Backend transport, daemon
+`features/remote-repo` owns provider-agnostic remote repository event
+vocabulary, including the `remote_repo.event.received` backend event
+definition. It does not own provider-specific webhook routes.
+
+`features/pull-request` owns pull-request schemas, backend PR routes, backend
+event sources for pull-request-originated remote repo events, daemon PR IPC
+handlers, SDK PR namespace construction, git-backed PR request resolution, PR
+feedback automation, and PR inbox attention behavior. Backend transport, daemon
 IPC server mechanics, and daemon persistence substrate remain in core packages.
 
 `features/session` owns session feature schemas, session-owned daemon IPC

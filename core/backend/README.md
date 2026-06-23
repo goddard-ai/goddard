@@ -9,15 +9,20 @@ results into backend session tokens, and daemon event streams authenticate with 
 tokens instead of raw GitHub tokens. The stream is authorized by a backend principal keyed to
 GitHub identity.
 
-Backend event streams are user-authorized. GitHub webhook deliveries are verified when
-`GITHUB_WEBHOOK_SECRET` is configured, normalized by `features/github` into
-`remote_repo.event.received` backend event envelopes, and fanned out only to principals allowed
-to see the referenced repository. Requested stream filters are bandwidth hints, not security
-boundaries.
+Backend event streams carry backend event envelopes. Product features own provider-agnostic event
+definitions, while event sources own provider-specific production and authorization. For example,
+`features/remote-repo` defines the `remote_repo.event.received` payload contract, and
+`features/github` owns `/webhooks/github`, raw GitHub payload parsing, signature verification,
+bot filtering, provider provenance, and GitHub repository authorization.
 
-The daemon uses one backend stream connection and dispatches received backend events to
-feature-owned handlers. PR feedback automation is owned by `features/pull-request`; GitHub
-provider integration and provenance are owned by `features/github`.
+Core backend composes route fragments, event definitions, and event sources. Publishing validates
+that the source may produce the event, validates the provider-agnostic payload schema, authorizes
+the source event for the backend principal, then applies the shared event-envelope filter matcher.
+Requested stream filters are bandwidth hints, not security boundaries.
+
+The daemon uses one backend stream connection and dispatches received envelopes to feature-owned
+handlers. PR feedback automation is owned by `features/pull-request`; GitHub provider integration
+and provenance are owned by `features/github`.
 
 ## Related Docs
 
