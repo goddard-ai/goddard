@@ -87,6 +87,13 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
     clientHook: input.ipcHook,
+    fetch: (async (request, init) => {
+      try {
+        return await fetch(request, init)
+      } catch (error) {
+        throw toDaemonConnectionError(error, input.daemonUrl)
+      }
+    }) as typeof fetch,
     onJsonError: async (response) => {
       const body = (await response.json().catch(() => undefined)) as
         | {
@@ -110,6 +117,32 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
       throw new Error(message)
     },
   }) as DaemonIpcClient
+}
+
+function toDaemonConnectionError(error: unknown, daemonUrl: string) {
+  if (!(error instanceof Error)) {
+    return error
+  }
+
+  const errorCode =
+    (error as Error & { code?: unknown }).code ??
+    (error.cause as (Error & { code?: unknown }) | undefined)?.code
+  if (
+    errorCode !== "ECONNREFUSED" &&
+    errorCode !== "EHOSTUNREACH" &&
+    errorCode !== "ENOTFOUND" &&
+    !error.message.includes("Unable to connect")
+  ) {
+    return error
+  }
+
+  return new IpcClientError(
+    `Could not connect to IPC server at ${daemonUrl}. ` +
+      "The server may not be running, or the daemon URL may be wrong.",
+    {
+      cause: error,
+    },
+  )
 }
 
 function isStructuredIpcError(value: unknown): value is {
