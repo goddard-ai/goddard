@@ -1,9 +1,5 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import {
-  composeBackendRoutes,
-  createBackendClient as createRouteClient,
-  type RouzerClient,
-} from "@goddard-ai/backend-plugin"
+import { composeBackendRoutes, createClient, type RouzerClient } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import {
   remoteRepoBackendRoutes,
@@ -113,12 +109,12 @@ class BackendStreamSubscription implements StreamSubscription {
 /** Creates the daemon's direct rouzer-backed client for backend auth, PR, and stream routes. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
   const debug = createDebug("backend.stream")
-  const routeClient = createRouteClient({
+  const client = createClient({
     baseURL: options.baseUrl,
     fetch: createAuthorizedFetch(options) as typeof fetch,
     routes: backendRoutes,
   })
-  const authorizedClient = createAuthorizedRouteClient(backendRoutes, routeClient, options)
+  const authorizedClient = createAuthorizedRouteClient(backendRoutes, client, options)
 
   return Object.assign(authorizedClient, {
     stream: {

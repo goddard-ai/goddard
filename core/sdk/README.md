@@ -79,13 +79,13 @@ Browser-safe explicit client:
 
 ```ts
 import { daemonIpcRoutes } from "@goddard-ai/daemon-client/daemon-ipc"
-import { createRouteClient, ndjson } from "@goddard-ai/ipc"
+import { createClient, ndjson } from "@goddard-ai/ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const desktopHost = globalThis.desktopHost
 
 const sdk = new GoddardSdk({
-  client: createRouteClient({
+  client: createClient({
     baseURL: "http://127.0.0.1:49827/",
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],

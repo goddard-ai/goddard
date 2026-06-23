@@ -1,6 +1,6 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
 import { readFileSync } from "node:fs"
-import { createRouteClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
+import { createClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
@@ -82,7 +82,7 @@ export function resolveDaemonUrl(env: DaemonClientEnv = process.env) {
 
 /** Creates the default Node daemon IPC transport from one daemon URL. */
 function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
-  return createRouteClient({
+  return createClient({
     baseURL: input.daemonUrl,
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],

@@ -1,5 +1,5 @@
 /** Browser-safe daemon IPC client helpers built on Fetch and explicit bearer tokens. */
-import { createRouteClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
+import { createClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
 
 import { daemonIpcRoutes } from "../daemon-ipc.ts"
 import type { DaemonIpcClient } from "../index.ts"
@@ -99,7 +99,7 @@ export function createBrowserDaemonIpcClient(
     }
   }
 
-  return createRouteClient({
+  return createClient({
     baseURL: "http://goddard-daemon.local",
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],

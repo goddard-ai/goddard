@@ -361,11 +361,7 @@ function formatRoutePath(node: HttpResource | HttpAction) {
   return node.path ? String(node.path) : ""
 }
 
-export {
-  $type,
-  createClient as createBackendClient,
-  createRouter as createBackendRouter,
-  type RouzerClient,
-} from "rouzer"
-export * as http from "rouzer/http"
+export { $type, createClient, createRouter, type RouzerClient } from "rouzer"
 export type { HttpRouteTree } from "rouzer/http"
+
+export * as http from "rouzer/http"

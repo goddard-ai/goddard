@@ -1,3 +1,5 @@
+import { authBackendRoutes } from "@goddard-ai/auth/backend"
+import { composeBackendRoutes, createRouter } from "@goddard-ai/backend-plugin"
 import {
   getDefaultBackendPluginComposition,
   handleDefaultGitHubWebhookRequest,
@@ -8,7 +10,6 @@ import {
 } from "@goddard-ai/remote-repo/backend"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
-import { createRouter } from "rouzer"
 
 import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
