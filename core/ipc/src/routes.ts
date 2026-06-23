@@ -1,3 +1,4 @@
+import { getResponsePluginMarkerId } from "rouzer"
 import type { HttpAction, HttpNode, HttpResource, HttpRouteTree } from "rouzer/http"
 
 type UnionToIntersection<TUnion> = (
@@ -16,6 +17,16 @@ export function defineIpcRoutes<const TRoutes extends HttpRouteTree>(routes: TRo
   return routes
 }
 
+/** Describes one leaf action discovered by walking an IPC route tree. */
+export type IpcRouteAction = {
+  keyPath: readonly string[]
+  commandPath: readonly string[]
+  httpPath: readonly string[]
+  action: HttpAction
+  requestInput: "body" | "query" | null
+  streamsNdjson: boolean
+}
+
 /** Combines daemon IPC route fragments and rejects ambiguous action ownership. */
 export function composeIpcRoutes<const TRoutes extends readonly HttpRouteTree[]>(routes: TRoutes) {
   const composed: HttpRouteTree = {}
@@ -25,6 +36,13 @@ export function composeIpcRoutes<const TRoutes extends readonly HttpRouteTree[]>
   }
 
   return composed as ComposeIpcRoutes<TRoutes>
+}
+
+/** Walks one IPC route tree and returns each concrete action with its route metadata. */
+export function listIpcRouteActions(routes: HttpRouteTree): IpcRouteAction[] {
+  const actions: IpcRouteAction[] = []
+  collectIpcRouteActions(routes, actions)
+  return actions
 }
 
 function mergeRouteTree(target: HttpRouteTree, source: HttpRouteTree, path: readonly string[]) {
@@ -61,6 +79,49 @@ function assertSameResourcePath(
 
 function formatRoutePath(node: HttpResource | HttpAction) {
   return node.path ? String(node.path) : ""
+}
+
+function collectIpcRouteActions(
+  routes: HttpRouteTree,
+  actions: IpcRouteAction[],
+  context: {
+    keyPath: readonly string[]
+    httpPath: readonly string[]
+  } = { keyPath: [], httpPath: [] },
+) {
+  for (const [key, node] of Object.entries(routes)) {
+    const keyPath = [...context.keyPath, key]
+    const httpPath = appendRoutePath(context.httpPath, formatRoutePath(node))
+
+    if (node.kind === "resource") {
+      collectIpcRouteActions(node.children, actions, { keyPath, httpPath })
+      continue
+    }
+
+    actions.push({
+      keyPath,
+      commandPath: keyPath,
+      httpPath,
+      action: node,
+      requestInput: getRouteRequestInput(node),
+      streamsNdjson: getResponsePluginMarkerId(node.schema.response) === "rouzer/ndjson",
+    })
+  }
+}
+
+function appendRoutePath(path: readonly string[], next: string) {
+  const normalized = next.replace(/^\/+/, "")
+  return normalized ? [...path, normalized] : path
+}
+
+function getRouteRequestInput(action: HttpAction): IpcRouteAction["requestInput"] {
+  if ("body" in action.schema) {
+    return "body"
+  }
+  if ("query" in action.schema) {
+    return "query"
+  }
+  return null
 }
 
 function cloneRouteTree(routeTree: HttpRouteTree) {
