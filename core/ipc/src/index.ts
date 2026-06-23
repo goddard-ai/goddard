@@ -1,7 +1,6 @@
 export {
   createClient,
   getResponsePluginMarkerId,
-  metadata,
   type RouzerClient,
   type RouzerClientHook as IpcClientHook,
   type RouzerClientHookEvent as IpcClientHookEvent,

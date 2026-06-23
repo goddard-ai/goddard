@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 /** Core IPC error codes shared by clients and non-feature surfaces. */
@@ -91,39 +91,39 @@ export type BrowserAccessWebviewTokenCreateResponse = {
 /** Core IPC routes that are not owned by feature packages. */
 export const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Core health and browser-access control.",
     }),
     health: http.get("health", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Checks whether the IPC server is responding.",
       }),
       response: $type<{ ok: boolean }>(),
     }),
     browserAccess: http.resource("browser-access", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Browser-access pairing and client authorization control.",
       }),
       pairing: http.resource("pairing", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Browser-access pairing flow control.",
         }),
         start: http.post("start", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Starts one browser-access pairing flow.",
           }),
           body: BrowserAccessPairingStartRequest,
           response: $type<BrowserAccessPairingStartResponse>(),
         }),
         confirm: http.post("confirm", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Confirms one browser-access pairing code.",
           }),
           body: BrowserAccessPairingConfirmRequest,
           response: $type<BrowserAccessPairingConfirmResponse>(),
         }),
         complete: http.post("complete", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Completes one confirmed browser-access pairing flow.",
           }),
           body: BrowserAccessPairingCompleteRequest,
@@ -131,17 +131,17 @@ export const coreDaemonIpcRoutes = defineIpcRoutes({
         }),
       }),
       client: http.resource("client", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Browser-access client authorization management.",
         }),
         list: http.get("list", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Lists browser-access client authorizations.",
           }),
           response: $type<BrowserAccessClientListResponse>(),
         }),
         revoke: http.post("revoke", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Revokes one browser-access client authorization.",
           }),
           body: BrowserAccessClientRevokeRequest,
@@ -149,11 +149,11 @@ export const coreDaemonIpcRoutes = defineIpcRoutes({
         }),
       }),
       webviewToken: http.resource("webview-token", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Browser webview access-token creation.",
         }),
         create: http.post("create", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Creates one browser webview access token.",
           }),
           body: BrowserAccessWebviewTokenCreateRequest,

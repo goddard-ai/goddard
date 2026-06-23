@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
 
 import {
   CancelSessionRequest,
@@ -49,12 +49,12 @@ import {
 
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Session control.",
     }),
     /** Creates one session record. */
     create: http.post("create", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Creates one session record.",
       }),
       body: CreateSessionRequest,
@@ -62,7 +62,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Lists sessions and pagination state. */
     list: http.post("list", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Lists sessions and pagination state.",
       }),
       body: ListSessionsRequest,
@@ -70,7 +70,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Fetches one session record. */
     get: http.post("get", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Fetches one session record.",
       }),
       body: SessionIdParams,
@@ -78,7 +78,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reconnects to one session record. */
     connect: http.post("connect", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reconnects to one session record.",
       }),
       body: SessionIdParams,
@@ -86,7 +86,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads one session history with session identity and connection state. */
     history: http.post("history", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads one session history with session identity and connection state.",
       }),
       body: GetSessionHistoryRequestSchema,
@@ -94,7 +94,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads the current git diff for one session workspace. */
     changes: http.post("changes", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads the current git diff for one session workspace.",
       }),
       body: GetSessionChangesRequestSchema,
@@ -102,7 +102,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads session-scoped composer suggestions for one chat trigger and filter query. */
     composerSuggestions: http.post("composer-suggestions", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Reads session-scoped composer suggestions for one chat trigger and filter query.",
       }),
@@ -111,7 +111,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads draft composer suggestions that only depend on one repository cwd. */
     draftSuggestions: http.post("draft-suggestions", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads draft composer suggestions that only depend on one repository cwd.",
       }),
       body: SessionDraftSuggestionsRequest,
@@ -119,7 +119,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Loads launch-time adapter and repository capabilities before a session is created. */
     launchPreview: http.post("launch-preview", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Loads launch-time adapter and repository capabilities before a session is created.",
       }),
@@ -127,12 +127,12 @@ export const sessionIpcRoutes = defineIpcRoutes({
       response: $type<SessionLaunchPreviewResponse>(),
     }),
     launchLease: http.resource("launch-lease", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Session launch-lease cleanup control.",
       }),
       /** Schedules one abandoned launch lease for delayed release. */
       release: http.post("release", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Schedules one abandoned launch lease for delayed release.",
         }),
         body: ReleaseSessionLaunchLeaseRequest,
@@ -140,12 +140,12 @@ export const sessionIpcRoutes = defineIpcRoutes({
       }),
     }),
     launchWorktree: http.resource("launch-worktree", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Session launch-dialog worktree preparation and cleanup.",
       }),
       /** Prepares one launch-dialog worktree for possible session creation. */
       prepare: http.post("prepare", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Prepares one launch-dialog worktree for possible session creation.",
         }),
         body: PrepareSessionLaunchWorktreeRequest,
@@ -153,7 +153,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
       }),
       /** Schedules one abandoned launch-dialog worktree for delayed cleanup. */
       release: http.post("release", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Schedules one abandoned launch-dialog worktree for delayed cleanup.",
         }),
         body: ReleaseSessionLaunchWorktreeRequest,
@@ -162,7 +162,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Discovers launchable subpackage working directories under one project cwd. */
     subpackages: http.post("subpackages", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Discovers launchable subpackage working directories under one project cwd.",
       }),
       body: SessionSubpackagesRequest,
@@ -170,19 +170,19 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reads one session diagnostics with event history and connection state. */
     diagnostics: http.post("diagnostics", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads one session diagnostics with event history and connection state.",
       }),
       body: SessionIdParams,
       response: $type<GetSessionDiagnosticsResponse>(),
     }),
     worktree: http.resource("worktree", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Session worktree metadata.",
       }),
       /** Reads persisted worktree metadata attached to one session. */
       get: http.post("get", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Reads persisted worktree metadata attached to one session.",
         }),
         body: GetSessionWorktreeRequest,
@@ -191,7 +191,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Shuts down one session and reports whether shutdown succeeded. */
     shutdown: http.post("shutdown", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Shuts down one session and reports whether shutdown succeeded.",
       }),
       body: SessionIdParams,
@@ -199,7 +199,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Cancels the active turn and returns any queued prompts aborted instead of replaying. */
     cancel: http.post("cancel", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Cancels the active turn and returns any queued prompts aborted instead of replaying.",
       }),
@@ -208,7 +208,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Cancels the active turn and injects one replacement prompt after a safe boundary. */
     steer: http.post("steer", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Cancels the active turn and injects one replacement prompt after a safe boundary.",
       }),
@@ -217,7 +217,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Removes the newest client-originated queued prompt before dispatch and returns it. */
     popQueuedPrompt: http.post("pop-queued-prompt", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Removes the newest client-originated queued prompt before dispatch and returns it.",
       }),
@@ -226,19 +226,19 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Sends one raw message to a session and reports whether it was accepted. */
     send: http.post("send", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Sends one raw message to a session and reports whether it was accepted.",
       }),
       body: SendSessionMessageRequest,
       response: $type<{ accepted: true }>(),
     }),
     configOption: http.resource("config-option", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Active session ACP config-option control.",
       }),
       /** Updates one ACP config option on an active session. */
       set: http.post("set", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Updates one ACP config option on an active session.",
         }),
         body: SetSessionConfigOptionRequest,
@@ -246,12 +246,12 @@ export const sessionIpcRoutes = defineIpcRoutes({
       }),
     }),
     model: http.resource("model", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Active session ACP model control.",
       }),
       /** Updates the ACP model on an active session. */
       set: http.post("set", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Updates the ACP model on an active session.",
         }),
         body: SetSessionModelRequest,
@@ -260,7 +260,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Marks one session inbox row completed without shutting down the session. */
     complete: http.post("complete", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Marks one session inbox row completed without shutting down the session.",
       }),
       body: CompleteSessionRequest,
@@ -268,7 +268,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Records the current session initiative without creating an inbox row. */
     declareInitiative: http.post("declare-initiative", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Records the current session initiative without creating an inbox row.",
       }),
       body: DeclareSessionInitiativeRequest,
@@ -276,7 +276,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reports a session blocker and marks the session inbox row unread. */
     reportBlocker: http.post("report-blocker", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reports a session blocker and marks the session inbox row unread.",
       }),
       body: ReportSessionBlockerRequest,
@@ -284,7 +284,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Reports an end-of-turn session update when no other entity claimed attention. */
     reportTurnEnded: http.post("report-turn-ended", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Reports an end-of-turn session update when no other entity claimed attention.",
       }),
@@ -293,7 +293,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Resolves one session token to its session id. */
     resolveToken: http.post("resolve-token", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Resolves one session token to its session id.",
       }),
       body: ResolveSessionTokenRequest,
@@ -301,7 +301,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Streams live ACP messages for one session id. */
     streamMessages: http.get("stream-messages", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Streams live ACP messages for one session id.",
       }),
       query: SessionIdParams,
@@ -309,7 +309,7 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Streams app-wide session lifecycle updates without observing transcript messages. */
     streamLifecycle: http.get("stream-lifecycle", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Streams app-wide session lifecycle updates without observing transcript messages.",
       }),

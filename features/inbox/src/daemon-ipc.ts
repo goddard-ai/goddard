@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
@@ -13,12 +13,12 @@ import {
 
 export const inboxIpcRoutes = defineIpcRoutes({
   inbox: http.resource("inbox", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Inbox row management.",
     }),
     /** Lists inbox rows using stable ordering and filtering. */
     list: http.post("list", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Lists inbox rows using stable ordering and filtering.",
       }),
       body: ListInboxRequest,
@@ -26,7 +26,7 @@ export const inboxIpcRoutes = defineIpcRoutes({
     }),
     /** Updates one inbox row by entity id. */
     update: http.post("update", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Updates one inbox row by entity id.",
       }),
       body: UpdateInboxItemRequest,
@@ -34,7 +34,7 @@ export const inboxIpcRoutes = defineIpcRoutes({
     }),
     /** Updates many inbox rows with one shared timestamp. */
     bulkUpdate: http.post("bulk-update", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Updates many inbox rows with one shared timestamp.",
       }),
       body: BulkUpdateInboxItemsRequest,
@@ -42,7 +42,7 @@ export const inboxIpcRoutes = defineIpcRoutes({
     }),
     /** Validates and completes the inbox row for one session. */
     completeSession: http.post("complete-session", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Validates and completes the inbox row for one session.",
       }),
       body: CompleteSessionInboxItemRequest,
@@ -50,7 +50,7 @@ export const inboxIpcRoutes = defineIpcRoutes({
     }),
     /** Streams inbox item updates. */
     streamItems: http.get("stream-items", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Streams inbox item updates.",
       }),
       response: ndjson.$type<InboxItem>(),

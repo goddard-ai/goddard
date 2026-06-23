@@ -1,19 +1,19 @@
-import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } from "./schema.ts"
 
 export const authIpcRoutes = defineIpcRoutes({
   auth: http.resource("auth", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Authentication session control.",
     }),
     device: http.resource("device", {
-      ...ipcMetadata({
+      ...metadata({
         description: "GitHub device-flow authentication control.",
       }),
       /** Starts one GitHub device flow through the auth contract. */
       start: http.post("start", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Starts one GitHub device flow through the auth contract.",
         }),
         body: DeviceFlowStart,
@@ -21,7 +21,7 @@ export const authIpcRoutes = defineIpcRoutes({
       }),
       /** Completes one pending GitHub device flow through the auth contract. */
       complete: http.post("complete", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Completes one pending GitHub device flow through the auth contract.",
         }),
         body: DeviceFlowComplete,
@@ -30,14 +30,14 @@ export const authIpcRoutes = defineIpcRoutes({
     }),
     /** Reads the current auth session as-is. */
     whoami: http.get("whoami", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads the current auth session as-is.",
       }),
       response: $type<AuthSession>(),
     }),
     /** Clears the current auth session as-is. */
     logout: http.post("logout", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Clears the current auth session as-is.",
       }),
       response: $type<{ success: true }>(),

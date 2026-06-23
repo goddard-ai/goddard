@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
 import { SessionIdParams } from "@goddard-ai/session/schema"
 
 import {
@@ -25,16 +25,16 @@ import {
 
 export const workforceIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Session extensions.",
     }),
     workforce: http.resource("workforce", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Session-attached workforce metadata.",
       }),
       /** Reads persisted workforce metadata attached to one session. */
       get: http.post("get", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Reads persisted workforce metadata attached to one session.",
         }),
         body: SessionIdParams,
@@ -43,12 +43,12 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
   }),
   workforce: http.resource("workforce", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Workforce runtime control.",
     }),
     /** Starts or reuses one workforce runtime. */
     start: http.post("start", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Starts or reuses one workforce runtime.",
       }),
       body: StartWorkforceRequest,
@@ -56,7 +56,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Discovers package candidates for one repository workforce initialization flow. */
     discoverCandidates: http.post("discover-candidates", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Discovers package candidates for one repository workforce initialization flow.",
       }),
@@ -65,7 +65,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Initializes one repository workforce config and ledger. */
     initialize: http.post("initialize", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Initializes one repository workforce config and ledger.",
       }),
       body: InitializeWorkforceRequest,
@@ -73,7 +73,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Fetches one workforce runtime and its resolved config. */
     get: http.post("get", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Fetches one workforce runtime and its resolved config.",
       }),
       body: GetWorkforceRequest,
@@ -81,14 +81,14 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Lists workforce runtime summaries. */
     list: http.get("list", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Lists workforce runtime summaries.",
       }),
       response: $type<ListWorkforcesResponse>(),
     }),
     /** Shuts down one workforce runtime and reports whether shutdown succeeded. */
     shutdown: http.post("shutdown", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Shuts down one workforce runtime and reports whether shutdown succeeded.",
       }),
       body: ShutdownWorkforceRequest,
@@ -96,7 +96,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Enqueues one workforce request and includes the updated workforce projection. */
     request: http.post("request", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Enqueues one workforce request and includes the updated workforce projection.",
       }),
@@ -105,7 +105,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Updates one workforce request and includes the updated workforce projection. */
     update: http.post("update", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Updates one workforce request and includes the updated workforce projection.",
       }),
       body: UpdateWorkforceRequest,
@@ -113,7 +113,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Cancels one workforce request and includes the updated workforce projection. */
     cancel: http.post("cancel", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Cancels one workforce request and includes the updated workforce projection.",
       }),
       body: CancelWorkforceRequest,
@@ -121,7 +121,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Truncates one workforce queue and includes the updated workforce projection. */
     truncate: http.post("truncate", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Truncates one workforce queue and includes the updated workforce projection.",
       }),
       body: TruncateWorkforceRequest,
@@ -129,7 +129,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Responds to one active workforce request and includes the updated workforce projection. */
     respond: http.post("respond", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Responds to one active workforce request and includes the updated workforce projection.",
       }),
@@ -138,7 +138,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Suspends one active workforce request and includes the updated workforce projection. */
     suspend: http.post("suspend", {
-      ...ipcMetadata({
+      ...metadata({
         description:
           "Suspends one active workforce request and includes the updated workforce projection.",
       }),
@@ -147,7 +147,7 @@ export const workforceIpcRoutes = defineIpcRoutes({
     }),
     /** Streams live workforce ledger events for one repository root. */
     streamEvents: http.get("stream-events", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Streams live workforce ledger events for one repository root.",
       }),
       query: SubscribeWorkforceEventsRequest,

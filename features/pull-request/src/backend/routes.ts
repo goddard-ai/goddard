@@ -1,16 +1,16 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
-import { $type, backendMetadata, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
+import { $type, defineBackendRoutes, http, metadata } from "@goddard-ai/backend-plugin"
 
 import { CreatePrInput, ManagedPrQuery, ReplyPrInput, type PullRequestRecord } from "../schema.ts"
 
 /** Pull-request-owned backend routes grouped by PR domain action. */
 export const pullRequestBackendRoutes = defineBackendRoutes({
   pullRequests: http.resource("pull-requests", {
-    ...backendMetadata({
+    ...metadata({
       description: "Backend pull request records and comments.",
     }),
     create: http.post("create", {
-      ...backendMetadata({
+      ...metadata({
         description: "Creates one backend pull request record.",
       }),
       headers: BearerHeaders,
@@ -18,7 +18,7 @@ export const pullRequestBackendRoutes = defineBackendRoutes({
       response: $type<PullRequestRecord>(),
     }),
     managed: http.get("managed", {
-      ...backendMetadata({
+      ...metadata({
         description: "Checks whether one pull request is backend-managed.",
       }),
       headers: BearerHeaders,
@@ -26,11 +26,11 @@ export const pullRequestBackendRoutes = defineBackendRoutes({
       response: $type<{ managed: boolean }>(),
     }),
     comments: http.resource("comments", {
-      ...backendMetadata({
+      ...metadata({
         description: "Backend pull request comment operations.",
       }),
       create: http.post("create", {
-        ...backendMetadata({
+        ...metadata({
           description: "Creates one backend pull request comment.",
         }),
         headers: BearerHeaders,

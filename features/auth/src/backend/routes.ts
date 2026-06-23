@@ -1,4 +1,4 @@
-import { $type, backendMetadata, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
+import { $type, defineBackendRoutes, http, metadata } from "@goddard-ai/backend-plugin"
 
 import {
   AuthSession,
@@ -11,22 +11,22 @@ import {
 /** Auth-owned backend routes grouped by the authenticated session workflow. */
 export const authBackendRoutes = defineBackendRoutes({
   auth: http.resource("auth", {
-    ...backendMetadata({
+    ...metadata({
       description: "Backend authentication workflow routes.",
     }),
     device: http.resource("device", {
-      ...backendMetadata({
+      ...metadata({
         description: "Backend device-flow authentication control.",
       }),
       start: http.post("start", {
-        ...backendMetadata({
+        ...metadata({
           description: "Starts one backend device-flow authentication session.",
         }),
         body: DeviceFlowStart,
         response: $type<DeviceFlowSession>(),
       }),
       complete: http.post("complete", {
-        ...backendMetadata({
+        ...metadata({
           description: "Completes one backend device-flow authentication session.",
         }),
         body: DeviceFlowComplete,
@@ -34,11 +34,11 @@ export const authBackendRoutes = defineBackendRoutes({
       }),
     }),
     session: http.resource("session", {
-      ...backendMetadata({
+      ...metadata({
         description: "Backend authenticated session lookup.",
       }),
       current: http.get("current", {
-        ...backendMetadata({
+        ...metadata({
           description: "Reads the current backend authenticated session.",
         }),
         headers: BearerHeaders,

@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   GetLoopRequest,
@@ -12,12 +12,12 @@ import {
 
 export const loopIpcRoutes = defineIpcRoutes({
   loop: http.resource("loop", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Loop runtime control.",
     }),
     /** Starts or reuses one loop runtime. */
     start: http.post("start", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Starts or reuses one loop runtime.",
       }),
       body: StartLoopRequest,
@@ -25,7 +25,7 @@ export const loopIpcRoutes = defineIpcRoutes({
     }),
     /** Fetches one loop runtime and its resolved config. */
     get: http.post("get", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Fetches one loop runtime and its resolved config.",
       }),
       body: GetLoopRequest,
@@ -33,14 +33,14 @@ export const loopIpcRoutes = defineIpcRoutes({
     }),
     /** Lists loop runtime summaries. */
     list: http.get("list", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Lists loop runtime summaries.",
       }),
       response: $type<ListLoopsResponse>(),
     }),
     /** Shuts down one loop and reports whether shutdown succeeded. */
     shutdown: http.post("shutdown", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Shuts down one loop and reports whether shutdown succeeded.",
       }),
       body: ShutdownLoopRequest,

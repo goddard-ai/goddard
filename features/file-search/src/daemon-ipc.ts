@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   FileSearchComposerEntriesRequest,
@@ -7,12 +7,12 @@ import {
 
 export const fileSearchIpcRoutes = defineIpcRoutes({
   fileSearch: http.resource("file-search", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Project file and folder search.",
     }),
     /** Finds file and folder entries for composer `@` suggestions. */
     composerEntries: http.post("composer-entries", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Finds file and folder entries for composer `@` suggestions.",
       }),
       body: FileSearchComposerEntriesRequest,

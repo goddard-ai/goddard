@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   GetReviewSessionRequest,
@@ -10,12 +10,12 @@ import {
 
 export const reviewSessionIpcRoutes = defineIpcRoutes({
   reviewSession: http.resource("review-session", {
-    ...ipcMetadata({
+    ...metadata({
       description: "Review-session state and lifecycle control.",
     }),
     /** Reads review-session state for one session worktree. */
     get: http.post("get", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Reads review-session state for one session worktree.",
       }),
       body: GetReviewSessionRequest,
@@ -23,7 +23,7 @@ export const reviewSessionIpcRoutes = defineIpcRoutes({
     }),
     /** Mounts a review session for one session worktree. */
     mount: http.post("mount", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Mounts a review session for one session worktree.",
       }),
       body: MountReviewSessionRequest,
@@ -31,7 +31,7 @@ export const reviewSessionIpcRoutes = defineIpcRoutes({
     }),
     /** Runs one mounted review session immediately. */
     run: http.post("run", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Runs one mounted review session immediately.",
       }),
       body: RunReviewSessionRequest,
@@ -39,7 +39,7 @@ export const reviewSessionIpcRoutes = defineIpcRoutes({
     }),
     /** Unmounts a review session from one session worktree. */
     unmount: http.post("unmount", {
-      ...ipcMetadata({
+      ...metadata({
         description: "Unmounts a review session from one session worktree.",
       }),
       body: UnmountReviewSessionRequest,

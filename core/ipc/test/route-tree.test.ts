@@ -5,8 +5,8 @@ import {
   $type,
   defineIpcRoutes,
   http,
-  ipcMetadata,
   listIpcRouteActions,
+  metadata,
   ndjson,
 } from "../src/index.ts"
 
@@ -19,11 +19,11 @@ describe("IPC route tree", () => {
         }),
       }),
       session: http.resource("session", {
-        ...ipcMetadata({
+        ...metadata({
           description: "Daemon-managed session control.",
         }),
         get: http.post("get", {
-          ...ipcMetadata({
+          ...metadata({
             description: "Fetches one daemon-managed session record.",
           }),
           body: z.object({ id: z.string() }),

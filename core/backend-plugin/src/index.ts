@@ -200,7 +200,7 @@ export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes:
  * Attaches Rouzer route metadata without leaking Rouzer's private marker symbol
  * into exported backend route declaration types.
  */
-export function backendMetadata(value: RouteMetadata) {
+export function metadata(value: RouteMetadata) {
   return rouzerMetadata(value) as object
 }
 
