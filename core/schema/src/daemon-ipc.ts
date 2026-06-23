@@ -1,7 +1,7 @@
 import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
 import { z } from "zod"
 
-/** Core daemon IPC error codes shared by clients and non-feature daemon surfaces. */
+/** Core IPC error codes shared by clients and non-feature surfaces. */
 export const DaemonIpcErrorCodes = {
   InvalidRequest: "daemon.invalid_request",
   Unavailable: "daemon.unavailable",
@@ -88,45 +88,15 @@ export type BrowserAccessWebviewTokenCreateResponse = {
   expiresAt: string
 }
 
-export const DaemonEventLogMetadata = z.object({
-  debug: z.string().optional(),
-})
-
-export type DaemonEventLogMetadata = z.infer<typeof DaemonEventLogMetadata>
-
-export const DaemonEventEnvelope = z.object({
-  id: z.string(),
-  at: z.string(),
-  name: z.string(),
-  payload: z.unknown(),
-  log: DaemonEventLogMetadata.optional(),
-})
-
-export type DaemonEventEnvelope = z.infer<typeof DaemonEventEnvelope>
-
-export const DaemonEventPropertyFilter = z.object({
-  path: z.string().min(1),
-  equals: z.unknown(),
-})
-
-export type DaemonEventPropertyFilter = z.infer<typeof DaemonEventPropertyFilter>
-
-export const DaemonEventsStreamRequest = z.object({
-  names: z.array(z.string().min(1)).optional(),
-  where: z.array(DaemonEventPropertyFilter).optional(),
-})
-
-export type DaemonEventsStreamRequest = z.infer<typeof DaemonEventsStreamRequest>
-
-/** Core daemon IPC routes that are not owned by feature packages. */
+/** Core IPC routes that are not owned by feature packages. */
 export const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
     ...ipcMetadata({
-      description: "Core daemon health and browser-access control.",
+      description: "Core health and browser-access control.",
     }),
     health: http.get("health", {
       ...ipcMetadata({
-        description: "Checks whether the daemon IPC server is responding.",
+        description: "Checks whether the IPC server is responding.",
       }),
       response: $type<{ ok: boolean }>(),
     }),

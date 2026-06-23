@@ -6,12 +6,12 @@ import { RunNamedActionRequest } from "./schema.ts"
 export const actionIpcRoutes = defineIpcRoutes({
   action: http.resource("action", {
     ...ipcMetadata({
-      description: "Named daemon action execution.",
+      description: "Named action execution.",
     }),
-    /** Runs one named daemon action and creates the resulting daemon session. */
+    /** Runs one named action and creates the resulting session. */
     run: http.post("run", {
       ...ipcMetadata({
-        description: "Runs one named daemon action and creates the resulting daemon session.",
+        description: "Runs one named action and creates the resulting session.",
       }),
       body: RunNamedActionRequest,
       response: $type<CreateSessionResponse>(),

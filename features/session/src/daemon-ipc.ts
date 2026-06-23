@@ -50,53 +50,52 @@ import {
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
     ...ipcMetadata({
-      description: "Daemon-managed session control.",
+      description: "Session control.",
     }),
-    /** Creates one daemon-managed session record. */
+    /** Creates one session record. */
     create: http.post("create", {
       ...ipcMetadata({
-        description: "Creates one daemon-managed session record.",
+        description: "Creates one session record.",
       }),
       body: CreateSessionRequest,
       response: $type<CreateSessionResponse>(),
     }),
-    /** Lists daemon-managed sessions and pagination state. */
+    /** Lists sessions and pagination state. */
     list: http.post("list", {
       ...ipcMetadata({
-        description: "Lists daemon-managed sessions and pagination state.",
+        description: "Lists sessions and pagination state.",
       }),
       body: ListSessionsRequest,
       response: $type<ListSessionsResponse>(),
     }),
-    /** Fetches one daemon-managed session record. */
+    /** Fetches one session record. */
     get: http.post("get", {
       ...ipcMetadata({
-        description: "Fetches one daemon-managed session record.",
+        description: "Fetches one session record.",
       }),
       body: SessionIdParams,
       response: $type<GetSessionResponse>(),
     }),
-    /** Reconnects to one daemon-managed session record. */
+    /** Reconnects to one session record. */
     connect: http.post("connect", {
       ...ipcMetadata({
-        description: "Reconnects to one daemon-managed session record.",
+        description: "Reconnects to one session record.",
       }),
       body: SessionIdParams,
       response: $type<GetSessionResponse>(),
     }),
-    /** Reads one daemon-managed session history with session identity and connection state. */
+    /** Reads one session history with session identity and connection state. */
     history: http.post("history", {
       ...ipcMetadata({
-        description:
-          "Reads one daemon-managed session history with session identity and connection state.",
+        description: "Reads one session history with session identity and connection state.",
       }),
       body: GetSessionHistoryRequestSchema,
       response: $type<GetSessionHistoryResponse>(),
     }),
-    /** Reads the current git diff for one daemon-managed session workspace. */
+    /** Reads the current git diff for one session workspace. */
     changes: http.post("changes", {
       ...ipcMetadata({
-        description: "Reads the current git diff for one daemon-managed session workspace.",
+        description: "Reads the current git diff for one session workspace.",
       }),
       body: GetSessionChangesRequestSchema,
       response: $type<GetSessionChangesResponse>(),
@@ -169,51 +168,49 @@ export const sessionIpcRoutes = defineIpcRoutes({
       body: SessionSubpackagesRequest,
       response: $type<SessionSubpackagesResponse>(),
     }),
-    /** Reads one daemon-managed session diagnostics with event history and connection state. */
+    /** Reads one session diagnostics with event history and connection state. */
     diagnostics: http.post("diagnostics", {
       ...ipcMetadata({
-        description:
-          "Reads one daemon-managed session diagnostics with event history and connection state.",
+        description: "Reads one session diagnostics with event history and connection state.",
       }),
       body: SessionIdParams,
       response: $type<GetSessionDiagnosticsResponse>(),
     }),
     worktree: http.resource("worktree", {
       ...ipcMetadata({
-        description: "Daemon-managed session worktree metadata.",
+        description: "Session worktree metadata.",
       }),
-      /** Reads persisted worktree metadata attached to one daemon-managed session. */
+      /** Reads persisted worktree metadata attached to one session. */
       get: http.post("get", {
         ...ipcMetadata({
-          description: "Reads persisted worktree metadata attached to one daemon-managed session.",
+          description: "Reads persisted worktree metadata attached to one session.",
         }),
         body: GetSessionWorktreeRequest,
         response: $type<GetSessionWorktreeResponse>(),
       }),
     }),
-    /** Shuts down one daemon-managed session and reports whether shutdown succeeded. */
+    /** Shuts down one session and reports whether shutdown succeeded. */
     shutdown: http.post("shutdown", {
       ...ipcMetadata({
-        description:
-          "Shuts down one daemon-managed session and reports whether shutdown succeeded.",
+        description: "Shuts down one session and reports whether shutdown succeeded.",
       }),
       body: SessionIdParams,
       response: $type<ShutdownSessionResponse>(),
     }),
-    /** Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying. */
+    /** Cancels the active turn and returns any queued prompts aborted instead of replaying. */
     cancel: http.post("cancel", {
       ...ipcMetadata({
         description:
-          "Cancels the active turn and returns any queued prompts the daemon aborted instead of replaying.",
+          "Cancels the active turn and returns any queued prompts aborted instead of replaying.",
       }),
       body: CancelSessionRequest,
       response: $type<CancelSessionResponse>(),
     }),
-    /** Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary. */
+    /** Cancels the active turn and injects one replacement prompt after a safe boundary. */
     steer: http.post("steer", {
       ...ipcMetadata({
         description:
-          "Cancels the active turn and injects one replacement prompt after the daemon observes a safe boundary.",
+          "Cancels the active turn and injects one replacement prompt after a safe boundary.",
       }),
       body: SteerSessionRequest,
       response: $type<SteerSessionResponse>(),
@@ -227,11 +224,10 @@ export const sessionIpcRoutes = defineIpcRoutes({
       body: SessionIdParams,
       response: $type<PopQueuedSessionPromptResponse>(),
     }),
-    /** Sends one raw message to a daemon-managed session and reports whether it was accepted. */
+    /** Sends one raw message to a session and reports whether it was accepted. */
     send: http.post("send", {
       ...ipcMetadata({
-        description:
-          "Sends one raw message to a daemon-managed session and reports whether it was accepted.",
+        description: "Sends one raw message to a session and reports whether it was accepted.",
       }),
       body: SendSessionMessageRequest,
       response: $type<{ accepted: true }>(),
@@ -240,10 +236,10 @@ export const sessionIpcRoutes = defineIpcRoutes({
       ...ipcMetadata({
         description: "Active session ACP config-option control.",
       }),
-      /** Updates one ACP config option on an active daemon-managed session. */
+      /** Updates one ACP config option on an active session. */
       set: http.post("set", {
         ...ipcMetadata({
-          description: "Updates one ACP config option on an active daemon-managed session.",
+          description: "Updates one ACP config option on an active session.",
         }),
         body: SetSessionConfigOptionRequest,
         response: $type<SetSessionConfigOptionResponse>(),
@@ -253,10 +249,10 @@ export const sessionIpcRoutes = defineIpcRoutes({
       ...ipcMetadata({
         description: "Active session ACP model control.",
       }),
-      /** Updates the ACP model on an active daemon-managed session. */
+      /** Updates the ACP model on an active session. */
       set: http.post("set", {
         ...ipcMetadata({
-          description: "Updates the ACP model on an active daemon-managed session.",
+          description: "Updates the ACP model on an active session.",
         }),
         body: SetSessionModelRequest,
         response: $type<SetSessionModelResponse>(),
@@ -295,28 +291,27 @@ export const sessionIpcRoutes = defineIpcRoutes({
       body: ReportSessionTurnEndedRequest,
       response: $type<ReportSessionResponse>(),
     }),
-    /** Resolves one daemon session token to its daemon session id. */
+    /** Resolves one session token to its session id. */
     resolveToken: http.post("resolve-token", {
       ...ipcMetadata({
-        description: "Resolves one daemon session token to its daemon session id.",
+        description: "Resolves one session token to its session id.",
       }),
       body: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
     }),
-    /** Streams live daemon-published ACP messages for one daemon-managed session id. */
+    /** Streams live ACP messages for one session id. */
     streamMessages: http.get("stream-messages", {
       ...ipcMetadata({
-        description:
-          "Streams live daemon-published ACP messages for one daemon-managed session id.",
+        description: "Streams live ACP messages for one session id.",
       }),
       query: SessionIdParams,
       response: ndjson.$type<SessionMessageEvent>(),
     }),
-    /** Streams app-wide daemon session lifecycle updates without observing transcript messages. */
+    /** Streams app-wide session lifecycle updates without observing transcript messages. */
     streamLifecycle: http.get("stream-lifecycle", {
       ...ipcMetadata({
         description:
-          "Streams app-wide daemon session lifecycle updates without observing transcript messages.",
+          "Streams app-wide session lifecycle updates without observing transcript messages.",
       }),
       response: ndjson.$type<SessionLifecycleEvent>(),
     }),
