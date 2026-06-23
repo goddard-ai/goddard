@@ -11,6 +11,7 @@ import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/
 import {
   isRemoteRepoStreamSink,
   type RemoteRepoEventBroadcaster,
+  type RemoteRepoStreamEvent,
   type RemoteRepoStreamService,
   type RemoteRepoStreamSink,
 } from "@goddard-ai/remote-repo/backend"
@@ -210,8 +211,8 @@ export class InMemoryBackendControlPlane
     }
   }
 
-  broadcastRemoteRepoEvent(event: RepoEvent): void {
-    const streamKey = this.#resolveAuthorizedStreamKey(event)
+  broadcastRemoteRepoEvent(event: RemoteRepoStreamEvent): void {
+    const streamKey = this.#resolveAuthorizedStreamKey(event.payload)
     if (!streamKey) {
       return
     }
@@ -221,7 +222,7 @@ export class InMemoryBackendControlPlane
       return
     }
 
-    const payload = JSON.stringify({ event })
+    const payload = JSON.stringify(event)
     for (const socket of sockets) {
       try {
         socket.send(payload)

@@ -1,4 +1,8 @@
+import type { BackendEventEnvelope } from "@goddard-ai/backend-plugin"
+
 import type { RepoEvent } from "../schema.ts"
+
+export type RemoteRepoStreamEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
 
 /** Minimal sink contract used by remote-repo server-sent-event fanout. */
 export type RemoteRepoStreamSink = {
@@ -15,7 +19,7 @@ export type RemoteRepoStreamService = {
 
 /** Optional in-process broadcaster used by local backend servers. */
 export type RemoteRepoEventBroadcaster = {
-  broadcastRemoteRepoEvent(event: RepoEvent): void
+  broadcastRemoteRepoEvent(event: RemoteRepoStreamEvent): void
 }
 
 /** Returns whether a value supports the minimal send/close contract used by SSE fanout. */

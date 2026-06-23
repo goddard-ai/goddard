@@ -133,14 +133,17 @@ test(
         )
 
         backend.sendEvent({
-          type: "comment",
-          owner: "other",
-          repo: "repo",
-          prNumber: 123,
-          author: "alice",
-          body: "handle this too",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString(),
+          name: "remote_repo.event.received",
+          payload: {
+            type: "comment",
+            owner: "other",
+            repo: "repo",
+            prNumber: 123,
+            author: "alice",
+            body: "handle this too",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          },
         })
 
         await waitFor(
@@ -164,14 +167,17 @@ test(
         )
 
         backend.sendEvent({
-          type: "comment",
-          owner: "test",
-          repo: "repo",
-          prNumber: 123,
-          author: "alice",
-          body: "fix it",
-          reactionAdded: "eyes",
-          createdAt: new Date().toISOString(),
+          name: "remote_repo.event.received",
+          payload: {
+            type: "comment",
+            owner: "test",
+            repo: "repo",
+            prNumber: 123,
+            author: "alice",
+            body: "fix it",
+            reactionAdded: "eyes",
+            createdAt: new Date().toISOString(),
+          },
         })
 
         await waitFor(
@@ -651,7 +657,7 @@ async function startBackendHarness(
       return subscriptionCount
     },
     sendEvent(event: unknown) {
-      const frame = `data: ${JSON.stringify({ event })}\n\n`
+      const frame = `data: ${JSON.stringify(event)}\n\n`
       for (const stream of streams) {
         stream.write(frame)
       }
