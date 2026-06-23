@@ -1,3 +1,5 @@
+import { composeBackendEventSources, defineBackendEventSources } from "@goddard-ai/backend-plugin"
+import { remoteRepoBackendEvents } from "@goddard-ai/remote-repo/backend"
 import { describe, expect, test } from "bun:test"
 
 import {
@@ -13,6 +15,26 @@ describe("github feature package", () => {
     expect(githubBackendRoutes.webhooks.children.github.path?.source).toBe("/github")
     expect(Object.keys(githubBackendEventSources)).toEqual(["github"])
     expect(githubBackendEventSources.github.produces).toEqual(["remote_repo.event.received"])
+  })
+
+  test("registers as a source for declared remote repo events only", () => {
+    expect(
+      Object.keys(composeBackendEventSources([githubBackendEventSources], remoteRepoBackendEvents)),
+    ).toEqual(["github"])
+
+    expect(() =>
+      composeBackendEventSources(
+        [
+          defineBackendEventSources({
+            github: {
+              produces: ["pull_request.feedback.received"],
+              authorize: () => true,
+            },
+          }),
+        ],
+        remoteRepoBackendEvents,
+      ),
+    ).toThrow("Backend event source github produces unknown event: pull_request.feedback.received")
   })
 
   test("normalizes raw GitHub webhook deliveries with provider provenance", () => {
