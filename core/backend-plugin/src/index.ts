@@ -47,16 +47,80 @@ export type BackendEventSourceDefinitions = Record<
   BackendEventSourceDefinition<string, any, any>
 >
 
+export type BackendProviderPrincipal = {
+  readonly id: string
+  readonly providerIdentities: readonly {
+    readonly provider: string
+    readonly subject: string
+    readonly displayName?: string
+  }[]
+}
+
+export type BackendProviderRepositoryRef<TProvider extends string = string> = {
+  readonly provider: TProvider
+  readonly owner: string
+  readonly repo: string
+}
+
+export type BackendProviderPullRequestCreateInput<TProvider extends string = string> =
+  BackendProviderRepositoryRef<TProvider> & {
+    readonly title: string
+    readonly body?: string
+    readonly head: string
+    readonly base: string
+  }
+
+export type BackendProviderPullRequestCommentInput<TProvider extends string = string> =
+  BackendProviderRepositoryRef<TProvider> & {
+    readonly prNumber: number
+    readonly body: string
+  }
+
+export type BackendProviderPullRequestResult = {
+  readonly number: number
+  readonly url: string
+  readonly createdAt?: string
+}
+
+export type BackendProviderCapabilityDefinition<TProvider extends string = string> = {
+  readonly resolvePrincipalGrants?: (input: {
+    readonly principal: BackendProviderPrincipal
+  }) => unknown | Promise<unknown>
+  readonly authorizeRemoteRepositoryAccess?: (input: {
+    readonly principal: BackendProviderPrincipal
+    readonly repository: BackendProviderRepositoryRef<TProvider>
+  }) => boolean | Promise<boolean>
+  readonly createPullRequest?: (
+    input: BackendProviderPullRequestCreateInput<TProvider>,
+  ) => BackendProviderPullRequestResult | Promise<BackendProviderPullRequestResult>
+  readonly createPullRequestComment?: (
+    input: BackendProviderPullRequestCommentInput<TProvider>,
+  ) => void | Promise<void>
+  readonly parseRepositoryUrl?: (
+    url: string,
+  ) =>
+    | BackendProviderRepositoryRef<TProvider>
+    | undefined
+    | Promise<BackendProviderRepositoryRef<TProvider> | undefined>
+}
+
+export type BackendProviderCapabilityDefinitions = Record<
+  string,
+  BackendProviderCapabilityDefinition<any>
+>
+
 export type BackendPluginDefinition<
   TName extends string = string,
   TRoutes extends HttpRouteTree = HttpRouteTree,
   TEvents extends BackendEventDefinitions = BackendEventDefinitions,
   TSources extends BackendEventSourceDefinitions = BackendEventSourceDefinitions,
+  TProviders extends BackendProviderCapabilityDefinitions = BackendProviderCapabilityDefinitions,
 > = {
   readonly name: TName
   readonly routes?: TRoutes
   readonly events?: TEvents
   readonly eventSources?: TSources
+  readonly providers?: TProviders
 }
 
 export type BackendEventPublisher = {
@@ -74,10 +138,16 @@ export type ComposeBackendEvents<TEvents extends readonly BackendEventDefinition
 export type ComposeBackendEventSources<TSources extends readonly BackendEventSourceDefinitions[]> =
   UnionToIntersection<TSources[number]>
 
+/** Infers the exact backend provider capability map produced by composing provider fragments. */
+export type ComposeBackendProviders<
+  TProviders extends readonly BackendProviderCapabilityDefinitions[],
+> = UnionToIntersection<TProviders[number]>
+
 export type ComposeBackendPlugins<TPlugins extends readonly BackendPluginDefinition[]> = {
   readonly routes: ComposeBackendRoutes<ExtractBackendPluginRoutes<TPlugins>>
   readonly events: ComposeBackendEvents<ExtractBackendPluginEvents<TPlugins>>
   readonly eventSources: ComposeBackendEventSources<ExtractBackendPluginSources<TPlugins>>
+  readonly providers: ComposeBackendProviders<ExtractBackendPluginProviders<TPlugins>>
 }
 
 type ExtractBackendPluginRoutes<TPlugins extends readonly BackendPluginDefinition[]> = {
@@ -106,6 +176,16 @@ type ExtractBackendPluginSources<TPlugins extends readonly BackendPluginDefiniti
     : {}
 }
 
+type ExtractBackendPluginProviders<TPlugins extends readonly BackendPluginDefinition[]> = {
+  readonly [TIndex in keyof TPlugins]: TPlugins[TIndex] extends {
+    readonly providers?: infer TProviders
+  }
+    ? TProviders extends BackendProviderCapabilityDefinitions
+      ? TProviders
+      : {}
+    : {}
+}
+
 /** Preserves the exact Rouzer route tree object for backend route inference. */
 export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes: TRoutes) {
   return routes
@@ -130,6 +210,13 @@ export function defineBackendEventSources<const TSources extends BackendEventSou
   sources: TSources,
 ) {
   return sources
+}
+
+/** Preserves the exact backend provider capability map for provider inference. */
+export function defineBackendProviders<
+  const TProviders extends BackendProviderCapabilityDefinitions,
+>(providers: TProviders) {
+  return providers
 }
 
 /** Combines backend route fragments and rejects ambiguous action ownership. */
@@ -189,6 +276,38 @@ export function composeBackendEventSources<
   return composed as ComposeBackendEventSources<TSources>
 }
 
+/** Combines backend provider capability fragments and rejects ambiguous provider ownership. */
+export function composeBackendProviders<
+  const TProviders extends readonly BackendProviderCapabilityDefinitions[],
+>(providerSets: TProviders) {
+  const composed: BackendProviderCapabilityDefinitions = {}
+
+  for (const providers of providerSets) {
+    for (const [name, provider] of Object.entries(providers)) {
+      if (composed[name]) {
+        throw new Error(`Duplicate backend provider: ${name}`)
+      }
+
+      composed[name] = provider
+    }
+  }
+
+  return composed as ComposeBackendProviders<TProviders>
+}
+
+/** Returns a composed backend provider capability or throws a diagnostic configuration error. */
+export function getBackendProviderCapability<
+  const TProviders extends BackendProviderCapabilityDefinitions,
+  const TProvider extends keyof TProviders & string,
+>(providers: TProviders, provider: TProvider): TProviders[TProvider] {
+  const capability = providers[provider]
+  if (!capability) {
+    throw new Error(`Unknown backend provider: ${provider}`)
+  }
+
+  return capability
+}
+
 /** Composes backend plugin contributions and rejects ambiguous plugin ownership. */
 export function composeBackendPlugins<const TPlugins extends readonly BackendPluginDefinition[]>(
   plugins: TPlugins,
@@ -197,6 +316,7 @@ export function composeBackendPlugins<const TPlugins extends readonly BackendPlu
   const routes: HttpRouteTree[] = []
   const eventSets: BackendEventDefinitions[] = []
   const sourceSets: BackendEventSourceDefinitions[] = []
+  const providerSets: BackendProviderCapabilityDefinitions[] = []
 
   for (const plugin of plugins) {
     if (pluginNames.has(plugin.name)) {
@@ -207,6 +327,7 @@ export function composeBackendPlugins<const TPlugins extends readonly BackendPlu
     routes.push(plugin.routes ?? {})
     eventSets.push(plugin.events ?? {})
     sourceSets.push(plugin.eventSources ?? {})
+    providerSets.push(plugin.providers ?? {})
   }
 
   const events = composeBackendEvents(eventSets)
@@ -215,6 +336,7 @@ export function composeBackendPlugins<const TPlugins extends readonly BackendPlu
     routes: composeBackendRoutes(routes),
     events,
     eventSources: composeBackendEventSources(sourceSets, events),
+    providers: composeBackendProviders(providerSets),
   } as ComposeBackendPlugins<TPlugins>
 }
 

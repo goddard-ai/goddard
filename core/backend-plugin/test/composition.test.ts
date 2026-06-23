@@ -5,10 +5,13 @@ import {
   composeBackendEvents,
   composeBackendEventSources,
   composeBackendPlugins,
+  composeBackendProviders,
   defineBackendEvents,
   defineBackendEventSources,
   defineBackendPlugin,
+  defineBackendProviders,
   defineBackendRoutes,
+  getBackendProviderCapability,
   http,
   type BackendEventEnvelope,
 } from "../src/index.ts"
@@ -160,6 +163,65 @@ describe("backend event composition", () => {
   })
 })
 
+describe("backend provider capability composition", () => {
+  test("composes provider-keyed capability definitions", async () => {
+    const providers = composeBackendProviders([
+      defineBackendProviders({
+        github: {
+          authorizeRemoteRepositoryAccess: ({ repository }) => repository.repo === "widgets",
+        },
+      }),
+      defineBackendProviders({
+        gitlab: {
+          authorizeRemoteRepositoryAccess: ({ repository }) => repository.repo === "platform",
+        },
+      }),
+    ])
+
+    expect(Object.keys(providers).sort()).toEqual(["github", "gitlab"])
+    await expect(
+      Promise.resolve(
+        providers.github.authorizeRemoteRepositoryAccess?.({
+          principal: { id: "user_1", providerIdentities: [] },
+          repository: { provider: "github", owner: "acme", repo: "widgets" },
+        }),
+      ),
+    ).resolves.toBe(true)
+  })
+
+  test("rejects duplicate backend providers", () => {
+    const first = defineBackendProviders({
+      github: {
+        authorizeRemoteRepositoryAccess: () => true,
+      },
+    })
+    const second = defineBackendProviders({
+      github: {
+        authorizeRemoteRepositoryAccess: () => true,
+      },
+    })
+
+    expect(() => composeBackendProviders([first, second])).toThrow(
+      "Duplicate backend provider: github",
+    )
+  })
+
+  test("looks up provider capabilities and reports missing providers", () => {
+    const providers = composeBackendProviders([
+      defineBackendProviders({
+        github: {
+          parseRepositoryUrl: () => ({ provider: "github", owner: "acme", repo: "widgets" }),
+        },
+      }),
+    ])
+
+    expect(getBackendProviderCapability(providers, "github")).toBe(providers.github)
+    expect(() => getBackendProviderCapability(providers, "gitlab" as never)).toThrow(
+      "Unknown backend provider: gitlab",
+    )
+  })
+})
+
 describe("backend plugin composition", () => {
   test("composes route, event, and source fragments from backend plugins", () => {
     const remoteRepo = defineBackendPlugin({
@@ -195,6 +257,11 @@ describe("backend plugin composition", () => {
           }),
         }),
       }),
+      providers: defineBackendProviders({
+        github: {
+          parseRepositoryUrl: () => ({ provider: "github", owner: "acme", repo: "widgets" }),
+        },
+      }),
     })
 
     const composition = composeBackendPlugins([remoteRepo, github])
@@ -203,6 +270,7 @@ describe("backend plugin composition", () => {
     expect(composition.routes.webhooks.children.github.path?.source).toBe("/github")
     expect(Object.keys(composition.events)).toEqual(["remote_repo.pull_request.comment.created"])
     expect(Object.keys(composition.eventSources)).toEqual(["remote-repo"])
+    expect(Object.keys(composition.providers)).toEqual(["github"])
   })
 
   test("rejects duplicate backend plugin names", () => {
@@ -279,6 +347,29 @@ describe("backend plugin composition", () => {
 
     expect(() => composeBackendPlugins([github])).toThrow(
       "Backend event source github produces unknown event: remote_repo.pull_request.comment.created",
+    )
+  })
+
+  test("rejects duplicate backend plugin provider capabilities", () => {
+    const first = defineBackendPlugin({
+      name: "github-a",
+      providers: defineBackendProviders({
+        github: {
+          authorizeRemoteRepositoryAccess: () => true,
+        },
+      }),
+    })
+    const second = defineBackendPlugin({
+      name: "github-b",
+      providers: defineBackendProviders({
+        github: {
+          authorizeRemoteRepositoryAccess: () => true,
+        },
+      }),
+    })
+
+    expect(() => composeBackendPlugins([first, second])).toThrow(
+      "Duplicate backend provider: github",
     )
   })
 })
