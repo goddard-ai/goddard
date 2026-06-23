@@ -8,6 +8,8 @@ import {
   githubBackendPlugin,
   githubBackendRoutes,
   normalizeGitHubWebhookRequest,
+  readGitHubWebhookRequest,
+  signGitHubWebhookBody,
 } from "../src/backend.ts"
 
 describe("github feature package", () => {
@@ -136,6 +138,42 @@ describe("github feature package", () => {
         deliveryId: "delivery-1",
         webhookType: "pull_request_review",
       },
+    })
+  })
+
+  test("rejects GitHub webhook requests with invalid configured signatures", async () => {
+    const request = new Request("https://example.test/webhooks/github", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-hub-signature-256": "sha256=bad",
+      },
+      body: JSON.stringify({ action: "created" }),
+    })
+
+    await expect(readGitHubWebhookRequest(request, "secret")).rejects.toMatchObject({
+      statusCode: 401,
+      message: "Invalid GitHub webhook signature",
+    })
+  })
+
+  test("accepts GitHub webhook requests with valid configured signatures", async () => {
+    const body = JSON.stringify({ action: "created" })
+    const request = new Request("https://example.test/webhooks/github", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issue_comment",
+        "x-github-delivery": "delivery-1",
+        "x-hub-signature-256": await signGitHubWebhookBody("secret", body),
+      },
+      body,
+    })
+
+    await expect(readGitHubWebhookRequest(request, "secret")).resolves.toEqual({
+      deliveryId: "delivery-1",
+      eventName: "issue_comment",
+      payload: { action: "created" },
     })
   })
 })

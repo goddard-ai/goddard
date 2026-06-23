@@ -1,4 +1,3 @@
-import { signGitHubWebhookBody } from "@goddard-ai/github/backend"
 import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
@@ -145,81 +144,6 @@ test("createBackendRouter publishes raw GitHub webhook events", async () => {
       },
     },
   ])
-})
-
-test("createBackendRouter rejects GitHub webhooks with invalid configured signatures", async () => {
-  const router = createBackendRouter({
-    createControlPlane: () => stubControlPlane,
-  })
-
-  const response = await router(
-    createContext(
-      new Request("https://example.test/webhooks/github", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-hub-signature-256": "sha256=bad",
-        },
-        body: JSON.stringify({
-          deliveryId: "delivery-1",
-          event: {
-            type: "issue_comment",
-            owner: "goddard-ai",
-            repo: "sdk",
-            prNumber: 1,
-            author: "alec",
-            body: "looks good",
-          },
-        }),
-      }),
-      createEnv({ GITHUB_WEBHOOK_SECRET: "secret" }),
-    ) as any,
-  )
-
-  expect(response.status).toBe(401)
-  const payload = (await response.json()) as { error: string }
-  expect(payload.error).toBe("Invalid GitHub webhook signature")
-})
-
-test("createBackendRouter accepts GitHub webhooks with valid configured signatures", async () => {
-  const router = createBackendRouter({
-    createControlPlane: () => stubControlPlane,
-    broadcastEvent: async () => {},
-  })
-  const body = JSON.stringify({
-    action: "created",
-    issue: {
-      number: 1,
-      pull_request: {},
-    },
-    comment: {
-      user: { login: "alec", type: "User" },
-      body: "looks good",
-    },
-    repository: {
-      name: "sdk",
-      owner: { login: "goddard-ai" },
-    },
-    sender: { login: "alec", type: "User" },
-  })
-
-  const response = await router(
-    createContext(
-      new Request("https://example.test/webhooks/github", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-github-event": "issue_comment",
-          "x-github-delivery": "delivery-1",
-          "x-hub-signature-256": await signGitHubWebhookBody("secret", body),
-        },
-        body,
-      }),
-      createEnv({ GITHUB_WEBHOOK_SECRET: "secret" }),
-    ) as any,
-  )
-
-  expect(response.status).toBe(200)
 })
 
 test("authorizeBackendEventPublication enforces source-owned repository access", async () => {
