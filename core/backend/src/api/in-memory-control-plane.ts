@@ -6,6 +6,7 @@ import type {
   DeviceFlowStart,
   ProviderIdentity,
 } from "@goddard-ai/auth/schema"
+import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
   createRemoteRepoBackendEvent,
@@ -289,6 +290,7 @@ export class InMemoryBackendControlPlane
       !remoteRepoBackendEventSources["remote-repo"].authorize({
         principal,
         event: createRemoteRepoBackendEvent(event),
+        providers: getDefaultBackendPluginComposition().providers,
       })
     ) {
       return undefined

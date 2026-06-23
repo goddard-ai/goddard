@@ -59,6 +59,16 @@ test("owns the remote repository backend event contract", () => {
 
 test("owns remote repository backend event source authorization", async () => {
   const source = remoteRepoBackendEventSources["remote-repo"]
+  const principal = {
+    id: "github:2997745",
+    providerIdentities: [
+      {
+        provider: "github",
+        subject: "2997745",
+        displayName: "alec",
+      },
+    ],
+  }
   const event = createRemoteRepoBackendEvent({
     type: "comment",
     provider: "github",
@@ -74,36 +84,23 @@ test("owns remote repository backend event source authorization", async () => {
   await expect(
     Promise.resolve(
       source.authorize({
-        principal: {
-          id: "github:2997745",
-          providerIdentities: [
-            {
-              provider: "github",
-              subject: "2997745",
-              displayName: "alec",
-            },
-          ],
-          repositories: [{ provider: "github", owner: "goddard-ai", repo: "sdk" }],
-        },
+        principal,
         event,
+        providers: {
+          github: {
+            authorizeRemoteRepositoryAccess: ({ repository }) =>
+              repository.owner === "goddard-ai" && repository.repo === "sdk",
+          },
+        },
       }),
     ),
   ).resolves.toBe(true)
   await expect(
     Promise.resolve(
       source.authorize({
-        principal: {
-          id: "github:2997745",
-          providerIdentities: [
-            {
-              provider: "github",
-              subject: "2997745",
-              displayName: "alec",
-            },
-          ],
-          repositories: [{ provider: "github", owner: "goddard-ai", repo: "other" }],
-        },
+        principal,
         event,
+        providers: {},
       }),
     ),
   ).resolves.toBe(false)

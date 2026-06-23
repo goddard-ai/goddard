@@ -2,7 +2,9 @@ import type { BackendPrincipal } from "@goddard-ai/auth/schema"
 import {
   defineBackendEvents,
   defineBackendEventSources,
+  getBackendProviderCapability,
   type BackendEventEnvelope,
+  type BackendProviderCapabilityDefinitions,
 } from "@goddard-ai/backend-plugin"
 
 import {
@@ -18,13 +20,7 @@ export const REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED =
   "remote_repo.pull_request.review.submitted" as const
 export const REMOTE_REPO_PULL_REQUEST_CREATED = "remote_repo.pull_request.created" as const
 
-type RemoteRepoPrincipal = BackendPrincipal & {
-  readonly repositories?: readonly {
-    readonly provider: string
-    readonly owner: string
-    readonly repo: string
-  }[]
-}
+type RemoteRepoPrincipal = BackendPrincipal
 
 export type RemoteRepoPullRequestCommentCreatedEvent = BackendEventEnvelope<
   typeof REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
@@ -68,15 +64,23 @@ export const remoteRepoBackendEventSources = defineBackendEventSources({
     authorize: ({
       principal,
       event,
+      providers,
     }: {
       principal: RemoteRepoPrincipal
       event: RemoteRepoBackendEvent
+      providers: BackendProviderCapabilityDefinitions
     }) => {
       if (event.name === REMOTE_REPO_PULL_REQUEST_CREATED) {
         return principalHasDisplayName(principal, event.payload.author)
       }
 
-      return canPrincipalAccessRepository(principal, event.payload)
+      const provider = getProviderCapability(providers, event.payload.provider)
+      return (
+        provider?.authorizeRemoteRepositoryAccess?.({
+          principal,
+          repository: event.payload,
+        }) ?? false
+      )
     },
   },
 })
@@ -101,24 +105,18 @@ export function createRemoteRepoBackendEvent(event: RepoEvent): RemoteRepoBacken
   }
 }
 
-function canPrincipalAccessRepository(
-  principal: RemoteRepoPrincipal,
-  repository: { readonly provider: string; readonly owner: string; readonly repo: string },
-) {
-  return (
-    principal.repositories?.some(
-      (allowed) =>
-        allowed.provider === repository.provider &&
-        allowed.owner === repository.owner &&
-        allowed.repo === repository.repo,
-    ) ?? false
-  )
-}
-
 function principalHasDisplayName(principal: RemoteRepoPrincipal, displayName: string) {
   return principal.providerIdentities.some(
     (identity) => identity.displayName === displayName || identity.subject === displayName,
   )
+}
+
+function getProviderCapability(providers: BackendProviderCapabilityDefinitions, provider: string) {
+  try {
+    return getBackendProviderCapability(providers, provider)
+  } catch {
+    return undefined
+  }
 }
 
 /** Feature-owned backend handler for normalized remote repository events. */
