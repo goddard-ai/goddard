@@ -1,5 +1,4 @@
 /** Internal backend plugin support for feature-owned Rouzer route declarations. */
-import { metadata as rouzerMetadata, type RouteMetadata } from "rouzer"
 import type { HttpAction, HttpNode, HttpResource, HttpRouteTree } from "rouzer/http"
 import type { z } from "zod"
 
@@ -196,14 +195,6 @@ export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes:
   return routes
 }
 
-/**
- * Attaches Rouzer route metadata without leaking Rouzer's private marker symbol
- * into exported backend route declaration types.
- */
-export function metadata(value: RouteMetadata) {
-  return rouzerMetadata(value) as object
-}
-
 /** Combines backend route fragments and rejects ambiguous action ownership. */
 export function composeBackendRoutes<const TRoutes extends readonly HttpRouteTree[]>(
   routes: TRoutes,
@@ -361,7 +352,7 @@ function formatRoutePath(node: HttpResource | HttpAction) {
   return node.path ? String(node.path) : ""
 }
 
-export { $type, createClient, createRouter, type RouzerClient } from "rouzer"
+export { $type, metadata, createClient, createRouter, type RouzerClient } from "rouzer"
 export type { HttpRouteTree } from "rouzer/http"
 
 export * as http from "rouzer/http"
