@@ -4,8 +4,6 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type { GitHubRemoteRepoEvent } from "@goddard-ai/github/backend"
-import type { GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import { getErrorMessage } from "radashi"
 
@@ -34,9 +32,6 @@ export interface BackendControlPlane {
     input: { owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> | void
-  handleGitHubWebhook(
-    delivery: GitHubWebhookDeliveryInput,
-  ): Promise<GitHubRemoteRepoEvent> | GitHubRemoteRepoEvent
 }
 
 /** HTTP-friendly error type that preserves the intended response status code. */

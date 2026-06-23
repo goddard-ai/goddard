@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 
-import { createGitHubApp } from "../src/github-app.ts"
+import { createGitHubApp } from "../src/backend.ts"
 
 test("GoddardGitHubApp initialization", () => {
   const app = createGitHubApp({
@@ -20,7 +20,11 @@ test("github-app forwards webhooks to backend and returns handled event", async 
     expect(url.endsWith("/webhooks/github")).toBe(true)
 
     const body = JSON.parse(String(init?.body))
-    expect(body.event.type).toBe("issue_comment")
+    expect(init?.headers).toMatchObject({
+      "x-github-event": "issue_comment",
+      "x-github-delivery": "delivery-1",
+    })
+    expect(body.action).toBe("created")
 
     return new Response(
       JSON.stringify({
@@ -46,13 +50,21 @@ test("github-app forwards webhooks to backend and returns handled event", async 
   })
   const result = await app.handleWebhook({
     deliveryId: "delivery-1",
-    event: {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 1,
-      author: "teammate",
-      body: "nice",
+    eventName: "issue_comment",
+    payload: {
+      action: "created",
+      issue: {
+        number: 1,
+        pull_request: {},
+      },
+      comment: {
+        user: { login: "teammate", type: "User" },
+        body: "nice",
+      },
+      repository: {
+        name: "sdk",
+        owner: { login: "goddard-ai" },
+      },
     },
   })
 

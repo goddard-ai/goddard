@@ -904,6 +904,9 @@ importers:
       '@goddard-ai/remote-repo':
         specifier: workspace:*
         version: link:../remote-repo
+      octokit:
+        specifier: ^5.0.5
+        version: 5.0.5
       zod:
         specifier: 'catalog:'
         version: 4.4.3

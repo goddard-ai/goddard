@@ -1,5 +1,5 @@
 import type { AuthSession } from "@goddard-ai/auth/schema"
-import { githubBackendEvents, type GitHubRemoteRepoEvent } from "@goddard-ai/github/backend"
+import { githubBackendEventSources, type GitHubRemoteRepoEvent } from "@goddard-ai/github/backend"
 import type { GitHubRepositoryRef, GitHubUserPrincipal } from "@goddard-ai/github/schema"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 
@@ -37,7 +37,7 @@ export async function authorizeGitHubRemoteRepoEvent(
   principal: BackendPrincipal,
   event: GitHubRemoteRepoEvent,
 ): Promise<boolean> {
-  return githubBackendEvents["remote_repo.event.received"].authorize({
+  return githubBackendEventSources.github.authorize({
     principal,
     event,
   })

@@ -5,11 +5,7 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import {
-  normalizeGitHubWebhookDelivery,
-  type GitHubRemoteRepoEvent,
-} from "@goddard-ai/github/backend"
-import type { GitHubRepositoryRef, GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
+import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
@@ -216,12 +212,6 @@ export class TursoBackendControlPlane
       .limit(1)
 
     return Boolean(match)
-  }
-
-  async handleGitHubWebhook(delivery: GitHubWebhookDeliveryInput): Promise<GitHubRemoteRepoEvent> {
-    assertRepo(delivery.event.owner, delivery.event.repo)
-
-    return normalizeGitHubWebhookDelivery(delivery)
   }
 
   async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {

@@ -16,7 +16,6 @@ import { createSseSession } from "./utils.ts"
 export * from "./api/control-plane.ts"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { TursoBackendControlPlane } from "./db/persistence.ts"
-export * from "./github-app.ts"
 
 // Optional host and port overrides for the local Node backend server.
 type StartServerOptions = {

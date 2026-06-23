@@ -1,6 +1,11 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import { composeBackendRoutes, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
-import { GitHubWebhookDeliveryInput } from "@goddard-ai/github/schema"
+import {
+  githubBackendRoutes,
+  GitHubWebhookError,
+  normalizeGitHubWebhookRequest,
+  readGitHubWebhookRequest,
+} from "@goddard-ai/github/backend"
 import {
   pullRequestBackendRoutes,
   pullRequestRemoteRepoEventHandler,
@@ -24,6 +29,7 @@ type RemoteRepoBackendEvent = BackendEventEnvelope<"remote_repo.event.received",
 
 const backendRoutes = composeBackendRoutes([
   authBackendRoutes,
+  githubBackendRoutes,
   pullRequestBackendRoutes,
   remoteRepoBackendRoutes,
 ])
@@ -139,10 +145,12 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
       github: async (ctx) => {
         try {
           const env = readEnv(ctx)
-          const controlPlane = createControlPlane(env)
-          const body = await readVerifiedGitHubWebhookBody(ctx.request, env)
-          const input = GitHubWebhookDeliveryInput.parse(JSON.parse(body))
-          const event = await controlPlane.handleGitHubWebhook(input)
+          const input = await readGitHubWebhookRequest(ctx.request, env.GITHUB_WEBHOOK_SECRET)
+          const event = normalizeGitHubWebhookRequest(input)
+          if (!event) {
+            return { ignored: true }
+          }
+
           await dispatchRemoteRepoEvent(event.payload, remoteRepoEventHandlers)
           await broadcastEvent(env, event)
           return event
@@ -213,57 +221,10 @@ function readBearerToken(header: string): string {
   return header.slice("Bearer ".length)
 }
 
-async function readVerifiedGitHubWebhookBody(request: Request, env: Env): Promise<string> {
-  const body = await request.text()
-  if (!env.GITHUB_WEBHOOK_SECRET) {
-    return body
-  }
-
-  const signature = request.headers.get("x-hub-signature-256")
-  if (!signature?.startsWith("sha256=")) {
-    throw new HttpError(401, "Missing GitHub webhook signature")
-  }
-
-  const expected = await signGitHubWebhookBody(env.GITHUB_WEBHOOK_SECRET, body)
-  if (!constantTimeEqual(signature, expected)) {
-    throw new HttpError(401, "Invalid GitHub webhook signature")
-  }
-
-  return body
-}
-
-async function signGitHubWebhookBody(secret: string, body: string): Promise<string> {
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  )
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body))
-  const hex = [...new Uint8Array(signature)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("")
-  return `sha256=${hex}`
-}
-
-function constantTimeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) {
-    return false
-  }
-
-  let difference = 0
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left.charCodeAt(index) ^ right.charCodeAt(index)
-  }
-
-  return difference === 0
-}
-
 /** Converts thrown backend errors into consistent JSON HTTP responses. */
 function toErrorResponse(error: unknown): Response {
-  const statusCode = error instanceof HttpError ? error.statusCode : 500
+  const statusCode =
+    error instanceof HttpError || error instanceof GitHubWebhookError ? error.statusCode : 500
   const message = getErrorMessage(error)
   return Response.json({ error: message }, { status: statusCode })
 }
