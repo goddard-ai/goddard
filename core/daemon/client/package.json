@@ -50,6 +50,7 @@
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
+    "cmd-ts": "catalog:",
     "radashi": "catalog:"
   }
 }

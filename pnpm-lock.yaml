@@ -574,6 +574,9 @@ importers:
       '@goddard-ai/schema':
         specifier: workspace:*
         version: link:../../schema
+      cmd-ts:
+        specifier: 'catalog:'
+        version: 0.15.0
       radashi:
         specifier: 'catalog:'
         version: 12.9.1

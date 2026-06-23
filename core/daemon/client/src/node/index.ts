@@ -20,6 +20,8 @@ export type {
   DaemonIpcClientFactory,
   DaemonIpcClientFactoryInput,
 } from "../index.ts"
+export { createDaemonIpcCommand } from "./ipc-command.ts"
+export type { DaemonIpcCommandOptions } from "./ipc-command.ts"
 
 /** Creates one daemon IPC client for a Node host using either the default or injected transport. */
 export function createDaemonIpcClient<TClient = DaemonIpcClient>(options: {
