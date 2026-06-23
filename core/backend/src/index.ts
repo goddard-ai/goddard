@@ -2,8 +2,8 @@ import type { Socket } from "node:net"
 import {
   isRemoteRepoEventBroadcaster,
   isRemoteRepoStreamService,
+  type RemoteRepoStreamEvent,
 } from "@goddard-ai/remote-repo/backend"
-import { type RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
 
@@ -40,7 +40,7 @@ export async function startBackendServer(
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
     broadcastEvent: async (_env, publication) => {
-      broadcastToInMemoryStreams(controlPlane, publication.event.payload)
+      broadcastToInMemoryStreams(controlPlane, publication.event)
     },
     handleUserStream: async (_env, principal, request) => {
       const streamKey = getPrincipalStreamKey(principal)
@@ -119,7 +119,10 @@ export async function startBackendServer(
   }
 }
 
-function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: RepoEvent): void {
+function broadcastToInMemoryStreams(
+  controlPlane: BackendControlPlane,
+  event: RemoteRepoStreamEvent,
+): void {
   if (isRemoteRepoEventBroadcaster(controlPlane)) {
     controlPlane.broadcastRemoteRepoEvent(event)
   }

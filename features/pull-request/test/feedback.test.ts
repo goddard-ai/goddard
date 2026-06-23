@@ -3,6 +3,7 @@ import { expect, test } from "bun:test"
 
 import {
   createPullRequestFeedbackHandler,
+  isFeedbackBackendEvent,
   isFeedbackEvent,
   type FeedbackEvent,
 } from "../src/daemon/feedback.ts"
@@ -10,6 +11,9 @@ import {
 test("pull request feedback handler ignores non-feedback backend events", () => {
   expect(isFeedbackEvent({ type: "pr.created", owner: "acme" })).toBe(false)
   expect(isFeedbackEvent(createFeedbackEvent())).toBe(true)
+  expect(
+    isFeedbackBackendEvent({ name: "remote_repo.event.received", payload: createFeedbackEvent() }),
+  ).toBe(true)
 })
 
 test("pull request feedback handler emits ignored events for unmanaged pull requests", async () => {
@@ -31,7 +35,7 @@ test("pull request feedback handler emits ignored events for unmanaged pull requ
     },
   })
 
-  await handler.handle(createFeedbackEvent())
+  await handler.handle(createFeedbackBackendEvent())
 
   expect(emitted).toEqual([
     {
@@ -68,7 +72,7 @@ test("pull request feedback handler launches one-shot sessions for managed feedb
     },
   })
 
-  await handler.handle(createFeedbackEvent())
+  await handler.handle(createFeedbackBackendEvent())
 
   expect(requests).toHaveLength(1)
   expect(requests[0]).toMatchObject({
@@ -103,6 +107,13 @@ function createFeedbackEvent(): FeedbackEvent {
     body: "Please update this.",
     reactionAdded: "eyes",
     createdAt: new Date().toISOString(),
+  }
+}
+
+function createFeedbackBackendEvent() {
+  return {
+    name: "remote_repo.event.received" as const,
+    payload: createFeedbackEvent(),
   }
 }
 

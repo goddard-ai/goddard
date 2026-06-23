@@ -223,10 +223,12 @@ test("sse stream receives webhook events for a managed PR", async () => {
     })
 
     const parsed = (await eventPromise) as {
-      event: { type: string; reactionAdded: string }
+      name: string
+      payload: { type: string; reactionAdded: string }
     }
-    expect(parsed.event.type).toBe("comment")
-    expect(parsed.event.reactionAdded).toBe("eyes")
+    expect(parsed.name).toBe("remote_repo.event.received")
+    expect(parsed.payload.type).toBe("comment")
+    expect(parsed.payload.reactionAdded).toBe("eyes")
   } finally {
     await server.close()
   }
@@ -308,9 +310,9 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     })
 
     const alecEvent = (await readFirstSseEvent(alecStream)) as {
-      event: { prNumber: number }
+      payload: { prNumber: number }
     }
-    expect(alecEvent.event.prNumber).toBe(1)
+    expect(alecEvent.payload.prNumber).toBe(1)
     await assertNoSseEvent(bobStream, 100)
   } finally {
     await server.close()

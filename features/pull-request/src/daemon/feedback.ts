@@ -1,4 +1,4 @@
-import type { RouzerClient } from "@goddard-ai/backend-plugin"
+import type { BackendEventEnvelope, RouzerClient } from "@goddard-ai/backend-plugin"
 import type {
   BackendEventHandler,
   DaemonLogService,
@@ -25,8 +25,25 @@ export const FeedbackEvent = z.discriminatedUnion("type", feedbackEventOptions)
 
 export type FeedbackEvent = z.infer<typeof FeedbackEvent>
 
+export type FeedbackBackendEvent = BackendEventEnvelope<
+  "remote_repo.event.received",
+  FeedbackEvent,
+  unknown
+>
+
 export function isFeedbackEvent(event: unknown): event is FeedbackEvent {
   return FeedbackEvent.safeParse(event).success
+}
+
+export function isFeedbackBackendEvent(event: unknown): event is FeedbackBackendEvent {
+  return (
+    !!event &&
+    typeof event === "object" &&
+    "name" in event &&
+    event.name === "remote_repo.event.received" &&
+    "payload" in event &&
+    isFeedbackEvent(event.payload)
+  )
 }
 
 export function buildPrompt(event: FeedbackEvent): string {
@@ -62,14 +79,15 @@ export function createPullRequestFeedbackHandler(input: {
       input: Parameters<InferProvides<typeof sessionPlugin>["session"]["newSession"]>[0],
     ) => Promise<unknown>
   }
-}): BackendEventHandler<FeedbackEvent> {
+}): BackendEventHandler<FeedbackBackendEvent> {
   const logger = input.log.createLogger()
   const runningPrs = new Set<string>()
 
   return {
     name: "pull-request.feedback",
-    canHandle: isFeedbackEvent,
-    async handle(event) {
+    canHandle: isFeedbackBackendEvent,
+    async handle(envelope) {
+      const event = envelope.payload
       const feedbackContext = {
         repository: `${event.owner}/${event.repo}`,
         prNumber: event.prNumber,

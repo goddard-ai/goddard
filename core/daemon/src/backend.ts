@@ -2,11 +2,12 @@ import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import {
   composeBackendRoutes,
   createBackendClient as createRouteClient,
+  type BackendEventEnvelope,
   type RouzerClient,
 } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
-import type { StreamMessage } from "@goddard-ai/remote-repo/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import { createDebug } from "./logging.ts"
@@ -18,6 +19,8 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 type StreamHandler = (event?: unknown) => void
 
 const notAuthenticatedMessage = "Not authenticated. Run login first."
+
+type BackendStreamEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
 
 /** Backend routes available to daemon-owned backend clients. */
 export const backendRoutes = composeBackendRoutes([
@@ -295,12 +298,12 @@ function flushSseBuffer(
     }
 
     try {
-      const parsed = JSON.parse(data) as StreamMessage
+      const parsed = JSON.parse(data) as BackendStreamEvent
       debug("backend.stream.event_received", {
-        eventType: parsed.event.type,
+        eventName: parsed.name,
       })
-      subscription.emit("event", parsed.event)
-      subscription.emit(parsed.event.type, parsed.event)
+      subscription.emit("event", parsed)
+      subscription.emit(parsed.name, parsed)
     } catch (error) {
       debug("backend.stream.event_parse_failed", {
         errorMessage: getErrorMessage(error),

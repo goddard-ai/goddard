@@ -250,7 +250,7 @@ test(
       },
     )
 
-    await feedbackHandler?.handle(createFeedbackEvent())
+    await feedbackHandler?.handle(createFeedbackBackendEvent())
 
     const firstSessions = db.sessions.findMany()
     const firstSessionIds = new Set(firstSessions.map((session: DaemonSession) => session.id))
@@ -269,7 +269,7 @@ test(
       return typeof agent === "object" && agent?.name === "Node Agent B"
     })
 
-    await feedbackHandler?.handle(createFeedbackEvent())
+    await feedbackHandler?.handle(createFeedbackBackendEvent())
 
     const secondSession = db.sessions
       .findMany()
@@ -303,6 +303,13 @@ function createFeedbackEvent(): Extract<RepoEvent, { type: "comment" }> {
     body: "Please update this.",
     reactionAdded: "eyes",
     createdAt: new Date().toISOString(),
+  }
+}
+
+function createFeedbackBackendEvent() {
+  return {
+    name: "remote_repo.event.received" as const,
+    payload: createFeedbackEvent(),
   }
 }
 

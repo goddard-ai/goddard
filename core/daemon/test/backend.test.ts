@@ -103,10 +103,14 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       base: "main",
     })
 
-    const event = (await eventPromise) as { type: string; prNumber: number }
+    const event = (await eventPromise) as {
+      name: string
+      payload: { type: string; prNumber: number }
+    }
     expect(pr.number).toBe(1)
-    expect(event.type).toBe("pr.created")
-    expect(event.prNumber).toBe(1)
+    expect(event.name).toBe("remote_repo.event.received")
+    expect(event.payload.type).toBe("pr.created")
+    expect(event.payload.prNumber).toBe(1)
   } finally {
     subscription?.close()
     await Bun.sleep(10)
