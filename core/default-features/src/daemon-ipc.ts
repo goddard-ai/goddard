@@ -1,5 +1,5 @@
 import { actionIpcRoutes } from "@goddard-ai/action/daemon-ipc"
-import { managedAgentIpcRoutes } from "@goddard-ai/agent/daemon-ipc"
+import { agentIpcRoutes } from "@goddard-ai/agent/daemon-ipc"
 import { authIpcRoutes } from "@goddard-ai/auth/daemon-ipc"
 import { fileSearchIpcRoutes } from "@goddard-ai/file-search/daemon-ipc"
 import { inboxIpcRoutes } from "@goddard-ai/inbox/daemon-ipc"
@@ -15,7 +15,7 @@ const defaultDaemonFeatureIpcRoutes = [
   actionIpcRoutes,
   authIpcRoutes,
   fileSearchIpcRoutes,
-  managedAgentIpcRoutes,
+  agentIpcRoutes,
   sessionIpcRoutes,
   inboxIpcRoutes,
   pullRequestIpcRoutes,

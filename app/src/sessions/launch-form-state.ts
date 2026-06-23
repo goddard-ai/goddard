@@ -2,7 +2,7 @@ import {
   deriveSessionLaunchModelConfig,
   type CreateSessionRequest,
   type InitialSessionConfigOption,
-  type ListManagedAgentsResponse,
+  type ListAgentsResponse,
   type SessionLaunchPreviewResponse,
   type SessionPromptRequest,
 } from "@goddard-ai/sdk"
@@ -22,7 +22,7 @@ type ComposerPromptBlocks = Exclude<SessionPromptRequest["prompt"], string>
 type SessionLaunchPickerId =
   | "project"
   | "subpackage"
-  | "managedAgent"
+  | "agent"
   | "branch"
   | "model"
   | "mode"
@@ -89,7 +89,7 @@ export function filterSlashCommandSuggestions(
 }
 
 export const SessionLaunchFormState = createModel(function () {
-  const managedAgentCatalog = signal<ListManagedAgentsResponse | null>(null)
+  const managedAgentCatalog = signal<ListAgentsResponse | null>(null)
   const draftManagedAgentId = signal<string | null>(null)
   const draftBaseBranchName = signal<string | null>(null)
   const draftLocation = signal<SessionLaunchLocation>("local")
@@ -198,7 +198,7 @@ export const SessionLaunchFormState = createModel(function () {
     }
   })
 
-  function syncManagedAgentSelection(nextManagedAgentCatalog: ListManagedAgentsResponse | null) {
+  function syncManagedAgentSelection(nextManagedAgentCatalog: ListAgentsResponse | null) {
     if (!nextManagedAgentCatalog) {
       draftManagedAgentId.value = null
       return

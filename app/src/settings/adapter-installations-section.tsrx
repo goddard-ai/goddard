@@ -1,5 +1,5 @@
 import { t } from "@lingui/core/macro"
-import type { ManagedAgentCatalogEntry, ManagedAgentInstallationState } from "@goddard-ai/sdk"
+import type { AgentCatalogEntry, AgentInstallationState } from "@goddard-ai/sdk"
 import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
@@ -33,15 +33,15 @@ export const adapterInstallationsSettingsSectionMetadata = {
   },
 }
 
-type SearchableManagedAgentCatalogEntry = {
-  managedAgent: ManagedAgentCatalogEntry;
+type SearchableAgentCatalogEntry = {
+  managedAgent: AgentCatalogEntry;
   preparedDescription: fuzzysort.PreparedTarget;
   preparedId: fuzzysort.PreparedTarget;
   preparedName: fuzzysort.PreparedTarget;
   preparedVersion: fuzzysort.PreparedTarget;
 }
 
-function getInstallationDetail(installation: ManagedAgentInstallationState) {
+function getInstallationDetail(installation: AgentInstallationState) {
   if (installation.method === "config") {
     return t`Configured`
   }
@@ -70,9 +70,9 @@ function isGithubRepository(repository: string | null | undefined) {
   }
 }
 
-function prepareManagedAgentSearchItems(managedAgents: readonly ManagedAgentCatalogEntry[]) {
-  return managedAgents.map(
-    (managedAgent): SearchableManagedAgentCatalogEntry => ({
+function prepareManagedAgentSearchItems(agents: readonly AgentCatalogEntry[]) {
+  return agents.map(
+    (managedAgent): SearchableAgentCatalogEntry => ({
       managedAgent,
       preparedDescription: fuzzysort.prepare(managedAgent.description),
       preparedId: fuzzysort.prepare(managedAgent.id),
@@ -83,16 +83,16 @@ function prepareManagedAgentSearchItems(managedAgents: readonly ManagedAgentCata
 }
 
 function filterPreparedAvailableManagedAgents(
-  managedAgents: readonly SearchableManagedAgentCatalogEntry[],
+  agents: readonly SearchableAgentCatalogEntry[],
   searchQuery: string,
 ) {
   if (isEmptyQuery(searchQuery)) {
-    return managedAgents.map((entry) => entry.managedAgent)
+    return agents.map((entry) => entry.managedAgent)
   }
 
   return fuzzysort.searchFields(
     searchQuery,
-    managedAgents,
+    agents,
     [
       { key: "name", extract: (entry) => entry.preparedName },
       { key: "id", extract: (entry) => entry.preparedId },
@@ -104,11 +104,11 @@ function filterPreparedAvailableManagedAgents(
 }
 
 function ManagedAgentInstallationRow(props: {
-  managedAgent: ManagedAgentCatalogEntry;
-  installation: ManagedAgentInstallationState;
+  managedAgent: AgentCatalogEntry;
+  installation: AgentInstallationState;
   pending: boolean;
-  onInstall: (managedAgentId: string) => Promise<void>;
-  onUninstall: (managedAgentId: string) => Promise<void>;
+  onInstall: (agentId: string) => Promise<void>;
+  onUninstall: (agentId: string) => Promise<void>;
 }) @{
   const actionDisabled =
     props.pending || props.installation.method === "config" || !props.installation.installable
@@ -182,18 +182,18 @@ function ManagedAgentInstallationRow(props: {
 }
 
 function ManagedAgentInstallationList() @{
-  const managedAgentCatalog = useQuery(goddardSdk.managedAgent.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.agent.list, {
     params: [{ includeUninstalled: true }],
   })
   const [pendingManagedAgentId, setPendingManagedAgentId] = useState<string | null>(null)
   const [availableAgentSearchQuery, setAvailableAgentSearchQuery] = useState("")
   const installationsByManagedAgentId = new Map(managedAgentCatalog.installations.map(
-    (installation) => [installation.managedAgentId, installation],
+    (installation) => [installation.agentId, installation],
   ))
-  const installedManagedAgents = managedAgentCatalog.managedAgents.filter((managedAgent) => {
+  const installedManagedAgents = managedAgentCatalog.agents.filter((managedAgent) => {
     return installationsByManagedAgentId.get(managedAgent.id)?.installed
   })
-  const availableManagedAgents = managedAgentCatalog.managedAgents.filter((managedAgent) => {
+  const availableManagedAgents = managedAgentCatalog.agents.filter((managedAgent) => {
     const installation = installationsByManagedAgentId.get(managedAgent.id)
     return installation && !installation.installed
   })
@@ -202,27 +202,27 @@ function ManagedAgentInstallationList() @{
     availableAgentSearchQuery,
   )
 
-  async function installManagedAgent(managedAgentId: string) {
-    setPendingManagedAgentId(managedAgentId)
+  async function installManagedAgent(agentId: string) {
+    setPendingManagedAgentId(agentId)
     try {
-      await goddardSdk.managedAgent.install({ managedAgentId })
-      queryClient.invalidate(goddardSdk.managedAgent.list)
+      await goddardSdk.agent.install({ agentId })
+      queryClient.invalidate(goddardSdk.agent.list)
     } finally {
       setPendingManagedAgentId(null)
     }
   }
 
-  async function uninstallManagedAgent(managedAgentId: string) {
-    setPendingManagedAgentId(managedAgentId)
+  async function uninstallManagedAgent(agentId: string) {
+    setPendingManagedAgentId(agentId)
     try {
-      await goddardSdk.managedAgent.uninstall({ managedAgentId })
-      queryClient.invalidate(goddardSdk.managedAgent.list)
+      await goddardSdk.agent.uninstall({ agentId })
+      queryClient.invalidate(goddardSdk.agent.list)
     } finally {
       setPendingManagedAgentId(null)
     }
   }
 
-  @if (managedAgentCatalog.managedAgents.length === 0) {
+  @if (managedAgentCatalog.agents.length === 0) {
     <p class={styles.emptyText}>
       {t`No agent harnesses are available.`}
     </p>

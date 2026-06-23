@@ -263,7 +263,7 @@ function ProjectLaunchSection(props: { project: ProjectRecord }) @{
   const form = useModel(SessionLaunchFormState)
   const isLaunching = useSignal(false)
   const workbenchTabSet = useWorkbenchTabSet()
-  const hasAdapterSelector = (form.managedAgentCatalog.value?.managedAgents.length ?? 0) > 0
+  const hasAdapterSelector = (form.managedAgentCatalog.value?.agents.length ?? 0) > 0
   const hasBranchSelector =
     (form.launchPreview.value?.branches.length ?? 0) > 0 &&
       !(form.draftLocation.value === "local" && form.launchPreview.value?.dirty === true) &&
@@ -344,7 +344,7 @@ function ProjectLaunchSection(props: { project: ProjectRecord }) @{
     form.setOpenPicker("subpackage")
   }, { active: hasSubpackageSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openAdapterSelector, () => {
-    form.setOpenPicker("managedAgent")
+    form.setOpenPicker("agent")
   }, { active: hasAdapterSelector && !isLaunching.value })
   useAppCommand(AppCommand.sessionInput.openLocationSelector, () => {
     form.cycleLaunchLocation()

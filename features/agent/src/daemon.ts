@@ -1,7 +1,7 @@
 import { definePlugin, type DaemonMetadataStore } from "@goddard-ai/daemon-plugin"
 import { createAcpRegistryService } from "acp-client/node"
 
-import { managedAgentIpcRoutes } from "./daemon-ipc.ts"
+import { agentIpcRoutes } from "./daemon-ipc.ts"
 import {
   createManagedAgentInstallService,
   type ManagedAgentInstallService,
@@ -29,7 +29,7 @@ export type AgentService = ManagedAgentInstallService & {
 
 export const agentPlugin = definePlugin({
   name: "agent",
-  ipcRoutes: managedAgentIpcRoutes,
+  ipcRoutes: agentIpcRoutes,
   setup({ configProvider, log, metadataStore }) {
     const registryService = createAcpRegistryService()
     const usageStore = createManagedAgentUsageStore(metadataStore)
@@ -61,7 +61,7 @@ export const agentPlugin = definePlugin({
         agent,
       },
       ipcHandlers: {
-        managedAgent: {
+        agent: {
           list: async ({ body }) => listManagedAgents(agentContext, body),
           install: async ({ body }) => installCatalogManagedAgent(agentContext, body),
           uninstall: async ({ body }) => uninstallCatalogManagedAgent(agentContext, body),

@@ -58,10 +58,10 @@ export function AgentHarnessSelector(props: {
 }) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
-  const managedAgentCatalog = useQuery(goddardSdk.managedAgent.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.agent.list, {
     params: [{ cwd: form.effectiveCwd.value ?? undefined }],
   })
-  const items: SessionInputSelectItem[] = managedAgentCatalog.managedAgents.map(
+  const items: SessionInputSelectItem[] = managedAgentCatalog.agents.map(
     (adapter) => ({
       value: adapter.id,
       label: adapter.name,
@@ -85,7 +85,7 @@ export function AgentHarnessSelector(props: {
     iconOnlyTrigger={props.compact}
     {items}
     label={t`Agent harness`}
-    open={form.getPickerOpen("managedAgent")}
+    open={form.getPickerOpen("agent")}
     placeholder={t`Select agent harness`}
     shortcut={adapterShortcut}
     value={form.draftManagedAgentId.value}

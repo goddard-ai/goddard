@@ -1,16 +1,16 @@
 import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
-import type { ListManagedAgentsResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
+import type { ListAgentsResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
 import { expect, test } from "vitest"
 
 import { filterSlashCommandSuggestions, SessionLaunchFormState } from "./launch-form-state.ts"
 import { preferredLaunchAgentId } from "./launch-preferences.ts"
 
 function createManagedAgentCatalog(input: {
-  managedAgentIds: readonly string[]
-  defaultManagedAgentId: string | null
-}): ListManagedAgentsResponse {
+  agentIds: readonly string[]
+  defaultAgentId: string | null
+}): ListAgentsResponse {
   return {
-    managedAgents: input.managedAgentIds.map((id) => ({
+    agents: input.agentIds.map((id) => ({
       id,
       name: id,
       version: "1.0.0",
@@ -19,13 +19,13 @@ function createManagedAgentCatalog(input: {
       source: "config",
       unofficial: false,
     })),
-    installations: input.managedAgentIds.map((id) => ({
-      managedAgentId: id,
+    installations: input.agentIds.map((id) => ({
+      agentId: id,
       installed: true,
       installable: false,
       method: "config",
     })),
-    defaultManagedAgentId: input.defaultManagedAgentId,
+    defaultAgentId: input.defaultAgentId,
     registrySource: "cache",
     lastSuccessfulSyncAt: "2026-06-10T00:00:00.000Z",
     stale: false,
@@ -105,8 +105,8 @@ test("SessionLaunchFormState builds a worktree launch request from selected cont
   const form = new SessionLaunchFormState()
 
   form.managedAgentCatalog.value = createManagedAgentCatalog({
-    managedAgentIds: ["codex", "pi"],
-    defaultManagedAgentId: "pi",
+    agentIds: ["codex", "pi"],
+    defaultAgentId: "pi",
   })
   form.draftProjectPath.value = "/repo"
   form.draftSubpackagePath.value = "/repo/packages/app"
@@ -153,8 +153,8 @@ test("SessionLaunchFormState keeps launch leases only for unchanged local branch
   const form = new SessionLaunchFormState()
 
   form.managedAgentCatalog.value = createManagedAgentCatalog({
-    managedAgentIds: ["codex"],
-    defaultManagedAgentId: "codex",
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()
@@ -180,8 +180,8 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   const form = new SessionLaunchFormState()
 
   form.managedAgentCatalog.value = createManagedAgentCatalog({
-    managedAgentIds: ["codex"],
-    defaultManagedAgentId: "codex",
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/bare-repo"
   form.launchPreview.value = createLaunchPreview({
@@ -206,8 +206,8 @@ test("SessionLaunchFormState falls back to the first valid model when managed-ag
   const form = new SessionLaunchFormState()
 
   form.managedAgentCatalog.value = createManagedAgentCatalog({
-    managedAgentIds: ["codex"],
-    defaultManagedAgentId: "codex",
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()

@@ -1,5 +1,5 @@
 import { actionSdkPlugin } from "@goddard-ai/action/sdk"
-import { managedAgentSdkPlugin } from "@goddard-ai/agent/sdk"
+import { agentSdkPlugin } from "@goddard-ai/agent/sdk"
 import { authSdkPlugin } from "@goddard-ai/auth/sdk"
 import { fileSearchSdkPlugin } from "@goddard-ai/file-search/sdk"
 import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
@@ -35,7 +35,7 @@ const sdkPlugins = composeSdkPlugins([
   fileSearchSdkPlugin,
   inboxSdkPlugin,
   loopSdkPlugin,
-  managedAgentSdkPlugin,
+  agentSdkPlugin,
   pullRequestSdkPlugin,
   reviewSessionSdkPlugin,
   sessionSdkPlugin,
@@ -143,7 +143,7 @@ export class GoddardSdk {
   readonly daemon: ReturnType<typeof createDaemonNamespace>
   readonly events: EventsNamespace<FeatureSdkEvents>
   readonly auth: FeatureSdkNamespaces["auth"]
-  readonly managedAgent: FeatureSdkNamespaces["managedAgent"]
+  readonly agent: FeatureSdkNamespaces["agent"]
   readonly fileSearch: FeatureSdkNamespaces["fileSearch"]
   readonly pr: FeatureSdkNamespaces["pr"]
   readonly inbox: FeatureSdkNamespaces["inbox"]
@@ -162,7 +162,7 @@ export class GoddardSdk {
     this.daemon = createDaemonNamespace(this.#client)
     this.events = createEventsNamespace<FeatureSdkEvents>(this.#client)
     this.auth = features.auth
-    this.managedAgent = features.managedAgent
+    this.agent = features.agent
     this.fileSearch = features.fileSearch
     this.pr = features.pr
     this.inbox = features.inbox

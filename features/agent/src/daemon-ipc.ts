@@ -1,30 +1,30 @@
 import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
 
 import {
-  InstallManagedAgentRequest,
-  ListManagedAgentsRequest,
-  UninstallManagedAgentRequest,
-  type InstallManagedAgentResponse,
-  type ListManagedAgentsResponse,
-  type UninstallManagedAgentResponse,
+  InstallAgentRequest,
+  ListAgentsRequest,
+  UninstallAgentRequest,
+  type InstallAgentResponse,
+  type ListAgentsResponse,
+  type UninstallAgentResponse,
 } from "./schema.ts"
 
-export const managedAgentIpcRoutes = defineIpcRoutes({
-  managedAgent: http.resource("managed-agent", {
-    /** Lists managed agents available for one project or global launch flow. */
+export const agentIpcRoutes = defineIpcRoutes({
+  agent: http.resource("agent", {
+    /** Lists agents available for one project or global launch flow. */
     list: http.post("list", {
-      body: ListManagedAgentsRequest,
-      response: $type<ListManagedAgentsResponse>(),
+      body: ListAgentsRequest,
+      response: $type<ListAgentsResponse>(),
     }),
-    /** Installs one managed agent into the local launch catalog. */
+    /** Installs one agent into the local launch catalog. */
     install: http.post("install", {
-      body: InstallManagedAgentRequest,
-      response: $type<InstallManagedAgentResponse>(),
+      body: InstallAgentRequest,
+      response: $type<InstallAgentResponse>(),
     }),
-    /** Removes one managed agent from the local launch catalog. */
+    /** Removes one agent from the local launch catalog. */
     uninstall: http.post("uninstall", {
-      body: UninstallManagedAgentRequest,
-      response: $type<UninstallManagedAgentResponse>(),
+      body: UninstallAgentRequest,
+      response: $type<UninstallAgentResponse>(),
     }),
   }),
 })
