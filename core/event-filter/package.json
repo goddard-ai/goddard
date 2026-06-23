@@ -1,5 +1,5 @@
 {
-  "name": "@goddard-ai/daemon-plugin",
+  "name": "@goddard-ai/event-filter",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -20,13 +20,5 @@
     "fmt": "prettier -w .",
     "typecheck": "tsgo --noEmit",
     "test": "bun test --pass-with-no-tests --dots"
-  },
-  "dependencies": {
-    "@goddard-ai/backend-plugin": "workspace:*",
-    "@goddard-ai/event-filter": "workspace:*",
-    "@goddard-ai/ipc": "workspace:*",
-    "@goddard-ai/schema": "workspace:*",
-    "kindstore": "catalog:",
-    "zod": "catalog:"
   }
 }

@@ -1,4 +1,4 @@
-import { isObject } from "radashi"
+import { matchesEventEnvelopeFilter } from "@goddard-ai/event-filter"
 
 import type {
   DaemonEventEnvelope,
@@ -179,59 +179,5 @@ export function matchesDaemonEventFilter(
   event: Pick<DaemonEventEnvelope, "name" | "payload">,
   filter: DaemonEventFilter = {},
 ) {
-  if (filter.names && filter.names.length > 0 && !filter.names.includes(event.name)) {
-    return false
-  }
-
-  for (const condition of filter.where ?? []) {
-    if (!isExactMatch(readPayloadPath(event.payload, condition.path), condition.equals)) {
-      return false
-    }
-  }
-
-  return true
-}
-
-function readPayloadPath(payload: unknown, path: string) {
-  if (path.length === 0) {
-    return undefined
-  }
-
-  let current = payload
-  for (const segment of path.split(".")) {
-    if (!isObject(current) || !(segment in current)) {
-      return undefined
-    }
-    current = current[segment as keyof typeof current]
-  }
-  return current
-}
-
-function isExactMatch(actual: unknown, expected: unknown): boolean {
-  if (Object.is(actual, expected)) {
-    return true
-  }
-
-  if (Array.isArray(actual) || Array.isArray(expected)) {
-    if (!Array.isArray(actual) || !Array.isArray(expected) || actual.length !== expected.length) {
-      return false
-    }
-    return actual.every((value, index) => isExactMatch(value, expected[index]))
-  }
-
-  if (!isObject(actual) || !isObject(expected)) {
-    return false
-  }
-
-  const actualKeys = Object.keys(actual)
-  const expectedKeys = Object.keys(expected)
-  if (actualKeys.length !== expectedKeys.length) {
-    return false
-  }
-
-  return expectedKeys.every(
-    (key) =>
-      key in actual &&
-      isExactMatch(actual[key as keyof typeof actual], expected[key as keyof typeof expected]),
-  )
+  return matchesEventEnvelopeFilter(event, filter)
 }
