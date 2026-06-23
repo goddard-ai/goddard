@@ -1,21 +1,11 @@
-import { authBackendRoutes } from "@goddard-ai/auth/backend"
+import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import {
-  composeBackendEvents,
-  composeBackendEventSources,
-  composeBackendRoutes,
-} from "@goddard-ai/backend-plugin"
-import {
-  githubBackendRoutes,
   GitHubWebhookError,
   normalizeGitHubWebhookRequest,
   readGitHubWebhookRequest,
 } from "@goddard-ai/github/backend"
-import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import {
   createRemoteRepoBackendEvent,
-  remoteRepoBackendEvents,
-  remoteRepoBackendEventSources,
-  remoteRepoBackendRoutes,
   type RemoteRepoBackendEvent,
 } from "@goddard-ai/remote-repo/backend"
 import { createClient } from "@libsql/client/web"
@@ -27,17 +17,10 @@ import type { Env } from "../env.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
 import type { BackendPrincipal } from "./events.ts"
 
-const backendRoutes = composeBackendRoutes([
-  authBackendRoutes,
-  githubBackendRoutes,
-  pullRequestBackendRoutes,
-  remoteRepoBackendRoutes,
-])
-const backendEvents = composeBackendEvents([remoteRepoBackendEvents])
-const backendEventSources = composeBackendEventSources(
-  [remoteRepoBackendEventSources],
-  backendEvents,
-)
+const backendPlugins = getDefaultBackendPluginComposition()
+const backendRoutes = backendPlugins.routes
+const backendEvents = backendPlugins.events
+const backendEventSources = backendPlugins.eventSources
 
 export type BackendEventPublication = {
   readonly source: keyof typeof backendEventSources & string
