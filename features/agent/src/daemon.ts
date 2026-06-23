@@ -15,11 +15,7 @@ import {
   type ManagedAgentUpdateCheckState,
 } from "./daemon/update-scheduler.ts"
 import type { ManagedAgentUsageState } from "./daemon/usage-store.ts"
-import {
-  installCatalogManagedAgent,
-  listManagedAgents,
-  uninstallCatalogManagedAgent,
-} from "./list-managed-agents.ts"
+import { installCatalogAgent, listAgents, uninstallCatalogAgent } from "./list-agents.ts"
 
 export type AgentService = ManagedAgentInstallService & {
   readonly resolveLaunchProcessSpec: (
@@ -62,9 +58,9 @@ export const agentPlugin = definePlugin({
       },
       ipcHandlers: {
         agent: {
-          list: async ({ body }) => listManagedAgents(agentContext, body),
-          install: async ({ body }) => installCatalogManagedAgent(agentContext, body),
-          uninstall: async ({ body }) => uninstallCatalogManagedAgent(agentContext, body),
+          list: async ({ body }) => listAgents(agentContext, body),
+          install: async ({ body }) => installCatalogAgent(agentContext, body),
+          uninstall: async ({ body }) => uninstallCatalogAgent(agentContext, body),
         },
       },
       close: () => {

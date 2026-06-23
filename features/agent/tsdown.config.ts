@@ -8,7 +8,7 @@ export default defineConfig({
     "./src/daemon.ts",
     "./src/daemon-ipc.ts",
     "./src/installations.ts",
-    "./src/list-managed-agents.ts",
+    "./src/list-agents.ts",
     "./src/sdk.ts",
     "./src/schema.ts",
   ],

@@ -1,10 +1,10 @@
-/** Shared ACP agent catalog merge helpers for the managed-agent feature. */
+/** Shared ACP agent catalog merge helpers for the agent feature. */
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 
 import { AgentCatalogEntry } from "./schema.ts"
 
-/** Sorts managed-agent catalog entries into a stable user-facing order. */
-export function sortManagedAgentCatalogEntries(entries: AgentCatalogEntry[]) {
+/** Sorts agent catalog entries into a stable user-facing order. */
+export function sortAgentCatalogEntries(entries: AgentCatalogEntry[]) {
   return [...entries].sort((left, right) => {
     const nameCompare = left.name.localeCompare(right.name, undefined, {
       sensitivity: "base",
@@ -13,15 +13,15 @@ export function sortManagedAgentCatalogEntries(entries: AgentCatalogEntry[]) {
   })
 }
 
-/** Converts config-declared registry overrides into the shared managed-agent catalog shape. */
-export function createConfigManagedAgentCatalogEntries(
+/** Converts config-declared registry overrides into the shared agent catalog shape. */
+export function createConfigAgentCatalogEntries(
   registry: Record<string, AgentDistribution> | undefined,
 ) {
   if (!registry) {
     return []
   }
 
-  return sortManagedAgentCatalogEntries(
+  return sortAgentCatalogEntries(
     Object.entries(registry).map(([id, agent]) =>
       AgentCatalogEntry.parse({
         ...agent,
@@ -34,7 +34,7 @@ export function createConfigManagedAgentCatalogEntries(
 }
 
 /** Applies config-declared registry overrides on top of the upstream catalog. */
-export function mergeManagedAgentCatalogEntries(
+export function mergeAgentCatalogEntries(
   registryEntries: AgentCatalogEntry[],
   configEntries: AgentCatalogEntry[],
 ) {
@@ -55,5 +55,5 @@ export function mergeManagedAgentCatalogEntries(
     )
   }
 
-  return sortManagedAgentCatalogEntries([...mergedById.values()])
+  return sortAgentCatalogEntries([...mergedById.values()])
 }

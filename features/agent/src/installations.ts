@@ -197,7 +197,7 @@ export async function getAgentInstallationStates(adapters: AdapterCatalogEntry[]
   )
 }
 
-export async function installManagedAgent(adapter: AdapterCatalogEntry) {
+export async function installAgent(adapter: AdapterCatalogEntry) {
   if (adapter.source === "config") {
     return await getAgentInstallationState(adapter, await readInstalledAdapterIds())
   }
@@ -230,7 +230,7 @@ export async function installManagedAgent(adapter: AdapterCatalogEntry) {
   return await getAgentInstallationState(adapter, installedAdapterIds)
 }
 
-export async function uninstallManagedAgent(agentId: string) {
+export async function uninstallAgent(agentId: string) {
   const installedAdapterIds = await readInstalledAdapterIds()
   installedAdapterIds.delete(agentId)
   await writeInstalledAdapterIds(installedAdapterIds)

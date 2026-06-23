@@ -5,12 +5,12 @@ import type { ManagedAgentInstallService } from "@goddard-ai/agent/daemon/instal
 import { createAcpRegistryService } from "acp-client/node"
 import { describe, expect, test } from "bun:test"
 
-import { installCatalogManagedAgent, listManagedAgents } from "../src/list-managed-agents.ts"
+import { installCatalogAgent, listAgents } from "../src/list-agents.ts"
 
 async function withIsolatedHome(callback: () => Promise<void>) {
   const previousHome = process.env.HOME
   const previousPath = process.env.PATH
-  const homeDir = await mkdtemp(join(tmpdir(), "goddard-managed-agent-installations-"))
+  const homeDir = await mkdtemp(join(tmpdir(), "goddard-agent-installations-"))
 
   process.env.HOME = homeDir
   process.env.PATH = ""
@@ -94,10 +94,10 @@ function createInstalledAgent(agentId: string) {
   }
 }
 
-describe("managed-agent listing", () => {
+describe("agent listing", () => {
   test("merges config-declared adapters and resolves a valid default adapter", async () => {
     await expect(
-      listManagedAgents(
+      listAgents(
         {
           registryService: {
             async listAdapters() {
@@ -163,7 +163,7 @@ describe("managed-agent listing", () => {
   test("lists adapters from acp-client registry data plus project config entries", async () => {
     const cacheDir = await mkdtemp(join(tmpdir(), "goddard-acp-client-registry-"))
     try {
-      const response = await listManagedAgents(
+      const response = await listAgents(
         {
           registryService: createAcpRegistryService({
             cacheDir,
@@ -225,7 +225,7 @@ describe("managed-agent listing", () => {
 
   test("uses agents.default as the adapter default when no narrower default is configured", async () => {
     await expect(
-      listManagedAgents(
+      listAgents(
         {
           registryService: {
             async listAdapters() {
@@ -320,7 +320,7 @@ describe("managed-agent listing", () => {
         },
       }
 
-      await expect(listManagedAgents(context, { cwd: "/repo" })).resolves.toMatchObject({
+      await expect(listAgents(context, { cwd: "/repo" })).resolves.toMatchObject({
         defaultAgentId: null,
         agents: [
           {
@@ -350,10 +350,10 @@ describe("managed-agent listing", () => {
         ]),
       })
 
-      await installCatalogManagedAgent(context, { agentId: "registry-agent" })
+      await installCatalogAgent(context, { agentId: "registry-agent" })
 
-      const installedResponse = await listManagedAgents(context, { cwd: "/repo" })
-      const settingsResponse = await listManagedAgents(context, {
+      const installedResponse = await listAgents(context, { cwd: "/repo" })
+      const settingsResponse = await listAgents(context, {
         cwd: "/repo",
         includeUninstalled: true,
       })
@@ -371,7 +371,7 @@ describe("managed-agent listing", () => {
 
   test("omits default adapter when the configured agent is not in the merged catalog", async () => {
     await expect(
-      listManagedAgents(
+      listAgents(
         {
           registryService: {
             async listAdapters() {
@@ -407,7 +407,7 @@ describe("managed-agent listing", () => {
 
   test("surfaces managed install status without local install paths", async () => {
     await expect(
-      listManagedAgents(
+      listAgents(
         {
           registryService: {
             async listAdapters() {
@@ -481,7 +481,7 @@ describe("managed-agent listing", () => {
 
   test("lists managed registry adapters while hiding ordinary uninstalled registry adapters", async () => {
     await withIsolatedHome(async () => {
-      const response = await listManagedAgents(
+      const response = await listAgents(
         {
           registryService: {
             async listAdapters() {
@@ -554,7 +554,7 @@ describe("managed-agent listing", () => {
   })
 
   test("surfaces failed managed install status with sanitized previous install metadata", async () => {
-    const response = await listManagedAgents(
+    const response = await listAgents(
       {
         registryService: {
           async listAdapters() {
