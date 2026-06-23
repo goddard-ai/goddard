@@ -4,12 +4,20 @@ import {
 } from "@goddard-ai/remote-repo/backend"
 import { describe, expect, test } from "bun:test"
 
-import { githubBackendRoutes, normalizeGitHubWebhookRequest } from "../src/backend.ts"
+import {
+  githubBackendPlugin,
+  githubBackendRoutes,
+  normalizeGitHubWebhookRequest,
+} from "../src/backend.ts"
 
 describe("github feature package", () => {
   test("exports selected feature entrypoints", () => {
     expect(githubBackendRoutes.webhooks.path.source).toBe("/webhooks")
     expect(githubBackendRoutes.webhooks.children.github.path?.source).toBe("/github")
+    expect(githubBackendPlugin.name).toBe("github")
+    expect(githubBackendPlugin.routes?.webhooks.children.github.path?.source).toBe("/github")
+    expect("events" in githubBackendPlugin).toBe(false)
+    expect("eventSources" in githubBackendPlugin).toBe(false)
   })
 
   test("normalizes raw GitHub webhook deliveries with provider provenance", () => {
