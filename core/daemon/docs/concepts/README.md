@@ -1,6 +1,6 @@
 # Daemon Concepts
 
-The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, managed agents, and auth. This section defines those concepts independently so feature pages can stay focused.
+The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, agents, and auth. This section defines those concepts independently so feature pages can stay focused.
 
 ## Purpose
 
@@ -29,7 +29,7 @@ The daemon has cross-cutting concepts that appear in many feature workflows, suc
 
 ## Agent availability and identity
 
-- [Managed agents](./managed-agents.md)
+- [Agents](./agents.md)
   - Launch catalog entries, local launch visibility, and runnable process resolution.
 - [Managed agent installs](./managed-agent-installs.md)
   - User-authorized install and update behavior for managed ACP agents.
