@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 
-import { $type, defineIpcRoutes, http, listIpcRouteActions, ndjson } from "../src/index.ts"
+import {
+  $type,
+  defineIpcRoutes,
+  http,
+  ipcMetadata,
+  listIpcRouteActions,
+  ndjson,
+} from "../src/index.ts"
 
 describe("IPC route tree", () => {
   test("lists action leaves with request and stream metadata", () => {
@@ -12,7 +19,13 @@ describe("IPC route tree", () => {
         }),
       }),
       session: http.resource("session", {
+        ...ipcMetadata({
+          description: "Daemon-managed session control.",
+        }),
         get: http.post("get", {
+          ...ipcMetadata({
+            description: "Fetches one daemon-managed session record.",
+          }),
           body: z.object({ id: z.string() }),
           response: $type<{ id: string }>(),
         }),
@@ -69,6 +82,10 @@ describe("IPC route tree", () => {
         streamsNdjson: false,
       },
     ])
+    expect(routes.session.metadata?.description).toBe("Daemon-managed session control.")
+    expect(actions[1]?.action.metadata?.description).toBe(
+      "Fetches one daemon-managed session record.",
+    )
     expect(actions[1]?.action).toBe(routes.session.children.get)
   })
 })

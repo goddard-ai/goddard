@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, ipcMetadata, ndjson } from "@goddard-ai/ipc"
 
 import {
   CancelSessionRequest,
@@ -49,6 +49,9 @@ import {
 
 export const sessionIpcRoutes = defineIpcRoutes({
   session: http.resource("session", {
+    ...ipcMetadata({
+      description: "Daemon-managed session control.",
+    }),
     /** Creates one daemon-managed session record. */
     create: http.post("create", {
       body: CreateSessionRequest,
@@ -56,6 +59,9 @@ export const sessionIpcRoutes = defineIpcRoutes({
     }),
     /** Lists daemon-managed sessions and pagination state. */
     list: http.post("list", {
+      ...ipcMetadata({
+        description: "Lists daemon-managed sessions and pagination state.",
+      }),
       body: ListSessionsRequest,
       response: $type<ListSessionsResponse>(),
     }),

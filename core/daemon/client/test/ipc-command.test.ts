@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runSafely } from "cmd-ts"
+import { dryRun, runSafely } from "cmd-ts"
 
 import type { DaemonIpcClientFactory } from "../src/node/index.ts"
 import { createDaemonIpcCommand } from "../src/node/ipc-command.ts"
@@ -164,6 +164,23 @@ describe("daemon IPC command", () => {
       },
     ])
     expect(output).toEqual([JSON.stringify({ token: "token-1" })])
+  })
+
+  test("uses route metadata descriptions in generated help", async () => {
+    const { app } = createFixture()
+
+    const resourceHelp = await dryRun(app, ["session", "--help"])
+    const actionHelp = await dryRun(app, ["session", "list", "--help"])
+
+    expect(resourceHelp._tag).toBe("error")
+    expect(actionHelp._tag).toBe("error")
+    if (resourceHelp._tag === "error") {
+      expect(resourceHelp.error).toContain("Daemon-managed session control.")
+      expect(resourceHelp.error).toContain("Lists daemon-managed sessions and pagination state.")
+    }
+    if (actionHelp._tag === "error") {
+      expect(actionHelp.error).toContain("Lists daemon-managed sessions and pagination state.")
+    }
   })
 
   test("rejects invalid JSON before dispatch", async () => {

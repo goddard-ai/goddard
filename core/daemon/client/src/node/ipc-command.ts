@@ -101,6 +101,7 @@ function createRouteCommandTree(
       node.kind === "resource"
         ? subcommands({
             name: commandName,
+            description: node.metadata?.description,
             cmds: createRouteCommandTree(node.children, options, keyPath),
           })
         : createRouteActionCommand(key, keyPath, options)
@@ -457,7 +458,7 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
 }
 
 function formatRouteDescription(route: IpcRouteAction) {
-  return `${route.action.method} /${route.httpPath.join("/")}`
+  return route.action.metadata?.description ?? `${route.action.method} /${route.httpPath.join("/")}`
 }
 
 function toCommandName(value: string) {

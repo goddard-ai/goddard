@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, ipcMetadata } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 /** Core daemon IPC error codes shared by clients and non-feature daemon surfaces. */
@@ -121,7 +121,13 @@ export type DaemonEventsStreamRequest = z.infer<typeof DaemonEventsStreamRequest
 /** Core daemon IPC routes that are not owned by feature packages. */
 export const coreDaemonIpcRoutes = defineIpcRoutes({
   daemon: http.resource("daemon", {
+    ...ipcMetadata({
+      description: "Core daemon health and browser-access control.",
+    }),
     health: http.get("health", {
+      ...ipcMetadata({
+        description: "Checks whether the daemon IPC server is responding.",
+      }),
       response: $type<{ ok: boolean }>(),
     }),
     browserAccess: http.resource("browser-access", {
