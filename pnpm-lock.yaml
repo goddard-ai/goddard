@@ -541,6 +541,9 @@ importers:
       '@goddard-ai/backend-plugin':
         specifier: workspace:*
         version: link:../backend-plugin
+      '@goddard-ai/event-filter':
+        specifier: workspace:*
+        version: link:../event-filter
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../ipc
@@ -550,9 +553,6 @@ importers:
       kindstore:
         specifier: 'catalog:'
         version: 0.4.5(zod@4.4.3)
-      radashi:
-        specifier: 'catalog:'
-        version: 12.9.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -616,6 +616,8 @@ importers:
       '@goddard-ai/workforce':
         specifier: workspace:*
         version: link:../../features/workforce
+
+  core/event-filter: {}
 
   core/fixtures:
     dependencies:

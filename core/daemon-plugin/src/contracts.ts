@@ -1,5 +1,6 @@
 /** Internal daemon plugin support contracts for statically composed feature packages. */
 import type { HttpRouteTree as BackendRouteTree, RouzerClient } from "@goddard-ai/backend-plugin"
+import type { EventEnvelopeFilter, EventEnvelopePropertyFilter } from "@goddard-ai/event-filter"
 import { type HttpRouteTree, type RouteRequestHandlerMap } from "@goddard-ai/ipc"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { KindRegistry, Kindstore, SchemaMigrationPlanner } from "kindstore"
@@ -63,15 +64,9 @@ export type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
   [TName in keyof TEvents & string]: DaemonEventEnvelope<TName, InferEventPayload<TEvents[TName]>>
 }[keyof TEvents & string]
 
-export type DaemonEventFilter = {
-  readonly names?: readonly string[]
-  readonly where?: readonly DaemonEventPropertyFilter[]
-}
+export type DaemonEventFilter = EventEnvelopeFilter
 
-export type DaemonEventPropertyFilter = {
-  readonly path: string
-  readonly equals: unknown
-}
+export type DaemonEventPropertyFilter = EventEnvelopePropertyFilter
 
 export type DaemonEventSubscriptionEvent = {
   readonly state: "started" | "ended"
