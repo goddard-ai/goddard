@@ -51,6 +51,7 @@
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
     "cmd-ts": "catalog:",
-    "radashi": "catalog:"
+    "radashi": "catalog:",
+    "zod": "catalog:"
   }
 }

@@ -80,6 +80,16 @@ describe("daemon IPC command", () => {
     expect(output).toEqual([JSON.stringify({ id: "ses_session_1" })])
   })
 
+  test("prints expected JSON shape when request payload is missing", async () => {
+    const { app, calls, output } = createFixture()
+
+    const result = await runSafely(app, ["session", "get"])
+
+    expect(result._tag).toBe("ok")
+    expect(calls).toEqual([])
+    expect(output).toEqual([JSON.stringify({ id: "<value>" }, null, 2)])
+  })
+
   test("validates and dispatches query routes from JSON input", async () => {
     const { app, calls, output } = createFixture()
 

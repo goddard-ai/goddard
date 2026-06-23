@@ -580,6 +580,9 @@ importers:
       radashi:
         specifier: 'catalog:'
         version: 12.9.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   core/default-features:
     dependencies:

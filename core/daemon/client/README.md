@@ -71,6 +71,15 @@ Request-bearing routes accept one JSON payload:
 goddard ipc session get --json '{"id":"ses_..."}'
 ```
 
+Calling a request-bearing route without `--json` prints the expected JSON shape instead of contacting the daemon:
+
+```text
+goddard ipc session get
+{
+  "id": "<value>"
+}
+```
+
 Routes without request payloads take no payload:
 
 ```text

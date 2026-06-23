@@ -1,5 +1,7 @@
 import { listIpcRouteActions, type HttpRouteTree, type IpcRouteAction } from "@goddard-ai/ipc"
-import { command, option, subcommands, type Runner, type Type } from "cmd-ts"
+import { command, option, optional, subcommands, type Runner, type Type } from "cmd-ts"
+import { toJSONSchema } from "zod"
+import type { ToJSONSchemaParams } from "zod/v4/core"
 
 import { daemonIpcRoutes } from "../daemon-ipc.ts"
 import type { DaemonClientEnv, DaemonIpcClientFactory } from "./index.ts"
@@ -12,6 +14,8 @@ type RouteCommandContext = {
   client: unknown
   output: Required<CommandOutput>
 }
+
+type JsonSchema = boolean | { [key: string]: unknown }
 
 /** Options for the generated daemon IPC command surface. */
 export type DaemonIpcCommandOptions = {
@@ -39,6 +43,7 @@ export function createDaemonIpcCommand(options: DaemonIpcCommandOptions = {}) {
     listIpcRouteActions(daemonIpcRoutes).map((route) => [formatRouteKey(route.keyPath), route]),
   )
   const commandTree = createRouteCommandTree(daemonIpcRoutes, {
+    output,
     routeMetadata,
     async getContext() {
       const { createDaemonIpcClientFromEnv } = await import("./index.ts")
@@ -66,6 +71,7 @@ type RouteCommandTree = Record<string, Runner<any, any>>
 function createRouteCommandTree(
   routes: HttpRouteTree,
   options: {
+    output: Required<CommandOutput>
     routeMetadata: ReadonlyMap<string, IpcRouteAction>
     getContext: () => Promise<RouteCommandContext>
   },
@@ -93,6 +99,7 @@ function createRouteActionCommand(
   key: string,
   keyPath: readonly string[],
   options: {
+    output: Required<CommandOutput>
     routeMetadata: ReadonlyMap<string, IpcRouteAction>
     getContext: () => Promise<RouteCommandContext>
   },
@@ -111,11 +118,16 @@ function createRouteActionCommand(
         : {
             json: option({
               long: "json",
-              type: createJsonRouteInput(metadata),
+              type: optional(createJsonRouteInput(metadata)),
               description: "JSON request payload.",
             }),
           },
     handler: async (args: { json?: unknown }) => {
+      if (metadata.requestInput !== null && args.json === undefined) {
+        await options.output.writeLine(JSON.stringify(createExpectedJsonShape(metadata), null, 2))
+        return
+      }
+
       const context = await options.getContext()
       const method = selectRouteMethod(context.client, keyPath)
       const response = await method(...(metadata.requestInput === null ? [] : [args.json]))
@@ -147,6 +159,122 @@ function createJsonRouteInput(route: IpcRouteAction): Type<string, unknown> {
       return (schema.parse as (value: unknown) => unknown)(parsed)
     },
   }
+}
+
+function createExpectedJsonShape(route: IpcRouteAction) {
+  if (route.requestInput === null) {
+    return {}
+  }
+
+  const schema = route.action.schema[route.requestInput]
+  if (!schema || typeof schema !== "object") {
+    return {}
+  }
+
+  const jsonSchema = toJSONSchema(schema as never, jsonSchemaParams)
+  return createShapeFromJsonSchema(jsonSchema, jsonSchema)
+}
+
+const jsonSchemaParams: ToJSONSchemaParams = {
+  io: "input",
+  unrepresentable: "any",
+}
+
+function createShapeFromJsonSchema(schema: JsonSchema, rootSchema: JsonSchema): unknown {
+  if (schema === true || schema === false) {
+    return "<value>"
+  }
+
+  const resolvedSchema = resolveJsonSchemaRef(schema, rootSchema)
+  if (resolvedSchema !== schema) {
+    return createShapeFromJsonSchema(resolvedSchema, rootSchema)
+  }
+
+  if (Array.isArray(resolvedSchema.enum) && resolvedSchema.enum.length > 0) {
+    return resolvedSchema.enum[0]
+  }
+  if ("const" in resolvedSchema) {
+    return resolvedSchema.const
+  }
+
+  const unionSchema = readFirstSchema(resolvedSchema.anyOf ?? resolvedSchema.oneOf)
+  if (unionSchema) {
+    return createShapeFromJsonSchema(unionSchema, rootSchema)
+  }
+
+  const type = resolveJsonSchemaType(resolvedSchema.type)
+  if (type === "object") {
+    return createObjectShape(resolvedSchema, rootSchema)
+  }
+  if (type === "array") {
+    return [createShapeFromJsonSchema(readFirstSchema(resolvedSchema.items) ?? true, rootSchema)]
+  }
+  if (type === "string") {
+    return "<string>"
+  }
+  if (type === "number" || type === "integer") {
+    return 0
+  }
+  if (type === "boolean") {
+    return false
+  }
+  if (type === "null") {
+    return null
+  }
+
+  return "<value>"
+}
+
+function createObjectShape(schema: Record<string, unknown>, rootSchema: JsonSchema) {
+  const properties =
+    schema.properties && typeof schema.properties === "object"
+      ? (schema.properties as Record<string, JsonSchema>)
+      : {}
+  const shape: Record<string, unknown> = {}
+
+  for (const [key, propertySchema] of Object.entries(properties)) {
+    shape[key] = createShapeFromJsonSchema(propertySchema, rootSchema)
+  }
+
+  return shape
+}
+
+function resolveJsonSchemaType(type: unknown) {
+  if (typeof type === "string") {
+    return type
+  }
+  if (Array.isArray(type)) {
+    return type.find((value) => typeof value === "string" && value !== "null") ?? type[0]
+  }
+  return undefined
+}
+
+function readFirstSchema(value: unknown): JsonSchema | undefined {
+  if (Array.isArray(value)) {
+    return value.find(isJsonSchema)
+  }
+  return isJsonSchema(value) ? value : undefined
+}
+
+function resolveJsonSchemaRef(schema: Record<string, unknown>, rootSchema: JsonSchema): JsonSchema {
+  if (typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/$defs/")) {
+    return schema
+  }
+  if (rootSchema === false || rootSchema === true || !rootSchema.$defs) {
+    return schema
+  }
+
+  const key = schema.$ref.slice("#/$defs/".length)
+  const defs =
+    typeof rootSchema.$defs === "object" && rootSchema.$defs !== null
+      ? (rootSchema.$defs as Record<string, unknown>)
+      : {}
+  const definition = defs[key]
+  return isJsonSchema(definition) ? definition : schema
+}
+
+function isJsonSchema(value: unknown): value is JsonSchema {
+  return typeof value === "boolean" || (typeof value === "object" && value !== null)
 }
 
 function selectRouteMethod(client: unknown, keyPath: readonly string[]) {
