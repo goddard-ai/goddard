@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { lstat, mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
 import { tmpdir } from "node:os"
@@ -137,6 +136,7 @@ test(
           name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
+            provider: "github",
             owner: "other",
             repo: "repo",
             prNumber: 123,
@@ -171,6 +171,7 @@ test(
           name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
+            provider: "github",
             owner: "test",
             repo: "repo",
             prNumber: 123,
@@ -482,12 +483,15 @@ test("daemon runtime resolves the global daemon port override", async () => {
   expect(resolveRuntimeConfig().port).toBe(41236)
 })
 
-function runGit(cwd: string, args: string[]): void {
-  const result = spawnSync("git", args, {
+async function runGit(cwd: string, args: string[]): Promise<void> {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
-  expect(result.status).toBe(0)
+  const exitCode = await subprocess.exited
+  expect(exitCode).toBe(0)
 }
 
 async function captureJsonLogs<T>(
@@ -561,11 +565,11 @@ async function createRepoFixture(): Promise<string> {
     "utf-8",
   )
 
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.email", "bot@example.com"])
-  runGit(repoDir, ["config", "user.name", "Bot"])
-  runGit(repoDir, ["add", "."])
-  runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Bot"])
+  await runGit(repoDir, ["add", "."])
+  await runGit(repoDir, ["commit", "-m", "init"])
 
   return repoDir
 }

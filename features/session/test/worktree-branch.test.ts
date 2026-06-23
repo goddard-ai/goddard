@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -60,7 +59,7 @@ test("resolveAvailableWorktreeBranchName skips existing generated branches", asy
     cwd: repoDir,
     branchPrefix: "agent",
   })
-  runGit(repoDir, ["branch", firstBranch])
+  await runGit(repoDir, ["branch", firstBranch])
 
   const secondBranch = await resolveAvailableWorktreeBranchName({
     cwd: repoDir,
@@ -77,20 +76,23 @@ async function createRepoFixture() {
 
   await writeFile(join(repoDir, "package.json"), JSON.stringify({ name: "repo" }), "utf-8")
 
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.email", "bot@example.com"])
-  runGit(repoDir, ["config", "user.name", "Bot"])
-  runGit(repoDir, ["add", "."])
-  runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "user.email", "bot@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Bot"])
+  await runGit(repoDir, ["add", "."])
+  await runGit(repoDir, ["commit", "-m", "init"])
 
   return repoDir
 }
 
-function runGit(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
+async function runGit(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const exitCode = await subprocess.exited
 
-  expect(result.status).toBe(0)
+  expect(exitCode).toBe(0)
 }

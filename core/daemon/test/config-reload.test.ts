@@ -297,6 +297,7 @@ function createFixtureAgent(name: string) {
 function createFeedbackEvent(): Extract<RepoEvent, { type: "comment" }> {
   return {
     type: "comment",
+    provider: "github",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,

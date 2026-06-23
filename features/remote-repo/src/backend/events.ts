@@ -106,8 +106,11 @@ export function createRemoteRepoBackendEvent(event: RepoEvent): RemoteRepoBacken
 }
 
 function principalHasDisplayName(principal: RemoteRepoPrincipal, displayName: string) {
-  return principal.providerIdentities.some(
-    (identity) => identity.displayName === displayName || identity.subject === displayName,
+  return (
+    principal.id === displayName ||
+    principal.providerIdentities.some(
+      (identity) => identity.displayName === displayName || identity.subject === displayName,
+    )
   )
 }
 

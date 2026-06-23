@@ -11,10 +11,10 @@ test("daemon backend client creates PRs and checks managed status through rouzer
   let authorization: string | null = null
 
   try {
-    const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
+    const flow = controlPlane.startDeviceFlow(githubStart("alec"))
     const session = controlPlane.completeDeviceFlow({
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
     authorization = `Bearer ${session.token}`
 
@@ -23,6 +23,7 @@ test("daemon backend client creates PRs and checks managed status through rouzer
       getAuthorizationHeader: () => authorization,
     })
     const pr = await client.pullRequests.create({
+      provider: "github",
       owner: "goddard-ai",
       repo: "sdk",
       title: "Add daemon backend route client",
@@ -34,6 +35,7 @@ test("daemon backend client creates PRs and checks managed status through rouzer
     expect(pr.number).toBe(1)
     await expect(
       client.pullRequests.managed({
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: pr.number,
@@ -55,10 +57,10 @@ test("daemon backend client uses injected auth state for authenticated requests"
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const start = await client.auth.device.start({ githubUsername: "alec" })
+    const start = await client.auth.device.start(githubStart("alec"))
     const session = await client.auth.device.complete({
       deviceCode: start.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     authorization = `Bearer ${session.token}`
@@ -78,10 +80,10 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   > | null = null
 
   try {
-    const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
+    const flow = controlPlane.startDeviceFlow(githubStart("alec"))
     const session = controlPlane.completeDeviceFlow({
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
     authorization = `Bearer ${session.token}`
 
@@ -96,6 +98,7 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
     })
 
     const pr = await client.pullRequests.create({
+      provider: "github",
       owner: "goddard-ai",
       repo: "sdk",
       title: "Stream me",
@@ -118,6 +121,30 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
     await server.close()
   }
 })
+
+function githubStart(login: string) {
+  return {
+    provider: "github",
+    loginHint: login,
+  }
+}
+
+function githubIdentity(login: string) {
+  return {
+    provider: "github",
+    subject: String(hashTestIdentity(login)),
+    displayName: login,
+  }
+}
+
+function hashTestIdentity(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash) + 1000
+}
 
 test("daemon backend client reports missing stream auth as unauthenticated errors", async () => {
   const client = createBackendClient({
