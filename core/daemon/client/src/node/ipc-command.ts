@@ -1,5 +1,14 @@
 import { listIpcRouteActions, type HttpRouteTree, type IpcRouteAction } from "@goddard-ai/ipc"
-import { command, option, optional, subcommands, type Runner, type Type } from "cmd-ts"
+import {
+  number as cmdNumber,
+  string as cmdString,
+  command,
+  option,
+  optional,
+  subcommands,
+  type Runner,
+  type Type,
+} from "cmd-ts"
 import { toJSONSchema } from "zod"
 import type { ToJSONSchemaParams } from "zod/v4/core"
 
@@ -16,6 +25,11 @@ type RouteCommandContext = {
 }
 
 type JsonSchema = boolean | { [key: string]: unknown }
+type ScalarRouteField = {
+  key: string
+  long: string
+  type: "boolean" | "number" | "string"
+}
 
 /** Options for the generated daemon IPC command surface. */
 export type DaemonIpcCommandOptions = {
@@ -112,25 +126,17 @@ function createRouteActionCommand(
   return command({
     name: toCommandName(key),
     description: formatRouteDescription(metadata),
-    args:
-      metadata.requestInput === null
-        ? {}
-        : {
-            json: option({
-              long: "json",
-              type: optional(createJsonRouteInput(metadata)),
-              description: "JSON request payload.",
-            }),
-          },
-    handler: async (args: { json?: unknown }) => {
-      if (metadata.requestInput !== null && args.json === undefined) {
+    args: createRouteArgs(metadata) as any,
+    handler: async (args: Record<string, unknown>) => {
+      const payload = resolveRoutePayload(metadata, args)
+      if (metadata.requestInput !== null && payload === undefined) {
         await options.output.writeLine(JSON.stringify(createExpectedJsonShape(metadata), null, 2))
         return
       }
 
       const context = await options.getContext()
       const method = selectRouteMethod(context.client, keyPath)
-      const response = await method(...(metadata.requestInput === null ? [] : [args.json]))
+      const response = await method(...(metadata.requestInput === null ? [] : [payload]))
 
       if (metadata.streamsNdjson) {
         await writeStream(response, context.output)
@@ -140,6 +146,26 @@ function createRouteActionCommand(
       await context.output.writeLine(JSON.stringify(response))
     },
   })
+}
+
+function createRouteArgs(route: IpcRouteAction) {
+  if (route.requestInput === null) {
+    return {}
+  }
+
+  const args: Record<string, unknown> = {
+    json: option({
+      long: "json",
+      type: optional(createJsonRouteInput(route)),
+      description: "JSON request payload.",
+    }),
+  }
+
+  for (const field of listScalarRouteFields(route)) {
+    args[field.key] = createScalarRouteOption(field)
+  }
+
+  return args
 }
 
 function createJsonRouteInput(route: IpcRouteAction): Type<string, unknown> {
@@ -161,6 +187,83 @@ function createJsonRouteInput(route: IpcRouteAction): Type<string, unknown> {
   }
 }
 
+function createScalarRouteOption(field: ScalarRouteField) {
+  if (field.type === "number") {
+    return option({
+      long: field.long,
+      type: optional(cmdNumber),
+      description: `JSON number field ${field.key}.`,
+    })
+  }
+
+  if (field.type === "boolean") {
+    return option({
+      long: field.long,
+      type: optional(BooleanString),
+      description: `JSON boolean field ${field.key}.`,
+    })
+  }
+
+  return option({
+    long: field.long,
+    type: optional(cmdString),
+    description: `JSON string field ${field.key}.`,
+  })
+}
+
+const BooleanString: Type<string, boolean> = {
+  displayName: "true/false",
+  async from(value) {
+    if (value === "true") {
+      return true
+    }
+    if (value === "false") {
+      return false
+    }
+    throw new Error(`Expected boolean value to be either "true" or "false".`)
+  },
+}
+
+function resolveRoutePayload(route: IpcRouteAction, args: Record<string, unknown>) {
+  if (route.requestInput === null) {
+    return undefined
+  }
+
+  if (args.json !== undefined) {
+    return args.json
+  }
+
+  const payload = createScalarPayload(route, args)
+  return payload === undefined ? undefined : validateRoutePayload(route, payload)
+}
+
+function createScalarPayload(route: IpcRouteAction, args: Record<string, unknown>) {
+  const fields = listScalarRouteFields(route)
+  const payload: Record<string, unknown> = {}
+
+  for (const field of fields) {
+    const value = args[field.key]
+    if (value !== undefined) {
+      payload[field.key] = value
+    }
+  }
+
+  return Object.keys(payload).length === 0 ? undefined : payload
+}
+
+function validateRoutePayload(route: IpcRouteAction, payload: unknown) {
+  if (route.requestInput === null) {
+    return undefined
+  }
+
+  const schema = route.action.schema[route.requestInput]
+  if (!schema || typeof schema !== "object" || !("parse" in schema)) {
+    throw new Error(`Route ${route.keyPath.join(".")} is missing a request validator.`)
+  }
+
+  return (schema.parse as (value: unknown) => unknown)(payload)
+}
+
 function createExpectedJsonShape(route: IpcRouteAction) {
   if (route.requestInput === null) {
     return {}
@@ -173,6 +276,46 @@ function createExpectedJsonShape(route: IpcRouteAction) {
 
   const jsonSchema = toJSONSchema(schema as never, jsonSchemaParams)
   return createShapeFromJsonSchema(jsonSchema, jsonSchema)
+}
+
+function listScalarRouteFields(route: IpcRouteAction): ScalarRouteField[] {
+  if (route.requestInput === null) {
+    return []
+  }
+
+  const schema = route.action.schema[route.requestInput]
+  if (!schema || typeof schema !== "object") {
+    return []
+  }
+
+  return listScalarFieldsFromJsonSchema(toJSONSchema(schema as never, jsonSchemaParams))
+}
+
+function listScalarFieldsFromJsonSchema(schema: JsonSchema): ScalarRouteField[] {
+  if (schema === true || schema === false || schema.type !== "object") {
+    return []
+  }
+
+  const properties =
+    schema.properties && typeof schema.properties === "object"
+      ? (schema.properties as Record<string, JsonSchema>)
+      : {}
+
+  return Object.entries(properties).flatMap(([key, propertySchema]) => {
+    if (key === "json" || propertySchema === true || propertySchema === false) {
+      return []
+    }
+
+    const type = resolveJsonSchemaType(propertySchema.type)
+    if (type === "string" || type === "boolean") {
+      return [{ key, long: toCommandName(key), type }]
+    }
+    if (type === "number" || type === "integer") {
+      return [{ key, long: toCommandName(key), type: "number" }]
+    }
+
+    return []
+  })
 }
 
 const jsonSchemaParams: ToJSONSchemaParams = {

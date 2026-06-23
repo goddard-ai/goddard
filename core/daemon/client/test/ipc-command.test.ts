@@ -27,7 +27,17 @@ function createFixture() {
         },
       },
     },
+    adapter: {
+      list: async (payload: unknown) => {
+        calls.push({ route: "adapter.list", payload })
+        return { adapters: [] }
+      },
+    },
     session: {
+      list: async (payload: unknown) => {
+        calls.push({ route: "session.list", payload })
+        return { sessions: [] }
+      },
       get: async (payload: unknown) => {
         calls.push({ route: "session.get", payload })
         return { id: "ses_session_1" }
@@ -78,6 +88,35 @@ describe("daemon IPC command", () => {
     expect(result._tag).toBe("ok")
     expect(calls).toEqual([{ route: "session.get", payload: { id: "ses_session_1" } }])
     expect(output).toEqual([JSON.stringify({ id: "ses_session_1" })])
+  })
+
+  test("dispatches string and boolean fields from generated scalar options", async () => {
+    const { app, calls, output } = createFixture()
+
+    const result = await runSafely(app, [
+      "adapter",
+      "list",
+      "--cwd",
+      "/repo",
+      "--include-uninstalled",
+      "true",
+    ])
+
+    expect(result._tag).toBe("ok")
+    expect(calls).toEqual([
+      { route: "adapter.list", payload: { cwd: "/repo", includeUninstalled: true } },
+    ])
+    expect(output).toEqual([JSON.stringify({ adapters: [] })])
+  })
+
+  test("dispatches number fields from generated scalar options", async () => {
+    const { app, calls, output } = createFixture()
+
+    const result = await runSafely(app, ["session", "list", "--limit", "25", "--cursor", "abc"])
+
+    expect(result._tag).toBe("ok")
+    expect(calls).toEqual([{ route: "session.list", payload: { limit: 25, cursor: "abc" } }])
+    expect(output).toEqual([JSON.stringify({ sessions: [] })])
   })
 
   test("prints expected JSON shape when request payload is missing", async () => {

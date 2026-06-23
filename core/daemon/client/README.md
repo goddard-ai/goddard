@@ -71,6 +71,13 @@ Request-bearing routes accept one JSON payload:
 goddard ipc session get --json '{"id":"ses_..."}'
 ```
 
+Top-level string, number, and boolean request fields are also exposed as generated options when the schema can represent them:
+
+```text
+goddard ipc session list --limit 25 --cursor abc
+goddard ipc adapter list --cwd /repo --include-uninstalled true
+```
+
 Calling a request-bearing route without `--json` prints the expected JSON shape instead of contacting the daemon:
 
 ```text
