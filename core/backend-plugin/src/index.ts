@@ -54,6 +54,7 @@ export type BackendProviderPrincipal = {
     readonly subject: string
     readonly displayName?: string
   }[]
+  readonly repositories?: readonly BackendProviderRepositoryRef[]
 }
 
 export type BackendProviderRepositoryRef<TProvider extends string = string> = {
@@ -64,6 +65,7 @@ export type BackendProviderRepositoryRef<TProvider extends string = string> = {
 
 export type BackendProviderPullRequestCreateInput<TProvider extends string = string> =
   BackendProviderRepositoryRef<TProvider> & {
+    readonly env?: unknown
     readonly title: string
     readonly body?: string
     readonly head: string
@@ -72,6 +74,7 @@ export type BackendProviderPullRequestCreateInput<TProvider extends string = str
 
 export type BackendProviderPullRequestCommentInput<TProvider extends string = string> =
   BackendProviderRepositoryRef<TProvider> & {
+    readonly env?: unknown
     readonly prNumber: number
     readonly body: string
   }

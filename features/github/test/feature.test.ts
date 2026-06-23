@@ -5,8 +5,11 @@ import {
 import { describe, expect, test } from "bun:test"
 
 import {
+  canGitHubPrincipalAccessRepository as canGitHubBackendPrincipalAccessRepository,
+  createPullRequestWithGitHubApp,
   githubBackendPlugin,
   githubBackendRoutes,
+  GitHubProviderError,
   normalizeGitHubWebhookRequest,
   readGitHubWebhookRequest,
   signGitHubWebhookBody,
@@ -23,6 +26,7 @@ describe("github feature package", () => {
     expect(githubBackendRoutes.webhooks.children.github.path?.source).toBe("/github")
     expect(githubBackendPlugin.name).toBe("github")
     expect(githubBackendPlugin.routes?.webhooks.children.github.path?.source).toBe("/github")
+    expect(Object.keys(githubBackendPlugin.providers ?? {})).toEqual(["github"])
     expect("events" in githubBackendPlugin).toBe(false)
     expect("eventSources" in githubBackendPlugin).toBe(false)
   })
@@ -70,6 +74,44 @@ describe("github feature package", () => {
         repo: "other",
       }),
     ).toBe(false)
+  })
+
+  test("authorizes backend GitHub provider repositories from principal grants", () => {
+    const principal = {
+      id: "github:42",
+      providerIdentities: [{ provider: "github", subject: "42", displayName: "alec" }],
+      repositories: [{ provider: "github", owner: "goddard-ai", repo: "core" }],
+    }
+
+    expect(
+      canGitHubBackendPrincipalAccessRepository(principal, {
+        provider: "github",
+        owner: "goddard-ai",
+        repo: "core",
+      }),
+    ).toBe(true)
+    expect(
+      canGitHubBackendPrincipalAccessRepository(principal, {
+        provider: "github",
+        owner: "goddard-ai",
+        repo: "other",
+      }),
+    ).toBe(false)
+  })
+
+  test("reports missing GitHub App credentials from provider PR operations", async () => {
+    await expect(
+      createPullRequestWithGitHubApp({
+        env: {},
+        provider: "github",
+        owner: "goddard-ai",
+        repo: "core",
+        title: "Update docs",
+        body: "Details",
+        head: "docs",
+        base: "main",
+      }),
+    ).rejects.toBeInstanceOf(GitHubProviderError)
   })
 
   test("normalizes raw GitHub webhook deliveries with provider provenance", () => {
