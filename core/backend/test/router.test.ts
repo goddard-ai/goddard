@@ -90,7 +90,7 @@ test("createBackendRouter delegates stream route to injected handleUserStream", 
   expect(capturedGithubLogin).toBe("alec")
 })
 
-test("createBackendRouter publishes raw GitHub webhook events", async () => {
+test("createBackendRouter publishes remote-repo events from the composed GitHub route", async () => {
   const publications: unknown[] = []
 
   const router = createBackendRouter({
@@ -161,11 +161,6 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
         reactionAdded: "eyes",
         createdAt: "2026-01-01T00:00:00.000Z",
       },
-      provenance: {
-        provider: "github",
-        deliveryId: "delivery-1",
-        webhookType: "issue_comment",
-      },
     },
   } as const
 
@@ -191,6 +186,46 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
       publication,
     ),
   ).resolves.toBe(false)
+})
+
+test("authorizeBackendEventPublication rejects invalid source and event pairs", async () => {
+  const principal = {
+    kind: "github_user" as const,
+    githubUserId: 1,
+    githubLogin: "alec",
+    repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+  }
+  const event = {
+    name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+    payload: {
+      type: "comment",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 1,
+      author: "alec",
+      body: "looks good",
+      reactionAdded: "eyes",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  } as const
+
+  await expect(
+    authorizeBackendEventPublication(principal, {
+      source: "unknown",
+      event,
+    } as never),
+  ).rejects.toThrow("Unknown backend event source: unknown")
+  await expect(
+    authorizeBackendEventPublication(principal, {
+      source: "remote-repo",
+      event: {
+        ...event,
+        name: "pull_request.feedback.received",
+      },
+    } as never),
+  ).rejects.toThrow(
+    "Backend event source remote-repo cannot produce event: pull_request.feedback.received",
+  )
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {
