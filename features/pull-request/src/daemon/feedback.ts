@@ -117,6 +117,7 @@ export function createPullRequestFeedbackHandler(input: {
 
       try {
         const { managed } = await input.backend.pullRequests.managed({
+          provider: event.provider,
           owner: event.owner,
           repo: event.repo,
           prNumber: event.prNumber,

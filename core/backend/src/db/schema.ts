@@ -31,6 +31,7 @@ export const authSessions = sqliteTable("auth_sessions", {
 export const pullRequests = sqliteTable("pull_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: integer("number").notNull(),
+  provider: text("provider").notNull(),
   owner: text("owner").notNull(),
   repo: text("repo").notNull(),
   title: text("title").notNull(),

@@ -11,7 +11,11 @@ import {
   readGitHubWebhookRequest,
   signGitHubWebhookBody,
 } from "../src/backend.ts"
-import { canGitHubPrincipalAccessRepository, createGitHubBackendPrincipal } from "../src/schema.ts"
+import {
+  canGitHubPrincipalAccessRepository,
+  createGitHubBackendPrincipal,
+  type GitHubPrincipalGrants,
+} from "../src/schema.ts"
 
 describe("github feature package", () => {
   test("exports selected feature entrypoints", () => {
@@ -49,17 +53,19 @@ describe("github feature package", () => {
         githubUserId: 42,
         githubLogin: "alec",
       },
-      repositories: [{ owner: "goddard-ai", repo: "core" }],
-    }
+      repositories: [{ provider: "github", owner: "goddard-ai", repo: "core" }],
+    } satisfies GitHubPrincipalGrants
 
     expect(
       canGitHubPrincipalAccessRepository(grants, {
+        provider: "github",
         owner: "goddard-ai",
         repo: "core",
       }),
     ).toBe(true)
     expect(
       canGitHubPrincipalAccessRepository(grants, {
+        provider: "github",
         owner: "goddard-ai",
         repo: "other",
       }),
@@ -93,6 +99,7 @@ describe("github feature package", () => {
       name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
       payload: {
         type: "comment",
+        provider: "github",
         owner: "goddard-ai",
         repo: "core",
         prNumber: 12,
@@ -168,6 +175,7 @@ describe("github feature package", () => {
       name: REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
       payload: {
         type: "review",
+        provider: "github",
         owner: "goddard-ai",
         repo: "core",
         prNumber: 12,

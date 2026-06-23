@@ -135,6 +135,7 @@ test("createBackendRouter publishes remote-repo events from the composed GitHub 
         name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
         payload: {
           type: "comment",
+          provider: "github",
           owner: "goddard-ai",
           repo: "sdk",
           prNumber: 1,
@@ -151,6 +152,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
       name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
       payload: {
         type: "comment",
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: 1,
@@ -166,7 +168,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
     authorizeBackendEventPublication(
       {
         ...githubPrincipal("alec"),
-        repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+        repositories: [{ provider: "github", owner: "goddard-ai", repo: "sdk" }],
       },
       publication,
     ),
@@ -175,7 +177,7 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
     authorizeBackendEventPublication(
       {
         ...githubPrincipal("bob"),
-        repositories: [{ owner: "goddard-ai", repo: "other" }],
+        repositories: [{ provider: "github", owner: "goddard-ai", repo: "other" }],
       },
       publication,
     ),
@@ -185,12 +187,13 @@ test("authorizeBackendEventPublication enforces source-owned repository access",
 test("authorizeBackendEventPublication rejects invalid source and event pairs", async () => {
   const principal = {
     ...githubPrincipal("alec"),
-    repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+    repositories: [{ provider: "github", owner: "goddard-ai", repo: "sdk" }],
   }
   const event = {
     name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     payload: {
       type: "comment",
+      provider: "github",
       owner: "goddard-ai",
       repo: "sdk",
       prNumber: 1,

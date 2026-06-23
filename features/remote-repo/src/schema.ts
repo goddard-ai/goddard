@@ -2,6 +2,7 @@ import { z } from "zod"
 
 /** Repository identity for a remotely hosted source repository. */
 export const RemoteRepositoryRef = z.object({
+  provider: z.string().min(1),
   owner: z.string(),
   repo: z.string(),
 })
@@ -60,26 +61,3 @@ export const StreamMessage = z.object({
 })
 
 export type StreamMessage = z.infer<typeof StreamMessage>
-
-const issueCommentWebhook = RemoteRepositoryRef.extend({
-  type: z.literal("issue_comment"),
-  prNumber: z.number(),
-  author: z.string(),
-  body: z.string(),
-})
-
-const pullRequestReviewWebhook = RemoteRepositoryRef.extend({
-  type: z.literal("pull_request_review"),
-  prNumber: z.number(),
-  author: z.string(),
-  state: z.enum(["approved", "changes_requested", "commented"]),
-  body: z.string(),
-})
-
-/** Normalized GitHub webhook payload accepted by remote-repo backend webhook handlers. */
-export const GitHubWebhookInput = z.discriminatedUnion("type", [
-  issueCommentWebhook,
-  pullRequestReviewWebhook,
-])
-
-export type GitHubWebhookInput = z.infer<typeof GitHubWebhookInput>

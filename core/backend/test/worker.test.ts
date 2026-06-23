@@ -23,6 +23,7 @@ test("user stream durable object fans out published events to subscribers", asyn
           name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
+            provider: "github",
             owner: "goddard-ai",
             repo: "sdk",
             prNumber: 1,
@@ -87,6 +88,7 @@ test("user stream durable object applies envelope filters", async () => {
           name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
           payload: {
             type: "comment",
+            provider: "github",
             owner: "goddard-ai",
             repo: "sdk",
             prNumber: 1,

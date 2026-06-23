@@ -4,7 +4,6 @@ import {
   createRemoteRepoBackendEvent,
   defineRemoteRepoEventHandler,
   dispatchRemoteRepoEvent,
-  normalizeGitHubWebhookEvent,
   REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
   REMOTE_REPO_PULL_REQUEST_CREATED,
   REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
@@ -27,6 +26,7 @@ test("backend routes keep their logical remote-repo resource grouping", () => {
 test("owns the remote repository backend event contract", () => {
   const event = {
     type: "comment",
+    provider: "example",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,
@@ -45,6 +45,12 @@ test("owns the remote repository backend event contract", () => {
     remoteRepoBackendEvents[REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED].payload.safeParse(event)
       .success,
   ).toBe(true)
+  expect(
+    remoteRepoBackendEvents[REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED].payload.safeParse({
+      ...event,
+      provider: undefined,
+    }).success,
+  ).toBe(false)
   expect(createRemoteRepoBackendEvent(event)).toEqual({
     name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     payload: event,
@@ -55,6 +61,7 @@ test("owns remote repository backend event source authorization", async () => {
   const source = remoteRepoBackendEventSources["remote-repo"]
   const event = createRemoteRepoBackendEvent({
     type: "comment",
+    provider: "github",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,
@@ -76,7 +83,7 @@ test("owns remote repository backend event source authorization", async () => {
               displayName: "alec",
             },
           ],
-          repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+          repositories: [{ provider: "github", owner: "goddard-ai", repo: "sdk" }],
         },
         event,
       }),
@@ -94,7 +101,7 @@ test("owns remote repository backend event source authorization", async () => {
               displayName: "alec",
             },
           ],
-          repositories: [{ owner: "goddard-ai", repo: "other" }],
+          repositories: [{ provider: "github", owner: "goddard-ai", repo: "other" }],
         },
         event,
       }),
@@ -102,21 +109,22 @@ test("owns remote repository backend event source authorization", async () => {
   ).resolves.toBe(false)
 })
 
-test("normalizes GitHub comment webhooks into remote repository events", () => {
+test("creates provider-qualified remote repository events", () => {
   expect(
-    normalizeGitHubWebhookEvent(
-      {
-        type: "issue_comment",
-        owner: "goddard-ai",
-        repo: "sdk",
-        prNumber: 12,
-        author: "alec",
-        body: "looks good",
-      },
-      "2026-01-01T00:00:00.000Z",
-    ),
+    createRemoteRepoBackendEvent({
+      type: "comment",
+      provider: "github",
+      owner: "goddard-ai",
+      repo: "sdk",
+      prNumber: 12,
+      author: "alec",
+      body: "looks good",
+      reactionAdded: "eyes",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }).payload,
   ).toEqual({
     type: "comment",
+    provider: "github",
     owner: "goddard-ai",
     repo: "sdk",
     prNumber: 12,
@@ -129,17 +137,17 @@ test("normalizes GitHub comment webhooks into remote repository events", () => {
 
 test("dispatches remote repository events to matching feature handlers", async () => {
   const handled: string[] = []
-  const event = normalizeGitHubWebhookEvent(
-    {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 12,
-      author: "alec",
-      body: "looks good",
-    },
-    "2026-01-01T00:00:00.000Z",
-  )
+  const event = {
+    type: "comment",
+    provider: "github",
+    owner: "goddard-ai",
+    repo: "sdk",
+    prNumber: 12,
+    author: "alec",
+    body: "looks good",
+    reactionAdded: "eyes",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  } as const
 
   await dispatchRemoteRepoEvent(event, [
     defineRemoteRepoEventHandler({

@@ -106,6 +106,7 @@ export function normalizeGitHubWebhookRequest(
     return withGitHubProvenance(
       createRemoteRepoBackendEvent({
         type: "comment",
+        provider: "github",
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
         prNumber: payload.issue.number,
@@ -136,6 +137,7 @@ export function normalizeGitHubWebhookRequest(
     return withGitHubProvenance(
       createRemoteRepoBackendEvent({
         type: "review",
+        provider: "github",
         owner: payload.repository.owner.login,
         repo: payload.repository.name,
         prNumber: payload.pull_request.number,

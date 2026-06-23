@@ -48,6 +48,7 @@ export type ManagedPrQuery = z.infer<typeof ManagedPrQuery>
 export const PullRequestRecord = z.object({
   id: z.number(),
   number: z.number(),
+  provider: z.string(),
   owner: z.string(),
   repo: z.string(),
   title: z.string(),

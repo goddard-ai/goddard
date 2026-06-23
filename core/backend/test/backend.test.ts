@@ -12,6 +12,7 @@ test("control plane creates PR authored by authenticated user", () => {
   })
 
   const pr = backend.createPr(session.token, {
+    provider: "github",
     owner: "goddard-ai",
     repo: "sdk",
     title: "Fix parser",
@@ -40,6 +41,7 @@ test("http api supports login and pr creation", async () => {
     const pr = await postJson(
       `${baseUrl}/pull-requests/create`,
       {
+        provider: "github",
         owner: "goddard-ai",
         repo: "test-repo",
         title: "Add CLI",
@@ -71,6 +73,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     await postJson(
       `${baseUrl}/pull-requests/create`,
       {
+        provider: "github",
         owner: "goddard-ai",
         repo: "test-repo",
         title: "Add CLI",
@@ -81,7 +84,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     )
 
     const managedResponse = await fetch(
-      `${baseUrl}/pull-requests/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
+      `${baseUrl}/pull-requests/managed?provider=github&owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     expect(managedResponse.status).toBe(200)
@@ -91,7 +94,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     expect(managedPayload.managed).toBe(true)
 
     const unmanagedResponse = await fetch(
-      `${baseUrl}/pull-requests/managed?owner=goddard-ai&repo=test-repo&prNumber=9`,
+      `${baseUrl}/pull-requests/managed?provider=github&owner=goddard-ai&repo=test-repo&prNumber=9`,
       { headers: { authorization: `Bearer ${alecSession.token}` } },
     )
     expect(unmanagedResponse.status).toBe(200)
@@ -107,7 +110,7 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     })
 
     const foreignResponse = await fetch(
-      `${baseUrl}/pull-requests/managed?owner=goddard-ai&repo=test-repo&prNumber=1`,
+      `${baseUrl}/pull-requests/managed?provider=github&owner=goddard-ai&repo=test-repo&prNumber=1`,
       { headers: { authorization: `Bearer ${bobSession.token}` } },
     )
     expect(foreignResponse.status).toBe(200)
@@ -185,6 +188,7 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     await postJson(
       `${baseUrl}/pull-requests/create`,
       {
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         title: "Alec PR",
@@ -196,6 +200,7 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     await postJson(
       `${baseUrl}/pull-requests/create`,
       {
+        provider: "github",
         owner: "goddard-ai",
         repo: "daemon",
         title: "Bob PR",
@@ -221,6 +226,7 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     backend.broadcastRemoteRepoEvent(
       createRemoteRepoBackendEvent({
         type: "comment",
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: 1,
@@ -265,6 +271,7 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
     backend.broadcastRemoteRepoEvent(
       createRemoteRepoBackendEvent({
         type: "comment",
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: 99,
