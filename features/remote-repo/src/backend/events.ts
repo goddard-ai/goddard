@@ -1,4 +1,14 @@
-import type { RepoEvent } from "../schema.ts"
+import { defineBackendEvents, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
+
+import { RepoEvent } from "../schema.ts"
+
+export type RemoteRepoBackendEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
+
+export const remoteRepoBackendEvents = defineBackendEvents({
+  "remote_repo.event.received": {
+    payload: RepoEvent,
+  },
+})
 
 /** Feature-owned backend handler for normalized remote repository events. */
 export type RemoteRepoEventHandler = {
