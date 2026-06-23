@@ -5,12 +5,12 @@ import { AuthSession, DeviceFlowComplete, DeviceFlowSession, DeviceFlowStart } f
 export const authIpcRoutes = defineIpcRoutes({
   auth: http.resource("auth", {
     device: http.resource("device", {
-      /** Starts one GitHub device flow through the daemon auth contract. */
+      /** Starts one provider-backed device flow through the daemon auth contract. */
       start: http.post("start", {
         body: DeviceFlowStart,
         response: $type<DeviceFlowSession>(),
       }),
-      /** Completes one pending GitHub device flow through the daemon auth contract. */
+      /** Completes one pending provider-backed device flow through the daemon auth contract. */
       complete: http.post("complete", {
         body: DeviceFlowComplete,
         response: $type<AuthSession>(),
