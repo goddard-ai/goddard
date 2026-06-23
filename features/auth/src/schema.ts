@@ -7,9 +7,27 @@ export const BearerHeaders = z.object({
 
 export type BearerHeaders = z.infer<typeof BearerHeaders>
 
-/** Request payload that starts one GitHub device authorization flow. */
+/** Identity from one provider that is linked to a Goddard backend principal. */
+export const ProviderIdentity = z.object({
+  provider: z.string().min(1),
+  subject: z.string().min(1),
+  displayName: z.string().min(1).optional(),
+})
+
+export type ProviderIdentity = z.infer<typeof ProviderIdentity>
+
+/** Authenticated backend principal without provider-specific identity fields. */
+export const BackendPrincipal = z.object({
+  id: z.string().min(1),
+  providerIdentities: z.array(ProviderIdentity),
+})
+
+export type BackendPrincipal = z.infer<typeof BackendPrincipal>
+
+/** Request payload that starts one provider-backed device authorization flow. */
 export const DeviceFlowStart = z.object({
-  githubUsername: z.string().optional(),
+  provider: z.string().min(1).optional(),
+  loginHint: z.string().min(1).optional(),
 })
 
 export type DeviceFlowStart = z.infer<typeof DeviceFlowStart>
@@ -25,19 +43,18 @@ export const DeviceFlowSession = z.object({
 
 export type DeviceFlowSession = z.infer<typeof DeviceFlowSession>
 
-/** Request payload that completes one GitHub device authorization flow. */
+/** Request payload that completes one provider-backed device authorization flow. */
 export const DeviceFlowComplete = z.object({
   deviceCode: z.string(),
-  githubUsername: z.string(),
+  providerIdentity: ProviderIdentity,
 })
 
 export type DeviceFlowComplete = z.infer<typeof DeviceFlowComplete>
 
-/** Authenticated backend session persisted for one GitHub user. */
+/** Authenticated backend session persisted for one provider-neutral principal. */
 export const AuthSession = z.object({
   token: z.string(),
-  githubUsername: z.string(),
-  githubUserId: z.number(),
+  principal: BackendPrincipal,
 })
 
 export type AuthSession = z.infer<typeof AuthSession>
