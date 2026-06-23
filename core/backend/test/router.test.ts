@@ -95,7 +95,6 @@ test("createBackendRouter dispatches raw GitHub webhook events", async () => {
 
   const router = createBackendRouter({
     createControlPlane: () => stubControlPlane,
-    broadcastEvent: async () => {},
     remoteRepoEventHandlers: [
       {
         name: "pull-request",
