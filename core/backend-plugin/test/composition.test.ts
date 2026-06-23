@@ -4,8 +4,12 @@ import { z } from "zod"
 import {
   composeBackendEvents,
   composeBackendEventSources,
+  composeBackendPlugins,
   defineBackendEvents,
   defineBackendEventSources,
+  defineBackendPlugin,
+  defineBackendRoutes,
+  http,
   type BackendEventEnvelope,
 } from "../src/index.ts"
 
@@ -152,6 +156,129 @@ describe("backend event composition", () => {
 
     expect(() => composeBackendEventSources([github], events)).toThrow(
       "Backend event source github produces unknown event: pull_request.feedback.received",
+    )
+  })
+})
+
+describe("backend plugin composition", () => {
+  test("composes route, event, and source fragments from backend plugins", () => {
+    const remoteRepo = defineBackendPlugin({
+      name: "remote-repo",
+      routes: defineBackendRoutes({
+        remoteRepo: http.resource("remote-repo", {
+          stream: http.get("stream", {}),
+        }),
+      }),
+      events: defineBackendEvents({
+        "remote_repo.pull_request.comment.created": {
+          payload: z.object({
+            owner: z.string(),
+            repo: z.string(),
+            prNumber: z.number(),
+            body: z.string(),
+          }),
+        },
+      }),
+      eventSources: defineBackendEventSources({
+        "remote-repo": {
+          produces: ["remote_repo.pull_request.comment.created"],
+          authorize: () => true,
+        },
+      }),
+    })
+    const github = defineBackendPlugin({
+      name: "github",
+      routes: defineBackendRoutes({
+        webhooks: http.resource("webhooks", {
+          github: http.post("github", {
+            body: http.rawBody(),
+          }),
+        }),
+      }),
+    })
+
+    const composition = composeBackendPlugins([remoteRepo, github])
+
+    expect(composition.routes.remoteRepo.path.source).toBe("/remote-repo")
+    expect(composition.routes.webhooks.children.github.path?.source).toBe("/github")
+    expect(Object.keys(composition.events)).toEqual(["remote_repo.pull_request.comment.created"])
+    expect(Object.keys(composition.eventSources)).toEqual(["remote-repo"])
+  })
+
+  test("rejects duplicate backend plugin names", () => {
+    const first = defineBackendPlugin({ name: "github" })
+    const second = defineBackendPlugin({ name: "github" })
+
+    expect(() => composeBackendPlugins([first, second])).toThrow("Duplicate backend plugin: github")
+  })
+
+  test("rejects duplicate backend plugin event definitions", () => {
+    const first = defineBackendPlugin({
+      name: "remote-repo-a",
+      events: defineBackendEvents({
+        "remote_repo.pull_request.comment.created": {
+          payload: z.object({}),
+        },
+      }),
+    })
+    const second = defineBackendPlugin({
+      name: "remote-repo-b",
+      events: defineBackendEvents({
+        "remote_repo.pull_request.comment.created": {
+          payload: z.object({}),
+        },
+      }),
+    })
+
+    expect(() => composeBackendPlugins([first, second])).toThrow(
+      "Duplicate backend event: remote_repo.pull_request.comment.created",
+    )
+  })
+
+  test("rejects duplicate backend plugin event sources", () => {
+    const events = defineBackendEvents({
+      "remote_repo.pull_request.comment.created": {
+        payload: z.object({}),
+      },
+    })
+    const first = defineBackendPlugin({
+      name: "remote-repo-a",
+      events,
+      eventSources: defineBackendEventSources({
+        "remote-repo": {
+          produces: ["remote_repo.pull_request.comment.created"],
+          authorize: () => true,
+        },
+      }),
+    })
+    const second = defineBackendPlugin({
+      name: "remote-repo-b",
+      eventSources: defineBackendEventSources({
+        "remote-repo": {
+          produces: ["remote_repo.pull_request.comment.created"],
+          authorize: () => true,
+        },
+      }),
+    })
+
+    expect(() => composeBackendPlugins([first, second])).toThrow(
+      "Duplicate backend event source: remote-repo",
+    )
+  })
+
+  test("rejects backend plugin event sources that claim unknown events", () => {
+    const github = defineBackendPlugin({
+      name: "github",
+      eventSources: defineBackendEventSources({
+        github: {
+          produces: ["remote_repo.pull_request.comment.created"],
+          authorize: () => true,
+        },
+      }),
+    })
+
+    expect(() => composeBackendPlugins([github])).toThrow(
+      "Backend event source github produces unknown event: remote_repo.pull_request.comment.created",
     )
   })
 })
