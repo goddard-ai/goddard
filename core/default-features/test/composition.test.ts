@@ -29,6 +29,10 @@ test("default backend composition includes backend feature routes and remote-rep
     REMOTE_REPO_PULL_REQUEST_CREATED,
   ])
   expect(Object.keys(composition.eventSources)).toEqual(["remote-repo"])
+  expect(Object.keys(composition.providers)).toEqual(["github"])
+  expect(composition.providers.github.authorizeRemoteRepositoryAccess).toBeFunction()
+  expect(composition.providers.github.createPullRequest).toBeFunction()
+  expect(composition.providers.github.createPullRequestComment).toBeFunction()
   expect(composition.eventSources["remote-repo"].produces).toEqual([
     REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
