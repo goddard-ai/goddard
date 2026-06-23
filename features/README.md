@@ -35,6 +35,14 @@ feature becomes part of a supported product surface.
 - Layer entrypoints such as `src/daemon.ts` should stay as thin plugin
   entrypoints. Feature-owned daemon implementation can live in focused modules
   under `src/daemon/` and be reached from the entrypoint.
+- Backend-capable features export a backend plugin definition from `./backend`.
+  The plugin declares that feature's backend routes, event definitions, and event
+  sources; default product composition imports the plugin definition rather than
+  individual contribution constants.
+- Provider feature tests own provider-specific parsing, signature verification,
+  filtering, provenance, and raw upstream fixtures. Core backend tests should
+  cover composition, publication, authorization, and fanout without duplicating
+  provider fixture variants.
 - JSON configuration is not a feature package. Daemon plugins may contribute
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
