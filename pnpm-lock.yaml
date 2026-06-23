@@ -592,12 +592,18 @@ importers:
       '@goddard-ai/auth':
         specifier: workspace:*
         version: link:../../features/auth
+      '@goddard-ai/backend-plugin':
+        specifier: workspace:*
+        version: link:../backend-plugin
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../daemon-plugin
       '@goddard-ai/file-search':
         specifier: workspace:*
         version: link:../../features/file-search
+      '@goddard-ai/github':
+        specifier: workspace:*
+        version: link:../../features/github
       '@goddard-ai/inbox':
         specifier: workspace:*
         version: link:../../features/inbox
@@ -610,6 +616,9 @@ importers:
       '@goddard-ai/pull-request':
         specifier: workspace:*
         version: link:../../features/pull-request
+      '@goddard-ai/remote-repo':
+        specifier: workspace:*
+        version: link:../../features/remote-repo
       '@goddard-ai/review-session':
         specifier: workspace:*
         version: link:../../features/review-session
