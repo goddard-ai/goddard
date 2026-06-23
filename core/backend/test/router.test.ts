@@ -2,7 +2,7 @@ import { signGitHubWebhookBody } from "@goddard-ai/github/backend"
 import { expect, test } from "bun:test"
 
 import { HttpError, type BackendControlPlane } from "../src/api/control-plane.ts"
-import { createBackendRouter } from "../src/api/router.ts"
+import { authorizeBackendEventPublication, createBackendRouter } from "../src/api/router.ts"
 import type { Env } from "../src/env.ts"
 
 const notUsed = () => {
@@ -211,6 +211,53 @@ test("createBackendRouter accepts GitHub webhooks with valid configured signatur
   )
 
   expect(response.status).toBe(200)
+})
+
+test("authorizeBackendEventPublication enforces source-owned repository access", async () => {
+  const publication = {
+    source: "github",
+    event: {
+      name: "remote_repo.event.received",
+      payload: {
+        type: "comment",
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "alec",
+        body: "looks good",
+        reactionAdded: "eyes",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      provenance: {
+        provider: "github",
+        deliveryId: "delivery-1",
+        webhookType: "issue_comment",
+      },
+    },
+  } as const
+
+  await expect(
+    authorizeBackendEventPublication(
+      {
+        kind: "github_user",
+        githubUserId: 1,
+        githubLogin: "alec",
+        repositories: [{ owner: "goddard-ai", repo: "sdk" }],
+      },
+      publication,
+    ),
+  ).resolves.toBe(true)
+  await expect(
+    authorizeBackendEventPublication(
+      {
+        kind: "github_user",
+        githubUserId: 2,
+        githubLogin: "bob",
+        repositories: [{ owner: "goddard-ai", repo: "other" }],
+      },
+      publication,
+    ),
+  ).resolves.toBe(false)
 })
 
 test("createBackendRouter serializes HttpError responses", async () => {

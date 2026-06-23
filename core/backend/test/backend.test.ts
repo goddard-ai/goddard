@@ -234,6 +234,76 @@ test("sse stream receives webhook events for a managed PR", async () => {
   }
 })
 
+test("sse stream receives pull request review webhook events for a managed PR", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const flow = await postJson(`${baseUrl}/auth/device/start`, {
+      githubUsername: "alec",
+    })
+    const session = await postJson(`${baseUrl}/auth/device/complete`, {
+      deviceCode: flow.deviceCode,
+      githubUsername: "alec",
+    })
+
+    await postJson(
+      `${baseUrl}/pull-requests/create`,
+      {
+        owner: "goddard-ai",
+        repo: "sdk",
+        title: "Add CLI",
+        head: "feat/cli",
+        base: "main",
+      },
+      session.token,
+    )
+
+    const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
+      headers: {
+        accept: "text/event-stream",
+        authorization: `Bearer ${session.token}`,
+      },
+    })
+
+    const eventPromise = readFirstSseEvent(streamResponse)
+    await postGitHubWebhook(
+      baseUrl,
+      "delivery-1",
+      {
+        action: "submitted",
+        pull_request: {
+          number: 1,
+        },
+        review: {
+          user: { login: "reviewer", type: "User" },
+          state: "approved",
+          body: "ship it",
+        },
+        repository: {
+          name: "sdk",
+          owner: { login: "goddard-ai" },
+        },
+        sender: { login: "reviewer", type: "User" },
+      },
+      "pull_request_review",
+    )
+
+    const parsed = (await eventPromise) as {
+      name: string
+      payload: { type: string; state: string; reactionAdded: string }
+    }
+    expect(parsed.name).toBe("remote_repo.event.received")
+    expect(parsed.payload.type).toBe("review")
+    expect(parsed.payload.state).toBe("approved")
+    expect(parsed.payload.reactionAdded).toBe("eyes")
+  } finally {
+    await server.close()
+  }
+})
+
 test("unified stream only emits events for managed PRs owned by the authenticated user", async () => {
   const server = await startBackendServer(new InMemoryBackendControlPlane(), {
     port: 0,
@@ -463,9 +533,14 @@ async function postJson(
   return response.json()
 }
 
-async function postGitHubWebhook(baseUrl: string, deliveryId: string, payload: unknown) {
+async function postGitHubWebhook(
+  baseUrl: string,
+  deliveryId: string,
+  payload: unknown,
+  eventName = "issue_comment",
+) {
   return postJson(`${baseUrl}/webhooks/github`, payload, undefined, {
-    "x-github-event": "issue_comment",
+    "x-github-event": eventName,
     "x-github-delivery": deliveryId,
   })
 }
