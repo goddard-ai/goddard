@@ -10,10 +10,10 @@ tokens instead of raw GitHub tokens. The stream is authorized by a backend princ
 GitHub identity.
 
 Backend event streams carry backend event envelopes. Product features own provider-agnostic event
-definitions, while event sources own provider-specific production and authorization. For example,
-`features/remote-repo` defines the `remote_repo.event.received` payload contract, and
-`features/github` owns `/webhooks/github`, raw GitHub payload parsing, signature verification,
-bot filtering, provider provenance, and GitHub repository authorization.
+definitions, while remote-repo owns provider-agnostic event production and authorization for remote
+repository events. For example, `features/remote-repo` defines specific pull-request comment,
+review, and created backend event contracts, while `features/github` owns `/webhooks/github`, raw
+GitHub payload parsing, signature verification, bot filtering, and provider provenance.
 
 Core backend composes route fragments, event definitions, and event sources. Publishing validates
 that the source may produce the event, validates the provider-agnostic payload schema, authorizes

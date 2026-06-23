@@ -1,4 +1,5 @@
 import { InMemoryBackendControlPlane, startBackendServer } from "@goddard-ai/backend"
+import { REMOTE_REPO_PULL_REQUEST_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { BackendUnauthenticatedError, createBackendClient } from "../src/backend.ts"
@@ -108,7 +109,7 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       payload: { type: string; prNumber: number }
     }
     expect(pr.number).toBe(1)
-    expect(event.name).toBe("remote_repo.event.received")
+    expect(event.name).toBe(REMOTE_REPO_PULL_REQUEST_CREATED)
     expect(event.payload.type).toBe("pr.created")
     expect(event.payload.prNumber).toBe(1)
   } finally {

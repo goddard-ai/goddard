@@ -1,8 +1,7 @@
-import type { BackendEventEnvelope } from "@goddard-ai/backend-plugin"
-
 import type { RepoEvent } from "../schema.ts"
+import type { RemoteRepoBackendEvent } from "./events.ts"
 
-export type RemoteRepoStreamEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
+export type RemoteRepoStreamEvent = RemoteRepoBackendEvent
 
 /** Minimal sink contract used by remote-repo server-sent-event fanout. */
 export type RemoteRepoStreamSink = {

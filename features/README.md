@@ -59,9 +59,10 @@ core packages.
 
 `features/github` owns GitHub provider integration: the `/webhooks/github`
 backend route, raw webhook parsing, signature verification, bot filtering,
-provider provenance, GitHub App helpers, and GitHub source authorization. It
-produces provider-agnostic backend event envelopes but does not own pull request
-workflow behavior.
+provider provenance, and GitHub App helpers. It maps supported GitHub webhook
+payloads into remote-repo-owned backend event envelopes but does not own
+provider-agnostic event definitions, event sources, authorization, or pull
+request workflow behavior.
 
 `features/file-search` owns file search schemas, file-search daemon IPC
 handlers, SDK file-search namespace construction, and daemon-local file/folder
@@ -86,15 +87,16 @@ loop manager/runtime modules. JSON config file loading/persistence, daemon
 process lifecycle, and session lifecycle mechanics remain core or
 session-feature substrate.
 
-`features/remote-repo` owns provider-agnostic remote repository event
-vocabulary, including the `remote_repo.event.received` backend event
-definition. It does not own provider-specific webhook routes.
+`features/remote-repo` owns provider-agnostic remote repository backend event
+vocabulary, event envelope producers, and event source authorization. It does
+not own provider-specific webhook routes.
 
 `features/pull-request` owns pull-request schemas, backend PR routes, backend
-event sources for pull-request-originated remote repo events, daemon PR IPC
-handlers, SDK PR namespace construction, git-backed PR request resolution, PR
-feedback automation, and PR inbox attention behavior. Backend transport, daemon
-IPC server mechanics, and daemon persistence substrate remain in core packages.
+daemon PR IPC handlers, SDK PR namespace construction, git-backed PR request
+resolution, PR feedback automation, and PR inbox attention behavior. Remote
+repository provider event production, backend transport, daemon IPC server
+mechanics, and daemon persistence substrate remain outside the pull-request
+feature boundary.
 
 `features/session` owns session feature schemas, session-owned daemon IPC
 routes, session lifecycle implementation modules, SDK session method fragments,

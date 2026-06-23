@@ -1,18 +1,22 @@
 import type { DaemonLogService } from "@goddard-ai/daemon-plugin"
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
+import type { RepoPullRequestCommentCreatedEvent } from "@goddard-ai/remote-repo/schema"
 import { expect, test } from "bun:test"
 
 import {
   createPullRequestFeedbackHandler,
   isFeedbackBackendEvent,
   isFeedbackEvent,
-  type FeedbackEvent,
 } from "../src/daemon/feedback.ts"
 
 test("pull request feedback handler ignores non-feedback backend events", () => {
   expect(isFeedbackEvent({ type: "pr.created", owner: "acme" })).toBe(false)
   expect(isFeedbackEvent(createFeedbackEvent())).toBe(true)
   expect(
-    isFeedbackBackendEvent({ name: "remote_repo.event.received", payload: createFeedbackEvent() }),
+    isFeedbackBackendEvent({
+      name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+      payload: createFeedbackEvent(),
+    }),
   ).toBe(true)
 })
 
@@ -97,7 +101,7 @@ test("pull request feedback handler launches one-shot sessions for managed feedb
   ])
 })
 
-function createFeedbackEvent(): FeedbackEvent {
+function createFeedbackEvent(): RepoPullRequestCommentCreatedEvent {
   return {
     type: "comment",
     owner: "acme",
@@ -112,7 +116,7 @@ function createFeedbackEvent(): FeedbackEvent {
 
 function createFeedbackBackendEvent() {
   return {
-    name: "remote_repo.event.received" as const,
+    name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     payload: createFeedbackEvent(),
   }
 }

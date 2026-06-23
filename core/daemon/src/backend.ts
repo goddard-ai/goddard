@@ -2,12 +2,13 @@ import { authBackendRoutes } from "@goddard-ai/auth/backend"
 import {
   composeBackendRoutes,
   createBackendClient as createRouteClient,
-  type BackendEventEnvelope,
   type RouzerClient,
 } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
-import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
-import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import {
+  remoteRepoBackendRoutes,
+  type RemoteRepoBackendEvent,
+} from "@goddard-ai/remote-repo/backend"
 import { getErrorMessage } from "radashi"
 
 import { createDebug } from "./logging.ts"
@@ -20,7 +21,7 @@ type StreamHandler = (event?: unknown) => void
 
 const notAuthenticatedMessage = "Not authenticated. Run login first."
 
-type BackendStreamEvent = BackendEventEnvelope<"remote_repo.event.received", RepoEvent>
+type BackendStreamEvent = RemoteRepoBackendEvent
 
 /** Backend routes available to daemon-owned backend clients. */
 export const backendRoutes = composeBackendRoutes([

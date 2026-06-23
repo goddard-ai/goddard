@@ -1,11 +1,20 @@
-import type { BackendEventEnvelope, RouzerClient } from "@goddard-ai/backend-plugin"
+import type { RouzerClient } from "@goddard-ai/backend-plugin"
 import type {
   BackendEventHandler,
   DaemonLogService,
   EventBus,
   InferProvides,
 } from "@goddard-ai/daemon-plugin"
-import { RepoEvent } from "@goddard-ai/remote-repo/schema"
+import {
+  REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+  REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,
+  type RemoteRepoPullRequestCommentCreatedEvent,
+  type RemoteRepoPullRequestReviewSubmittedEvent,
+} from "@goddard-ai/remote-repo/backend"
+import {
+  RepoPullRequestCommentCreatedEvent,
+  RepoPullRequestReviewSubmittedEvent,
+} from "@goddard-ai/remote-repo/schema"
 import type { sessionPlugin } from "@goddard-ai/session/daemon"
 import { z } from "zod"
 
@@ -13,37 +22,34 @@ import type { pullRequestBackendRoutes } from "../backend.ts"
 import type { PullRequestDb } from "../daemon.ts"
 import type { pullRequestEvents } from "../events.ts"
 
-const feedbackEventOptions = RepoEvent.options.filter((option) => {
-  const eventType = option.shape.type.value
-  return eventType === "comment" || eventType === "review"
-}) as [
-  Extract<(typeof RepoEvent.options)[number], { shape: { type: z.ZodLiteral<"comment"> } }>,
-  Extract<(typeof RepoEvent.options)[number], { shape: { type: z.ZodLiteral<"review"> } }>,
-]
-
-export const FeedbackEvent = z.discriminatedUnion("type", feedbackEventOptions)
+export const FeedbackEvent = z.discriminatedUnion("type", [
+  RepoPullRequestCommentCreatedEvent,
+  RepoPullRequestReviewSubmittedEvent,
+])
 
 export type FeedbackEvent = z.infer<typeof FeedbackEvent>
 
-export type FeedbackBackendEvent = BackendEventEnvelope<
-  "remote_repo.event.received",
-  FeedbackEvent,
-  unknown
->
+export type FeedbackBackendEvent =
+  | RemoteRepoPullRequestCommentCreatedEvent
+  | RemoteRepoPullRequestReviewSubmittedEvent
+
+const FeedbackBackendEvent = z.discriminatedUnion("name", [
+  z.object({
+    name: z.literal(REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED),
+    payload: RepoPullRequestCommentCreatedEvent,
+  }),
+  z.object({
+    name: z.literal(REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED),
+    payload: RepoPullRequestReviewSubmittedEvent,
+  }),
+])
 
 export function isFeedbackEvent(event: unknown): event is FeedbackEvent {
   return FeedbackEvent.safeParse(event).success
 }
 
 export function isFeedbackBackendEvent(event: unknown): event is FeedbackBackendEvent {
-  return (
-    !!event &&
-    typeof event === "object" &&
-    "name" in event &&
-    event.name === "remote_repo.event.received" &&
-    "payload" in event &&
-    isFeedbackEvent(event.payload)
-  )
+  return FeedbackBackendEvent.safeParse(event).success
 }
 
 export function buildPrompt(event: FeedbackEvent): string {

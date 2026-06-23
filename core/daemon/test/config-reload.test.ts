@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterEach, expect, test } from "bun:test"
@@ -308,7 +309,7 @@ function createFeedbackEvent(): Extract<RepoEvent, { type: "comment" }> {
 
 function createFeedbackBackendEvent() {
   return {
-    name: "remote_repo.event.received" as const,
+    name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     payload: createFeedbackEvent(),
   }
 }
