@@ -60,17 +60,18 @@ roots, and SDK action namespace construction. Config file storage and hot
 reload remain daemon/core substrate, and session execution is consumed through
 the first-class session feature extension.
 
-`features/auth` owns auth schemas, backend auth route contracts, daemon auth IPC
-handlers, and SDK auth namespace construction. Backend storage, GitHub device
-flow persistence, daemon token persistence, and HTTP/router substrate remain in
-core packages.
+`features/auth` owns provider-neutral auth schemas, backend auth route
+contracts, daemon auth IPC handlers, and SDK auth namespace construction.
+Backend storage, provider login adapters, daemon token persistence, and
+HTTP/router substrate remain outside the auth feature.
 
-`features/github` owns GitHub provider integration: the `/webhooks/github`
-backend route, raw webhook parsing, signature verification, bot filtering,
-provider provenance, and GitHub App helpers. It maps supported GitHub webhook
-payloads into remote-repo-owned backend event envelopes but does not own
-provider-agnostic event definitions, event sources, authorization, or pull
-request workflow behavior.
+`features/github` owns GitHub provider integration: identity mapping, repository
+grants, the `/webhooks/github` backend route, raw webhook parsing, signature
+verification, bot filtering, provider provenance, GitHub App PR operations, and
+GitHub repository URL parsing. It exposes those capabilities through backend and
+daemon provider surfaces. It maps supported GitHub facts into provider-neutral
+feature contracts but does not own provider-agnostic event definitions or pull
+request workflow policy.
 
 `features/file-search` owns file search schemas, file-search daemon IPC
 handlers, SDK file-search namespace construction, and daemon-local file/folder
@@ -95,16 +96,17 @@ loop manager/runtime modules. JSON config file loading/persistence, daemon
 process lifecycle, and session lifecycle mechanics remain core or
 session-feature substrate.
 
-`features/remote-repo` owns provider-agnostic remote repository backend event
-vocabulary, event envelope producers, and event source authorization. It does
-not own provider-specific webhook routes.
+`features/remote-repo` owns provider-neutral remote repository identities,
+backend event vocabulary, event envelope producers, and provider capability
+authorization dispatch. It does not own provider-specific webhook routes,
+payload parsing, signatures, or account access logic.
 
-`features/pull-request` owns pull-request schemas, backend PR routes, backend
-daemon PR IPC handlers, SDK PR namespace construction, git-backed PR request
-resolution, PR feedback automation, and PR inbox attention behavior. Remote
-repository provider event production, backend transport, daemon IPC server
-mechanics, and daemon persistence substrate remain outside the pull-request
-feature boundary.
+`features/pull-request` owns pull-request schemas, backend PR routes, daemon PR
+IPC handlers, SDK PR namespace construction, provider-qualified PR request
+resolution, PR feedback automation, and PR inbox attention behavior. Provider
+packages own provider-specific PR operations and repository URL parsing; remote
+repository event production, backend transport, daemon IPC server mechanics, and
+daemon persistence substrate remain outside the pull-request feature boundary.
 
 `features/session` owns session feature schemas, session-owned daemon IPC
 routes, session lifecycle implementation modules, SDK session method fragments,
