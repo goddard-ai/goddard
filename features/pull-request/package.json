@@ -65,6 +65,7 @@
     "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/github": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/remote-repo": "workspace:*",

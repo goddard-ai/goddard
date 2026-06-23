@@ -40,6 +40,7 @@ test("pull request git helpers infer repository and branch defaults", async () =
     body: "Done.",
   })
   expect(submit).toEqual({
+    provider: "github",
     owner: "acme",
     repo: "widgets",
     title: "Implement IPC routing",
@@ -54,6 +55,7 @@ test("pull request git helpers infer repository and branch defaults", async () =
     message: "Updated per review",
   })
   expect(reply).toEqual({
+    provider: "github",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,

@@ -98,13 +98,12 @@ export const pullRequestPlugin = definePlugin({
             const resolvedInput = await resolveSubmitRequestFromGit(payload)
             const pr = await backend.pullRequests.create({
               ...resolvedInput,
-              provider: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })
             await session.allowPullRequest(sessionRecord.sessionId, pr.number)
             const pullRequest = await recordPullRequest({
-              host: "github",
+              host: resolvedInput.provider,
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
               prNumber: pr.number,
@@ -151,12 +150,11 @@ export const pullRequestPlugin = definePlugin({
 
             const response = await backend.pullRequests.comments.create({
               ...resolvedInput,
-              provider: "github",
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
             })
             const pullRequest = await recordPullRequest({
-              host: "github",
+              host: resolvedInput.provider,
               owner: sessionRecord.owner,
               repo: sessionRecord.repo,
               prNumber: resolvedInput.prNumber,

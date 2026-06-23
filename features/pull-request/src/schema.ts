@@ -64,7 +64,7 @@ export type PullRequestRecord = z.infer<typeof PullRequestRecord>
 
 /** Persisted daemon-managed pull request record owned by the pull-request feature. */
 export const DaemonPullRequest = z.strictObject({
-  host: z.enum(["github"]),
+  host: z.string().min(1),
   owner: z.string(),
   repo: z.string(),
   prNumber: z.number().int(),

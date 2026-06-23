@@ -1006,6 +1006,9 @@ importers:
       '@goddard-ai/daemon-plugin':
         specifier: workspace:*
         version: link:../../core/daemon-plugin
+      '@goddard-ai/github':
+        specifier: workspace:*
+        version: link:../github
       '@goddard-ai/ipc':
         specifier: workspace:*
         version: link:../../core/ipc

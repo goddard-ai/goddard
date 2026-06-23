@@ -24,7 +24,7 @@ import { hashToInteger, toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
-  postPrCommentViaApp,
+  postPrCommentViaProvider,
   type BackendControlPlane,
 } from "./control-plane.ts"
 import {
@@ -163,7 +163,7 @@ export class InMemoryBackendControlPlane
 
   async replyToPr(
     token: string,
-    input: { owner: string; repo: string; prNumber: number; body: string },
+    input: { provider: string; owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> {
     const session = this.getSession(token)
@@ -172,15 +172,27 @@ export class InMemoryBackendControlPlane
       throw new HttpError(400, "body is required")
     }
 
-    const managed = this.isManagedPr(input.owner, input.repo, input.prNumber, session.principal.id)
+    const managed = this.isManagedPr(
+      input.provider,
+      input.owner,
+      input.repo,
+      input.prNumber,
+      session.principal.id,
+    )
     if (!managed) {
       throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
+    await postPrCommentViaProvider(env, getDefaultBackendPluginComposition().providers, input)
   }
 
-  isManagedPr(owner: string, repo: string, prNumber: number, principalId: string): boolean {
+  isManagedPr(
+    provider: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    principalId: string,
+  ): boolean {
     assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
       throw new HttpError(400, "prNumber must be a positive integer")
@@ -188,6 +200,7 @@ export class InMemoryBackendControlPlane
 
     return this.#pullRequests.some(
       (pullRequest) =>
+        pullRequest.provider === provider &&
         pullRequest.owner === owner &&
         pullRequest.repo === repo &&
         pullRequest.number === prNumber &&
