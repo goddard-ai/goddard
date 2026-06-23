@@ -5,10 +5,10 @@ import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts
 
 test("control plane creates PR authored by authenticated user", () => {
   const backend = new InMemoryBackendControlPlane()
-  const flow = backend.startDeviceFlow({ githubUsername: "alec" })
+  const flow = backend.startDeviceFlow({ provider: "github", loginHint: "alec" })
   const session = backend.completeDeviceFlow({
     deviceCode: flow.deviceCode,
-    githubUsername: "alec",
+    providerIdentity: githubIdentity("alec"),
   })
 
   const pr = backend.createPr(session.token, {
@@ -31,12 +31,10 @@ test("http api supports login and pr creation", async () => {
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, githubStart("alec"))
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     const pr = await postJson(
@@ -64,12 +62,10 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, githubStart("alec"))
     const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     await postJson(
@@ -104,12 +100,10 @@ test("managed PR endpoint returns true only for PRs created by the authenticated
     }
     expect(unmanagedPayload.managed).toBe(false)
 
-    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "bob",
-    })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, githubStart("bob"))
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: bobFlow.deviceCode,
-      githubUsername: "bob",
+      providerIdentity: githubIdentity("bob"),
     })
 
     const foreignResponse = await fetch(
@@ -132,10 +126,10 @@ test("expired auth sessions are rejected", () => {
   try {
     Date.now = () => 1000
     const backend = new InMemoryBackendControlPlane()
-    const flow = backend.startDeviceFlow({ githubUsername: "alec" })
+    const flow = backend.startDeviceFlow(githubStart("alec"))
     const session = backend.completeDeviceFlow({
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     Date.now = () => 1000 + 1000 * 60 * 60 * 24 + 1
@@ -177,19 +171,15 @@ test("unified stream only emits events for managed PRs owned by the authenticate
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
+    const alecFlow = await postJson(`${baseUrl}/auth/device/start`, githubStart("alec"))
     const alecSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: alecFlow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
-    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "bob",
-    })
+    const bobFlow = await postJson(`${baseUrl}/auth/device/start`, githubStart("bob"))
     const bobSession = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: bobFlow.deviceCode,
-      githubUsername: "bob",
+      providerIdentity: githubIdentity("bob"),
     })
 
     await postJson(
@@ -259,12 +249,10 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, githubStart("alec"))
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     const streamResponse = await fetch(`${baseUrl}/remote-repo/stream`, {
@@ -390,4 +378,28 @@ async function postJson(
   }
 
   return response.json()
+}
+
+function githubStart(login: string) {
+  return {
+    provider: "github",
+    loginHint: login,
+  }
+}
+
+function githubIdentity(login: string) {
+  return {
+    provider: "github",
+    subject: String(hashTestIdentity(login)),
+    displayName: login,
+  }
+}
+
+function hashTestIdentity(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash) + 1000
 }

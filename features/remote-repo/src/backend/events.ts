@@ -1,3 +1,4 @@
+import type { BackendPrincipal } from "@goddard-ai/auth/schema"
 import {
   defineBackendEvents,
   defineBackendEventSources,
@@ -17,8 +18,7 @@ export const REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED =
   "remote_repo.pull_request.review.submitted" as const
 export const REMOTE_REPO_PULL_REQUEST_CREATED = "remote_repo.pull_request.created" as const
 
-type RemoteRepoPrincipal = {
-  readonly githubLogin: string
+type RemoteRepoPrincipal = BackendPrincipal & {
   readonly repositories?: readonly { readonly owner: string; readonly repo: string }[]
 }
 
@@ -69,7 +69,7 @@ export const remoteRepoBackendEventSources = defineBackendEventSources({
       event: RemoteRepoBackendEvent
     }) => {
       if (event.name === REMOTE_REPO_PULL_REQUEST_CREATED) {
-        return event.payload.author === principal.githubLogin
+        return principalHasDisplayName(principal, event.payload.author)
       }
 
       return canPrincipalAccessRepository(principal, event.payload)
@@ -105,6 +105,12 @@ function canPrincipalAccessRepository(
     principal.repositories?.some(
       (allowed) => allowed.owner === repository.owner && allowed.repo === repository.repo,
     ) ?? false
+  )
+}
+
+function principalHasDisplayName(principal: RemoteRepoPrincipal, displayName: string) {
+  return principal.providerIdentities.some(
+    (identity) => identity.displayName === displayName || identity.subject === displayName,
   )
 }
 

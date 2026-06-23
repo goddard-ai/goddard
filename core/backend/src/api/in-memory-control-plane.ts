@@ -4,6 +4,7 @@ import type {
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+  ProviderIdentity,
 } from "@goddard-ai/auth/schema"
 import type { GitHubRepositoryRef } from "@goddard-ai/github/schema"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
@@ -26,14 +27,20 @@ import {
   postPrCommentViaApp,
   type BackendControlPlane,
 } from "./control-plane.ts"
-import { getPrincipalStreamKey, sessionToPrincipal, type BackendPrincipal } from "./events.ts"
+import {
+  getPrincipalDisplayName,
+  getPrincipalStreamKey,
+  sessionToPrincipal,
+  type BackendPrincipal,
+} from "./events.ts"
 
 /** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }
 
 /** Stored device-code session awaiting completion. */
 export type DeviceSessionRecord = {
-  githubUsername: string
+  provider: string
+  loginHint: string
   createdAt: number
   expiresAt: number
 }
@@ -53,13 +60,15 @@ export class InMemoryBackendControlPlane
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
-    const githubUsername = input.githubUsername?.trim() || "developer"
+    const provider = input.provider?.trim() || "github"
+    const loginHint = input.loginHint?.trim() || "developer"
     const deviceCode = `dev_${randomBytes(32).toString("hex")}`
     const userCode = randomBytes(4).toString("hex").toUpperCase()
     const createdAt = Date.now()
 
     this.#deviceSessions.set(deviceCode, {
-      githubUsername,
+      provider,
+      loginHint,
       createdAt,
       expiresAt: createdAt + DEVICE_FLOW_EXPIRES_IN_SECONDS * 1000,
     })
@@ -67,7 +76,8 @@ export class InMemoryBackendControlPlane
     return {
       deviceCode,
       userCode,
-      verificationUri: "https://github.com/login/device",
+      verificationUri:
+        provider === "github" ? "https://github.com/login/device" : "https://auth.local/device",
       expiresIn: DEVICE_FLOW_EXPIRES_IN_SECONDS,
       interval: DEVICE_FLOW_INTERVAL_SECONDS,
     }
@@ -84,16 +94,15 @@ export class InMemoryBackendControlPlane
       throw new HttpError(410, "Device code expired")
     }
 
-    const githubUsername = input.githubUsername.trim()
-    if (!githubUsername) {
-      throw new HttpError(400, "githubUsername is required")
+    const providerIdentity = input.providerIdentity
+    if (providerIdentity.provider !== pending.provider) {
+      throw new HttpError(400, "providerIdentity.provider must match the pending device flow")
     }
 
     const expiresAt = Date.now() + AUTH_SESSION_TTL_MS
     const session: SessionRecord = {
       token: `tok_${randomBytes(32).toString("hex")}`,
-      githubUsername,
-      githubUserId: hashToInteger(githubUsername),
+      principal: createPrincipal(providerIdentity),
       expiresAt,
     }
 
@@ -119,7 +128,7 @@ export class InMemoryBackendControlPlane
 
   getPrincipal(token: string): BackendPrincipal {
     const session = this.getSession(token)
-    return sessionToPrincipal(session, this.#listRepositoriesForUser(session.githubUsername))
+    return sessionToPrincipal(session, this.#listRepositoriesForPrincipal(session.principal.id))
   }
 
   createPr(token: string, input: CreatePrInput): PullRequestRecord {
@@ -130,8 +139,8 @@ export class InMemoryBackendControlPlane
     }
 
     const prNumber = this.#pullRequests.length + 1
-    const body =
-      `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
+    const displayName = getPrincipalDisplayName(session.principal)
+    const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${displayName}`.trim()
 
     const record: PullRequestRecord = {
       id: this.#nextPrId++,
@@ -143,7 +152,7 @@ export class InMemoryBackendControlPlane
       head: input.head,
       base: input.base,
       url: `https://github.com/${input.owner}/${input.repo}/pull/${prNumber}`,
-      createdBy: session.githubUsername,
+      createdBy: session.principal.id,
       createdAt: new Date().toISOString(),
     }
 
@@ -162,12 +171,7 @@ export class InMemoryBackendControlPlane
       throw new HttpError(400, "body is required")
     }
 
-    const managed = this.isManagedPr(
-      input.owner,
-      input.repo,
-      input.prNumber,
-      session.githubUsername,
-    )
+    const managed = this.isManagedPr(input.owner, input.repo, input.prNumber, session.principal.id)
     if (!managed) {
       throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
@@ -175,7 +179,7 @@ export class InMemoryBackendControlPlane
     await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
   }
 
-  isManagedPr(owner: string, repo: string, prNumber: number, githubUsername: string): boolean {
+  isManagedPr(owner: string, repo: string, prNumber: number, principalId: string): boolean {
     assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
       throw new HttpError(400, "prNumber must be a positive integer")
@@ -186,7 +190,7 @@ export class InMemoryBackendControlPlane
         pullRequest.owner === owner &&
         pullRequest.repo === repo &&
         pullRequest.number === prNumber &&
-        pullRequest.createdBy === githubUsername,
+        pullRequest.createdBy === principalId,
     )
   }
 
@@ -240,7 +244,7 @@ export class InMemoryBackendControlPlane
 
   resolveEventOwner(event: RepoEvent): string | undefined {
     if (event.type === "pr.created") {
-      return event.author
+      return toDefaultPrincipalId(event.author)
     }
 
     return this.#pullRequests.find(
@@ -251,11 +255,11 @@ export class InMemoryBackendControlPlane
     )?.createdBy
   }
 
-  #listRepositoriesForUser(githubUsername: string): GitHubRepositoryRef[] {
+  #listRepositoriesForPrincipal(principalId: string): GitHubRepositoryRef[] {
     const repositories = new Map<string, GitHubRepositoryRef>()
 
     for (const pullRequest of this.#pullRequests) {
-      if (pullRequest.createdBy !== githubUsername) {
+      if (pullRequest.createdBy !== principalId) {
         continue
       }
 
@@ -270,17 +274,16 @@ export class InMemoryBackendControlPlane
   }
 
   #resolveAuthorizedStreamKey(event: RepoEvent): string | undefined {
-    const githubUsername = this.resolveEventOwner(event)
-    if (!githubUsername) {
+    const principalId = this.resolveEventOwner(event)
+    if (!principalId) {
       return undefined
     }
 
     const session = {
       token: "",
-      githubUsername,
-      githubUserId: hashToInteger(githubUsername),
+      principal: createPrincipalFromId(principalId),
     }
-    const principal = sessionToPrincipal(session, this.#listRepositoriesForUser(githubUsername))
+    const principal = sessionToPrincipal(session, this.#listRepositoriesForPrincipal(principalId))
     if (
       !remoteRepoBackendEventSources["remote-repo"].authorize({
         principal,
@@ -292,4 +295,29 @@ export class InMemoryBackendControlPlane
 
     return getPrincipalStreamKey(principal)
   }
+}
+
+function createPrincipal(providerIdentity: ProviderIdentity): AuthSession["principal"] {
+  return {
+    id: `${providerIdentity.provider}:${providerIdentity.subject}`,
+    providerIdentities: [providerIdentity],
+  }
+}
+
+function createPrincipalFromId(principalId: string): AuthSession["principal"] {
+  const [provider, ...subjectParts] = principalId.split(":")
+  const subject = subjectParts.join(":") || principalId
+  return {
+    id: principalId,
+    providerIdentities: [
+      {
+        provider: provider || "unknown",
+        subject,
+      },
+    ],
+  }
+}
+
+function toDefaultPrincipalId(login: string): string {
+  return `github:${hashToInteger(login)}`
 }

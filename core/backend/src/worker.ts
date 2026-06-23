@@ -15,15 +15,15 @@ import { createSseSession } from "./utils.ts"
 
 const router = createBackendRouter({
   broadcastEvent: async (env, publication) => {
-    const githubUsername = await createWorkerStreamService(env).resolveEventOwner(
+    const principalId = await createWorkerStreamService(env).resolveEventOwner(
       publication.event.payload,
     )
-    if (!githubUsername) {
+    if (!principalId) {
       return
     }
 
     const controlPlane = createWorkerControlPlane(env)
-    const principal = await controlPlane.getPrincipalForGithubUsername(githubUsername)
+    const principal = await controlPlane.getPrincipalForId(principalId)
     if (!(await authorizeBackendEventPublication(principal, publication))) {
       return
     }
@@ -147,10 +147,10 @@ function createWorkerControlPlane(env: Env): TursoBackendControlPlane {
   )
 }
 
-function getUserStreamStub(env: Env, githubUsername: string) {
+function getUserStreamStub(env: Env, principalId: string) {
   if (!env.USER_STREAM) {
     throw new Error("USER_STREAM Durable Object binding is not configured")
   }
 
-  return env.USER_STREAM.get(env.USER_STREAM.idFromName(githubUsername))
+  return env.USER_STREAM.get(env.USER_STREAM.idFromName(principalId))
 }

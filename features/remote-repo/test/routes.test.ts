@@ -68,7 +68,14 @@ test("owns remote repository backend event source authorization", async () => {
     Promise.resolve(
       source.authorize({
         principal: {
-          githubLogin: "alec",
+          id: "github:2997745",
+          providerIdentities: [
+            {
+              provider: "github",
+              subject: "2997745",
+              displayName: "alec",
+            },
+          ],
           repositories: [{ owner: "goddard-ai", repo: "sdk" }],
         },
         event,
@@ -79,7 +86,14 @@ test("owns remote repository backend event source authorization", async () => {
     Promise.resolve(
       source.authorize({
         principal: {
-          githubLogin: "alec",
+          id: "github:2997745",
+          providerIdentities: [
+            {
+              provider: "github",
+              subject: "2997745",
+              displayName: "alec",
+            },
+          ],
           repositories: [{ owner: "goddard-ai", repo: "other" }],
         },
         event,

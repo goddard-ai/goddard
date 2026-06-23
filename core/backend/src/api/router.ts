@@ -110,7 +110,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             owner,
             repo,
             prNumber,
-            session.githubUsername,
+            session.principal.id,
           )
           return { managed }
         } catch (error) {

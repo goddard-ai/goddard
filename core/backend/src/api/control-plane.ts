@@ -25,7 +25,7 @@ export interface BackendControlPlane {
     owner: string,
     repo: string,
     prNumber: number,
-    githubUsername: string,
+    principalId: string,
   ): Promise<boolean> | boolean
   replyToPr(
     token: string,

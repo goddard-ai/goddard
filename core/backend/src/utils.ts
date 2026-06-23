@@ -15,8 +15,7 @@ export function hashToInteger(value: string): number {
 export function toPublicSession(session: SessionRecord): AuthSession {
   return {
     token: session.token,
-    githubUsername: session.githubUsername,
-    githubUserId: session.githubUserId,
+    principal: session.principal,
   }
 }
 
