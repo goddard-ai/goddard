@@ -1,17 +1,25 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import { composeBackendRoutes, type BackendEventEnvelope } from "@goddard-ai/backend-plugin"
 import {
+  composeBackendEvents,
+  composeBackendEventSources,
+  composeBackendRoutes,
+  type BackendEventEnvelope,
+} from "@goddard-ai/backend-plugin"
+import {
+  githubBackendEventSources,
   githubBackendRoutes,
   GitHubWebhookError,
   normalizeGitHubWebhookRequest,
   readGitHubWebhookRequest,
 } from "@goddard-ai/github/backend"
 import {
+  pullRequestBackendEventSources,
   pullRequestBackendRoutes,
   pullRequestRemoteRepoEventHandler,
 } from "@goddard-ai/pull-request/backend"
 import {
   dispatchRemoteRepoEvent,
+  remoteRepoBackendEvents,
   remoteRepoBackendRoutes,
   type RemoteRepoEventHandler,
 } from "@goddard-ai/remote-repo/backend"
@@ -33,6 +41,16 @@ const backendRoutes = composeBackendRoutes([
   pullRequestBackendRoutes,
   remoteRepoBackendRoutes,
 ])
+const backendEvents = composeBackendEvents([remoteRepoBackendEvents])
+const backendEventSources = composeBackendEventSources(
+  [githubBackendEventSources, pullRequestBackendEventSources],
+  backendEvents,
+)
+
+type BackendEventPublication = {
+  readonly source: keyof typeof backendEventSources & string
+  readonly event: RemoteRepoBackendEvent
+}
 
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
@@ -50,6 +68,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const remoteRepoEventHandlers = dependencies.remoteRepoEventHandlers ?? [
     pullRequestRemoteRepoEventHandler,
   ]
+  const publishEvent = createBackendEventPublisher(remoteRepoEventHandlers, broadcastEvent)
 
   return createRouter<Env>({ debug: false }).use(backendRoutes, {
     auth: {
@@ -91,16 +110,19 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const token = readBearerToken(ctx.headers.authorization)
           const pr = await controlPlane.createPr(token, ctx.body, env)
 
-          await broadcastEvent(env, {
-            name: "remote_repo.event.received",
-            payload: {
-              type: "pr.created",
-              owner: pr.owner,
-              repo: pr.repo,
-              prNumber: pr.number,
-              title: pr.title,
-              author: pr.createdBy,
-              createdAt: pr.createdAt,
+          await publishEvent(env, {
+            source: "pull-request",
+            event: {
+              name: "remote_repo.event.received",
+              payload: {
+                type: "pr.created",
+                owner: pr.owner,
+                repo: pr.repo,
+                prNumber: pr.number,
+                title: pr.title,
+                author: pr.createdBy,
+                createdAt: pr.createdAt,
+              },
             },
           })
 
@@ -151,8 +173,10 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             return { ignored: true }
           }
 
-          await dispatchRemoteRepoEvent(event.payload, remoteRepoEventHandlers)
-          await broadcastEvent(env, event)
+          await publishEvent(env, {
+            source: "github",
+            event,
+          })
           return event
         } catch (error) {
           return toErrorResponse(error)
@@ -184,6 +208,41 @@ function createTursoControlPlane(env: Env): BackendControlPlane {
   })
 
   return new TursoBackendControlPlane(client as any)
+}
+
+function createBackendEventPublisher(
+  remoteRepoEventHandlers: readonly RemoteRepoEventHandler[],
+  broadcastEvent: (env: Env, event: RemoteRepoBackendEvent) => Promise<void>,
+) {
+  return async (env: Env, publication: BackendEventPublication) => {
+    assertBackendEventPublication(publication)
+    await dispatchRemoteRepoEvent(publication.event.payload, remoteRepoEventHandlers)
+    await broadcastEvent(env, publication.event)
+  }
+}
+
+function assertBackendEventPublication(publication: BackendEventPublication) {
+  const source = backendEventSources[publication.source]
+  if (!source) {
+    throw new HttpError(500, `Unknown backend event source: ${publication.source}`)
+  }
+
+  if (!source.produces.includes(publication.event.name)) {
+    throw new HttpError(
+      500,
+      `Backend event source ${publication.source} cannot produce event: ${publication.event.name}`,
+    )
+  }
+
+  const definition = backendEvents[publication.event.name]
+  if (!definition) {
+    throw new HttpError(500, `Unknown backend event: ${publication.event.name}`)
+  }
+
+  const payload = definition.payload.safeParse(publication.event.payload)
+  if (!payload.success) {
+    throw new HttpError(500, `Invalid backend event payload: ${publication.event.name}`)
+  }
 }
 
 /** Provides a safe default when the worker host does not supply event broadcasting. */
