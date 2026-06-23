@@ -1,40 +1,18 @@
-import type { BackendEventHandler, DaemonLogService, EventBus } from "@goddard-ai/daemon-plugin"
+import type { RouzerClient } from "@goddard-ai/backend-plugin"
+import type {
+  BackendEventHandler,
+  DaemonLogService,
+  EventBus,
+  InferProvides,
+} from "@goddard-ai/daemon-plugin"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
-import type { CreateSessionRequest } from "@goddard-ai/session/schema"
+import type { sessionPlugin } from "@goddard-ai/session/daemon"
 
+import type { pullRequestBackendRoutes } from "../backend.ts"
+import type { PullRequestDb } from "../daemon.ts"
 import type { pullRequestEvents } from "../events.ts"
-import type { DaemonPullRequest } from "../schema.ts"
 
 export type FeedbackEvent = Extract<RepoEvent, { type: "comment" | "review" }>
-
-type FeedbackBackend = {
-  readonly pullRequests: {
-    readonly managed: (input: {
-      readonly owner: string
-      readonly repo: string
-      readonly prNumber: number
-    }) => Promise<{ readonly managed: boolean }>
-  }
-}
-
-type FeedbackStore = {
-  readonly pullRequests: {
-    readonly first: (query: {
-      readonly where: {
-        readonly host: "github"
-        readonly owner: string
-        readonly repo: string
-        readonly prNumber: number
-      }
-    }) => Pick<DaemonPullRequest, "cwd"> | null | undefined
-  }
-}
-
-type FeedbackSessionService = {
-  readonly newSession: (input: { readonly request: CreateSessionRequest }) => Promise<unknown>
-}
-
-type FeedbackEventBus = Pick<EventBus<typeof pullRequestEvents>, "emit">
 
 export function isFeedbackEvent(event: unknown): event is FeedbackEvent {
   if (!event || typeof event !== "object" || !("type" in event)) {
@@ -61,11 +39,22 @@ export function buildPrompt(event: FeedbackEvent): string {
 }
 
 export function createPullRequestFeedbackHandler(input: {
-  readonly backend: FeedbackBackend
-  readonly db: FeedbackStore
-  readonly events: FeedbackEventBus
+  readonly backend: {
+    readonly pullRequests: Pick<
+      RouzerClient<typeof pullRequestBackendRoutes>["pullRequests"],
+      "managed"
+    >
+  }
+  readonly db: {
+    readonly pullRequests: Pick<PullRequestDb["pullRequests"], "first">
+  }
+  readonly events: Pick<EventBus<typeof pullRequestEvents>, "emit">
   readonly log: DaemonLogService
-  readonly session: FeedbackSessionService
+  readonly session: {
+    readonly newSession: (
+      input: Parameters<InferProvides<typeof sessionPlugin>["session"]["newSession"]>[0],
+    ) => Promise<unknown>
+  }
 }): BackendEventHandler<FeedbackEvent> {
   const logger = input.log.createLogger()
   const runningPrs = new Set<string>()
@@ -162,7 +151,10 @@ export function createPullRequestFeedbackHandler(input: {
   }
 }
 
-function resolveProjectDir(store: FeedbackStore, event: FeedbackEvent): string | null {
+function resolveProjectDir(
+  store: { readonly pullRequests: Pick<PullRequestDb["pullRequests"], "first"> },
+  event: FeedbackEvent,
+) {
   return (
     store.pullRequests.first({
       where: {
