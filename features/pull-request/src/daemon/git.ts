@@ -1,6 +1,9 @@
+import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
+
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
 
 type PrCreateInput = {
+  provider: string
   owner: string
   repo: string
   title: string
@@ -10,6 +13,7 @@ type PrCreateInput = {
 }
 
 type PrReplyInput = {
+  provider: string
   owner: string
   repo: string
   prNumber: number
@@ -18,10 +22,10 @@ type PrReplyInput = {
 
 /** Resolves PR creation defaults from the local Git checkout. */
 export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promise<PrCreateInput> {
-  const repoRef = inferRepoFromGit(input.cwd)
-  const { owner, repo } = splitRepo(repoRef)
+  const { provider, owner, repo } = inferRepoFromGit(input.cwd)
 
   return {
+    provider,
     owner,
     repo,
     title: input.title,
@@ -33,10 +37,10 @@ export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promi
 
 /** Resolves PR reply defaults from the local Git checkout. */
 export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise<PrReplyInput> {
-  const repoRef = inferRepoFromGit(input.cwd)
-  const { owner, repo } = splitRepo(repoRef)
+  const { provider, owner, repo } = inferRepoFromGit(input.cwd)
 
   return {
+    provider,
     owner,
     repo,
     prNumber: input.prNumber ?? inferPrNumberFromGit(input.cwd),
@@ -44,25 +48,11 @@ export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise
   }
 }
 
-function splitRepo(repo: string) {
-  const [owner, name] = repo.split("/")
-  if (!owner || !name || repo.split("/").length !== 2) {
-    throw new Error(`Invalid repository '${repo}'. Expected owner/name.`)
-  }
-
-  return { owner, repo: name }
-}
-
-function inferRepoFromGit(cwd: string): string {
+function inferRepoFromGit(cwd: string) {
   const remote = runGit(cwd, ["config", "--get", "remote.origin.url"])
-  const httpsMatch = remote.match(/^https:\/\/github\.com\/(.+?)\/(.+?)(\.git)?$/)
-  if (httpsMatch) {
-    return `${httpsMatch[1]}/${httpsMatch[2]}`
-  }
-
-  const sshMatch = remote.match(/^git@github\.com:(.+?)\/(.+?)(\.git)?$/)
-  if (sshMatch) {
-    return `${sshMatch[1]}/${sshMatch[2]}`
+  const repository = parseGitHubRepositoryUrl(remote)
+  if (repository) {
+    return repository
   }
 
   throw new Error(`Unsupported origin remote URL: ${remote}`)

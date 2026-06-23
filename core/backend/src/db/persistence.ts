@@ -6,6 +6,7 @@ import type {
   DeviceFlowStart,
   ProviderIdentity,
 } from "@goddard-ai/auth/schema"
+import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
 import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
@@ -15,9 +16,9 @@ import { drizzle } from "drizzle-orm/libsql"
 
 import {
   assertRepo,
-  createPrViaApp,
+  createPrViaProvider,
   HttpError,
-  postPrCommentViaApp,
+  postPrCommentViaProvider,
   type BackendControlPlane,
 } from "../api/control-plane.ts"
 import {
@@ -150,7 +151,12 @@ export class TursoBackendControlPlane
     const now = new Date().toISOString()
     const displayName = getPrincipalDisplayName(session.principal)
     const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${displayName}`.trim()
-    const createdPr = await createPrViaApp(env, input, body)
+    const createdPr = await createPrViaProvider(
+      env,
+      getDefaultBackendPluginComposition().providers,
+      input,
+      body,
+    )
 
     const [inserted] = await this.#db
       .insert(schema.pullRequests)
@@ -174,7 +180,7 @@ export class TursoBackendControlPlane
 
   async replyToPr(
     token: string,
-    input: { owner: string; repo: string; prNumber: number; body: string },
+    input: { provider: string; owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> {
     const session = await this.getSession(token)
@@ -184,6 +190,7 @@ export class TursoBackendControlPlane
     }
 
     const managed = await this.isManagedPr(
+      input.provider,
       input.owner,
       input.repo,
       input.prNumber,
@@ -193,10 +200,11 @@ export class TursoBackendControlPlane
       throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
+    await postPrCommentViaProvider(env, getDefaultBackendPluginComposition().providers, input)
   }
 
   async isManagedPr(
+    provider: string,
     owner: string,
     repo: string,
     prNumber: number,
@@ -213,6 +221,7 @@ export class TursoBackendControlPlane
       .where(
         and(
           eq(schema.pullRequests.owner, owner),
+          eq(schema.pullRequests.provider, provider),
           eq(schema.pullRequests.repo, repo),
           eq(schema.pullRequests.number, prNumber),
           eq(schema.pullRequests.createdBy, principalId),

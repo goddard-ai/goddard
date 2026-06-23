@@ -106,9 +106,10 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
           const controlPlane = createControlPlane(readEnv(ctx))
           const token = readBearerToken(ctx.headers.authorization)
           const session = await controlPlane.getSession(token)
-          const { owner, repo, prNumber } = ctx.query
+          const { provider, owner, repo, prNumber } = ctx.query
           assertRepo(owner, repo)
           const managed = await controlPlane.isManagedPr(
+            provider,
             owner,
             repo,
             prNumber,

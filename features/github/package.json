@@ -13,6 +13,14 @@
       "bun": "./src/backend.ts",
       "import": "./dist/backend.mjs"
     },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon.ts",
+        "default": "./dist/daemon.d.mts"
+      },
+      "bun": "./src/daemon.ts",
+      "import": "./dist/daemon.mjs"
+    },
     "./schema": {
       "types": {
         "source": "./src/schema.ts",
