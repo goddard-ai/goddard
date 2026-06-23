@@ -1,4 +1,5 @@
 /** Internal backend plugin support for feature-owned Rouzer route declarations. */
+import { metadata as rouzerMetadata, type RouteMetadata } from "rouzer"
 import type { HttpAction, HttpNode, HttpResource, HttpRouteTree } from "rouzer/http"
 import type { z } from "zod"
 
@@ -195,32 +196,12 @@ export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes:
   return routes
 }
 
-/** Preserves one feature-owned backend plugin contribution object. */
-export function defineBackendPlugin<const TPlugin extends BackendPluginDefinition>(
-  plugin: TPlugin,
-) {
-  return plugin
-}
-
-/** Preserves the exact backend event definition object for backend event inference. */
-export function defineBackendEvents<const TEvents extends BackendEventDefinitions>(
-  events: TEvents,
-) {
-  return events
-}
-
-/** Preserves the exact backend event source object for backend source inference. */
-export function defineBackendEventSources<const TSources extends BackendEventSourceDefinitions>(
-  sources: TSources,
-) {
-  return sources
-}
-
-/** Preserves the exact backend provider capability map for provider inference. */
-export function defineBackendProviders<
-  const TProviders extends BackendProviderCapabilityDefinitions,
->(providers: TProviders) {
-  return providers
+/**
+ * Attaches Rouzer route metadata without leaking Rouzer's private marker symbol
+ * into exported backend route declaration types.
+ */
+export function backendMetadata(value: RouteMetadata) {
+  return rouzerMetadata(value) as object
 }
 
 /** Combines backend route fragments and rejects ambiguous action ownership. */
