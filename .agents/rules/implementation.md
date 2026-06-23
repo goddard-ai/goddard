@@ -12,6 +12,8 @@ Read this ruleset when editing production code, refactoring, changing architectu
 - Do not add speculative helpers, abstractions, options, extension points, alternate code paths, or future-proofing.
 - Do not add public exports, optional parameters, config flags, interfaces, base classes, generic utility modules, lifecycle hooks, plugin systems, or endpoint variants unless the current change requires them.
 - Do not export a symbol unless another module imports it or a framework/tooling contract requires it.
+- Before adding a local `type` or `interface`, check whether it mirrors an existing schema, function, route tree, plugin context, service, or store. Prefer importing or deriving the type from the owner; local structural types should describe genuinely local data only.
+- For parsed or validated data, derive TypeScript types from the runtime schema. Do not maintain separate hand-written runtime checks and compile-time types for the same value.
 - Extract one-use helpers only when they clearly improve readability or isolate a meaningful constraint.
 - Prefer focused module names over broad catch-all files; follow nearby naming patterns.
 - Avoid explicit return types unless they improve safety or clarity.
