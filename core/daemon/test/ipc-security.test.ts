@@ -3,10 +3,9 @@ import { connect } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { createBrowserDaemonIpcClient } from "@goddard-ai/daemon-client/browser"
-import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
+import { createDaemonIpcClient, type DaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { createLogStore } from "@goddard-ai/logs"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
-import type { DaemonPullRequest } from "@goddard-ai/pull-request/schema"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
@@ -24,6 +23,7 @@ const otherHostedOrigin = "https://other.goddardai.org"
 const desktopWebviewOrigin = "http://desktop.goddard.local"
 let sharedHomeDir: string | null = null
 let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+const allInboxStatuses = ["unread", "read", "replied", "completed", "saved", "archived"] as const
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -48,7 +48,21 @@ afterAll(async () => {
   // Per-test cleanup above already restores HOME and removes shared temp directories.
 })
 
-test("daemon submit request requires a valid session token", async () => {
+test("daemon submit request rejects invalid session tokens", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  await expect(
+    send(client, "pr.submit", {
+      token: "",
+      cwd: process.cwd(),
+      title: "Ship daemon security",
+      body: "Done.",
+    }),
+  ).rejects.toThrow(/invalid session token/i)
+})
+
+test("daemon submit request redacts invalid session tokens in IPC logs", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
@@ -364,6 +378,44 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  await expect(
+    send(client, "pr.submit", {
+      token: "tok_session",
+      cwd: repoDir,
+      title: "Ship daemon security",
+      body: "Done.",
+    }),
+  ).rejects.toThrow(/internal server error/i)
+})
+
+test("daemon logs unexpected handler crashes after returning generic IPC errors", async () => {
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "trusted",
+    repo: "widgets",
+    branch: "feature/secure-daemon",
+  })
+
+  const daemon = await startServer({
+    sdk: {
+      pr: {
+        create: async () => {
+          throw new Error("github exploded")
+        },
+        reply: async () => ({ success: true }),
+      },
+    },
+    useExistingHome: true,
+  })
+  seedAuthorizedSession({
+    sessionId: "ses_crash",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await expect(
       send(client, "pr.submit", {
@@ -435,13 +487,11 @@ test("daemon submit request enforces trusted repo context and records created PR
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const { logs } = await captureLogs(async () => {
-    await send(client, "pr.submit", {
-      token: "tok_session",
-      cwd: repoDir,
-      title: "Ship daemon security",
-      body: "Done.",
-    })
+  await send(client, "pr.submit", {
+    token: "tok_session",
+    cwd: repoDir,
+    title: "Ship daemon security",
+    body: "Done.",
   })
 
   expect(createCalls).toEqual([
@@ -455,47 +505,55 @@ test("daemon submit request enforces trusted repo context and records created PR
       base: "main",
     },
   ])
-  expect(db.sessions.get("ses_42")?.permissions?.allowedPrNumbers).toEqual([42])
   expect(
-    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }: DaemonPullRequest) => ({
-      host,
-      owner,
-      repo,
-      prNumber,
-      cwd,
-    })),
-  ).toEqual([
-    {
-      host: "github",
-      owner: "trusted",
-      repo: "widgets",
-      prNumber: 42,
-      cwd: repoDir,
-    },
-  ])
-  const pullRequest = db.pullRequests.first({
-    where: {
-      host: "github",
-      owner: "trusted",
-      repo: "widgets",
-      prNumber: 42,
-    },
-  })
-  expect(db.inboxItems.first({ where: { entityId: pullRequest!.id } })).toMatchObject({
-    entityId: pullRequest!.id,
+    (await send(client, "session.get", { id: "ses_42" })).session.permissions?.allowedPrNumbers,
+  ).toEqual([42])
+  const pullRequestItem = await waitForInboxItem(
+    client,
+    (item) => item.reason === "pull_request.created",
+  )
+  expect(pullRequestItem).toMatchObject({
     reason: "pull_request.created",
     status: "unread",
     priority: "normal",
     scope: "Session",
     headline: "Ship daemon security",
   })
-  await expect(send(client, "pr.get", { id: pullRequest!.id })).resolves.toMatchObject({
+  await expect(send(client, "pr.get", { id: pullRequestItem.entityId })).resolves.toMatchObject({
     pullRequest: {
-      id: pullRequest!.id,
+      id: pullRequestItem.entityId,
       owner: "trusted",
       repo: "widgets",
       prNumber: 42,
     },
+  })
+})
+
+test("daemon submit request correlates IPC request and response logs after resolving session scope", async () => {
+  await useTempHome()
+  const repoDir = await createGitRepoFixture({
+    owner: "evil",
+    repo: "fork",
+    branch: "feature/secure-daemon",
+  })
+
+  const daemon = await startServer({ useExistingHome: true })
+  seedAuthorizedSession({
+    sessionId: "ses_42",
+    token: "tok_session",
+    owner: "trusted",
+    repo: "widgets",
+    allowedPrNumbers: [],
+  })
+
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const { logs } = await captureLogs(async () => {
+    await send(client, "pr.submit", {
+      token: "tok_session",
+      cwd: repoDir,
+      title: "Ship daemon security",
+      body: "Done.",
+    })
   })
 
   const received = logs.find((entry) => entry.event === "ipc.request_received")
@@ -610,38 +668,25 @@ test("daemon reply request records pull request checkout locations", async () =>
     message: "Updated per review",
   })
 
-  expect(
-    db.pullRequests.findMany().map(({ host, owner, repo, prNumber, cwd }: DaemonPullRequest) => ({
-      host,
-      owner,
-      repo,
-      prNumber,
-      cwd,
-    })),
-  ).toEqual([
-    {
-      host: "github",
-      owner: "trusted",
-      repo: "widgets",
-      prNumber: 12,
-      cwd: repoDir,
-    },
-  ])
-  const pullRequest = db.pullRequests.first({
-    where: {
-      host: "github",
-      owner: "trusted",
-      repo: "widgets",
-      prNumber: 12,
-    },
-  })
-  expect(db.inboxItems.first({ where: { entityId: pullRequest!.id } })).toMatchObject({
-    entityId: pullRequest!.id,
+  const pullRequestItem = await waitForInboxItem(
+    client,
+    (item) => item.reason === "pull_request.updated",
+  )
+  expect(pullRequestItem).toMatchObject({
     reason: "pull_request.updated",
     status: "unread",
     priority: "normal",
     scope: "Session",
     headline: "PR reply posted",
+  })
+  await expect(send(client, "pr.get", { id: pullRequestItem.entityId })).resolves.toMatchObject({
+    pullRequest: {
+      id: pullRequestItem.entityId,
+      owner: "trusted",
+      repo: "widgets",
+      prNumber: 12,
+      cwd: repoDir,
+    },
   })
 })
 
@@ -685,7 +730,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     headline: "Decision ready for review",
   })
 
-  const turnEndedItem = db.inboxItems.first({ where: { entityId: "ses_inbox" } })
+  const turnEndedItem = await waitForInboxItem(client, (item) => item.entityId === "ses_inbox")
   expect(turnEndedItem).toMatchObject({
     entityId: "ses_inbox",
     reason: "session.turn_ended",
@@ -698,9 +743,13 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     entityId: "ses_inbox",
     status: "read",
   })
-  expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("read")
+  expect((await waitForInboxItem(client, (item) => item.entityId === "ses_inbox")).status).toBe(
+    "read",
+  )
   await send(client, "inbox.completeSession", { id: "ses_inbox" })
-  expect(db.inboxItems.first({ where: { entityId: "ses_inbox" } })?.status).toBe("completed")
+  expect((await waitForInboxItem(client, (item) => item.entityId === "ses_inbox")).status).toBe(
+    "completed",
+  )
   await waitFor(async () => inboxEvents.length >= 3)
   expect(inboxEvents).toEqual([{ status: "unread" }, { status: "read" }, { status: "completed" }])
 })
@@ -1219,6 +1268,23 @@ async function captureLogs(
     restoreLogging()
     store.close()
   }
+}
+
+async function waitForInboxItem(
+  client: DaemonIpcClient,
+  predicate: (item: any) => boolean,
+  timeoutMs = 2_000,
+) {
+  let matched: any = null
+  await waitFor(async () => {
+    const { items } = await send(client, "inbox.list", {
+      limit: 50,
+      statuses: [...allInboxStatuses],
+    })
+    matched = items.find(predicate) ?? null
+    return matched != null
+  }, timeoutMs)
+  return matched
 }
 
 async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 2_000) {

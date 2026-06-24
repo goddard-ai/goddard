@@ -12,7 +12,6 @@ import {
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
   SessionErrorCodes,
-  type DaemonSessionDiagnosticEvent,
   type GetSessionHistoryResponse,
   type SessionId,
   type SessionLifecycleEvent,
@@ -23,6 +22,7 @@ import { kind, kindstore } from "kindstore"
 
 import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import { getSessionTurnMessagePayload } from "../../../features/session/src/daemon/turn-history.ts"
+import type { SessionIdleShutdownUpdatedEvent } from "../../../features/session/src/events.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -127,6 +127,35 @@ function subscribeSessionLifecycle(
   )
 }
 
+function subscribeDaemonIdleShutdownEvents(
+  daemon: DaemonServer,
+  onEvent: (payload: SessionIdleShutdownUpdatedEvent) => void,
+  id?: SessionId,
+) {
+  const abortController = new AbortController()
+  const stream = daemon.events.stream(
+    id
+      ? {
+          names: ["session.idle_shutdown.updated"],
+          where: [{ path: "sessionId", equals: id }],
+        }
+      : {
+          names: ["session.idle_shutdown.updated"],
+        },
+    abortController.signal,
+  )
+  const done = (async () => {
+    for await (const event of stream) {
+      onEvent(event.payload as SessionIdleShutdownUpdatedEvent)
+    }
+  })()
+
+  return async () => {
+    abortController.abort()
+    await done.catch(() => {})
+  }
+}
+
 async function expectIpcErrorCode<T>(
   promise: Promise<T>,
   code: (typeof SessionErrorCodes)[keyof typeof SessionErrorCodes],
@@ -138,6 +167,32 @@ async function expectIpcErrorCode<T>(
     expect(error).toBeInstanceOf(IpcClientError)
     expect(error).toHaveProperty("code", code)
   }
+}
+
+async function waitForSession(
+  client: DaemonIpcClient,
+  id: SessionId,
+  predicate: (session: {
+    activeDaemonSession: boolean
+    stopReason: string | null
+    completedHidden: boolean
+    title: string
+    titleState: string
+    contextUsage: unknown
+  }) => boolean,
+  timeoutMs = 5_000,
+) {
+  let latestSession: any
+  await waitFor(async () => {
+    const { session } = await send(client, "session.get", { id })
+    latestSession = session
+    return predicate(session)
+  }, timeoutMs)
+  return latestSession
+}
+
+function filterIdleShutdownEvents(events: SessionIdleShutdownUpdatedEvent[], id: SessionId) {
+  return events.filter((event) => event.sessionId === id)
 }
 
 afterEach(async () => {
@@ -416,7 +471,11 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   })
 
   await send(client, "session.shutdown", { id: created.session.id })
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
 
   const session = await send(client, "session.get", { id: created.session.id })
   const history: GetSessionHistoryResponse = await send(client, "session.history", {
@@ -491,8 +550,17 @@ test("session completion hides from the default list but stays interactive", asy
   expect(await listSessionIds(client)).toContain(created.session.id)
 
   await send(client, "inbox.completeSession", { id: created.session.id })
-  expect(db.sessions.get(created.session.id)?.completedHidden).toBe(true)
-  expect(db.inboxItems.first({ where: { entityId: created.session.id } })?.status).toBe("completed")
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.completedHidden,
+  ).toBe(true)
+  expect(
+    (
+      await send(client, "inbox.list", {
+        limit: 50,
+        statuses: ["unread", "read", "replied", "completed", "saved", "archived"],
+      })
+    ).items.find((item: any) => item.entityId === created.session.id)?.status,
+  ).toBe("completed")
   expect(await listSessionIds(client)).not.toContain(created.session.id)
 
   await expect(send(client, "session.get", { id: created.session.id })).resolves.toMatchObject({
@@ -510,8 +578,15 @@ test("session completion hides from the default list but stays interactive", asy
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-after-complete", "wait:5"),
   })
-  expect(db.sessions.get(created.session.id)?.completedHidden).toBe(false)
-  expect(db.inboxItems.first({ where: { entityId: created.session.id } })?.status).toBe("replied")
+  await waitForSession(client, created.session.id, (session) => session.completedHidden === false)
+  expect(
+    (
+      await send(client, "inbox.list", {
+        limit: 50,
+        statuses: ["unread", "read", "replied", "completed", "saved", "archived"],
+      })
+    ).items.find((item: any) => item.entityId === created.session.id)?.status,
+  ).toBe("replied")
   expect(await listSessionIds(client)).toContain(created.session.id)
 
   await send(client, "session.send", {
@@ -544,7 +619,6 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
   })
 
   await daemonA.close()
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
 
   const daemonB = await startServer({ useExistingHome: true })
   const clientB = createDaemonIpcClient({ daemonUrl: daemonB.daemonUrl })
@@ -584,7 +658,11 @@ test("session reconnect fails when the resolved agent no longer supports ACP ses
   })
 
   await send(client, "session.shutdown", { id: created.session.id })
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
 
   db.sessions.update(created.session.id, {
     agent: createWrappedNodeAgent(chunkingAgentPath),
@@ -615,7 +693,9 @@ test("daemon persists ACP stop reasons on the session record", async () => {
   })
 
   expect(created.session.stopReason).toBe("end_turn")
-  expect(db.sessions.get(created.session.id)?.stopReason).toBe("end_turn")
+  expect((await send(client, "session.get", { id: created.session.id })).session.stopReason).toBe(
+    "end_turn",
+  )
 })
 
 test("daemon coalesces stored agent message chunks while keeping the live stream granular", async () => {
@@ -655,9 +735,11 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
   })
 
-  await waitFor(async () => {
-    return db.sessions.get(created.session.id)?.stopReason === "end_turn" && liveChunks.length === 3
-  })
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.stopReason === "end_turn" && liveChunks.length === 3,
+  )
 
   await Promise.resolve(unsubscribe()).catch(() => {})
 
@@ -703,12 +785,7 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     },
   })
 
-  const turnRecord =
-    db.sessionTurns.first({
-      where: { sessionId: created.session.id },
-    }) ?? null
   expect(history.turns).toHaveLength(1)
-  expect(turnRecord?.messages).toEqual(history.turns[0]?.messages)
 })
 
 test("daemon stores usage updates on the session instead of durable turn history", async () => {
@@ -740,17 +817,18 @@ test("daemon stores usage updates on the session instead of durable turn history
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
   })
 
-  await waitFor(async () => {
-    return (
-      db.sessions.get(created.session.id)?.stopReason === "end_turn" &&
-      liveUsageUpdates.length === 1
-    )
-  })
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.stopReason === "end_turn" && liveUsageUpdates.length === 1,
+  )
 
   await Promise.resolve(unsubscribe()).catch(() => {})
 
   expect(liveUsageUpdates).toHaveLength(1)
-  expect(db.sessions.get(created.session.id)?.contextUsage).toEqual({
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.contextUsage,
+  ).toEqual({
     size: 258400,
     used: 35839,
   })
@@ -827,9 +905,13 @@ test("daemon promotes placeholder titles after the first later prompt is accepte
     ),
   })
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "fallback")
+  const fallbackSession = await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.titleState === "fallback",
+  )
 
-  expect(db.sessions.get(created.session.id)).toMatchObject({
+  expect(fallbackSession).toMatchObject({
     title: "Audit the retry policy for loop",
     titleState: "fallback",
   })
@@ -862,9 +944,13 @@ test("daemon marks pending title generation as failed when provider config is pr
   expect(created.session.title).toBe("Summarize the retry failure mode")
   expect(created.session.titleState).toBe("pending")
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.titleState === "failed")
+  const failedTitleSession = await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.titleState === "failed",
+  )
 
-  expect(db.sessions.get(created.session.id)).toMatchObject({
+  expect(failedTitleSession).toMatchObject({
     title: "Summarize the retry failure mode",
     titleState: "failed",
   })
@@ -1104,6 +1190,13 @@ test("multiple clients can observe the same live session stream independently", 
 test("daemon auto-shuts down idle loadable sessions with no connected clients", async () => {
   const daemon = await startServer({ idleSessionShutdownTimeoutMs: 60 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1111,16 +1204,18 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
     systemPrompt: "Keep responses short.",
   })
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
 
   const session = await send(client, "session.get", { id: created.session.id })
+  const sessionIdleEvents = filterIdleShutdownEvents(idleEvents, created.session.id)
   expect(session.session.connectionMode).toBe("live")
   expect(session.session.activeDaemonSession).toBe(false)
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_started",
-  )
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_expired",
+  expect(sessionIdleEvents.map((event) => event.action)).toEqual(
+    expect.arrayContaining(["started", "expired"]),
   )
 
   const reconnected = await send(client, "session.connect", {
@@ -1140,6 +1235,13 @@ test("session idle auto-shutdown uses configured duration", async () => {
   })
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1147,12 +1249,15 @@ test("session idle auto-shutdown uses configured duration", async () => {
     systemPrompt: "Keep responses short.",
   })
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
 
   expect(
-    getDiagnosticEvents(created.session.id).some(
-      (entry) =>
-        entry.type === "session_idle_shutdown_timer_started" && entry.detail?.timeoutMs === 60,
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "started" && event.timeoutMs === 60,
     ),
   ).toBe(true)
 
@@ -1163,6 +1268,13 @@ test("session.message event stream subscribers cancel idle auto-shutdown before 
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1172,14 +1284,20 @@ test("session.message event stream subscribers cancel idle auto-shutdown before 
 
   const unsubscribe = await subscribeSessionMessages(client, created.session.id, () => {})
   await waitFor(async () =>
-    getDiagnosticEventTypes(created.session.id).includes("session_idle_shutdown_timer_cancelled"),
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "cancelled",
+    ),
   )
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
-  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
-    "session_idle_shutdown_timer_expired",
-  )
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
+  ).toBe(true)
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "expired",
+    ),
+  ).toBe(false)
 
   await Promise.resolve(unsubscribe()).catch(() => {})
   await send(client, "session.shutdown", { id: created.session.id })
@@ -1189,6 +1307,13 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const lifecycleEvents: Array<{
     kind: string
     session?: { id?: string; activeDaemonSession?: boolean }
@@ -1216,11 +1341,17 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
         event.changed?.includes("connection"),
     ),
   )
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
-
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_expired",
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
   )
+
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "expired",
+    ),
+  ).toBe(true)
   await waitFor(async () =>
     lifecycleEvents.some(
       (event) =>
@@ -1284,6 +1415,13 @@ test("idle auto-shutdown waits for the last session.message event stream subscri
   const idleSessionShutdownTimeoutMs = 70
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const clientA = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(clientA, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1320,19 +1458,34 @@ test("idle auto-shutdown waits for the last session.message event stream subscri
 
   await Promise.resolve(unsubscribeA()).catch(() => {})
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
-  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+  expect(
+    (await send(clientA, "session.get", { id: created.session.id })).session.activeDaemonSession,
+  ).toBe(true)
 
   await Promise.resolve(unsubscribeB()).catch(() => {})
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
-
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_expired",
+  await waitForSession(
+    clientA,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
   )
+
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "expired",
+    ),
+  ).toBe(true)
 })
 
 test("busy loadable sessions do not time out until they become quiescent", async () => {
   const daemon = await startServer({ idleSessionShutdownTimeoutMs: 60 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1346,18 +1499,33 @@ test("busy loadable sessions do not time out until they become quiescent", async
   })
 
   await new Promise((resolve) => setTimeout(resolve, 110))
-  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
+  ).toBe(true)
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_expired",
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
   )
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "expired",
+    ),
+  ).toBe(true)
 })
 
 test("sessions waiting on permission responses do not time out until the permission resolves", async () => {
   const idleSessionShutdownTimeoutMs = 60
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1371,7 +1539,9 @@ test("sessions waiting on permission responses do not time out until the permiss
   })
 
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
-  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
+  ).toBe(true)
 
   await send(client, "session.send", {
     id: created.session.id,
@@ -1386,16 +1556,29 @@ test("sessions waiting on permission responses do not time out until the permiss
     },
   })
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_expired",
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
   )
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "expired",
+    ),
+  ).toBe(true)
 })
 
 test("sessions without session/load support never use idle auto-shutdown", async () => {
   const idleSessionShutdownTimeoutMs = 60
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(chunkingAgentPath),
     cwd: process.cwd(),
@@ -1405,10 +1588,14 @@ test("sessions without session/load support never use idle auto-shutdown", async
 
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(db.sessions.get(created.session.id)?.activeDaemonSession).toBe(true)
-  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
-    "session_idle_shutdown_timer_started",
-  )
+  expect(
+    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
+  ).toBe(true)
+  expect(
+    filterIdleShutdownEvents(idleEvents, created.session.id).some(
+      (event) => event.action === "started",
+    ),
+  ).toBe(false)
 
   await send(client, "session.shutdown", { id: created.session.id })
 })
@@ -1417,6 +1604,13 @@ test("manual session shutdown clears any pending idle auto-shutdown timer", asyn
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1426,21 +1620,29 @@ test("manual session shutdown clears any pending idle auto-shutdown timer", asyn
 
   await new Promise((resolve) => setTimeout(resolve, 20))
   await send(client, "session.shutdown", { id: created.session.id })
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_cancelled",
-  )
-  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
-    "session_idle_shutdown_timer_expired",
-  )
+  const sessionIdleEvents = filterIdleShutdownEvents(idleEvents, created.session.id)
+  expect(sessionIdleEvents.some((event) => event.action === "cancelled")).toBe(true)
+  expect(sessionIdleEvents.some((event) => event.action === "expired")).toBe(false)
 })
 
 test("daemon shutdown clears pending idle auto-shutdown timers", async () => {
   const idleSessionShutdownTimeoutMs = 80
   const daemon = await startServer({ idleSessionShutdownTimeoutMs })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1452,17 +1654,21 @@ test("daemon shutdown clears pending idle auto-shutdown timers", async () => {
   await daemon.close()
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(getDiagnosticEventTypes(created.session.id)).toContain(
-    "session_idle_shutdown_timer_cancelled",
-  )
-  expect(getDiagnosticEventTypes(created.session.id)).not.toContain(
-    "session_idle_shutdown_timer_expired",
-  )
+  const sessionIdleEvents = filterIdleShutdownEvents(idleEvents, created.session.id)
+  expect(sessionIdleEvents.some((event) => event.action === "cancelled")).toBe(true)
+  expect(sessionIdleEvents.some((event) => event.action === "expired")).toBe(false)
 })
 
 test("agent process exit clears pending idle auto-shutdown timers", async () => {
   const daemon = await startServer({ idleSessionShutdownTimeoutMs: 80 })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const idleEvents: SessionIdleShutdownUpdatedEvent[] = []
+  const unsubscribeIdle = subscribeDaemonIdleShutdownEvents(daemon, (event) => {
+    idleEvents.push(event)
+  })
+  cleanup.push(async () => {
+    await Promise.resolve(unsubscribeIdle()).catch(() => {})
+  })
   const created = await send(client, "session.create", {
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
@@ -1475,14 +1681,18 @@ test("agent process exit clears pending idle auto-shutdown timers", async () => 
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "exit-after-turn:20"),
   })
 
-  await waitFor(async () => db.sessions.get(created.session.id)?.activeDaemonSession === false)
+  await waitForSession(
+    client,
+    created.session.id,
+    (session) => session.activeDaemonSession === false,
+  )
 
-  const diagnosticTypes = getDiagnosticEventTypes(created.session.id)
+  const sessionIdleEvents = filterIdleShutdownEvents(idleEvents, created.session.id)
   expect(
-    diagnosticTypes.filter((type: string) => type === "session_idle_shutdown_timer_started").length,
+    sessionIdleEvents.filter((event) => event.action === "started").length,
   ).toBeGreaterThanOrEqual(2)
-  expect(diagnosticTypes).toContain("session_idle_shutdown_timer_cancelled")
-  expect(diagnosticTypes).not.toContain("session_idle_shutdown_timer_expired")
+  expect(sessionIdleEvents.some((event) => event.action === "cancelled")).toBe(true)
+  expect(sessionIdleEvents.some((event) => event.action === "expired")).toBe(false)
 })
 
 test("daemon queues concurrent prompts per session and drains them in arrival order", async () => {
@@ -3084,16 +3294,6 @@ function sessionTurnMessages(...messages: AcpMessage[]): SessionTurnMessage[] {
 async function listSessionIds(client: DaemonIpcClient) {
   const { sessions } = await send(client, "session.list", { limit: 50 })
   return sessions.map((session: any) => session.id)
-}
-
-function getDiagnosticEventTypes(sessionId: ReturnType<typeof db.sessions.newId>) {
-  return getDiagnosticEvents(sessionId).map((event: DaemonSessionDiagnosticEvent) => event.type)
-}
-
-function getDiagnosticEvents(sessionId: ReturnType<typeof db.sessions.newId>) {
-  return (db.sessionDiagnostics.first({
-    where: { sessionId },
-  })?.events ?? []) as DaemonSessionDiagnosticEvent[]
 }
 
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000) {
