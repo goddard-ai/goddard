@@ -12,7 +12,6 @@ import { afterAll, afterEach, expect, test } from "bun:test"
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
-import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -53,7 +52,7 @@ test("daemon submit request rejects invalid session tokens", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
   await expect(
-    send(client, "pr.submit", {
+    client.pr.submit({
       token: "",
       cwd: process.cwd(),
       title: "Ship daemon security",
@@ -68,7 +67,7 @@ test("daemon submit request redacts invalid session tokens in IPC logs", async (
 
   const { logs } = await captureLogs(async () => {
     await expect(
-      send(client, "pr.submit", {
+      client.pr.submit({
         token: "",
         cwd: process.cwd(),
         title: "Ship daemon security",
@@ -277,12 +276,12 @@ test("daemon browser pairing issues origin-bound revocable tokens", async () => 
     await browserStreamDone.catch(() => {})
   })
 
-  await send(localClient, "session.reportTurnEnded", {
+  await localClient.session.reportTurnEnded({
     id: "ses_browser_direct",
     scope: "Browser client",
     headline: "Direct stream update",
   })
-  await send(localClient, "inbox.update", {
+  await localClient.inbox.update({
     entityId: "ses_browser_direct",
     status: "read",
   })
@@ -379,7 +378,7 @@ test("daemon hides unexpected handler crashes from IPC clients", async () => {
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "pr.submit", {
+    client.pr.submit({
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -418,7 +417,7 @@ test("daemon logs unexpected handler crashes after returning generic IPC errors"
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
     await expect(
-      send(client, "pr.submit", {
+      client.pr.submit({
         token: "tok_session",
         cwd: repoDir,
         title: "Ship daemon security",
@@ -487,7 +486,7 @@ test("daemon submit request enforces trusted repo context and records created PR
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await send(client, "pr.submit", {
+  await client.pr.submit({
     token: "tok_session",
     cwd: repoDir,
     title: "Ship daemon security",
@@ -506,7 +505,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     },
   ])
   expect(
-    (await send(client, "session.get", { id: "ses_42" })).session.permissions?.allowedPrNumbers,
+    (await client.session.get({ id: "ses_42" })).session.permissions?.allowedPrNumbers,
   ).toEqual([42])
   const pullRequestItem = await waitForInboxItem(
     client,
@@ -519,7 +518,7 @@ test("daemon submit request enforces trusted repo context and records created PR
     scope: "Session",
     headline: "Ship daemon security",
   })
-  await expect(send(client, "pr.get", { id: pullRequestItem.entityId })).resolves.toMatchObject({
+  await expect(client.pr.get({ id: pullRequestItem.entityId })).resolves.toMatchObject({
     pullRequest: {
       id: pullRequestItem.entityId,
       owner: "trusted",
@@ -548,7 +547,7 @@ test("daemon submit request correlates IPC request and response logs after resol
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const { logs } = await captureLogs(async () => {
-    await send(client, "pr.submit", {
+    await client.pr.submit({
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -607,7 +606,7 @@ test("daemon submit request honors repository-local security deny policy", async
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "pr.submit", {
+    client.pr.submit({
       token: "tok_session",
       cwd: repoDir,
       title: "Ship daemon security",
@@ -636,7 +635,7 @@ test("daemon reply request rejects PRs outside the session allowlist", async () 
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "pr.reply", {
+    client.pr.reply({
       token: "tok_session",
       cwd: repoDir,
       message: "Updated per review",
@@ -662,7 +661,7 @@ test("daemon reply request records pull request checkout locations", async () =>
   })
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  await send(client, "pr.reply", {
+  await client.pr.reply({
     token: "tok_session",
     cwd: repoDir,
     message: "Updated per review",
@@ -679,7 +678,7 @@ test("daemon reply request records pull request checkout locations", async () =>
     scope: "Session",
     headline: "PR reply posted",
   })
-  await expect(send(client, "pr.get", { id: pullRequestItem.entityId })).resolves.toMatchObject({
+  await expect(client.pr.get({ id: pullRequestItem.entityId })).resolves.toMatchObject({
     pullRequest: {
       id: pullRequestItem.entityId,
       owner: "trusted",
@@ -705,26 +704,32 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   const inboxEvents: Array<{
     status: string
   }> = []
-  const unsubscribe = await subscribe(
-    client,
+  const abortController = new AbortController()
+  const eventStream = await client.events.stream(
+    { names: ["inbox.item.updated"] },
     {
-      name: "events.stream",
-      filter: { names: ["inbox.item.updated"] },
+      signal: abortController.signal,
     },
-    (event) => {
+  )
+  const eventsDone = (async () => {
+    for await (const event of eventStream) {
       const item = event.payload
       if (item.entityId === "ses_inbox") {
         inboxEvents.push({
           status: item.status,
         })
       }
-    },
-  )
+    }
+  })()
+  const unsubscribe = async () => {
+    abortController.abort()
+    await eventsDone.catch(() => {})
+  }
   cleanup.push(async () => {
-    unsubscribe()
+    await unsubscribe()
   })
 
-  await send(client, "session.reportTurnEnded", {
+  await client.session.reportTurnEnded({
     id: "ses_inbox",
     scope: "Checkout flow",
     headline: "Decision ready for review",
@@ -739,14 +744,14 @@ test("daemon session reporting creates and updates session inbox rows", async ()
     headline: "Decision ready for review",
   })
 
-  await send(client, "inbox.update", {
+  await client.inbox.update({
     entityId: "ses_inbox",
     status: "read",
   })
   expect((await waitForInboxItem(client, (item) => item.entityId === "ses_inbox")).status).toBe(
     "read",
   )
-  await send(client, "inbox.completeSession", { id: "ses_inbox" })
+  await client.inbox.completeSession({ id: "ses_inbox" })
   expect((await waitForInboxItem(client, (item) => item.entityId === "ses_inbox")).status).toBe(
     "completed",
   )
@@ -773,7 +778,7 @@ test("daemon workforce request rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "workforce.request", {
+    client.workforce.request({
       rootDir: otherRootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -801,7 +806,7 @@ test("daemon workforce respond rejects mismatched roots for token-backed session
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "workforce.respond", {
+    client.workforce.respond({
       rootDir: otherRootDir,
       output: "done",
       token,
@@ -827,7 +832,7 @@ test("daemon workforce request rejects token-backed sessions without a workforce
 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   await expect(
-    send(client, "workforce.request", {
+    client.workforce.request({
       rootDir,
       targetAgentId: "root",
       input: "Ship it.",
@@ -1277,7 +1282,7 @@ async function waitForInboxItem(
 ) {
   let matched: any = null
   await waitFor(async () => {
-    const { items } = await send(client, "inbox.list", {
+    const { items } = await client.inbox.list({
       limit: 50,
       statuses: [...allInboxStatuses],
     })

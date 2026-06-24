@@ -16,7 +16,6 @@ import { resolveRuntimeConfig } from "../src/config.ts"
 import { SetupContext } from "../src/context.ts"
 import { startDaemonServer } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -248,26 +247,32 @@ test(
       name?: string
       payload?: { repository?: string; prNumber?: number; feedbackType?: string; phase?: string }
     }> = []
-    const unsubscribeEvents = await subscribe(
-      client,
+    const abortController = new AbortController()
+    const eventStream = await client.events.stream(
       {
-        name: "events.stream",
-        filter: {
-          names: ["pull_request.feedback.finished", "pull_request.feedback.failed"],
-        },
+        names: ["pull_request.feedback.finished", "pull_request.feedback.failed"],
       },
-      (event) => {
+      {
+        signal: abortController.signal,
+      },
+    )
+    const eventsDone = (async () => {
+      for await (const event of eventStream) {
         if (event && typeof event === "object" && "name" in event) {
           if ((event as { name?: string }).name === "pull_request.feedback.finished") {
             feedbackFinishedEvents.push(event as (typeof feedbackFinishedEvents)[number])
-            return
+            continue
           }
           if ((event as { name?: string }).name === "pull_request.feedback.failed") {
             feedbackFailedEvents.push(event as (typeof feedbackFailedEvents)[number])
           }
         }
-      },
-    )
+      }
+    })()
+    const unsubscribeEvents = () => {
+      abortController.abort()
+      return eventsDone.catch(() => {})
+    }
     const feedbackHandler = daemon.backendEventHandlers.find(
       (handler) => handler.name === "pull-request.feedback",
     )
@@ -295,15 +300,15 @@ test(
         if (feedbackFinishedEvents.length !== 1) {
           return false
         }
-        const listed = await send(client, "session.list", { limit: 50 })
+        const listed = await client.session.list({ limit: 50 })
         return listed.sessions.length === 1
       })
 
-      const firstListed = await send(client, "session.list", { limit: 50 })
+      const firstListed = await client.session.list({ limit: 50 })
       const firstSessionIds = new Set(
         firstListed.sessions.map((session: DaemonSession) => session.id),
       )
-      const firstSession = await send(client, "session.get", { id: firstListed.sessions[0].id })
+      const firstSession = await client.session.get({ id: firstListed.sessions[0].id })
       expect(firstSession.session.agentName).toBe("Node Agent A")
 
       await writeGlobalRootConfig({
@@ -323,16 +328,16 @@ test(
         if (feedbackFinishedEvents.length !== 2) {
           return false
         }
-        const listed = await send(client, "session.list", { limit: 50 })
+        const listed = await client.session.list({ limit: 50 })
         return listed.sessions.length === 2
       })
 
-      const secondListed = await send(client, "session.list", { limit: 50 })
+      const secondListed = await client.session.list({ limit: 50 })
       const secondSessionSummary = secondListed.sessions.find(
         (session: DaemonSession) => firstSessionIds.has(session.id) === false,
       )
       expect(secondSessionSummary).toBeTruthy()
-      const secondSession = await send(client, "session.get", { id: secondSessionSummary!.id })
+      const secondSession = await client.session.get({ id: secondSessionSummary!.id })
       expect(secondSession.session.agentName).toBe("Node Agent B")
       expect(feedbackFailedEvents).toHaveLength(0)
       expect(
@@ -343,7 +348,7 @@ test(
       ).toEqual(["acme/widgets#12:comment:0", "acme/widgets#12:comment:0"])
 
       for (const sessionId of secondListed.sessions.map((session: DaemonSession) => session.id)) {
-        await send(client, "session.shutdown", { id: sessionId })
+        await client.session.shutdown({ id: sessionId })
       }
     } finally {
       await Promise.resolve(unsubscribeEvents()).catch(() => {})

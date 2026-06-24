@@ -12,7 +12,6 @@ import { resolveRuntimeConfig } from "../src/config.ts"
 import { runDaemon } from "../src/daemon.ts"
 import { createDaemonUrl, readDaemonTcpAddressFromDaemonUrl } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -108,7 +107,7 @@ test(
         store: db,
       })
       const stopDaemon = createDaemonStopper()
-      let unsubscribeEvents: (() => void) | undefined
+      let unsubscribeEvents: (() => Promise<void>) | undefined
 
       try {
         await waitFor(async () => {
@@ -118,18 +117,24 @@ test(
         const client = createDaemonIpcClient({
           daemonUrl: createDaemonUrl(port),
         })
-        unsubscribeEvents = await subscribe(
-          client,
+        const abortController = new AbortController()
+        const eventStream = await client.events.stream(
           {
-            name: "events.stream",
-            filter: {
-              names: ["pull_request.feedback.finished"],
-            },
+            names: ["pull_request.feedback.finished"],
           },
-          (event) => {
-            feedbackFinishedEvents.push(event)
+          {
+            signal: abortController.signal,
           },
         )
+        const eventsDone = (async () => {
+          for await (const event of eventStream) {
+            feedbackFinishedEvents.push(event)
+          }
+        })()
+        unsubscribeEvents = async () => {
+          abortController.abort()
+          await eventsDone.catch(() => {})
+        }
 
         backend.sendEvent({
           name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
@@ -190,7 +195,7 @@ test(
         await stopDaemon()
         return await daemonPromise
       } finally {
-        unsubscribeEvents?.()
+        await unsubscribeEvents?.()
         await stopDaemon()
         await daemonPromise.catch(() => {})
       }
@@ -328,7 +333,7 @@ test(
         store: db,
       })
       const stopDaemon = createDaemonStopper()
-      let unsubscribeEvents: (() => void) | undefined
+      let unsubscribeEvents: (() => Promise<void>) | undefined
       const degradedEvents: Array<{
         name?: string
         payload?: {
@@ -342,18 +347,24 @@ test(
         const client = createDaemonIpcClient({
           daemonUrl: createDaemonUrl(port),
         })
-        unsubscribeEvents = await subscribe(
-          client,
+        const abortController = new AbortController()
+        const eventStream = await client.events.stream(
           {
-            name: "events.stream",
-            filter: {
-              names: ["backend.stream.degraded"],
-            },
+            names: ["backend.stream.degraded"],
           },
-          (event) => {
-            degradedEvents.push(event)
+          {
+            signal: abortController.signal,
           },
         )
+        const eventsDone = (async () => {
+          for await (const event of eventStream) {
+            degradedEvents.push(event)
+          }
+        })()
+        unsubscribeEvents = async () => {
+          abortController.abort()
+          await eventsDone.catch(() => {})
+        }
         streamResponse.resolve()
         await waitFor(() =>
           degradedEvents.some(
@@ -366,7 +377,7 @@ test(
         await stopDaemon()
         return await daemonPromise
       } finally {
-        unsubscribeEvents?.()
+        await unsubscribeEvents?.()
         await stopDaemon()
         await daemonPromise.catch(() => {})
       }
@@ -727,7 +738,7 @@ async function isDaemonHealthy(port: number) {
     const client = createDaemonIpcClient({
       daemonUrl: createDaemonUrl(port),
     })
-    const response = await send(client, "daemon.health")
+    const response = await client.daemon.health()
     return response.ok === true
   } catch {
     return false

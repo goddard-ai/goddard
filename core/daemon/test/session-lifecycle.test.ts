@@ -26,7 +26,6 @@ import type { SessionIdleShutdownUpdatedEvent } from "../../../features/session/
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -64,24 +63,31 @@ function readStreamMessagePayload(payload: unknown) {
   return getSessionTurnMessagePayload(payload as AcpMessage | SessionTurnMessage)
 }
 
-function subscribeSessionMessages(
+async function subscribeSessionMessages(
   client: DaemonIpcClient,
   id: SessionId,
   onMessage: (payload: unknown) => void,
 ) {
-  return subscribe(
-    client,
+  const abortController = new AbortController()
+  const stream = await client.events.stream(
     {
-      name: "events.stream",
-      filter: {
-        names: ["session.message"],
-        where: [{ path: "id", equals: id }],
-      },
+      names: ["session.message"],
+      where: [{ path: "id", equals: id }],
     },
-    (event) => {
-      onMessage(event.payload.message)
+    {
+      signal: abortController.signal,
     },
   )
+  const done = (async () => {
+    for await (const event of stream) {
+      onMessage((event.payload as { message: unknown }).message)
+    }
+  })()
+
+  return async () => {
+    abortController.abort()
+    await done.catch(() => {})
+  }
 }
 
 function subscribeDaemonSessionMessages(
@@ -109,22 +115,29 @@ function subscribeDaemonSessionMessages(
   }
 }
 
-function subscribeSessionLifecycle(
+async function subscribeSessionLifecycle(
   client: DaemonIpcClient,
   onEvent: (payload: SessionLifecycleEvent) => void,
 ) {
-  return subscribe(
-    client,
+  const abortController = new AbortController()
+  const stream = await client.events.stream(
     {
-      name: "events.stream",
-      filter: {
-        names: ["session.lifecycle.updated", "session.lifecycle.deleted"],
-      },
+      names: ["session.lifecycle.updated", "session.lifecycle.deleted"],
     },
-    (event) => {
-      onEvent(event.payload)
+    {
+      signal: abortController.signal,
     },
   )
+  const done = (async () => {
+    for await (const event of stream) {
+      onEvent(event.payload)
+    }
+  })()
+
+  return async () => {
+    abortController.abort()
+    await done.catch(() => {})
+  }
 }
 
 function subscribeDaemonIdleShutdownEvents(
@@ -184,7 +197,7 @@ async function waitForSession(
 ) {
   let latestSession: any
   await waitFor(async () => {
-    const { session } = await send(client, "session.get", { id })
+    const { session } = await client.session.get({ id })
     latestSession = session
     return predicate(session)
   }, timeoutMs)
@@ -385,7 +398,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -397,7 +410,7 @@ test("daemon revokes session tokens when agent processes exit", async () => {
   expect(permissions).toBeTruthy()
   expect(typeof token).toBe("string")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 
   await waitFor(async () => {
     return db.sessions.get(created.session.id)?.permissions == null
@@ -412,7 +425,7 @@ test("daemon persists repository context into durable session storage", async ()
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -432,7 +445,7 @@ test("daemon persists repository context into durable session storage", async ()
   expect(storedRecord?.metadata ?? null).toBeNull()
   expect(created.session.metadata ?? null).toBeNull()
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon resolves the default agent for direct session creation", async () => {
@@ -448,7 +461,7 @@ test("daemon resolves the default agent for direct session creation", async () =
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
@@ -456,29 +469,29 @@ test("daemon resolves the default agent for direct session creation", async () =
 
   expect(created.session.agentName).toBe("Node Agent")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("loadable sessions remain reconnectable after shutdown", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
   await waitForSession(
     client,
     created.session.id,
     (session) => session.activeDaemonSession === false,
   )
 
-  const session = await send(client, "session.get", { id: created.session.id })
-  const history: GetSessionHistoryResponse = await send(client, "session.history", {
+  const session = await client.session.get({ id: created.session.id })
+  const history: GetSessionHistoryResponse = await client.session.history({
     id: created.session.id,
   })
   const promptStarts: string[] = []
@@ -510,10 +523,10 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
     activeDaemonSession: false,
   })
 
-  const reconnected = await send(client, "session.connect", {
+  const reconnected = await client.session.connect({
     id: created.session.id,
   })
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(
       reconnected.session.acpSessionId,
@@ -528,34 +541,32 @@ test("loadable sessions remain reconnectable after shutdown", async () => {
   expect(reconnected.session.activeDaemonSession).toBe(true)
   expect(promptStarts).toContain("after-shutdown")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session completion hides from the default list but stays interactive", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.reportTurnEnded", {
+  await client.session.reportTurnEnded({
     id: created.session.id,
     scope: "Checkout flow",
     headline: "Ready for review",
   })
   expect(await listSessionIds(client)).toContain(created.session.id)
 
-  await send(client, "inbox.completeSession", { id: created.session.id })
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.completedHidden,
-  ).toBe(true)
+  await client.inbox.completeSession({ id: created.session.id })
+  expect((await client.session.get({ id: created.session.id })).session.completedHidden).toBe(true)
   expect(
     (
-      await send(client, "inbox.list", {
+      await client.inbox.list({
         limit: 50,
         statuses: ["unread", "read", "replied", "completed", "saved", "archived"],
       })
@@ -563,25 +574,25 @@ test("session completion hides from the default list but stays interactive", asy
   ).toBe("completed")
   expect(await listSessionIds(client)).not.toContain(created.session.id)
 
-  await expect(send(client, "session.get", { id: created.session.id })).resolves.toMatchObject({
+  await expect(client.session.get({ id: created.session.id })).resolves.toMatchObject({
     session: { id: created.session.id, completedHidden: true },
   })
   await expect(
-    send(client, "session.history", {
+    client.session.history({
       id: created.session.id,
     }),
   ).resolves.toMatchObject({
     id: created.session.id,
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-after-complete", "wait:5"),
   })
   await waitForSession(client, created.session.id, (session) => session.completedHidden === false)
   expect(
     (
-      await send(client, "inbox.list", {
+      await client.inbox.list({
         limit: 50,
         statuses: ["unread", "read", "replied", "completed", "saved", "archived"],
       })
@@ -589,21 +600,21 @@ test("session completion hides from the default list but stays interactive", asy
   ).toBe("replied")
   expect(await listSessionIds(client)).toContain(created.session.id)
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "held-prompt", "hold:final-only"),
   })
   await waitFor(async () => {
-    const history = await send(client, "session.history", { id: created.session.id })
+    const history = await client.session.history({ id: created.session.id })
     return history.turns.some((turn: any) => turn.completedAt === null)
   })
   await expectIpcErrorCode(
-    send(client, "session.complete", { id: created.session.id }),
+    client.session.complete({ id: created.session.id }),
     SessionErrorCodes.CannotCompleteActiveTurn,
   )
 
-  await send(client, "session.cancel", { id: created.session.id })
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.cancel({ id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("loadable sessions remain reconnectable after daemon restart", async () => {
@@ -611,7 +622,7 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
 
   const daemonA = await startServer({ useExistingHome: true })
   const clientA = createDaemonIpcClient({ daemonUrl: daemonA.daemonUrl })
-  const created = await send(clientA, "session.create", {
+  const created = await clientA.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -622,10 +633,10 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
 
   const daemonB = await startServer({ useExistingHome: true })
   const clientB = createDaemonIpcClient({ daemonUrl: daemonB.daemonUrl })
-  const reloadedSession = await send(clientB, "session.get", {
+  const reloadedSession = await clientB.session.get({
     id: created.session.id,
   })
-  const history = await send(clientB, "session.history", {
+  const history = await clientB.session.history({
     id: created.session.id,
   })
 
@@ -637,27 +648,27 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
     activeDaemonSession: false,
   })
 
-  const connected = await send(clientB, "session.connect", {
+  const connected = await clientB.session.connect({
     id: created.session.id,
   })
   expect(connected.session.connectionMode).toBe("live")
   expect(connected.session.activeDaemonSession).toBe(true)
 
-  await send(clientB, "session.shutdown", { id: created.session.id })
+  await clientB.session.shutdown({ id: created.session.id })
 })
 
 test("session reconnect fails when the resolved agent no longer supports ACP session/load", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
   await waitForSession(
     client,
     created.session.id,
@@ -669,11 +680,11 @@ test("session reconnect fails when the resolved agent no longer supports ACP ses
   })
 
   await expectIpcErrorCode(
-    send(client, "session.connect", { id: created.session.id }),
+    client.session.connect({ id: created.session.id }),
     SessionErrorCodes.CannotResumeUnsupportedAgent,
   )
 
-  const session = await send(client, "session.get", { id: created.session.id })
+  const session = await client.session.get({ id: created.session.id })
   expect(session.session.connectionMode).toBe("live")
   expect(session.session.activeDaemonSession).toBe(false)
   expect(session.session.acpSessionId).toBe(created.session.acpSessionId)
@@ -683,7 +694,7 @@ test("daemon persists ACP stop reasons on the session record", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -693,16 +704,14 @@ test("daemon persists ACP stop reasons on the session record", async () => {
   })
 
   expect(created.session.stopReason).toBe("end_turn")
-  expect((await send(client, "session.get", { id: created.session.id })).session.stopReason).toBe(
-    "end_turn",
-  )
+  expect((await client.session.get({ id: created.session.id })).session.stopReason).toBe("end_turn")
 })
 
 test("daemon coalesces stored agent message chunks while keeping the live stream granular", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(chunkingAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -730,7 +739,7 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
     }
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
   })
@@ -745,7 +754,7 @@ test("daemon coalesces stored agent message chunks while keeping the live stream
 
   expect(liveChunks).toEqual(["Chunked ", "response", "."])
 
-  const history: GetSessionHistoryResponse = await send(client, "session.history", {
+  const history: GetSessionHistoryResponse = await client.session.history({
     id: created.session.id,
   })
   const chunkMessages = history.turns
@@ -792,7 +801,7 @@ test("daemon stores usage updates on the session instead of durable turn history
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(usageAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -812,7 +821,7 @@ test("daemon stores usage updates on the session instead of durable turn history
     }
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "Say hello."),
   })
@@ -826,14 +835,12 @@ test("daemon stores usage updates on the session instead of durable turn history
   await Promise.resolve(unsubscribe()).catch(() => {})
 
   expect(liveUsageUpdates).toHaveLength(1)
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.contextUsage,
-  ).toEqual({
+  expect((await client.session.get({ id: created.session.id })).session.contextUsage).toEqual({
     size: 258400,
     used: 35839,
   })
 
-  const history: GetSessionHistoryResponse = await send(client, "session.history", {
+  const history: GetSessionHistoryResponse = await client.session.history({
     id: created.session.id,
   })
   expect(
@@ -854,7 +861,7 @@ test("daemon creates placeholder session titles before any user prompt is sent",
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -864,14 +871,14 @@ test("daemon creates placeholder session titles before any user prompt is sent",
   expect(created.session.title).toBe("New session")
   expect(created.session.titleState).toBe("placeholder")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon derives a fallback title immediately when the session starts with an initial prompt", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -882,21 +889,21 @@ test("daemon derives a fallback title immediately when the session starts with a
   expect(created.session.title).toBe("Review the worktree bootstrap flow for")
   expect(created.session.titleState).toBe("fallback")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon promotes placeholder titles after the first later prompt is accepted", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(
       created.session.acpSessionId,
@@ -916,7 +923,7 @@ test("daemon promotes placeholder titles after the first later prompt is accepte
     titleState: "fallback",
   })
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon marks pending title generation as failed when provider config is present but unusable", async () => {
@@ -933,7 +940,7 @@ test("daemon marks pending title generation as failed when provider config is pr
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -955,7 +962,7 @@ test("daemon marks pending title generation as failed when provider config is pr
     titleState: "failed",
   })
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon reconciles interrupted sessions on restart and leaves archived history readable", async () => {
@@ -1021,28 +1028,28 @@ test("daemon reconciles interrupted sessions on restart and leaves archived hist
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const session = await send(client, "session.get", { id: sessionId })
+  const session = await client.session.get({ id: sessionId })
   expect(session.session.status).toBe("error")
   expect(session.session.connectionMode).toBe("history")
   expect(session.session.activeDaemonSession).toBe(false)
   expect(session.session.errorMessage ?? "").toMatch(/previous daemon exited unexpectedly/i)
 
-  const history = await send(client, "session.history", { id: sessionId })
+  const history = await client.session.history({ id: sessionId })
   expect(history.connection.mode).toBe("history")
   expect(history.turns).toHaveLength(1)
 
-  const diagnostics = await send(client, "session.diagnostics", {
+  const diagnostics = await client.session.diagnostics({
     id: sessionId,
   })
   expect(
     diagnostics.events.some((event: any) => event.type === "session_reconciled_after_restart"),
   ).toBe(true)
   await expectIpcErrorCode(
-    send(client, "session.connect", { id: sessionId }),
+    client.session.connect({ id: sessionId }),
     SessionErrorCodes.ArchivedNotReconnectable,
   )
   await expectIpcErrorCode(
-    send(client, "session.resolveToken", { token: "tok-restart-1" }),
+    client.session.resolveToken({ token: "tok-restart-1" }),
     SessionErrorCodes.InvalidToken,
   )
 })
@@ -1115,7 +1122,7 @@ test("daemon promotes interrupted turn drafts into incomplete turn history on re
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const history = await send(client, "session.history", { id: sessionId })
+  const history = await client.session.history({ id: sessionId })
 
   expect(history.turns).toHaveLength(1)
   expect(history.turns[0]).toMatchObject({
@@ -1149,7 +1156,7 @@ test("multiple clients can observe the same live session stream independently", 
   const require = createRequire(import.meta.url)
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
-  const created = await send(clientA, "session.create", {
+  const created = await clientA.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1165,7 +1172,7 @@ test("multiple clients can observe the same live session stream independently", 
     clientBMessages.push(readStreamMessagePayload(payload))
   })
 
-  await send(clientA, "session.send", {
+  await clientA.session.send({
     id: created.session.id,
     message: {
       jsonrpc: "2.0",
@@ -1197,7 +1204,7 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1210,7 +1217,7 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
     (session) => session.activeDaemonSession === false,
   )
 
-  const session = await send(client, "session.get", { id: created.session.id })
+  const session = await client.session.get({ id: created.session.id })
   const sessionIdleEvents = filterIdleShutdownEvents(idleEvents, created.session.id)
   expect(session.session.connectionMode).toBe("live")
   expect(session.session.activeDaemonSession).toBe(false)
@@ -1218,12 +1225,12 @@ test("daemon auto-shuts down idle loadable sessions with no connected clients", 
     expect.arrayContaining(["started", "expired"]),
   )
 
-  const reconnected = await send(client, "session.connect", {
+  const reconnected = await client.session.connect({
     id: created.session.id,
   })
   expect(reconnected.session.activeDaemonSession).toBe(true)
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session idle auto-shutdown uses configured duration", async () => {
@@ -1242,7 +1249,7 @@ test("session idle auto-shutdown uses configured duration", async () => {
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1261,7 +1268,7 @@ test("session idle auto-shutdown uses configured duration", async () => {
     ),
   ).toBe(true)
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.message event stream subscribers cancel idle auto-shutdown before expiry", async () => {
@@ -1275,7 +1282,7 @@ test("session.message event stream subscribers cancel idle auto-shutdown before 
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1290,9 +1297,9 @@ test("session.message event stream subscribers cancel idle auto-shutdown before 
   )
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
-  ).toBe(true)
+  expect((await client.session.get({ id: created.session.id })).session.activeDaemonSession).toBe(
+    true,
+  )
   expect(
     filterIdleShutdownEvents(idleEvents, created.session.id).some(
       (event) => event.action === "expired",
@@ -1300,7 +1307,7 @@ test("session.message event stream subscribers cancel idle auto-shutdown before 
   ).toBe(false)
 
   await Promise.resolve(unsubscribe()).catch(() => {})
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session lifecycle subscribers do not cancel idle auto-shutdown", async () => {
@@ -1326,7 +1333,7 @@ test("session lifecycle subscribers do not cancel idle auto-shutdown", async () 
     await Promise.resolve(unsubscribe()).catch(() => {})
   })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1370,24 +1377,30 @@ test("daemon event stream emits filtered composed event envelopes", async () => 
     name: string
     payload?: { sessionId?: string; request?: { systemPrompt?: string } }
   }> = []
-  const unsubscribe = await subscribe(
-    client,
+  const abortController = new AbortController()
+  const eventStream = await client.events.stream(
     {
-      name: "events.stream",
-      filter: {
-        names: ["session.persisted"],
-        where: [{ path: "request.systemPrompt", equals: systemPrompt }],
-      },
+      names: ["session.persisted"],
+      where: [{ path: "request.systemPrompt", equals: systemPrompt }],
     },
-    (event) => {
-      events.push(event)
+    {
+      signal: abortController.signal,
     },
   )
+  const unsubscribe = async () => {
+    abortController.abort()
+    await eventsDone.catch(() => {})
+  }
+  const eventsDone = (async () => {
+    for await (const event of eventStream) {
+      events.push(event)
+    }
+  })()
   cleanup.push(async () => {
     await Promise.resolve(unsubscribe()).catch(() => {})
   })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1408,7 +1421,7 @@ test("daemon event stream emits filtered composed event envelopes", async () => 
   ])
 
   await Promise.resolve(unsubscribe()).catch(() => {})
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("idle auto-shutdown waits for the last session.message event stream subscriber to disconnect", async () => {
@@ -1422,7 +1435,7 @@ test("idle auto-shutdown waits for the last session.message event stream subscri
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(clientA, "session.create", {
+  const created = await clientA.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1438,7 +1451,7 @@ test("idle auto-shutdown waits for the last session.message event stream subscri
     clientBMessages.push(readStreamMessagePayload(payload))
   })
 
-  await send(clientA, "session.send", {
+  await clientA.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "subscriber-check"),
   })
@@ -1458,9 +1471,9 @@ test("idle auto-shutdown waits for the last session.message event stream subscri
 
   await Promise.resolve(unsubscribeA()).catch(() => {})
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
-  expect(
-    (await send(clientA, "session.get", { id: created.session.id })).session.activeDaemonSession,
-  ).toBe(true)
+  expect((await clientA.session.get({ id: created.session.id })).session.activeDaemonSession).toBe(
+    true,
+  )
 
   await Promise.resolve(unsubscribeB()).catch(() => {})
   await waitForSession(
@@ -1486,22 +1499,22 @@ test("busy loadable sessions do not time out until they become quiescent", async
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "wait:150"),
   })
 
   await new Promise((resolve) => setTimeout(resolve, 110))
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
-  ).toBe(true)
+  expect((await client.session.get({ id: created.session.id })).session.activeDaemonSession).toBe(
+    true,
+  )
 
   await waitForSession(
     client,
@@ -1526,24 +1539,24 @@ test("sessions waiting on permission responses do not time out until the permiss
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "permission:approve"),
   })
 
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
-  ).toBe(true)
+  expect((await client.session.get({ id: created.session.id })).session.activeDaemonSession).toBe(
+    true,
+  )
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: {
       jsonrpc: "2.0",
@@ -1579,7 +1592,7 @@ test("sessions without session/load support never use idle auto-shutdown", async
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(chunkingAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1588,16 +1601,16 @@ test("sessions without session/load support never use idle auto-shutdown", async
 
   await new Promise((resolve) => setTimeout(resolve, idleSessionShutdownTimeoutMs + 40))
 
-  expect(
-    (await send(client, "session.get", { id: created.session.id })).session.activeDaemonSession,
-  ).toBe(true)
+  expect((await client.session.get({ id: created.session.id })).session.activeDaemonSession).toBe(
+    true,
+  )
   expect(
     filterIdleShutdownEvents(idleEvents, created.session.id).some(
       (event) => event.action === "started",
     ),
   ).toBe(false)
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("manual session shutdown clears any pending idle auto-shutdown timer", async () => {
@@ -1611,7 +1624,7 @@ test("manual session shutdown clears any pending idle auto-shutdown timer", asyn
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1619,7 +1632,7 @@ test("manual session shutdown clears any pending idle auto-shutdown timer", asyn
   })
 
   await new Promise((resolve) => setTimeout(resolve, 20))
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
   await waitForSession(
     client,
     created.session.id,
@@ -1643,7 +1656,7 @@ test("daemon shutdown clears pending idle auto-shutdown timers", async () => {
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1669,14 +1682,14 @@ test("agent process exit clears pending idle auto-shutdown timers", async () => 
   cleanup.push(async () => {
     await Promise.resolve(unsubscribeIdle()).catch(() => {})
   })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "exit-after-turn:20"),
   })
@@ -1698,7 +1711,7 @@ test("agent process exit clears pending idle auto-shutdown timers", async () => 
 test("daemon queues concurrent prompts per session and drains them in arrival order", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1733,15 +1746,15 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
   })
 
   await Promise.all([
-    send(client, "session.send", {
+    client.session.send({
       id: created.session.id,
       message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "wait:40"),
     }),
-    send(client, "session.send", {
+    client.session.send({
       id: created.session.id,
       message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "second"),
     }),
-    send(client, "session.send", {
+    client.session.send({
       id: created.session.id,
       message: buildPromptMessage(created.session.acpSessionId, "prompt-3", "third"),
     }),
@@ -1758,7 +1771,7 @@ test("daemon queues concurrent prompts per session and drains them in arrival or
 test("daemon cancel returns queued prompts, emits terminal errors for queued raw prompts, and prevents them from being sent", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1795,22 +1808,22 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
     }
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:final-only"),
   })
   await waitFor(async () => promptStarts.includes("hold:final-only"))
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "queued-second"),
   })
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-3", "queued-third"),
   })
 
-  const cancelled = await send(client, "session.cancel", {
+  const cancelled = await client.session.cancel({
     id: created.session.id,
   })
   await waitFor(async () => promptErrors.length >= 2)
@@ -1848,7 +1861,7 @@ test("daemon cancel returns queued prompts, emits terminal errors for queued raw
 test("daemon steering ignores message chunks and dispatches on tool updates", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1891,18 +1904,18 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
     }
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:update-boundary"),
   })
   await waitFor(async () => events.includes("chunk:prompt_started:hold:update-boundary"))
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "stale-queued"),
   })
 
-  const steered = await send(client, "session.steer", {
+  const steered = await client.session.steer({
     id: created.session.id,
     prompt: "replacement",
   })
@@ -1934,7 +1947,7 @@ test("daemon steering ignores message chunks and dispatches on tool updates", as
 test("daemon steering falls back to the cancelled prompt response when no tool boundary appears", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(queueAgentPath),
     cwd: process.cwd(),
     mcpServers: [],
@@ -1969,18 +1982,18 @@ test("daemon steering falls back to the cancelled prompt response when no tool b
     }
   })
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-1", "hold:final-only"),
   })
   await waitFor(async () => events.includes("chunk:prompt_started:hold:final-only"))
 
-  await send(client, "session.send", {
+  await client.session.send({
     id: created.session.id,
     message: buildPromptMessage(created.session.acpSessionId, "prompt-2", "stale-queued"),
   })
 
-  const steered = await send(client, "session.steer", {
+  const steered = await client.session.steer({
     id: created.session.id,
     prompt: "replacement",
   })
@@ -2011,7 +2024,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   const requestedCwd = join(repoDir, "src")
   const resolvedRequestedCwd = await realpath(requestedCwd)
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: requestedCwd,
     worktree: { enabled: true },
@@ -2019,7 +2032,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
     systemPrompt: "Keep responses short.",
   })
 
-  const fetchedWorktree = await send(client, "session.worktree.get", {
+  const fetchedWorktree = await client.session.worktree.get({
     id: created.session.id,
   })
   const worktree = fetchedWorktree.worktree
@@ -2030,7 +2043,7 @@ test("session worktree opt-in maps cwd into a real worktree subdirectory", async
   expect(worktree?.worktreeDir).not.toBe(repoDir)
   expect(existsSync(worktree!.worktreeDir)).toBe(true)
   expect(existsSync(worktree!.effectiveCwd)).toBe(true)
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.changes reads tracked and untracked diff content from the session workspace root", async () => {
@@ -2040,7 +2053,7 @@ test("session.changes reads tracked and untracked diff content from the session 
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
   const repoDir = await createRepoFixture({ includeSrc: true })
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: join(repoDir, "src"),
     worktree: { enabled: true },
@@ -2048,7 +2061,7 @@ test("session.changes reads tracked and untracked diff content from the session 
     systemPrompt: "Keep responses short.",
   })
 
-  const fetchedWorktree = await send(client, "session.worktree.get", {
+  const fetchedWorktree = await client.session.worktree.get({
     id: created.session.id,
   })
   expect(fetchedWorktree.worktree).toBeTruthy()
@@ -2060,7 +2073,7 @@ test("session.changes reads tracked and untracked diff content from the session 
   )
   await writeFile(join(fetchedWorktree.worktree!.worktreeDir, "README.md"), "# Session changes\n")
 
-  const changes = await send(client, "session.changes", {
+  const changes = await client.session.changes({
     id: created.session.id,
   })
 
@@ -2069,7 +2082,7 @@ test("session.changes reads tracked and untracked diff content from the session 
   expect(changes.diff).toContain("diff --git a/package.json b/package.json")
   expect(changes.diff).toContain("diff --git a/README.md b/README.md")
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session completion enforces worktree cleanliness without blocking local dirty repos", async () => {
@@ -2079,69 +2092,63 @@ test("session completion enforces worktree cleanliness without blocking local di
   const exampleAgentPath = require.resolve("@agentclientprotocol/sdk/dist/examples/agent.js")
 
   const localRepoDir = await createRepoFixture()
-  const local = await send(client, "session.create", {
+  const local = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: localRepoDir,
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
-  await send(client, "session.reportTurnEnded", { id: local.session.id })
+  await client.session.reportTurnEnded({ id: local.session.id })
   await writeFile(join(localRepoDir, "local-note.txt"), "local dirty work\n", "utf-8")
-  await expect(
-    send(client, "inbox.completeSession", { id: local.session.id }),
-  ).resolves.toMatchObject({
+  await expect(client.inbox.completeSession({ id: local.session.id })).resolves.toMatchObject({
     item: { status: "completed" },
   })
-  await send(client, "session.shutdown", { id: local.session.id })
+  await client.session.shutdown({ id: local.session.id })
 
   const cleanRepoDir = await createRepoFixture()
-  const clean = await send(client, "session.create", {
+  const clean = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: cleanRepoDir,
     worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
-  await send(client, "session.reportTurnEnded", { id: clean.session.id })
-  await expect(
-    send(client, "inbox.completeSession", { id: clean.session.id }),
-  ).resolves.toMatchObject({
+  await client.session.reportTurnEnded({ id: clean.session.id })
+  await expect(client.inbox.completeSession({ id: clean.session.id })).resolves.toMatchObject({
     item: { status: "completed" },
   })
-  await send(client, "session.shutdown", { id: clean.session.id })
+  await client.session.shutdown({ id: clean.session.id })
 
   const dirtyRepoDir = await createRepoFixture()
-  const dirty = await send(client, "session.create", {
+  const dirty = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: dirtyRepoDir,
     worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
-  const dirtyWorktree = (await send(client, "session.worktree.get", { id: dirty.session.id }))
-    .worktree
+  const dirtyWorktree = (await client.session.worktree.get({ id: dirty.session.id })).worktree
   expect(dirtyWorktree).toBeTruthy()
-  await send(client, "session.reportTurnEnded", { id: dirty.session.id })
+  await client.session.reportTurnEnded({ id: dirty.session.id })
   await writeFile(join(dirtyWorktree!.worktreeDir, "dirty-note.txt"), "uncommitted\n", "utf-8")
   await expectIpcErrorCode(
-    send(client, "session.complete", { id: dirty.session.id }),
+    client.session.complete({ id: dirty.session.id }),
     SessionErrorCodes.CannotCompleteDirtyWorktree,
   )
-  await send(client, "session.shutdown", { id: dirty.session.id })
+  await client.session.shutdown({ id: dirty.session.id })
 
   const committedRepoDir = await createRepoFixture()
-  const committed = await send(client, "session.create", {
+  const committed = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: committedRepoDir,
     worktree: { enabled: true },
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
-  const committedWorktree = (
-    await send(client, "session.worktree.get", { id: committed.session.id })
-  ).worktree
+  const committedWorktree = (await client.session.worktree.get({ id: committed.session.id }))
+    .worktree
   expect(committedWorktree).toBeTruthy()
-  await send(client, "session.reportTurnEnded", { id: committed.session.id })
+  await client.session.reportTurnEnded({ id: committed.session.id })
   await writeFile(
     join(committedWorktree!.worktreeDir, "committed-note.txt"),
     "committed\n",
@@ -2150,10 +2157,10 @@ test("session completion enforces worktree cleanliness without blocking local di
   await runGit(committedWorktree!.worktreeDir, ["add", "committed-note.txt"])
   await runGit(committedWorktree!.worktreeDir, ["commit", "-m", "session work"])
   await expectIpcErrorCode(
-    send(client, "session.complete", { id: committed.session.id }),
+    client.session.complete({ id: committed.session.id }),
     SessionErrorCodes.CannotCompleteUnmergedCommits,
   )
-  await send(client, "session.shutdown", { id: committed.session.id })
+  await client.session.shutdown({ id: committed.session.id })
 })
 
 test("session worktree launch branches from the selected base branch", async () => {
@@ -2171,7 +2178,7 @@ test("session worktree launch branches from the selected base branch", async () 
   const featureHead = await readGitOutput(repoDir, ["rev-parse", "HEAD"])
   await runGit(repoDir, ["checkout", defaultBranch])
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: repoDir,
     worktree: { enabled: true, baseBranchName: "feature-base" },
@@ -2179,7 +2186,7 @@ test("session worktree launch branches from the selected base branch", async () 
     systemPrompt: "Keep responses short.",
   })
 
-  const fetchedWorktree = await send(client, "session.worktree.get", {
+  const fetchedWorktree = await client.session.worktree.get({
     id: created.session.id,
   })
   expect(fetchedWorktree.worktree).toBeTruthy()
@@ -2194,7 +2201,7 @@ test("session worktree launch branches from the selected base branch", async () 
     featureHead,
   )
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.create promotes a compatible prepared launch worktree", async () => {
@@ -2205,7 +2212,7 @@ test("session.create promotes a compatible prepared launch worktree", async () =
   const repoDir = await createRepoFixture({ includeSrc: true })
   const requestedCwd = join(repoDir, "src")
 
-  const prepared = await send(client, "session.launchWorktree.prepare", {
+  const prepared = await client.session.launchWorktree.prepare({
     cwd: requestedCwd,
   })
 
@@ -2214,7 +2221,7 @@ test("session.create promotes a compatible prepared launch worktree", async () =
   expect(prepared.worktree?.worktreeDir).not.toBe(repoDir)
   expect(existsSync(prepared.worktree!.worktreeDir)).toBe(true)
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: requestedCwd,
     launchWorktreeId: prepared.launchWorktreeId!,
@@ -2223,7 +2230,7 @@ test("session.create promotes a compatible prepared launch worktree", async () =
     systemPrompt: "Keep responses short.",
   })
 
-  const fetchedWorktree = await send(client, "session.worktree.get", {
+  const fetchedWorktree = await client.session.worktree.get({
     id: created.session.id,
   })
 
@@ -2231,7 +2238,7 @@ test("session.create promotes a compatible prepared launch worktree", async () =
   expect(fetchedWorktree.worktree?.effectiveCwd).toBe(prepared.worktree?.effectiveCwd)
   expect(db.launchWorktrees.findMany()).toHaveLength(0)
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("daemon startup cleans cold prepared launch worktrees", async () => {
@@ -2239,7 +2246,7 @@ test("daemon startup cleans cold prepared launch worktrees", async () => {
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  const prepared = await send(client, "session.launchWorktree.prepare", {
+  const prepared = await client.session.launchWorktree.prepare({
     cwd: repoDir,
   })
   const worktreeDir = prepared.worktree!.worktreeDir
@@ -2252,7 +2259,7 @@ test("daemon startup cleans cold prepared launch worktrees", async () => {
   const restarted = await startServer({ useExistingHome: true })
   const restartedClient = createDaemonIpcClient({ daemonUrl: restarted.daemonUrl })
 
-  await send(restartedClient, "session.list", {})
+  await restartedClient.session.list({})
 
   expect(db.launchWorktrees.findMany()).toHaveLength(0)
   expect(existsSync(worktreeDir)).toBe(false)
@@ -2274,12 +2281,12 @@ test("fileSearch.composerEntries scopes `@` lookups to indexed results under the
   await writeFile(join(repoDir, "node_modules", "pkg", "ignore.ts"), "ignored\n", "utf-8")
   await writeFile(join(repoDir, "dist", "ignore.ts"), "ignored\n", "utf-8")
 
-  const emptyQuery = await send(client, "fileSearch.composerEntries", {
+  const emptyQuery = await client.fileSearch.composerEntries({
     cwd: repoDir,
     query: "",
     limit: 50,
   })
-  const filtered = await send(client, "fileSearch.composerEntries", {
+  const filtered = await client.fileSearch.composerEntries({
     cwd: repoDir,
     query: "match",
   })
@@ -2307,14 +2314,14 @@ test("session suggestion routes reject removed `@` triggers", async () => {
   const repoDir = await createRepoFixture()
 
   await expect(
-    send(client, "session.composerSuggestions", {
+    client.session.composerSuggestions({
       id: "ses_missing",
       trigger: "at",
       query: "",
     }),
   ).rejects.toThrow("Invalid option")
   await expect(
-    send(client, "session.draftSuggestions", {
+    client.session.draftSuggestions({
       cwd: repoDir,
       trigger: "at",
       query: "",
@@ -2337,14 +2344,14 @@ test("session.composerSuggestions prefers local `$` skills over global duplicate
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: repoDir,
     mcpServers: [],
     systemPrompt: "Keep responses short.",
   })
 
-  const suggestions = await send(client, "session.composerSuggestions", {
+  const suggestions = await client.session.composerSuggestions({
     id: created.session.id,
     trigger: "dollar",
     query: "",
@@ -2369,7 +2376,7 @@ test("session.composerSuggestions prefers local `$` skills over global duplicate
     },
   ])
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.composerSuggestions reads `/` commands from the latest ACP history update", async () => {
@@ -2419,7 +2426,7 @@ test("session.composerSuggestions reads `/` commands from the latest ACP history
 
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-  const suggestions = await send(client, "session.composerSuggestions", {
+  const suggestions = await client.session.composerSuggestions({
     id: sessionId,
     trigger: "slash",
     query: "plan",
@@ -2446,7 +2453,7 @@ test("session.draftSuggestions reads launch-dialog `$` suggestions without a ses
   const daemon = await startServer({ useExistingHome: true })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const dollarSuggestions = await send(client, "session.draftSuggestions", {
+  const dollarSuggestions = await client.session.draftSuggestions({
     cwd: repoDir,
     trigger: "dollar",
     query: "check",
@@ -2472,7 +2479,7 @@ test("session.launchPreview loads agent capabilities and repository branches for
 
   await runGit(repoDir, ["branch", "feature-a"])
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
     cwd: repoDir,
   })
@@ -2512,7 +2519,7 @@ test("session.launchPreview reports dirty local checkout state", async () => {
 
   await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
     cwd: repoDir,
   })
@@ -2534,12 +2541,12 @@ test("session.create checks out the selected local branch before the initial pro
   await runGit(repoDir, ["commit", "-m", "feature"])
   await runGit(repoDir, ["checkout", defaultBranch])
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent,
     cwd: repoDir,
   })
 
-  await send(client, "session.create", {
+  await client.session.create({
     agent,
     cwd: repoDir,
     launchLeaseId: preview.launchLeaseId,
@@ -2568,7 +2575,7 @@ test("session.create refuses local branch checkout with uncommitted changes", as
   await writeFile(join(repoDir, "dirty.txt"), "uncommitted\n", "utf-8")
 
   await expectIpcErrorCode(
-    send(client, "session.create", {
+    client.session.create({
       agent: createWrappedNodeAgent(launchPreviewAgentPath),
       cwd: repoDir,
       localCheckout: { branchName: "feature-launch" },
@@ -2588,12 +2595,12 @@ test("session.create promotes compatible launch leases instead of creating a sec
   const repoDir = await createRepoFixture()
   const agent = createWrappedNodeAgent(launchPreviewAgentPath)
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent,
     cwd: repoDir,
   })
 
-  await send(client, "session.create", {
+  await client.session.create({
     agent,
     cwd: repoDir,
     launchLeaseId: preview.launchLeaseId,
@@ -2630,12 +2637,12 @@ test("session.create falls back to a fresh session for worktree launches", async
   const repoDir = await createRepoFixture()
   const agent = createWrappedNodeAgent(launchPreviewAgentPath)
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent,
     cwd: repoDir,
   })
 
-  await send(client, "session.create", {
+  await client.session.create({
     agent,
     cwd: repoDir,
     launchLeaseId: preview.launchLeaseId,
@@ -2662,13 +2669,13 @@ test("released launch leases remain promotable until delayed cleanup expires", a
   const repoDir = await createRepoFixture()
   const agent = createWrappedNodeAgent(launchPreviewAgentPath)
 
-  const preview = await send(client, "session.launchPreview", {
+  const preview = await client.session.launchPreview({
     agent,
     cwd: repoDir,
   })
 
   await expect(
-    send(client, "session.launchLease.release", {
+    client.session.launchLease.release({
       launchLeaseId: preview.launchLeaseId,
     }),
   ).resolves.toEqual({
@@ -2676,7 +2683,7 @@ test("released launch leases remain promotable until delayed cleanup expires", a
     released: true,
   })
 
-  await send(client, "session.create", {
+  await client.session.create({
     agent,
     cwd: repoDir,
     launchLeaseId: preview.launchLeaseId,
@@ -2714,7 +2721,7 @@ test("session.subpackages discovers package manifests breadth-first while skippi
   await writeFile(join(repoDir, "ignored", "pkg", "package.json"), "{}", "utf-8")
   await writeFile(join(repoDir, ".gitignore"), "ignored/\n", "utf-8")
 
-  const response = await send(client, "session.subpackages", {
+  const response = await client.session.subpackages({
     cwd: repoDir,
   })
 
@@ -2765,7 +2772,7 @@ test("session.subpackages extends built-in manifests from local Goddard config",
   await writeFile(join(repoDir, "services", "worker", "project.toml"), "", "utf-8")
   await writeFile(join(repoDir, "plugins", "tool", "meta", "package.cfg"), "", "utf-8")
 
-  const response = await send(client, "session.subpackages", {
+  const response = await client.session.subpackages({
     cwd: repoDir,
   })
 
@@ -2790,7 +2797,7 @@ test("session.create applies initial model and thinking configuration before the
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
     cwd: repoDir,
     mcpServers: [],
@@ -2819,7 +2826,7 @@ test("session.create applies initial model and thinking configuration before the
     }),
   )
 
-  const history = await send(client, "session.history", {
+  const history = await client.session.history({
     id: created.session.id,
   })
   expect(
@@ -2846,14 +2853,14 @@ test("session.create applies the foreground prompt to interactive initial prompt
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: repoDir,
     mcpServers: [],
     initialPrompt: "Start the session.",
   })
 
-  const history = await send(client, "session.history", {
+  const history = await client.session.history({
     id: created.session.id,
   })
   const promptRequest = findSessionPromptRequest(history)
@@ -2865,7 +2872,7 @@ test("session.create applies the foreground prompt to interactive initial prompt
     text: "Start the session.",
   })
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.create returns before an interactive initial prompt completes", async () => {
@@ -2874,7 +2881,7 @@ test("session.create returns before an interactive initial prompt completes", as
   const repoDir = await createRepoFixture()
 
   const created = await Promise.race([
-    send(client, "session.create", {
+    client.session.create({
       agent: createWrappedNodeAgent(queueAgentPath),
       cwd: repoDir,
       mcpServers: [],
@@ -2892,7 +2899,7 @@ test("session.create returns before an interactive initial prompt completes", as
   expect(created.session.connectionMode).toBe("live")
 
   await waitFor(async () => {
-    const history = await send(client, "session.history", { id: created.session.id })
+    const history = await client.session.history({ id: created.session.id })
     return history.turns.some((turn: any) =>
       turn.messages.some((message: any) => {
         const update = matchAcpRequest<{
@@ -2910,8 +2917,8 @@ test("session.create returns before an interactive initial prompt completes", as
     )
   })
 
-  await send(client, "session.cancel", { id: created.session.id })
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.cancel({ id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.create leaves one-shot initial prompts unframed by default", async () => {
@@ -2919,7 +2926,7 @@ test("session.create leaves one-shot initial prompts unframed by default", async
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: repoDir,
     mcpServers: [],
@@ -2927,7 +2934,7 @@ test("session.create leaves one-shot initial prompts unframed by default", async
     oneShot: true,
   })
 
-  const history = await send(client, "session.history", {
+  const history = await client.session.history({
     id: created.session.id,
   })
   const promptRequest = findSessionPromptRequest(history)
@@ -2944,14 +2951,14 @@ test("session.configOption.set updates active session config options", async () 
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
     cwd: repoDir,
     mcpServers: [],
     systemPrompt: "",
   })
 
-  const updated = await send(client, "session.configOption.set", {
+  const updated = await client.session.configOption.set({
     id: created.session.id,
     configId: "thinking",
     value: "high",
@@ -2964,21 +2971,21 @@ test("session.configOption.set updates active session config options", async () 
     }),
   )
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session.model.set updates active session model", async () => {
   const daemon = await startServer()
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(launchPreviewAgentPath),
     cwd: repoDir,
     mcpServers: [],
     systemPrompt: "",
   })
 
-  const updated = await send(client, "session.model.set", {
+  const updated = await client.session.model.set({
     id: created.session.id,
     modelId: "gpt-5.4-mini",
   })
@@ -2990,7 +2997,7 @@ test("session.model.set updates active session model", async () => {
     }),
   )
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap output", async () => {
@@ -3016,7 +3023,7 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
   await runGit(repoDir, ["add", ".goddard/config.json"])
   await runGit(repoDir, ["commit", "-m", "add local goddard config"])
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(exampleAgentPath),
     cwd: repoDir,
     worktree: { enabled: true },
@@ -3024,9 +3031,8 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
     systemPrompt: "Keep responses short.",
   })
 
-  const worktree = (await send(client, "session.worktree.get", { id: created.session.id })).worktree
-  const reviewSession = (await send(client, "reviewSession.mount", { id: created.session.id }))
-    .reviewSession
+  const worktree = (await client.session.worktree.get({ id: created.session.id })).worktree
+  const reviewSession = (await client.reviewSession.mount({ id: created.session.id })).reviewSession
   expect(reviewSession?.agentBranch).toBe(worktree?.branchName)
   expect(reviewSession?.reviewBranch).toBe(`review-sync/${worktree?.branchName}`)
   expect(
@@ -3036,7 +3042,7 @@ test("sync-enabled worktree launch mounts after bootstrap and mirrors bootstrap 
     "install\n",
   )
 
-  await send(client, "session.shutdown", { id: created.session.id })
+  await client.session.shutdown({ id: created.session.id })
 })
 
 test("session creation fails when fresh worktree bootstrap install exits unsuccessfully", async () => {
@@ -3062,7 +3068,7 @@ test("session creation fails when fresh worktree bootstrap install exits unsucce
 
   const sessionCountBefore = db.sessions.findMany().length
   await expect(
-    send(client, "session.create", {
+    client.session.create({
       agent: createWrappedNodeAgent(exampleAgentPath),
       cwd: repoDir,
       worktree: { enabled: true },
@@ -3292,7 +3298,7 @@ function sessionTurnMessages(...messages: AcpMessage[]): SessionTurnMessage[] {
 }
 
 async function listSessionIds(client: DaemonIpcClient) {
-  const { sessions } = await send(client, "session.list", { limit: 50 })
+  const { sessions } = await client.session.list({ limit: 50 })
   return sessions.map((session: any) => session.id)
 }
 
