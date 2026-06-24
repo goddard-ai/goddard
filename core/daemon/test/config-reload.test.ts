@@ -15,9 +15,8 @@ import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"
 import { SetupContext } from "../src/context.ts"
 import { startDaemonServer } from "../src/ipc.ts"
-import { configureLogging } from "../src/logging.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send } from "./ipc-client-helpers.ts"
+import { send, subscribe } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -48,19 +47,22 @@ test("config manager promotes valid root config edits and preserves the last goo
   await useTempHome()
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-manager-repo-"))
   cleanup.push(() => removeTemporaryPath(repoDir))
-
-  const output: string[] = []
-  const restoreLogging = configureLogging({
-    mode: "json",
-    writeLine: (line) => {
-      output.push(line)
+  const reloadFailedEvents: Array<{
+    name: string
+    payload: {
+      watchScope?: string
+      localConfigPath?: string
+      errorMessage?: string
+    }
+  }> = []
+  const configManager = createConfigManager({
+    onReloadFailed: (payload) => {
+      reloadFailedEvents.push({
+        name: "config.reload.failed",
+        payload,
+      })
     },
   })
-  cleanup.push(async () => {
-    restoreLogging()
-  })
-
-  const configManager = createConfigManager()
   cleanup.push(() => closeConfigManager(configManager))
 
   const firstSnapshot = await configManager.getRootConfig(repoDir)
@@ -138,11 +140,18 @@ test("config manager promotes valid root config edits and preserves the last goo
   expect(recoveredSnapshot).toBeTruthy()
   expect(recoveredSnapshot!.version).toBeGreaterThan(renamedSnapshot!.version)
 
-  const previousLocalFailureCount = countLocalReloadFailures(output)
+  const previousLocalFailureCount = countLocalReloadFailures(reloadFailedEvents)
   await writeFile(localConfigPath, "{ invalid json\n", "utf-8")
 
   await waitFor(() => {
-    return countLocalReloadFailures(output) > previousLocalFailureCount
+    return countLocalReloadFailures(reloadFailedEvents) > previousLocalFailureCount
+  })
+  expect(reloadFailedEvents.at(-1)).toMatchObject({
+    name: "config.reload.failed",
+    payload: {
+      watchScope: "local",
+      localConfigPath,
+    },
   })
 
   const fallbackSnapshot = await configManager.getRootConfig(repoDir)
@@ -231,6 +240,34 @@ test(
     cleanup.push(() => closeConfigManager(configManager))
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+    const feedbackFinishedEvents: Array<{
+      name?: string
+      payload?: { repository?: string; prNumber?: number; feedbackType?: string; exitCode?: number }
+    }> = []
+    const feedbackFailedEvents: Array<{
+      name?: string
+      payload?: { repository?: string; prNumber?: number; feedbackType?: string; phase?: string }
+    }> = []
+    const unsubscribeEvents = await subscribe(
+      client,
+      {
+        name: "events.stream",
+        filter: {
+          names: ["pull_request.feedback.finished", "pull_request.feedback.failed"],
+        },
+      },
+      (event) => {
+        if (event && typeof event === "object" && "name" in event) {
+          if ((event as { name?: string }).name === "pull_request.feedback.finished") {
+            feedbackFinishedEvents.push(event as (typeof feedbackFinishedEvents)[number])
+            return
+          }
+          if ((event as { name?: string }).name === "pull_request.feedback.failed") {
+            feedbackFailedEvents.push(event as (typeof feedbackFailedEvents)[number])
+          }
+        }
+      },
+    )
     const feedbackHandler = daemon.backendEventHandlers.find(
       (handler) => handler.name === "pull-request.feedback",
     )
@@ -251,36 +288,65 @@ test(
       },
     )
 
-    await feedbackHandler?.handle(createFeedbackBackendEvent())
+    try {
+      await feedbackHandler?.handle(createFeedbackBackendEvent())
 
-    const firstSessions = db.sessions.findMany()
-    const firstSessionIds = new Set(firstSessions.map((session: DaemonSession) => session.id))
-    expect(firstSessions.map((session: DaemonSession) => session.agentName)).toEqual([
-      "Node Agent A",
-    ])
+      await waitFor(async () => {
+        if (feedbackFinishedEvents.length !== 1) {
+          return false
+        }
+        const listed = await send(client, "session.list", { limit: 50 })
+        return listed.sessions.length === 1
+      })
 
-    await writeGlobalRootConfig({
-      session: {
-        agent: agentB,
-      },
-    })
+      const firstListed = await send(client, "session.list", { limit: 50 })
+      const firstSessionIds = new Set(
+        firstListed.sessions.map((session: DaemonSession) => session.id),
+      )
+      const firstSession = await send(client, "session.get", { id: firstListed.sessions[0].id })
+      expect(firstSession.session.agentName).toBe("Node Agent A")
 
-    await waitFor(() => {
-      const agent = configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent
-      return typeof agent === "object" && agent?.name === "Node Agent B"
-    })
+      await writeGlobalRootConfig({
+        session: {
+          agent: agentB,
+        },
+      })
 
-    await feedbackHandler?.handle(createFeedbackBackendEvent())
+      await waitFor(() => {
+        const agent = configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent
+        return typeof agent === "object" && agent?.name === "Node Agent B"
+      })
 
-    const secondSession = db.sessions
-      .findMany()
-      .find((session: DaemonSession) => firstSessionIds.has(session.id) === false)
-    expect(secondSession?.agentName).toBe("Node Agent B")
+      await feedbackHandler?.handle(createFeedbackBackendEvent())
 
-    for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
-      (value) => value != null,
-    )) {
-      await send(client, "session.shutdown", { id: sessionId })
+      await waitFor(async () => {
+        if (feedbackFinishedEvents.length !== 2) {
+          return false
+        }
+        const listed = await send(client, "session.list", { limit: 50 })
+        return listed.sessions.length === 2
+      })
+
+      const secondListed = await send(client, "session.list", { limit: 50 })
+      const secondSessionSummary = secondListed.sessions.find(
+        (session: DaemonSession) => firstSessionIds.has(session.id) === false,
+      )
+      expect(secondSessionSummary).toBeTruthy()
+      const secondSession = await send(client, "session.get", { id: secondSessionSummary!.id })
+      expect(secondSession.session.agentName).toBe("Node Agent B")
+      expect(feedbackFailedEvents).toHaveLength(0)
+      expect(
+        feedbackFinishedEvents.map(
+          (event) =>
+            `${event.payload?.repository}#${event.payload?.prNumber}:${event.payload?.feedbackType}:${event.payload?.exitCode}`,
+        ),
+      ).toEqual(["acme/widgets#12:comment:0", "acme/widgets#12:comment:0"])
+
+      for (const sessionId of secondListed.sessions.map((session: DaemonSession) => session.id)) {
+        await send(client, "session.shutdown", { id: sessionId })
+      }
+    } finally {
+      await Promise.resolve(unsubscribeEvents()).catch(() => {})
     }
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
@@ -425,16 +491,11 @@ async function writePromptOnlyAction(repoDir: string, actionName: string, prompt
   await writeFile(join(actionsDir, `${actionName}.md`), `${prompt}\n`, "utf-8")
 }
 
-function readLogs(lines: string[]) {
-  return lines
-    .flatMap((chunk) => chunk.split("\n"))
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-}
-
-function countLocalReloadFailures(lines: string[]) {
-  return readLogs(lines).filter(
-    (entry) => entry.event === "config.reload_failed" && entry.watchScope === "local",
+function countLocalReloadFailures(
+  events: Array<{ name: string; payload: { watchScope?: string } }>,
+) {
+  return events.filter(
+    (event) => event.name === "config.reload.failed" && event.payload.watchScope === "local",
   ).length
 }
 
