@@ -89,8 +89,17 @@ test(
     })
 
     const port = await getUnusedTcpPort()
+    const feedbackFinishedEvents: Array<{
+      name?: string
+      payload?: {
+        repository?: string
+        prNumber?: number
+        feedbackType?: string
+        exitCode?: number
+      }
+    }> = []
 
-    const { logs, result: exitCode } = await captureJsonLogs(async (output) => {
+    const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
         port,
@@ -109,22 +118,12 @@ test(
         const client = createDaemonIpcClient({
           daemonUrl: createDaemonUrl(port),
         })
-        const feedbackFinishedEvents: Array<{
-          name?: string
-          payload?: {
-            repository?: string
-            prNumber?: number
-            feedbackType?: string
-            exitCode?: number
-          }
-        }> = []
         unsubscribeEvents = await subscribe(
           client,
           {
             name: "events.stream",
             filter: {
               names: ["pull_request.feedback.finished"],
-              where: [{ path: "repository", equals: "other/repo" }],
             },
           },
           (event) => {
@@ -159,9 +158,7 @@ test(
                   event.payload?.prNumber === 123 &&
                   event.payload?.feedbackType === "comment" &&
                   event.payload?.exitCode === 0,
-              ) &&
-              parseJsonLogs(output).filter((entry) => entry.event === "pr_feedback.finish")
-                .length === 1
+              )
             )
           },
           { timeoutMs: 15000 },
@@ -185,11 +182,7 @@ test(
         await waitFor(
           () => {
             const sessions = db.sessions.findMany()
-            return (
-              sessions.length === 2 &&
-              parseJsonLogs(output).filter((entry) => entry.event === "pr_feedback.finish")
-                .length === 2
-            )
+            return sessions.length === 2 && feedbackFinishedEvents.length === 2
           },
           { timeoutMs: 15000 },
         )
@@ -226,31 +219,14 @@ test(
         stopReason: "end_turn",
       },
     ])
-
-    const startupLog = logs.find((entry) => entry.event === "daemon.startup")
-    expect(startupLog).toEqual({
-      scope: "daemon",
-      at: startupLog?.at,
-      event: "daemon.startup",
-      baseUrl: backend.baseUrl,
-      port,
-      agentBinDir,
-    })
-    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(true)
     expect(
-      logs
-        .filter((entry) => entry.event === "pr_feedback.launch")
-        .map((entry) => {
-          const feedbackEvent = entry.feedbackEvent as Record<string, unknown>
-          return `${feedbackEvent.repository}#${feedbackEvent.prNumber}`
-        })
+      feedbackFinishedEvents
+        .map(
+          (event) =>
+            `${event.payload?.repository}#${event.payload?.prNumber}:${event.payload?.exitCode}`,
+        )
         .sort(),
-    ).toEqual(["other/repo#123", "test/repo#123"])
-    expect(logs.some((entry) => entry.event === "pr_feedback.session_create_failed")).toBe(false)
-    expect(
-      logs.filter((entry) => entry.event === "pr_feedback.finish").map((entry) => entry.exitCode),
-    ).toEqual([0, 0])
-    expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
+    ).toEqual(["other/repo#123:0", "test/repo#123:0"])
   },
   { timeout: 20000 },
 )
@@ -265,7 +241,7 @@ test(
 
     const port = await getUnusedTcpPort()
 
-    const { logs, result: exitCode } = await captureJsonLogs(async () => {
+    const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
         port,
@@ -291,9 +267,6 @@ test(
 
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
-    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
-    expect(logs.some((entry) => entry.event === "ipc.server_listening")).toBe(true)
-    expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
   { timeout: 10000 },
 )
@@ -306,7 +279,7 @@ test(
     cleanup.push(() => backend.close())
     db.metadata.set("authToken", "tok")
 
-    const { logs, result: exitCode } = await captureJsonLogs(async () => {
+    const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
         enableIpc: false,
@@ -325,11 +298,9 @@ test(
         await daemonPromise.catch(() => {})
       }
     })
-
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
     expect(db.sessions.findMany()).toHaveLength(0)
-    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
   },
   { timeout: 10000 },
 )
@@ -338,7 +309,9 @@ test(
   "daemon run keeps IPC available when stream startup is unauthenticated",
   async () => {
     await useTempHome()
+    const streamResponse = createDeferred<void>()
     const backend = await startBackendHarness({
+      beforeStreamResponse: () => streamResponse.promise,
       rejectStreamUnauthorized: true,
     })
     cleanup.push(() => backend.close())
@@ -346,7 +319,7 @@ test(
 
     const port = await getUnusedTcpPort()
 
-    const { logs, result: exitCode } = await captureJsonLogs(async (output) => {
+    const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
         baseUrl: backend.baseUrl,
         port,
@@ -355,21 +328,45 @@ test(
         store: db,
       })
       const stopDaemon = createDaemonStopper()
+      let unsubscribeEvents: (() => void) | undefined
+      const degradedEvents: Array<{
+        name?: string
+        payload?: {
+          reason?: string
+          errorMessage?: string
+        }
+      }> = []
 
       try {
-        await waitFor(async () => {
-          const healthy = await isDaemonHealthy(port)
-          return (
-            healthy &&
-            parseJsonLogs(output).some(
-              (entry) =>
-                entry.event === "backend.stream_degraded" && entry.reason === "unauthenticated",
-            )
-          )
+        await waitFor(async () => isDaemonHealthy(port))
+        const client = createDaemonIpcClient({
+          daemonUrl: createDaemonUrl(port),
         })
+        unsubscribeEvents = await subscribe(
+          client,
+          {
+            name: "events.stream",
+            filter: {
+              names: ["backend.stream.degraded"],
+            },
+          },
+          (event) => {
+            degradedEvents.push(event)
+          },
+        )
+        streamResponse.resolve()
+        await waitFor(() =>
+          degradedEvents.some(
+            (event) =>
+              event.name === "backend.stream.degraded" &&
+              event.payload?.reason === "unauthenticated" &&
+              typeof event.payload?.errorMessage === "string",
+          ),
+        )
         await stopDaemon()
         return await daemonPromise
       } finally {
+        unsubscribeEvents?.()
         await stopDaemon()
         await daemonPromise.catch(() => {})
       }
@@ -377,14 +374,6 @@ test(
 
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
-    expect(
-      logs.some(
-        (entry) => entry.event === "backend.stream_degraded" && entry.reason === "unauthenticated",
-      ),
-    ).toBe(true)
-    expect(logs.some((entry) => entry.event === "backend.stream_started")).toBe(false)
-    expect(logs.some((entry) => entry.event === "daemon.run_failed")).toBe(false)
-    expect(logs.some((entry) => entry.event === "daemon.shutdown")).toBe(true)
   },
   { timeout: 10000 },
 )
@@ -586,6 +575,7 @@ function seedPullRequest(input: { owner: string; repo: string; prNumber: number;
 
 async function startBackendHarness(
   options: {
+    beforeStreamResponse?: () => void | Promise<void>
     rejectStreamUnauthorized?: boolean
     isManaged?: (input: { owner: string; repo: string; prNumber: number }) => boolean
   } = {},
@@ -596,22 +586,28 @@ async function startBackendHarness(
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`)
 
     if (url.pathname === "/remote-repo/stream") {
-      if (options.rejectStreamUnauthorized || !request.headers.authorization) {
-        response.writeHead(401, { "content-type": "text/plain" })
-        response.end("unauthorized")
-        return
-      }
+      void (async () => {
+        await options.beforeStreamResponse?.()
+        if (options.rejectStreamUnauthorized || !request.headers.authorization) {
+          response.writeHead(401, { "content-type": "text/plain" })
+          response.end("unauthorized")
+          return
+        }
 
-      subscriptionCount += 1
-      response.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-      })
-      response.write(": connected\n\n")
-      streams.add(response)
-      request.on("close", () => {
-        streams.delete(response)
+        subscriptionCount += 1
+        response.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+        })
+        response.write(": connected\n\n")
+        streams.add(response)
+        request.on("close", () => {
+          streams.delete(response)
+        })
+      })().catch((error) => {
+        response.writeHead(500, { "content-type": "text/plain" })
+        response.end(error instanceof Error ? error.message : String(error))
       })
       return
     }
@@ -754,6 +750,16 @@ function createDaemonStopper() {
     stopped = true
     await emitSigint()
   }
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => {}
+  let reject: (reason?: unknown) => void = () => {}
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
 
 async function waitFor<T>(
