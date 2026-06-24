@@ -8,6 +8,7 @@ import {
 } from "@goddard-ai/paths/node"
 import { getErrorMessage } from "radashi"
 
+import type { ConfigReloadFailedEvent } from "./events.ts"
 import { createDebug, createLogger } from "./logging.ts"
 import { readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
 
@@ -58,10 +59,15 @@ type CachedRootConfigEntry = {
   debounceHandle: ReturnType<typeof setTimeout> | null
 }
 
+type CreateConfigManagerOptions = {
+  onReloadFailed?: (event: ConfigReloadFailedEvent) => void | Promise<void>
+}
+
 /** Creates the daemon-owned config manager for merged persisted root-config snapshots. */
-export function createConfigManager() {
+export function createConfigManager(options: CreateConfigManagerOptions = {}) {
   const logger = createLogger()
   const debug = createDebug("config.watch")
+  const { onReloadFailed } = options
   const entries = new Map<string, CachedRootConfigEntry>()
   const globalRoot = resolve(getGoddardGlobalDir())
   const globalConfigPath = resolve(getGlobalConfigPath())
@@ -367,12 +373,18 @@ export function createConfigManager() {
             continue
           }
 
-          logger.log("config.reload_failed", {
+          const reloadFailedEvent = {
             watchScope: changedLayer,
+            cwd: entry.cwd,
             localConfigPath: entry.localConfigPath,
             errorMessage: getErrorMessage(error),
             version: entry.snapshot?.version,
-          })
+          } satisfies ConfigReloadFailedEvent
+          if (onReloadFailed) {
+            await onReloadFailed(reloadFailedEvent)
+          } else {
+            logger.log("config.reload_failed", reloadFailedEvent)
+          }
           if (entry.snapshot) {
             return entry.snapshot
           }

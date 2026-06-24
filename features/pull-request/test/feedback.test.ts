@@ -22,7 +22,6 @@ test("pull request feedback handler ignores non-feedback backend events", () => 
 
 test("pull request feedback handler emits ignored events for unmanaged pull requests", async () => {
   const emitted: Array<{ name: string; payload: unknown }> = []
-  const logs: Array<{ event: string; fields: Record<string, unknown> }> = []
   const handler = createPullRequestFeedbackHandler({
     backend: {
       pullRequests: {
@@ -31,7 +30,7 @@ test("pull request feedback handler emits ignored events for unmanaged pull requ
     },
     db: createFeedbackStore("/tmp/repo"),
     events: createEventBus(emitted),
-    log: createLogService(logs),
+    log: createLogService([]),
     session: {
       newSession: async () => {
         throw new Error("session should not start")
@@ -54,7 +53,6 @@ test("pull request feedback handler emits ignored events for unmanaged pull requ
       },
     },
   ])
-  expect(logs.some((entry) => entry.event === "pull_request.feedback_ignored")).toBe(true)
 })
 
 test("pull request feedback handler launches one-shot sessions for managed feedback", async () => {
@@ -87,6 +85,195 @@ test("pull request feedback handler launches one-shot sessions for managed feedb
     prNumber: 12,
   })
   expect(emitted).toEqual([
+    {
+      name: "pull_request.feedback.launched",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
+    {
+      name: "pull_request.feedback.finished",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+        exitCode: 0,
+      },
+    },
+  ])
+})
+
+test("pull request feedback handler emits failed and finished events when the repository lookup fails", async () => {
+  const emitted: Array<{ name: string; payload: unknown }> = []
+  const handler = createPullRequestFeedbackHandler({
+    backend: {
+      pullRequests: {
+        managed: async () => ({ managed: true }),
+      },
+    },
+    db: createFeedbackStore(null),
+    events: createEventBus(emitted),
+    log: createLogService([]),
+    session: {
+      newSession: async () => {
+        throw new Error("session should not start")
+      },
+    },
+  })
+
+  await handler.handle(createFeedbackBackendEvent())
+
+  expect(emitted).toEqual([
+    {
+      name: "pull_request.feedback.failed",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+        phase: "repository_lookup",
+        errorMessage: "Managed pull request repository is unavailable",
+      },
+    },
+    {
+      name: "pull_request.feedback.finished",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+        exitCode: 1,
+      },
+    },
+  ])
+})
+
+test("pull request feedback handler emits failed events when session creation throws", async () => {
+  const emitted: Array<{ name: string; payload: unknown }> = []
+  const handler = createPullRequestFeedbackHandler({
+    backend: {
+      pullRequests: {
+        managed: async () => ({ managed: true }),
+      },
+    },
+    db: createFeedbackStore("/tmp/repo"),
+    events: createEventBus(emitted),
+    log: createLogService([]),
+    session: {
+      newSession: async () => {
+        throw new Error("launch failed")
+      },
+    },
+  })
+
+  await handler.handle(createFeedbackBackendEvent())
+
+  expect(emitted).toEqual([
+    {
+      name: "pull_request.feedback.launched",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
+    {
+      name: "pull_request.feedback.failed",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+        phase: "session_create",
+        errorMessage: "launch failed",
+      },
+    },
+  ])
+})
+
+test("pull request feedback handler emits coalesced events for concurrent feedback", async () => {
+  const emitted: Array<{ name: string; payload: unknown }> = []
+  const sessionStarted = createDeferred<void>()
+  const releaseSession = createDeferred<void>()
+  const handler = createPullRequestFeedbackHandler({
+    backend: {
+      pullRequests: {
+        managed: async () => ({ managed: true }),
+      },
+    },
+    db: createFeedbackStore("/tmp/repo"),
+    events: createEventBus(emitted),
+    log: createLogService([]),
+    session: {
+      newSession: async () => {
+        sessionStarted.resolve()
+        await releaseSession.promise
+      },
+    },
+  })
+
+  const firstHandle = handler.handle(createFeedbackBackendEvent())
+  await sessionStarted.promise
+  await handler.handle(createFeedbackBackendEvent())
+
+  expect(emitted).toEqual([
+    {
+      name: "pull_request.feedback.launched",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
+    {
+      name: "pull_request.feedback.coalesced",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
+  ])
+
+  releaseSession.resolve()
+  await firstHandle
+
+  expect(emitted).toEqual([
+    {
+      name: "pull_request.feedback.launched",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
+    {
+      name: "pull_request.feedback.coalesced",
+      payload: {
+        repository: "acme/widgets",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        feedbackType: "comment",
+      },
+    },
     {
       name: "pull_request.feedback.finished",
       payload: {
@@ -122,18 +309,21 @@ function createFeedbackBackendEvent() {
   }
 }
 
-function createFeedbackStore(cwd: string) {
+function createFeedbackStore(cwd: string | null) {
   return {
     pullRequests: {
-      first: () => ({
-        id: "pr_1" as const,
-        host: "github" as const,
-        owner: "acme",
-        repo: "widgets",
-        prNumber: 12,
-        cwd,
-        updatedAt: Date.now(),
-      }),
+      first: () =>
+        cwd == null
+          ? null
+          : {
+              id: "pr_1" as const,
+              host: "github" as const,
+              owner: "acme",
+              repo: "widgets",
+              prNumber: 12,
+              cwd,
+              updatedAt: Date.now(),
+            },
     },
   }
 }
@@ -165,4 +355,14 @@ function createLogService(
       truncated: false,
     }),
   }
+}
+
+function createDeferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => {}
+  let reject: (reason?: unknown) => void = () => {}
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }

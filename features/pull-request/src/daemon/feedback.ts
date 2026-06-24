@@ -86,7 +86,6 @@ export function createPullRequestFeedbackHandler(input: {
     ) => Promise<unknown>
   }
 }): BackendEventHandler<FeedbackBackendEvent> {
-  const logger = input.log.createLogger()
   const runningPrs = new Set<string>()
 
   return {
@@ -107,9 +106,7 @@ export function createPullRequestFeedbackHandler(input: {
       const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
 
       if (runningPrs.has(requestKey)) {
-        logger.log("pull_request.feedback_coalesced", {
-          feedbackEvent: feedbackContext,
-        })
+        await input.events.emit("pull_request.feedback.coalesced", feedbackEventPayload)
         return
       }
 
@@ -123,10 +120,6 @@ export function createPullRequestFeedbackHandler(input: {
           prNumber: event.prNumber,
         })
         if (!managed) {
-          logger.log("pull_request.feedback_ignored", {
-            feedbackEvent: feedbackContext,
-            reason: "unmanaged_pr",
-          })
           await input.events.emit("pull_request.feedback.ignored", {
             ...feedbackEventPayload,
             reason: "unmanaged_pr",
@@ -136,9 +129,10 @@ export function createPullRequestFeedbackHandler(input: {
 
         const projectDir = resolveProjectDir(input.db, event)
         if (!projectDir) {
-          logger.log("pr_feedback.repository_lookup_failed", {
-            repository: feedbackContext.repository,
-            prNumber: event.prNumber,
+          await input.events.emit("pull_request.feedback.failed", {
+            ...feedbackEventPayload,
+            phase: "repository_lookup",
+            errorMessage: "Managed pull request repository is unavailable",
           })
           await input.events.emit("pull_request.feedback.finished", {
             ...feedbackEventPayload,
@@ -148,10 +142,7 @@ export function createPullRequestFeedbackHandler(input: {
         }
 
         const prompt = buildPrompt(event)
-        logger.log("pr_feedback.launch", {
-          feedbackEvent: feedbackContext,
-          prompt: input.log.createPayloadPreview(prompt),
-        })
+        await input.events.emit("pull_request.feedback.launched", feedbackEventPayload)
         await input.session.newSession({
           request: {
             cwd: projectDir,
@@ -163,17 +154,14 @@ export function createPullRequestFeedbackHandler(input: {
             prNumber: event.prNumber,
           },
         })
-        logger.log("pr_feedback.finish", {
-          feedbackEvent: feedbackContext,
-          exitCode: 0,
-        })
         await input.events.emit("pull_request.feedback.finished", {
           ...feedbackEventPayload,
           exitCode: 0,
         })
       } catch (error) {
-        logger.log("pr_feedback.failed", {
-          feedbackEvent: feedbackContext,
+        await input.events.emit("pull_request.feedback.failed", {
+          ...feedbackEventPayload,
+          phase: "session_create",
           errorMessage: error instanceof Error ? error.message : String(error),
         })
       } finally {

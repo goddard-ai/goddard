@@ -10,7 +10,7 @@ import {
 import { createConfigManager } from "./config-manager.ts"
 import { resolveRuntimeConfig } from "./config.ts"
 import { SetupContext } from "./context.ts"
-import { daemonRuntimeEvents } from "./events.ts"
+import { daemonRuntimeEvents, type ConfigReloadFailedEvent } from "./events.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
@@ -35,6 +35,7 @@ export type RunInput = {
 type ConfiguredDaemonInput = {
   agentBinDir: string
   baseUrl: string
+  bindConfigReloadFailed: (emit: (event: ConfigReloadFailedEvent) => void | Promise<void>) => void
   configManager: ReturnType<typeof createConfigManager>
   enableIpc: boolean
   enableStream: boolean
@@ -64,7 +65,12 @@ export async function runDaemon(input: RunInput): Promise<number> {
       port: input.port,
       agentBinDir: input.agentBinDir,
     })
-    const configManager = createConfigManager()
+    let emitConfigReloadFailed:
+      | ((event: ConfigReloadFailedEvent) => void | Promise<void>)
+      | undefined
+    const configManager = createConfigManager({
+      onReloadFailed: (event) => emitConfigReloadFailed?.(event),
+    })
     let didHandoffConfigManager = false
 
     try {
@@ -73,6 +79,9 @@ export async function runDaemon(input: RunInput): Promise<number> {
 
       return await runConfiguredDaemon({
         ...runtime,
+        bindConfigReloadFailed: (emit) => {
+          emitConfigReloadFailed = emit
+        },
         configManager,
         enableIpc: input.enableIpc ?? true,
         enableStream: input.enableStream ?? true,
@@ -99,6 +108,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
   const {
     agentBinDir,
     baseUrl,
+    bindConfigReloadFailed,
     configManager,
     enableIpc,
     enableStream,
@@ -146,6 +156,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
 
     const activeIpcServer = ipcServer
     const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
+    bindConfigReloadFailed((event) => daemonEvents.emit("config.reload.failed", event))
     const backendEventHandlers = createBackendEventHandlerRegistry()
     let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
     let startingSubscription: Promise<void> | null = null
@@ -183,10 +194,6 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
               throw authError
             }
 
-            logger.log("backend.stream_degraded", {
-              reason: "unauthenticated",
-              errorMessage: authError.message,
-            })
             await daemonEvents.emit("backend.stream.degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
@@ -194,15 +201,12 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
             return
           }
 
-          logger.log(
-            "backend.stream_started",
-            activeIpcServer
-              ? {
-                  daemonUrl: activeIpcServer.daemonUrl,
-                  port: activeIpcServer.port,
-                }
-              : {},
-          )
+          if (activeIpcServer) {
+            await daemonEvents.emit("backend.stream.started", {
+              daemonUrl: activeIpcServer.daemonUrl,
+              port: activeIpcServer.port,
+            })
+          }
 
           subscription.on("event", (payload) => {
             void dispatchBackendEvent(payload, backendEventHandlers, logger)
