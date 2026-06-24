@@ -722,6 +722,9 @@ export function createSessionManager({
     memory,
     logger,
     emitDiagnostic,
+    emitEvent: (event) => {
+      void events.emit("session.idle_shutdown.updated", event)
+    },
     shutdownSession,
   })
   const acpDebug = log.createDebug("session.acp")

@@ -72,6 +72,13 @@ export type SessionIdEvent = {
   sessionId: SessionId
 }
 
+export type SessionIdleShutdownUpdatedEvent = {
+  sessionId: SessionId
+  action: "started" | "cancelled" | "expired"
+  reason?: string
+  timeoutMs: number
+}
+
 export const sessionEvents = {
   "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
   "session.persisted": event<SessionPersistedEvent>(),
@@ -84,6 +91,9 @@ export const sessionEvents = {
   "session.replied": event<SessionIdEvent>(),
   "session.completed": event<SessionIdEvent>(),
   "session.message": event<RoutedSessionMessageEvent>({ debug: "session.stream" }),
+  "session.idle_shutdown.updated": event<SessionIdleShutdownUpdatedEvent>({
+    debug: "session.lifecycle",
+  }),
   "session.lifecycle.updated": event<Extract<SessionLifecycleEvent, { kind: "sessionUpdated" }>>({
     debug: "session.lifecycle",
   }),

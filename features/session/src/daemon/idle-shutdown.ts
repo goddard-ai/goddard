@@ -1,6 +1,7 @@
 import type { DaemonLogger } from "@goddard-ai/daemon-plugin"
 import { getErrorMessage } from "radashi"
 
+import type { SessionIdleShutdownUpdatedEvent } from "../events.ts"
 import type { DaemonSession } from "../schema.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"
 
@@ -11,6 +12,7 @@ export function createIdleShutdownController({
   memory,
   logger,
   emitDiagnostic,
+  emitEvent,
   shutdownSession,
 }: {
   memory: SessionMemory
@@ -21,8 +23,13 @@ export function createIdleShutdownController({
     detail?: Record<string, unknown>,
     diagnosticLogger?: DaemonLogger,
   ) => void
+  emitEvent: (event: SessionIdleShutdownUpdatedEvent) => void | Promise<void>
   shutdownSession: (id: SessionId) => Promise<boolean>
 }) {
+  function emitIdleShutdownUpdatedEvent(event: SessionIdleShutdownUpdatedEvent) {
+    void emitEvent(event)
+  }
+
   /** Returns how many `session.message event stream` stream subscribers are attached to one session id. */
   function getSessionSubscriberCount(id: SessionId): number {
     return memory.sessionSubscriberCounts.get(id) ?? 0
@@ -55,6 +62,12 @@ export function createIdleShutdownController({
       { reason, timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
+    emitIdleShutdownUpdatedEvent({
+      sessionId: active.id,
+      action: "cancelled",
+      reason,
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
   }
 
   /** Re-checks whether one active session should have an idle auto-shutdown timer armed right now. */
@@ -79,6 +92,12 @@ export function createIdleShutdownController({
       { reason, timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
+    emitIdleShutdownUpdatedEvent({
+      sessionId: active.id,
+      action: "started",
+      reason,
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
     active.idleShutdownTimer = setTimeout(() => {
       void handleIdleShutdownTimerExpired(active.id).catch((error) => {
         logger.log("session_idle_shutdown_timer_failed", {
@@ -107,6 +126,11 @@ export function createIdleShutdownController({
       { timeoutMs: active.idleShutdownTimeoutMs },
       active.logger,
     )
+    emitIdleShutdownUpdatedEvent({
+      sessionId: id,
+      action: "expired",
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
     await shutdownSession(id)
   }
 
