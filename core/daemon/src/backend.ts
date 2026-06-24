@@ -1,10 +1,5 @@
 import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import {
-  composeBackendRoutes,
-  createClient,
-  ndjson,
-  type RouzerClient,
-} from "@goddard-ai/backend-plugin"
+import { composeBackendRoutes, createClient, type RouzerClient } from "@goddard-ai/backend-plugin"
 import { pullRequestBackendRoutes } from "@goddard-ai/pull-request/backend"
 import { remoteRepoBackendRoutes } from "@goddard-ai/remote-repo/backend"
 
@@ -50,7 +45,8 @@ export type BackendClient = RouzerClient<typeof backendRoutes>
 
 /** Creates the daemon's direct rouzer-backed client for backend auth, PR, and event routes. */
 export function createBackendClient(options: BackendClientOptions): BackendClient {
-  return createClient({
+  const debug = createDebug("backend.stream")
+  const routeClient = createClient({
     baseURL: options.baseUrl,
     headers: {
       authorization: "Bearer unauthenticated",
