@@ -34,7 +34,7 @@ const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap((fileGlob) => [
 
 const BUN_RUNTIME_CHECK_FILE_PATTERNS = [
   "app/electrobun.config.ts",
-  "package.json",
+  "pnpm-workspace.yaml",
   "pnpm-lock.yaml",
 ]
 

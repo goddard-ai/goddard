@@ -1,24 +1,17 @@
 #!/usr/bin/env bun
 /*
  * Verifies that the workspace Bun runtime and Electrobun build configuration
- * both use the Bun version pinned in the root package catalog.
+ * both use the Bun version pinned in the root pnpm workspace catalog.
  */
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-type RootPackage = {
-  catalog?: {
-    bun?: string
-  }
-}
-
 const workspaceDir = dirname(dirname(fileURLToPath(import.meta.url)))
-const rootPackage = JSON.parse(
-  readFileSync(join(workspaceDir, "package.json"), "utf8"),
-) as RootPackage
-const expectedVersion = rootPackage.catalog?.bun
+const expectedVersion = readWorkspaceCatalogBunVersion(
+  readFileSync(join(workspaceDir, "pnpm-workspace.yaml"), "utf8"),
+)
 const runtimeBunPath = join(
   workspaceDir,
   "node_modules",
@@ -27,7 +20,7 @@ const runtimeBunPath = join(
 )
 
 if (!expectedVersion) {
-  fail("package.json#catalog.bun must pin the daemon runtime Bun version")
+  fail("pnpm-workspace.yaml#catalog.bun must pin the daemon runtime Bun version")
 }
 
 if (!existsSync(runtimeBunPath)) {
@@ -70,6 +63,15 @@ function assertVersion(label: string, actual: string | undefined, expected: stri
   }
 
   fail(`${label} is ${actual ?? "unset"}, expected ${expected}`)
+}
+
+function readWorkspaceCatalogBunVersion(workspaceYaml: string) {
+  const catalogSection = /(?:^|\n)catalog:\n((?:^[ \t].*\n?)*)/m.exec(workspaceYaml)?.[1]
+  if (!catalogSection) {
+    return undefined
+  }
+
+  return /^\s{2}bun:\s*(\S+)\s*$/m.exec(catalogSection)?.[1]
 }
 
 function fail(message: string): never {
