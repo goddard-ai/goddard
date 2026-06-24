@@ -1,4 +1,3 @@
-import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { InMemoryBackendControlPlane, startBackendServer } from "../src/index.ts"

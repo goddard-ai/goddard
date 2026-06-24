@@ -81,11 +81,3 @@ async function readFirstNdjsonEvent(response: Response): Promise<unknown> {
 
   throw new Error("NDJSON stream ended before emitting data")
 }
-
-async function expectNoEvent(promise: Promise<unknown>, timeoutMs: number) {
-  const result = await Promise.race([
-    promise.then(() => "event"),
-    new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
-  ])
-  expect(result).toBe("timeout")
-}
