@@ -75,9 +75,10 @@ describe("changed file checks", () => {
   })
 
   test("detects files that require Bun runtime checks", () => {
-    expect(shouldRunBunRuntimeCheck(["package.json"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["pnpm-workspace.yaml"])).toBe(true)
     expect(shouldRunBunRuntimeCheck(["pnpm-lock.yaml"])).toBe(true)
     expect(shouldRunBunRuntimeCheck(["app/electrobun.config.ts"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["package.json"])).toBe(false)
     expect(shouldRunBunRuntimeCheck(["app/src/bun/index.ts"])).toBe(false)
   })
 
