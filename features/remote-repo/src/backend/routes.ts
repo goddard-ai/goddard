@@ -1,5 +1,5 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
-import { $type, defineBackendRoutes, http, metadata, ndjson } from "@goddard-ai/backend-plugin"
+import { defineBackendRoutes, http, metadata, ndjson } from "@goddard-ai/backend-plugin"
 
 import { BackendEventStreamRequest, type RepoEvent } from "../schema.ts"
 
@@ -16,18 +16,6 @@ export const remoteRepoBackendRoutes = defineBackendRoutes({
       headers: BearerHeaders,
       body: BackendEventStreamRequest,
       response: ndjson.$type<RepoEvent>(),
-    }),
-  }),
-  webhooks: http.resource("webhooks", {
-    ...metadata({
-      description: "Backend webhook ingestion.",
-    }),
-    github: http.post("github", {
-      ...metadata({
-        description: "Ingests one GitHub webhook payload.",
-      }),
-      body: http.rawBody(),
-      response: $type<RepoEvent>(),
     }),
   }),
 })

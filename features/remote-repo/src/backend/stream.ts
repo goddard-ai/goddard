@@ -1,4 +1,5 @@
 import type { BackendEventStreamRequest, RepoEvent } from "../schema.ts"
+import type { RemoteRepoBackendEvent } from "./events.ts"
 
 /** Feature-owned service boundary for ephemeral remote repository stream delivery. */
 export type RemoteRepoStreamService = {
@@ -8,6 +9,8 @@ export type RemoteRepoStreamService = {
   ): AsyncIterable<RepoEvent>
   resolveEventOwner(event: RepoEvent): Promise<string | undefined> | string | undefined
 }
+
+export type RemoteRepoStreamEvent = RemoteRepoBackendEvent
 
 /** Optional in-process broadcaster used by local backend servers. */
 export type RemoteRepoEventBroadcaster = {

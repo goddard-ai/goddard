@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -16,6 +17,22 @@ const originalHome = process.env.HOME
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+
+async function runGit(cwd: string, args: string[]) {
+  const child = spawn("git", args, {
+    cwd,
+    stdio: "ignore",
+  })
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.on("error", reject)
+    child.on("exit", resolve)
+  })
+
+  if (exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed with exit code ${exitCode}`)
+  }
+}
 
 afterEach(async () => {
   while (cleanup.length > 0) {

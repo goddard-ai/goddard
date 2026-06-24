@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   CancelSessionRequest,
@@ -298,22 +298,6 @@ export const sessionIpcRoutes = defineIpcRoutes({
       }),
       body: ResolveSessionTokenRequest,
       response: $type<{ id: string }>(),
-    }),
-    /** Streams live ACP messages for one session id. */
-    streamMessages: http.get("stream-messages", {
-      ...metadata({
-        description: "Streams live ACP messages for one session id.",
-      }),
-      query: SessionIdParams,
-      response: ndjson.$type<SessionMessageEvent>(),
-    }),
-    /** Streams app-wide session lifecycle updates without observing transcript messages. */
-    streamLifecycle: http.get("stream-lifecycle", {
-      ...metadata({
-        description:
-          "Streams app-wide session lifecycle updates without observing transcript messages.",
-      }),
-      response: ndjson.$type<SessionLifecycleEvent>(),
     }),
   }),
 })

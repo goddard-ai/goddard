@@ -713,7 +713,7 @@ test("daemon session reporting creates and updates session inbox rows", async ()
   )
   const eventsDone = (async () => {
     for await (const event of eventStream) {
-      const item = event.payload
+      const item = event.payload as { entityId: string; status: string }
       if (item.entityId === "ses_inbox") {
         inboxEvents.push({
           status: item.status,

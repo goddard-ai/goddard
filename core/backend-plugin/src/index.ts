@@ -195,6 +195,34 @@ export function defineBackendRoutes<const TRoutes extends HttpRouteTree>(routes:
   return routes
 }
 
+/** Preserves the exact backend event definition map for composition inference. */
+export function defineBackendEvents<const TEvents extends BackendEventDefinitions>(
+  events: TEvents,
+) {
+  return events
+}
+
+/** Preserves the exact backend event source definition map for composition inference. */
+export function defineBackendEventSources<const TSources extends BackendEventSourceDefinitions>(
+  sources: TSources,
+) {
+  return sources
+}
+
+/** Preserves the exact backend provider capability map for composition inference. */
+export function defineBackendProviders<
+  const TProviders extends BackendProviderCapabilityDefinitions,
+>(providers: TProviders) {
+  return providers
+}
+
+/** Preserves one feature-owned backend plugin definition for composition inference. */
+export function defineBackendPlugin<const TPlugin extends BackendPluginDefinition>(
+  plugin: TPlugin,
+) {
+  return plugin
+}
+
 /** Combines backend route fragments and rejects ambiguous action ownership. */
 export function composeBackendRoutes<const TRoutes extends readonly HttpRouteTree[]>(
   routes: TRoutes,

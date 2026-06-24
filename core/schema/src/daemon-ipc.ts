@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 /** Core IPC error codes shared by clients and non-feature surfaces. */
@@ -87,6 +87,36 @@ export type BrowserAccessWebviewTokenCreateResponse = {
   origin: string
   expiresAt: string
 }
+
+export const DaemonEventLogMetadata = z.object({
+  debug: z.string().optional(),
+})
+
+export type DaemonEventLogMetadata = z.infer<typeof DaemonEventLogMetadata>
+
+export const DaemonEventEnvelope = z.object({
+  id: z.string(),
+  at: z.string(),
+  name: z.string(),
+  payload: z.unknown(),
+  log: DaemonEventLogMetadata.optional(),
+})
+
+export type DaemonEventEnvelope = z.infer<typeof DaemonEventEnvelope>
+
+export const DaemonEventPropertyFilter = z.object({
+  path: z.string().min(1),
+  equals: z.unknown(),
+})
+
+export type DaemonEventPropertyFilter = z.infer<typeof DaemonEventPropertyFilter>
+
+export const DaemonEventsStreamRequest = z.object({
+  names: z.array(z.string().min(1)).optional(),
+  where: z.array(DaemonEventPropertyFilter).optional(),
+})
+
+export type DaemonEventsStreamRequest = z.infer<typeof DaemonEventsStreamRequest>
 
 /** Core IPC routes that are not owned by feature packages. */
 export const coreDaemonIpcRoutes = defineIpcRoutes({

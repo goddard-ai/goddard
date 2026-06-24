@@ -1,5 +1,7 @@
-import { createDaemonEventBus, type BackendEventHandler } from "@goddard-ai/daemon-plugin"
+import { createDaemonEventBus } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
+import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
 import {
@@ -155,8 +157,8 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
     }
 
     const activeIpcServer = ipcServer
-    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
-    const runningPrs = new Set<string>()
+    const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
+    bindConfigReloadFailed((event) => daemonEvents.emit("config.reload.failed", event))
     const eventStreamAbort = new AbortController()
     let eventStreamTask: Promise<void> | null = null
 
@@ -184,67 +186,11 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
           await consumeBackendEvents(
             events,
             async (event) => {
-              if (!isFeedbackEvent(event)) {
-                return
-              }
-
-              const feedbackContext = {
-                repository: `${event.owner}/${event.repo}`,
-                prNumber: event.prNumber,
-                feedbackType: event.type,
-              }
-
-              await FeedbackEventContext.run(feedbackContext, async () => {
-                if (!activeIpcServer) {
-                  logger.log("repo.feedback_ignored", {
-                    reason: "ipc_disabled",
-                  })
-                  return
-                }
-
-                const prompt = buildPrompt(event)
-                const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-                if (runningPrs.has(requestKey)) {
-                  logger.log("repo.feedback_coalesced")
-                  return
-                }
-
-                runningPrs.add(requestKey)
-
-                try {
-                  const { managed } = await client.pullRequests.managed({
-                    owner: event.owner,
-                    repo: event.repo,
-                    prNumber: event.prNumber,
-                  })
-                  if (!managed) {
-                    logger.log("repo.feedback_ignored", {
-                      reason: "unmanaged_pr",
-                    })
-                    return
-                  }
-
-                  logger.log("pr_feedback.launch", {
-                    prompt: createPayloadPreview(prompt),
-                  })
-                  const exitCode = await runPrFeedbackFlow({
-                    event,
-                    prompt,
-                    daemonUrl: activeIpcServer.daemonUrl,
-                    agentBinDir,
-                    configManager,
-                    store,
-                  })
-                  logger.log("pr_feedback.finish", {
-                    exitCode,
-                  })
-                } catch (error) {
-                  logger.log("pr_feedback.failed", toErrorProperties(error))
-                } finally {
-                  runningPrs.delete(requestKey)
-                }
-              })
+              await dispatchBackendEvent(
+                createRemoteRepoBackendEvent(event),
+                activeIpcServer,
+                logger,
+              )
             },
             (error) => {
               logger.log("repo.event_failed", toErrorProperties(error))
@@ -260,6 +206,10 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
           const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
           if (isBackendUnauthenticatedError(authError)) {
             logger.log("repo.subscription_degraded", {
+              reason: "unauthenticated",
+              errorMessage: authError.message,
+            })
+            void daemonEvents.emit("backend.stream.degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
             })
@@ -324,6 +274,29 @@ async function consumeBackendEvents(
   } finally {
     signal.removeEventListener("abort", abort)
     await iterator.return?.()
+  }
+}
+
+async function dispatchBackendEvent(
+  payload: unknown,
+  server: DaemonServer | undefined,
+  logger: DaemonLogger,
+) {
+  if (!server) {
+    return
+  }
+
+  for (const handler of server.backendEventHandlers) {
+    try {
+      if (handler.canHandle(payload)) {
+        await handler.handle(payload)
+      }
+    } catch (error) {
+      logger.log("backend.event_handler_failed", {
+        handlerName: handler.name,
+        ...toErrorProperties(error),
+      })
+    }
   }
 }
 

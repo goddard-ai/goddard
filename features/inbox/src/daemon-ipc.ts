@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
@@ -47,13 +47,6 @@ export const inboxIpcRoutes = defineIpcRoutes({
       }),
       body: CompleteSessionInboxItemRequest,
       response: $type<CompleteSessionInboxItemResponse>(),
-    }),
-    /** Streams inbox item updates. */
-    streamItems: http.get("stream-items", {
-      ...metadata({
-        description: "Streams inbox item updates.",
-      }),
-      response: ndjson.$type<InboxItem>(),
     }),
   }),
 })

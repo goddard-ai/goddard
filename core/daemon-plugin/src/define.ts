@@ -222,7 +222,7 @@ type DefinePlugin = {
           TBackendRoutes,
           TIpcRoutes
         >,
-        undefined,
+        TIpcRoutes,
         TProvides
       >
     },
@@ -236,7 +236,7 @@ type DefinePlugin = {
     TBackendRoutes,
     TIpcRoutes
   > & {
-    readonly setup?: PublicPluginSetup<undefined, TProvides>
+    readonly setup?: PublicPluginSetup<TIpcRoutes, TProvides>
   }
 }
 

@@ -54,7 +54,7 @@ test("createBackendRouter handles auth device start via rouzer route map", async
 })
 
 test("createBackendRouter delegates event stream route to injected handleUserEvents", async () => {
-  let capturedGithubUsername = ""
+  let capturedStreamKey = ""
   let capturedFilter: unknown
 
   const controlPlane: BackendControlPlane = {
@@ -70,12 +70,13 @@ test("createBackendRouter delegates event stream route to injected handleUserEve
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    handleUserEvents: (_env, githubUsername, filter, _request) => {
-      capturedGithubUsername = githubUsername
+    handleUserEvents: (_env, streamKey, filter, _request) => {
+      capturedStreamKey = streamKey
       capturedFilter = filter
       return (async function* () {
         yield {
           type: "comment" as const,
+          provider: "github",
           owner: "goddard-ai",
           repo: "sdk",
           prNumber: 1,
@@ -103,7 +104,7 @@ test("createBackendRouter delegates event stream route to injected handleUserEve
 
   expect(streamResponse.status).toBe(200)
   expect(await readFirstNdjsonLine(streamResponse)).toMatchObject({ type: "comment" })
-  expect(capturedGithubUsername).toBe("alec")
+  expect(capturedStreamKey).toBe("github:alec")
   expect(capturedFilter).toEqual({ names: ["comment"] })
 })
 
@@ -285,6 +286,26 @@ function createEnv(overrides: Partial<Env> = {}): Env {
     TURSO_DB_URL: "libsql://test",
     TURSO_DB_AUTH_TOKEN: "token",
     ...overrides,
+  }
+}
+
+function githubStart(loginHint: string) {
+  return {
+    provider: "github",
+    loginHint,
+  }
+}
+
+function githubPrincipal(subject: string) {
+  return {
+    id: `github:${subject}`,
+    providerIdentities: [
+      {
+        provider: "github",
+        subject,
+        displayName: subject,
+      },
+    ],
   }
 }
 

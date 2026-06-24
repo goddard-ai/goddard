@@ -1,5 +1,4 @@
-import { authBackendRoutes } from "@goddard-ai/auth/backend"
-import { composeBackendRoutes, createRouter, ndjson } from "@goddard-ai/backend-plugin"
+import { createRouter, ndjson } from "@goddard-ai/backend-plugin"
 import {
   getDefaultBackendPluginComposition,
   handleDefaultGitHubWebhookRequest,
@@ -8,11 +7,7 @@ import {
   createRemoteRepoBackendEvent,
   type RemoteRepoBackendEvent,
 } from "@goddard-ai/remote-repo/backend"
-import {
-  GitHubWebhookInput,
-  type BackendEventStreamRequest,
-  type RepoEvent,
-} from "@goddard-ai/remote-repo/schema"
+import type { BackendEventStreamRequest, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createClient } from "@libsql/client/web"
 import { getErrorMessage } from "radashi"
 
@@ -20,13 +15,13 @@ import { TursoBackendControlPlane } from "../db/persistence.ts"
 import type { Env } from "../env.ts"
 import { createReadyNdjsonResponse } from "../utils.ts"
 import { assertRepo, HttpError, type BackendControlPlane } from "./control-plane.ts"
-import type { BackendPrincipal } from "./events.ts"
+import { getPrincipalStreamKey, type BackendPrincipal } from "./events.ts"
 
-const backendRoutes = composeBackendRoutes([
-  authBackendRoutes,
-  pullRequestBackendRoutes,
-  remoteRepoBackendRoutes,
-])
+const backendPlugins = getDefaultBackendPluginComposition()
+const backendRoutes = backendPlugins.routes
+const backendEvents = backendPlugins.events
+const backendEventSources = backendPlugins.eventSources
+const backendProviders = backendPlugins.providers
 const backendNdjsonRouterPlugin = {
   ...ndjson.routerPlugin,
   encode(value: unknown) {
@@ -34,17 +29,21 @@ const backendNdjsonRouterPlugin = {
   },
 }
 
+export type BackendEventPublication = {
+  readonly source: keyof typeof backendEventSources & string
+  readonly event: RemoteRepoBackendEvent
+}
+
 /** Test seams and runtime adapters injected into the backend router. */
 type RouterDependencies = {
   createControlPlane?: (env: Env) => BackendControlPlane
-  broadcastEvent?: (env: Env, event: RepoEvent) => Promise<void>
+  broadcastEvent?: (env: Env, publication: BackendEventPublication) => Promise<void>
   handleUserEvents?: (
     env: Env,
-    githubUsername: string,
+    streamKey: string,
     filter: BackendEventStreamRequest,
     request: Request,
   ) => Promise<AsyncIterable<RepoEvent>> | AsyncIterable<RepoEvent>
-  remoteRepoEventHandlers?: readonly RemoteRepoEventHandler[]
 }
 
 /** Creates the backend HTTP router over the current control-plane implementation. */
@@ -52,9 +51,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const createControlPlane = dependencies.createControlPlane ?? createTursoControlPlane
   const broadcastEvent = dependencies.broadcastEvent ?? noopBroadcast
   const handleUserEvents = dependencies.handleUserEvents ?? defaultHandleUserEvents
-  const remoteRepoEventHandlers = dependencies.remoteRepoEventHandlers ?? [
-    pullRequestRemoteRepoEventHandler,
-  ]
+  const publishEvent = createBackendEventPublisher(broadcastEvent)
 
   return createRouter<Env>({ debug: false, plugins: [backendNdjsonRouterPlugin] }).use(
     backendRoutes,
@@ -98,14 +95,18 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             const token = readBearerToken(ctx.headers.authorization)
             const pr = await controlPlane.createPr(token, ctx.body, env)
 
-            await broadcastEvent(env, {
-              type: "pr.created",
-              owner: pr.owner,
-              repo: pr.repo,
-              prNumber: pr.number,
-              title: pr.title,
-              author: pr.createdBy,
-              createdAt: pr.createdAt,
+            await publishEvent(env, {
+              source: "remote-repo",
+              event: createRemoteRepoBackendEvent({
+                type: "pr.created",
+                provider: pr.provider,
+                owner: pr.owner,
+                repo: pr.repo,
+                prNumber: pr.number,
+                title: pr.title,
+                author: pr.createdBy,
+                createdAt: pr.createdAt,
+              }),
             })
 
             return pr
@@ -118,13 +119,14 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             const controlPlane = createControlPlane(readEnv(ctx))
             const token = readBearerToken(ctx.headers.authorization)
             const session = await controlPlane.getSession(token)
-            const { owner, repo, prNumber } = ctx.query
+            const { provider, owner, repo, prNumber } = ctx.query
             assertRepo(owner, repo)
             const managed = await controlPlane.isManagedPr(
+              provider,
               owner,
               repo,
               prNumber,
-              session.githubUsername,
+              session.principal.id,
             )
             return { managed }
           } catch (error) {
@@ -149,11 +151,18 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
         github: async (ctx) => {
           try {
             const env = readEnv(ctx)
-            const controlPlane = createControlPlane(env)
-            const input = GitHubWebhookInput.parse(await ctx.request.json())
-            const event = await controlPlane.handleGitHubWebhook(input)
-            await dispatchRemoteRepoEvent(event, remoteRepoEventHandlers)
-            await broadcastEvent(env, event)
+            const event = await handleDefaultGitHubWebhookRequest(
+              ctx.request,
+              env.GITHUB_WEBHOOK_SECRET,
+            )
+            if (!event) {
+              return new Response(null, { status: 204 })
+            }
+
+            await publishEvent(env, {
+              source: "remote-repo",
+              event,
+            })
             return event
           } catch (error) {
             return toErrorResponse(error)
@@ -166,9 +175,14 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
             const env = readEnv(ctx)
             const controlPlane = createControlPlane(env)
             const token = readBearerToken(ctx.headers.authorization)
-            const session = await controlPlane.getSession(token)
+            const principal = await controlPlane.getPrincipal(token)
 
-            return await handleUserEvents(env, session.githubUsername, ctx.body, ctx.request)
+            return await handleUserEvents(
+              env,
+              getPrincipalStreamKey(principal),
+              ctx.body,
+              ctx.request,
+            )
           } catch (error) {
             return toErrorResponse(error)
           }

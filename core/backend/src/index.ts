@@ -4,11 +4,11 @@ import {
   isRemoteRepoStreamService,
   type RemoteRepoStreamEvent,
 } from "@goddard-ai/remote-repo/backend"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
 
 import { type BackendControlPlane } from "./api/control-plane.ts"
-import { getPrincipalStreamKey } from "./api/events.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
 

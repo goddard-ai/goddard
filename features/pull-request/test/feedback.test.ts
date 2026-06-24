@@ -314,7 +314,7 @@ function createFeedbackStore(cwd: string | null) {
     pullRequests: {
       first: () =>
         cwd == null
-          ? null
+          ? undefined
           : {
               id: "pr_1" as const,
               host: "github" as const,

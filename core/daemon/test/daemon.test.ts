@@ -128,7 +128,7 @@ test(
         )
         const eventsDone = (async () => {
           for await (const event of eventStream) {
-            feedbackFinishedEvents.push(event)
+            feedbackFinishedEvents.push(event as (typeof feedbackFinishedEvents)[number])
           }
         })()
         unsubscribeEvents = async () => {
@@ -358,7 +358,7 @@ test(
         )
         const eventsDone = (async () => {
           for await (const event of eventStream) {
-            degradedEvents.push(event)
+            degradedEvents.push(event as (typeof degradedEvents)[number])
           }
         })()
         unsubscribeEvents = async () => {

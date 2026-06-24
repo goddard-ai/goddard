@@ -871,7 +871,6 @@ function createTestLogService(
   }
 
   return {
-    createDebug: () => () => {},
     createLogger: () => logger,
     createDebug:
       (debugScope) =>

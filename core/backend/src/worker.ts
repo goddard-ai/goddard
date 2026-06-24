@@ -8,7 +8,6 @@ import { getPrincipalStreamKey } from "./api/events.ts"
 import {
   authorizeBackendEventPublication,
   createBackendRouter,
-  type BackendEventPublication,
 } from "./api/router.ts"
 import { TursoBackendControlPlane } from "./db/persistence.ts"
 import type { Env } from "./env.ts"
@@ -39,7 +38,7 @@ const router = createBackendRouter({
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ event: publication.event }),
+        body: JSON.stringify({ event: publication.event.payload }),
       },
     )
   },
@@ -110,27 +109,6 @@ export class UserStream {
     this.#queues.add(queue)
 
     return createReadyNdjsonResponse(queue)
-  }
-
-  #deleteSink(sink: ReturnType<typeof createSseSession>["sink"]) {
-    for (const subscription of this.#subscriptions) {
-      if (subscription.sink === sink) {
-        this.#subscriptions.delete(subscription)
-      }
-    }
-  }
-}
-
-function readStreamFilter(request: Request): EventEnvelopeFilter {
-  const value = new URL(request.url).searchParams.get("filter")
-  if (!value) {
-    return {}
-  }
-
-  try {
-    return JSON.parse(value) as EventEnvelopeFilter
-  } catch {
-    return {}
   }
 }
 

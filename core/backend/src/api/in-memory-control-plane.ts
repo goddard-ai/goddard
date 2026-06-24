@@ -9,19 +9,20 @@ import type {
 import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
-  normalizeGitHubWebhookEvent,
+  createRemoteRepoBackendEvent,
+  remoteRepoBackendEventSources,
   type RemoteRepoEventBroadcaster,
   type RemoteRepoStreamEvent,
   type RemoteRepoStreamService,
 } from "@goddard-ai/remote-repo/backend"
 import type {
   BackendEventStreamRequest,
-  GitHubWebhookInput,
+  RemoteRepositoryRef,
   RepoEvent,
 } from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
-import { filterRepoEvent, hashToInteger, toPublicSession } from "../utils.ts"
+import { filterRepoEvent, toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
@@ -208,27 +209,21 @@ export class InMemoryBackendControlPlane
     )
   }
 
-  handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
-    assertRepo(event.owner, event.repo)
-
-    return normalizeGitHubWebhookEvent(event)
-  }
-
   subscribeRemoteRepoEvents(
-    githubUsername: string,
+    streamKey: string,
     filter: BackendEventStreamRequest = {},
   ): AsyncIterable<RepoEvent> {
     const subscription = new RemoteRepoEventSubscription(filter, () => {
-      const subscriptions = this.#streamsByUser.get(githubUsername)
+      const subscriptions = this.#streamsByUser.get(streamKey)
       subscriptions?.delete(subscription)
       if (subscriptions && subscriptions.size === 0) {
-        this.#streamsByUser.delete(githubUsername)
+        this.#streamsByUser.delete(streamKey)
       }
     })
     const subscriptions =
-      this.#streamsByUser.get(githubUsername) ?? new Set<RemoteRepoEventSubscription>()
+      this.#streamsByUser.get(streamKey) ?? new Set<RemoteRepoEventSubscription>()
     subscriptions.add(subscription)
-    this.#streamsByUser.set(githubUsername, subscriptions)
+    this.#streamsByUser.set(streamKey, subscriptions)
     return subscription
   }
 
@@ -238,17 +233,17 @@ export class InMemoryBackendControlPlane
       return
     }
 
-    const subscriptions = this.#streamsByUser.get(githubUsername)
+    const subscriptions = this.#streamsByUser.get(streamKey)
     if (!subscriptions) {
       return
     }
 
     for (const subscription of subscriptions) {
-      subscription.publish(event)
+      subscription.publish(event.payload)
     }
 
     if (subscriptions.size === 0) {
-      this.#streamsByUser.delete(githubUsername)
+      this.#streamsByUser.delete(streamKey)
     }
   }
 

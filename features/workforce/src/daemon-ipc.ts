@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 import { SessionIdParams } from "@goddard-ai/session/schema"
 
 import {
@@ -144,14 +144,6 @@ export const workforceIpcRoutes = defineIpcRoutes({
       }),
       body: SuspendWorkforceRequest,
       response: $type<MutateWorkforceResponse>(),
-    }),
-    /** Streams live workforce ledger events for one repository root. */
-    streamEvents: http.get("stream-events", {
-      ...metadata({
-        description: "Streams live workforce ledger events for one repository root.",
-      }),
-      query: SubscribeWorkforceEventsRequest,
-      response: ndjson.$type<WorkforceLedgerEvent>(),
     }),
   }),
 })

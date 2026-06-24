@@ -130,7 +130,7 @@ async function subscribeSessionLifecycle(
   )
   const done = (async () => {
     for await (const event of stream) {
-      onEvent(event.payload)
+      onEvent(event.payload as SessionLifecycleEvent)
     }
   })()
 
@@ -1393,7 +1393,7 @@ test("daemon event stream emits filtered composed event envelopes", async () => 
   }
   const eventsDone = (async () => {
     for await (const event of eventStream) {
-      events.push(event)
+      events.push(event as (typeof events)[number])
     }
   })()
   cleanup.push(async () => {
@@ -2316,14 +2316,14 @@ test("session suggestion routes reject removed `@` triggers", async () => {
   await expect(
     client.session.composerSuggestions({
       id: "ses_missing",
-      trigger: "at",
+      trigger: "at" as never,
       query: "",
     }),
   ).rejects.toThrow("Invalid option")
   await expect(
     client.session.draftSuggestions({
       cwd: repoDir,
-      trigger: "at",
+      trigger: "at" as never,
       query: "",
     }),
   ).rejects.toThrow("Invalid input")
