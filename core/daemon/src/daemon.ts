@@ -25,7 +25,7 @@ import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
-  baseUrl: string
+  baseUrl?: string
   port?: number
   agentBinDir?: string
   enableIpc?: boolean

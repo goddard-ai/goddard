@@ -9,6 +9,14 @@ async function main() {
   process.env.NODE_ENV = "development"
   process.env.FORCE_COLOR = "1"
 
+  const backend = supervise({
+    name: "backend",
+    command: "pnpm",
+    args: ["--dir", "core/backend", "run", "dev"],
+  })
+
+  await backend.waitFor(/Ready on http:\/\/(?:localhost|127\.0\.0\.1):8787/)
+
   const daemon = supervise({
     name: "daemon",
     command: "bun",

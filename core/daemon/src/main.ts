@@ -90,9 +90,8 @@ export async function main(argv = process.argv.slice(2)) {
         description: "Start the daemon runtime and background services",
         args: {
           baseUrl: option({
-            type: string,
+            type: optional(string),
             long: "base-url",
-            defaultValue: () => "https://goddardai.org/api",
             description: "Base URL for the Goddard API",
           }),
           port: option({

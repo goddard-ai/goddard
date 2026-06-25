@@ -17,6 +17,7 @@ import { removeTemporaryPath } from "./support/temp.ts"
 const cleanup: Array<() => Promise<void>> = []
 const originalHome = process.env.HOME
 const originalDaemonPort = process.env.GODDARD_DAEMON_PORT
+const originalBaseUrl = process.env.GODDARD_BASE_URL
 const agentBinDir = fileURLToPath(new URL("../agent-bin", import.meta.url))
 const fastFixtureAgentPath = fileURLToPath(
   new URL("./fixtures/fast-acp-agent.mjs", import.meta.url),
@@ -35,6 +36,11 @@ afterEach(async () => {
     delete process.env.GODDARD_DAEMON_PORT
   } else {
     process.env.GODDARD_DAEMON_PORT = originalDaemonPort
+  }
+  if (originalBaseUrl === undefined) {
+    delete process.env.GODDARD_BASE_URL
+  } else {
+    process.env.GODDARD_BASE_URL = originalBaseUrl
   }
 
   while (cleanup.length > 0) {
@@ -632,6 +638,21 @@ test("daemon runtime resolves the global daemon port override", async () => {
   })
 
   expect(resolveRuntimeConfig().port).toBe(41236)
+})
+
+test("daemon runtime defaults to the local backend URL", () => {
+  delete process.env.GODDARD_BASE_URL
+
+  expect(resolveRuntimeConfig({ port: 0 }).baseUrl).toBe("http://127.0.0.1:8787")
+})
+
+test("daemon runtime backend URL overrides preserve precedence", () => {
+  process.env.GODDARD_BASE_URL = "http://127.0.0.1:9999"
+
+  expect(resolveRuntimeConfig({ port: 0 }).baseUrl).toBe("http://127.0.0.1:9999")
+  expect(resolveRuntimeConfig({ baseUrl: "https://example.test/api", port: 0 }).baseUrl).toBe(
+    "https://example.test/api",
+  )
 })
 
 async function runGit(cwd: string, args: string[]): Promise<void> {

@@ -1,6 +1,20 @@
 name = "goddard-backend"
 main = "src/worker.ts"
 compatibility_date = "2024-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+[alias]
+"@goddard-ai/auth/backend" = "../../features/auth/src/backend.ts"
+"@goddard-ai/auth/schema" = "../../features/auth/src/schema.ts"
+"@goddard-ai/backend-plugin" = "../backend-plugin/src/index.ts"
+"@goddard-ai/default-features/backend" = "../default-features/src/backend.ts"
+"@goddard-ai/github/backend" = "../../features/github/src/backend.ts"
+"@goddard-ai/github/schema" = "../../features/github/src/schema.ts"
+"@goddard-ai/pull-request/backend" = "../../features/pull-request/src/backend.ts"
+"@goddard-ai/pull-request/schema" = "../../features/pull-request/src/schema.ts"
+"@goddard-ai/remote-repo/backend" = "../../features/remote-repo/src/backend.ts"
+"@goddard-ai/remote-repo/schema" = "../../features/remote-repo/src/schema.ts"
+"@goddard-ai/schema/attention" = "../schema/src/attention.ts"
 
 [vars]
 # TURSO_DB_URL = "libsql://..."
