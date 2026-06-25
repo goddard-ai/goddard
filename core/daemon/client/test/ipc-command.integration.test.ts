@@ -35,12 +35,19 @@ async function createFixture() {
           },
         },
       },
+      events: {
+        stream: () =>
+          (async function* () {
+            yield {
+              id: "evt_integration",
+              at: "2026-06-25T00:00:00.000Z",
+              name: "session.message",
+              payload: { role: "assistant", content: "ready" },
+            }
+          })(),
+      },
       session: {
         get: ({ body }: { body: { id: string } }) => ({ id: body.id }),
-        streamMessages: () =>
-          (async function* () {
-            yield { type: "message", message: { role: "assistant", content: "ready" } }
-          })(),
       },
     }),
   })
@@ -116,15 +123,20 @@ describe("daemon IPC command integration", () => {
     const { app, output } = await createFixture()
 
     const result = await runSafely(app, [
-      "session",
-      "stream-messages",
+      "events",
+      "stream",
       "--json",
-      '{"id":"ses_integration"}',
+      '{"names":["session.message"]}',
     ])
 
     expect(result._tag).toBe("ok")
     expect(output).toEqual([
-      JSON.stringify({ type: "message", message: { role: "assistant", content: "ready" } }),
+      JSON.stringify({
+        id: "evt_integration",
+        at: "2026-06-25T00:00:00.000Z",
+        name: "session.message",
+        payload: { role: "assistant", content: "ready" },
+      }),
     ])
   })
 

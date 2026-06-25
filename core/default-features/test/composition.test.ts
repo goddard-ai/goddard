@@ -22,7 +22,7 @@ test("default backend composition includes backend feature routes and remote-rep
   expect(composition.routes.auth.path.source).toBe("/auth")
   expect(composition.routes.webhooks.children.github.path?.source).toBe("/github")
   expect(composition.routes.pullRequests.path.source).toBe("/pull-requests")
-  expect(composition.routes.remoteRepo.children.stream.path?.source).toBe("/stream")
+  expect(composition.routes.events.children.stream.path?.source).toBe("/stream")
   expect(Object.keys(composition.events)).toEqual([
     REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
     REMOTE_REPO_PULL_REQUEST_REVIEW_SUBMITTED,

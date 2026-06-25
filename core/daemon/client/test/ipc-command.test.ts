@@ -27,10 +27,10 @@ function createFixture() {
         },
       },
     },
-    adapter: {
+    agent: {
       list: async (payload: unknown) => {
-        calls.push({ route: "adapter.list", payload })
-        return { adapters: [] }
+        calls.push({ route: "agent.list", payload })
+        return { agents: [] }
       },
     },
     session: {
@@ -42,11 +42,13 @@ function createFixture() {
         calls.push({ route: "session.get", payload })
         return { id: "ses_session_1" }
       },
-      async streamMessages(payload: unknown) {
-        calls.push({ route: "session.streamMessages", payload })
+    },
+    events: {
+      async stream(payload: unknown) {
+        calls.push({ route: "events.stream", payload })
         return (async function* () {
-          yield { message: "one" }
-          yield { message: "two" }
+          yield { id: "evt_1", at: "2026-06-25T00:00:00.000Z", name: "one", payload: {} }
+          yield { id: "evt_2", at: "2026-06-25T00:00:01.000Z", name: "two", payload: {} }
         })()
       },
     },
@@ -94,7 +96,7 @@ describe("daemon IPC command", () => {
     const { app, calls, output } = createFixture()
 
     const result = await runSafely(app, [
-      "adapter",
+      "agent",
       "list",
       "--cwd",
       "/repo",
@@ -104,9 +106,9 @@ describe("daemon IPC command", () => {
 
     expect(result._tag).toBe("ok")
     expect(calls).toEqual([
-      { route: "adapter.list", payload: { cwd: "/repo", includeUninstalled: true } },
+      { route: "agent.list", payload: { cwd: "/repo", includeUninstalled: true } },
     ])
-    expect(output).toEqual([JSON.stringify({ adapters: [] })])
+    expect(output).toEqual([JSON.stringify({ agents: [] })])
   })
 
   test("dispatches number fields from generated scalar options", async () => {
@@ -133,15 +135,18 @@ describe("daemon IPC command", () => {
     const { app, calls, output } = createFixture()
 
     const result = await runSafely(app, [
-      "session",
-      "stream-messages",
+      "events",
+      "stream",
       "--json",
-      '{"id":"ses_session_1"}',
+      '{"names":["session.message"]}',
     ])
 
     expect(result._tag).toBe("ok")
-    expect(calls).toEqual([{ route: "session.streamMessages", payload: { id: "ses_session_1" } }])
-    expect(output).toEqual([JSON.stringify({ message: "one" }), JSON.stringify({ message: "two" })])
+    expect(calls).toEqual([{ route: "events.stream", payload: { names: ["session.message"] } }])
+    expect(output).toEqual([
+      JSON.stringify({ id: "evt_1", at: "2026-06-25T00:00:00.000Z", name: "one", payload: {} }),
+      JSON.stringify({ id: "evt_2", at: "2026-06-25T00:00:01.000Z", name: "two", payload: {} }),
+    ])
   })
 
   test("uses kebab-case command names for camel-case route keys", async () => {
