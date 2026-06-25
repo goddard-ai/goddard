@@ -9,6 +9,10 @@ import { defineConfig } from "vite"
 
 import svgIcons from "./plugins/svg-icon-build-plugin.ts"
 
+const devServerUrl = process.env.GODDARD_APP_DEV_SERVER_URL
+  ? new URL(process.env.GODDARD_APP_DEV_SERVER_URL)
+  : undefined
+
 /** Vite config for the desktop webview source rooted at src/main. */
 export default defineConfig({
   root: "src/main",
@@ -41,8 +45,8 @@ export default defineConfig({
     }),
   ],
   server: {
-    host: "127.0.0.1",
-    port: 5173,
+    host: devServerUrl?.hostname ?? "127.0.0.1",
+    port: Number(devServerUrl?.port ?? 5173),
     strictPort: true,
   },
   build: {

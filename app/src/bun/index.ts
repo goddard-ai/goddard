@@ -15,8 +15,7 @@ import {
   type WindowFrame,
 } from "./window-layout.ts"
 
-const DEV_SERVER_PORT = 5173
-const DEV_SERVER_URL = `http://127.0.0.1:${DEV_SERVER_PORT}`
+const DEFAULT_DEV_SERVER_URL = "http://127.0.0.1:5173"
 const MAIN_WINDOW_READY_FALLBACK_MS = 5000
 
 /** Creates the one primary Electrobun window used by the current app shell. */
@@ -53,16 +52,21 @@ async function getMainWindowUrl() {
   const channel = await Updater.localInfo.channel()
 
   if (channel === "dev") {
+    const devServerUrl = resolveDevServerUrl()
     try {
-      await fetch(DEV_SERVER_URL, { method: "HEAD" })
-      console.log(`HMR enabled: using Vite dev server at ${DEV_SERVER_URL}`)
-      return DEV_SERVER_URL
+      await fetch(devServerUrl, { method: "HEAD" })
+      console.log(`HMR enabled: using Vite dev server at ${devServerUrl}`)
+      return devServerUrl
     } catch {
       console.log("Vite dev server not running. Run `pnpm run dev` to start the app with Vite.")
     }
   }
 
   return "views://main/index.html"
+}
+
+function resolveDevServerUrl() {
+  return process.env.GODDARD_APP_DEV_SERVER_URL ?? DEFAULT_DEV_SERVER_URL
 }
 
 function installWindowLayoutPersistence(window: BrowserWindow<typeof appRpc>) {
