@@ -4,15 +4,15 @@ import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
-import {
-  createBackendClient,
-  isBackendUnauthenticatedError,
-  type BackendClient,
-} from "./backend.ts"
+import { createBackendClient, isBackendUnauthenticatedError } from "./backend.ts"
 import { createConfigManager } from "./config-manager.ts"
-import { resolveRuntimeConfig } from "./config.ts"
+import { ResolvedRuntimeConfig, resolveRuntimeConfig } from "./config.ts"
 import { SetupContext } from "./context.ts"
-import { daemonRuntimeEvents, type ConfigReloadFailedEvent } from "./events.ts"
+import {
+  DaemonRuntimeEventBus,
+  daemonRuntimeEvents,
+  type ConfigReloadFailedEvent,
+} from "./events.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
@@ -56,17 +56,17 @@ export async function runDaemon({
   const logger = createLogger()
 
   try {
-    const runtime = resolveRuntimeConfig({
+    const runtimeConfig = resolveRuntimeConfig({
       baseUrl,
       port,
       agentBinDir,
     })
     return await runConfiguredDaemon({
-      ...runtime,
       enableIpc,
       enableStream,
       logger,
       logStore,
+      runtimeConfig,
       store,
     })
   } catch (error) {
@@ -79,22 +79,18 @@ export async function runDaemon({
 }
 
 async function runConfiguredDaemon({
-  agentBinDir,
-  baseUrl,
   enableIpc,
   enableStream,
   logger,
   logStore,
-  port,
+  runtimeConfig,
   store,
 }: {
-  agentBinDir: string
-  baseUrl: string
   enableIpc: boolean
   enableStream: boolean
   logger: DaemonLogger
   logStore: ReturnType<typeof createLogStore>
-  port: number
+  runtimeConfig: ResolvedRuntimeConfig
   store?: ComposedDaemonStore
 }): Promise<number> {
   let emitConfigReloadFailed: ((event: ConfigReloadFailedEvent) => void | Promise<void>) | undefined
@@ -106,11 +102,7 @@ async function runConfiguredDaemon({
   let ipcServer: DaemonServer | undefined
 
   try {
-    logger.log("daemon.startup", {
-      baseUrl,
-      port,
-      agentBinDir,
-    })
+    logger.log("daemon.startup", runtimeConfig)
     void Promise.resolve()
       .then(() => {
         logStore.retainSince(subtractHours(new Date(), 24))
@@ -126,26 +118,40 @@ async function runConfiguredDaemon({
       return 0
     }
 
-    const client = await defaultCreateBackendClient(baseUrl, store)
+    const client = createBackendClient({
+      baseUrl: runtimeConfig.baseUrl,
+      getAuthorizationHeader: async () => {
+        const token = store.metadata.get("authToken") ?? null
+        return token ? `Bearer ${token}` : null
+      },
+    })
+
     if (enableIpc) {
       ipcServer = await SetupContext.run(
-        { runtime: { agentBinDir, baseUrl, port }, configManager },
+        {
+          runtimeConfig,
+          configManager,
+        },
         () =>
           startDaemonServer(client, {
-            port,
-            agentBinDir,
+            agentBinDir: runtimeConfig.agentBinDir,
+            port: runtimeConfig.port,
             store,
           }),
       )
     }
 
-    const activeIpcServer = ipcServer
-    const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
+    const daemonEvents: DaemonRuntimeEventBus =
+      ipcServer?.events ?? (createDaemonEventBus(daemonRuntimeEvents) as DaemonRuntimeEventBus)
+
     emitConfigReloadFailed = (event) => daemonEvents.emit("config.reload.failed", event)
+
     const eventStreamAbort = new AbortController()
     let eventStreamTask: Promise<void> | null = null
 
-    if (enableStream && activeIpcServer && activeIpcServer.backendEventHandlers.length > 0) {
+    if (enableStream && ipcServer && ipcServer.backendEventHandlers.length > 0) {
+      const { daemonUrl, port, backendEventHandlers } = ipcServer
+
       eventStreamTask = Promise.resolve()
         .then(async () => {
           const events = await client.events.stream(
@@ -157,18 +163,26 @@ async function runConfiguredDaemon({
             },
           )
           await daemonEvents.emit("backend.stream.started", {
-            daemonUrl: activeIpcServer.daemonUrl,
-            port: activeIpcServer.port,
+            daemonUrl,
+            port,
           })
 
           await consumeBackendEvents(
             events,
             async (event) => {
-              await dispatchBackendEvent(
-                createRemoteRepoBackendEvent(event),
-                activeIpcServer,
-                logger,
-              )
+              const payload = createRemoteRepoBackendEvent(event)
+              for (const handler of backendEventHandlers) {
+                try {
+                  if (handler.canHandle(payload)) {
+                    await handler.handle(payload)
+                  }
+                } catch (error) {
+                  logger.log("backend.event_handler_failed", {
+                    handlerName: handler.name,
+                    ...toErrorProperties(error),
+                  })
+                }
+              }
             },
             (error) => {
               logger.log("backend.stream.event_failed", toErrorProperties(error))
@@ -205,11 +219,11 @@ async function runConfiguredDaemon({
               .then(() => eventStreamTask)
               .catch(() => {})
           : Promise.resolve(),
-        activeIpcServer ? activeIpcServer.close() : Promise.resolve(),
+        ipcServer ? ipcServer.close() : Promise.resolve(),
       ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      port: ipcServer?.port ?? port,
+      port: ipcServer?.port ?? runtimeConfig.port,
     })
     return 0
   } finally {
@@ -254,29 +268,6 @@ async function consumeBackendEvents(
   }
 }
 
-async function dispatchBackendEvent(
-  payload: unknown,
-  server: DaemonServer | undefined,
-  logger: DaemonLogger,
-) {
-  if (!server) {
-    return
-  }
-
-  for (const handler of server.backendEventHandlers) {
-    try {
-      if (handler.canHandle(payload)) {
-        await handler.handle(payload)
-      }
-    } catch (error) {
-      logger.log("backend.event_handler_failed", {
-        handlerName: handler.name,
-        ...toErrorProperties(error),
-      })
-    }
-  }
-}
-
 /** Waits for SIGINT and then closes the active daemon resources. */
 export async function waitForShutdown(close: () => void | Promise<void>): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -284,19 +275,5 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
       void close()
       resolve()
     })
-  })
-}
-
-/** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
-async function defaultCreateBackendClient(
-  baseUrl: string,
-  store: ComposedDaemonStore,
-): Promise<BackendClient> {
-  return createBackendClient({
-    baseUrl,
-    getAuthorizationHeader: async () => {
-      const token = store.metadata.get("authToken") ?? null
-      return token ? `Bearer ${token}` : null
-    },
   })
 }

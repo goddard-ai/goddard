@@ -1,4 +1,4 @@
-import { event } from "@goddard-ai/daemon-plugin"
+import { event, EventBus } from "@goddard-ai/daemon-plugin"
 
 export type BackendStreamDegradedEvent = {
   reason: "stream_failed" | "unauthenticated"
@@ -24,3 +24,5 @@ export const daemonRuntimeEvents = {
   "backend.stream.degraded": event<BackendStreamDegradedEvent>(),
   "config.reload.failed": event<ConfigReloadFailedEvent>(),
 }
+
+export type DaemonRuntimeEventBus = EventBus<typeof daemonRuntimeEvents>

@@ -69,7 +69,7 @@ export async function startDaemonServer(
   const debug = createDebug("ipc.server")
   const setupContext = SetupContext.get()
   const runtime =
-    setupContext?.runtime ??
+    setupContext?.runtimeConfig ??
     resolveRuntimeConfig({
       port: options.port,
       agentBinDir: options.agentBinDir,

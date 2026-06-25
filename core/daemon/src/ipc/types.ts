@@ -1,9 +1,11 @@
-import type { BackendEventHandler, EventBus, EventDefinition } from "@goddard-ai/daemon-plugin"
+import type { BackendEventHandler } from "@goddard-ai/daemon-plugin"
+
+import type { DaemonRuntimeEventBus } from "../events.ts"
 
 export type DaemonServer = {
   backendEventHandlers: readonly BackendEventHandler<any>[]
   daemonUrl: string
-  events: EventBus<Record<string, EventDefinition<unknown>>>
+  events: DaemonRuntimeEventBus
   port: number
   close: () => Promise<void>
 }

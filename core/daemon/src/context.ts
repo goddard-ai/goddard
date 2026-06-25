@@ -3,14 +3,11 @@ import { AsyncContext } from "@b9g/async-context"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 
 import type { ConfigManager } from "./config-manager.ts"
+import type { ResolvedRuntimeConfig } from "./config.ts"
 
 /** Setup-only dependencies installed while daemon construction is running. */
 export type SetupContext = {
-  runtime: {
-    baseUrl: string
-    port: number
-    agentBinDir: string
-  }
+  runtimeConfig: ResolvedRuntimeConfig
   configManager: ConfigManager
 }
 
