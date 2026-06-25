@@ -135,14 +135,9 @@ overlay behavior in the caller but need shared active-row behavior.
 controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
 Enter activation, pointer hover, registered-row focus helpers, disabled-row
 skipping from DOM state, active DOM attributes, and active-row scroll visibility.
-Pass `onActiveIndexChange(index)` to observe primitive-owned active-row changes
-from keyboard movement, pointer hover, count clamping, reset, and direct setter
-calls.
-When the active registered row changes from keyboard or programmatic movement,
-the hook calls `scrollIntoView` on that row. Pointer-origin hover changes update
-the active row without scrolling. Scrolling is enabled by default with
-`{ block: "nearest" }`; pass `scrollIntoView: false` to disable it, or pass
-custom `ScrollIntoViewOptions`.
+When the active registered row changes, the hook calls `scrollIntoView` on that
+row. Scrolling is enabled by default with `{ block: "nearest" }`; pass
+`scrollIntoView: false` to disable it, or pass custom `ScrollIntoViewOptions`.
 The hook does not create or size a scroll viewport. Callers still own list
 layout, overflow CSS, rendered rows, and `itemRef(index)` wiring. Browser
 `scrollIntoView` behavior determines which scroll ancestor moves. Pointer hover
