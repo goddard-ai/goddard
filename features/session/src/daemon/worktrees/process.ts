@@ -65,14 +65,14 @@ type SpawnSpec = {
   args: string[]
 }
 
-async function resolveSpawnSpec(command: string, args: string[]): Promise<SpawnSpec> {
+export async function resolveSpawnSpec(command: string, args: string[]): Promise<SpawnSpec> {
   if (process.platform !== "win32") {
     return { command, args }
   }
 
   const resolvedCommand = await resolveWindowsCommand(command)
   if (!resolvedCommand || !isWindowsBatchCommand(resolvedCommand)) {
-    return { command: resolvedCommand ?? command, args }
+    return { command, args }
   }
 
   return {
