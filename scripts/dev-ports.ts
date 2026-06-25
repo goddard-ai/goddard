@@ -2,7 +2,7 @@ import { createServer } from "node:net"
 
 const localDevHost = "127.0.0.1"
 
-export function createLocalHttpUrl(port: number) {
+export function createLocalHttpUrl(port: string | number) {
   return `http://${localDevHost}:${port}`
 }
 
@@ -40,5 +40,5 @@ export async function getUnusedTcpPort() {
     })
   })
 
-  return address.port
+  return String(address.port)
 }
