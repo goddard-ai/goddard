@@ -34,25 +34,19 @@ export type RunInput = {
   store?: ComposedDaemonStore
 }
 
-type ConfiguredDaemonInput = {
-  agentBinDir: string
-  baseUrl: string
-  bindConfigReloadFailed: (emit: (event: ConfigReloadFailedEvent) => void | Promise<void>) => void
-  configManager: ReturnType<typeof createConfigManager>
-  enableIpc: boolean
-  enableStream: boolean
-  logger: DaemonLogger
-  logStore: ReturnType<typeof createLogStore>
-  ownsStore: boolean
-  port: number
-  store: ComposedDaemonStore
-}
-
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
-export async function runDaemon(input: RunInput): Promise<number> {
+export async function runDaemon({
+  baseUrl,
+  port,
+  agentBinDir,
+  enableIpc = true,
+  enableStream = true,
+  logMode = "compact",
+  store,
+}: RunInput): Promise<number> {
   const logStore = createLogStore()
   const restoreLogging = configureLogging({
-    mode: input.logMode ?? "compact",
+    mode: logMode,
     writeLine: (line) => {
       process.stdout.write(`${line}\n`)
     },
@@ -63,40 +57,18 @@ export async function runDaemon(input: RunInput): Promise<number> {
 
   try {
     const runtime = resolveRuntimeConfig({
-      baseUrl: input.baseUrl,
-      port: input.port,
-      agentBinDir: input.agentBinDir,
+      baseUrl,
+      port,
+      agentBinDir,
     })
-    let emitConfigReloadFailed:
-      | ((event: ConfigReloadFailedEvent) => void | Promise<void>)
-      | undefined
-    const configManager = createConfigManager({
-      onReloadFailed: (event) => emitConfigReloadFailed?.(event),
+    return await runConfiguredDaemon({
+      ...runtime,
+      enableIpc,
+      enableStream,
+      logger,
+      logStore,
+      store,
     })
-    let didHandoffConfigManager = false
-
-    try {
-      const store = input.store ?? openComposedDaemonStore()
-      didHandoffConfigManager = true
-
-      return await runConfiguredDaemon({
-        ...runtime,
-        bindConfigReloadFailed: (emit) => {
-          emitConfigReloadFailed = emit
-        },
-        configManager,
-        enableIpc: input.enableIpc ?? true,
-        enableStream: input.enableStream ?? true,
-        logger,
-        logStore,
-        ownsStore: input.store == null,
-        store,
-      })
-    } finally {
-      if (!didHandoffConfigManager) {
-        await configManager.close().catch(() => {})
-      }
-    }
   } catch (error) {
     logger.log("daemon.run_failed", toErrorProperties(error))
     return 1
@@ -106,20 +78,31 @@ export async function runDaemon(input: RunInput): Promise<number> {
   }
 }
 
-async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number> {
-  const {
-    agentBinDir,
-    baseUrl,
-    bindConfigReloadFailed,
-    configManager,
-    enableIpc,
-    enableStream,
-    logger,
-    logStore,
-    ownsStore,
-    port,
-    store,
-  } = input
+async function runConfiguredDaemon({
+  agentBinDir,
+  baseUrl,
+  enableIpc,
+  enableStream,
+  logger,
+  logStore,
+  port,
+  store,
+}: {
+  agentBinDir: string
+  baseUrl: string
+  enableIpc: boolean
+  enableStream: boolean
+  logger: DaemonLogger
+  logStore: ReturnType<typeof createLogStore>
+  port: number
+  store?: ComposedDaemonStore
+}): Promise<number> {
+  let emitConfigReloadFailed: ((event: ConfigReloadFailedEvent) => void | Promise<void>) | undefined
+  const configManager = createConfigManager({
+    onReloadFailed: (event) => emitConfigReloadFailed?.(event),
+  })
+  const ownsStore = store == null
+  store ??= openComposedDaemonStore()
   let ipcServer: DaemonServer | undefined
 
   try {
@@ -158,7 +141,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
 
     const activeIpcServer = ipcServer
     const daemonEvents = activeIpcServer?.events ?? createDaemonEventBus(daemonRuntimeEvents)
-    bindConfigReloadFailed((event) => daemonEvents.emit("config.reload.failed", event))
+    emitConfigReloadFailed = (event) => daemonEvents.emit("config.reload.failed", event)
     const eventStreamAbort = new AbortController()
     let eventStreamTask: Promise<void> | null = null
 
