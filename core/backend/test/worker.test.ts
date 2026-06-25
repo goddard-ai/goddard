@@ -1,4 +1,3 @@
-import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { expect, test } from "bun:test"
 
 import { UserStream } from "../src/worker.ts"
@@ -23,18 +22,15 @@ test("user stream durable object fans out published events as ndjson", async () 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         event: {
-          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
-          payload: {
-            type: "comment",
-            provider: "github",
-            owner: "goddard-ai",
-            repo: "sdk",
-            prNumber: 1,
-            author: "teammate",
-            body: "looks good",
-            reactionAdded: "eyes",
-            createdAt: new Date().toISOString(),
-          },
+          type: "comment",
+          provider: "github",
+          owner: "goddard-ai",
+          repo: "sdk",
+          prNumber: 1,
+          author: "teammate",
+          body: "looks good",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
         },
       }),
     }),

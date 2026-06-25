@@ -172,17 +172,16 @@ test("ndjson event stream receives webhook events for a managed PR", async () =>
   const baseUrl = `http://127.0.0.1:${server.port}`
 
   try {
-    const flow = await postJson(`${baseUrl}/auth/device/start`, {
-      githubUsername: "alec",
-    })
+    const flow = await postJson(`${baseUrl}/auth/device/start`, githubStart("alec"))
     const session = await postJson(`${baseUrl}/auth/device/complete`, {
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     await postJson(
       `${baseUrl}/pull-requests/create`,
       {
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         title: "Add CLI",
@@ -207,14 +206,16 @@ test("ndjson event stream receives webhook events for a managed PR", async () =>
       return readFirstNdjsonEvent(streamResponse)
     })
 
-    await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 1,
-      author: "teammate",
-      body: "looks good",
-    })
+    await postGitHubWebhook(
+      `${baseUrl}/webhooks/github`,
+      githubIssueCommentWebhook({
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
+        body: "looks good",
+      }),
+    )
 
     const parsed = (await eventPromise) as { type: string; reactionAdded: string }
     expect(parsed.type).toBe("comment")
@@ -288,14 +289,16 @@ test("unified stream only emits events for managed PRs owned by the authenticate
     })
 
     await Bun.sleep(10)
-    await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 1,
-      author: "teammate",
-      body: "looks good",
-    })
+    await postGitHubWebhook(
+      `${baseUrl}/webhooks/github`,
+      githubIssueCommentWebhook({
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 1,
+        author: "teammate",
+        body: "looks good",
+      }),
+    )
 
     const alecEvent = (await alecStreamPromise.then(readFirstNdjsonEvent)) as { prNumber: number }
     expect(alecEvent.prNumber).toBe(1)
@@ -333,14 +336,16 @@ test("unified stream ignores webhook events for unmanaged PRs", async () => {
     })
 
     await Bun.sleep(10)
-    await postJson(`${baseUrl}/webhooks/github`, {
-      type: "issue_comment",
-      owner: "goddard-ai",
-      repo: "sdk",
-      prNumber: 99,
-      author: "teammate",
-      body: "looks good",
-    })
+    await postGitHubWebhook(
+      `${baseUrl}/webhooks/github`,
+      githubIssueCommentWebhook({
+        owner: "goddard-ai",
+        repo: "sdk",
+        prNumber: 99,
+        author: "teammate",
+        body: "looks good",
+      }),
+    )
 
     await assertNoStreamResponse(streamResponsePromise, 100)
     streamAbort.abort()
@@ -442,6 +447,38 @@ async function postJson(
   }
 
   return response.json()
+}
+
+async function postGitHubWebhook(url: string, payload: unknown): Promise<any> {
+  return postJson(url, payload, undefined, {
+    "x-github-event": "issue_comment",
+    "x-github-delivery": crypto.randomUUID(),
+  })
+}
+
+function githubIssueCommentWebhook(input: {
+  owner: string
+  repo: string
+  prNumber: number
+  author: string
+  body: string
+}) {
+  return {
+    action: "created",
+    issue: {
+      number: input.prNumber,
+      pull_request: {},
+    },
+    comment: {
+      user: { login: input.author, type: "User" },
+      body: input.body,
+    },
+    repository: {
+      name: input.repo,
+      owner: { login: input.owner },
+    },
+    sender: { login: input.author, type: "User" },
+  }
 }
 
 function githubStart(login: string) {
