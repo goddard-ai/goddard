@@ -122,10 +122,6 @@ export type InlineSessionParams = z.infer<typeof InlineSessionParams>
 /** Browser origins allowed to request local daemon loopback access. */
 export const BrowserAccessConfig = z
   .strictObject({
-    enabled: z
-      .literal(true)
-      .optional()
-      .describe("Enables browser-origin access to the local daemon control server."),
     allowedOrigins: z
       .array(z.string())
       .optional()

@@ -62,6 +62,7 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
   handlers: RouteRequestHandlerMap<TRoutes>
   browserAccess?: {
     readonly allowedOrigins: readonly string[]
+    readonly isAllowedOrigin?: (origin: string) => boolean
     readonly authorizeRequest?: (
       request: Request,
     ) => Promise<Response | null | undefined> | Response | null | undefined
@@ -78,6 +79,7 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
   const browserAccess = config.browserAccess
     ? {
         allowedOrigins: new Set(config.browserAccess.allowedOrigins.map(normalizeAllowedOrigin)),
+        isAllowedOrigin: config.browserAccess.isAllowedOrigin,
         authorizeRequest: config.browserAccess.authorizeRequest,
       }
     : null
@@ -101,7 +103,7 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
           return
         }
 
-        const browserHeaders = resolveBrowserAccessHeaders(req, browserAccess.allowedOrigins)
+        const browserHeaders = resolveBrowserAccessHeaders(req, browserAccess)
         if (req.method === "OPTIONS") {
           await writeResponse(
             res,
@@ -226,7 +228,10 @@ function hasOriginHeader(req: http.IncomingMessage) {
 
 function resolveBrowserAccessHeaders(
   req: http.IncomingMessage,
-  allowedOrigins: ReadonlySet<string>,
+  browserAccess: {
+    readonly allowedOrigins: ReadonlySet<string>
+    readonly isAllowedOrigin?: (origin: string) => boolean
+  },
 ): Headers | null {
   const origin = req.headers.origin
   if (typeof origin !== "string") {
@@ -240,7 +245,11 @@ function resolveBrowserAccessHeaders(
     return null
   }
 
-  if (normalizedOrigin !== origin || !allowedOrigins.has(normalizedOrigin)) {
+  if (
+    normalizedOrigin !== origin ||
+    (!browserAccess.allowedOrigins.has(normalizedOrigin) &&
+      browserAccess.isAllowedOrigin?.(normalizedOrigin) !== true)
+  ) {
     return null
   }
 

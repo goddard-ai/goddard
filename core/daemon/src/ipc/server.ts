@@ -202,6 +202,7 @@ export async function startDaemonServer(
     handlers: ipcHandlers as any,
     browserAccess: {
       allowedOrigins: browserAccessConfig.allowedOrigins,
+      isAllowedOrigin: browserAccessConfig.isAllowedOrigin,
       authorizeRequest: browserAccessService.authorizeRequest,
     },
     runHandler: ({ payload, request }, handler) => {

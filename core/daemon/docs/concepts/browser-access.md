@@ -1,27 +1,28 @@
 # Browser Access
 
-Browser access lets a web page or desktop webview call the local daemon over loopback HTTP without treating CORS as authorization. It is disabled by default and must be enabled explicitly in daemon configuration.
+Browser access lets a web page or desktop webview call the local daemon over loopback HTTP without treating CORS as authorization. The hosted Goddard app origin and local desktop webview loopback origins are allowed by default; additional hosted or non-loopback desktop origins must be configured explicitly in daemon configuration.
 
 ## Configuration
 
-Enable browser access in the daemon config and list exact origins:
+List additional browser access origins in the daemon config:
 
 ```json
 {
   "daemon": {
     "browserAccess": {
-      "enabled": true,
-      "allowedOrigins": ["https://app.goddardai.org"],
-      "desktopWebviewOrigins": ["http://localhost:5173"]
+      "allowedOrigins": ["https://staging.goddardai.org"],
+      "desktopWebviewOrigins": ["https://desktop.goddard.local"]
     }
   }
 }
 ```
 
-- `allowedOrigins` are hosted web origins that may start and complete browser pairing.
-- `desktopWebviewOrigins` are trusted app webview origins that may use host-bootstrapped desktop tokens.
+- `https://app.goddardai.org` is always allowed as a hosted browser origin.
+- `http://localhost:<port>`, `http://127.0.0.1:<port>`, and `http://[::1]:<port>` are always allowed as desktop webview origins for host-bootstrapped tokens.
+- `allowedOrigins` are additional hosted web origins that may start and complete browser pairing.
+- `desktopWebviewOrigins` are additional trusted app webview origins that may use host-bootstrapped desktop tokens.
 - Origins must be exact URL origins. Do not use `*`, `null`, paths, queries, or hashes.
-- If browser access is omitted or not enabled, browser-origin requests are rejected.
+- Browser-origin requests from any other origin are rejected.
 
 The daemon still defaults to `http://127.0.0.1:49827/` unless the normal daemon port settings override it. Existing local Node and desktop host clients that do not send an `Origin` header keep using trusted local IPC behavior.
 
@@ -57,7 +58,7 @@ Browsers may apply Private Network Access checks when a public web page calls `h
 
 Manual smoke check:
 
-1. Start the daemon with browser access enabled for the page origin.
+1. Start the daemon with the page origin allowed.
 2. Open the page from that exact origin.
 3. Pair the browser through the local confirmation flow.
 4. Call `http://127.0.0.1:49827/daemon/health` or another daemon route through the browser client.

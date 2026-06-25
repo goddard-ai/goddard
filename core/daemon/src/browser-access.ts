@@ -34,10 +34,10 @@ type BrowserAccessState = {
 }
 
 type BrowserAccessRuntimeConfig = {
-  readonly enabled: boolean
   readonly hostedOrigins: ReadonlySet<string>
   readonly desktopWebviewOrigins: ReadonlySet<string>
   readonly allowedOrigins: readonly string[]
+  readonly isAllowedOrigin: (origin: string) => boolean
 }
 
 type BrowserAccessRequestContext = {
@@ -51,6 +51,7 @@ type DesktopWebviewToken = {
 }
 
 const requestContext = new AsyncLocalStorage<BrowserAccessRequestContext>()
+const defaultHostedBrowserOrigins = ["https://app.goddardai.org"] as const
 
 export function runBrowserAccessRequestContext<T>(request: Request, callback: () => T): T {
   return requestContext.run(
@@ -64,23 +65,20 @@ export function runBrowserAccessRequestContext<T>(request: Request, callback: ()
 export function resolveBrowserAccessRuntimeConfig(
   config: BrowserAccessConfig | undefined,
 ): BrowserAccessRuntimeConfig {
-  if (config?.enabled !== true) {
-    return {
-      enabled: false,
-      hostedOrigins: new Set(),
-      desktopWebviewOrigins: new Set(),
-      allowedOrigins: [],
-    }
-  }
-
-  const hostedOrigins = new Set((config.allowedOrigins ?? []).map(normalizeOrigin))
-  const desktopWebviewOrigins = new Set((config.desktopWebviewOrigins ?? []).map(normalizeOrigin))
+  const hostedOrigins = new Set(
+    [...defaultHostedBrowserOrigins, ...(config?.allowedOrigins ?? [])].map(normalizeOrigin),
+  )
+  const desktopWebviewOrigins = new Set((config?.desktopWebviewOrigins ?? []).map(normalizeOrigin))
+  const allowedOrigins = [...hostedOrigins, ...desktopWebviewOrigins]
 
   return {
-    enabled: true,
     hostedOrigins,
     desktopWebviewOrigins,
-    allowedOrigins: [...hostedOrigins, ...desktopWebviewOrigins],
+    allowedOrigins,
+    isAllowedOrigin(origin) {
+      const normalizedOrigin = normalizeOrigin(origin)
+      return hostedOrigins.has(normalizedOrigin) || isLoopbackOrigin(normalizedOrigin)
+    },
   }
 }
 
@@ -120,14 +118,17 @@ export function createBrowserAccessService(
   }
 
   function requireHostedOrigin(origin: string) {
-    if (!config.enabled || !config.hostedOrigins.has(origin)) {
+    if (!config.hostedOrigins.has(origin)) {
       throw new IpcClientError("Browser origin is not enabled")
     }
   }
 
   function requireDesktopWebviewOrigin(origin: string) {
     const normalizedOrigin = normalizeOrigin(origin)
-    if (!config.enabled || !config.desktopWebviewOrigins.has(normalizedOrigin)) {
+    if (
+      !config.desktopWebviewOrigins.has(normalizedOrigin) &&
+      !isLoopbackOrigin(normalizedOrigin)
+    ) {
       throw new IpcClientError("Desktop webview origin is not enabled")
     }
 
@@ -340,6 +341,17 @@ function normalizeOrigin(origin: string) {
   }
 
   return url.origin
+}
+
+function isLoopbackOrigin(origin: string) {
+  const url = new URL(origin)
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    (url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "::1" ||
+      url.hostname === "[::1]")
+  )
 }
 
 function isBrowserPublicRoute(pathname: string) {

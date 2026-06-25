@@ -231,13 +231,17 @@ function readTcpAddress(server: Server) {
   }
 }
 
-async function createBrowserAccessFixture(allowedOrigins = ["https://app.goddardai.org"]) {
+async function createBrowserAccessFixture(
+  allowedOrigins = ["https://app.goddardai.org"],
+  isAllowedOrigin?: (origin: string) => boolean,
+) {
   let pingCount = 0
   const ipcServer = createServer({
     port: 0,
     routes,
     browserAccess: {
       allowedOrigins,
+      isAllowedOrigin,
     },
     handlers: {
       ping: () => {
@@ -424,6 +428,26 @@ describe("core/ipc", () => {
     expect(JSON.parse(response.body)).toEqual({ ok: true })
     expect(response.headers["access-control-allow-origin"]).toBe("https://app.goddardai.org")
     expect(response.headers["access-control-allow-credentials"]).toBeUndefined()
+    expect(readPingCount()).toBe(1)
+  })
+
+  test("adds CORS headers for predicate-allowed browser origins", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture(
+      [],
+      (origin) => origin === "http://127.0.0.1:5173",
+    )
+
+    const response = await requestRaw(address, {
+      method: "GET",
+      path: "/ping",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(JSON.parse(response.body)).toEqual({ ok: true })
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:5173")
     expect(readPingCount()).toBe(1)
   })
 

@@ -91,17 +91,29 @@ test("daemon submit request redacts invalid session tokens in IPC logs", async (
   expect(failed?.requestName).toBe("pr.submit")
 })
 
-test("daemon browser access is unavailable until explicitly enabled", async () => {
+test("daemon browser access allows the hosted app origin by default", async () => {
   const daemon = await startServer()
 
-  const response = await browserFetch(daemon, "daemon/browser-access/pairing/start", {
+  const started = await browserFetchJson<{
+    pairingId: string
+    code: string
+    expiresAt: string
+  }>(daemon, "daemon/browser-access/pairing/start", {
     method: "POST",
     origin: hostedOrigin,
     body: {},
   })
+  expect(started.pairingId).toStartWith("bap_")
+  expect(started.code).toMatch(/^\d{6}$/)
+  expect(new Date(started.expiresAt).getTime()).toBeGreaterThan(Date.now())
 
-  expect(response.status).toBe(403)
-  expect(await response.json()).toEqual({ error: "Forbidden" })
+  const otherOrigin = await browserFetch(daemon, "daemon/browser-access/pairing/start", {
+    method: "POST",
+    origin: otherHostedOrigin,
+    body: {},
+  })
+  expect(otherOrigin.status).toBe(403)
+  expect(await otherOrigin.json()).toEqual({ error: "Forbidden" })
 })
 
 test("daemon browser access preflight and origin validation fail closed", async () => {
@@ -109,7 +121,6 @@ test("daemon browser access preflight and origin validation fail closed", async 
   await writeGlobalRootConfig({
     daemon: {
       browserAccess: {
-        enabled: true,
         allowedOrigins: [hostedOrigin],
         desktopWebviewOrigins: [desktopWebviewOrigin],
       },
@@ -147,7 +158,6 @@ test("daemon browser pairing issues origin-bound revocable tokens", async () => 
   await writeGlobalRootConfig({
     daemon: {
       browserAccess: {
-        enabled: true,
         allowedOrigins: [hostedOrigin, otherHostedOrigin],
         desktopWebviewOrigins: [desktopWebviewOrigin],
       },
@@ -312,7 +322,6 @@ test("daemon desktop webview tokens are host-bootstrapped and origin-checked", a
   await writeGlobalRootConfig({
     daemon: {
       browserAccess: {
-        enabled: true,
         allowedOrigins: [hostedOrigin],
         desktopWebviewOrigins: [desktopWebviewOrigin],
       },
@@ -347,6 +356,44 @@ test("daemon desktop webview tokens are host-bootstrapped and origin-checked", a
     token: webviewToken.token,
   })
   expect(wrongOrigin.status).toBe(403)
+})
+
+test("daemon desktop webview tokens allow loopback origins by default", async () => {
+  const daemon = await startServer()
+  const localClient = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const loopbackOrigins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"]
+
+  for (const origin of loopbackOrigins) {
+    const browserCreate = await browserFetch(daemon, "daemon/browser-access/webview-token/create", {
+      method: "POST",
+      origin,
+      body: { origin },
+    })
+    expect(browserCreate.status).toBe(403)
+
+    const webviewToken = await localClient.daemon.browserAccess.webviewToken.create({ origin })
+    expect(webviewToken.origin).toBe(origin)
+
+    const whoami = await browserFetchJson<{ githubUsername: string }>(daemon, "auth/whoami", {
+      method: "GET",
+      origin,
+      token: webviewToken.token,
+    })
+    expect(whoami.githubUsername).toBe("alec")
+
+    const wrongOrigin = await browserFetch(daemon, "auth/whoami", {
+      method: "GET",
+      origin: hostedOrigin,
+      token: webviewToken.token,
+    })
+    expect(wrongOrigin.status).toBe(403)
+  }
+
+  await expect(
+    localClient.daemon.browserAccess.webviewToken.create({
+      origin: "https://desktop.goddard.local",
+    }),
+  ).rejects.toThrow(/desktop webview origin is not enabled/i)
 })
 
 test("daemon hides unexpected handler crashes from IPC clients", async () => {

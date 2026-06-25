@@ -57,7 +57,7 @@ const client = createBrowserDaemonIpcClient({
 })
 ```
 
-Browser access is disabled by default at the daemon boundary and requires exact origin allowlisting plus either hosted-browser pairing or desktop webview token bootstrap. See [Browser Access](../docs/concepts/browser-access.md) for the operating model and troubleshooting notes.
+Browser access requires an allowed origin plus either hosted-browser pairing or desktop webview token bootstrap. The hosted Goddard app origin and local loopback desktop webview origins are allowed by default; additional origins require exact allowlisting. See [Browser Access](../docs/concepts/browser-access.md) for the operating model and troubleshooting notes.
 
 ## Generated IPC Shell
 
