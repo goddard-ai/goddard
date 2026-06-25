@@ -2,19 +2,16 @@ import { t } from "@lingui/core/macro"
 import type { Signal } from "@preact/signals"
 
 import { useWorkbenchTabSet } from "./app-state-context.tsrx"
-import {
-  CommandPaletteSurface,
-  type CommandPaletteSurfaceItem,
-} from "./command-palette-surface.tsrx"
-import styles from "./command-palette.style.ts"
+import styles from "./recent-tabs-palette.style.ts"
 import { GoodIcon } from "./lib/good-icon.tsrx"
+import { GoodPaletteModal, type GoodPaletteModalItem } from "./lib/good-palette-modal.tsrx"
 import { getWorkbenchTabIcon } from "./workbench-tab-registry.ts"
 
 export default function RecentTabsPalette(props: { open: Signal<boolean> }) @{
   const workbenchTabSet = useWorkbenchTabSet()
   const items = workbenchTabSet.recentDetailTabList.filter(
     (tab) => tab.id !== workbenchTabSet.activeTabId,
-  ).map((tab): CommandPaletteSurfaceItem => {
+  ).map((tab): GoodPaletteModalItem => {
     const icon = getWorkbenchTabIcon(tab.kind)
 
     return {
@@ -28,12 +25,12 @@ export default function RecentTabsPalette(props: { open: Signal<boolean> }) @{
     }
   })
 
-  function selectRecentTab(item: CommandPaletteSurfaceItem) {
+  function selectRecentTab(item: GoodPaletteModalItem) {
     props.open.value = false
     workbenchTabSet.openOrFocusRecentTab(item.id)
   }
 
-  <CommandPaletteSurface
+  <GoodPaletteModal
     emptyText={t`No recent tabs.`}
     {items}
     listLabel={t`Recent tabs`}

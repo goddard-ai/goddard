@@ -4,10 +4,10 @@ import { Search } from "lucide-react"
 import { useEffect, useId } from "preact/hooks"
 
 import { Modal, useSearchNavigation } from "@goddard-ai/ui-primitives"
-import { isEmptyQuery } from "./lib/search-query.ts"
-import styles from "./command-palette.style.ts"
+import { isEmptyQuery } from "./search-query.ts"
+import styles from "./good-palette-modal.style.ts"
 
-export type CommandPaletteSurfaceItem = {
+export type GoodPaletteModalItem = {
   id: string;
   icon?: preact.ComponentChildren;
   keywords?: readonly string[];
@@ -15,7 +15,7 @@ export type CommandPaletteSurfaceItem = {
   suffix?: preact.ComponentChildren;
 }
 
-function prepareCommandPaletteSurfaceItems(items: readonly CommandPaletteSurfaceItem[]) {
+function prepareGoodPaletteModalItems(items: readonly GoodPaletteModalItem[]) {
   return items.map(
     (item) => ({
       item,
@@ -25,20 +25,20 @@ function prepareCommandPaletteSurfaceItems(items: readonly CommandPaletteSurface
   )
 }
 
-export function CommandPaletteSurface(props: {
+export function GoodPaletteModal(props: {
   emptyText: string;
-  items: readonly CommandPaletteSurfaceItem[];
+  items: readonly GoodPaletteModalItem[];
   listLabel: string;
   open: Signal<boolean>;
   placeholder: string;
   title: string;
-  onSelect: (item: CommandPaletteSurfaceItem) => void;
+  onSelect: (item: GoodPaletteModalItem) => void;
 }) @{
   const titleId = useId()
   const listboxId = useId()
   const inputId = useId()
   const search = useSignal("")
-  const preparedItems = prepareCommandPaletteSurfaceItems(props.items)
+  const preparedItems = prepareGoodPaletteModalItems(props.items)
   const visibleItems = (() => {
     if (isEmptyQuery(search.value)) {
       return props.items

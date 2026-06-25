@@ -2,13 +2,10 @@ import { t } from "@lingui/core/macro"
 import type { Signal } from "@preact/signals"
 
 import { useShortcutRegistry } from "./app-state-context.tsrx"
-import {
-  CommandPaletteSurface,
-  type CommandPaletteSurfaceItem,
-} from "./command-palette-surface.tsrx"
 import styles from "./command-palette.style.ts"
 import { appCommandList } from "./commands/app-command.ts"
 import { isCommandPaletteVisible } from "./commands/command-context.ts"
+import { GoodPaletteModal, type GoodPaletteModalItem } from "./lib/good-palette-modal.tsrx"
 import { GoodKeyboardShortcut } from "./lib/good-keyboard-shortcut.tsrx"
 import { getShortcutBindingExpression } from "./shared/shortcut-keymap.ts"
 
@@ -19,7 +16,7 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
       command.id !== "navigation.openCommandPalette" &&
         isCommandPaletteVisible(shortcutRegistry.runtime, command),
   )
-  const items = visibleCommands.map((command): CommandPaletteSurfaceItem => {
+  const items = visibleCommands.map((command): GoodPaletteModalItem => {
     const shortcut = getShortcutBindingExpression(
       shortcutRegistry.resolvedBindings[command.id]?.[0],
     )
@@ -36,7 +33,7 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
     }
   })
 
-  const selectCommand = (item: CommandPaletteSurfaceItem) => {
+  const selectCommand = (item: GoodPaletteModalItem) => {
     const command = visibleCommands.find((command) => command.id === item.id)
 
     if (!command) {
@@ -49,7 +46,7 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
     }, 0)
   }
 
-  <CommandPaletteSurface
+  <GoodPaletteModal
     emptyText={t`No matching commands.`}
     {items}
     listLabel={t`Command menu`}
