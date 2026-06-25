@@ -14,6 +14,7 @@ const ZERO_SHA = "0000000000000000000000000000000000000000"
 const CHECKED_SOURCE_FILE_EXTENSIONS = ["ts", "tsrx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
 
 const FULL_CHECK_FILE_GLOBS = [
+  ".bun-version",
   ...CHECKED_SOURCE_FILE_EXTENSIONS.flatMap((extension) => [
     `src/**/*.${extension}`,
     `scripts/**/*.${extension}`,
@@ -33,9 +34,10 @@ const FULL_CHECK_FILE_PATTERNS = FULL_CHECK_FILE_GLOBS.flatMap((fileGlob) => [
 ])
 
 const BUN_RUNTIME_CHECK_FILE_PATTERNS = [
+  ".bun-version",
   "app/electrobun.config.ts",
-  "pnpm-workspace.yaml",
   "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
 ]
 
 const IGNORED_PUBLIC_DOCS_DIRS = ["core/schema/docs", "core/ui-primitives/docs", "workforce/docs"]

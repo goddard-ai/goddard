@@ -28,7 +28,11 @@ jobs:
         id: bun-version
         shell: bash
         run: |
-          version="$(node -e "const v = require('./package.json').catalog?.bun; if (!v) throw new Error('package.json#catalog.bun is required'); process.stdout.write(v)")"
+          version="$(tr -d '[:space:]' < .bun-version)"
+          if [ -z "$version" ]; then
+            echo ".bun-version is required" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
@@ -59,6 +63,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check Bun runtime pin
+        run: pnpm run check:bun-runtime
+
       - name: Typecheck
         if: github.event_name == 'pull_request'
         run: |
@@ -84,7 +91,11 @@ jobs:
         id: bun-version
         shell: bash
         run: |
-          version="$(node -e "const v = require('./package.json').catalog?.bun; if (!v) throw new Error('package.json#catalog.bun is required'); process.stdout.write(v)")"
+          version="$(tr -d '[:space:]' < .bun-version)"
+          if [ -z "$version" ]; then
+            echo ".bun-version is required" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
@@ -143,7 +154,11 @@ jobs:
         id: bun-version
         shell: bash
         run: |
-          version="$(node -e "const v = require('./package.json').catalog?.bun; if (!v) throw new Error('package.json#catalog.bun is required'); process.stdout.write(v)")"
+          version="$(tr -d '[:space:]' < .bun-version)"
+          if [ -z "$version" ]; then
+            echo ".bun-version is required" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
