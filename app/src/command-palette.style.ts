@@ -12,4 +12,10 @@ export default {
     fontSize: "0.7rem",
     lineHeight: "18px",
   }),
+  itemMeta: css({
+    minWidth: "0",
+    color: "muted",
+    fontSize: "0.75rem",
+    fontWeight: "500",
+  }),
 }
