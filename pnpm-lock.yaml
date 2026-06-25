@@ -357,8 +357,8 @@ importers:
         specifier: npm:@preact/compat
         version: '@preact/compat@18.3.2(preact@11.0.0-beta.1)'
       sculpted:
-        specifier: ^0.3.8
-        version: 0.3.8(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3)
+        specifier: ^0.3.12
+        version: 0.3.12(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3)
       state-launcher:
         specifier: 0.2.2
         version: 0.2.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@typescript/native-preview@7.0.0-dev.20260417.1)(preact@11.0.0-beta.1)(typescript@6.0.3)(unplugin-unused@0.5.7)
@@ -6423,8 +6423,8 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  sculpted@0.3.8:
-    resolution: {integrity: sha512-6rbimYJEfnJPEH9lOfhv1wsOH1sGz80B+pNV1k7Jaz2YXDP9Ny5HM85YIXsUG1QjbgxAD85Dk01bmamI+6dWzg==}
+  sculpted@0.3.12:
+    resolution: {integrity: sha512-45JyGSUof0Nju7QKg/54jRWFt5Nhl1X3LWr5fTuARIyO/xzJ8BcieGE/VhwcavXjWhhGBMnIBTBF/WxX2PD8TA==}
     peerDependencies:
       '@tsrx/core': '>=0.1.0'
       typescript: '>=5.0.0'
@@ -12301,7 +12301,7 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  sculpted@0.3.8(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3):
+  sculpted@0.3.12(@tsrx/core@0.1.29(@typescript-eslint/types@8.60.0))(typescript@6.0.3):
     dependencies:
       '@pandacss/node': 1.11.1(typescript@6.0.3)
       chromonym: 3.5.0
