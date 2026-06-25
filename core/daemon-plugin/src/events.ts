@@ -7,6 +7,8 @@ import type {
   DaemonEventSubscriptionEvent,
   EventBus,
   EventDefinition,
+  EventDefinitions,
+  EventEnvelopeUnion,
   EventLogMetadata,
 } from "./contracts.ts"
 
@@ -23,9 +25,9 @@ export function event<TPayload>(options: EventDefinitionOptions = {}): EventDefi
 }
 
 /** Creates the in-process event bus shared by one daemon plugin composition. */
-export function createDaemonEventBus(
-  definitions: Record<string, EventDefinition<unknown>> = {},
-): EventBus<Record<string, EventDefinition<unknown>>> {
+export function createDaemonEventBus<
+  TDefinitions extends EventDefinitions = Record<string, EventDefinition<unknown>>,
+>(definitions: TDefinitions = {} as TDefinitions): EventBus<TDefinitions> {
   const cache = new Map<string, Set<Listener>>()
   const observers = new Set<Observer>()
   const subscriptionObservers = new Set<SubscriptionObserver>()
@@ -33,11 +35,11 @@ export function createDaemonEventBus(
   return {
     on(eventName, listener) {
       const listeners = cache.get(eventName) ?? new Set<Listener>()
-      listeners.add(listener)
+      listeners.add(listener as Listener)
       cache.set(eventName, listeners)
 
       return () => {
-        listeners.delete(listener)
+        listeners.delete(listener as Listener)
         if (listeners.size === 0) {
           cache.delete(eventName)
         }
@@ -58,7 +60,7 @@ export function createDaemonEventBus(
       }
     },
     stream(filter, signal) {
-      const queue: DaemonEventEnvelope[] = []
+      const queue: Array<EventEnvelopeUnion<TDefinitions>> = []
       let wake: (() => void) | undefined
       let started = false
       let closed = false
@@ -69,7 +71,7 @@ export function createDaemonEventBus(
         if (!matchesDaemonEventFilter(event, filter)) {
           return
         }
-        queue.push(event)
+        queue.push(event as EventEnvelopeUnion<TDefinitions>)
         wake?.()
       }
       const abort = () => {

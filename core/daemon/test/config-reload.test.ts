@@ -391,7 +391,7 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
     port: 0,
   })
   const daemonClient = createTestBackendClient()
-  const daemon = await SetupContext.run({ runtime, configManager }, () =>
+  const daemon = await SetupContext.run({ runtimeConfig: runtime, configManager }, () =>
     startDaemonServer(daemonClient, {
       port: runtime.port,
       agentBinDir: runtime.agentBinDir,

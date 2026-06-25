@@ -141,7 +141,7 @@ async function runConfiguredDaemon({
       )
     }
 
-    const daemonEvents: DaemonRuntimeEventBus =
+    const daemonEvents: Pick<DaemonRuntimeEventBus, "emit"> =
       ipcServer?.events ?? (createDaemonEventBus(daemonRuntimeEvents) as DaemonRuntimeEventBus)
 
     emitConfigReloadFailed = (event) => daemonEvents.emit("config.reload.failed", event)
