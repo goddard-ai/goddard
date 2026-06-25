@@ -563,25 +563,23 @@ test("default keymap dispatches workbench back and forward navigation", async ()
     workbenchTabSet.activateMainTab("sessions")
 
     dispatchKeydown(runtimeDocument, {
-      key: "ArrowLeft",
-      code: "ArrowLeft",
-      altKey: true,
+      key: "[",
+      code: "BracketLeft",
       ctrlKey: true,
     })
     dispatchKeydown(runtimeDocument, {
-      key: "ArrowRight",
-      code: "ArrowRight",
-      altKey: true,
+      key: "]",
+      code: "BracketRight",
       ctrlKey: true,
     })
 
     expect(backMatches).toHaveLength(1)
     expect(backMatches[0]).toMatchObject({
-      combo: "Ctrl+Alt+ArrowLeft",
+      combo: "Ctrl+[",
     })
     expect(forwardMatches).toHaveLength(1)
     expect(forwardMatches[0]).toMatchObject({
-      combo: "Ctrl+Alt+ArrowRight",
+      combo: "Ctrl+]",
     })
   } finally {
     render(null, container)

@@ -80,8 +80,8 @@ test("resolveShortcutBindings applies unbind and replacement overrides over the 
     }),
   ).toEqual({
     [closeActiveTab]: ["Mod+w"],
-    [navigateBack]: ["Mod+Alt+ArrowLeft"],
-    [navigateForward]: ["Mod+Alt+ArrowRight"],
+    [navigateBack]: ["Mod+["],
+    [navigateForward]: ["Mod+]"],
     [openCommandPalette]: ["Mod+p"],
     [newSession]: ["Mod+Shift+n"],
     [openSwitchProject]: ["Mod+o"],
@@ -123,8 +123,8 @@ test("resolveShortcutBindings allows overrides for known commands that ship with
     }),
   ).toMatchObject({
     [closeActiveTab]: ["Mod+w"],
-    [navigateBack]: ["Mod+Alt+ArrowLeft"],
-    [navigateForward]: ["Mod+Alt+ArrowRight"],
+    [navigateBack]: ["Mod+["],
+    [navigateForward]: ["Mod+]"],
     [openInbox]: ["Alt+Digit1"],
     [openNextUnreadInboxItem]: ["Alt+Shift+n"],
     [openKeyboardShortcuts]: ["Mod+/"],
