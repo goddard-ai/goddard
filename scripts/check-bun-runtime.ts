@@ -1,17 +1,24 @@
 #!/usr/bin/env bun
 /*
- * Verifies that the workspace Bun runtime and Electrobun build configuration
- * both use the Bun version pinned in the root pnpm workspace catalog.
+ * Verifies that the installed workspace Bun runtime matches the monorepo pin.
  */
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+type WorkspaceConfig = {
+  catalog?: {
+    bun?: string
+  }
+}
+
 const workspaceDir = dirname(dirname(fileURLToPath(import.meta.url)))
-const expectedVersion = readWorkspaceCatalogBunVersion(
+const bunVersion = readFileSync(join(workspaceDir, ".bun-version"), "utf8").trim()
+const workspaceConfig = Bun.YAML.parse(
   readFileSync(join(workspaceDir, "pnpm-workspace.yaml"), "utf8"),
-)
+) as WorkspaceConfig
+const catalogVersion = workspaceConfig.catalog?.bun
 const runtimeBunPath = join(
   workspaceDir,
   "node_modules",
@@ -19,8 +26,12 @@ const runtimeBunPath = join(
   process.platform === "win32" ? "bun.exe" : "bun",
 )
 
-if (!expectedVersion) {
-  fail("pnpm-workspace.yaml#catalog.bun must pin the daemon runtime Bun version")
+if (!bunVersion) {
+  fail(".bun-version must pin the monorepo Bun version")
+}
+
+if (!catalogVersion) {
+  fail("pnpm-workspace.yaml#catalog.bun must pin the workspace Bun package version")
 }
 
 if (!existsSync(runtimeBunPath)) {
@@ -28,16 +39,9 @@ if (!existsSync(runtimeBunPath)) {
 }
 
 const installedVersion = run(runtimeBunPath, ["--version"]).trim()
-const electrobunVersion = run(runtimeBunPath, [
-  "--print",
-  "import config from './app/electrobun.config.ts'; console.log(config.build.bunVersion)",
-])
-  .trim()
-  .split(/\r?\n/)
-  .find((line) => line && line !== "undefined")
 
-assertVersion("workspace Bun runtime", installedVersion, expectedVersion)
-assertVersion("Electrobun build.bunVersion", electrobunVersion, expectedVersion)
+assertVersion("pnpm-workspace.yaml catalog.bun", catalogVersion, bunVersion)
+assertVersion("workspace Bun runtime", installedVersion, bunVersion)
 
 function run(command: string, args: string[]) {
   const result = spawnSync(command, args, {
@@ -63,15 +67,6 @@ function assertVersion(label: string, actual: string | undefined, expected: stri
   }
 
   fail(`${label} is ${actual ?? "unset"}, expected ${expected}`)
-}
-
-function readWorkspaceCatalogBunVersion(workspaceYaml: string) {
-  const catalogSection = /(?:^|\n)catalog:\n((?:^[ \t].*\n?)*)/m.exec(workspaceYaml)?.[1]
-  if (!catalogSection) {
-    return undefined
-  }
-
-  return /^\s{2}bun:\s*(\S+)\s*$/m.exec(catalogSection)?.[1]
 }
 
 function fail(message: string): never {

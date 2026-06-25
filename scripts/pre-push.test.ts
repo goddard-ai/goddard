@@ -71,12 +71,14 @@ describe("getTurboAffectedFilterRange", () => {
 describe("changed file checks", () => {
   test("detects files that require full repo checks", () => {
     expect(shouldRunRepoCheck(["features/session/src/sdk.ts"])).toBe(true)
+    expect(shouldRunRepoCheck([".bun-version"])).toBe(true)
     expect(shouldRunRepoCheck(["README.md"])).toBe(false)
   })
 
   test("detects files that require Bun runtime checks", () => {
-    expect(shouldRunBunRuntimeCheck(["pnpm-workspace.yaml"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck([".bun-version"])).toBe(true)
     expect(shouldRunBunRuntimeCheck(["pnpm-lock.yaml"])).toBe(true)
+    expect(shouldRunBunRuntimeCheck(["pnpm-workspace.yaml"])).toBe(true)
     expect(shouldRunBunRuntimeCheck(["app/electrobun.config.ts"])).toBe(true)
     expect(shouldRunBunRuntimeCheck(["package.json"])).toBe(false)
     expect(shouldRunBunRuntimeCheck(["app/src/bun/index.ts"])).toBe(false)
