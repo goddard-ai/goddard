@@ -5,7 +5,6 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
-import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
 import { afterEach, expect, test } from "bun:test"
 
 import { resolveRuntimeConfig } from "../src/config.ts"
@@ -135,20 +134,16 @@ test(
           abortController.abort()
           await eventsDone.catch(() => {})
         }
-
         backend.sendEvent({
-          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
-          payload: {
-            type: "comment",
-            provider: "github",
-            owner: "other",
-            repo: "repo",
-            prNumber: 123,
-            author: "alice",
-            body: "handle this too",
-            reactionAdded: "eyes",
-            createdAt: new Date().toISOString(),
-          },
+          type: "comment",
+          provider: "github",
+          owner: "other",
+          repo: "repo",
+          prNumber: 123,
+          author: "alice",
+          body: "handle this too",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
         })
 
         await waitFor(
@@ -170,18 +165,15 @@ test(
         )
 
         backend.sendEvent({
-          name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
-          payload: {
-            type: "comment",
-            provider: "github",
-            owner: "test",
-            repo: "repo",
-            prNumber: 123,
-            author: "alice",
-            body: "fix it",
-            reactionAdded: "eyes",
-            createdAt: new Date().toISOString(),
-          },
+          type: "comment",
+          provider: "github",
+          owner: "test",
+          repo: "repo",
+          prNumber: 123,
+          author: "alice",
+          body: "fix it",
+          reactionAdded: "eyes",
+          createdAt: new Date().toISOString(),
         })
 
         await waitFor(
@@ -277,6 +269,85 @@ test(
 )
 
 test(
+  "daemon run emits backend stream started when the subscription opens",
+  async () => {
+    await useTempHome()
+    const streamResponse = createDeferred<void>()
+    const backend = await startBackendHarness({
+      beforeStreamResponse: () => streamResponse.promise,
+    })
+    cleanup.push(() => backend.close())
+    db.metadata.set("authToken", "tok")
+
+    const port = await getUnusedTcpPort()
+    const startedEvents: Array<{
+      name?: string
+      payload?: {
+        daemonUrl?: string
+        port?: number
+      }
+    }> = []
+
+    const { result: exitCode } = await captureStdout(async () => {
+      const daemonPromise = runDaemon({
+        baseUrl: backend.baseUrl,
+        port,
+        agentBinDir,
+        logMode: "json",
+        store: db,
+      })
+      const stopDaemon = createDaemonStopper()
+      let unsubscribeEvents: (() => Promise<void>) | undefined
+
+      try {
+        await waitFor(async () => isDaemonHealthy(port))
+        const client = createDaemonIpcClient({
+          daemonUrl: createDaemonUrl(port),
+        })
+        const abortController = new AbortController()
+        const eventStream = await client.events.stream(
+          {
+            names: ["backend.stream.started"],
+          },
+          {
+            signal: abortController.signal,
+          },
+        )
+        const eventsDone = (async () => {
+          for await (const event of eventStream) {
+            startedEvents.push(event as (typeof startedEvents)[number])
+          }
+        })()
+        unsubscribeEvents = async () => {
+          abortController.abort()
+          await eventsDone.catch(() => {})
+        }
+
+        streamResponse.resolve()
+        await waitFor(() =>
+          startedEvents.some(
+            (event) =>
+              event.name === "backend.stream.started" &&
+              event.payload?.daemonUrl === createDaemonUrl(port) &&
+              event.payload?.port === port,
+          ),
+        )
+        await stopDaemon()
+        return await daemonPromise
+      } finally {
+        await unsubscribeEvents?.()
+        await stopDaemon()
+        await daemonPromise.catch(() => {})
+      }
+    })
+
+    expect(exitCode).toBe(0)
+    expect(backend.subscriptionCount()).toBe(1)
+  },
+  { timeout: 10000 },
+)
+
+test(
   "daemon run skips backend stream without IPC-owned backend event handlers",
   async () => {
     await useTempHome()
@@ -306,6 +377,86 @@ test(
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
     expect(db.sessions.findMany()).toHaveLength(0)
+  },
+  { timeout: 10000 },
+)
+
+test(
+  "daemon run emits backend stream degradation when subscription startup fails",
+  async () => {
+    await useTempHome()
+    const streamResponse = createDeferred<void>()
+    const backend = await startBackendHarness({
+      beforeStreamResponse: () => streamResponse.promise,
+      rejectStreamStatus: 503,
+    })
+    cleanup.push(() => backend.close())
+    db.metadata.set("authToken", "tok")
+
+    const port = await getUnusedTcpPort()
+
+    const { result: exitCode } = await captureStdout(async () => {
+      const daemonPromise = runDaemon({
+        baseUrl: backend.baseUrl,
+        port,
+        agentBinDir,
+        logMode: "json",
+        store: db,
+      })
+      const stopDaemon = createDaemonStopper()
+      let unsubscribeEvents: (() => Promise<void>) | undefined
+      const degradedEvents: Array<{
+        name?: string
+        payload?: {
+          reason?: string
+          errorMessage?: string
+        }
+      }> = []
+
+      try {
+        await waitFor(async () => isDaemonHealthy(port))
+        const client = createDaemonIpcClient({
+          daemonUrl: createDaemonUrl(port),
+        })
+        const abortController = new AbortController()
+        const eventStream = await client.events.stream(
+          {
+            names: ["backend.stream.degraded"],
+          },
+          {
+            signal: abortController.signal,
+          },
+        )
+        const eventsDone = (async () => {
+          for await (const event of eventStream) {
+            degradedEvents.push(event as (typeof degradedEvents)[number])
+          }
+        })()
+        unsubscribeEvents = async () => {
+          abortController.abort()
+          await eventsDone.catch(() => {})
+        }
+
+        streamResponse.resolve()
+        await waitFor(() =>
+          degradedEvents.some(
+            (event) =>
+              event.name === "backend.stream.degraded" &&
+              event.payload?.reason === "stream_failed" &&
+              typeof event.payload?.errorMessage === "string",
+          ),
+        )
+        await stopDaemon()
+        return await daemonPromise
+      } finally {
+        await unsubscribeEvents?.()
+        await stopDaemon()
+        await daemonPromise.catch(() => {})
+      }
+    })
+
+    expect(exitCode).toBe(0)
+    expect(backend.subscriptionCount()).toBe(0)
   },
   { timeout: 10000 },
 )
@@ -587,6 +738,7 @@ function seedPullRequest(input: { owner: string; repo: string; prNumber: number;
 async function startBackendHarness(
   options: {
     beforeStreamResponse?: () => void | Promise<void>
+    rejectStreamStatus?: number
     rejectStreamUnauthorized?: boolean
     isManaged?: (input: { owner: string; repo: string; prNumber: number }) => boolean
   } = {},
@@ -597,25 +749,39 @@ async function startBackendHarness(
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`)
 
     if (url.pathname === "/events/stream") {
-      if (options.rejectStreamUnauthorized || !request.headers.authorization) {
-        response.writeHead(401, { "content-type": "text/plain" })
-        response.end("unauthorized")
-        return
-      }
-
       request.resume()
       request.on("end", () => {
-        subscriptionCount += 1
-        response.writeHead(200, {
-          "content-type": "application/x-ndjson; charset=utf-8",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-        })
-        response.flushHeaders()
-        streams.add(response)
-        response.on("close", () => {
-          streams.delete(response)
-        })
+        void Promise.resolve()
+          .then(() => options.beforeStreamResponse?.())
+          .then(() => {
+            if (options.rejectStreamUnauthorized || !request.headers.authorization) {
+              response.writeHead(401, { "content-type": "text/plain" })
+              response.end("unauthorized")
+              return
+            }
+
+            if (options.rejectStreamStatus) {
+              response.writeHead(options.rejectStreamStatus, { "content-type": "text/plain" })
+              response.end("stream unavailable")
+              return
+            }
+
+            subscriptionCount += 1
+            response.writeHead(200, {
+              "content-type": "application/x-ndjson; charset=utf-8",
+              "cache-control": "no-cache",
+              connection: "keep-alive",
+            })
+            response.flushHeaders()
+            streams.add(response)
+            response.on("close", () => {
+              streams.delete(response)
+            })
+          })
+          .catch((error) => {
+            response.writeHead(500, { "content-type": "text/plain" })
+            response.end(error instanceof Error ? error.message : String(error))
+          })
       })
       return
     }

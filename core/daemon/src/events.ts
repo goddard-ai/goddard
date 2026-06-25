@@ -1,7 +1,7 @@
 import { event } from "@goddard-ai/daemon-plugin"
 
 export type BackendStreamDegradedEvent = {
-  reason: "unauthenticated"
+  reason: "stream_failed" | "unauthenticated"
   errorMessage: string
 }
 

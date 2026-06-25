@@ -162,7 +162,7 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
     const eventStreamAbort = new AbortController()
     let eventStreamTask: Promise<void> | null = null
 
-    if (enableStream) {
+    if (enableStream && activeIpcServer && activeIpcServer.backendEventHandlers.length > 0) {
       eventStreamTask = Promise.resolve()
         .then(async () => {
           const events = await client.events.stream(
@@ -173,15 +173,10 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
               signal: eventStreamAbort.signal,
             },
           )
-          logger.log(
-            "repo.subscription_started",
-            activeIpcServer
-              ? {
-                  daemonUrl: activeIpcServer.daemonUrl,
-                  port: activeIpcServer.port,
-                }
-              : {},
-          )
+          await daemonEvents.emit("backend.stream.started", {
+            daemonUrl: activeIpcServer.daemonUrl,
+            port: activeIpcServer.port,
+          })
 
           await consumeBackendEvents(
             events,
@@ -193,30 +188,29 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
               )
             },
             (error) => {
-              logger.log("repo.event_failed", toErrorProperties(error))
+              logger.log("backend.stream.event_failed", toErrorProperties(error))
             },
             eventStreamAbort.signal,
           )
         })
-        .catch((error) => {
+        .catch(async (error) => {
           if (eventStreamAbort.signal.aborted) {
             return
           }
 
           const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
           if (isBackendUnauthenticatedError(authError)) {
-            logger.log("repo.subscription_degraded", {
-              reason: "unauthenticated",
-              errorMessage: authError.message,
-            })
-            void daemonEvents.emit("backend.stream.degraded", {
+            await daemonEvents.emit("backend.stream.degraded", {
               reason: "unauthenticated",
               errorMessage: authError.message,
             })
             return
           }
 
-          logger.log("repo.event_stream_failed", toErrorProperties(error))
+          await daemonEvents.emit("backend.stream.degraded", {
+            reason: "stream_failed",
+            errorMessage: getErrorMessage(error),
+          })
         })
     }
 
