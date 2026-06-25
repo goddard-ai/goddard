@@ -30,6 +30,7 @@ export type WorkbenchTabSetState = {
   orderedTabIds: string[]
   activeTabId: string
   recency: string[]
+  recentDetailTabHistory: WorkbenchTab[]
   navigationHistory: WorkbenchNavigationLocation[]
   navigationIndex: number
 }
@@ -55,6 +56,9 @@ export const WORKBENCH_MAIN_TAB: WorkbenchMainTab = {
 
 /** Maximum number of closable workbench tabs kept open at once. */
 export const WORKBENCH_TAB_LIMIT = 20
+
+/** Maximum number of recent detail tabs retained for reopen and switcher surfaces. */
+export const WORKBENCH_RECENT_DETAIL_TAB_LIMIT = 40
 
 function isFocusableWorkbenchTab(tabSet: WorkbenchTabSetState, tabId: string) {
   return tabId === WORKBENCH_MAIN_TAB.id || tabId in tabSet.tabs
@@ -123,6 +127,21 @@ function findLeastRecentClosableTabId(tabSet: WorkbenchTabSetState) {
   return null
 }
 
+function getOpenTabInputFromTab(tab: WorkbenchTab): WorkbenchOpenTabInput {
+  return {
+    kind: tab.kind,
+    persistence: tab.persistence,
+    props: tab.props,
+  } as WorkbenchOpenTabInput
+}
+
+function getRecentDetailTabHistory(currentHistory: readonly WorkbenchTab[], tab: WorkbenchTab) {
+  return [tab, ...currentHistory.filter((item) => item.id !== tab.id)].slice(
+    0,
+    WORKBENCH_RECENT_DETAIL_TAB_LIMIT,
+  )
+}
+
 /** Returns the subset of a tab snapshot that should survive app reloads. */
 export function getRestorableWorkbenchTabSetState(
   tabSet: Immutable<WorkbenchTabSetState>,
@@ -146,6 +165,11 @@ export function getRestorableWorkbenchTabSetState(
     recency: [activeTabId, ...recency.filter((tabId) => tabId !== activeTabId)].filter(
       isFocusableTabId,
     ),
+    recentDetailTabHistory: tabSet.recentDetailTabHistory
+      .map((tab) => tabs[tab.id] ?? (tab as WorkbenchTab))
+      .filter((tab) => tab.persistence !== "transient")
+      .filter((tab, index, history) => history.findIndex((item) => item.id === tab.id) === index)
+      .slice(0, WORKBENCH_RECENT_DETAIL_TAB_LIMIT),
     navigationHistory: [getInitialNavigationLocation(activeTabId, mainTabKind)],
     navigationIndex: 0,
   }
@@ -162,6 +186,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       orderedTabIds: [],
       activeTabId: WORKBENCH_MAIN_TAB.id,
       recency: [WORKBENCH_MAIN_TAB.id],
+      recentDetailTabHistory: [],
       navigationHistory: [getInitialNavigationLocation(WORKBENCH_MAIN_TAB.id, "inbox")],
       navigationIndex: 0,
     })
@@ -184,6 +209,13 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   /** Returns the active closable tab, when one is selected. */
   get activeClosableTab() {
     return this.activeTabId === WORKBENCH_MAIN_TAB.id ? null : (this.tabs[this.activeTabId] ?? null)
+  }
+
+  /** Returns recently visited detail tabs, including closed tabs that can be restored. */
+  get recentDetailTabList() {
+    return this.recentDetailTabHistory
+      .map((tab) => this.tabs[tab.id] ?? tab)
+      .filter((tab, index, history) => history.findIndex((item) => item.id === tab.id) === index)
   }
 
   /** Returns whether back navigation can reach an available workbench location. */
@@ -214,6 +246,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.tabs[tab.id] = tab
     this.orderedTabIds.push(tab.id)
     this.#focusTab(tab.id, previousActiveTabId)
+    this.#recordRecentDetailTab(tab)
     this.#recordNavigationLocation({
       kind: "detail",
       tabId: tab.id,
@@ -226,6 +259,12 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
   activateTab(tabId: string, options: { recordHistory?: boolean } = {}) {
     const previousActiveTabId = this.activeTabId
     this.#focusTab(tabId, previousActiveTabId)
+
+    const tab = this.tabs[tabId]
+
+    if (tab) {
+      this.#recordRecentDetailTab(tab)
+    }
 
     if (options.recordHistory !== false && tabId !== WORKBENCH_MAIN_TAB.id) {
       this.#recordNavigationLocation({
@@ -263,7 +302,14 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     this.#onCloseTab(tabId)
 
     if (this.activeTabId === tabId) {
-      this.activeTabId = this.recency[0] ?? WORKBENCH_MAIN_TAB.id
+      const nextActiveTabId = this.recency[0] ?? WORKBENCH_MAIN_TAB.id
+      this.#focusTab(nextActiveTabId, tabId)
+
+      const nextTab = this.tabs[nextActiveTabId]
+
+      if (nextTab) {
+        this.#recordRecentDetailTab(nextTab)
+      }
     }
   }
 
@@ -340,6 +386,23 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     return this.#navigateHistory(1)
   }
 
+  /** Opens or focuses a recent detail tab by its stable tab id. */
+  openOrFocusRecentTab(tabId: string) {
+    const tab = this.tabs[tabId] ?? this.recentDetailTabList.find((item) => item.id === tabId)
+
+    if (!tab) {
+      return null
+    }
+
+    if (this.tabs[tab.id]) {
+      this.activateTab(tab.id)
+      return this.tabs[tab.id] ?? null
+    }
+
+    this.openOrFocusTab(getOpenTabInputFromTab(tab))
+    return this.tabs[tab.id] ?? null
+  }
+
   #focusTab(tabId: string, previousActiveTabId: string) {
     this.activeTabId = tabId
     this.recency = [
@@ -347,6 +410,10 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       previousActiveTabId,
       ...this.recency.filter((id) => id !== tabId && id !== previousActiveTabId),
     ].filter((id) => isFocusableWorkbenchTab(this, id))
+  }
+
+  #recordRecentDetailTab(tab: WorkbenchTab) {
+    this.recentDetailTabHistory = getRecentDetailTabHistory(this.recentDetailTabHistory, tab)
   }
 
   #recordNavigationLocation(location: WorkbenchNavigationLocation) {

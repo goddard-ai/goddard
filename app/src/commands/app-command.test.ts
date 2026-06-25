@@ -102,6 +102,7 @@ test("app commands expose stable ids and shortcut groups", () => {
   expect(AppCommand.workbench.closeActiveTab.group).toBe("workbench")
   expect(AppCommand.workbench.navigateBack.id).toBe("workbench.navigateBack")
   expect(AppCommand.workbench.navigateForward.group).toBe("workbench")
+  expect(AppCommand.workbench.openRecentTabs.id).toBe("workbench.openRecentTabs")
 })
 
 test("keydown dispatches one typed app command event", async () => {

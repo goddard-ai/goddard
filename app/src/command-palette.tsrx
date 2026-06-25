@@ -23,10 +23,11 @@ export default function CommandPalette(props: { open: Signal<boolean> }) @{
     const shortcut = getShortcutBindingExpression(
       shortcutRegistry.resolvedBindings[command.id]?.[0],
     )
+    const Icon = command.icon
 
     return {
       id: command.id,
-      icon: command.icon,
+      icon: Icon ? <Icon aria-hidden={true} size={16} strokeWidth={2} /> : null,
       keywords: command.keywords,
       label: command.label,
       suffix: shortcut

@@ -78,6 +78,52 @@ test("WorkbenchTabSet closes a tab only when it is clean", () => {
   expect(tabSet.tabs["session:session-2"]).toBeUndefined()
 })
 
+test("WorkbenchTabSet tracks recent detail tabs across open and closed tabs", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  openSessionTabs(tabSet, 3)
+  tabSet.activateTab("session:session-1")
+  tabSet.closeTab("session:session-1")
+
+  expect(tabSet.recentDetailTabList.map((tab) => tab.id)).toEqual([
+    "session:session-3",
+    "session:session-1",
+    "session:session-2",
+  ])
+  expect(tabSet.recentDetailTabList.find((tab) => tab.id === "session:session-1")).toMatchObject({
+    kind: "sessionChat",
+    props: {
+      sessionId: "session-1",
+    },
+  })
+})
+
+test("WorkbenchTabSet reopens closed recent detail tabs", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-1",
+    },
+  } as any)
+  tabSet.closeTab("session:session-1")
+
+  expect(tabSet.tabs["session:session-1"]).toBeUndefined()
+
+  expect(tabSet.openOrFocusRecentTab("session:session-1")).toMatchObject({
+    id: "session:session-1",
+    kind: "sessionChat",
+  })
+  expect(tabSet.activeTabId).toBe("session:session-1")
+  expect(tabSet.tabs["session:session-1"]).toMatchObject({
+    props: {
+      sessionId: "session-1",
+    },
+  })
+})
+
 test("WorkbenchTabSet can refocus the main tab after closing the active tab", () => {
   const tabSet = new WorkbenchTabSet()
 
@@ -258,4 +304,33 @@ test("getRestorableWorkbenchTabSetState removes transient tabs from reload snaps
       },
     },
   })
+})
+
+test("getRestorableWorkbenchTabSetState preserves closed recent detail tabs", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-1",
+    },
+  } as any)
+  tabSet.openOrFocusTab({
+    kind: "sessionChat",
+    persistence: "transient",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "session-2",
+    },
+  } as any)
+  tabSet.closeTab("session:session-1")
+  tabSet.closeTab("session:session-2")
+
+  expect(getRestorableWorkbenchTabSetState(tabSet).recentDetailTabHistory).toMatchObject([
+    {
+      id: "session:session-1",
+      persistence: "restore",
+    },
+  ])
 })

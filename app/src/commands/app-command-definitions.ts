@@ -12,6 +12,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  History,
   Inbox,
   Keyboard,
   Lightbulb,
@@ -53,6 +54,12 @@ export const AppCommand = defineAppCommands({
         },
         icon: ChevronRight,
         when: "workbench.canNavigateForward",
+      },
+      openRecentTabs: {
+        get label() {
+          return t`Open Recent Tabs`
+        },
+        icon: History,
       },
     },
   },

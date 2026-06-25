@@ -9,13 +9,7 @@ import styles from "./command-palette.style.ts"
 
 export type CommandPaletteSurfaceItem = {
   id: string;
-  icon?: preact.FunctionComponent<{
-    className?: string;
-    style?: preact.CSSProperties;
-    size?: number;
-    strokeWidth?: number;
-    "aria-hidden"?: boolean;
-  }>;
+  icon?: preact.ComponentChildren;
   keywords?: readonly string[];
   label: string;
   suffix?: preact.ComponentChildren;
@@ -124,7 +118,6 @@ export function CommandPaletteSurface(props: {
         } @else {
           @for (const item of visibleItems; index index) {
             const itemId = `${listboxId}-${item.id}`
-            const Icon = item.icon
 
             <div
               id={itemId}
@@ -134,7 +127,7 @@ export function CommandPaletteSurface(props: {
               role="option"
               aria-selected="false"
               style={{
-                gridTemplateColumns: Icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
+                gridTemplateColumns: item.icon ? "16px minmax(0, 1fr) auto" : "minmax(0, 1fr) auto",
               }}
               onMouseDown={(event) => {
                 event.preventDefault()
@@ -143,10 +136,8 @@ export function CommandPaletteSurface(props: {
                 props.onSelect(item)
               }}
             >
-              @if (Icon) {
-                <span class={styles.itemIcon}>
-                  <Icon aria-hidden={true} size={16} strokeWidth={2} />
-                </span>
+              @if (item.icon) {
+                <span class={styles.itemIcon}>{item.icon}</span>
               }
 
               <span class={styles.itemLabel}>{item.label}</span>
