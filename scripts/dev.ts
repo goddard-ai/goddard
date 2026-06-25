@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url"
 import { supervise } from "procband"
 import { concat } from "radashi"
 
+import { startElectrobun } from "../app/scripts/electrobun.ts"
+import { startViteDevServer } from "../app/scripts/vite.ts"
 import { createLocalHttpUrl, getUnusedTcpPort } from "./dev-ports.ts"
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url))
@@ -45,9 +47,14 @@ async function main() {
 
   process.chdir(rootDir)
 
+  const viteReady = startViteDevServer()
+  // Vite starts in parallel, but its readiness failure is reported before Electrobun launches.
+  void viteReady.catch(() => {})
+
   await startBackend()
   await startDaemon()
-  await import("../app/scripts/dev.ts")
+  await viteReady
+  await startElectrobun()
 }
 
 await main()
