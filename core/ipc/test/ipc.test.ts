@@ -388,7 +388,25 @@ describe("core/ipc", () => {
 
     const response = await requestRaw(address, { method: "POST", path: "/echo" })
     expect(response.statusCode).toBe(400)
-    expect(JSON.parse(response.body)).toMatchObject({ message: "Invalid request body" })
+    const payload = JSON.parse(response.body) as { message: string }
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("Unexpected end")
+  })
+
+  test("describes raw request body schema failures", async () => {
+    const { address } = await createFixture()
+
+    const response = await requestRaw(address, {
+      method: "POST",
+      path: "/echo",
+      body: { text: 123 },
+    })
+    expect(response.statusCode).toBe(400)
+    const payload = JSON.parse(response.body) as { message: string }
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("text")
+    expect(payload.message).toContain("expected")
+    expect(payload.message).toContain("string")
   })
 
   test("returns not found for unknown routes", async () => {

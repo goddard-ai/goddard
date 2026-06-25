@@ -53,7 +53,7 @@ export function createBackendRouter(dependencies: RouterDependencies = {}) {
   const handleUserEvents = dependencies.handleUserEvents ?? defaultHandleUserEvents
   const publishEvent = createBackendEventPublisher(broadcastEvent)
 
-  return createRouter<Env>({ debug: false, plugins: [backendNdjsonRouterPlugin] }).use(
+  return createRouter<Env>({ debug: true, plugins: [backendNdjsonRouterPlugin] }).use(
     backendRoutes,
     {
       auth: {

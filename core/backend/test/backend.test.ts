@@ -159,7 +159,34 @@ test("invalid JSON body returns 400", async () => {
 
     expect(response.status).toBe(400)
     const payload = (await response.json()) as { message: string }
-    expect(payload.message).toBe("Invalid request body")
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("JSON Parse error")
+  } finally {
+    await server.close()
+  }
+})
+
+test("invalid request body schema returns validation details", async () => {
+  const server = await startBackendServer(new InMemoryBackendControlPlane(), {
+    port: 0,
+  })
+  const baseUrl = `http://127.0.0.1:${server.port}`
+
+  try {
+    const response = await fetch(`${baseUrl}/auth/device/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ provider: 123 }),
+    })
+
+    expect(response.status).toBe(400)
+    const payload = (await response.json()) as { message: string }
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("provider")
+    expect(payload.message).toContain("expected")
+    expect(payload.message).toContain("string")
   } finally {
     await server.close()
   }

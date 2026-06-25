@@ -85,6 +85,7 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
     : null
   const handlers = wrapHandlers(routes, config.handlers, config)
   const router = createRouter({
+    debug: true,
     plugins: [ndjson.routerPlugin],
   }).use(routes, handlers as RouteRequestHandlerMap<TRoutes, any>)
 
