@@ -7,20 +7,19 @@ import type {
   DaemonEventSubscriptionEvent,
   EventBus,
   EventDefinition,
+  EventDefinitionOptions,
   EventDefinitions,
-  EventLogMetadata,
 } from "./contracts.ts"
 
 type Listener<TPayload = unknown> = (payload: TPayload) => void | Promise<void>
 type Observer = (event: DaemonEventEnvelope) => void | Promise<void>
 type SubscriptionObserver = (event: DaemonEventSubscriptionEvent) => void | Promise<void>
 
-export type EventDefinitionOptions = EventLogMetadata
 export type { DaemonEventFilter, DaemonEventPropertyFilter }
 
 /** Declares one daemon plugin event payload type without adding runtime behavior. */
-export function event<TPayload>(options: EventDefinitionOptions = {}): EventDefinition<TPayload> {
-  return Object.keys(options).length > 0 ? { log: options } : {}
+export function event<TPayload>(options?: EventDefinitionOptions): EventDefinition<TPayload> {
+  return { options }
 }
 
 /** Creates the in-process event bus shared by one daemon plugin composition. */
@@ -31,7 +30,7 @@ export function createEventBus<
   const observers = new Set<Observer>()
   const subscriptionObservers = new Set<SubscriptionObserver>()
 
-  const bus: EventBus<Record<string, EventDefinition<unknown>>> = {
+  const bus: EventBus = {
     on(eventName, listener) {
       const listeners = cache.get(eventName) ?? new Set<Listener>()
       listeners.add(listener)
@@ -45,17 +44,17 @@ export function createEventBus<
       }
     },
     observe(listener) {
-      observers.add(listener as Observer)
+      observers.add(listener)
 
       return () => {
-        observers.delete(listener as Observer)
+        observers.delete(listener)
       }
     },
     onSubscription(listener) {
-      subscriptionObservers.add(listener as SubscriptionObserver)
+      subscriptionObservers.add(listener)
 
       return () => {
-        subscriptionObservers.delete(listener as SubscriptionObserver)
+        subscriptionObservers.delete(listener)
       }
     },
     stream(filter, signal) {
@@ -63,7 +62,8 @@ export function createEventBus<
       let wake: (() => void) | undefined
       let started = false
       let closed = false
-      const listener = (event: DaemonEventEnvelope) => {
+
+      const observer = (event: DaemonEventEnvelope) => {
         if (closed) {
           return
         }
@@ -73,6 +73,7 @@ export function createEventBus<
         queue.push(event)
         wake?.()
       }
+
       const abort = () => {
         void close()
       }
@@ -86,7 +87,7 @@ export function createEventBus<
           state: "started",
           filter,
         })
-        observers.add(listener)
+        observers.add(observer)
         signal.addEventListener("abort", abort)
       }
 
@@ -97,7 +98,7 @@ export function createEventBus<
         closed = true
         signal.removeEventListener("abort", abort)
         if (started) {
-          observers.delete(listener)
+          observers.delete(observer)
         }
         wake?.()
         wake = undefined
@@ -147,9 +148,10 @@ export function createEventBus<
         at: new Date().toISOString(),
         name: eventName,
         payload,
-        log: definitions[eventName]?.log,
+        options: definitions[eventName]?.options,
       }
 
+      // oxlint-disable-next-line unicorn/no-useless-spread
       for (const observer of [...observers]) {
         await observer(envelope)
       }
@@ -165,13 +167,14 @@ export function createEventBus<
     },
   }
 
-  return bus as unknown as EventBus<TDefinitions>
+  return bus as EventBus<any>
 }
 
 async function notifySubscriptionObservers(
   observers: Set<SubscriptionObserver>,
   event: DaemonEventSubscriptionEvent,
 ) {
+  // oxlint-disable-next-line unicorn/no-useless-spread
   for (const observer of [...observers]) {
     await observer(event)
   }

@@ -88,18 +88,18 @@ export type BrowserAccessWebviewTokenCreateResponse = {
   expiresAt: string
 }
 
-export const DaemonEventLogMetadata = z.object({
+export const DaemonEventOptions = z.object({
   debug: z.string().optional(),
 })
 
-export type DaemonEventLogMetadata = z.infer<typeof DaemonEventLogMetadata>
+export type DaemonEventOptions = z.infer<typeof DaemonEventOptions>
 
 export const DaemonEventEnvelope = z.object({
   id: z.string(),
   at: z.string(),
   name: z.string(),
   payload: z.unknown(),
-  log: DaemonEventLogMetadata.optional(),
+  options: DaemonEventOptions.optional(),
 })
 
 export type DaemonEventEnvelope = z.infer<typeof DaemonEventEnvelope>

@@ -8,7 +8,6 @@ import {
   type DaemonConfigProvider,
   type DaemonSetupSubstrate,
   type EventBus,
-  type EventDefinition,
   type DaemonEventEnvelope as PluginDaemonEventEnvelope,
 } from "@goddard-ai/daemon-plugin"
 import { composeIpcRoutes } from "@goddard-ai/ipc"
@@ -54,7 +53,6 @@ import {
 import type { DaemonServer } from "./types.ts"
 
 type ComposedDaemonPlugin = ReturnType<typeof getDaemonPluginComposition>["plugins"][number]
-type ComposedDaemonEvents = EventBus<Record<string, EventDefinition<unknown>>>
 
 export async function startDaemonServer(
   client: BackendClient,
@@ -89,7 +87,7 @@ export async function startDaemonServer(
   )
   const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
   const composition = getDaemonPluginComposition()
-  const events = createEventBus({
+  const events = createEventBus<any>({
     ...daemonRuntimeEvents,
     ...composition.events,
   })
@@ -300,7 +298,7 @@ async function setupDaemonPlugins(
   backendClient: BackendClient,
   store: ComposedDaemonStore,
   plugins: readonly ComposedDaemonPlugin[],
-  events: ComposedDaemonEvents,
+  events: EventBus,
 ) {
   const extensions: Record<string, unknown> = {}
   const extensionsByPluginName = new Map<string, Record<string, unknown>>()
@@ -354,12 +352,12 @@ async function setupDaemonPlugins(
   }
 }
 
-function observeDaemonEventsForLogging(events: ComposedDaemonEvents, logger: DaemonLogger) {
+function observeDaemonEventsForLogging(events: EventBus, logger: DaemonLogger) {
   const debugLoggers = new Map<string, DaemonDebugLogger>()
 
   events.observe((event) => {
     const fields = createDaemonEventLogFields(event)
-    const debugScope = event.log?.debug
+    const debugScope = event.options?.debug
     if (debugScope) {
       const debugLogger =
         debugLoggers.get(debugScope) ?? createAndRememberDebugLogger(debugLoggers, debugScope)

@@ -3,19 +3,19 @@ import { composeIpcRoutes, type HttpRouteTree, type RouzerClient } from "@goddar
 
 type SdkNamespaces = Record<string, Record<string, unknown>>
 
-export type EventLogMetadata = {
+export type EventDefinitionOptions = {
   readonly debug?: string
 }
 export type EventDefinition<TPayload = unknown> = {
   readonly payload?: TPayload
-  readonly log?: EventLogMetadata
+  readonly options?: EventDefinitionOptions
 }
 export type EventDefinitions = Record<string, EventDefinition<any>>
 type HttpNode = HttpRouteTree[string]
 
 /** Declares one daemon event payload type without adding runtime behavior. */
-export function event<TPayload>(options: EventLogMetadata = {}): EventDefinition<TPayload> {
-  return Object.keys(options).length > 0 ? { log: options } : {}
+export function event<TPayload>(options: EventDefinitionOptions = {}): EventDefinition<TPayload> {
+  return Object.keys(options).length > 0 ? { options: options } : {}
 }
 
 type RuntimeSdkPlugin = {

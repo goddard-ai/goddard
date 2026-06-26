@@ -10,8 +10,8 @@ import type { DaemonEventsStreamRequest } from "@goddard-ai/schema/daemon-ipc"
 import {
   composeSdkPlugins,
   type EventDefinition,
+  type EventDefinitionOptions,
   type EventDefinitions,
-  type EventLogMetadata,
   type InferSdkEvents,
   type InferSdkNamespaces,
 } from "@goddard-ai/sdk-plugin"
@@ -53,7 +53,7 @@ type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
     readonly at: string
     readonly name: TName
     readonly payload: InferEventPayload<TEvents[TName]>
-    readonly log?: EventLogMetadata
+    readonly log?: EventDefinitionOptions
   }
 }[keyof TEvents & string]
 type EventStreamRequest<TEvents extends EventDefinitions> = Omit<

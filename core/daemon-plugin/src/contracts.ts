@@ -28,14 +28,14 @@ export type ConfigDefinition<TRawConfig = unknown, TResolvedConfig = TRawConfig>
 export type ConfigDefinitions = Record<string, ConfigDefinition<any, any>>
 
 /** Optional routing metadata for event-derived daemon logs. */
-export type EventLogMetadata = {
+export type EventDefinitionOptions = {
   readonly debug?: string
 }
 
 /** Type-only declaration for one in-process daemon plugin event payload. */
 export type EventDefinition<TPayload = unknown> = {
   readonly payload?: TPayload
-  readonly log?: EventLogMetadata
+  readonly options?: EventDefinitionOptions
 }
 
 /** One or more event payloads owned by a daemon plugin. */
@@ -57,7 +57,7 @@ export type DaemonEventEnvelope<TName extends string = string, TPayload = unknow
   readonly at: string
   readonly name: TName
   readonly payload: TPayload
-  readonly log?: EventLogMetadata
+  readonly options?: EventDefinitionOptions
 }
 
 export type EventEnvelopeUnion<TEvents extends EventDefinitions> = {
@@ -74,7 +74,7 @@ export type DaemonEventSubscriptionEvent = {
 }
 
 export type EventBus<
-  TEmitEvents extends EventDefinitions,
+  TEmitEvents extends EventDefinitions = Record<string, EventDefinition>,
   TListenEvents extends EventDefinitions = TEmitEvents,
 > = {
   readonly emit: <TName extends keyof TEmitEvents & string>(

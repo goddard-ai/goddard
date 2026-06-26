@@ -5,7 +5,7 @@ export * from "./sdk.ts"
 export { AgentSession } from "./daemon/session/client-session.ts"
 export type {
   DaemonEventEnvelope,
-  DaemonEventLogMetadata,
+  DaemonEventOptions,
   DaemonEventPropertyFilter,
   DaemonEventsStreamRequest,
 } from "@goddard-ai/schema/daemon-ipc"
