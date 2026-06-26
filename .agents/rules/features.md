@@ -24,6 +24,10 @@ Read this ruleset when adding or changing feature packages, feature-owned schema
 - A feature package may depend on another feature only through an explicit public entrypoint and only when that dependency is part of the feature contract. Avoid incidental imports across feature internals.
 - Do not introduce package-level cycles between feature packages.
 - Feature-owned events should use the owning product domain in their names. Do not place workflow events in substrate namespaces such as `daemon.*` or `backend.*` unless the event is actually owned by that substrate.
+- Use feature-owned daemon events for ephemeral facts that another daemon plugin, the app, or any SDK consumer could reasonably react to. Prefer an event when the occurrence is not otherwise clear from the initiating IPC response or from a consumed plugin `provides` method return value.
+- Do not add a daemon event only to mirror a direct method result that the caller already receives. Use debug logs for source-local execution details and normal logs for warnings, errors, or degraded behavior.
+- Declare feature-owned daemon events in `features/<name>/src/events.ts`, register them on the daemon plugin, register them on the SDK plugin when SDK consumers can observe them, and export `./events` from the package.
+- Back routine feature lifecycle events with `event(..., { debug: "<scope>" })` when they should be observable without entering the normal log timeline.
 - Backend event transport belongs to backend/daemon substrate; behavior derived from backend events belongs to feature-owned handlers.
 - Provider integration packages should normalize provider facts and provenance. Product workflow behavior belongs to the product feature that owns the workflow.
 - Shared daemon IPC contracts belong in `src/daemon-ipc.ts` and use `defineIpcSchema()` from `@goddard-ai/ipc`; public composition roots combine fragments with `composeIpcSchemas()`.
