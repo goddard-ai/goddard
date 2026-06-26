@@ -88,7 +88,8 @@ function createReviewSessionManager(
 
   function emitReviewSessionWarnings(id: SessionId, reason: string, result: ReviewSyncResult) {
     for (const warning of createReviewSessionWarnings(result)) {
-      session.emitDiagnostic(id, "review_session.warning", {
+      debug("warning", {
+        sessionId: id,
         reason,
         warning,
         acceptedPatchPath: result.acceptedPatchPath,
@@ -99,7 +100,8 @@ function createReviewSessionManager(
 
   function emitReviewSessionResult(id: SessionId, reason: string, result: ReviewSyncResult) {
     if (result.status === "error") {
-      session.emitDiagnostic(id, "review_session.warning", {
+      debug("warning", {
+        sessionId: id,
         reason,
         errorMessage: result.message,
       })
@@ -135,7 +137,8 @@ function createReviewSessionManager(
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
     const state = await readRequiredReviewSessionState(worktree)
-    session.emitDiagnostic(id, "review_session.completed", {
+    debug("completed", {
+      sessionId: id,
       reason: "manual",
       warningCount: createReviewSessionWarnings(result).length,
       lastSync: state.lastSync,
@@ -170,14 +173,15 @@ function createReviewSessionManager(
         if (abortController.signal.aborted) {
           return
         }
-        session.emitDiagnostic(id, "review_session.warning", {
+        debug("warning", {
+          sessionId: id,
           reason: "watch",
           errorMessage: getErrorMessage(error),
         })
       })
 
     runtimes.set(id, { abortController, running })
-    debug("review_session.watcher_started", {
+    debug("watcher_started", {
       sessionId: id,
       agentBranch: state.agentBranch,
       reviewBranch: state.reviewBranch,
@@ -200,12 +204,14 @@ function createReviewSessionManager(
     await stopReviewSession({ cwd: mounted.agentWorktree })
 
     if (previousWorktree) {
-      session.emitDiagnostic(previousWorktree.sessionId, "review_session.replaced", {
+      debug("replaced", {
+        sessionId: previousWorktree.sessionId,
         replacedBySessionId: id,
       })
     }
 
-    session.emitDiagnostic(id, "review_session.replaced", {
+    debug("replaced", {
+      sessionId: id,
       previousSessionId: previousWorktree?.sessionId ?? null,
       previousReviewSessionId: mounted.sessionId,
     })
@@ -219,7 +225,8 @@ function createReviewSessionManager(
     })
     emitReviewSessionResult(id, "mount", result)
     const state = await readRequiredReviewSessionState(worktree)
-    session.emitDiagnostic(id, "review_session.mounted", {
+    debug("mounted", {
+      sessionId: id,
       reviewSessionId: state.sessionId,
       agentBranch: state.agentBranch,
       reviewBranch: state.reviewBranch,
@@ -239,7 +246,8 @@ function createReviewSessionManager(
     }
 
     const result = await stopReviewSession({ cwd: worktree.worktreeDir })
-    session.emitDiagnostic(id, "review_session.unmounted", {
+    debug("unmounted", {
+      sessionId: id,
       reason,
       reviewSessionId: result.sessionId ?? state.sessionId,
     })
@@ -251,7 +259,8 @@ function createReviewSessionManager(
         try {
           await cleanupMountedReviewSession(worktree.sessionId, worktree, "daemon_reconciliation")
         } catch (error) {
-          session.emitDiagnostic(worktree.sessionId, "review_session.warning", {
+          debug("warning", {
+            sessionId: worktree.sessionId,
             reason: "daemon_reconciliation",
             errorMessage: getErrorMessage(error),
           })
@@ -276,7 +285,7 @@ function createReviewSessionManager(
 
     async run(id: SessionId) {
       const worktree = await session.requireWorktree(id)
-      debug("review_session.requested", {
+      debug("requested", {
         sessionId: id,
         reason: "manual",
       })
