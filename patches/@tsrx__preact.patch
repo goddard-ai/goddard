@@ -1,8 +1,8 @@
 diff --git a/src/index.js b/src/index.js
-index 23f9c134f7cef549ae490c2be27f493252ce01ea..c17903cd74e3f419c4374dd3af61edac744098a1 100644
+index 29f735d873fe0076766391e08d0c01c9c61521ca..fd90cb4b9afe69c59da728946728cb7be264a94a 100644
 --- a/src/index.js
 +++ b/src/index.js
-@@ -70,6 +70,7 @@ export function compile_to_volar_mappings(source, filename, options) {
+@@ -74,6 +74,7 @@ export function compile_to_volar_mappings(source, filename, options) {
  		...options,
  		collect: true,
  		loose: !!options?.loose,

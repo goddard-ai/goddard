@@ -1,4 +1,4 @@
-diff --git a/node_modules/@tsrx/core/src/transform/jsx/hook-safety.js b/src/transform/jsx/hook-safety.js
+diff --git a/src/transform/jsx/hook-safety.js b/src/transform/jsx/hook-safety.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..731a0b4ecfe0647a20b5cca93cd684b620167cbb
 --- /dev/null
@@ -876,10 +876,10 @@ index 0000000000000000000000000000000000000000..731a0b4ecfe0647a20b5cca93cd684b6
 +}
 +
 diff --git a/src/transform/jsx/index.js b/src/transform/jsx/index.js
-index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b3731755670 100644
+index 2e84b105560413351497e01bd9edef0192073b36..525a9cf5379a9611484f2963c5186e2a32604b19 100644
 --- a/src/transform/jsx/index.js
 +++ b/src/transform/jsx/index.js
-@@ -55,6 +55,14 @@ import {
+@@ -60,6 +60,14 @@ import {
  	capture_jsx_child as captureJsxChild,
  } from '../jsx-interleave.js';
  import { is_hoist_safe_jsx_node } from '../jsx-hoist.js';
@@ -894,7 +894,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  
  const TEMPLATE_FRAGMENT_ERROR =
  	'JSX fragment syntax is not needed in TSRX templates. TSRX renders in immediate mode, so everything is already a fragment. Use `<>...</>` only in expression position.';
-@@ -1080,42 +1088,270 @@ function is_interleaved_body(body_nodes) {
+@@ -1346,42 +1354,270 @@ function is_interleaved_body(body_nodes) {
  	return is_interleaved_body_core(body_nodes, is_render_child_node);
  }
  
@@ -1177,7 +1177,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	transform_context,
  	include_platform_setup,
  ) {
-@@ -1123,96 +1359,100 @@ function node_contains_top_level_hook_call(
+@@ -1389,96 +1625,100 @@ function node_contains_top_level_hook_call(
  		return false;
  	}
  
@@ -1346,7 +1346,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	}
  
  	return false;
-@@ -1324,7 +1564,7 @@ function create_generated_helper_metadata(helper_state) {
+@@ -1590,7 +1830,7 @@ function create_generated_helper_metadata(helper_state) {
   * @returns {any}
   */
  function strip_function_transform_metadata(metadata) {
@@ -1355,7 +1355,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	return next_metadata;
  }
  
-@@ -1334,10 +1574,18 @@ function strip_function_transform_metadata(metadata) {
+@@ -1600,10 +1840,18 @@ function strip_function_transform_metadata(metadata) {
   * @returns {any}
   */
  function transform_block_statement(node, { next, visit, state, path }) {
@@ -1375,7 +1375,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	if (get_active_native_tsrx_function(path)?.metadata?.native_tsrx_body) {
  		const block = create_native_tsrx_statement_list_block(node, state);
  		if (block) {
-@@ -1492,6 +1740,7 @@ function transform_native_tsrx_function(node, { next, state }, { nativeBody = fa
+@@ -1781,6 +2029,7 @@ function transform_native_tsrx_function(node, { next, state }, { nativeBody = fa
  		...(node.metadata || {}),
  		native_tsrx: true,
  		...(nativeBody ? { native_tsrx_body: true } : {}),
@@ -1383,7 +1383,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	};
  	state.available_bindings = merge_binding_maps(
  		saved_bindings,
-@@ -1643,10 +1892,6 @@ function find_native_await_in_statement(statement) {
+@@ -1932,10 +2181,6 @@ function find_native_await_in_statement(statement) {
   * @returns {any}
   */
  function transform_function_with_hook_helpers(node, { next, state }) {
@@ -1394,7 +1394,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	const has_hook_bearing_tsrx = function_contains_hook_bearing_tsrx(node, state);
  	if (state.helper_state || !is_uppercase_function_like(node) || !has_hook_bearing_tsrx) {
  		return next() ?? node;
-@@ -2512,10 +2757,7 @@ function should_use_module_scoped_hook_components(transform_context) {
+@@ -2801,10 +3046,7 @@ function should_use_module_scoped_hook_components(transform_context) {
   * @returns {boolean}
   */
  function should_extract_hook_helpers(transform_context) {
@@ -1406,7 +1406,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  }
  
  /**
-@@ -2549,6 +2791,13 @@ export function collect_param_bindings(params) {
+@@ -2838,6 +3080,13 @@ export function collect_param_bindings(params) {
  export function collect_statement_bindings(statement, bindings) {
  	if (!statement) return;
  
@@ -1420,7 +1420,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	if (statement.type === 'VariableDeclaration') {
  		for (const declaration of statement.declarations || []) {
  			collect_pattern_bindings(declaration.id, bindings);
-@@ -2617,6 +2866,26 @@ function collect_pattern_bindings(pattern, bindings) {
+@@ -2906,6 +3155,26 @@ function collect_pattern_bindings(pattern, bindings) {
  	}
  }
  
@@ -1447,7 +1447,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  /**
   * Check if a node references any of the given scope bindings.
   * Used to determine if a JSX element is static and can be hoisted to module level.
-@@ -2643,6 +2912,33 @@ function references_scope_bindings(node, scope_bindings) {
+@@ -2932,6 +3201,33 @@ function references_scope_bindings(node, scope_bindings) {
  		return node.some((child) => references_scope_bindings(child, scope_bindings));
  	}
  
@@ -1481,7 +1481,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	for (const key of Object.keys(node)) {
  		if (key === 'loc' || key === 'start' || key === 'end' || key === 'metadata') continue;
  
-@@ -3077,6 +3373,11 @@ function build_hoisted_for_of_with_hooks(node, transform_context) {
+@@ -3371,6 +3667,11 @@ function build_hoisted_for_of_with_hooks(node, transform_context) {
  	for (const param of loop_params) {
  		collect_pattern_bindings(param, transform_context.available_bindings);
  	}
@@ -1493,7 +1493,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  
  	const all_helper_bindings = get_referenced_helper_bindings(
  		original_loop_body,
-@@ -3566,6 +3867,11 @@ export function create_hook_safe_helper(
+@@ -3862,6 +4163,11 @@ export function create_hook_safe_helper(
  	preallocated_helper_id,
  	options = {},
  ) {
@@ -1505,7 +1505,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  	const helper_id =
  		preallocated_helper_id ??
  		create_generated_identifier(create_local_statement_component_name(transform_context));
-@@ -3890,6 +4196,14 @@ function is_if_control_node(node) {
+@@ -4186,6 +4492,14 @@ function is_if_control_node(node) {
  	return node?.type === 'IfStatement' || node?.type === 'JSXIfExpression';
  }
  
@@ -1520,8 +1520,8 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  /**
   * @param {any} node
   * @returns {boolean}
-@@ -3936,6 +4250,17 @@ function is_try_control_node(node) {
- 	return node?.type === 'TryStatement' || node?.type === 'JSXTryExpression';
+@@ -4293,6 +4607,17 @@ export function wrap_edge_whitespace(nodes) {
+ 	return out;
  }
  
 +/**
@@ -1538,7 +1538,7 @@ index 3827d01178dd90b476b56f6a64459dbfe52291c3..9757a9a143c8ebcdd7182d242c670b37
  /**
   * @param {any} node
   * @param {TransformContext} transform_context
-@@ -4886,9 +5211,16 @@ function try_statement_to_jsx_child(node, transform_context) {
+@@ -5208,9 +5533,16 @@ function try_statement_to_jsx_child(node, transform_context) {
  		// correctly identifies references to err/reset as non-static
  		const saved_catch_bindings = transform_context.available_bindings;
  		transform_context.available_bindings = new Map(saved_catch_bindings);

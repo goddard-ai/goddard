@@ -15,8 +15,8 @@ catalog:
   "@happy-dom/global-registrator": ^20.9.0
   "@pandacss/dev": ^1.10.0
   "@preact/signals": ^2.9.0
-  "@tsrx/bun-plugin-preact": 0.0.51
-  "@tsrx/preact": 0.1.28
+  "@tsrx/bun-plugin-preact": 0.0.56
+  "@tsrx/preact": 0.1.33
   "@types/hash-sum": ^1.0.2
   acp-client: ^0.5.3
   ai-sdk-json-schema: ^0.3.1
@@ -69,13 +69,13 @@ minimumReleaseAgeExclude:
   - "@tsrx/vite-plugin-preact"
   - esrap
 
-patchedDependencies:
-  "@tsrx/core@0.1.28": patches/@tsrx%2Fcore@0.1.28.patch
-  "@tsrx/preact@0.1.28": patches/@tsrx%2Fpreact@0.1.28.patch
-  "@tsrx/prettier-plugin@0.3.80": patches/@tsrx%2Fprettier-plugin@0.3.80.patch
-
 allowBuilds:
   bun: true
   esbuild: true
   sharp: true
   workerd: true
+
+patchedDependencies:
+  "@tsrx/core": patches/@tsrx__core.patch
+  "@tsrx/preact": patches/@tsrx__preact.patch
+  "@tsrx/prettier-plugin": patches/@tsrx__prettier-plugin.patch
