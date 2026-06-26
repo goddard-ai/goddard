@@ -6,7 +6,6 @@ import { getDatabasePath } from "@goddard-ai/paths/node"
 import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { resolveRuntimeConfig } from "../src/config.ts"
 import { startDaemonServer } from "../src/ipc/server.ts"
 import { main } from "../src/main.ts"
 import { openComposedDaemonStore } from "../src/plugins.ts"
@@ -35,8 +34,9 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   expect(process.env.GODDARD_DATA_PROFILE).toBe(originalDataProfile)
 
   process.env.GODDARD_DATA_PROFILE = "mock"
-  const runtime = await createDaemonRuntime(createTestBackendClient(), {
-    runtimeConfig: resolveRuntimeConfig({ port: 0 }),
+  const runtime = await createDaemonRuntime({
+    backendClient: createTestBackendClient(),
+    port: 0,
   })
   const daemon = await startDaemonServer(runtime)
   cleanup.push(async () => {

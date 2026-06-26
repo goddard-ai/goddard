@@ -9,7 +9,7 @@ import {
 } from "@goddard-ai/daemon-plugin"
 import { getErrorMessage, isObject } from "radashi"
 
-import type { BackendClient } from "./backend.ts"
+import { createBackendClient, type BackendClient } from "./backend.ts"
 import { createConfigManager, type ConfigManager } from "./config-manager.ts"
 import {
   prependAgentBinToPath,
@@ -49,20 +49,23 @@ export type DaemonRuntime = {
 }
 
 export async function createDaemonRuntime(
-  client: BackendClient,
   options: {
-    runtimeConfig?: ResolvedRuntimeConfig
+    agentBinDir?: string
+    backendClient?: BackendClient
+    baseUrl?: string
     configManager?: ConfigManager
     idleSessionShutdownTimeoutMs?: number
+    port?: number
     store?: ComposedDaemonStore
   } = {},
 ): Promise<DaemonRuntime> {
   const logger = createLogger()
-  const runtime = options.runtimeConfig ?? resolveRuntimeConfig()
-  const configManager = options.configManager ?? createConfigManager()
-  const ownsConfigManager = options.configManager == null
+  const runtime = resolveRuntimeConfig({
+    agentBinDir: options.agentBinDir,
+    baseUrl: options.baseUrl,
+    port: options.port,
+  })
   const store = options.store ?? openComposedDaemonStore()
-  const ownsStore = options.store == null
   const metadataStore = store.metadata as {
     get: (key: string) => unknown
     set: (key: string, value: unknown) => void
@@ -74,6 +77,20 @@ export async function createDaemonRuntime(
     ...composition.events,
   })
   observeDaemonEventsForLogging(events, logger)
+  const configManager =
+    options.configManager ??
+    createConfigManager({
+      onReloadFailed: (event) => events.emit("config.reload.failed", event),
+    })
+  const client =
+    options.backendClient ??
+    createBackendClient({
+      baseUrl: runtime.baseUrl,
+      getAuthorizationHeader: async () => {
+        const token = store.metadata.get("authToken") ?? null
+        return token ? `Bearer ${token}` : null
+      },
+    })
 
   let daemonUrl: string | undefined
 
@@ -165,12 +182,8 @@ export async function createDaemonRuntime(
       }
       closed = true
       await pluginSetup.close().catch(() => {})
-      if (ownsConfigManager) {
-        await configManager.close().catch(() => {})
-      }
-      if (ownsStore) {
-        store.close()
-      }
+      await configManager.close().catch(() => {})
+      store.close()
     },
   }
 }

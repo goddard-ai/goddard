@@ -102,6 +102,11 @@ test(
         exitCode?: number
       }
     }> = []
+    let sessionSummaries: Array<{
+      repository: string | null
+      prNumber: number | null
+      stopReason: string | null
+    }> = []
 
     const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
@@ -189,6 +194,14 @@ test(
           },
           { timeoutMs: 15000 },
         )
+        sessionSummaries = db.sessions
+          .findMany()
+          .map(({ repository, prNumber, stopReason }) => ({
+            repository,
+            prNumber,
+            stopReason,
+          }))
+          .sort((left, right) => (left.repository ?? "").localeCompare(right.repository ?? ""))
 
         await stopDaemon()
         return await daemonPromise
@@ -201,16 +214,7 @@ test(
 
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(1)
-    expect(
-      db.sessions
-        .findMany()
-        .map(({ repository, prNumber, stopReason }) => ({
-          repository,
-          prNumber,
-          stopReason,
-        }))
-        .sort((left, right) => (left.repository ?? "").localeCompare(right.repository ?? "")),
-    ).toEqual([
+    expect(sessionSummaries).toEqual([
       {
         repository: "other/repo",
         prNumber: 123,
@@ -360,6 +364,7 @@ test(
     const backend = await startBackendHarness()
     cleanup.push(() => backend.close())
     db.metadata.set("authToken", "tok")
+    let sessionCount = -1
 
     const { result: exitCode } = await captureStdout(async () => {
       const daemonPromise = runDaemon({
@@ -373,6 +378,7 @@ test(
 
       try {
         await new Promise((resolve) => setTimeout(resolve, 100))
+        sessionCount = db.sessions.findMany().length
         await stopDaemon()
         return await daemonPromise
       } finally {
@@ -382,7 +388,7 @@ test(
     })
     expect(exitCode).toBe(0)
     expect(backend.subscriptionCount()).toBe(0)
-    expect(db.sessions.findMany()).toHaveLength(0)
+    expect(sessionCount).toBe(0)
   },
   { timeout: 10000 },
 )

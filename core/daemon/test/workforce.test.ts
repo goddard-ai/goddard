@@ -8,7 +8,6 @@ import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url
 import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { resolveRuntimeConfig } from "../src/config.ts"
 import { createDaemonRuntime, startDaemonServer } from "../src/ipc.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
@@ -73,8 +72,9 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   )
   await runGit(repoDir, ["init"])
 
-  const runtime = await createDaemonRuntime(createTestBackendClient(), {
-    runtimeConfig: resolveRuntimeConfig({ port: 0 }),
+  const runtime = await createDaemonRuntime({
+    backendClient: createTestBackendClient(),
+    port: 0,
     store: db,
   })
   const daemon = await startDaemonServer(runtime)

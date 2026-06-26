@@ -24,7 +24,6 @@ import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import { getSessionTurnMessagePayload } from "../../../features/session/src/daemon/turn-history.ts"
 import type { SessionIdleShutdownUpdatedEvent } from "../../../features/session/src/events.ts"
 import type { BackendClient } from "../src/backend.ts"
-import { resolveRuntimeConfig } from "../src/config.ts"
 import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import type { DaemonRuntime } from "../src/runtime.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -635,6 +634,7 @@ test("loadable sessions remain reconnectable after daemon restart", async () => 
   })
 
   await daemonA.close()
+  reopenComposedStore()
 
   const daemonB = await startServer({ useExistingHome: true })
   const clientB = createDaemonIpcClient({ daemonUrl: daemonB.daemonUrl })
@@ -2260,6 +2260,7 @@ test("daemon startup cleans cold prepared launch worktrees", async () => {
   expect(db.launchWorktrees.findMany()).toHaveLength(1)
 
   await daemon.close()
+  reopenComposedStore()
 
   const restarted = await startServer({ useExistingHome: true })
   const restartedClient = createDaemonIpcClient({ daemonUrl: restarted.daemonUrl })
@@ -3094,9 +3095,10 @@ async function startServer(
     await useTempHome()
   }
 
-  const runtime = await createDaemonRuntime(createTestBackendClient(), {
-    runtimeConfig: resolveRuntimeConfig({ port: 0 }),
+  const runtime = await createDaemonRuntime({
+    backendClient: createTestBackendClient(),
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
+    port: 0,
     store: db,
   })
   const daemon = await startDaemonServer(runtime)
@@ -3165,6 +3167,10 @@ async function* emptyBackendEvents(): AsyncIterable<never> {}
 async function useTempHome(): Promise<void> {
   sharedHomeDir ??= await mkdtemp(join(tmpdir(), "goddard-daemon-home-"))
   process.env.HOME = sharedHomeDir
+  db = resetComposedDaemonStore()
+}
+
+function reopenComposedStore() {
   db = resetComposedDaemonStore()
 }
 

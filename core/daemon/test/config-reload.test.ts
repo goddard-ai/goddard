@@ -12,7 +12,6 @@ import { afterEach, expect, test } from "bun:test"
 import { settleWindowsHandles } from "../../test-support/windows-fixtures.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
-import { resolveRuntimeConfig } from "../src/config.ts"
 import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import type { DaemonRuntime } from "../src/runtime.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
@@ -387,13 +386,11 @@ function createFeedbackBackendEvent() {
 }
 
 async function startServer(configManager: ReturnType<typeof createConfigManager>) {
-  const runtime = resolveRuntimeConfig({
-    port: 0,
-  })
   const daemonClient = createTestBackendClient()
-  const daemonRuntime = await createDaemonRuntime(daemonClient, {
+  const daemonRuntime = await createDaemonRuntime({
+    backendClient: daemonClient,
     configManager,
-    runtimeConfig: runtime,
+    port: 0,
     store: db,
   })
   const daemon = await startDaemonServer(daemonRuntime)
