@@ -395,9 +395,15 @@ export default {
     marginRight: "0",
     paddingRight: "9px",
     boxSizing: "border-box",
-    background: `linear-gradient(90deg, transparent 0, ${surfaceColor} 26px, ${surfaceColor} 100%)`,
     cursor: "pointer",
     zIndex: "1",
+  }),
+  tabTailMask: css({
+    position: "absolute",
+    inset: "0",
+    background: `linear-gradient(90deg, transparent 0, ${surfaceColor} 26px, ${surfaceColor} 100%)`,
+    pointerEvents: "none",
+    transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   tabDirty: css({
     gridArea: "1 / 1",
@@ -406,6 +412,7 @@ export default {
     borderRadius: "999px",
     backgroundColor: "accentStrong",
     transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    zIndex: "1",
   }),
   tabClose: css({
     gridArea: "1 / 1",
@@ -423,6 +430,7 @@ export default {
     opacity: "0",
     transition:
       "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    zIndex: "1",
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",

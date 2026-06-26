@@ -483,6 +483,14 @@ function TabButton(props: {
           props.onSelect(props.id)
         }}
       >
+        <span
+          aria-hidden="true"
+          class={styles.tabTailMask}
+          style={{
+            opacity: showCloseButton ? "1" : "0",
+          }}
+        />
+
         @if (props.dirty) {
           <span
             aria-hidden="true"
