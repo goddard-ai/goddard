@@ -1,4 +1,4 @@
-import type { DaemonConfigProvider, DaemonLogger } from "@goddard-ai/daemon-plugin"
+import type { DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
 import type * as acp from "acp-client/protocol"
 import { getErrorMessage } from "radashi"
 
@@ -26,17 +26,11 @@ export function createSessionTitleRuntime({
     sessionTitles?: SessionTitlesConfig
   }>
   debug: (event: string, fields?: Record<string, unknown>) => void
-  emitDiagnostic: (
-    sessionId: SessionId,
-    type: string,
-    detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
-  ) => void
+  emitDiagnostic: (sessionId: SessionId, type: string, detail?: Record<string, unknown>) => void
   updateSession: (
     id: SessionId,
     update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
   ) => void
 }) {
   const pendingPreparations = memory.pendingSessionTitlePreparations
@@ -48,7 +42,6 @@ export function createSessionTitleRuntime({
     generatorConfig: SessionTitleGeneratorConfig
     fallbackTitle: string
     promptText: string
-    diagnosticLogger?: DaemonLogger
   }) {
     if (pendingGenerations.has(params.id)) {
       debug("session.titles.generation_skipped", {
@@ -75,15 +68,6 @@ export function createSessionTitleRuntime({
         model: params.generatorConfig.model,
         fallbackTitle: params.fallbackTitle,
       })
-      emitDiagnostic(
-        params.id,
-        "session_title_generation_started",
-        {
-          provider: params.generatorConfig.provider,
-          model: params.generatorConfig.model,
-        },
-        params.diagnosticLogger,
-      )
 
       try {
         const loadedTextModel = await loadDaemonTextModel(params.generatorConfig)
@@ -95,57 +79,37 @@ export function createSessionTitleRuntime({
           throw new Error("Generated session title was empty or invalid.")
         }
 
-        updateSession(
-          params.id,
-          {
-            title: generatedTitle,
-            titleState: "generated",
-          },
-          undefined,
-          params.diagnosticLogger,
-        )
+        updateSession(params.id, {
+          title: generatedTitle,
+          titleState: "generated",
+        })
         debug("session.titles.generated", {
           sessionId: params.id,
           provider: loadedTextModel.descriptor.provider,
           model: loadedTextModel.descriptor.model,
           title: generatedTitle,
         })
-        emitDiagnostic(
-          params.id,
-          "session_title_generated",
-          {
-            provider: loadedTextModel.descriptor.provider,
-            model: loadedTextModel.descriptor.model,
-            title: generatedTitle,
-          },
-          params.diagnosticLogger,
-        )
+        emitDiagnostic(params.id, "session_title_generated", {
+          provider: loadedTextModel.descriptor.provider,
+          model: loadedTextModel.descriptor.model,
+          title: generatedTitle,
+        })
       } catch (error) {
-        updateSession(
-          params.id,
-          {
-            title: params.fallbackTitle,
-            titleState: "failed",
-          },
-          undefined,
-          params.diagnosticLogger,
-        )
+        updateSession(params.id, {
+          title: params.fallbackTitle,
+          titleState: "failed",
+        })
         debug("session.titles.generation_failed", {
           sessionId: params.id,
           provider: params.generatorConfig.provider,
           model: params.generatorConfig.model,
           errorMessage: getErrorMessage(error),
         })
-        emitDiagnostic(
-          params.id,
-          "session_title_generation_failed",
-          {
-            provider: params.generatorConfig.provider,
-            model: params.generatorConfig.model,
-            errorMessage: getErrorMessage(error),
-          },
-          params.diagnosticLogger,
-        )
+        emitDiagnostic(params.id, "session_title_generation_failed", {
+          provider: params.generatorConfig.provider,
+          model: params.generatorConfig.model,
+          errorMessage: getErrorMessage(error),
+        })
       }
     })().finally(() => {
       pendingGenerations.delete(params.id)
@@ -158,7 +122,6 @@ export function createSessionTitleRuntime({
   function queueSessionTitlePreparation(params: {
     id: SessionId
     prompt: string | acp.ContentBlock[]
-    diagnosticLogger?: DaemonLogger
   }) {
     const sessionRecord = db.sessions.get(params.id) ?? null
     if (
@@ -203,15 +166,10 @@ export function createSessionTitleRuntime({
         return
       }
 
-      updateSession(
-        params.id,
-        {
-          title: preparedTitle.title,
-          titleState: preparedTitle.titleState,
-        },
-        undefined,
-        params.diagnosticLogger,
-      )
+      updateSession(params.id, {
+        title: preparedTitle.title,
+        titleState: preparedTitle.titleState,
+      })
       debug("session.titles.prepared", {
         sessionId: params.id,
         title: preparedTitle.title,
@@ -225,19 +183,13 @@ export function createSessionTitleRuntime({
           generatorConfig: preparedTitle.generatorConfig,
           fallbackTitle: preparedTitle.title,
           promptText: preparedTitle.promptText,
-          diagnosticLogger: params.diagnosticLogger,
         })
       }
     })()
       .catch((error) => {
-        emitDiagnostic(
-          params.id,
-          "session_title_generation_failed",
-          {
-            errorMessage: getErrorMessage(error),
-          },
-          params.diagnosticLogger,
-        )
+        emitDiagnostic(params.id, "session_title_generation_failed", {
+          errorMessage: getErrorMessage(error),
+        })
       })
       .finally(() => {
         pendingPreparations.delete(params.id)

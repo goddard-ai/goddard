@@ -721,6 +721,7 @@ export function createSessionManager({
   const idleShutdown = createIdleShutdownController({
     memory,
     logger,
+    debug: log.createDebug("session.idle_shutdown"),
     emitDiagnostic,
     emitEvent: (event) => {
       void events.emit("session.idle_shutdown.updated", event)
@@ -731,7 +732,6 @@ export function createSessionManager({
   const activeTurns = createActiveTurnStore({
     db,
     debug: log.createDebug("session.turns"),
-    emitDiagnostic,
     publishSessionUpdated,
     refreshIdleShutdownState: idleShutdown.refreshIdleShutdownState,
     updateSessionAvailableCommands,
@@ -790,6 +790,8 @@ export function createSessionManager({
     await launchWorktrees.cleanupColdWorktrees()
     await reconcilePersistedSessions()
   })()
+  const connectionDebug = log.createDebug("session.connection")
+  const historyDebug = log.createDebug("session.history")
 
   function publishSessionUpdated(id: SessionId, changed: readonly SessionLifecycleField[]) {
     const session = db.sessions.get(id) ?? null
@@ -853,12 +855,10 @@ export function createSessionManager({
     id: SessionId,
     update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
   ) {
     const active = activeSessions.get(id)
     const previousRecord = db.sessions.get(id) ?? null
     const previousStatus = active?.status ?? previousRecord?.status
-    const resolvedLogger = diagnosticLogger ?? active?.logger ?? logger
     if (update.status && active) {
       active.status = update.status
     }
@@ -868,16 +868,11 @@ export function createSessionManager({
       publishSessionUpdated(id, lifecycleFieldsFromSessionUpdate(update))
     }
     if (update.status && previousStatus && previousStatus !== update.status) {
-      emitDiagnostic(
-        id,
-        "session_status_changed",
-        {
-          previousStatus,
-          nextStatus: update.status,
-          ...detail,
-        },
-        resolvedLogger,
-      )
+      emitDiagnostic(id, "session_status_changed", {
+        previousStatus,
+        nextStatus: update.status,
+        ...detail,
+      })
     }
   }
 
@@ -885,7 +880,6 @@ export function createSessionManager({
     id: SessionId,
     update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
   ) {
     updateSession(
       id,
@@ -894,7 +888,6 @@ export function createSessionManager({
         lastSessionActivityAt: Date.now(),
       },
       detail,
-      diagnosticLogger,
     )
   }
 
@@ -947,22 +940,12 @@ export function createSessionManager({
     )
   }
 
-  function emitDiagnostic(
-    sessionId: SessionId,
-    type: string,
-    detail?: Record<string, unknown>,
-    diagnosticLogger: DaemonLogger = logger,
-    options: { logSessionId?: boolean } = {},
-  ) {
+  function emitDiagnostic(sessionId: SessionId, type: string, detail?: Record<string, unknown>) {
     const event: DaemonSessionDiagnosticEvent = {
       type,
       at: new Date().toISOString(),
       detail,
     }
-    diagnosticLogger.log(type, {
-      ...(options.logSessionId === false ? {} : { sessionId }),
-      ...detail,
-    })
     const diagnosticsRecord =
       db.sessionDiagnostics.first({
         where: { sessionId },
@@ -1071,7 +1054,7 @@ export function createSessionManager({
           }
         }
         if (draftRecord) {
-          activeTurns.persistTurnDraftAsInterruptedTurn(session.id, draftRecord, logger)
+          activeTurns.persistTurnDraftAsInterruptedTurn(session.id, draftRecord)
         }
 
         if (
@@ -1124,30 +1107,24 @@ export function createSessionManager({
     supportsLoadSession: boolean
   }) {
     params.agentProcess.onceExit((code, signal) => {
-      emitDiagnostic(
-        params.id,
-        "agent_process_exit",
-        {
-          code,
-          signal,
-          nextStatus: "done",
-        },
-        params.sessionLogger,
-      )
+      emitDiagnostic(params.id, "agent_process_exit", {
+        code,
+        signal,
+        nextStatus: "done",
+      })
     })
 
     updateSessionActivity(
       params.id,
       { status: "done", token: null, permissions: null },
       { reason: "one_shot_completed" },
-      params.sessionLogger,
     )
     setConnectionMode(
       params.id,
       disconnectedConnectionMode(true, params.supportsLoadSession),
       false,
     )
-    emitDiagnostic(params.id, "session_completed_one_shot", undefined, params.sessionLogger)
+    emitDiagnostic(params.id, "session_completed_one_shot")
     await params.initialized.client.close().catch(() => {})
     await treeKill(params.agentProcess)
     await waitForAgentProcessExit(params.agentProcess)
@@ -1219,12 +1196,10 @@ export function createSessionManager({
             : null,
         })
       } catch (error) {
-        emitDiagnostic(
-          activeSession.id,
-          "session_stop_cleanup_failed",
-          { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
-          activeSession.logger,
-        )
+        emitDiagnostic(activeSession.id, "session_stop_cleanup_failed", {
+          reason: "agent_process_exit",
+          errorMessage: getErrorMessage(error),
+        })
       }
 
       const nextUpdate: Partial<DaemonSession> = {}
@@ -1248,16 +1223,11 @@ export function createSessionManager({
         ),
         false,
       )
-      emitDiagnostic(
-        activeSession.id,
-        "agent_process_exit",
-        {
-          code,
-          signal,
-          nextStatus: nextUpdate.status ?? activeSession.status,
-        },
-        activeSession.logger,
-      )
+      emitDiagnostic(activeSession.id, "agent_process_exit", {
+        code,
+        signal,
+        nextStatus: nextUpdate.status ?? activeSession.status,
+      })
       if (Object.keys(nextUpdate).length > 0) {
         try {
           const persistSessionExit = nextUpdate.status ? updateSessionActivity : updateSession
@@ -1272,12 +1242,10 @@ export function createSessionManager({
 
     params.agentProcess.onceExit((code, signal) => {
       activeSession.exitCleanup = handleExit(code, signal).catch((error) => {
-        emitDiagnostic(
-          activeSession.id,
-          "session_stop_cleanup_failed",
-          { reason: "agent_process_exit", errorMessage: getErrorMessage(error) },
-          activeSession.logger,
-        )
+        emitDiagnostic(activeSession.id, "session_stop_cleanup_failed", {
+          reason: "agent_process_exit",
+          errorMessage: getErrorMessage(error),
+        })
       })
     })
 
@@ -1395,44 +1363,24 @@ export function createSessionManager({
             worktreeDir: worktree.state.worktreeDir,
             config: resolvedConfig?.worktrees?.bootstrap,
             onEvent: (event) => {
-              emitDiagnostic(id, event.type, event.detail, sessionLogger)
+              emitDiagnostic(id, event.type, event.detail)
             },
           })
         } catch (error) {
-          emitDiagnostic(
-            id,
-            "worktree.bootstrap_failed",
-            {
-              errorMessage: getErrorMessage(error),
-            },
-            sessionLogger,
-          )
+          emitDiagnostic(id, "worktree.bootstrap_failed", {
+            errorMessage: getErrorMessage(error),
+          })
           throw error
         }
       } else if (worktree && existingArtifacts.worktree) {
-        emitDiagnostic(
-          id,
-          "worktree.bootstrap_skipped",
-          { reason: "reused_worktree" },
-          sessionLogger,
-        )
+        emitDiagnostic(id, "worktree.bootstrap_skipped", { reason: "reused_worktree" })
       } else if (worktree && launchWorktree) {
-        emitDiagnostic(
-          id,
-          "worktree.bootstrap_skipped",
-          { reason: "prewarmed_worktree" },
-          sessionLogger,
-        )
+        emitDiagnostic(id, "worktree.bootstrap_skipped", { reason: "prewarmed_worktree" })
       } else if (worktree && worktree.state.poweredBy !== defaultPlugin.name) {
-        emitDiagnostic(
-          id,
-          "worktree.bootstrap_skipped",
-          {
-            reason: "unsupported_plugin",
-            poweredBy: worktree.state.poweredBy,
-          },
-          sessionLogger,
-        )
+        emitDiagnostic(id, "worktree.bootstrap_skipped", {
+          reason: "unsupported_plugin",
+          poweredBy: worktree.state.poweredBy,
+        })
       }
 
       if (worktree) {
@@ -1566,15 +1514,10 @@ export function createSessionManager({
         request: resolvedRequest,
       })
       publishSessionUpdated(id, ["status", "connection", "title", "contextUsage"])
-      emitDiagnostic(
-        id,
-        "session_created",
-        {
-          status: initialized.status,
-          ...sessionLogContext,
-        },
-        sessionLogger,
-      )
+      emitDiagnostic(id, "session_created", {
+        status: initialized.status,
+        ...sessionLogContext,
+      })
 
       if (
         preparedTitle.titleState === "pending" &&
@@ -1586,7 +1529,6 @@ export function createSessionManager({
           generatorConfig: preparedTitle.generatorConfig,
           fallbackTitle: preparedTitle.title,
           promptText: preparedTitle.promptText,
-          diagnosticLogger: sessionLogger,
         })
       }
 
@@ -1621,14 +1563,9 @@ export function createSessionManager({
       })
       if (deferredInitialPrompt !== undefined) {
         void promptTurns.promptSession(id, deferredInitialPrompt).catch((error) => {
-          emitDiagnostic(
-            id,
-            "session_initial_prompt_failed",
-            {
-              errorMessage: getErrorMessage(error),
-            },
-            sessionLogger,
-          )
+          emitDiagnostic(id, "session_initial_prompt_failed", {
+            errorMessage: getErrorMessage(error),
+          })
         })
       }
       if (worktree) {
@@ -1741,7 +1678,10 @@ export function createSessionManager({
     await ready
     const active = activeSessions.get(id)
     if (active) {
-      emitDiagnostic(id, "session_connected", undefined, active.logger)
+      connectionDebug("session.connection.connected", {
+        sessionId: id,
+        mode: "active",
+      })
       return getSession(id)
     }
 
@@ -1752,7 +1692,10 @@ export function createSessionManager({
         request: createReconnectRequest(session),
       })
       const reloadedActiveSession = activeSessions.get(id)
-      emitDiagnostic(id, "session_connected", undefined, reloadedActiveSession?.logger ?? logger)
+      connectionDebug("session.connection.connected", {
+        sessionId: id,
+        mode: reloadedActiveSession ? "reloaded" : "history",
+      })
       return reloadedSession
     }
 
@@ -1830,18 +1773,13 @@ export function createSessionManager({
       }
     }
 
-    emitDiagnostic(
-      params.id,
-      "session_history_read",
-      {
-        persistedTurnCount: page.items.length,
-        returnedTurnCount: turns.length,
-        hasCursor: params.cursor != null,
-        hasMore: page.next != null,
-      },
-      logger,
-      { logSessionId: false },
-    )
+    historyDebug("session.history.read", {
+      sessionId: params.id,
+      persistedTurnCount: page.items.length,
+      returnedTurnCount: turns.length,
+      hasCursor: params.cursor != null,
+      hasMore: page.next != null,
+    })
 
     return {
       id: session.id,
@@ -2144,7 +2082,7 @@ export function createSessionManager({
     }
 
     idleShutdown.cancelIdleShutdownTimer(active, "session_shutdown")
-    emitDiagnostic(id, "session_shutdown_requested", undefined, active.logger)
+    emitDiagnostic(id, "session_shutdown_requested")
     const worktreeRecord = await sessionWorktrees.resolvePersistedWorktreeRecord(id)
     try {
       await events.emit("session.stopping", {
@@ -2153,14 +2091,9 @@ export function createSessionManager({
         worktree: worktreeRecord ? toSessionWorktreeLifecycleState(worktreeRecord, id) : null,
       })
     } catch (error) {
-      emitDiagnostic(
-        id,
-        "session_shutdown_failed",
-        {
-          errorMessage: getErrorMessage(error),
-        },
-        active.logger,
-      )
+      emitDiagnostic(id, "session_shutdown_failed", {
+        errorMessage: getErrorMessage(error),
+      })
       return false
     }
     await treeKill(active.process)
@@ -2199,7 +2132,7 @@ export function createSessionManager({
             : null,
         })
       } catch {}
-      emitDiagnostic(session.id, "daemon_shutdown", { status: session.status }, session.logger)
+      emitDiagnostic(session.id, "daemon_shutdown", { status: session.status })
       await treeKill(session.process)
       await waitForAgentProcessExit(session.process)
       await session.exitCleanup

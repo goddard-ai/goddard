@@ -25,7 +25,10 @@ type ReviewSessionRuntime = {
 }
 
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
-function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>["session"]) {
+function createReviewSessionManager(
+  session: InferProvides<typeof sessionPlugin>["session"],
+  debug: (event: string, fields?: Record<string, unknown>) => void,
+) {
   const runtimes = new Map<SessionId, ReviewSessionRuntime>()
 
   async function toResponse(
@@ -174,7 +177,8 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
       })
 
     runtimes.set(id, { abortController, running })
-    session.emitDiagnostic(id, "review_session.watcher_started", {
+    debug("review_session.watcher_started", {
+      sessionId: id,
       agentBranch: state.agentBranch,
       reviewBranch: state.reviewBranch,
     })
@@ -272,7 +276,10 @@ function createReviewSessionManager(session: InferProvides<typeof sessionPlugin>
 
     async run(id: SessionId) {
       const worktree = await session.requireWorktree(id)
-      session.emitDiagnostic(id, "review_session.requested", { reason: "manual" })
+      debug("review_session.requested", {
+        sessionId: id,
+        reason: "manual",
+      })
       const result = await runCycle(id, worktree)
       return toResponse(id, result.state, result.warnings)
     },
@@ -308,8 +315,8 @@ export const reviewSessionPlugin = definePlugin({
   name: "review-session",
   consumes: [sessionPlugin],
   ipcRoutes: reviewSessionIpcRoutes,
-  setup({ events, session }) {
-    const reviewSession = createReviewSessionManager(session)
+  setup({ events, log, session }) {
+    const reviewSession = createReviewSessionManager(session, log.createDebug("review_session"))
 
     void reviewSession.reconcilePersistedWorktrees()
 

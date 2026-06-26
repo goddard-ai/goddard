@@ -11,18 +11,15 @@ type SessionId = DaemonSession["id"]
 export function createIdleShutdownController({
   memory,
   logger,
+  debug,
   emitDiagnostic,
   emitEvent,
   shutdownSession,
 }: {
   memory: SessionMemory
   logger: DaemonLogger
-  emitDiagnostic: (
-    sessionId: SessionId,
-    type: string,
-    detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
-  ) => void
+  debug: (event: string, fields?: Record<string, unknown>) => void
+  emitDiagnostic: (sessionId: SessionId, type: string, detail?: Record<string, unknown>) => void
   emitEvent: (event: SessionIdleShutdownUpdatedEvent) => void | Promise<void>
   shutdownSession: (id: SessionId) => Promise<boolean>
 }) {
@@ -56,12 +53,11 @@ export function createIdleShutdownController({
 
     clearTimeout(active.idleShutdownTimer)
     active.idleShutdownTimer = null
-    emitDiagnostic(
-      active.id,
-      "session_idle_shutdown_timer_cancelled",
-      { reason, timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
+    debug("session.idle_shutdown.timer_cancelled", {
+      sessionId: active.id,
+      reason,
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
     emitIdleShutdownUpdatedEvent({
       sessionId: active.id,
       action: "cancelled",
@@ -86,12 +82,11 @@ export function createIdleShutdownController({
       return
     }
 
-    emitDiagnostic(
-      active.id,
-      "session_idle_shutdown_timer_started",
-      { reason, timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
+    debug("session.idle_shutdown.timer_started", {
+      sessionId: active.id,
+      reason,
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
     emitIdleShutdownUpdatedEvent({
       sessionId: active.id,
       action: "started",
@@ -120,12 +115,9 @@ export function createIdleShutdownController({
       return
     }
 
-    emitDiagnostic(
-      id,
-      "session_idle_shutdown_timer_expired",
-      { timeoutMs: active.idleShutdownTimeoutMs },
-      active.logger,
-    )
+    emitDiagnostic(id, "session_idle_shutdown_timer_expired", {
+      timeoutMs: active.idleShutdownTimeoutMs,
+    })
     emitIdleShutdownUpdatedEvent({
       sessionId: id,
       action: "expired",

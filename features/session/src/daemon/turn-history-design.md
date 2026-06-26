@@ -414,8 +414,8 @@ Required tests:
 
 Observability:
 
-- add diagnostics for turn creation, draft flush, turn persistence, draft cleanup, and history page reads
-- add diagnostics when queued prompts are intentionally excluded from turn persistence
+- use `session.turns`, `session.queue`, and `session.history` debug logs for turn creation, draft flush, turn persistence, draft cleanup, history page reads, and queued prompts intentionally excluded from turn persistence
+- keep persisted diagnostics for user-visible lifecycle outcomes rather than internal turn-storage movement
 
 ## Rollout And Migration
 
@@ -436,7 +436,7 @@ Because the repository is pre-alpha, the daemon does not migrate legacy `session
 
 - Should `AgentSession` keep a convenience helper that flattens one page of turns back into `acp.AnyMessage[]`, or is explicit caller flattening clearer?
 - Should the first cut also coalesce `agent_thought_chunk` and `user_message_chunk`, or should it stay limited to `agent_message_chunk` until a concrete need appears?
-- Should the daemon expose draft-specific diagnostics or metadata in `session.history`, or is the `completedAt: null` shape sufficient for clients?
+- Should the daemon expose draft-specific metadata in `session.history`, or is the `completedAt: null` shape sufficient for clients?
 
 ## Ambiguities And Blockers
 

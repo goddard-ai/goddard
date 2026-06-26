@@ -447,11 +447,10 @@ Tradeoff:
 
 Emit session diagnostics for:
 
-- `session_title_generation_started`
 - `session_title_generated`
 - `session_title_generation_failed`
 
-These should include the session id and, when available, the configured provider and model id.
+These should include the session id and, when available, the configured provider and model id. Generation start is a debug-log event rather than a persisted session diagnostic.
 
 ## Rollout / Migration
 
