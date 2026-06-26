@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import { definePlugin, type InferProvides } from "@goddard-ai/daemon-plugin"
+import { definePlugin, type DaemonLogger, type InferProvides } from "@goddard-ai/daemon-plugin"
 import {
   listReviewSessions,
   startReviewSync,
@@ -27,6 +27,7 @@ type ReviewSessionRuntime = {
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
 function createReviewSessionManager(
   session: InferProvides<typeof sessionPlugin>["session"],
+  logger: DaemonLogger,
   debug: (event: string, fields?: Record<string, unknown>) => void,
 ) {
   const runtimes = new Map<SessionId, ReviewSessionRuntime>()
@@ -88,7 +89,7 @@ function createReviewSessionManager(
 
   function emitReviewSessionWarnings(id: SessionId, reason: string, result: ReviewSyncResult) {
     for (const warning of createReviewSessionWarnings(result)) {
-      debug("warning", {
+      logger.log("review_session.warning", {
         sessionId: id,
         reason,
         warning,
@@ -100,7 +101,7 @@ function createReviewSessionManager(
 
   function emitReviewSessionResult(id: SessionId, reason: string, result: ReviewSyncResult) {
     if (result.status === "error") {
-      debug("warning", {
+      logger.log("review_session.error", {
         sessionId: id,
         reason,
         errorMessage: result.message,
@@ -133,7 +134,10 @@ function createReviewSessionManager(
   }
 
   async function runCycle(id: SessionId, worktree: SessionWorktreeLifecycleState) {
-    session.emitDiagnostic(id, "review_session.started", { reason: "manual" })
+    debug("started", {
+      sessionId: id,
+      reason: "manual",
+    })
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
     const state = await readRequiredReviewSessionState(worktree)
@@ -173,7 +177,7 @@ function createReviewSessionManager(
         if (abortController.signal.aborted) {
           return
         }
-        debug("warning", {
+        logger.log("review_session.error", {
           sessionId: id,
           reason: "watch",
           errorMessage: getErrorMessage(error),
@@ -259,7 +263,7 @@ function createReviewSessionManager(
         try {
           await cleanupMountedReviewSession(worktree.sessionId, worktree, "daemon_reconciliation")
         } catch (error) {
-          debug("warning", {
+          logger.log("review_session.error", {
             sessionId: worktree.sessionId,
             reason: "daemon_reconciliation",
             errorMessage: getErrorMessage(error),
@@ -325,7 +329,11 @@ export const reviewSessionPlugin = definePlugin({
   consumes: [sessionPlugin],
   ipcRoutes: reviewSessionIpcRoutes,
   setup({ events, log, session }) {
-    const reviewSession = createReviewSessionManager(session, log.createDebug("review_session"))
+    const reviewSession = createReviewSessionManager(
+      session,
+      log.createLogger(),
+      log.createDebug("review_session"),
+    )
 
     void reviewSession.reconcilePersistedWorktrees()
 
