@@ -6,6 +6,7 @@ const accentStrongColor = token.var("colors.accentStrong")
 const backgroundColor = token.var("colors.background")
 const borderColor = token.var("colors.border")
 const panelColor = token.var("colors.panel")
+const surfaceColor = token.var("colors.surface")
 const textColor = token.var("colors.text")
 
 export default {
@@ -387,11 +388,14 @@ export default {
     top: "0",
     right: "0",
     display: "grid",
-    placeItems: "center",
-    width: "36px",
+    alignItems: "center",
+    justifyItems: "end",
+    width: "54px",
     height: "30px",
     marginRight: "0",
-    background: `linear-gradient(90deg, transparent 0, ${token.var("colors.surface")} 14px, ${token.var("colors.surface")} 100%)`,
+    paddingRight: "9px",
+    boxSizing: "border-box",
+    background: `linear-gradient(90deg, transparent 0, ${surfaceColor} 26px, ${surfaceColor} 100%)`,
     cursor: "pointer",
     zIndex: "1",
   }),

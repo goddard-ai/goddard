@@ -334,7 +334,7 @@ function TabButton(props: {
   const [isDragging, setIsDragging] = useState(false)
   const tabRef = useRef<HTMLDivElement | null>(null)
   const tabButtonRef = useRef<HTMLButtonElement | null>(null)
-  const showCloseButton = isActive || isHovered
+  const showCloseButton = isHovered
   const iconColor =
     isActive
       ? isHome
