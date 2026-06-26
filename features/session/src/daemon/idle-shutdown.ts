@@ -53,7 +53,7 @@ export function createIdleShutdownController({
 
     clearTimeout(active.idleShutdownTimer)
     active.idleShutdownTimer = null
-    debug("session.idle_shutdown.timer_cancelled", {
+    debug("timer_cancelled", {
       sessionId: active.id,
       reason,
       timeoutMs: active.idleShutdownTimeoutMs,
@@ -82,7 +82,7 @@ export function createIdleShutdownController({
       return
     }
 
-    debug("session.idle_shutdown.timer_started", {
+    debug("timer_started", {
       sessionId: active.id,
       reason,
       timeoutMs: active.idleShutdownTimeoutMs,
