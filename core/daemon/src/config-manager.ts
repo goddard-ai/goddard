@@ -188,12 +188,6 @@ export function createConfigManager(options: CreateConfigManagerOptions = {}) {
     }
 
     const nextTarget = resolveWatchTarget(state)
-    debug("config.watch.target_resolved", {
-      watchScope: state.scope,
-      watchMode: nextTarget.watchMode,
-      watchRoot: nextTarget.watchedDir,
-      configPath: state.configPath,
-    })
     if (
       state.watcher &&
       state.watchMode === nextTarget.watchMode &&
@@ -203,6 +197,13 @@ export function createConfigManager(options: CreateConfigManagerOptions = {}) {
     }
 
     closeWatchTarget(state)
+
+    debug("config.watch.target_resolved", {
+      watchScope: state.scope,
+      watchMode: nextTarget.watchMode,
+      watchRoot: nextTarget.watchedDir,
+      configPath: state.configPath,
+    })
 
     let watcher: FSWatcher
     try {
