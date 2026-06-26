@@ -1,6 +1,11 @@
 import { realpath } from "node:fs/promises"
 import { resolve } from "node:path"
-import { definePlugin, type DaemonLogger, type InferProvides } from "@goddard-ai/daemon-plugin"
+import {
+  definePlugin,
+  type DaemonLogger,
+  type EventBus,
+  type InferProvides,
+} from "@goddard-ai/daemon-plugin"
 import {
   listReviewSessions,
   startReviewSync,
@@ -16,6 +21,7 @@ import type { SessionId } from "@goddard-ai/session/schema"
 import { getErrorMessage } from "radashi"
 
 import { reviewSessionIpcRoutes } from "./daemon-ipc.ts"
+import { reviewSessionEvents } from "./events.ts"
 import type { ReviewSessionResponse } from "./schema.ts"
 
 /** In-process watcher task for one mounted review-sync session. */
@@ -27,6 +33,7 @@ type ReviewSessionRuntime = {
 /** Coordinates review-sync runtimes around session-owned daemon worktrees. */
 function createReviewSessionManager(
   session: InferProvides<typeof sessionPlugin>["session"],
+  events: Pick<EventBus<typeof reviewSessionEvents>, "emit">,
   logger: DaemonLogger,
   debug: (event: string, fields?: Record<string, unknown>) => void,
 ) {
@@ -141,12 +148,13 @@ function createReviewSessionManager(
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
     const state = await readRequiredReviewSessionState(worktree)
-    debug("completed", {
+    const completedEvent = {
       sessionId: id,
       reason: "manual",
       warningCount: createReviewSessionWarnings(result).length,
       lastSync: state.lastSync,
-    })
+    }
+    await events.emit("review_session.sync.completed", completedEvent)
     return {
       state,
       warnings: createReviewSessionWarnings(result),
@@ -208,13 +216,13 @@ function createReviewSessionManager(
     await stopReviewSession({ cwd: mounted.agentWorktree })
 
     if (previousWorktree) {
-      debug("replaced", {
+      await events.emit("review_session.replaced", {
         sessionId: previousWorktree.sessionId,
         replacedBySessionId: id,
       })
     }
 
-    debug("replaced", {
+    await events.emit("review_session.replaced", {
       sessionId: id,
       previousSessionId: previousWorktree?.sessionId ?? null,
       previousReviewSessionId: mounted.sessionId,
@@ -229,7 +237,7 @@ function createReviewSessionManager(
     })
     emitReviewSessionResult(id, "mount", result)
     const state = await readRequiredReviewSessionState(worktree)
-    debug("mounted", {
+    await events.emit("review_session.mounted", {
       sessionId: id,
       reviewSessionId: state.sessionId,
       agentBranch: state.agentBranch,
@@ -250,7 +258,7 @@ function createReviewSessionManager(
     }
 
     const result = await stopReviewSession({ cwd: worktree.worktreeDir })
-    debug("unmounted", {
+    await events.emit("review_session.unmounted", {
       sessionId: id,
       reason,
       reviewSessionId: result.sessionId ?? state.sessionId,
@@ -327,10 +335,12 @@ function createReviewSessionManager(
 export const reviewSessionPlugin = definePlugin({
   name: "review-session",
   consumes: [sessionPlugin],
+  events: reviewSessionEvents,
   ipcRoutes: reviewSessionIpcRoutes,
   setup({ events, log, session }) {
     const reviewSession = createReviewSessionManager(
       session,
+      events,
       log.createLogger(),
       log.createDebug("review_session"),
     )
