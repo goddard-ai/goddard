@@ -1,4 +1,3 @@
-import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
   createEventBus,
   type BackendEventHandler,
@@ -197,24 +196,20 @@ async function setupDaemonPlugins(
   events: EventBus,
 ) {
   const extensions: Record<string, unknown> = {}
-  const extensionsByPluginName = new Map<string, Record<string, unknown>>()
   const backendEventHandlers: BackendEventHandler<any>[] = []
   const ipcHandlers: Record<string, unknown> = {}
   const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of plugins) {
-    const consumedExtensions = (plugin.consumes ?? []).map(
-      (consumedPlugin) => extensionsByPluginName.get(consumedPlugin.name) ?? {},
-    )
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
         db: store,
-        backend: createPluginBackendContext(plugin, backendClient),
-        configProvider: createPluginConfigProvider(configProvider, plugin),
+        backend: backendClient,
+        configProvider,
         events,
       },
-      ...consumedExtensions,
+      extensions,
     )
     const setup = await plugin.setup?.(context)
 
@@ -232,13 +227,11 @@ async function setupDaemonPlugins(
 
     if (setup?.provides) {
       Object.assign(extensions, setup.provides)
-      extensionsByPluginName.set(plugin.name, setup.provides)
     }
   }
 
   return {
     backendEventHandlers,
-    extensions,
     ipcHandlers,
     close: async () => {
       for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
@@ -286,95 +279,6 @@ function sanitizeEventLogFields(fields: object) {
     sanitized[key] = value instanceof Error ? { errorMessage: getErrorMessage(value) } : value
   }
   return sanitized
-}
-
-function createPluginBackendContext(plugin: ComposedDaemonPlugin, client: BackendClient) {
-  const routes = composeBackendRoutes([
-    ...(plugin.consumes ?? []).map((consumedPlugin) => consumedPlugin.backendRoutes ?? {}),
-    plugin.backendRoutes ?? {},
-  ])
-
-  return selectBackendClientRoutes(routes, client)
-}
-
-function createPluginConfigProvider(
-  source: DaemonConfigProvider,
-  plugin: ComposedDaemonPlugin,
-): DaemonConfigProvider {
-  const keys = new Set([
-    "agents",
-    "registry",
-    "security",
-    "session",
-    ...getPluginConfigKeys(plugin),
-  ])
-
-  return {
-    async getRootConfig(cwd) {
-      const snapshot = await source.getRootConfig(cwd)
-      return {
-        ...snapshot,
-        config: selectConfigKeys(snapshot.config, keys),
-      }
-    },
-    getLastKnownRootConfig(cwd) {
-      const snapshot = source.getLastKnownRootConfig(cwd)
-      if (!snapshot) {
-        return null
-      }
-
-      return {
-        ...snapshot,
-        config: selectConfigKeys(snapshot.config, keys),
-      }
-    },
-  }
-}
-
-function getPluginConfigKeys(plugin: ComposedDaemonPlugin): string[] {
-  const keys = [
-    ...readConfigKeys(plugin),
-    ...(plugin.consumes ?? []).flatMap((consumedPlugin) => readConfigKeys(consumedPlugin)),
-  ]
-
-  return keys
-}
-
-function readConfigKeys(plugin: ComposedDaemonPlugin) {
-  if (!plugin.config) {
-    return []
-  }
-
-  return Object.keys(plugin.config)
-}
-
-function selectConfigKeys(config: Record<string, unknown>, keys: ReadonlySet<string>) {
-  const selected: Record<string, unknown> = {}
-
-  for (const key of keys) {
-    if (key in config) {
-      selected[key] = config[key]
-    }
-  }
-
-  return selected
-}
-
-function selectBackendClientRoutes(routes: Record<string, any>, source: Record<string, any>) {
-  const context: Record<string, unknown> = {}
-
-  for (const [key, route] of Object.entries(routes)) {
-    if (!route || typeof route !== "object") {
-      continue
-    }
-    if (route.kind === "resource") {
-      context[key] = selectBackendClientRoutes(route.children, source[key])
-      continue
-    }
-    context[key] = source[key]
-  }
-
-  return context
 }
 
 function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string, unknown>) {
