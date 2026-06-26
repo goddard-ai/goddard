@@ -148,13 +148,12 @@ function createReviewSessionManager(
     const result = await syncReviewSession({ cwd: worktree.worktreeDir })
     emitReviewSessionWarnings(id, "manual", result)
     const state = await readRequiredReviewSessionState(worktree)
-    const completedEvent = {
+    await events.emit("review_session.sync.completed", {
       sessionId: id,
       reason: "manual",
       warningCount: createReviewSessionWarnings(result).length,
       lastSync: state.lastSync,
-    }
-    await events.emit("review_session.sync.completed", completedEvent)
+    })
     return {
       state,
       warnings: createReviewSessionWarnings(result),
