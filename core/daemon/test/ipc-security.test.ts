@@ -10,7 +10,8 @@ import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterAll, afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import { resolveRuntimeConfig } from "../src/config.ts"
+import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
 import { configureLogging } from "../src/logging.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
@@ -910,7 +911,7 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
     await useTempHome()
   }
 
-  const daemon = await startDaemonServer(
+  const runtime = await createDaemonRuntime(
     createTestBackendClient({
       auth: {
         start:
@@ -947,11 +948,16 @@ async function startServer(options: StartServerOptions = {}): Promise<DaemonServ
         reply: options.sdk?.pr?.reply ?? (async (_input: any) => ({ success: true })),
       },
     }),
-    { port: 0, store: db },
+    {
+      runtimeConfig: resolveRuntimeConfig({ port: 0 }),
+      store: db,
+    },
   )
+  const daemon = await startDaemonServer(runtime)
 
   cleanup.push(async () => {
     await daemon.close()
+    await runtime.close()
   })
 
   return daemon

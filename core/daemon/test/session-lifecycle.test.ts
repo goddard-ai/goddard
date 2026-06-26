@@ -24,12 +24,17 @@ import { matchAcpRequest } from "../../../features/session/src/daemon/acp.ts"
 import { getSessionTurnMessagePayload } from "../../../features/session/src/daemon/turn-history.ts"
 import type { SessionIdleShutdownUpdatedEvent } from "../../../features/session/src/events.ts"
 import type { BackendClient } from "../src/backend.ts"
-import { startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import { resolveRuntimeConfig } from "../src/config.ts"
+import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import type { DaemonRuntime } from "../src/runtime.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
 type AcpMessage = Parameters<typeof matchAcpRequest>[0]
+type StartedDaemon = DaemonServer & {
+  events: DaemonRuntime["events"]
+}
 
 const queueAgentPath = fileURLToPath(new URL("./fixtures/queue-agent.mjs", import.meta.url))
 const chunkingAgentPath = createRequire(import.meta.url).resolve("./fixtures/chunking-agent.mjs")
@@ -91,7 +96,7 @@ async function subscribeSessionMessages(
 }
 
 function subscribeDaemonSessionMessages(
-  daemon: DaemonServer,
+  daemon: StartedDaemon,
   id: SessionId,
   onMessage: (payload: unknown) => void,
 ) {
@@ -141,7 +146,7 @@ async function subscribeSessionLifecycle(
 }
 
 function subscribeDaemonIdleShutdownEvents(
-  daemon: DaemonServer,
+  daemon: StartedDaemon,
   onEvent: (payload: SessionIdleShutdownUpdatedEvent) => void,
   id?: SessionId,
 ) {
@@ -3084,22 +3089,31 @@ async function startServer(
     useExistingHome?: boolean
     idleSessionShutdownTimeoutMs?: number
   } = {},
-): Promise<DaemonServer> {
+): Promise<StartedDaemon> {
   if (!options.useExistingHome) {
     await useTempHome()
   }
 
-  const daemon = await startDaemonServer(createTestBackendClient(), {
-    port: 0,
+  const runtime = await createDaemonRuntime(createTestBackendClient(), {
+    runtimeConfig: resolveRuntimeConfig({ port: 0 }),
     idleSessionShutdownTimeoutMs: options.idleSessionShutdownTimeoutMs,
     store: db,
   })
-
-  cleanup.push(async () => {
-    await daemon.close().catch(() => {})
+  const daemon = await startDaemonServer(runtime)
+  const closeDaemonServer = daemon.close
+  const server = Object.assign(daemon, {
+    events: runtime.events,
+    close: async () => {
+      await closeDaemonServer()
+      await runtime.close()
+    },
   })
 
-  return daemon
+  cleanup.push(async () => {
+    await server.close().catch(() => {})
+  })
+
+  return server
 }
 
 function createTestBackendClient(): BackendClient {

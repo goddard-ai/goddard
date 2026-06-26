@@ -13,8 +13,8 @@ import { settleWindowsHandles } from "../../test-support/windows-fixtures.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
 import { resolveRuntimeConfig } from "../src/config.ts"
-import { SetupContext } from "../src/context.ts"
-import { startDaemonServer } from "../src/ipc.ts"
+import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import type { DaemonRuntime } from "../src/runtime.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
@@ -391,17 +391,29 @@ async function startServer(configManager: ReturnType<typeof createConfigManager>
     port: 0,
   })
   const daemonClient = createTestBackendClient()
-  const daemon = await SetupContext.run({ runtimeConfig: runtime, configManager }, () =>
-    startDaemonServer(daemonClient, {
-      port: runtime.port,
-      agentBinDir: runtime.agentBinDir,
-      store: db,
-    }),
-  )
-  cleanup.push(async () => {
-    await daemon.close()
+  const daemonRuntime = await createDaemonRuntime(daemonClient, {
+    configManager,
+    runtimeConfig: runtime,
+    store: db,
   })
-  return daemon
+  const daemon = await startDaemonServer(daemonRuntime)
+  const closeDaemonServer = daemon.close
+  const server = Object.assign(daemon, {
+    backendEventHandlers: daemonRuntime.backendEventHandlers,
+    close: () => closeServerAndRuntime(closeDaemonServer, daemonRuntime),
+  })
+  cleanup.push(async () => {
+    await server.close()
+  })
+  return server
+}
+
+async function closeServerAndRuntime(
+  closeDaemonServer: DaemonServer["close"],
+  runtime: DaemonRuntime,
+) {
+  await closeDaemonServer()
+  await runtime.close()
 }
 
 function createTestBackendClient(): BackendClient {

@@ -1,4 +1,3 @@
-import { createEventBus } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
 import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
@@ -7,12 +6,7 @@ import { getErrorMessage } from "radashi"
 import { createBackendClient, isBackendUnauthenticatedError } from "./backend.ts"
 import { createConfigManager } from "./config-manager.ts"
 import { ResolvedRuntimeConfig, resolveRuntimeConfig } from "./config.ts"
-import { SetupContext } from "./context.ts"
-import {
-  DaemonRuntimeEventBus,
-  daemonRuntimeEvents,
-  type ConfigReloadFailedEvent,
-} from "./events.ts"
+import { DaemonRuntimeEventBus, type ConfigReloadFailedEvent } from "./events.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
@@ -22,6 +16,7 @@ import {
   type LogMode,
 } from "./logging.ts"
 import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
+import { createDaemonRuntime, type DaemonRuntime } from "./runtime.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
@@ -100,6 +95,7 @@ async function runConfiguredDaemon({
   const ownsStore = store == null
   store ??= openComposedDaemonStore()
   let ipcServer: DaemonServer | undefined
+  let daemonRuntime: DaemonRuntime | undefined
 
   try {
     logger.log("daemon.startup", runtimeConfig)
@@ -126,31 +122,26 @@ async function runConfiguredDaemon({
       },
     })
 
+    daemonRuntime = await createDaemonRuntime(client, {
+      configManager,
+      runtimeConfig,
+      store,
+    })
+
     if (enableIpc) {
-      ipcServer = await SetupContext.run(
-        {
-          runtimeConfig,
-          configManager,
-        },
-        () =>
-          startDaemonServer(client, {
-            agentBinDir: runtimeConfig.agentBinDir,
-            port: runtimeConfig.port,
-            store,
-          }),
-      )
+      ipcServer = await startDaemonServer(daemonRuntime)
     }
 
-    const daemonEvents: Pick<DaemonRuntimeEventBus, "emit"> =
-      ipcServer?.events ?? (createEventBus(daemonRuntimeEvents) as DaemonRuntimeEventBus)
+    const daemonEvents: Pick<DaemonRuntimeEventBus, "emit"> = daemonRuntime.events
 
     emitConfigReloadFailed = (event) => daemonEvents.emit("config.reload.failed", event)
 
     const eventStreamAbort = new AbortController()
     let eventStreamTask: Promise<void> | null = null
 
-    if (enableStream && ipcServer && ipcServer.backendEventHandlers.length > 0) {
-      const { daemonUrl, port, backendEventHandlers } = ipcServer
+    if (enableStream && ipcServer && daemonRuntime.backendEventHandlers.length > 0) {
+      const { daemonUrl, port } = ipcServer
+      const { backendEventHandlers } = daemonRuntime
 
       eventStreamTask = Promise.resolve()
         .then(async () => {
@@ -229,6 +220,9 @@ async function runConfiguredDaemon({
   } finally {
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
+    }
+    if (daemonRuntime) {
+      await daemonRuntime.close().catch(() => {})
     }
     await configManager.close().catch(() => {})
     if (ownsStore) {
