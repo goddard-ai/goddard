@@ -18,10 +18,11 @@
     }
   },
   "scripts": {
+    "alchemy:typings": "bun run ./scripts/generate-alchemy-typings.ts",
     "start": "node dist/server.mjs",
     "build": "tsdown --unused",
     "dev": "wrangler dev",
-    "deploy": "alchemy deploy",
+    "deploy": "pnpx alchemy@0.90.1 deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "oxlint",
@@ -46,7 +47,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260425.1",
-    "alchemy": "^0.90.1",
     "wrangler": "^4.71.0"
   }
 }
