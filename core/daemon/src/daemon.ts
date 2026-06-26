@@ -1,4 +1,4 @@
-import { createDaemonEventBus } from "@goddard-ai/daemon-plugin"
+import { createEventBus } from "@goddard-ai/daemon-plugin"
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
 import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
@@ -142,7 +142,7 @@ async function runConfiguredDaemon({
     }
 
     const daemonEvents: Pick<DaemonRuntimeEventBus, "emit"> =
-      ipcServer?.events ?? (createDaemonEventBus(daemonRuntimeEvents) as DaemonRuntimeEventBus)
+      ipcServer?.events ?? (createEventBus(daemonRuntimeEvents) as DaemonRuntimeEventBus)
 
     emitConfigReloadFailed = (event) => daemonEvents.emit("config.reload.failed", event)
 

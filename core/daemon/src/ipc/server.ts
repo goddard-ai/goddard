@@ -3,7 +3,7 @@ import { once } from "node:events"
 import type { Server } from "node:http"
 import { composeBackendRoutes } from "@goddard-ai/backend-plugin"
 import {
-  createDaemonEventBus,
+  createEventBus,
   type BackendEventHandler,
   type DaemonConfigProvider,
   type DaemonSetupSubstrate,
@@ -89,7 +89,7 @@ export async function startDaemonServer(
   )
   const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
   const composition = getDaemonPluginComposition()
-  const events = createDaemonEventBus({
+  const events = createEventBus({
     ...daemonRuntimeEvents,
     ...composition.events,
   })

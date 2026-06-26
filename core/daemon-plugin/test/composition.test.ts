@@ -5,7 +5,7 @@ import { z } from "zod"
 
 import {
   composePlugins,
-  createDaemonEventBus,
+  createEventBus,
   definePlugin,
   event,
   matchesDaemonEventFilter,
@@ -224,7 +224,7 @@ describe("daemon plugin composition", () => {
   })
 
   test("event bus emits observable envelopes and waits for async observers and listeners", async () => {
-    const events = createDaemonEventBus({
+    const events = createEventBus({
       "session.stopping": event<{ id: string }>({ debug: "session.lifecycle" }),
     })
     const calls: string[] = []
@@ -260,7 +260,7 @@ describe("daemon plugin composition", () => {
   })
 
   test("event bus observers can unsubscribe independently of named listeners", async () => {
-    const events = createDaemonEventBus()
+    const events = createEventBus()
     const observed: unknown[] = []
     const listened: unknown[] = []
 
