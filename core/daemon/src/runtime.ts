@@ -201,6 +201,7 @@ async function setupDaemonPlugins(
   const closeHandlers: Array<() => void | Promise<void>> = []
 
   for (const plugin of plugins) {
+    // Runtime setup intentionally shares full daemon resources; plugin isolation is type-level.
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
