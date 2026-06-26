@@ -196,7 +196,7 @@ async function setupDaemonPlugins(
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
       {
-        db: createPluginDbContext(plugin, store),
+        db: store,
         backend: createPluginBackendContext(plugin, backendClient),
         configProvider: createPluginConfigProvider(configProvider, plugin),
         events,
@@ -389,31 +389,4 @@ function mergeIpcHandlers(target: Record<string, unknown>, source: Record<string
 
     throw new Error(`Duplicate IPC handler: ${key}`)
   }
-}
-
-function createPluginDbContext(plugin: ComposedDaemonPlugin, store: ComposedDaemonStore) {
-  const schema: Record<string, unknown> = {}
-  for (const consumedPlugin of plugin.consumes ?? []) {
-    Object.assign(schema, consumedPlugin.db?.schema)
-  }
-  Object.assign(schema, plugin.db?.schema)
-
-  const contextSchema: Record<string, unknown> = {}
-  const storeRecord = store as Record<string, unknown> & {
-    readonly schema: Record<string, unknown>
-  }
-  const context: Record<string, unknown> = {
-    schema: contextSchema,
-    batch: (callback: () => unknown) => store.batch(callback),
-  }
-
-  for (const key of Object.keys(schema)) {
-    contextSchema[key] = storeRecord.schema[key]
-    Object.defineProperty(context, key, {
-      enumerable: true,
-      get: () => storeRecord[key],
-    })
-  }
-
-  return context
 }
