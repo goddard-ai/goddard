@@ -28,7 +28,14 @@ const selectorMenuMinimumFuzzyScore = 0.12
 const selectorMenuTypeaheadTimeoutMs = 700
 
 type SelectCloseReason =
-  "disabled" | "escape" | "focus-leave" | "group" | "outside" | "programmatic" | "selection"
+  | "disabled"
+  | "escape"
+  | "focus-leave"
+  | "group"
+  | "outside"
+  | "programmatic"
+  | "selection"
+  | "trigger"
 
 /** One item rendered inside a launch-session selector menu. */
 export type SessionInputSelectItem = {
@@ -100,6 +107,7 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const promptRestoreRef = useRef<(() => void) | null>(null)
   const closeReasonRef = useRef<SelectCloseReason | null>(null)
   const triggerPressPointerIdRef = useRef<number | null>(null)
+  const suppressNextTriggerClickRef = useRef(false)
   const wasOpenRef = useRef(props.open.value)
 
   function closeSelect(reason: SelectCloseReason) {
@@ -194,14 +202,20 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
       return
     }
 
+    const wasOpen = props.open.value
+
     capturePromptFocusBeforeOpen()
     triggerPressPointerIdRef.current = event.pointerId
+    suppressNextTriggerClickRef.current = !wasOpen
     props.open.value = true
 
     const clearTriggerPress = () => {
       triggerPressPointerIdRef.current = null
       window.removeEventListener("pointerup", clearTriggerPress)
       window.removeEventListener("pointercancel", clearTriggerPress)
+      setTimeout(() => {
+        suppressNextTriggerClickRef.current = false
+      }, 0)
     }
 
     window.addEventListener("pointerup", clearTriggerPress)
@@ -384,7 +398,17 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
           onPointerDown={openSelectFromTriggerPointer}
           onClick={() => {
             capturePromptFocusBeforeOpen()
-            props.open.value = true
+
+            if (suppressNextTriggerClickRef.current) {
+              suppressNextTriggerClickRef.current = false
+              return
+            }
+
+            if (props.open.value) {
+              closeSelect("trigger")
+            } else {
+              props.open.value = true
+            }
           }}
           onBlur={closeWhenFocusLeavesSelect}
           onKeyDown={(event) => {
