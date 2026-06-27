@@ -54,6 +54,9 @@ export default defineConfig({
     outDir: "../../build/views/main",
     emptyOutDir: true,
   },
+  optimizeDeps: {
+    exclude: ["state-launcher"],
+  },
   resolve: {
     conditions: ["bun"],
     tsconfigPaths: true,
