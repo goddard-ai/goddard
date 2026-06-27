@@ -19,6 +19,7 @@ import {
   activeSession,
   activeSessionHistoryResponse,
   activeSessionResponse,
+  activeSessionWorktreeResponse,
   blockedSession,
   blockedSessionChangesResponse,
   blockedSessionHistoryResponse,
@@ -97,6 +98,11 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
           blockedSessionHistoryResponse,
         ),
         queryClient.injectData(
+          goddardSdk.session.worktree.get,
+          [{ id: blockedSession.id }],
+          blockedSessionWorktreeResponse,
+        ),
+        queryClient.injectData(
           goddardSdk.session.get,
           [{ id: activeSession.id }],
           activeSessionResponse,
@@ -105,6 +111,11 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
           goddardSdk.session.history,
           [{ id: activeSession.id }],
           activeSessionHistoryResponse,
+        ),
+        queryClient.injectData(
+          goddardSdk.session.worktree.get,
+          [{ id: activeSession.id }],
+          activeSessionWorktreeResponse,
         ),
       ])
       workbenchTabSet.activateTab("main")
