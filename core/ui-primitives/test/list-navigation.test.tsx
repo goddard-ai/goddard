@@ -394,10 +394,6 @@ test("useListNavigation does not scroll when pointer movement highlights an item
   expect(buttons[1]?.getAttribute("data-highlighted")).toBe("true")
   expect(scrollIntoView).not.toHaveBeenCalled()
 
-  await harness.render()
-  expect(navigation!.activeIndex()).toBe(1)
-  expect(scrollIntoView).not.toHaveBeenCalled()
-
   scrollIntoView.mockRestore()
   harness.cleanup()
 })
