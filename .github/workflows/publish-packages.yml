@@ -164,6 +164,22 @@ jobs:
         with:
           version: ${{ env.PNPM_VERSION }}
 
+      - name: Configure release git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit package version and tag
+        env:
+          NEXT_VERSION: ${{ needs.build-pack.outputs.next }}
+          PACKAGE_RELEASE_NAME: ${{ matrix.name }}
+        run: |
+          pnpm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
+          git add package.json ../../pnpm-lock.yaml
+          git commit -m "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
+          git tag "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
+        working-directory: ${{ matrix.path }}
+
       - name: Download package artifact
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
         with:
@@ -177,20 +193,6 @@ jobs:
 
       - name: Publish package
         run: npm publish ./package.tgz --provenance --access public --ignore-scripts
-        working-directory: ${{ matrix.path }}
-
-      - name: Configure release git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Tag package version
-        env:
-          NEXT_VERSION: ${{ needs.build-pack.outputs.next }}
-          PACKAGE_RELEASE_NAME: ${{ matrix.name }}
-        run: |
-          pnpm version "$NEXT_VERSION" --message "chore(release): ${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}" --no-git-tag-version
-          git tag "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
         working-directory: ${{ matrix.path }}
 
       - name: Push release commit and tag
