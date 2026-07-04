@@ -206,14 +206,13 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
         if (index === activeIndexRef.current && !isItemDisabled(index)) {
           element.setAttribute(activeAttribute, "true")
-          const scrollOptions = getScrollOptions()
+          if (!options?.pointerOrigin) {
+            suppressPointerHighlightUntilMove()
+            const scrollOptions = getScrollOptions()
 
-          if (scrollOptions) {
-            if (!options?.pointerOrigin) {
-              suppressPointerHighlightUntilMove()
+            if (scrollOptions) {
+              element.scrollIntoView(scrollOptions)
             }
-
-            element.scrollIntoView(scrollOptions)
           }
         } else {
           element.setAttribute(activeAttribute, "false")
