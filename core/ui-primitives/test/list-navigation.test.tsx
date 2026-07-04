@@ -308,6 +308,34 @@ test("useListNavigation can focus registered items and only highlights after poi
   harness.cleanup()
 })
 
+test("useListNavigation does not scroll when pointer movement highlights an item", async () => {
+  const scrollIntoView = vi
+    .spyOn(HTMLElement.prototype, "scrollIntoView")
+    .mockImplementation(() => {})
+  const count = signal(2)
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    count,
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  await harness.render()
+  scrollIntoView.mockClear()
+
+  const buttons = harness.container.querySelectorAll("button")
+
+  buttons[1]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 1 }))
+
+  expect(navigation!.activeIndex()).toBe(1)
+  expect(buttons[1]?.getAttribute("data-highlighted")).toBe("true")
+  expect(scrollIntoView).not.toHaveBeenCalled()
+
+  scrollIntoView.mockRestore()
+  harness.cleanup()
+})
+
 test("useListNavigation ignores stale pointer enters after item updates until pointer movement", async () => {
   const count = signal(2)
   let navigation: ListNavigationController | null = null

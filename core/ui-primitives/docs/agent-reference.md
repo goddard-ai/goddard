@@ -134,16 +134,25 @@ overlay behavior in the caller but need shared active-row behavior.
 `useListNavigation` requires `count: () => number` and returns an active-index
 controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
 Enter activation, pointer hover, registered-row focus helpers, disabled-row
-skipping from DOM state, active DOM attributes, and scroll-into-view. Wrapping
-and scroll-into-view are enabled by default. Pointer hover is ignored after the
-list first appears, item registration changes, programmatic active-index
-changes, or scroll events until the pointer actually moves. Use
+skipping from DOM state, active DOM attributes, and active-row scroll visibility.
+When the active registered row changes from keyboard or programmatic movement,
+the hook calls `scrollIntoView` on that row. Pointer-origin hover changes update
+the active row without scrolling. Scrolling is enabled by default with
+`{ block: "nearest" }`; pass `scrollIntoView: false` to disable it, or pass
+custom `ScrollIntoViewOptions`.
+The hook does not create or size a scroll viewport. Callers still own list
+layout, overflow CSS, rendered rows, and `itemRef(index)` wiring. Browser
+`scrollIntoView` behavior determines which scroll ancestor moves. Pointer hover
+is ignored after the list first appears, item registration changes, programmatic
+active-index changes, or scroll events until the pointer actually moves. Use
 `shouldIgnorePointer` only for additional caller-owned suppression rules.
 
-`useSearchNavigation` adds `inputRef` for search inputs. It listens for input
-changes, resets active index, delegates movement keys to list navigation, and
-supports optional Escape handling. Keep fuzzy search, typeahead matching, and
-ranking outside the hook.
+`useSearchNavigation` adds `inputRef` for search inputs on top of
+`useListNavigation`, so it inherits the same active-row attributes, keyboard
+movement, disabled-row skipping, and scroll visibility behavior. It listens for
+input changes, resets active index, delegates movement keys to list navigation,
+and supports optional Escape handling. Keep fuzzy search, typeahead matching,
+filtering, ranking, list layout, and viewport styling outside the hook.
 
 ## Runnable examples
 
