@@ -49,6 +49,8 @@ Use `Tooltip` for non-interactive explanatory content attached to one trigger el
 Use `useListNavigation` for indexed list surfaces that need shared keyboard movement,
 active-row DOM attributes, disabled-row skipping, pointer hover highlighting, and
 scroll-into-view behavior without giving the primitive ownership of item rendering.
+Use `onActiveIndexChange` when consumers need preview-on-highlight behavior while
+leaving active-row ownership with the primitive.
 The hook keeps keyboard and programmatic active-row movement visible by calling
 `scrollIntoView` with default `{ block: "nearest" }`; pointer-origin hover
 changes update the active row without scrolling. Callers still own the scroll

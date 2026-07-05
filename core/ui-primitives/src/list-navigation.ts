@@ -47,6 +47,8 @@ export type ListNavigationOptions = {
   count: () => number
   /** Called with the active index when Enter activates an enabled row. */
   onActivate?: (index: number) => void
+  /** Called after the primitive changes the active index. */
+  onActiveIndexChange?: (index: number) => void
   /**
    * Controls whether active rows scroll into view.
    *
@@ -184,7 +186,8 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       return ignorePointerHighlightRef.current || optionsRef.current.shouldIgnorePointer?.()
     }
 
-    function syncActiveElement(options?: { pointerOrigin?: boolean }) {
+    function syncActiveElement(options?: { pointerOrigin?: boolean; previousIndex?: number }) {
+      const previousIndex = options?.previousIndex ?? activeIndexRef.current
       const count = getCount()
       const activeAttribute = getActiveAttribute()
 
@@ -218,14 +221,19 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
           element.setAttribute(activeAttribute, "false")
         }
       }
+
+      if (activeIndexRef.current !== previousIndex) {
+        optionsRef.current.onActiveIndexChange?.(activeIndexRef.current)
+      }
     }
 
     function setActiveIndexWithDirection(index: number, direction: -1 | 1) {
       const count = getCount()
+      const previousIndex = activeIndexRef.current
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement()
+        syncActiveElement({ previousIndex })
         return
       }
 
@@ -235,7 +243,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
         ? findEnabledIndex(clampedIndex, direction)
         : clampedIndex
       suppressPointerHighlightUntilMove()
-      syncActiveElement()
+      syncActiveElement({ previousIndex })
     }
 
     function setActiveIndex(index: number) {
@@ -244,10 +252,11 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
     function setActiveIndexFromPointer(index: number) {
       const count = getCount()
+      const previousIndex = activeIndexRef.current
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement({ pointerOrigin: true })
+        syncActiveElement({ pointerOrigin: true, previousIndex })
         return
       }
 
@@ -256,15 +265,16 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       activeIndexRef.current = isItemDisabled(clampedIndex)
         ? findEnabledIndex(clampedIndex, 1)
         : clampedIndex
-      syncActiveElement({ pointerOrigin: true })
+      syncActiveElement({ pointerOrigin: true, previousIndex })
     }
 
     function moveActiveIndex(delta: -1 | 1) {
       const count = getCount()
+      const previousIndex = activeIndexRef.current
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement()
+        syncActiveElement({ previousIndex })
         return
       }
 
@@ -272,7 +282,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
       activeIndexRef.current = nextIndex
       suppressPointerHighlightUntilMove()
-      syncActiveElement()
+      syncActiveElement({ previousIndex })
     }
 
     function activateActiveIndex() {
