@@ -28,6 +28,7 @@ function renderListNavigation(props: {
   capture: (controller: ListNavigationController) => void
   disabledIndexes?: Set<number>
   onActivate?: (index: number) => void
+  onActiveIndexChange?: (index: number) => void
   scrollIntoView?: boolean | ScrollIntoViewOptions
   shouldIgnorePointer?: () => boolean
   wrap?: boolean
@@ -40,6 +41,7 @@ function renderListNavigation(props: {
     const navigation = useListNavigation({
       count: () => props.count.value,
       onActivate: props.onActivate,
+      onActiveIndexChange: props.onActiveIndexChange,
       scrollIntoView: props.scrollIntoView,
       shouldIgnorePointer: props.shouldIgnorePointer,
       wrap: props.wrap,
@@ -82,6 +84,7 @@ function renderSearchNavigation(props: {
   count: Signal<number>
   capture: (controller: SearchNavigationController) => void
   onActivate?: (index: number) => void
+  onActiveIndexChange?: (index: number) => void
   onEscape?: () => void
   onQueryChange: (query: string) => void
 }) {
@@ -93,6 +96,7 @@ function renderSearchNavigation(props: {
     const navigation = useSearchNavigation({
       count: () => props.count.value,
       onActivate: props.onActivate,
+      onActiveIndexChange: props.onActiveIndexChange,
       onEscape: props.onEscape,
       onQueryChange: props.onQueryChange,
     })
@@ -203,6 +207,37 @@ test("useListNavigation clamps active index when count shrinks", async () => {
   harness.cleanup()
 })
 
+test("useListNavigation reports active index changes from primitive-owned movement", async () => {
+  const onActiveIndexChange = vi.fn()
+  const count = signal(4)
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    count,
+    onActiveIndexChange,
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  await harness.render()
+
+  pressKey(navigation!, "ArrowDown")
+  navigation!.setActiveIndex(3)
+
+  const buttons = harness.container.querySelectorAll("button")
+  buttons[2]?.dispatchEvent(new PointerEvent("pointermove", { clientX: 1, clientY: 1 }))
+
+  count.value = 2
+  await harness.render()
+
+  navigation!.resetActiveIndex()
+  navigation!.setActiveIndex(0)
+
+  expect(onActiveIndexChange.mock.calls).toEqual([[1], [3], [2], [1], [0]])
+
+  harness.cleanup()
+})
+
 test("useSearchNavigation wires input changes, reset, Enter activation, and Escape", async () => {
   const count = signal(3)
   const onActivate = vi.fn()
@@ -235,6 +270,33 @@ test("useSearchNavigation wires input changes, reset, Enter activation, and Esca
 
   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }))
   expect(onEscape).toHaveBeenCalled()
+
+  harness.cleanup()
+})
+
+test("useSearchNavigation reports active index changes from input handlers", async () => {
+  const count = signal(3)
+  const onActiveIndexChange = vi.fn()
+  let navigation: SearchNavigationController | null = null
+  const harness = renderSearchNavigation({
+    count,
+    onActiveIndexChange,
+    onQueryChange() {},
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  await harness.render()
+
+  const input = harness.container.querySelector("input")!
+
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }))
+  input.value = "abc"
+  input.dispatchEvent(new InputEvent("input", { bubbles: true }))
+
+  expect(navigation!.activeIndex()).toBe(0)
+  expect(onActiveIndexChange.mock.calls).toEqual([[1], [0]])
 
   harness.cleanup()
 })
