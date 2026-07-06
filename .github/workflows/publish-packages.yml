@@ -70,8 +70,6 @@ jobs:
             next_version="$(pnpm exec bumped-version "$PACKAGE_DIR")"
           fi
 
-          bumped_tag="${PACKAGE_RELEASE_NAME}@${next_version}"
-
           echo "current=$current_version" >> "$GITHUB_OUTPUT"
           echo "next=$next_version" >> "$GITHUB_OUTPUT"
 
@@ -195,11 +193,18 @@ jobs:
         run: npm publish ./package.tgz --provenance --access public --ignore-scripts
         working-directory: ${{ matrix.path }}
 
+      - name: Create release app token
+        id: release-app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Push release commit and tag
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           NEXT_VERSION: ${{ needs.build-pack.outputs.next }}
           PACKAGE_RELEASE_NAME: ${{ matrix.name }}
         run: |
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push origin HEAD:${GITHUB_REF_NAME} "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "${PACKAGE_RELEASE_NAME}@${NEXT_VERSION}"
