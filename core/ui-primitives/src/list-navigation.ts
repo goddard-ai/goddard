@@ -87,6 +87,7 @@ export type SearchNavigationOptions = ListNavigationOptions & {
 
 const defaultActiveAttribute = "data-highlighted"
 const defaultScrollOptions: ScrollIntoViewOptions = { block: "nearest" }
+type ActiveIndexOrigin = "navigation" | "pointer"
 
 /**
  * Manages DOM-backed active-row state for indexed list surfaces.
@@ -103,6 +104,8 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
   const itemCleanupRef = useRef(new Map<number, () => void>())
   const ignorePointerHighlightRef = useRef(true)
   const lastPointerPositionRef = useRef<{ x: number; y: number } | null>(null)
+  const activeIndexOriginRef = useRef<ActiveIndexOrigin>("navigation")
+  const syncActiveElementRef = useRef(() => {})
 
   optionsRef.current = options
 
@@ -186,7 +189,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       return ignorePointerHighlightRef.current || optionsRef.current.shouldIgnorePointer?.()
     }
 
-    function syncActiveElement(options?: { pointerOrigin?: boolean; previousIndex?: number }) {
+    function syncActiveElement(options?: { allowScroll?: boolean; previousIndex?: number }) {
       const previousIndex = options?.previousIndex ?? activeIndexRef.current
       const count = getCount()
       const activeAttribute = getActiveAttribute()
@@ -209,7 +212,7 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
         if (index === activeIndexRef.current && !isItemDisabled(index)) {
           element.setAttribute(activeAttribute, "true")
-          if (!options?.pointerOrigin) {
+          if (options?.allowScroll && activeIndexOriginRef.current === "navigation") {
             suppressPointerHighlightUntilMove()
             const scrollOptions = getScrollOptions()
 
@@ -227,13 +230,16 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       }
     }
 
+    syncActiveElementRef.current = syncActiveElement
+
     function setActiveIndexWithDirection(index: number, direction: -1 | 1) {
       const count = getCount()
       const previousIndex = activeIndexRef.current
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement({ previousIndex })
+        activeIndexOriginRef.current = "navigation"
+        syncActiveElement({ allowScroll: true, previousIndex })
         return
       }
 
@@ -242,8 +248,9 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       activeIndexRef.current = isItemDisabled(clampedIndex)
         ? findEnabledIndex(clampedIndex, direction)
         : clampedIndex
+      activeIndexOriginRef.current = "navigation"
       suppressPointerHighlightUntilMove()
-      syncActiveElement({ previousIndex })
+      syncActiveElement({ allowScroll: true, previousIndex })
     }
 
     function setActiveIndex(index: number) {
@@ -256,7 +263,8 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement({ pointerOrigin: true, previousIndex })
+        activeIndexOriginRef.current = "pointer"
+        syncActiveElement({ previousIndex })
         return
       }
 
@@ -265,7 +273,8 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
       activeIndexRef.current = isItemDisabled(clampedIndex)
         ? findEnabledIndex(clampedIndex, 1)
         : clampedIndex
-      syncActiveElement({ pointerOrigin: true, previousIndex })
+      activeIndexOriginRef.current = "pointer"
+      syncActiveElement({ previousIndex })
     }
 
     function moveActiveIndex(delta: -1 | 1) {
@@ -274,15 +283,17 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
 
       if (count === 0) {
         activeIndexRef.current = 0
-        syncActiveElement({ previousIndex })
+        activeIndexOriginRef.current = "navigation"
+        syncActiveElement({ allowScroll: true, previousIndex })
         return
       }
 
       const nextIndex = findEnabledIndex(activeIndexRef.current + delta, delta)
 
       activeIndexRef.current = nextIndex
+      activeIndexOriginRef.current = "navigation"
       suppressPointerHighlightUntilMove()
-      syncActiveElement({ previousIndex })
+      syncActiveElement({ allowScroll: true, previousIndex })
     }
 
     function activateActiveIndex() {
@@ -394,7 +405,9 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
   }, [])
 
   useLayoutEffect(() => {
-    controller.setActiveIndex(controller.activeIndex())
+    // Registration and render-driven reconciliation must not replay scrolling
+    // for an active index that came from pointer hover during manual scroll.
+    syncActiveElementRef.current()
   })
 
   useLayoutEffect(() => {
