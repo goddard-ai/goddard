@@ -406,12 +406,15 @@ export default {
     transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   tabDirty: css({
-    gridArea: "1 / 1",
+    position: "absolute",
+    top: "50%",
+    right: "8px",
     width: "6px",
     height: "6px",
     borderRadius: "999px",
     backgroundColor: "accentStrong",
-    transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    transform: "translateY(-50%)",
+    pointerEvents: "none",
     zIndex: "1",
   }),
   tabClose: css({

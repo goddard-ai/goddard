@@ -492,19 +492,14 @@ function TabButton(props: {
         />
 
         @if (props.dirty) {
-          <span
-            aria-hidden="true"
-            class={styles.tabDirty}
-            style={{
-              opacity: showCloseButton ? "0" : "1",
-            }}
-          />
+          <span aria-hidden="true" class={styles.tabDirty} />
         }
 
         <button
           aria-label={`Close ${props.title}`}
           class={styles.tabClose}
           style={{
+            marginRight: props.dirty ? "12px" : "0",
             opacity: showCloseButton ? "1" : "0",
             pointerEvents: showCloseButton ? "auto" : "none",
           }}
