@@ -16,6 +16,7 @@ import {
   prepareInboxItemWorkbenchTarget,
   warmPreparedInboxWorkbenchTargetOnIdle,
 } from "~/inbox/open.ts"
+import { getUnreadInboxAttentionListRequest } from "~/inbox/queries.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -338,7 +339,7 @@ function AppShellNextInboxAttentionButton(props: {
   })
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
-      { statuses: ["unread"], limit: 100 },
+      getUnreadInboxAttentionListRequest(),
     ],
   })
   const nextItem = getNextUnreadInboxAttentionItem(items)
@@ -405,7 +406,7 @@ function AppShellSidebarQueryContent(props: {
 }) @{
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
-      { statuses: ["unread"], limit: 100 },
+      getUnreadInboxAttentionListRequest(),
     ],
   })
 

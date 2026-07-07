@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 
 import { allInboxStatuses, DEFAULT_INBOX_FILTER_ID, inboxFilterDefinitions } from "./filters.ts"
-import { getInboxListRequest } from "./queries.ts"
+import { getInboxListRequest, getUnreadInboxAttentionListRequest } from "./queries.ts"
 
 test("default inbox list request asks the daemon for unread and read active items", () => {
   expect(getInboxListRequest({ filterId: DEFAULT_INBOX_FILTER_ID })).toEqual({
@@ -14,6 +14,13 @@ test("search inbox list request can ask the daemon for every status", () => {
   expect(getInboxListRequest({ statuses: allInboxStatuses })).toEqual({
     statuses: ["unread", "read", "saved", "replied", "completed", "archived"],
     limit: 50,
+  })
+})
+
+test("attention list request asks the daemon for unread items only", () => {
+  expect(getUnreadInboxAttentionListRequest()).toEqual({
+    statuses: ["unread"],
+    limit: 100,
   })
 })
 

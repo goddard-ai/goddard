@@ -6,7 +6,7 @@ import {
   type LaunchCleanup,
 } from "state-launcher"
 
-import { getInboxListRequest } from "~/inbox/queries.ts"
+import { getInboxListRequest, getUnreadInboxAttentionListRequest } from "~/inbox/queries.ts"
 import { queryClient } from "~/lib/query.ts"
 import type { MainTab } from "~/main-tab.ts"
 import { goddardSdk } from "~/sdk.ts"
@@ -80,6 +80,11 @@ function defineLaunchableStates({ closeLauncher, mainTab, workbenchTabSet }: Lau
         queryClient.injectData(
           goddardSdk.inbox.list,
           [getInboxListRequest()],
+          inboxAttentionResponse,
+        ),
+        queryClient.injectData(
+          goddardSdk.inbox.list,
+          [getUnreadInboxAttentionListRequest()],
           inboxAttentionResponse,
         ),
         queryClient.injectData(
