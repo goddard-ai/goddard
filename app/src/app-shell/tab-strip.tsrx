@@ -452,11 +452,7 @@ function TabButton(props: {
       class={styles.tabButton}
       style={{
         paddingLeft: "8px",
-        paddingRight: isHome
-          ? "14px"
-          : props.dirty
-            ? "28px"
-            : "8px",
+        paddingRight: isHome ? "14px" : "8px",
       }}
       role="tab"
       type="button"
@@ -480,7 +476,7 @@ function TabButton(props: {
       >{props.title}</span>
     </button>
 
-    @if (!isHome) {
+    @if (!isHome && (props.dirty || showCloseButton)) {
       <div
         class={styles.tabTail}
         onClick={() => {
@@ -495,15 +491,10 @@ function TabButton(props: {
           }}
         />
 
-        @if (props.dirty) {
-          <span aria-hidden="true" class={styles.tabDirty} />
-        }
-
         <button
           aria-label={`Close ${props.title}`}
           class={styles.tabClose}
           style={{
-            marginRight: props.dirty ? "12px" : "0",
             opacity: showCloseButton ? "1" : "0",
             pointerEvents: showCloseButton ? "auto" : "none",
           }}
@@ -515,6 +506,10 @@ function TabButton(props: {
         >
           <InlineSvgIcon icon="close-tab" size="9px" />
         </button>
+
+        @if (props.dirty) {
+          <span aria-hidden="true" class={styles.tabDirty} />
+        }
       </div>
     }
   </div>
