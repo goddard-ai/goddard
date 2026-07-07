@@ -3,7 +3,7 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { ChevronRight, Folder } from "lucide-react"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
 
 import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
@@ -54,8 +54,10 @@ const mainTabCommands: Record<MainTabItemId, AppCommand> = {
 export function AppShellChrome() @{
   const mainTab = useMainTab()
   const workbenchTabSet = useWorkbenchTabSet()
+  const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null)
   const topBarSelectorShortcutActive = workbenchTabSet.activeClosableTab?.kind !== "project"
   const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
+  const confirmCloseTab = confirmCloseTabId ? workbenchTabSet.tabs[confirmCloseTabId] ?? null : null
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
@@ -68,9 +70,24 @@ export function AppShellChrome() @{
     }
   }
 
+  function requestCloseTab(tabId: string) {
+    const tab = workbenchTabSet.tabs[tabId]
+
+    if (!tab) {
+      return
+    }
+
+    if (tab.dirty) {
+      setConfirmCloseTabId(tab.id)
+      return
+    }
+
+    workbenchTabSet.closeTab(tab.id)
+  }
+
   useAppCommand(AppCommand.workbench.closeActiveTab, () => {
     if (workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id) {
-      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+      requestCloseTab(workbenchTabSet.activeTabId)
     }
   })
 
@@ -267,7 +284,7 @@ export function AppShellChrome() @{
           }
         }}
         onCloseTab={(id) => {
-          workbenchTabSet.closeTab(id)
+          requestCloseTab(id)
         }}
         onNavigateBack={() => {
           applyWorkbenchNavigation(workbenchTabSet.navigateBack())
@@ -305,7 +322,90 @@ export function AppShellChrome() @{
         }
       </div>
     </div>
+
+    @if (confirmCloseTab?.dirty) {
+      <AppShellDirtyTabCloseDialog
+        tabTitle={confirmCloseTab.title}
+        onCancel={() => {
+          setConfirmCloseTabId(null)
+        }}
+        onConfirm={() => {
+          workbenchTabSet.closeTab(confirmCloseTab.id)
+          setConfirmCloseTabId(null)
+        }}
+      />
+    }
   </div>
+}
+
+function AppShellDirtyTabCloseDialog(props: {
+  tabTitle: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) @{
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+
+    if (!dialog) {
+      return
+    }
+
+    if (!dialog.open) {
+      dialog.showModal()
+    }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close()
+      }
+    }
+  }, [])
+
+  <dialog
+    ref={dialogRef}
+    aria-labelledby="dirty-tab-close-title"
+    class={styles.confirmDialog}
+    onCancel={(event) => {
+      event.preventDefault()
+      props.onCancel()
+    }}
+  >
+    <form
+      class={styles.confirmDialogContent}
+      method="dialog"
+      onSubmit={(event) => {
+        event.preventDefault()
+        props.onConfirm()
+      }}
+    >
+      <div>
+        <h2 id="dirty-tab-close-title" class={styles.confirmDialogTitle}>
+          {t`Close tab?`}
+        </h2>
+        <p class={styles.confirmDialogBody}>
+          {t`"${props.tabTitle}" has unsubmitted or unsaved changes.`}
+        </p>
+      </div>
+      <div class={styles.confirmDialogActions}>
+        <button
+          class={cx(styles.confirmDialogButton, styles.confirmDialogCancelButton)}
+          type="button"
+          onClick={props.onCancel}
+        >
+          {t`Cancel`}
+        </button>
+        <button
+          autoFocus={true}
+          class={cx(styles.confirmDialogButton, styles.confirmDialogConfirmButton)}
+          type="submit"
+        >
+          {t`Close Tab`}
+        </button>
+      </div>
+    </form>
+  </dialog>
 }
 
 function AppShellNextInboxAttentionSlot(props: {
