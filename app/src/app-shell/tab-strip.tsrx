@@ -452,7 +452,11 @@ function TabButton(props: {
       class={styles.tabButton}
       style={{
         paddingLeft: "8px",
-        paddingRight: isHome ? "14px" : "8px",
+        paddingRight: isHome
+          ? "14px"
+          : props.dirty
+            ? "28px"
+            : "8px",
       }}
       role="tab"
       type="button"
