@@ -1,7 +1,7 @@
 import { t } from "@lingui/core/macro"
 import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
 import { cx } from "@goddard-ai/styled-system/css"
-import { useSignal } from "@preact/signals"
+import { signal, useSignal } from "@preact/signals"
 import {
   CheckCircle2,
   ChevronDown,
@@ -16,6 +16,7 @@ import { castProtected, SigmaTarget, useSigmaSync } from "preact-sigma"
 import { isObject } from "radashi"
 
 import { Composer } from "./composer.tsrx"
+import { hasPromptContent } from "./composer-content.ts"
 import { loadSessionChatComposerSuggestions } from "./composer-suggestion-loader.ts"
 import { SessionChat } from "./model.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
@@ -55,6 +56,8 @@ import {
   steerSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
+import type { SessionInputPromptBlocks } from "~/session-input/input.tsrx"
+import { useTabContext } from "~/tab-context.tsrx"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
 export default function SessionChatView(props: {
@@ -431,6 +434,14 @@ function SessionChatComposerDock(props: {
   const draftModelId = useSignal<string | null>(null)
   const draftThinkingValue = useSignal<string | null>(null)
   const shortcutRegistry = useShortcutRegistry()
+  const tabContext = useTabContext()
+  const workbenchTabSet = useWorkbenchTabSet()
+  const draftPromptBlocks = useWorkbenchCachedValue(
+    "sessionChatComposerDraft",
+    () => ({
+      value: signal<SessionInputPromptBlocks>([]),
+    }),
+  )
   const sessionModelConfig = deriveSessionLaunchModelConfig({
     configOptions: props.chat.session.configOptions,
   })
@@ -585,6 +596,10 @@ function SessionChatComposerDock(props: {
     )
   }, { active: thinkingOption !== null })
 
+  useEffect(() => {
+    workbenchTabSet.setTabDirty(tabContext.id, hasPromptContent(draftPromptBlocks.value))
+  }, [draftPromptBlocks, tabContext.id, workbenchTabSet])
+
   async function applyDraftSessionControls() {
     const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
     const selectedThinkingValue = draftThinkingValue.value ?? thinkingOption?.currentValue ?? null
@@ -656,6 +671,7 @@ function SessionChatComposerDock(props: {
       enableQueueSubmitShortcut={true}
       footerControls={footerControls}
       helperText={null}
+      initialPrompt={draftPromptBlocks.value}
       loadSuggestions={async (input) => {
         return loadSessionChatComposerSuggestions({
           cwd: props.chat.session.cwd,
@@ -665,7 +681,10 @@ function SessionChatComposerDock(props: {
           query: input.query,
         })
       }}
-      onPromptChange={() => {
+      onPromptChange={(prompt) => {
+        draftPromptBlocks.value = prompt
+        workbenchTabSet.setTabDirty(tabContext.id, hasPromptContent(prompt))
+
         if (submitError) {
           props.page.submitPrompt.clearError()
         }
