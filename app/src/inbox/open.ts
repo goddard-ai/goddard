@@ -85,10 +85,12 @@ export async function prepareInboxItemWorkbenchTarget(
 
 /** Opens the workbench tab linked to one daemon inbox row. */
 export async function openInboxItemInWorkbench(input: {
+  closeCurrentCleanTab?: boolean
   item: InboxItem
   preparedTarget?: PreparedInboxWorkbenchTarget | null
-  workbenchTabSet: Pick<WorkbenchTabSet, "openOrFocusTab">
+  workbenchTabSet: Pick<WorkbenchTabSet, "activeTabId" | "closeTabIfClean" | "openOrFocusTab">
 }) {
+  const previousActiveTabId = input.workbenchTabSet.activeTabId
   const target =
     input.preparedTarget && isPreparedInboxWorkbenchTargetCurrent(input.item, input.preparedTarget)
       ? input.preparedTarget
@@ -98,7 +100,11 @@ export async function openInboxItemInWorkbench(input: {
     return
   }
 
-  input.workbenchTabSet.openOrFocusTab(target.tab)
+  const openedTab = input.workbenchTabSet.openOrFocusTab(target.tab)
+
+  if (input.closeCurrentCleanTab === true && previousActiveTabId !== openedTab.id) {
+    input.workbenchTabSet.closeTabIfClean(previousActiveTabId)
+  }
 }
 
 /** Warms heavier resources for one already prepared inbox target after idle time. */

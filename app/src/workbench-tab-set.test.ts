@@ -65,6 +65,19 @@ test("WorkbenchTabSet focuses the most recently used open tab after closing the 
   expect(tabSet.activeTabId).toBe("session:session-1")
 })
 
+test("WorkbenchTabSet closes a tab only when it is clean", () => {
+  const tabSet = new WorkbenchTabSet()
+
+  openSessionTabs(tabSet, 2)
+  tabSet.setTabDirty("session:session-1", true)
+
+  expect(tabSet.closeTabIfClean("session:session-1")).toBe(false)
+  expect(tabSet.tabs["session:session-1"]).toBeDefined()
+
+  expect(tabSet.closeTabIfClean("session:session-2")).toBe(true)
+  expect(tabSet.tabs["session:session-2"]).toBeUndefined()
+})
+
 test("WorkbenchTabSet can refocus the main tab after closing the active tab", () => {
   const tabSet = new WorkbenchTabSet()
 

@@ -286,6 +286,61 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
   })
 })
 
+test("openInboxItemInWorkbench closes the previous clean tab when requested", async () => {
+  const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  workbenchTabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "ses_previous",
+      sessionTitle: "Previous session",
+    },
+  })
+
+  await openInboxItemInWorkbench({
+    closeCurrentCleanTab: true,
+    item: createFixtureInboxItem({ entityId: "ses_next" }),
+    workbenchTabSet,
+  })
+
+  expect(workbenchTabSet.tabs["session:ses_previous"]).toBeUndefined()
+  expect(workbenchTabSet.activeClosableTab).toMatchObject({
+    id: "session:ses_next",
+    kind: "sessionChat",
+  })
+})
+
+test("openInboxItemInWorkbench keeps the previous dirty tab when requested", async () => {
+  const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  workbenchTabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "ses_previous_dirty",
+      sessionTitle: "Previous dirty session",
+    },
+  })
+  workbenchTabSet.setTabDirty("session:ses_previous_dirty", true)
+
+  await openInboxItemInWorkbench({
+    closeCurrentCleanTab: true,
+    item: createFixtureInboxItem({ entityId: "ses_next_dirty" }),
+    workbenchTabSet,
+  })
+
+  expect(workbenchTabSet.tabs["session:ses_previous_dirty"]).toBeDefined()
+  expect(workbenchTabSet.activeClosableTab).toMatchObject({
+    id: "session:ses_next_dirty",
+    kind: "sessionChat",
+  })
+})
+
 test("openInboxItemInWorkbench opens pull request rows as pull request tabs", async () => {
   const { openInboxItemInWorkbench } = await import("./open.ts")
   const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")

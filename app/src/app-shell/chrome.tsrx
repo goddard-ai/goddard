@@ -352,6 +352,7 @@ function AppShellNextInboxAttentionButton(props: {
     try {
       const preparedTarget = await preloaderRef.current?.resolve(item) ?? null
       await openInboxItemInWorkbench({
+        closeCurrentCleanTab: true,
         item,
         preparedTarget,
         workbenchTabSet: props.workbenchTabSet,

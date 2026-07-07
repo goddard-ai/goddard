@@ -204,7 +204,7 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     if (this.tabs[tab.id]) {
       this.tabs[tab.id] = tab
       this.activateTab(tab.id)
-      return
+      return tab
     }
 
     if (this.orderedTabIds.length >= WORKBENCH_TAB_LIMIT) {
@@ -218,6 +218,8 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
       kind: "detail",
       tabId: tab.id,
     })
+
+    return tab
   }
 
   /** Activates one visible tab and updates the recency stack used for LRU eviction. */
@@ -265,6 +267,18 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
     }
   }
 
+  /** Closes one closable tab only when it has no unsaved or unsubmitted state. */
+  closeTabIfClean(tabId: string) {
+    const tab = this.tabs[tabId]
+
+    if (!tab || tab.dirty) {
+      return false
+    }
+
+    this.closeTab(tabId)
+    return true
+  }
+
   /** Enforces the tab cap by closing the least-recently-used closable tab. */
   closeLeastRecentlyUsedTab() {
     const leastRecentTabId =
@@ -300,6 +314,20 @@ export class WorkbenchTabSet extends Sigma<WorkbenchTabSetState> {
 
     nextOrder.splice(insertIndex, 0, fromId)
     this.orderedTabIds = nextOrder
+  }
+
+  /** Marks one closable tab as having or not having unsaved or unsubmitted state. */
+  setTabDirty(tabId: string, dirty: boolean) {
+    const tab = this.tabs[tabId]
+
+    if (!tab || tab.dirty === dirty) {
+      return
+    }
+
+    this.tabs[tabId] = {
+      ...tab,
+      dirty,
+    } as WorkbenchTab
   }
 
   /** Navigates backward through available workbench locations. */
