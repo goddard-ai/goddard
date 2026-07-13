@@ -17,6 +17,7 @@ The daemon may host multiple distinct automation domains, including:
 - Workforce orchestration for multi-agent delegation
 
 The daemon also owns shared launch behavior for fresh isolated session worktrees when supported session flows request worktree isolation.
+It also owns durable repository task state used by clients and agents to coordinate planned work without turning tasks into an automation runtime.
 
 ## Boundaries
 - The daemon is the lifecycle authority for supported runtimes.
@@ -40,4 +41,5 @@ Background automation moved toward daemon-owned runtime management because unatt
 
 * `spec/daemon/pr-feedback.md`: PR feedback flow behavior.
 * `spec/daemon/session-worktree-preparation.md`: Fresh isolated session worktree preparation and its trust boundaries.
+* `spec/daemon/tasks.md`: Durable repository task planning and coordination.
 * `spec/daemon/workforce.md`: Workforce orchestration for delegated multi-agent work.
