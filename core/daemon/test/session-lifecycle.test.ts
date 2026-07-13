@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
@@ -2243,6 +2243,36 @@ test("session worktree stores a null merge target when the source checkout HEAD 
   expect(readinessBefore.readiness.status).toBe("merge_target_branch_required")
   expect(updated.mergeTargetBranch).toBe(targetBranch)
   expect(updated.readiness.status).toBe("not_ahead")
+})
+
+test("session worktree readiness reports a persisted checkout missing on disk", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await send(client, "session.create", {
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Say hello in one sentence.",
+    oneShot: true,
+  })
+
+  const fetchedWorktree = await send(client, "session.worktree.get", { id: created.session.id })
+  expect(fetchedWorktree.worktree).toBeTruthy()
+  await rm(fetchedWorktree.worktree!.worktreeDir, { recursive: true, force: true })
+
+  const readiness = await send(client, "session.worktree.mergeReadiness", {
+    id: created.session.id,
+  })
+
+  expect(readiness.readiness).toMatchObject({
+    status: "worktree_missing",
+    syncMounted: false,
+    willAutoUnmountSync: false,
+  })
 })
 
 test("session worktree merge fast-forwards the target branch and auto-unmounts sync", async () => {

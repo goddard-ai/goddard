@@ -61,6 +61,26 @@ export async function getSessionWorktreeMergeReadiness(params: {
   sessionPrNumber: number | null
 }) {
   const readiness = createDefaultReadiness(params.mergeTargetBranch)
+  let normalizedPrimaryDir: string
+  let normalizedWorktreeDir: string
+  try {
+    normalizedPrimaryDir = normalizeExistingPath(params.primaryDir)
+    normalizedWorktreeDir = normalizeExistingPath(params.worktreeDir)
+  } catch {
+    return {
+      ...readiness,
+      status: "worktree_missing",
+    } satisfies SessionWorktreeMergeReadiness
+  }
+
+  const worktreeHeadOid = await resolveHeadOid(normalizedWorktreeDir)
+  if (!worktreeHeadOid) {
+    return {
+      ...readiness,
+      status: "worktree_missing",
+    } satisfies SessionWorktreeMergeReadiness
+  }
+
   const syncState = await inspectSyncState(params.worktreeDir)
 
   if (params.sessionPrNumber !== null) {
@@ -90,34 +110,10 @@ export async function getSessionWorktreeMergeReadiness(params: {
     } satisfies SessionWorktreeMergeReadiness
   }
 
-  let normalizedPrimaryDir: string
-  let normalizedWorktreeDir: string
-  try {
-    normalizedPrimaryDir = normalizeExistingPath(params.primaryDir)
-    normalizedWorktreeDir = normalizeExistingPath(params.worktreeDir)
-  } catch {
-    return {
-      ...readiness,
-      status: "worktree_missing",
-      syncMounted: syncState.syncMounted,
-      willAutoUnmountSync: syncState.willAutoUnmountSync,
-    } satisfies SessionWorktreeMergeReadiness
-  }
-
-  const [targetBranchHeadOid, worktreeHeadOid, worktreeHeadBranch] = await Promise.all([
+  const [targetBranchHeadOid, worktreeHeadBranch] = await Promise.all([
     resolveRefOid(normalizedPrimaryDir, toLocalBranchRef(params.mergeTargetBranch)),
-    resolveHeadOid(normalizedWorktreeDir),
     resolveGitHeadRef(normalizedWorktreeDir).catch(() => null),
   ])
-
-  if (!worktreeHeadOid) {
-    return {
-      ...readiness,
-      status: "worktree_missing",
-      syncMounted: syncState.syncMounted,
-      willAutoUnmountSync: syncState.willAutoUnmountSync,
-    } satisfies SessionWorktreeMergeReadiness
-  }
 
   const nextReadiness = {
     ...readiness,
