@@ -10,6 +10,7 @@ import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
 import { taskPlugin } from "@goddard-ai/task/daemon"
 import { terminalPlugin } from "@goddard-ai/terminal/daemon"
+import { vscodeTaskPlugin } from "@goddard-ai/vscode-task/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
 const defaultDaemonPlugins = [
@@ -24,6 +25,7 @@ const defaultDaemonPlugins = [
   reviewSessionPlugin,
   loopPlugin,
   terminalPlugin,
+  vscodeTaskPlugin,
   workforcePlugin,
 ] as const
 

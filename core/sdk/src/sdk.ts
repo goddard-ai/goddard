@@ -21,6 +21,7 @@ import {
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
 import { taskSdkPlugin } from "@goddard-ai/task/sdk"
 import { terminalSdkPlugin, type GoddardTerminalNamespace } from "@goddard-ai/terminal/sdk"
+import { vscodeTaskSdkPlugin, type GoddardVscodeTaskNamespace } from "@goddard-ai/vscode-task/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 import type * as acp from "acp-client/protocol"
 
@@ -46,6 +47,7 @@ const sdkPlugins = composeSdkPlugins([
   sessionSdkPlugin,
   taskSdkPlugin,
   terminalSdkPlugin,
+  vscodeTaskSdkPlugin,
   workforceSdkPlugin,
 ])
 
@@ -171,6 +173,7 @@ export class GoddardSdk {
   readonly loop: FeatureSdkNamespaces["loop"]
   readonly task: FeatureSdkNamespaces["task"]
   readonly terminal: GoddardTerminalNamespace
+  readonly vscodeTask: GoddardVscodeTaskNamespace
   readonly workforce: FeatureSdkNamespaces["workforce"]
 
   constructor(options: GoddardClientOptions) {
@@ -193,6 +196,7 @@ export class GoddardSdk {
     this.loop = features.loop
     this.task = features.task
     this.terminal = features.terminal as GoddardTerminalNamespace
+    this.vscodeTask = features.vscodeTask as GoddardVscodeTaskNamespace
     this.workforce = features.workforce
   }
 }

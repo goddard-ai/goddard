@@ -30,6 +30,7 @@ catalog:
   radashi: ^12.8.0
   rouzer: ^5.3.1
   tabbable: ^6.4.0
+  vscode-tasks-engine: ^0.1.0
   zod: ^4.3.6
 
 minimumReleaseAge: 20160 # 14 days

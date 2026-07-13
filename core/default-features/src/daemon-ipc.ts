@@ -11,6 +11,7 @@ import { coreDaemonIpcRoutes } from "@goddard-ai/schema/daemon-ipc"
 import { sessionIpcRoutes } from "@goddard-ai/session/daemon-ipc"
 import { taskIpcRoutes } from "@goddard-ai/task/daemon-ipc"
 import { terminalIpcRoutes } from "@goddard-ai/terminal/daemon-ipc"
+import { vscodeTaskIpcRoutes } from "@goddard-ai/vscode-task/daemon-ipc"
 import { workforceIpcRoutes } from "@goddard-ai/workforce/daemon-ipc"
 
 const defaultDaemonFeatureIpcRoutes = [
@@ -25,6 +26,7 @@ const defaultDaemonFeatureIpcRoutes = [
   reviewSessionIpcRoutes,
   loopIpcRoutes,
   terminalIpcRoutes,
+  vscodeTaskIpcRoutes,
   workforceIpcRoutes,
 ] as const
 

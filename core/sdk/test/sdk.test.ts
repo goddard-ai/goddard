@@ -123,6 +123,7 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "action")).toBe(true)
     expect(Object.hasOwn(sdk, "loop")).toBe(true)
     expect(Object.hasOwn(sdk, "task")).toBe(true)
+    expect(Object.hasOwn(sdk, "vscodeTask")).toBe(true)
     expect(Object.hasOwn(sdk, "workforce")).toBe(true)
   })
 

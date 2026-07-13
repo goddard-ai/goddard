@@ -55,6 +55,7 @@
     "@goddard-ai/session": "workspace:*",
     "@goddard-ai/task": "workspace:*",
     "@goddard-ai/terminal": "workspace:*",
+    "@goddard-ai/vscode-task": "workspace:*",
     "@goddard-ai/workforce": "workspace:*"
   }
 }

@@ -69,6 +69,9 @@ catalogs:
     tabbable:
       specifier: ^6.4.0
       version: 6.4.0
+    vscode-tasks-engine:
+      specifier: ^0.1.0
+      version: 0.1.0
     zod:
       specifier: ^4.3.6
       version: 4.4.3
@@ -649,6 +652,9 @@ importers:
       '@goddard-ai/terminal':
         specifier: workspace:*
         version: link:../../features/terminal
+      '@goddard-ai/vscode-task':
+        specifier: workspace:*
+        version: link:../../features/vscode-task
       '@goddard-ai/workforce':
         specifier: workspace:*
         version: link:../../features/workforce
@@ -776,6 +782,9 @@ importers:
       '@goddard-ai/terminal':
         specifier: workspace:*
         version: link:../../features/terminal
+      '@goddard-ai/vscode-task':
+        specifier: workspace:*
+        version: link:../../features/vscode-task
       '@goddard-ai/workforce':
         specifier: workspace:*
         version: link:../../features/workforce
@@ -1201,6 +1210,27 @@ importers:
       '@goddard-ai/sdk-plugin':
         specifier: workspace:*
         version: link:../../core/sdk-plugin
+
+  features/vscode-task:
+    dependencies:
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
+      '@goddard-ai/terminal':
+        specifier: workspace:*
+        version: link:../terminal
+      vscode-tasks-engine:
+        specifier: 'catalog:'
+        version: 0.1.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   features/workforce:
     dependencies:
@@ -6446,6 +6476,9 @@ packages:
       jsdom:
         optional: true
 
+  vscode-tasks-engine@0.1.0:
+    resolution: {integrity: sha512-dC2FOR3Zw7c2rXYoLv3ODzjxlA90WtKdMwETybgxrl4rqRyJcLIYlwQb4mX+9QA8FNps30C69N+KuvGv0EpcIg==}
+
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
 
@@ -11666,6 +11699,10 @@ snapshots:
       happy-dom: 20.9.0
     transitivePeerDependencies:
       - msw
+
+  vscode-tasks-engine@0.1.0:
+    dependencies:
+      jsonc-parser: 3.3.1
 
   vscode-uri@3.1.0: {}
 

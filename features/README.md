@@ -120,6 +120,13 @@ feature events, and SDK task namespace construction. Sessions own execution,
 workforce requests own delegated runtime work, inbox items own human attention,
 and daemon/core packages own process and database lifecycle.
 
+`features/vscode-task` owns workspace `.vscode/tasks.json` inspection,
+resolution previews, daemon task-graph execution, connection-scoped lifecycle
+and output streams, stable task IPC errors, and SDK namespace construction. The
+task engine owns supported VS Code task semantics, while PTY process realization
+is consumed from the terminal feature. App task UI and Actions remain outside
+this feature boundary.
+
 `features/workforce` owns workforce schemas, workforce IPC, daemon workforce
 configuration discovery and initialization, workforce manager/runtime modules,
 and SDK workforce namespace construction. The standalone
