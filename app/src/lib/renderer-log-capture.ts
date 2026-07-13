@@ -65,13 +65,15 @@ export function installRendererLogCapture(writeLog: RendererLogWriter) {
   window.addEventListener("error", (event) => {
     void writeLog({
       level: "error",
-      message: formatErrorEvent(event),
+      message: "app.renderer.uncaught_error",
+      properties: toErrorProperties(event.error ?? event.message),
     })
   })
   window.addEventListener("unhandledrejection", (event) => {
     void writeLog({
       level: "error",
-      message: formatConsoleValue(event.reason),
+      message: "app.renderer.unhandled_rejection",
+      properties: toErrorProperties(event.reason),
     })
   })
 }
@@ -173,10 +175,6 @@ function readRendererDebugLog(args: unknown[]): RendererDebugLogInput | null {
     properties:
       record.properties && typeof record.properties === "object" ? record.properties : undefined,
   }
-}
-
-function formatErrorEvent(event: ErrorEvent) {
-  return event.error ? formatConsoleValue(event.error) : event.message
 }
 
 function formatConsoleValue(value: unknown) {
