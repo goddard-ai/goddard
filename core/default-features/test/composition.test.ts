@@ -16,6 +16,13 @@ test("default daemon composition includes file search", () => {
   ).toBe(true)
 })
 
+test("default daemon composition includes repository tasks", () => {
+  expect(Object.hasOwn(daemonIpcRoutes, "task")).toBe(true)
+  expect(getDefaultDaemonPluginComposition().plugins.some((plugin) => plugin.name === "task")).toBe(
+    true,
+  )
+})
+
 test("default backend composition includes backend feature routes and remote-repo events", () => {
   const composition = getDefaultBackendPluginComposition()
 

@@ -114,6 +114,12 @@ and the first-class daemon `context.session` extension that downstream feature
 packages consume. Low-level linked-worktree substrate and third-party worktree
 provider contracts remain in core packages.
 
+`features/task` owns repository-scoped task schemas, current task state,
+immutable task activity, generic task links, claim rules, daemon IPC handlers,
+feature events, and SDK task namespace construction. Sessions own execution,
+workforce requests own delegated runtime work, inbox items own human attention,
+and daemon/core packages own process and database lifecycle.
+
 `features/workforce` owns workforce schemas, workforce IPC, daemon workforce
 configuration discovery and initialization, workforce manager/runtime modules,
 and SDK workforce namespace construction. The standalone

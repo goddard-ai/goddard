@@ -628,6 +628,9 @@ importers:
       '@goddard-ai/session':
         specifier: workspace:*
         version: link:../../features/session
+      '@goddard-ai/task':
+        specifier: workspace:*
+        version: link:../../features/task
       '@goddard-ai/terminal':
         specifier: workspace:*
         version: link:../../features/terminal
@@ -747,6 +750,9 @@ importers:
       '@goddard-ai/session':
         specifier: workspace:*
         version: link:../../features/session
+      '@goddard-ai/task':
+        specifier: workspace:*
+        version: link:../../features/task
       '@goddard-ai/terminal':
         specifier: workspace:*
         version: link:../../features/terminal
@@ -1154,6 +1160,27 @@ importers:
       '@types/hash-sum':
         specifier: 'catalog:'
         version: 1.0.2
+
+  features/task:
+    dependencies:
+      '@goddard-ai/daemon-plugin':
+        specifier: workspace:*
+        version: link:../../core/daemon-plugin
+      '@goddard-ai/ipc':
+        specifier: workspace:*
+        version: link:../../core/ipc
+      '@goddard-ai/sdk-plugin':
+        specifier: workspace:*
+        version: link:../../core/sdk-plugin
+      '@goddard-ai/session':
+        specifier: workspace:*
+        version: link:../session
+      kindstore:
+        specifier: 'catalog:'
+        version: 0.4.5(zod@4.4.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   features/terminal:
     dependencies:

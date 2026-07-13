@@ -16,6 +16,7 @@ import {
   type InferSdkNamespaces,
 } from "@goddard-ai/sdk-plugin"
 import { sessionSdkPlugin } from "@goddard-ai/session/sdk"
+import { taskSdkPlugin } from "@goddard-ai/task/sdk"
 import { terminalSdkPlugin, type GoddardTerminalNamespace } from "@goddard-ai/terminal/sdk"
 import { workforceSdkPlugin } from "@goddard-ai/workforce/sdk"
 import type * as acp from "acp-client/protocol"
@@ -40,6 +41,7 @@ const sdkPlugins = composeSdkPlugins([
   pullRequestSdkPlugin,
   reviewSessionSdkPlugin,
   sessionSdkPlugin,
+  taskSdkPlugin,
   terminalSdkPlugin,
   workforceSdkPlugin,
 ])
@@ -153,6 +155,7 @@ export class GoddardSdk {
   readonly reviewSession: FeatureSdkNamespaces["reviewSession"]
   readonly action: FeatureSdkNamespaces["action"]
   readonly loop: FeatureSdkNamespaces["loop"]
+  readonly task: FeatureSdkNamespaces["task"]
   readonly terminal: GoddardTerminalNamespace
   readonly workforce: FeatureSdkNamespaces["workforce"]
 
@@ -173,6 +176,7 @@ export class GoddardSdk {
     this.reviewSession = features.reviewSession
     this.action = features.action
     this.loop = features.loop
+    this.task = features.task
     this.terminal = features.terminal as GoddardTerminalNamespace
     this.workforce = features.workforce
   }

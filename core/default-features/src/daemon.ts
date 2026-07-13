@@ -8,6 +8,7 @@ import { loopPlugin } from "@goddard-ai/loop/daemon"
 import { pullRequestPlugin } from "@goddard-ai/pull-request/daemon"
 import { reviewSessionPlugin } from "@goddard-ai/review-session/daemon"
 import { sessionPlugin } from "@goddard-ai/session/daemon"
+import { taskPlugin } from "@goddard-ai/task/daemon"
 import { terminalPlugin } from "@goddard-ai/terminal/daemon"
 import { workforcePlugin } from "@goddard-ai/workforce/daemon"
 
@@ -17,6 +18,7 @@ const defaultDaemonPlugins = [
   fileSearchPlugin,
   agentPlugin,
   sessionPlugin,
+  taskPlugin,
   inboxPlugin,
   pullRequestPlugin,
   reviewSessionPlugin,

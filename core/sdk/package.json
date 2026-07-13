@@ -42,6 +42,7 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
+    "@goddard-ai/task": "workspace:*",
     "@goddard-ai/terminal": "workspace:*",
     "@goddard-ai/workforce": "workspace:*",
     "acp-client": "catalog:"
