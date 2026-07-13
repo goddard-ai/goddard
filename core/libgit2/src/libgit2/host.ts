@@ -1,8 +1,7 @@
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
 import { normalizePath } from "../paths.ts"
-import type { GitApi } from "../types.ts"
 import {
   createLibgit2RefResolver,
   cString,
@@ -12,6 +11,7 @@ import {
   readNestedPointer,
   readPointer,
   readUint32,
+  readUint64,
   resetLibgit2ForTests,
   resolveLibgit2Object,
   toFfiPointer,
@@ -21,7 +21,6 @@ import {
 } from "./ffi.ts"
 
 const namespaceResets: Array<() => void> = []
-const unsupportedGit = createUnsupportedGitApi()
 
 export const git = defineGitNamespaces({
   repository: (libgit2) => ({
@@ -114,22 +113,7 @@ export const git = defineGitNamespaces({
         }
       }),
     getCurrentBranch: (cwd: string) =>
-      withLibgit2Repository(libgit2, cwd, (repo) => {
-        const out = pointerStorage()
-        const status = libgit2.git_repository_head(toFfiPointer(out), repo)
-        if (status !== 0) {
-          return null
-        }
-
-        const head = readPointer(out)
-        try {
-          const name = libgit2.git_reference_name(head)
-          const branchRef = name ? String(name) : ""
-          return branchRef.startsWith("refs/heads/") ? branchRef.slice("refs/heads/".length) : null
-        } finally {
-          libgit2.git_reference_free(head)
-        }
-      }),
+      withLibgit2Repository(libgit2, cwd, (repo) => getCurrentBranch(libgit2, repo)),
     branchExists: (cwd: string, branch: string) =>
       withLibgit2Repository(
         libgit2,
@@ -233,8 +217,49 @@ export const git = defineGitNamespaces({
         }
       }),
   }),
-  worktrees: () => unsupportedGit.worktrees,
-  stash: () => unsupportedGit.stash,
+  worktrees: (libgit2) => ({
+    list: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const commonDir = libgit2.git_repository_commondir(repo)
+        if (!commonDir) {
+          throw new GitHostError(`libgit2 could not resolve Git common dir for ${cwd}`)
+        }
+        return withLibgit2Repository(libgit2, String(commonDir), (mainRepo) =>
+          listWorktrees(libgit2, mainRepo),
+        )
+      }),
+  }),
+  stash: (libgit2) => ({
+    list: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const out = pointerStorage()
+        const status = libgit2.git_reflog_read(
+          toFfiPointer(out),
+          repo,
+          toFfiPointer(cString("refs/stash")),
+        )
+        if (status !== 0) {
+          if (status === -3) {
+            return new Map<string, string>()
+          }
+          throw new GitHostError(`git_reflog_read failed with status ${status}`)
+        }
+
+        const reflog = readPointer(out)
+        try {
+          const count = Number(libgit2.git_reflog_entrycount(reflog))
+          return new Map(
+            Array.from({ length: count }, (_, index) => {
+              const entry = libgit2.git_reflog_entry_byindex(reflog, index)
+              const message = entry ? libgit2.git_reflog_entry_message(entry) : null
+              return [`stash@{${index}}`, message ? String(message) : ""]
+            }),
+          )
+        } finally {
+          libgit2.git_reflog_free(reflog)
+        }
+      }),
+  }),
 })
 
 export function validateLibgit2Runtime(options: { libgit2PathCandidates?: string[] } = {}) {
@@ -302,6 +327,76 @@ function resolveRefWithLibgit2(libgit2: Libgit2Symbols, cwd: string, refName: st
       libgit2.git_object_free(object)
     }
   })
+}
+
+function getCurrentBranch(libgit2: Libgit2Symbols, repo: FfiPointer) {
+  const out = pointerStorage()
+  const status = libgit2.git_repository_head(toFfiPointer(out), repo)
+  if (status !== 0) {
+    return null
+  }
+
+  const head = readPointer(out)
+  try {
+    const name = libgit2.git_reference_name(head)
+    const branchRef = name ? String(name) : ""
+    return branchRef.startsWith("refs/heads/") ? branchRef.slice("refs/heads/".length) : null
+  } finally {
+    libgit2.git_reference_free(head)
+  }
+}
+
+async function listWorktrees(libgit2: Libgit2Symbols, repo: FfiPointer) {
+  const entries = []
+  const mainPath = libgit2.git_repository_workdir(repo)
+  if (mainPath) {
+    entries.push({
+      path: resolve(String(mainPath)),
+      branch: getCurrentBranch(libgit2, repo),
+    })
+  }
+
+  const names = new Uint8Array(16)
+  const status = libgit2.git_worktree_list(toFfiPointer(names), repo)
+  if (status !== 0) {
+    throw new GitHostError(`git_worktree_list failed with status ${status}`)
+  }
+
+  try {
+    const namesPointer = readNestedPointer(toFfiPointer(names))
+    const count = Number(readUint64(toFfiPointer(names), 8))
+    for (let index = 0; index < count; index += 1) {
+      const namePointer = readNestedPointer(namesPointer, index * 8)
+      const out = pointerStorage()
+      const lookupStatus = libgit2.git_worktree_lookup(toFfiPointer(out), repo, namePointer)
+      if (lookupStatus !== 0) {
+        throw new GitHostError(`git_worktree_lookup failed with status ${lookupStatus}`)
+      }
+
+      const worktree = readPointer(out)
+      try {
+        const worktreePath = libgit2.git_worktree_path(worktree)
+        if (!worktreePath) {
+          throw new GitHostError(
+            `libgit2 returned no path for worktree ${readCString(namePointer)}`,
+          )
+        }
+        const path = resolve(String(worktreePath))
+        entries.push({
+          path,
+          branch: await withLibgit2Repository(libgit2, path, (worktreeRepo) =>
+            getCurrentBranch(libgit2, worktreeRepo),
+          ),
+        })
+      } finally {
+        libgit2.git_worktree_free(worktree)
+      }
+    }
+  } finally {
+    libgit2.git_strarray_dispose(toFfiPointer(names))
+  }
+
+  return entries
 }
 
 const commonGitPathRoots = new Set([
@@ -384,44 +479,4 @@ function formatWorkdirStatus(status: number) {
   if ((status & (1 << 8)) !== 0) return "M"
   if ((status & (1 << 12)) !== 0) return "?"
   return " "
-}
-
-function createUnsupportedGitApi(): GitApi {
-  return {
-    repository: {
-      resolveRoot: () => unsupported("repository.resolveRoot"),
-      resolveGitDir: () => unsupported("repository.resolveGitDir"),
-      resolveCommonDir: () => unsupported("repository.resolveCommonDir"),
-      resolveGitPath: () => unsupported("repository.resolveGitPath"),
-      isBareRepository: () => unsupported("repository.isBareRepository"),
-    },
-    refs: {
-      resolve: () => unsupported("refs.resolve"),
-      exists: () => unsupported("refs.exists"),
-      update: () => unsupported("refs.update"),
-      delete: () => unsupported("refs.delete"),
-      getCurrentBranch: () => unsupported("refs.getCurrentBranch"),
-      branchExists: () => unsupported("refs.branchExists"),
-      getBranchHead: () => unsupported("refs.getBranchHead"),
-    },
-    history: {
-      resolveHead: () => unsupported("history.resolveHead"),
-      isAncestor: () => unsupported("history.isAncestor"),
-      getMergeBase: () => unsupported("history.getMergeBase"),
-    },
-    status: {
-      getWorkingTreeStatus: () => unsupported("status.getWorkingTreeStatus"),
-      isWorktreeClean: () => unsupported("status.isWorktreeClean"),
-    },
-    worktrees: {
-      list: () => unsupported("worktrees.list"),
-    },
-    stash: {
-      list: () => unsupported("stash.list"),
-    },
-  }
-}
-
-async function unsupported<T>(operation: string): Promise<T> {
-  throw new GitHostError(`libgit2 host does not support ${operation}`)
 }

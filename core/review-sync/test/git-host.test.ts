@@ -49,6 +49,9 @@ test("review-sync libgit2 host uses a valid libgit2 candidate when available", a
   await expect(host.resolveRef(repoDir, "refs/review-sync/test")).resolves.toBe(head)
   await host.deleteRef(repoDir, "refs/review-sync/test")
   await expect(host.resolveRef(repoDir, "refs/review-sync/test")).resolves.toBeNull()
+  await expect(host.listWorktrees(repoDir)).resolves.toEqual([
+    { path: await normalizePath(repoDir), branch: "main" },
+  ])
 })
 
 async function createRepo() {

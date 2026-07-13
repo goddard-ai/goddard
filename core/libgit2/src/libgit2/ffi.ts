@@ -140,6 +140,46 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr],
           returns: FFIType.void,
         },
+        git_worktree_list: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_worktree_lookup: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_worktree_path: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_worktree_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_strarray_dispose: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_reflog_read: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_reflog_entrycount: {
+          args: [FFIType.ptr],
+          returns: FFIType.u64,
+        },
+        git_reflog_entry_byindex: {
+          args: [FFIType.ptr, FFIType.u64],
+          returns: FFIType.ptr,
+        },
+        git_reflog_entry_message: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_reflog_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
       })
     } catch (error) {
       errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`)
@@ -219,6 +259,10 @@ export function toFfiPointer(value: Uint8Array | BigUint64Array | Buffer) {
 
 export function readUint32(pointer: FfiPointer, byteOffset = 0) {
   return read.u32(pointer, byteOffset)
+}
+
+export function readUint64(pointer: FfiPointer, byteOffset = 0) {
+  return read.u64(pointer, byteOffset)
 }
 
 export function readNestedPointer(pointer: FfiPointer, byteOffset = 0) {

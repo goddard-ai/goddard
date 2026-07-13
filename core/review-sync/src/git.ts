@@ -55,6 +55,7 @@ export function createReviewSyncGitHost() {
     resolveRef: libgit2Host.resolveRef,
     updateRef: libgit2Host.updateRef,
     deleteRef: libgit2Host.deleteRef,
+    listWorktrees: libgit2Host.listWorktrees,
   }
 }
 

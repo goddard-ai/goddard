@@ -33,18 +33,8 @@ export type SprintCandidate = {
 /** A clean worktree that must release a sprint branch before that branch is deleted. */
 export type SprintBranchWorktree = {
   path: string
-  head: string | null
   branch: string | null
-  detached: boolean
   reason: string
-}
-
-/** Parsed entry from git worktree list --porcelain. */
-export type WorktreeEntry = {
-  path: string
-  head: string | null
-  branch: string | null
-  detached: boolean
 }
 
 /** Common report fields for human-only landing commands. */

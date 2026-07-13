@@ -126,6 +126,15 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   await expect(git.repository.resolveGitPath(linkedWorktreeDir, "MERGE_HEAD")).resolves.toBe(
     expectedOperationPath,
   )
+  await expect(git.worktrees.list(linkedWorktreeDir)).resolves.toEqual([
+    { path: await normalizePath(repoDir), branch: "main" },
+    { path: await normalizePath(linkedWorktreeDir), branch: "feature" },
+  ])
+
+  await runGit(repoDir, ["stash", "push", "--include-untracked", "-m", "native stash"])
+  await expect(git.stash.list(repoDir)).resolves.toEqual(
+    new Map([["stash@{0}", "On main: native stash"]]),
+  )
 })
 
 test("fake Git API exposes deterministic method overrides", async () => {

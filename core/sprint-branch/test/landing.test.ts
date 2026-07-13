@@ -363,9 +363,7 @@ describe("sprint-branch human landing commands", () => {
       [
         {
           path: branchWorktree,
-          head: await branchHead(repo, "sprint/example/review"),
           branch: "sprint/example/review",
-          detached: false,
           reason: "branch sprint/example/review",
         },
       ],
