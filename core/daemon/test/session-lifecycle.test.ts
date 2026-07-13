@@ -2250,7 +2250,7 @@ test("session worktree readiness reports a persisted checkout missing on disk", 
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
   const repoDir = await createRepoFixture()
 
-  const created = await send(client, "session.create", {
+  const created = await client.session.create({
     agent: createWrappedNodeAgent(fastFixtureAgentPath),
     cwd: repoDir,
     worktree: { enabled: true },
@@ -2260,11 +2260,11 @@ test("session worktree readiness reports a persisted checkout missing on disk", 
     oneShot: true,
   })
 
-  const fetchedWorktree = await send(client, "session.worktree.get", { id: created.session.id })
+  const fetchedWorktree = await client.session.worktree.get({ id: created.session.id })
   expect(fetchedWorktree.worktree).toBeTruthy()
   await rm(fetchedWorktree.worktree!.worktreeDir, { recursive: true, force: true })
 
-  const readiness = await send(client, "session.worktree.mergeReadiness", {
+  const readiness = await client.session.worktree.mergeReadiness({
     id: created.session.id,
   })
 
@@ -2273,6 +2273,40 @@ test("session worktree readiness reports a persisted checkout missing on disk", 
     syncMounted: false,
     willAutoUnmountSync: false,
   })
+})
+
+test("session worktree merge leaves review sync mounted when preflight fails", async () => {
+  const daemon = await startServer()
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+  const repoDir = await createRepoFixture()
+
+  const created = await client.session.create({
+    agent: createWrappedNodeAgent(fastFixtureAgentPath),
+    cwd: repoDir,
+    worktree: { enabled: true },
+    mcpServers: [],
+    systemPrompt: "Keep responses short.",
+    initialPrompt: "Say hello in one sentence.",
+    oneShot: true,
+  })
+
+  const fetchedWorktree = await client.session.worktree.get({ id: created.session.id })
+  expect(fetchedWorktree.worktree).toBeTruthy()
+  await writeFile(join(fetchedWorktree.worktree!.worktreeDir, "feature.txt"), "feature\n", "utf-8")
+  await runGit(fetchedWorktree.worktree!.worktreeDir, ["add", "feature.txt"])
+  await runGit(fetchedWorktree.worktree!.worktreeDir, ["commit", "-m", "feature"])
+  await client.reviewSession.mount({ id: created.session.id })
+  await writeFile(join(repoDir, "uncommitted.txt"), "dirty\n", "utf-8")
+
+  const merged = await client.session.worktree.merge({ id: created.session.id })
+  const reviewSession = await client.reviewSession.get({ id: created.session.id })
+
+  expect(merged).toMatchObject({
+    merged: false,
+    readiness: { status: "primary_dirty" },
+    syncUnmounted: false,
+  })
+  expect(reviewSession.reviewSession).not.toBeNull()
 })
 
 test("session worktree merge fast-forwards the target branch and auto-unmounts sync", async () => {

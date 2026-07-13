@@ -2035,15 +2035,6 @@ export function createSessionManager({
       }
     }
 
-    if (!session.activeDaemonSession) {
-      syncUnmounted = await unmountMountedWorktreeSync(worktreeRecord.worktreeDir)
-      if (syncUnmounted) {
-        await emitDiagnostic(id, "worktree.sync_unmounted", {
-          reason: "merge_preflight",
-        })
-      }
-    }
-
     const readinessResponse = await getWorktreeMergeReadiness(id)
     if (
       readinessResponse.readiness.status !== "ready" ||
@@ -2057,6 +2048,13 @@ export function createSessionManager({
         syncUnmounted,
         warnings,
       }
+    }
+
+    syncUnmounted = await unmountMountedWorktreeSync(worktreeRecord.worktreeDir)
+    if (syncUnmounted) {
+      await emitDiagnostic(id, "worktree.sync_unmounted", {
+        reason: "merge_preflight",
+      })
     }
 
     try {

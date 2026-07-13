@@ -271,6 +271,7 @@ export function createActiveSessionScenario(
     worktree: {
       branchName: "codex/tab-restore",
       effectiveCwd: fixtureProjectPath,
+      mergeTargetBranch: null,
       poweredBy: "goddard",
       repoRoot: fixtureProjectPath,
       requestedCwd: fixtureProjectPath,
