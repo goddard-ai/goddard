@@ -1,15 +1,9 @@
-import { runGitCommand } from "./command.ts"
+import { git } from "@goddard-ai/libgit2"
 
 export async function readOriginRemoteUrl(cwd: string) {
-  return await runGit(cwd, ["config", "--get", "remote.origin.url"])
-}
-
-async function runGit(cwd: string, args: string[]): Promise<string> {
-  const result = await runGitCommand(cwd, args)
-  if (result.status !== 0) {
-    const stderr = result.stderr.trim()
-    throw new Error(stderr || `git ${args.join(" ")} failed in ${cwd}`)
+  const url = await git.config.get(cwd, "remote.origin.url")
+  if (!url) {
+    throw new Error(`Unable to resolve remote.origin.url in ${cwd}`)
   }
-
-  return result.stdout.trim()
+  return url
 }

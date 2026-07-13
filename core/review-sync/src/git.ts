@@ -1,7 +1,7 @@
 /** Git and filesystem helpers used by review-sync internals. */
 import { constants as fsConstants } from "node:fs"
 import { access } from "node:fs/promises"
-import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, isAbsolute, join, relative } from "node:path"
 import {
   GitNotRepositoryError,
   normalizePath as normalizeSharedPath,
@@ -34,6 +34,8 @@ export type GitHost = {
   branchExists: (cwd: string, branch: string) => Promise<boolean>
   isWorktreeClean: (cwd: string) => Promise<boolean>
   resolveRef: (cwd: string, refName: string) => Promise<string | null>
+  isAncestor: (cwd: string, ancestor: string, descendant: string) => Promise<boolean>
+  getMergeBase: (cwd: string, left: string, right: string) => Promise<string | null>
   updateRef: (cwd: string, refName: string, oid: string) => Promise<void>
   deleteRef: (cwd: string, refName: string) => Promise<void>
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
@@ -41,22 +43,7 @@ export type GitHost = {
 
 /** Creates the Git host selected for this process. */
 export function createReviewSyncGitHost() {
-  const commandHost = createReviewSyncCommandGitHost()
-  const libgit2Host = adaptSharedGitHost(sharedGit)
-
-  return {
-    ...commandHost,
-    resolveRequiredRepoRoot: libgit2Host.resolveRequiredRepoRoot,
-    resolveRequiredGitCommonDir: libgit2Host.resolveRequiredGitCommonDir,
-    resolveRequiredGitDir: libgit2Host.resolveRequiredGitDir,
-    resolveCurrentBranch: libgit2Host.resolveCurrentBranch,
-    branchExists: libgit2Host.branchExists,
-    isWorktreeClean: libgit2Host.isWorktreeClean,
-    resolveRef: libgit2Host.resolveRef,
-    updateRef: libgit2Host.updateRef,
-    deleteRef: libgit2Host.deleteRef,
-    listWorktrees: libgit2Host.listWorktrees,
-  }
+  return adaptSharedGitHost(sharedGit)
 }
 
 export function resetReviewSyncGitHostForTests() {
@@ -74,83 +61,11 @@ function adaptSharedGitHost(shared: SharedGitApi): GitHost {
     branchExists: (cwd, branch) => shared.refs.branchExists(cwd, branch),
     isWorktreeClean: (cwd) => shared.status.isWorktreeClean(cwd),
     resolveRef: (cwd, refName) => shared.refs.resolve(cwd, refName),
+    isAncestor: (cwd, ancestor, descendant) => shared.history.isAncestor(cwd, ancestor, descendant),
+    getMergeBase: (cwd, left, right) => shared.history.getMergeBase(cwd, left, right),
     updateRef: (cwd, refName, oid) => shared.refs.update(cwd, refName, oid),
     deleteRef: (cwd, refName) => shared.refs.delete(cwd, refName),
     listWorktrees: (cwd) => shared.worktrees.list(cwd),
-  }
-}
-
-function createReviewSyncCommandGitHost(): GitHost {
-  return {
-    run: runReviewSyncGitCommand,
-    resolveRequiredRepoRoot: async (cwd) => {
-      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--show-toplevel"], {
-        allowFailure: true,
-      })
-      if (result.status !== 0 || !result.stdout.trim()) {
-        throw new UserError(`Not a Git worktree: ${cwd}`)
-      }
-      return await normalizePath(result.stdout.trim())
-    },
-    resolveRequiredGitCommonDir: async (cwd) => {
-      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--git-common-dir"])
-      return await normalizePath(resolveGitOutputPath(cwd, result.stdout.trim()))
-    },
-    resolveRequiredGitDir: async (cwd) => {
-      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--git-dir"])
-      return await normalizePath(resolveGitOutputPath(cwd, result.stdout.trim()))
-    },
-    resolveCurrentBranch: async (cwd) => {
-      const result = await runReviewSyncGitCommand(
-        cwd,
-        ["symbolic-ref", "--quiet", "--short", "HEAD"],
-        {
-          allowFailure: true,
-        },
-      )
-      return result.status === 0 ? result.stdout.trim() || null : null
-    },
-    branchExists: async (cwd, branch) => {
-      const result = await runReviewSyncGitCommand(
-        cwd,
-        ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-        {
-          allowFailure: true,
-        },
-      )
-      return result.status === 0
-    },
-    isWorktreeClean: async (cwd) => {
-      const result = await runReviewSyncGitCommand(cwd, [
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-      ])
-      return (
-        result.stdout
-          .split("\n")
-          .map((entry) => entry.trimEnd())
-          .filter(Boolean).length === 0
-      )
-    },
-    resolveRef: async (cwd, refName) => {
-      const result = await runReviewSyncGitCommand(cwd, ["rev-parse", "--verify", "-q", refName], {
-        allowFailure: true,
-      })
-      return result.status === 0 ? result.stdout.trim() || null : null
-    },
-    updateRef: async (cwd, refName, oid) => {
-      await runReviewSyncGitCommand(cwd, ["update-ref", refName, oid])
-    },
-    deleteRef: async (cwd, refName) => {
-      await runReviewSyncGitCommand(cwd, ["update-ref", "-d", refName], {
-        allowFailure: true,
-      })
-    },
-    listWorktrees: async (cwd) => {
-      const result = await runReviewSyncGitCommand(cwd, ["worktree", "list", "--porcelain"])
-      return parseGitWorktrees(result.stdout)
-    },
   }
 }
 
@@ -327,33 +242,4 @@ export function isProcessAlive(pid: number) {
 /** Parses Git's porcelain worktree list into path and branch records. */
 export async function listGitWorktrees(cwd: string, context: RuntimeContext) {
   return await context.gitHost.listWorktrees(cwd)
-}
-
-function parseGitWorktrees(output: string): WorktreeInfo[] {
-  const entries: WorktreeInfo[] = []
-  let current: WorktreeInfo | null = null
-
-  for (const line of output.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      if (current) {
-        entries.push(current)
-      }
-      current = { path: line.slice("worktree ".length), branch: null }
-      continue
-    }
-
-    if (current && line.startsWith("branch refs/heads/")) {
-      current.branch = line.slice("branch refs/heads/".length)
-    }
-  }
-
-  if (current) {
-    entries.push(current)
-  }
-
-  return entries
-}
-
-function resolveGitOutputPath(cwd: string, value: string) {
-  return isAbsolute(value) ? value : resolve(cwd, value)
 }

@@ -127,6 +127,43 @@ export const git = defineGitNamespaces({
       ),
     getBranchHead: (cwd: string, branch: string) =>
       resolveRefWithLibgit2(libgit2, cwd, `refs/heads/${branch}`),
+    readSymbolic: (cwd: string, refName: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const out = pointerStorage()
+        const status = libgit2.git_reference_lookup(
+          toFfiPointer(out),
+          repo,
+          toFfiPointer(cString(refName)),
+        )
+        if (status === -3) return null
+        if (status !== 0) {
+          throw new GitHostError(`git_reference_lookup failed with status ${status}`)
+        }
+
+        const reference = readPointer(out)
+        try {
+          const target = libgit2.git_reference_symbolic_target(reference)
+          return target ? String(target) : null
+        } finally {
+          libgit2.git_reference_free(reference)
+        }
+      }),
+    listLocalBranches: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const refs = new Uint8Array(16)
+        const status = libgit2.git_reference_list(toFfiPointer(refs), repo)
+        if (status !== 0) {
+          throw new GitHostError(`git_reference_list failed with status ${status}`)
+        }
+        try {
+          return readStringArray(refs)
+            .filter((refName) => refName.startsWith("refs/heads/"))
+            .map((refName) => refName.slice("refs/heads/".length))
+            .sort()
+        } finally {
+          libgit2.git_strarray_dispose(toFfiPointer(refs))
+        }
+      }),
   }),
   history: (libgit2) => ({
     resolveHead: (cwd: string) => resolveRefWithLibgit2(libgit2, cwd, "HEAD"),
@@ -188,6 +225,48 @@ export const git = defineGitNamespaces({
           libgit2.git_object_free(rightObject)
         }
       }),
+    countCommits: (cwd: string, range: { from: string; to?: string }) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const from = resolveLibgit2Object(libgit2, repo, range.from)
+        if (!from) {
+          throw new GitHostError(`Unable to resolve commit ${range.from}`)
+        }
+
+        const out = pointerStorage()
+        const status = libgit2.git_revwalk_new(toFfiPointer(out), repo)
+        if (status !== 0) {
+          libgit2.git_object_free(from)
+          throw new GitHostError(`git_revwalk_new failed with status ${status}`)
+        }
+
+        const walk = readPointer(out)
+        try {
+          const pushStatus = range.to
+            ? pushRevwalkObject(libgit2, repo, walk, range.to)
+            : libgit2.git_revwalk_push_head(walk)
+          const hideStatus = libgit2.git_revwalk_hide(walk, libgit2.git_object_id(from))
+          if (pushStatus !== 0 || hideStatus !== 0) {
+            throw new GitHostError(
+              `Unable to prepare revision walk (push ${pushStatus}, hide ${hideStatus})`,
+            )
+          }
+
+          let count = 0
+          const oid = new Uint8Array(20)
+          while (true) {
+            const nextStatus = libgit2.git_revwalk_next(toFfiPointer(oid), walk)
+            if (nextStatus === -31) break
+            if (nextStatus !== 0) {
+              throw new GitHostError(`git_revwalk_next failed with status ${nextStatus}`)
+            }
+            count += 1
+          }
+          return count
+        } finally {
+          libgit2.git_revwalk_free(walk)
+          libgit2.git_object_free(from)
+        }
+      }),
   }),
   status: (libgit2) => ({
     getWorkingTreeStatus: (cwd: string) =>
@@ -214,6 +293,117 @@ export const git = defineGitNamespaces({
           return Number(libgit2.git_status_list_entrycount(statusList)) === 0
         } finally {
           libgit2.git_status_list_free(statusList)
+        }
+      }),
+    listUntracked: (cwd: string, options: { collapseDirectories?: boolean } = {}) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const flags =
+          statusIncludeUntracked |
+          (options.collapseDirectories ? 0 : statusRecurseUntrackedDirectories)
+        const statusList = createStatusList(libgit2, repo, flags)
+        try {
+          const count = Number(libgit2.git_status_list_entrycount(statusList))
+          const entries = []
+          for (let index = 0; index < count; index += 1) {
+            const entry = libgit2.git_status_byindex(statusList, index)
+            if (!entry || (readUint32(entry) & (1 << 7)) === 0) continue
+            const path = readStatusPath(readNestedPointer(entry, 16))
+            const isDirectory = path.endsWith("/") || path.endsWith("\\")
+            entries.push({
+              path: isDirectory ? path.slice(0, -1) : path,
+              isDirectory,
+            })
+          }
+          return entries
+        } finally {
+          libgit2.git_status_list_free(statusList)
+        }
+      }),
+  }),
+  config: (libgit2) => ({
+    get: (cwd: string, name: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const out = pointerStorage()
+        const configStatus = libgit2.git_repository_config_snapshot(toFfiPointer(out), repo)
+        if (configStatus !== 0) {
+          throw new GitHostError(
+            `git_repository_config_snapshot failed with status ${configStatus}`,
+          )
+        }
+
+        const config = readPointer(out)
+        try {
+          const value = pointerStorage()
+          const status = libgit2.git_config_get_string(
+            toFfiPointer(value),
+            config,
+            toFfiPointer(cString(name)),
+          )
+          if (status === -3) return null
+          if (status !== 0) {
+            throw new GitHostError(`git_config_get_string failed with status ${status}`)
+          }
+          return readCString(readPointer(value))
+        } finally {
+          libgit2.git_config_free(config)
+        }
+      }),
+  }),
+  ignore: (libgit2) => ({
+    isIgnored: (cwd: string, path: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const ignored = new Int32Array(1)
+        const status = libgit2.git_status_should_ignore(
+          toFfiPointer(ignored),
+          repo,
+          toFfiPointer(cString(path)),
+        )
+        if (status !== 0) {
+          throw new GitHostError(`git_status_should_ignore failed with status ${status}`)
+        }
+        return ignored[0] === 1
+      }),
+    filterIgnored: (cwd: string, paths: string[]) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const result = new Set<string>()
+        for (const path of paths) {
+          const ignored = new Int32Array(1)
+          const status = libgit2.git_status_should_ignore(
+            toFfiPointer(ignored),
+            repo,
+            toFfiPointer(cString(path)),
+          )
+          if (status !== 0) {
+            throw new GitHostError(`git_status_should_ignore failed with status ${status}`)
+          }
+          if (ignored[0] === 1) result.add(path)
+        }
+        return result
+      }),
+  }),
+  index: (libgit2) => ({
+    listPaths: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const out = pointerStorage()
+        const status = libgit2.git_repository_index(toFfiPointer(out), repo)
+        if (status !== 0) {
+          throw new GitHostError(`git_repository_index failed with status ${status}`)
+        }
+
+        const index = readPointer(out)
+        try {
+          const count = Number(libgit2.git_index_entrycount(index))
+          const paths = new Set<string>()
+          for (let entryIndex = 0; entryIndex < count; entryIndex += 1) {
+            const entry = libgit2.git_index_get_byindex(index, entryIndex)
+            if (!entry) continue
+            // git_index_entry.path is the final pointer in the 64-bit libgit2 v1 layout.
+            const path = readNestedPointer(entry, 64)
+            if (path) paths.add(readCString(path))
+          }
+          return [...paths]
+        } finally {
+          libgit2.git_index_free(index)
         }
       }),
   }),
@@ -417,17 +607,17 @@ const statusOptionBytes = 48
 const statusIncludeUntracked = 1 << 0
 const statusRecurseUntrackedDirectories = 1 << 4
 
-function createStatusList(libgit2: Libgit2Symbols, repo: FfiPointer) {
+function createStatusList(
+  libgit2: Libgit2Symbols,
+  repo: FfiPointer,
+  flags = statusIncludeUntracked | statusRecurseUntrackedDirectories,
+) {
   const options = new Uint8Array(statusOptionBytes)
   const optionsStatus = libgit2.git_status_options_init(toFfiPointer(options), 1)
   if (optionsStatus !== 0) {
     throw new GitHostError(`git_status_options_init failed with status ${optionsStatus}`)
   }
-  new DataView(options.buffer).setUint32(
-    8,
-    statusIncludeUntracked | statusRecurseUntrackedDirectories,
-    true,
-  )
+  new DataView(options.buffer).setUint32(8, flags, true)
 
   const out = pointerStorage()
   const status = libgit2.git_status_list_new(toFfiPointer(out), repo, toFfiPointer(options))
@@ -435,6 +625,30 @@ function createStatusList(libgit2: Libgit2Symbols, repo: FfiPointer) {
     throw new GitHostError(`git_status_list_new failed with status ${status}`)
   }
   return readPointer(out)
+}
+
+function readStringArray(storage: Uint8Array) {
+  const storagePointer = toFfiPointer(storage)
+  const strings = readNestedPointer(storagePointer)
+  const count = Number(readUint64(storagePointer, 8))
+  return Array.from({ length: count }, (_, index) =>
+    readCString(readNestedPointer(strings, index * 8)),
+  )
+}
+
+function pushRevwalkObject(
+  libgit2: Libgit2Symbols,
+  repo: FfiPointer,
+  walk: FfiPointer,
+  refName: string,
+) {
+  const object = resolveLibgit2Object(libgit2, repo, refName)
+  if (!object) return -3
+  try {
+    return libgit2.git_revwalk_push(walk, libgit2.git_object_id(object))
+  } finally {
+    libgit2.git_object_free(object)
+  }
 }
 
 function formatStatusEntry(entry: FfiPointer) {

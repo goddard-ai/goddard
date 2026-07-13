@@ -1,6 +1,5 @@
 import { relative } from "node:path"
-
-import { runGitCommand } from "./command.ts"
+import { git } from "@goddard-ai/libgit2"
 
 export async function isGitIgnoredDirectory(params: { gitRoot: string; path: string }) {
   const relativePath = relative(params.gitRoot, params.path)
@@ -9,14 +8,7 @@ export async function isGitIgnoredDirectory(params: { gitRoot: string; path: str
     return false
   }
 
-  const result = await runGitCommand(
-    params.gitRoot,
-    ["check-ignore", "-q", "--", `${relativePath}/`],
-    {
-      stdin: "ignore",
-    },
-  )
-  return result.status === 0
+  return await git.ignore.isIgnored(params.gitRoot, `${relativePath}/`)
 }
 
 export async function filterGitignoredPaths(repoRoot: string, relativePaths: string[]) {
@@ -27,22 +19,7 @@ export async function filterGitignoredPaths(repoRoot: string, relativePaths: str
   const normalizedPaths = relativePaths.map((relativePath) =>
     trimTrailingPathSeparator(relativePath),
   )
-  const result = await runGitCommand(repoRoot, ["check-ignore", "--stdin", "-z"], {
-    stdin: `${normalizedPaths.join("\0")}\0`,
-  })
-
-  if (result.status !== 0 && result.status !== 1) {
-    throw new Error(result.stderr.trim() || result.stdout.trim() || "git check-ignore failed")
-  }
-
-  return new Set(parseGitPathOutput(result.stdout).map(trimTrailingPathSeparator))
-}
-
-function parseGitPathOutput(stdout: string) {
-  return stdout
-    .split("\0")
-    .filter((line) => line.length > 0)
-    .map(trimTrailingPathSeparator)
+  return await git.ignore.filterIgnored(repoRoot, normalizedPaths)
 }
 
 function trimTrailingPathSeparator(relativePath: string) {

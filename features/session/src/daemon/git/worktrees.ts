@@ -1,3 +1,5 @@
+import { git, GitNotRepositoryError } from "@goddard-ai/libgit2"
+
 import { runGitCommand } from "./command.ts"
 
 export async function addDetachedWorktree(cwd: string, worktreeDir: string) {
@@ -59,18 +61,15 @@ export async function removeWorktree(cwd: string, worktreeDir: string) {
 }
 
 export async function findWorktrunkBranchWorktree(cwd: string, branchName: string) {
-  const result = await runGitCommand(cwd, ["worktree", "list"])
-
-  if (result.status !== 0) {
-    return null
-  }
-
-  const lines = result.stdout.split("\n")
-  for (const line of lines) {
-    if (line.includes(`[${branchName}]`)) {
-      return line.split(" ")[0] || null
+  try {
+    return (
+      (await git.worktrees.list(cwd)).find((worktree) => worktree.branch === branchName)?.path ??
+      null
+    )
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      return null
     }
+    throw error
   }
-
-  return null
 }

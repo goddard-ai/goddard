@@ -130,11 +130,44 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
     { path: await normalizePath(repoDir), branch: "main" },
     { path: await normalizePath(linkedWorktreeDir), branch: "feature" },
   ])
+  await expect(
+    git.history.countCommits(repoDir, { from: branchHead, to: featureHead }),
+  ).resolves.toBe(1)
+  await expect(git.refs.listLocalBranches(repoDir)).resolves.toEqual(["feature", "main"])
+
+  await runGit(repoDir, ["config", "remote.origin.url", "git@github.com:goddard-ai/test.git"])
+  await runGit(repoDir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"])
+  await expect(git.config.get(repoDir, "remote.origin.url")).resolves.toBe(
+    "git@github.com:goddard-ai/test.git",
+  )
+  await expect(git.config.get(repoDir, "missing.value")).resolves.toBeNull()
+  await expect(git.refs.readSymbolic(repoDir, "refs/remotes/origin/HEAD")).resolves.toBe(
+    "refs/remotes/origin/main",
+  )
 
   await runGit(repoDir, ["stash", "push", "--include-untracked", "-m", "native stash"])
   await expect(git.stash.list(repoDir)).resolves.toEqual(
     new Map([["stash@{0}", "On main: native stash"]]),
   )
+  await expect(git.index.listPaths(repoDir)).resolves.toEqual(["README.md"])
+
+  await writeFile(join(repoDir, ".gitignore"), "ignored/\n")
+  await mkdir(join(repoDir, "ignored"))
+  await mkdir(join(repoDir, "visible"))
+  await writeFile(join(repoDir, "ignored", "cache.txt"), "ignored\n")
+  await writeFile(join(repoDir, "visible", "nested.txt"), "visible\n")
+  await expect(git.ignore.isIgnored(repoDir, "ignored/")).resolves.toBe(true)
+  await expect(
+    git.ignore.filterIgnored(repoDir, ["ignored/cache.txt", "visible/nested.txt"]),
+  ).resolves.toEqual(new Set(["ignored/cache.txt"]))
+  await expect(git.status.listUntracked(repoDir, { collapseDirectories: true })).resolves.toEqual([
+    { path: ".gitignore", isDirectory: false },
+    { path: "visible", isDirectory: true },
+  ])
+  await expect(git.status.listUntracked(repoDir)).resolves.toEqual([
+    { path: ".gitignore", isDirectory: false },
+    { path: "visible/nested.txt", isDirectory: false },
+  ])
 })
 
 test("fake Git API exposes deterministic method overrides", async () => {

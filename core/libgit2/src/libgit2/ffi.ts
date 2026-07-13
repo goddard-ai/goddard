@@ -64,6 +64,14 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr],
           returns: FFIType.i32,
         },
+        git_repository_config_snapshot: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_repository_index: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
         git_repository_head: {
           args: [FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
@@ -86,6 +94,14 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
         },
         git_reference_delete: {
           args: [FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_reference_symbolic_target: {
+          args: [FFIType.ptr],
+          returns: FFIType.cstring,
+        },
+        git_reference_list: {
+          args: [FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
         },
         git_reference_free: {
@@ -120,6 +136,30 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
         },
+        git_revwalk_new: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_revwalk_push_head: {
+          args: [FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_revwalk_push: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_revwalk_hide: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_revwalk_next: {
+          args: [FFIType.ptr, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_revwalk_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
         git_status_list_new: {
           args: [FFIType.ptr, FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
@@ -135,6 +175,10 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
         git_status_byindex: {
           args: [FFIType.ptr, FFIType.u64],
           returns: FFIType.ptr,
+        },
+        git_status_should_ignore: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
         },
         git_status_list_free: {
           args: [FFIType.ptr],
@@ -177,6 +221,26 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           returns: FFIType.cstring,
         },
         git_reflog_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_config_get_string: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_config_free: {
+          args: [FFIType.ptr],
+          returns: FFIType.void,
+        },
+        git_index_entrycount: {
+          args: [FFIType.ptr],
+          returns: FFIType.u64,
+        },
+        git_index_get_byindex: {
+          args: [FFIType.ptr, FFIType.u64],
+          returns: FFIType.ptr,
+        },
+        git_index_free: {
           args: [FFIType.ptr],
           returns: FFIType.void,
         },
@@ -253,7 +317,7 @@ export function cString(value: string) {
   return Buffer.from(`${value}\0`)
 }
 
-export function toFfiPointer(value: Uint8Array | BigUint64Array | Buffer) {
+export function toFfiPointer(value: Uint8Array | Int32Array | BigUint64Array | Buffer) {
   return ptr(value)
 }
 

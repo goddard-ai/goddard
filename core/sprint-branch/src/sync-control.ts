@@ -7,7 +7,9 @@ import { getErrorMessage } from "radashi"
 import { z } from "zod"
 
 import { runGit } from "./git/command"
+import { resolveHead } from "./git/refs"
 import { getCurrentBranch, resolveGitCommonPath, resolveRepositoryRoot } from "./git/repository"
+import { getWorkingTreeStatus } from "./git/worktree"
 import { sprintStateRoot } from "./state/paths"
 import type { SprintDiagnostic, SprintSyncStopReport } from "./types"
 
@@ -42,7 +44,10 @@ export async function createSprintSyncStopControl(input: { cwd: string; signal?:
   await fs.mkdir(controlDir, { recursive: true })
 
   const startingBranch = await getCurrentBranch(cwd)
-  const startingHead = (await runGit(cwd, ["rev-parse", "HEAD"])).trim()
+  const startingHead = await resolveHead(cwd)
+  if (!startingHead) {
+    throw new Error(`Unable to resolve HEAD in ${cwd}`)
+  }
   const runId = `${Date.now()}-${process.pid}-${randomUUID()}`
   const controlPath = path.join(controlDir, `${runId}.json`)
   const controller = new AbortController()
@@ -282,8 +287,8 @@ async function restoreStaleSyncCheckout(input: { cwd: string; control: SyncRunCo
     return diagnostics
   }
 
-  const porcelain = await runGit(input.cwd, ["status", "--porcelain"])
-  if (porcelain.length > 0) {
+  const status = await getWorkingTreeStatus(input.cwd)
+  if (!status.clean) {
     return [
       {
         severity: "warning" as const,

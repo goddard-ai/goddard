@@ -1,13 +1,16 @@
+import { git, GitNotRepositoryError } from "@goddard-ai/libgit2"
+
 import { runGitCommand } from "./command.ts"
 
 export async function hasGitHead(workspaceRoot: string) {
-  return (
-    (
-      await runGit(workspaceRoot, ["rev-parse", "--verify", "--quiet", "HEAD"], {
-        allowedExitCodes: new Set([0, 1]),
-      })
-    ).exitCode === 0
-  )
+  try {
+    return (await git.history.resolveHead(workspaceRoot)) !== null
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      return false
+    }
+    throw error
+  }
 }
 
 export async function buildTrackedAndUntrackedDiff(workspaceRoot: string) {
@@ -19,12 +22,7 @@ export async function buildTrackedAndUntrackedDiff(workspaceRoot: string) {
     "HEAD",
     "--",
   ])
-  const untrackedPaths = await readGitPathList(workspaceRoot, [
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "-z",
-  ])
+  const untrackedPaths = (await git.status.listUntracked(workspaceRoot)).map((entry) => entry.path)
   const sections = [trackedDiff]
 
   for (const path of untrackedPaths) {
@@ -35,13 +33,12 @@ export async function buildTrackedAndUntrackedDiff(workspaceRoot: string) {
 }
 
 export async function buildInitialWorkspaceDiff(workspaceRoot: string) {
-  const trackedAndUntrackedPaths = await readGitPathList(workspaceRoot, [
-    "ls-files",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-    "-z",
-  ])
+  const trackedAndUntrackedPaths = [
+    ...new Set([
+      ...(await git.index.listPaths(workspaceRoot)),
+      ...(await git.status.listUntracked(workspaceRoot)).map((entry) => entry.path),
+    ]),
+  ].sort()
   const sections: string[] = []
 
   for (const path of trackedAndUntrackedPaths) {
@@ -62,11 +59,6 @@ async function readAddedFileDiff(workspaceRoot: string, path: string) {
 async function readGitText(workspaceRoot: string, args: string[], allowedExitCodes = new Set([0])) {
   const { stdout } = await runGit(workspaceRoot, args, { allowedExitCodes })
   return stdout
-}
-
-async function readGitPathList(workspaceRoot: string, args: string[]) {
-  const { stdout } = await runGit(workspaceRoot, args)
-  return stdout.split("\0").filter((path) => path.length > 0)
 }
 
 async function runGit(

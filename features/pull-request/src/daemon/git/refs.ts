@@ -1,11 +1,10 @@
-import { runGitCommand } from "./command.ts"
+import { git } from "@goddard-ai/libgit2"
 
 export async function readOriginRef(cwd: string, refName: string) {
-  const result = await runGitCommand(cwd, ["symbolic-ref", `refs/remotes/origin/${refName}`])
-  if (result.status !== 0) {
-    const stderr = result.stderr.trim()
-    throw new Error(stderr || `git symbolic-ref refs/remotes/origin/${refName} failed in ${cwd}`)
+  const fullRefName = `refs/remotes/origin/${refName}`
+  const target = await git.refs.readSymbolic(cwd, fullRefName)
+  if (!target) {
+    throw new Error(`Unable to resolve symbolic ref ${fullRefName} in ${cwd}`)
   }
-
-  return result.stdout.trim()
+  return target
 }

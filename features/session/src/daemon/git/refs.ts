@@ -1,35 +1,15 @@
-import { runGitCommand } from "./command.ts"
+import { git, GitNotRepositoryError } from "@goddard-ai/libgit2"
 
 export async function listLocalBranches(sourcePath: string) {
-  const result = await runGitCommand(sourcePath, [
-    "for-each-ref",
-    "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)",
-    "refs/heads",
-  ])
-  if (result.status !== 0) {
-    return { branches: [], currentBranch: null }
-  }
-
-  const branches: string[] = []
-  let currentBranch: string | null = null
-
-  for (const rawLine of result.stdout.split("\n")) {
-    const line = rawLine.trim()
-    if (!line) {
-      continue
+  try {
+    return {
+      branches: await git.refs.listLocalBranches(sourcePath),
+      currentBranch: await git.refs.getCurrentBranch(sourcePath),
     }
-
-    const current = line.startsWith("*")
-    const name = current ? line.slice(1) : line
-    if (current) {
-      currentBranch = name
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      return { branches: [], currentBranch: null }
     }
-
-    branches.push(name)
-  }
-
-  return {
-    branches,
-    currentBranch,
+    throw error
   }
 }

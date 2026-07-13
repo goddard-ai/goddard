@@ -15,6 +15,11 @@ export async function getBranchHead(rootDir: string, branch: string) {
   return await getSharedGitApi().refs.getBranchHead(rootDir, branch)
 }
 
+/** Returns the current HEAD commit when the repository has one. */
+export async function resolveHead(rootDir: string) {
+  return await getSharedGitApi().history.resolveHead(rootDir)
+}
+
 /** Checks whether the possible ancestor commit is contained by the descendant ref. */
 export async function isAncestor(rootDir: string, ancestor: string, descendant: string) {
   return await getSharedGitApi().history.isAncestor(rootDir, ancestor, descendant)

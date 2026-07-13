@@ -26,18 +26,35 @@ export function createFakeGitApi(overrides: DeepPartial<GitApi> = {}): GitApi {
       getCurrentBranch: fail,
       branchExists: fail,
       getBranchHead: fail,
+      readSymbolic: fail,
+      listLocalBranches: fail,
       ...overrides.refs,
     },
     history: {
       resolveHead: fail,
       isAncestor: fail,
       getMergeBase: fail,
+      countCommits: fail,
       ...overrides.history,
     },
     status: {
       getWorkingTreeStatus: fail,
       isWorktreeClean: fail,
+      listUntracked: fail,
       ...overrides.status,
+    },
+    config: {
+      get: fail,
+      ...overrides.config,
+    },
+    ignore: {
+      isIgnored: fail,
+      filterIgnored: fail,
+      ...overrides.ignore,
+    },
+    index: {
+      listPaths: fail,
+      ...overrides.index,
     },
     worktrees: {
       list: fail,

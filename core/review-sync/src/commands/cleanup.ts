@@ -3,7 +3,7 @@ import { command, flag } from "cmd-ts"
 
 import { createReviewSyncResult, UserError } from "../errors.ts"
 import {
-  git,
+  deleteRef,
   isInsideOrEqual,
   resolveRef,
   resolveRequiredGitCommonDir,
@@ -148,7 +148,7 @@ async function deleteSessionRefIfPresent(
   context: RuntimeContext,
 ) {
   if (await resolveRef(resolvedDirectory, refName, context)) {
-    await git(resolvedDirectory, ["update-ref", "-d", refName], context)
+    await deleteRef(resolvedDirectory, refName, context)
   }
 }
 

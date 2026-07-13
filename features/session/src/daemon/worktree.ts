@@ -1,7 +1,7 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
-import { git } from "@goddard-ai/libgit2"
+import { git, GitNotRepositoryError } from "@goddard-ai/libgit2"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
@@ -86,7 +86,14 @@ export async function resolveGitRepoRoot(cwd: string) {
 
 /** Returns true when the requested cwd points at a bare git repository. */
 export async function inspectGitBareRepository(cwd: string) {
-  return await git.repository.isBareRepository(cwd)
+  try {
+    return await git.repository.isBareRepository(cwd)
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      return false
+    }
+    throw error
+  }
 }
 
 /** Resolves the git source directory that can create linked worktrees for one launch cwd. */
