@@ -15,7 +15,7 @@ The exported `git` namespace now implements these operations with libgit2:
 - worktree listing and stash reflog listing
 - repository config reads, ignore checks, and index path listing
 
-Review-sync, sprint-branch, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam. The desktop runtime and workforce command still have native-compatible read operations to migrate.
+Review-sync, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam. The desktop runtime and workforce command still have native-compatible read operations to migrate.
 
 ## Core Review Sync
 
@@ -31,20 +31,6 @@ Subprocess seam: `core/review-sync/src/git/command.ts`.
 | Rebase-state probe | `rebase --show-current-patch` | This currently distinguishes stale metadata from an active rebase. It is a candidate for repository-state inspection without performing a native rebase. |
 
 Several concrete review-sync command calls still live outside `src/git/`. Moving those command-specific wrappers under `src/git/` remains package-local organization work and does not require expanding `@goddard-ai/libgit2`.
-
-## Core Sprint Branch
-
-Subprocess seam: `core/sprint-branch/src/git/command.ts`.
-
-| CLI-owned capability | Command shapes | Why it remains CLI-backed |
-| --- | --- | --- |
-| Checkout and branch mutation | `checkout`, `checkout --detach`, `branch`, `branch --force`, `branch -d/-D` | Sprint transitions coordinate branch ownership, worktree state, and recovery. Migrate only a complete transition with parity tests. |
-| Merge and rebase | `merge --ff-only`, `rebase`, `rebase --onto` | Git porcelain owns sequencing, conflict metadata, continuation state, and diagnostics. These are intentionally CLI-backed. |
-| Reset | `reset --hard` | This is part of branch movement and should migrate with that workflow, not as an isolated binding. |
-| Stash mutation | `stash push --include-untracked`, `stash apply` | Native stash mutation is feasible, but the current recovery flow depends on porcelain conflict behavior. Stash reads are already native. |
-| Human diff command | `diff` with user-selected display flags | The command's formatted text is the user-facing output, so CLI formatting is the contract. |
-
-Most sprint mutation call sites still invoke the package runner outside `src/git/`. They should first move into capability-oriented `src/git/` modules so future native migration does not leak command arguments through feature logic.
 
 ## Session Feature
 

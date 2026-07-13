@@ -17,7 +17,6 @@
     "lint": "turbo run lint --output-logs=errors-only",
     "test": "bun test scripts/*.test.ts --dots && turbo run test --output-logs=errors-only",
     "smoke:review-sync": "pnpm --dir core/review-sync run smoke",
-    "smoke:sprint-branch": "bun run ./core/sprint-branch/scripts/smoke.ts",
     "smoke:workforce": "bun run ./scripts/smoke-workforce.ts",
     "acp": "bun run ./scripts/acp-session.ts",
     "goddard:daemon": "NODE_ENV=development bun run ./scripts/runtime-bun.ts run ./core/daemon/src/main.ts",
@@ -31,7 +30,6 @@
   "devDependencies": {
     "@clack/prompts": "catalog:",
     "@goddard-ai/review-sync": "workspace:*",
-    "@goddard-ai/sprint-branch": "workspace:*",
     "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
     "@prettier/plugin-oxc": "^0.1.4",
     "@tsrx/core": "0.1.33",
