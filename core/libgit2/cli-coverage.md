@@ -1,6 +1,6 @@
 # Git CLI Coverage
 
-This document tracks Git behavior that daemon packages still implement through `git` subprocesses instead of `@goddard-ai/libgit2`.
+This document tracks production Git behavior that Goddard packages still implement through `git` subprocesses instead of `@goddard-ai/libgit2`. Tests, smoke scripts, repository hooks, and development tooling are outside this inventory.
 
 Last reviewed: 2026-07-12.
 
@@ -15,7 +15,7 @@ The exported `git` namespace now implements these operations with libgit2:
 - worktree listing and stash reflog listing
 - repository config reads, ignore checks, and index path listing
 
-Review-sync, sprint-branch, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam.
+Review-sync, sprint-branch, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam. The desktop runtime and workforce command still have native-compatible read operations to migrate.
 
 ## Core Review Sync
 
@@ -59,6 +59,24 @@ Subprocess seam: `features/session/src/daemon/git/command.ts`.
 | Empty-directory discovery | `ls-files --others --exclude-standard --directory` | libgit2 status does not report empty untracked directories; session bootstrap intentionally copies an empty `node_modules`. |
 | Custom include matching | `ls-files --others --ignored --exclude-from=<file>` | `.worktreeinclude` relies on Git's exclude-file matching and directory collapsing. Keep it on CLI unless a native implementation proves equivalent pattern semantics. |
 
+## Desktop Runtime
+
+Subprocess seam: `app/src/bun/project-git-status.ts`.
+
+| CLI-owned capability | Command shapes | Migration assessment |
+| --- | --- | --- |
+| Checkout identity | `rev-parse --short HEAD`, `rev-parse --show-toplevel` | The native API already resolves `HEAD` and repository roots. Shortening an object id is presentation logic, so these reads can migrate without new bindings. |
+| Checkout status | `status --porcelain=v1 -b` | Native status and current-branch reads already cover changes, untracked files, and branch identity. Ahead/behind reporting needs an explicit upstream-resolution API before the complete result can migrate. |
+| Linked worktree discovery | `worktree list --porcelain` | Native worktree listing already covers this behavior and should replace the subprocess call. |
+
+## Workforce Command
+
+Subprocess seam: `workforce/src/main.ts`.
+
+| CLI-owned capability | Command shapes | Migration assessment |
+| --- | --- | --- |
+| Repository root discovery | `rev-parse --show-toplevel` | The native repository API already supports this operation. This call can migrate directly once workforce depends on `@goddard-ai/libgit2`. |
+
 ## Recommended Boundary
 
 Keep these operations CLI-backed unless a future task explicitly accepts their parity and recovery risk:
@@ -70,3 +88,5 @@ Keep these operations CLI-backed unless a future task explicitly accepts their p
 - empty untracked directory and custom exclude-file enumeration
 
 Good later native candidates are worktree add/remove, narrowly scoped stash mutation, repository-state probes, and review-sync snapshot creation. Each should be migrated as a complete workflow with real-repository tests rather than as unused bindings.
+
+The desktop runtime's repository, status, and worktree reads and workforce's repository-root read are smaller migration candidates because the native API already implements most or all of their behavior.
