@@ -12,3 +12,10 @@ export const nativeLibgit2Manifest = {
 } as const
 
 export type NativeLibgit2Target = keyof typeof nativeLibgit2Manifest.targets
+
+export function nativeLibgit2TargetForBunTarget(bunTarget: string) {
+  const match = Object.entries(nativeLibgit2Manifest.targets).find(
+    ([, target]) => target.bunTarget === bunTarget,
+  )
+  return (match?.[0] as NativeLibgit2Target | undefined) ?? null
+}

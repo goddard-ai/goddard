@@ -6,7 +6,9 @@ import { afterAll, expect, test } from "bun:test"
 
 import {
   listNativeLibraryFiles,
+  resolveNativeLibgit2Target,
   stageNativeLibraries,
+  stageSharedBunRuntime,
   updateNativeLibrariesHash,
 } from "../scripts/build-standalone.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
@@ -24,11 +26,32 @@ test("standalone native manifest is absent when no native libraries are staged",
 
   const nativeLibraries = await stageNativeLibraries({
     outputDir,
-    target: "bun-darwin-arm64",
   })
 
   expect(nativeLibraries).toEqual({})
   expect(await listNativeLibraryFiles(outputDir, nativeLibraries)).toEqual([])
+})
+
+test("shared Bun staging preserves the complete bundled module graph", async () => {
+  const rootDir = await createTempDir()
+  const sourceDir = join(rootDir, "source")
+  const outputDir = join(rootDir, "output")
+  await mkdir(sourceDir, { recursive: true })
+  await writeFile(
+    join(sourceDir, "main.mjs"),
+    'import { value } from "./chunk.mjs"\nconsole.log(value)\n',
+  )
+  await writeFile(join(sourceDir, "chunk.mjs"), "export const value = 1\n")
+
+  const stagedFiles = await stageSharedBunRuntime({
+    outputDir,
+    entrypoints: [{ sourcePath: join(sourceDir, "main.mjs"), outputPath: "main.mjs" }],
+  })
+
+  expect(stagedFiles).toHaveLength(1)
+  const result = Bun.spawnSync([process.execPath, stagedFiles[0]!])
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout.toString()).toBe("1\n")
 })
 
 test("standalone native staging records libgit2 metadata and hashes staged files", async () => {
@@ -41,16 +64,18 @@ test("standalone native staging records libgit2 metadata and hashes staged files
 
   const nativeLibraries = await stageNativeLibraries({
     outputDir,
-    target: "bun-darwin-arm64",
-    libgit2SourceDir: sourceDir,
-    libgit2Library: "libgit2.dylib",
-    libgit2Version: "1.9.4",
+    libgit2: {
+      target: "darwin-arm64",
+      sourceDir,
+      library: "libgit2.dylib",
+      version: "1.9.0",
+    },
   })
 
   expect(nativeLibraries.libgit2).toEqual({
-    target: "bun-darwin-arm64",
+    target: "darwin-arm64",
     path: "native/libgit2/libgit2.dylib",
-    version: "1.9.4",
+    version: "1.9.0",
     sha256: createHash("sha256").update("libgit2-v1").digest("hex"),
   })
   expect(
@@ -65,9 +90,12 @@ test("standalone native staging records libgit2 metadata and hashes staged files
   await writeFile(join(sourceDir, "deps", "libssh2.dylib"), "dependency-v2")
   await stageNativeLibraries({
     outputDir,
-    target: "bun-darwin-arm64",
-    libgit2SourceDir: sourceDir,
-    libgit2Library: "libgit2.dylib",
+    libgit2: {
+      target: "darwin-arm64",
+      sourceDir,
+      library: "libgit2.dylib",
+      version: "1.9.0",
+    },
   })
   const secondHash = createHash("sha256")
   await updateNativeLibrariesHash(secondHash, outputDir, nativeLibraries)
@@ -75,16 +103,28 @@ test("standalone native staging records libgit2 metadata and hashes staged files
   expect(secondHash.digest("hex")).not.toBe(firstHash.digest("hex"))
 })
 
-test("standalone native staging requires libgit2 source and library together", async () => {
+test("standalone native staging rejects a library outside its artifact directory", async () => {
+  const rootDir = await createTempDir()
   const outputDir = await createTempDir()
 
   await expect(
     stageNativeLibraries({
       outputDir,
-      target: "bun-darwin-arm64",
-      libgit2SourceDir: outputDir,
+      libgit2: {
+        target: "darwin-arm64",
+        sourceDir: join(rootDir, "artifact"),
+        library: "../libgit2.dylib",
+        version: "1.9.0",
+      },
     }),
-  ).rejects.toThrow("--native-libgit2-source-dir and --native-libgit2-library")
+  ).rejects.toThrow("must be inside its artifact directory")
+})
+
+test("standalone builds resolve the package-owned libgit2 target", () => {
+  expect(resolveNativeLibgit2Target("bun-darwin-arm64")).toBe("darwin-arm64")
+  expect(() => resolveNativeLibgit2Target("bun-linux-x64")).toThrow(
+    "No packaged libgit2 artifact supports bun-linux-x64",
+  )
 })
 
 async function createTempDir() {

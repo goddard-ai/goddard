@@ -2,6 +2,7 @@
   "libgit2": {
     "repo": "https://github.com/libgit2/libgit2.git",
     "version": "1.9.0",
-    "ref": "v1.9.0"
+    "ref": "v1.9.0",
+    "commit": "338e6fb681369ff0537719095e22ce9dc602dbf0"
   }
 }

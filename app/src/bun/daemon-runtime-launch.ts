@@ -21,6 +21,15 @@ export function resolveInstalledNativeRuntimePaths(
   }
 }
 
+/** Pins one generated shared-Bun launcher to the executable bundled with the desktop app. */
+export function bindBunRuntimeLauncher(source: string, bunExecutablePath: string) {
+  const placeholder = '"${GODDARD_BUN_RUNTIME:-bun}"'
+  if (!source.includes(placeholder)) {
+    return null
+  }
+  return source.replace(placeholder, quoteShellLiteral(bunExecutablePath))
+}
+
 export function createDaemonRunArgs(input: {
   runtime: PreparedDaemonRuntime
   baseUrl: string
@@ -47,4 +56,8 @@ export function createDaemonRunArgs(input: {
   }
 
   return args
+}
+
+function quoteShellLiteral(value: string) {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }

@@ -8,6 +8,7 @@ import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url
 import { Updater } from "electrobun/bun"
 
 import {
+  bindBunRuntimeLauncher,
   createDaemonRunArgs,
   resolveInstalledNativeRuntimePaths,
   type PreparedDaemonRuntime,
@@ -215,32 +216,20 @@ async function prepareDaemonRuntime(manifest: EmbeddedRuntimeManifest) {
 /** Points lightweight packaged launchers at the current app-bundled Bun executable. */
 async function writeAppBunLaunchers(manifest: EmbeddedRuntimeManifest, installDir: string) {
   await Promise.all(
-    [manifest.daemon.executablePath, ...Object.values(manifest.daemon.helperPaths)].map(
-      async (relativeLauncherPath) => {
-        const launcherPath = join(installDir, relativeLauncherPath)
-        const payloadPath = `${launcherPath}.mjs`
+    (manifest.daemon.sharedBunLauncherPaths ?? []).map(async (relativeLauncherPath) => {
+      const launcherPath = join(installDir, relativeLauncherPath)
+      const launcher = bindBunRuntimeLauncher(
+        await readFile(launcherPath, "utf8"),
+        process.execPath,
+      )
+      if (!launcher) {
+        return
+      }
 
-        if (!(await pathExists(payloadPath))) {
-          return
-        }
-
-        await writeFile(
-          launcherPath,
-          [
-            "#!/bin/sh",
-            `exec ${quoteShellLiteral(process.execPath)} ${quoteShellLiteral(payloadPath)} "$@"`,
-            "",
-          ].join("\n"),
-          "utf8",
-        )
-        await chmod(launcherPath, 0o755)
-      },
-    ),
+      await writeFile(launcherPath, launcher, "utf8")
+      await chmod(launcherPath, 0o755)
+    }),
   )
-}
-
-function quoteShellLiteral(value: string) {
-  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 /** Installs or updates a user-scoped daemon service through the bundled serviceman shell launcher. */

@@ -1,9 +1,11 @@
-import { join } from "node:path"
+import { copyFile, realpath } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 import {
   artifactManifestPath,
   artifactPath,
   assertFile,
+  assertPinnedSourceCommit,
   buildDir,
   copyLicenseFiles,
   distDir,
@@ -11,6 +13,7 @@ import {
   parseOptions,
   pathExists,
   readVersions,
+  removePath,
   resolveTarget,
   rootDir,
   run,
@@ -31,7 +34,10 @@ if (!(await pathExists(sourceDir))) {
 
 const targetBuildDir = buildDir(options.target)
 const targetDistDir = distDir(options.target)
+const targetInstallDir = join(targetBuildDir, "install")
 await ensureDir(targetBuildDir)
+await removePath(targetInstallDir)
+await removePath(targetDistDir)
 await ensureDir(targetDistDir)
 
 const cmakeArgs = [
@@ -40,7 +46,7 @@ const cmakeArgs = [
   "-B",
   targetBuildDir,
   "-DCMAKE_BUILD_TYPE=Release",
-  `-DCMAKE_INSTALL_PREFIX=${targetDistDir}`,
+  `-DCMAKE_INSTALL_PREFIX=${targetInstallDir}`,
   "-DBUILD_SHARED_LIBS=ON",
   "-DBUILD_TESTS=OFF",
   "-DBUILD_CLI=OFF",
@@ -61,11 +67,20 @@ await run("cmake", ["--build", targetBuildDir, "--config", "Release", "--paralle
 await run("cmake", ["--install", targetBuildDir, "--config", "Release"])
 
 const libraryPath = await artifactPath(options.target)
+const installedLibraryPath = join(targetInstallDir, targetConfig.library)
+await assertFile(installedLibraryPath)
+await ensureDir(dirname(libraryPath))
+await copyFile(await realpath(installedLibraryPath), libraryPath)
+
+if (targetConfig.platform === "darwin") {
+  await run("codesign", ["--force", "--sign", "-", libraryPath])
+}
+
 await assertFile(libraryPath)
 await copyLicenseFiles(options.target)
 
 const manifestPath = await artifactManifestPath(options.target)
-const sourceCommit = (await run("git", ["rev-parse", "HEAD"], { cwd: sourceDir })).stdout.trim()
+const sourceCommit = await assertPinnedSourceCommit()
 await writeJson(manifestPath, {
   target: options.target,
   platform: targetConfig.platform,

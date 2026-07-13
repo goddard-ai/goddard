@@ -1,6 +1,14 @@
 import { dirname } from "node:path"
 
-import { ensureDir, pathExists, readVersions, rootDir, run, sourceDir } from "./common.ts"
+import {
+  assertPinnedSourceCommit,
+  ensureDir,
+  pathExists,
+  readVersions,
+  rootDir,
+  run,
+  sourceDir,
+} from "./common.ts"
 
 const versions = await readVersions()
 
@@ -21,6 +29,6 @@ if (!(await pathExists(sourceDir))) {
   await run("git", ["checkout", "FETCH_HEAD"], { cwd: sourceDir })
 }
 
-const { stdout } = await run("git", ["rev-parse", "HEAD"], { cwd: sourceDir })
-console.log(`Fetched libgit2 ${versions.libgit2.ref} at ${stdout.trim()} in ${sourceDir}`)
+const commit = await assertPinnedSourceCommit()
+console.log(`Fetched libgit2 ${versions.libgit2.ref} at ${commit} in ${sourceDir}`)
 console.log(`Native pipeline root: ${rootDir}`)

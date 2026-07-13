@@ -7,6 +7,7 @@
   "scripts": {
     "fetch": "bun run ./scripts/fetch.ts",
     "build": "bun run ./scripts/build.ts",
+    "prepare:runtime": "bun run ./scripts/prepare-runtime.ts",
     "verify": "bun run ./scripts/verify.ts",
     "clean": "bun run ./scripts/clean.ts",
     "artifact": "bun run ./scripts/print-artifact.ts"

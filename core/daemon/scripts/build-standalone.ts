@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto"
 import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { createRequire } from "node:module"
+import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 
+import {
+  nativeLibgit2Manifest,
+  nativeLibgit2TargetForBunTarget,
+  type NativeLibgit2Target,
+} from "../../libgit2/vendor/libgit2/manifest.ts"
 import pkg from "../package.json" with { type: "json" }
 
 type StandaloneArtifact = {
@@ -20,8 +26,37 @@ export type NativeLibrariesManifest = {
   }
 }
 
+type NativeLibgit2Artifact = {
+  target: NativeLibgit2Target
+  sourceDir: string
+  library: string
+  version: string
+}
+
+type GeneratedNativeLibgit2Manifest = {
+  target: string
+  bunTarget: string
+  libgit2Version: string
+  artifact: string
+}
+
 const packageDir = resolve(import.meta.dirname, "..")
+const workspaceDir = resolve(packageDir, "..", "..")
 const distDir = join(packageDir, "dist")
+const libgit2VendorDir = resolve(packageDir, "..", "libgit2", "vendor", "libgit2")
+const nodeStreamZipDir = dirname(
+  createRequire(import.meta.url).resolve("node-stream-zip/package.json"),
+)
+const sessionPromptsDir = resolve(
+  packageDir,
+  "..",
+  "..",
+  "features",
+  "session",
+  "src",
+  "daemon",
+  "prompts",
+)
 
 /** Builds standalone Bun executables for the daemon runtime and helper tools. */
 export async function main() {
@@ -39,6 +74,7 @@ export async function main() {
   const executableExt = target.includes("windows") ? ".exe" : ""
   const daemonExt = runtime === "shared-bun" ? "" : executableExt
   const helperExt = helperRuntime === "shared-bun" ? "" : executableExt
+  const nativeLibgit2Artifact = await prepareNativeLibgit2Artifact(target)
   const artifacts: StandaloneArtifact[] = [
     {
       sourcePath: join(distDir, "main.mjs"),
@@ -57,14 +93,27 @@ export async function main() {
     },
   ]
 
-  await runBun(["run", "build"], packageDir)
+  await runWorkspaceDaemonBuild()
   await rm(outputDir, { recursive: true, force: true })
+  const sharedBunArtifacts = artifacts.filter((artifact) => artifact.runtime === "shared-bun")
+  const sharedBunFiles =
+    sharedBunArtifacts.length > 0
+      ? await stageSharedBunRuntime({
+          outputDir,
+          entrypoints: sharedBunArtifacts.map((artifact) => ({
+            sourcePath: artifact.sourcePath,
+            outputPath: relative(distDir, artifact.sourcePath),
+          })),
+          packages: [{ name: "node-stream-zip", sourceDir: nodeStreamZipDir }],
+          directories: [{ sourceDir: sessionPromptsDir, outputPath: "prompts" }],
+        })
+      : []
 
   for (const artifact of artifacts) {
     await mkdir(dirname(artifact.outputPath), { recursive: true })
 
     if (artifact.runtime === "shared-bun") {
-      await writeSharedBunHelper(artifact)
+      await writeSharedBunHelper(artifact, outputDir)
     } else {
       await runBun(buildCompileArgs(target, artifact.sourcePath, artifact.outputPath), packageDir)
     }
@@ -72,18 +121,16 @@ export async function main() {
 
   const nativeLibraries = await stageNativeLibraries({
     outputDir,
-    target,
-    libgit2SourceDir: args.get("native-libgit2-source-dir"),
-    libgit2Library: args.get("native-libgit2-library"),
-    libgit2Version: args.get("native-libgit2-version"),
+    libgit2: nativeLibgit2Artifact,
   })
   const runtimeHash = createHash("sha256")
 
   for (const artifact of artifacts) {
     runtimeHash.update(await readFile(artifact.outputPath))
-    if (artifact.runtime === "shared-bun") {
-      runtimeHash.update(await readFile(`${artifact.outputPath}.mjs`))
-    }
+  }
+  for (const sharedBunFile of sharedBunFiles) {
+    runtimeHash.update(relativeFromOutputDir(outputDir, sharedBunFile))
+    runtimeHash.update(await readFile(sharedBunFile))
   }
   await updateNativeLibrariesHash(runtimeHash, outputDir, nativeLibraries)
 
@@ -103,6 +150,11 @@ export async function main() {
           goddard: relativeFromOutputDir(outputDir, artifacts[1]!.outputPath),
           workforce: relativeFromOutputDir(outputDir, artifacts[2]!.outputPath),
         },
+        ...(sharedBunArtifacts.length > 0 && {
+          sharedBunLauncherPaths: sharedBunArtifacts.map((artifact) =>
+            relativeFromOutputDir(outputDir, artifact.outputPath),
+          ),
+        }),
         ...(Object.keys(nativeLibraries).length > 0 && { nativeLibraries }),
       },
       null,
@@ -115,27 +167,18 @@ export async function main() {
 /** Stages optional native runtime libraries into the standalone output directory. */
 export async function stageNativeLibraries(input: {
   outputDir: string
-  target: string
-  libgit2SourceDir?: string
-  libgit2Library?: string
-  libgit2Version?: string
+  libgit2?: NativeLibgit2Artifact
 }) {
   const nativeLibraries: NativeLibrariesManifest = {}
 
-  if (!input.libgit2SourceDir && !input.libgit2Library && !input.libgit2Version) {
+  if (!input.libgit2) {
     return nativeLibraries
   }
 
-  if (!input.libgit2SourceDir || !input.libgit2Library) {
-    throw new Error(
-      "--native-libgit2-source-dir and --native-libgit2-library must be provided together",
-    )
-  }
-
-  const sourceDir = resolve(process.cwd(), input.libgit2SourceDir)
-  const librarySourcePath = resolve(sourceDir, input.libgit2Library)
+  const sourceDir = resolve(process.cwd(), input.libgit2.sourceDir)
+  const librarySourcePath = resolve(sourceDir, input.libgit2.library)
   if (!isInsideOrEqual(sourceDir, librarySourcePath)) {
-    throw new Error("--native-libgit2-library must point inside --native-libgit2-source-dir")
+    throw new Error("The native libgit2 library must be inside its artifact directory")
   }
 
   const outputNativeDir = join(input.outputDir, "native", "libgit2")
@@ -148,13 +191,57 @@ export async function stageNativeLibraries(input: {
     .digest("hex")
 
   nativeLibraries.libgit2 = {
-    target: input.target,
+    target: input.libgit2.target,
     path: relativeFromOutputDir(input.outputDir, libraryOutputPath),
-    ...(input.libgit2Version && { version: input.libgit2Version }),
+    version: input.libgit2.version,
     sha256,
   }
 
   return nativeLibraries
+}
+
+/** Resolves the required package-owned native artifact for a Bun compile target. */
+export function resolveNativeLibgit2Target(target: string) {
+  const nativeTarget = nativeLibgit2TargetForBunTarget(target)
+  if (nativeTarget) {
+    return nativeTarget
+  }
+
+  const supportedTargets = Object.values(nativeLibgit2Manifest.targets)
+    .map((candidate) => candidate.bunTarget)
+    .join(", ")
+  throw new Error(
+    `No packaged libgit2 artifact supports ${target}. Supported Bun targets: ${supportedTargets}`,
+  )
+}
+
+/** Builds and verifies the package-owned libgit2 artifact required by the daemon target. */
+async function prepareNativeLibgit2Artifact(target: string): Promise<NativeLibgit2Artifact> {
+  const nativeTarget = resolveNativeLibgit2Target(target)
+  const targetConfig = nativeLibgit2Manifest.targets[nativeTarget]
+  await runBun(
+    ["run", join(libgit2VendorDir, "scripts", "prepare-runtime.ts"), "--target", nativeTarget],
+    libgit2VendorDir,
+  )
+
+  const sourceDir = join(libgit2VendorDir, "dist", nativeTarget)
+  const manifest = JSON.parse(
+    await readFile(join(sourceDir, "manifest.json"), "utf8"),
+  ) as GeneratedNativeLibgit2Manifest
+  if (
+    manifest.target !== nativeTarget ||
+    manifest.bunTarget !== target ||
+    manifest.artifact !== targetConfig.library
+  ) {
+    throw new Error(`Generated libgit2 manifest does not match daemon target ${target}`)
+  }
+
+  return {
+    target: nativeTarget,
+    sourceDir,
+    library: manifest.artifact,
+    version: manifest.libgit2Version,
+  }
 }
 
 /** Lists every file that belongs to a staged native library payload. */
@@ -204,22 +291,69 @@ function resolveArtifactRuntime(value: string | undefined, flagName: string) {
 }
 
 /** Writes a small launcher plus bundled JS payload for app builds that already ship Bun. */
-async function writeSharedBunHelper(artifact: StandaloneArtifact) {
-  const payloadPath = `${artifact.outputPath}.mjs`
-  const payloadName = basename(payloadPath)
-
-  await cp(artifact.sourcePath, payloadPath)
+async function writeSharedBunHelper(artifact: StandaloneArtifact, outputDir: string) {
+  const payloadPath = join(outputDir, "runtime", relative(distDir, artifact.sourcePath))
+  const relativePayloadPath = relative(dirname(artifact.outputPath), payloadPath).replaceAll(
+    "\\",
+    "/",
+  )
   await writeFile(
     artifact.outputPath,
     [
       "#!/bin/sh",
       'launcher_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
-      `exec "\${GODDARD_BUN_RUNTIME:-bun}" "$launcher_dir/${payloadName}" "$@"`,
+      `exec "\${GODDARD_BUN_RUNTIME:-bun}" "$launcher_dir/${relativePayloadPath}" "$@"`,
       "",
     ].join("\n"),
     "utf8",
   )
   await chmod(artifact.outputPath, 0o755)
+}
+
+/** Stages the complete bundled module graph used by shared-Bun launchers. */
+export async function stageSharedBunRuntime(input: {
+  outputDir: string
+  entrypoints: Array<{ sourcePath: string; outputPath: string }>
+  packages?: Array<{ name: string; sourceDir: string }>
+  directories?: Array<{ sourceDir: string; outputPath: string }>
+}) {
+  const outputDir = resolve(input.outputDir)
+  const runtimeDir = join(outputDir, "runtime")
+  await rm(runtimeDir, { recursive: true, force: true })
+
+  for (const entrypoint of input.entrypoints) {
+    const sourcePath = resolve(entrypoint.sourcePath)
+    const outputPath = resolve(runtimeDir, entrypoint.outputPath)
+    if (!isInsideOrEqual(runtimeDir, outputPath)) {
+      throw new Error("A shared Bun entrypoint output must be inside the runtime directory")
+    }
+    await mkdir(dirname(outputPath), { recursive: true })
+    await runBun(
+      ["build", sourcePath, "--target=bun", "--packages=bundle", `--outfile=${outputPath}`],
+      packageDir,
+    )
+  }
+
+  for (const runtimePackage of input.packages ?? []) {
+    const packageOutputDir = join(runtimeDir, "node_modules", runtimePackage.name)
+    await mkdir(dirname(packageOutputDir), { recursive: true })
+    await cp(runtimePackage.sourceDir, packageOutputDir, {
+      recursive: true,
+      force: true,
+    })
+  }
+
+  for (const directory of input.directories ?? []) {
+    const outputPath = resolve(runtimeDir, directory.outputPath)
+    if (!isInsideOrEqual(runtimeDir, outputPath)) {
+      throw new Error("A shared Bun runtime directory must be inside the runtime directory")
+    }
+    await cp(directory.sourceDir, outputPath, { recursive: true, force: true })
+  }
+
+  return (await listFilesRecursive(runtimeDir)).sort((left, right) =>
+    relativeFromOutputDir(runtimeDir, left).localeCompare(relativeFromOutputDir(runtimeDir, right)),
+  )
 }
 
 async function listFilesRecursive(path: string): Promise<string[]> {
@@ -302,7 +436,27 @@ function buildCompileArgs(target: string, sourcePath: string, outputPath: string
 
 /** Runs one Bun subprocess and fails the build immediately on non-zero exit. */
 async function runBun(args: string[], cwd: string) {
-  const subprocess = Bun.spawn([process.execPath, ...args], {
+  await runCommand(process.execPath, args, cwd)
+}
+
+/** Builds the daemon and all workspace dependencies needed by its bundled entrypoints. */
+async function runWorkspaceDaemonBuild() {
+  await runCommand(
+    "pnpm",
+    [
+      "exec",
+      "turbo",
+      "run",
+      "build",
+      "--filter=@goddard-ai/daemon...",
+      "--output-logs=errors-only",
+    ],
+    workspaceDir,
+  )
+}
+
+async function runCommand(command: string, args: string[], cwd: string) {
+  const subprocess = Bun.spawn([command, ...args], {
     cwd,
     stdin: "ignore",
     stdout: "inherit",
@@ -312,7 +466,7 @@ async function runBun(args: string[], cwd: string) {
   const exitCode = await subprocess.exited
 
   if (exitCode !== 0) {
-    throw new Error(`bun ${args.join(" ")} failed with exit code ${exitCode}`)
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${exitCode}`)
   }
 }
 

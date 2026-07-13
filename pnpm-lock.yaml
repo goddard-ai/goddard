@@ -513,6 +513,9 @@ importers:
       kleur:
         specifier: 'catalog:'
         version: 4.1.5
+      node-stream-zip:
+        specifier: 1.15.0
+        version: 1.15.0
       radashi:
         specifier: 'catalog:'
         version: 12.9.1

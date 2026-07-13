@@ -14,6 +14,7 @@ type Versions = {
     repo: string
     version: string
     ref: string
+    commit: string
   }
 }
 
@@ -28,6 +29,18 @@ export const generatedRootNames = ["source", "build", "dist"] as const
 
 export async function readVersions() {
   return JSON.parse(await readFile(join(rootDir, "versions.json"), "utf8")) as Versions
+}
+
+export async function assertPinnedSourceCommit() {
+  const versions = await readVersions()
+  const { stdout } = await run("git", ["rev-parse", "HEAD"], { cwd: sourceDir })
+  const commit = stdout.trim()
+  if (commit !== versions.libgit2.commit) {
+    throw new Error(
+      `Expected libgit2 ${versions.libgit2.ref} at ${versions.libgit2.commit}, found ${commit}`,
+    )
+  }
+  return commit
 }
 
 export async function resolveTarget(target: string) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { chmod, cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises"
-import { basename, dirname, join, resolve } from "node:path"
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { dirname, join, resolve } from "node:path"
 
 import {
   embeddedRuntimeDirName,
@@ -22,6 +22,7 @@ type DaemonManifest = {
     goddard: string
     workforce: string
   }
+  sharedBunLauncherPaths?: string[]
   nativeLibraries?: EmbeddedRuntimeManifest["daemon"]["nativeLibraries"]
 }
 
@@ -29,8 +30,6 @@ const appDir = resolve(import.meta.dirname, "..")
 const workspaceDir = resolve(appDir, "..")
 const coreDaemonDir = resolve(workspaceDir, "core", "daemon")
 const embeddedRuntimeDir = join(appDir, ".generated", embeddedRuntimeDirName)
-const nativeRuntimeStagingDir = join(appDir, ".generated", "native-runtime")
-const macosArm64HomebrewPrefix = "/opt/homebrew"
 
 /** Builds and stages the daemon runtime payload copied into Electrobun resources. */
 async function main() {
@@ -46,9 +45,7 @@ async function main() {
   const servicemanOutputDir = join(embeddedRuntimeDir, "serviceman")
 
   await rm(embeddedRuntimeDir, { recursive: true, force: true })
-  await rm(nativeRuntimeStagingDir, { recursive: true, force: true })
   await mkdir(embeddedRuntimeDir, { recursive: true })
-  const nativeLibraryBuildArgs = await stageNativeLibraryBuildArgs(os, arch)
 
   runBunScript(coreDaemonDir, [
     join(coreDaemonDir, "scripts", "build-standalone.ts"),
@@ -57,7 +54,6 @@ async function main() {
     "--out-dir",
     daemonOutputDir,
     ...(os === "macos" ? ["--runtime", "shared-bun"] : []),
-    ...nativeLibraryBuildArgs,
   ])
 
   const daemonManifest = JSON.parse(
@@ -82,6 +78,11 @@ async function main() {
         goddard: join("daemon", daemonManifest.helperPaths.goddard),
         workforce: join("daemon", daemonManifest.helperPaths.workforce),
       },
+      ...(daemonManifest.sharedBunLauncherPaths && {
+        sharedBunLauncherPaths: daemonManifest.sharedBunLauncherPaths.map((path) =>
+          join("daemon", path),
+        ),
+      }),
       ...(daemonManifest.nativeLibraries && {
         nativeLibraries: prefixNativeLibraryPaths("daemon", daemonManifest.nativeLibraries),
       }),
@@ -98,113 +99,6 @@ async function main() {
     JSON.stringify(manifest, null, 2) + "\n",
     "utf8",
   )
-}
-
-async function stageNativeLibraryBuildArgs(os: ElectrobunTargetOs, arch: ElectrobunTargetArch) {
-  if (os !== "macos" || arch !== "arm64") {
-    return []
-  }
-
-  const bundle = await stageMacosArm64HomebrewLibgit2Bundle(
-    join(nativeRuntimeStagingDir, "libgit2-darwin-arm64"),
-  )
-
-  return [
-    "--native-libgit2-source-dir",
-    bundle.sourceDir,
-    "--native-libgit2-library",
-    bundle.library,
-    "--native-libgit2-version",
-    bundle.version,
-  ]
-}
-
-/** Stages the first packaged libgit2 slice from Homebrew's macOS arm64 bottle layout. */
-async function stageMacosArm64HomebrewLibgit2Bundle(outputDir: string) {
-  const libgit2Path = join(macosArm64HomebrewPrefix, "lib", "libgit2.dylib")
-  const copied = new Map<string, string>()
-  const pending = [libgit2Path]
-
-  await mkdir(outputDir, { recursive: true })
-
-  while (pending.length > 0) {
-    const sourcePath = pending.pop()!
-    const outputPath = join(outputDir, basename(sourcePath))
-    if (copied.has(sourcePath)) {
-      continue
-    }
-
-    await cp(await realpath(sourcePath), outputPath, { force: true })
-    copied.set(sourcePath, outputPath)
-
-    for (const dependency of readHomebrewDylibDependencies(sourcePath)) {
-      if (!copied.has(dependency)) {
-        pending.push(dependency)
-      }
-    }
-  }
-
-  for (const [sourcePath, outputPath] of copied) {
-    rewriteBundledDylibPaths(outputPath, readHomebrewDylibDependencies(sourcePath), copied)
-    codesignBundledDylib(outputPath)
-  }
-
-  return {
-    sourceDir: outputDir,
-    library: basename(libgit2Path),
-    version: resolveHomebrewFormulaVersion("libgit2"),
-  }
-}
-
-function readHomebrewDylibDependencies(path: string) {
-  return runTextCommand(["otool", "-L", path])
-    .split("\n")
-    .slice(2)
-    .map((line) => line.trim().split(/\s+/)[0])
-    .filter(
-      (dependency) =>
-        dependency &&
-        dependency !== path &&
-        dependency.startsWith(`${macosArm64HomebrewPrefix}/`) &&
-        dependency.endsWith(".dylib"),
-    )
-}
-
-function rewriteBundledDylibPaths(
-  outputPath: string,
-  dependencies: string[],
-  copied: Map<string, string>,
-) {
-  const args = ["-id", `@loader_path/${basename(outputPath)}`]
-
-  for (const dependency of dependencies) {
-    const copiedDependency = copied.get(dependency)
-    if (copiedDependency) {
-      args.push("-change", dependency, `@loader_path/${basename(copiedDependency)}`)
-    }
-  }
-
-  runManagedCommand(["install_name_tool", ...args, outputPath])
-}
-
-function codesignBundledDylib(outputPath: string) {
-  runManagedCommand(["codesign", "--force", "--sign", "-", outputPath])
-}
-
-function resolveHomebrewFormulaVersion(formula: string) {
-  const source = runTextCommand(["brew", "info", formula, "--json=v2"])
-  const parsed = JSON.parse(source) as {
-    formulae?: Array<{
-      versions?: {
-        stable?: string
-      }
-    }>
-  }
-  const version = parsed.formulae?.[0]?.versions?.stable
-  if (!version) {
-    throw new Error(`Homebrew did not report a stable ${formula} version`)
-  }
-  return version
 }
 
 function prefixNativeLibraryPaths(
@@ -290,27 +184,6 @@ function runBunScript(cwd: string, args: string[]) {
   if (result.exitCode !== 0) {
     throw new Error(`bun ${args.join(" ")} failed with exit code ${result.exitCode ?? 1}`)
   }
-}
-
-function runTextCommand(args: string[]) {
-  const result = runManagedCommand(args)
-  return result.stdout ? new TextDecoder().decode(result.stdout) : ""
-}
-
-function runManagedCommand(args: string[]) {
-  const result = Bun.spawnSync(args, {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env,
-  })
-
-  if (result.exitCode !== 0) {
-    const stderr = result.stderr ? new TextDecoder().decode(result.stderr) : ""
-    const stdout = result.stdout ? new TextDecoder().decode(result.stdout) : ""
-    const output = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n")
-    throw new Error(output ? `${args.join(" ")} failed:\n${output}` : `${args.join(" ")} failed`)
-  }
-
-  return result
 }
 
 await main()

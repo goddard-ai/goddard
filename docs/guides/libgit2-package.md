@@ -11,7 +11,7 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a la
 
 - `git` is the shared libgit2-backed Git API namespace.
 - Accessing a direct namespace such as `git.repository` or `git.refs` lazily loads the libgit2 runtime once and reuses it.
-- The packaged macOS arm64 daemon runtime supplies an explicit library path. Source checkouts can use a locally built artifact or an explicit environment override.
+- The packaged macOS arm64 daemon runtime builds and supplies the package-owned library at an explicit path. Source checkouts can use a locally built artifact or an explicit environment override.
 - `validateLibgit2Runtime(options)` verifies that a libgit2 runtime can be loaded from the supplied candidates.
 - `resetGitForTests()` clears cached libgit2 and Git API state between tests.
 

@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { expect, test } from "vitest"
 
 import {
+  bindBunRuntimeLauncher,
   createDaemonRunArgs,
   resolveInstalledNativeRuntimePaths,
   type PreparedDaemonRuntime,
@@ -16,7 +17,7 @@ test("installed native runtime paths resolve relative manifest paths under the i
           libgit2: {
             target: "bun-darwin-arm64",
             path: "daemon/native/libgit2/libgit2.dylib",
-            version: "1.9.4",
+            version: "1.9.0",
             sha256: "abc123",
           },
         },
@@ -32,6 +33,22 @@ test("installed native runtime paths are absent without native library metadata"
   expect(
     resolveInstalledNativeRuntimePaths(createEmbeddedRuntimeManifest(), "/installed/runtime"),
   ).toEqual({})
+})
+
+test("shared Bun launchers preserve their staged payload path when pinned", () => {
+  expect(
+    bindBunRuntimeLauncher(
+      [
+        "#!/bin/sh",
+        'launcher_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"',
+        'exec "${GODDARD_BUN_RUNTIME:-bun}" "$launcher_dir/../runtime/main.mjs" "$@"',
+        "",
+      ].join("\n"),
+      "/Applications/Goddard's Runtime/bun",
+    ),
+  ).toContain(
+    `exec '/Applications/Goddard'\\''s Runtime/bun' "$launcher_dir/../runtime/main.mjs" "$@"`,
+  )
 })
 
 test("daemon runtime args omit Git libgit2 path when no native library is installed", () => {

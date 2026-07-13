@@ -158,7 +158,11 @@ The command runs the normal package build first, then emits a platform-specific 
 - `bin/goddard-daemon`
 - `agent-bin/goddard`
 - `agent-bin/workforce`
+- `native/libgit2/`
+- `runtime/` when launchers share the app-bundled Bun executable
 - `manifest.json`
+
+The build resolves the matching package-owned libgit2 target, runs its pinned native build and verification pipeline, and records the staged library in `manifest.json`. A target without a declared libgit2 artifact fails packaging instead of depending on a host installation.
 
 ## Issues & Feature Requests
 

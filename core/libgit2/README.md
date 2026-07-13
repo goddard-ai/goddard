@@ -25,7 +25,7 @@ The loader checks candidates in this order:
 
 Packaged runtimes should pass an explicit target-specific path. Source-checkout fallbacks exist for development and tests; they are not a packaging contract.
 
-Only `darwin-arm64` has a package-owned artifact definition today. Automatic daemon packaging does not yet build and stage that artifact.
+Only `darwin-arm64` has a package-owned artifact definition today. Standalone daemon builds automatically fetch, build, verify, and stage the matching artifact; unsupported targets fail instead of producing a package that depends on host libgit2.
 
 ## Development
 
@@ -35,6 +35,7 @@ Build and verify the pinned native dependency before running the real-repository
 pnpm --dir core/libgit2/vendor/libgit2 run fetch
 pnpm --dir core/libgit2/vendor/libgit2 run build -- --target darwin-arm64
 pnpm --dir core/libgit2/vendor/libgit2 run verify -- --target darwin-arm64
+pnpm --dir core/libgit2/vendor/libgit2 run prepare:runtime -- --target darwin-arm64
 pnpm --dir core/libgit2 run test
 ```
 

@@ -54,6 +54,7 @@
     "cmd-ts": "catalog:",
     "kindstore": "catalog:",
     "kleur": "catalog:",
+    "node-stream-zip": "1.15.0",
     "radashi": "catalog:",
     "zod": "catalog:"
   },
