@@ -74,8 +74,57 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   await expect(git.history.resolveHead(repoDir)).resolves.toBe(branchHead)
   await expect(git.history.isAncestor(repoDir, branchHead, featureHead)).resolves.toBe(true)
   await expect(git.history.getMergeBase(repoDir, "main", "feature")).resolves.toBe(branchHead)
-  await expect(git.status.isWorktreeClean(repoDir)).rejects.toThrow(
-    "libgit2 host does not support status.isWorktreeClean",
+  await expect(git.repository.isBareRepository(repoDir)).resolves.toBe(false)
+  await expect(git.repository.resolveGitPath(repoDir, "info/exclude")).resolves.toEndWith(
+    ".git/info/exclude",
+  )
+  await expect(git.status.isWorktreeClean(repoDir)).resolves.toBe(true)
+
+  await writeFile(join(repoDir, "untracked.txt"), "untracked\n")
+  await expect(git.status.getWorkingTreeStatus(repoDir)).resolves.toEqual({
+    clean: false,
+    entries: ["?? untracked.txt"],
+  })
+  await runGit(repoDir, ["add", "untracked.txt"])
+  await writeFile(join(repoDir, "README.md"), "modified\n")
+  const changedStatus = await git.status.getWorkingTreeStatus(repoDir)
+  expect(changedStatus.clean).toBe(false)
+  expect(changedStatus.entries).toContain("A  untracked.txt")
+  expect(changedStatus.entries).toContain(" M README.md")
+
+  await git.refs.update(repoDir, "refs/goddard/test", featureHead)
+  await expect(git.refs.resolve(repoDir, "refs/goddard/test")).resolves.toBe(featureHead)
+  await git.refs.delete(repoDir, "refs/goddard/test")
+  await expect(git.refs.resolve(repoDir, "refs/goddard/test")).resolves.toBeNull()
+  await expect(git.refs.delete(repoDir, "refs/goddard/missing")).resolves.toBeUndefined()
+
+  const bareRepoDir = join(repoDir, "..", "bare.git")
+  await runGit(repoDir, ["clone", "--bare", repoDir, bareRepoDir])
+  await expect(git.repository.isBareRepository(bareRepoDir)).resolves.toBe(true)
+
+  const linkedWorktreeDir = join(repoDir, "..", "linked")
+  await runGit(repoDir, ["worktree", "add", linkedWorktreeDir, "feature"])
+  const expectedInfoPath = (
+    await runGit(linkedWorktreeDir, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "info/exclude",
+    ])
+  ).stdout.trim()
+  const expectedOperationPath = (
+    await runGit(linkedWorktreeDir, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-path",
+      "MERGE_HEAD",
+    ])
+  ).stdout.trim()
+  await expect(git.repository.resolveGitPath(linkedWorktreeDir, "info/exclude")).resolves.toBe(
+    await normalizePath(expectedInfoPath),
+  )
+  await expect(git.repository.resolveGitPath(linkedWorktreeDir, "MERGE_HEAD")).resolves.toBe(
+    expectedOperationPath,
   )
 })
 

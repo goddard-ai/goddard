@@ -1,10 +1,10 @@
-import { dlopen, FFIType, ptr, suffix } from "bun:ffi"
+import { CString, dlopen, FFIType, ptr, read, suffix, type Pointer } from "bun:ffi"
 
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
 import { nativeLibgit2PathCandidates } from "./native-artifact.ts"
 
 export type Libgit2Symbols = ReturnType<typeof loadLibgit2>["symbols"]
-export type FfiPointer = Parameters<Libgit2Symbols["git_repository_free"]>[0]
+export type FfiPointer = Pointer
 
 let initializedLibgit2: Libgit2Symbols | undefined
 
@@ -60,6 +60,10 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr],
           returns: FFIType.cstring,
         },
+        git_repository_is_bare: {
+          args: [FFIType.ptr],
+          returns: FFIType.i32,
+        },
         git_repository_head: {
           args: [FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
@@ -70,6 +74,18 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
         },
         git_reference_name_to_id: {
           args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_reference_create: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring, FFIType.ptr, FFIType.i32, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        git_reference_lookup: {
+          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
+        git_reference_delete: {
+          args: [FFIType.ptr],
           returns: FFIType.i32,
         },
         git_reference_free: {
@@ -92,6 +108,10 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr],
           returns: FFIType.cstring,
         },
+        git_oid_fromstr: {
+          args: [FFIType.ptr, FFIType.cstring],
+          returns: FFIType.i32,
+        },
         git_graph_descendant_of: {
           args: [FFIType.ptr, FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
@@ -104,9 +124,17 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr, FFIType.ptr, FFIType.ptr],
           returns: FFIType.i32,
         },
+        git_status_options_init: {
+          args: [FFIType.ptr, FFIType.u32],
+          returns: FFIType.i32,
+        },
         git_status_list_entrycount: {
           args: [FFIType.ptr],
           returns: FFIType.u64,
+        },
+        git_status_byindex: {
+          args: [FFIType.ptr, FFIType.u64],
+          returns: FFIType.ptr,
         },
         git_status_list_free: {
           args: [FFIType.ptr],
@@ -187,4 +215,16 @@ export function cString(value: string) {
 
 export function toFfiPointer(value: Uint8Array | BigUint64Array | Buffer) {
   return ptr(value)
+}
+
+export function readUint32(pointer: FfiPointer, byteOffset = 0) {
+  return read.u32(pointer, byteOffset)
+}
+
+export function readNestedPointer(pointer: FfiPointer, byteOffset = 0) {
+  return read.ptr(pointer, byteOffset) as FfiPointer
+}
+
+export function readCString(pointer: FfiPointer) {
+  return String(new CString(pointer))
 }

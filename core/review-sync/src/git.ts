@@ -51,7 +51,10 @@ export function createReviewSyncGitHost() {
     resolveRequiredGitDir: libgit2Host.resolveRequiredGitDir,
     resolveCurrentBranch: libgit2Host.resolveCurrentBranch,
     branchExists: libgit2Host.branchExists,
+    isWorktreeClean: libgit2Host.isWorktreeClean,
     resolveRef: libgit2Host.resolveRef,
+    updateRef: libgit2Host.updateRef,
+    deleteRef: libgit2Host.deleteRef,
   }
 }
 

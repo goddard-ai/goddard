@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp } from "node:fs/promises"
+import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, expect, test } from "bun:test"
@@ -36,6 +36,19 @@ test("review-sync libgit2 host uses a valid libgit2 candidate when available", a
   const host = createReviewSyncGitHost()
 
   await expect(host.resolveRequiredRepoRoot(repoDir)).resolves.toBe(await normalizePath(repoDir))
+  await expect(host.isWorktreeClean(repoDir)).resolves.toBe(true)
+  await writeFile(join(repoDir, "untracked.txt"), "untracked\n")
+  await expect(host.isWorktreeClean(repoDir)).resolves.toBe(false)
+
+  await runGit(repoDir, ["add", "untracked.txt"])
+  await runGit(repoDir, ["config", "user.email", "review-sync@example.com"])
+  await runGit(repoDir, ["config", "user.name", "Review Sync"])
+  await runGit(repoDir, ["commit", "-m", "init"])
+  const head = (await runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim()
+  await host.updateRef(repoDir, "refs/review-sync/test", head)
+  await expect(host.resolveRef(repoDir, "refs/review-sync/test")).resolves.toBe(head)
+  await host.deleteRef(repoDir, "refs/review-sync/test")
+  await expect(host.resolveRef(repoDir, "refs/review-sync/test")).resolves.toBeNull()
 })
 
 async function createRepo() {

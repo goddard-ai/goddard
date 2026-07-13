@@ -1,3 +1,5 @@
+import { join } from "node:path"
+
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
 import { normalizePath } from "../paths.ts"
 import type { GitApi } from "../types.ts"
@@ -6,11 +8,15 @@ import {
   cString,
   ensureLibgit2,
   pointerStorage,
+  readCString,
+  readNestedPointer,
   readPointer,
+  readUint32,
   resetLibgit2ForTests,
   resolveLibgit2Object,
   toFfiPointer,
   withLibgit2Repository,
+  type FfiPointer,
   type Libgit2Symbols,
 } from "./ffi.ts"
 
@@ -44,16 +50,69 @@ export const git = defineGitNamespaces({
         return await normalizePath(String(commonDir))
       }),
     resolveGitPath: (cwd: string, gitPath: string) =>
-      unsupportedGit.repository.resolveGitPath(cwd, gitPath),
-    isBareRepository: (cwd: string) => unsupportedGit.repository.isBareRepository(cwd),
+      withLibgit2Repository(libgit2, cwd, async (repo) => {
+        const gitDir = libgit2.git_repository_path(repo)
+        const commonDir = libgit2.git_repository_commondir(repo)
+        if (!gitDir || !commonDir) {
+          throw new GitHostError(`libgit2 could not resolve Git path for ${cwd}`)
+        }
+
+        const root = commonGitPathRoots.has(gitPath.split("/")[0] ?? "") ? commonDir : gitDir
+        return join(await normalizePath(String(root)), gitPath)
+      }),
+    isBareRepository: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => libgit2.git_repository_is_bare(repo) === 1),
   }),
   refs: (libgit2) => ({
     resolve: (cwd: string, refName: string) => resolveRefWithLibgit2(libgit2, cwd, refName),
     exists: async (cwd: string, refName: string) =>
       (await createLibgit2RefResolver(libgit2, cwd, refName)) !== null,
     update: (cwd: string, refName: string, oid: string) =>
-      unsupportedGit.refs.update(cwd, refName, oid),
-    delete: (cwd: string, refName: string) => unsupportedGit.refs.delete(cwd, refName),
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const parsedOid = new Uint8Array(20)
+        if (libgit2.git_oid_fromstr(toFfiPointer(parsedOid), toFfiPointer(cString(oid))) !== 0) {
+          throw new GitHostError(`Invalid Git object ID: ${oid}`)
+        }
+
+        const out = pointerStorage()
+        const status = libgit2.git_reference_create(
+          toFfiPointer(out),
+          repo,
+          toFfiPointer(cString(refName)),
+          toFfiPointer(parsedOid),
+          1,
+          0,
+        )
+        if (status !== 0) {
+          throw new GitHostError(`libgit2 could not update ref ${refName} (status ${status})`)
+        }
+
+        libgit2.git_reference_free(readPointer(out))
+      }),
+    delete: (cwd: string, refName: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const out = pointerStorage()
+        const lookupStatus = libgit2.git_reference_lookup(
+          toFfiPointer(out),
+          repo,
+          toFfiPointer(cString(refName)),
+        )
+        if (lookupStatus !== 0) {
+          return
+        }
+
+        const reference = readPointer(out)
+        try {
+          const deleteStatus = libgit2.git_reference_delete(reference)
+          if (deleteStatus !== 0) {
+            throw new GitHostError(
+              `libgit2 could not delete ref ${refName} (status ${deleteStatus})`,
+            )
+          }
+        } finally {
+          libgit2.git_reference_free(reference)
+        }
+      }),
     getCurrentBranch: (cwd: string) =>
       withLibgit2Repository(libgit2, cwd, (repo) => {
         const out = pointerStorage()
@@ -146,7 +205,34 @@ export const git = defineGitNamespaces({
         }
       }),
   }),
-  status: () => unsupportedGit.status,
+  status: (libgit2) => ({
+    getWorkingTreeStatus: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const statusList = createStatusList(libgit2, repo)
+        try {
+          const count = Number(libgit2.git_status_list_entrycount(statusList))
+          const entries = Array.from({ length: count }, (_, index) => {
+            const entry = libgit2.git_status_byindex(statusList, index)
+            if (!entry) {
+              throw new GitHostError(`libgit2 returned an invalid status entry at index ${index}`)
+            }
+            return formatStatusEntry(entry)
+          })
+          return { clean: entries.length === 0, entries }
+        } finally {
+          libgit2.git_status_list_free(statusList)
+        }
+      }),
+    isWorktreeClean: (cwd: string) =>
+      withLibgit2Repository(libgit2, cwd, (repo) => {
+        const statusList = createStatusList(libgit2, repo)
+        try {
+          return Number(libgit2.git_status_list_entrycount(statusList)) === 0
+        } finally {
+          libgit2.git_status_list_free(statusList)
+        }
+      }),
+  }),
   worktrees: () => unsupportedGit.worktrees,
   stash: () => unsupportedGit.stash,
 })
@@ -216,6 +302,88 @@ function resolveRefWithLibgit2(libgit2: Libgit2Symbols, cwd: string, refName: st
       libgit2.git_object_free(object)
     }
   })
+}
+
+const commonGitPathRoots = new Set([
+  "config",
+  "hooks",
+  "info",
+  "logs",
+  "modules",
+  "objects",
+  "packed-refs",
+  "refs",
+  "remotes",
+  "worktrees",
+])
+
+// libgit2 v1's git_status_options is 48 bytes on the supported 64-bit targets.
+const statusOptionBytes = 48
+const statusIncludeUntracked = 1 << 0
+const statusRecurseUntrackedDirectories = 1 << 4
+
+function createStatusList(libgit2: Libgit2Symbols, repo: FfiPointer) {
+  const options = new Uint8Array(statusOptionBytes)
+  const optionsStatus = libgit2.git_status_options_init(toFfiPointer(options), 1)
+  if (optionsStatus !== 0) {
+    throw new GitHostError(`git_status_options_init failed with status ${optionsStatus}`)
+  }
+  new DataView(options.buffer).setUint32(
+    8,
+    statusIncludeUntracked | statusRecurseUntrackedDirectories,
+    true,
+  )
+
+  const out = pointerStorage()
+  const status = libgit2.git_status_list_new(toFfiPointer(out), repo, toFfiPointer(options))
+  if (status !== 0) {
+    throw new GitHostError(`git_status_list_new failed with status ${status}`)
+  }
+  return readPointer(out)
+}
+
+function formatStatusEntry(entry: FfiPointer) {
+  const status = readUint32(entry)
+  const headToIndex = readNestedPointer(entry, 8)
+  const indexToWorkdir = readNestedPointer(entry, 16)
+  const path = readStatusPath(indexToWorkdir || headToIndex)
+  if ((status & (1 << 15)) !== 0) {
+    return `UU ${path}`
+  }
+  if ((status & (1 << 7)) !== 0 && (status & 0x1f) === 0) {
+    return `?? ${path}`
+  }
+
+  return `${formatIndexStatus(status)}${formatWorkdirStatus(status)} ${path}`
+}
+
+function readStatusPath(delta: FfiPointer) {
+  if (!delta) {
+    return ""
+  }
+  // git_diff_delta embeds old_file and new_file; their path pointers are at these ABI offsets.
+  const newPath = readNestedPointer(delta, 88)
+  const oldPath = readNestedPointer(delta, 40)
+  const path = newPath || oldPath
+  return path ? readCString(path) : ""
+}
+
+function formatIndexStatus(status: number) {
+  if ((status & (1 << 3)) !== 0) return "R"
+  if ((status & (1 << 4)) !== 0) return "T"
+  if ((status & (1 << 0)) !== 0) return "A"
+  if ((status & (1 << 2)) !== 0) return "D"
+  if ((status & (1 << 1)) !== 0) return "M"
+  return " "
+}
+
+function formatWorkdirStatus(status: number) {
+  if ((status & (1 << 11)) !== 0) return "R"
+  if ((status & (1 << 10)) !== 0) return "T"
+  if ((status & (1 << 9)) !== 0) return "D"
+  if ((status & (1 << 8)) !== 0) return "M"
+  if ((status & (1 << 12)) !== 0) return "?"
+  return " "
 }
 
 function createUnsupportedGitApi(): GitApi {
