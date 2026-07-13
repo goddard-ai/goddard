@@ -2,11 +2,13 @@ import type {
   CreateSessionRequest,
   DaemonSession,
   MergeSessionWorktreeRequest,
+  RemoveSessionProfileRequest,
   SessionPermissionResponseRequest,
   SessionPromptRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   SetSessionWorktreeMergeTargetBranchRequest,
+  SetSessionProfileRequest,
   SteerSessionRequest,
 } from "@goddard-ai/sdk"
 
@@ -97,6 +99,20 @@ export async function setSessionConfigOption(props: SetSessionConfigOptionReques
 export async function setSessionModel(props: SetSessionModelRequest) {
   const result = await goddardSdk.session.model.set(props)
   invalidateSessionViews(props.id)
+  return result
+}
+
+/** Replaces one global session profile and refreshes profile selectors. */
+export async function setSessionProfile(props: SetSessionProfileRequest) {
+  const result = await goddardSdk.session.profile.set(props)
+  queryClient.invalidate(goddardSdk.session.profile.list)
+  return result
+}
+
+/** Removes one global session profile and refreshes profile selectors. */
+export async function removeSessionProfile(props: RemoveSessionProfileRequest) {
+  const result = await goddardSdk.session.profile.remove(props)
+  queryClient.invalidate(goddardSdk.session.profile.list)
   return result
 }
 

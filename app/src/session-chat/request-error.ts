@@ -53,6 +53,8 @@ function formatKnownSessionIpcError(error: IpcClientErrorForRegistry<typeof Sess
       return t`This session does not have a worktree.`
     case SessionErrorCodes.PromptAborted:
       return t`The queued prompt was cancelled.`
+    case SessionErrorCodes.ProfileConfigurationFailed:
+      return t`Session profiles could not be saved. Check the configuration and try again.`
     default:
       return assertNever(error)
   }

@@ -1,9 +1,11 @@
 import {
   deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
   type CreateSessionRequest,
   type InitialSessionConfigOption,
   type ListAgentsResponse,
   type SessionLaunchPreviewResponse,
+  type SessionProfile,
   type SessionPromptRequest,
 } from "@goddard-ai/sdk"
 import { computed, createModel, signal } from "@preact/signals"
@@ -24,6 +26,7 @@ type SessionLaunchPickerId =
   | "subpackage"
   | "agent"
   | "branch"
+  | "profile"
   | "model"
   | "mode"
   | "thinking"
@@ -313,6 +316,21 @@ export const SessionLaunchFormState = createModel(function () {
     }
   }
 
+  function applySessionProfile(profile: SessionProfile) {
+    const resolvedProfile = deriveSessionProfileConfig({
+      configOptions: launchPreview.value?.configOptions ?? [],
+    }).resolveProfile(profile)
+
+    if (resolvedProfile.status !== "available") {
+      return false
+    }
+
+    draftModelId.value = resolvedProfile.modelId
+    draftThinkingValue.value = resolvedProfile.thinkingValue
+    draftModeValue.value = resolvedProfile.approvalModeValue
+    return true
+  }
+
   function cycleLaunchLocation() {
     if (!launchPreview.value?.repoRoot) {
       setLaunchLocation("local")
@@ -336,6 +354,7 @@ export const SessionLaunchFormState = createModel(function () {
   return {
     managedAgentCatalog,
     canSubmit: computed(() => sessionInput.value !== null),
+    applySessionProfile,
     cycleLaunchLocation,
     draftManagedAgentId,
     draftBaseBranchName,

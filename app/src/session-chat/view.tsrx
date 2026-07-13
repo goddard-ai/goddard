@@ -1,11 +1,13 @@
 import { t } from "@lingui/core/macro"
 import {
   deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
   type DaemonSession,
   type GetSessionWorktreeMergeReadinessResponse,
+  type SessionProfileId,
 } from "@goddard-ai/sdk"
 import { cx } from "@goddard-ai/styled-system/css"
-import { signal, useSignal } from "@preact/signals"
+import { signal, type Signal, useSignal } from "@preact/signals"
 import {
   CheckCircle2,
   ChevronDown,
@@ -47,6 +49,12 @@ import {
 } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
+import { applySessionControlUpdates } from "~/sessions/apply-session-controls.ts"
+import {
+  findMatchingSessionProfileId,
+  getAvailableSessionProfiles,
+  getSessionProfileLabel,
+} from "~/sessions/session-profiles.ts"
 import {
   SessionConfigOptionSelector,
   SessionModeSelector,
@@ -543,6 +551,69 @@ function SessionChatHeaderActions(props: {
   </>
 }
 
+function SessionChatProfileSelector(props: {
+  agentId: string | null;
+  approvalModeValue: string | null;
+  configOptions: DaemonSession["configOptions"];
+  modelId: string | null;
+  open: Signal<boolean>;
+  thinkingValue: string | null;
+  onSelect: (selection: {
+    modelId: string;
+    thinkingValue: string;
+    approvalModeValue: string;
+  }) => void;
+}) @{
+  @try {
+    const sessionProfiles = useQuery(goddardSdk.session.profile.list, {
+      params: [{}],
+    })
+    const profileConfig = deriveSessionProfileConfig({
+      configOptions: props.configOptions,
+    })
+    const agentProfiles = props.agentId ? sessionProfiles.profiles[props.agentId] : undefined
+    const profileItems: SessionInputSelectItem[] = getAvailableSessionProfiles(
+      agentProfiles,
+      profileConfig,
+    ).map(
+      ({ profileId }) => ({
+        value: profileId,
+        label: getSessionProfileLabel(profileId),
+      }),
+    )
+    const activeProfileId = findMatchingSessionProfileId(agentProfiles, profileConfig, {
+      modelId: props.modelId,
+      thinkingValue: props.thinkingValue,
+      approvalModeValue: props.approvalModeValue,
+    })
+
+    @if (profileItems.length > 0) {
+      <SessionInputSelect
+        compact={true}
+        filterable={false}
+        items={profileItems}
+        label={t`Session profile`}
+        open={props.open}
+        placeholder={t`Custom`}
+        value={activeProfileId}
+        onValueChange={(value) => {
+          const profile = agentProfiles?.[value as SessionProfileId]
+          if (!profile) {
+            return
+          }
+
+          const resolvedProfile = profileConfig.resolveProfile(profile)
+          if (resolvedProfile.status === "available") {
+            props.onSelect(resolvedProfile)
+          }
+        }}
+      />
+    }
+  } @pending {
+  } @catch {
+  }
+}
+
 function SessionChatComposerDock(props: {
   canReconnectSession: boolean;
   canSubmitPrompt: boolean;
@@ -553,6 +624,7 @@ function SessionChatComposerDock(props: {
   const submitError = props.page.submitPrompt.error.value
   const modePickerOpen = useSignal(false)
   const modelPickerOpen = useSignal(false)
+  const profilePickerOpen = useSignal(false)
   const thinkingPickerOpen = useSignal(false)
   const draftModeValue = useSignal<string | null>(null)
   const draftModelId = useSignal<string | null>(null)
@@ -634,6 +706,19 @@ function SessionChatComposerDock(props: {
                 </div>
               </GoodTooltip>
             : null}
+          <SessionChatProfileSelector
+            agentId={typeof props.chat.session.agent === "string" ? props.chat.session.agent : null}
+            approvalModeValue={draftModeValue.value ?? modeOption?.currentValue ?? null}
+            configOptions={props.chat.session.configOptions}
+            modelId={draftModelId.value ?? currentModelId}
+            open={profilePickerOpen}
+            thinkingValue={draftThinkingValue.value ?? thinkingOption?.currentValue ?? null}
+            onSelect={(selection) => {
+              draftModelId.value = selection.modelId
+              draftThinkingValue.value = selection.thinkingValue
+              draftModeValue.value = selection.approvalModeValue
+            }}
+          />
           {modelItems.length > 0
             ? <SessionInputSelect
                 compact={true}
@@ -746,35 +831,43 @@ function SessionChatComposerDock(props: {
       modelId: draftModelId.value,
       configOptions: selectedConfigOptions,
     })
-    let latestSession: DaemonSession | null = null
+    const updates = [
+      ...(shouldApplyMode && typeof selectedModeValue === "string"
+        ? [
+            {
+              id: props.chat.session.id,
+              configId: modeOption.id,
+              value: selectedModeValue,
+            },
+          ]
+        : []),
+      ...(shouldApplyModel
+        ? (resolvedSelection.initialConfigOptions ?? []).map(
+            (configOption) => ({
+              id: props.chat.session.id,
+              configId: configOption.configId,
+              value: String(configOption.value),
+            }),
+          )
+        : []),
+    ]
 
-    if (shouldApplyMode && typeof selectedModeValue === "string") {
-      const result = await setSessionConfigOption({
-        id: props.chat.session.id,
-        configId: modeOption.id,
-        value: selectedModeValue,
+    try {
+      await applySessionControlUpdates({
+        updates,
+        apply: setSessionConfigOption,
+        refresh: async () => {
+          invalidateSessionDetail(props.chat.session.id)
+          const { session } = await goddardSdk.session.get({ id: props.chat.session.id })
+          return session
+        },
+        sync: (session) => props.chat.syncSession(session),
       })
-      latestSession = result.session
+    } finally {
+      draftModeValue.value = null
+      draftModelId.value = null
+      draftThinkingValue.value = null
     }
-
-    if (shouldApplyModel) {
-      for (const configOption of resolvedSelection.initialConfigOptions ?? []) {
-        const result = await setSessionConfigOption({
-          id: props.chat.session.id,
-          configId: configOption.configId,
-          value: String(configOption.value),
-        })
-        latestSession = result.session
-      }
-    }
-
-    if (latestSession) {
-      props.chat.syncSession(latestSession)
-    }
-
-    draftModeValue.value = null
-    draftModelId.value = null
-    draftThinkingValue.value = null
   }
 
   <footer class={styles.composerDock}>
@@ -783,9 +876,9 @@ function SessionChatComposerDock(props: {
           <strong class={styles.composerErrorTitle}>
             {t`Prompt wasn't sent`}
           </strong>
-          <span class={styles.composerErrorDescription}>
-            {t`Your draft is still here. Try again when the session is available.`}
-          </span>
+          <span class={styles.composerErrorDescription}>{formatSessionRequestError(
+            submitError,
+          )}</span>
         </div>
       : null}
 

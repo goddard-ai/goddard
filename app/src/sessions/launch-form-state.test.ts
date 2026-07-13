@@ -229,6 +229,37 @@ test("SessionLaunchFormState falls back to the first valid model when managed-ag
   expect(form.draftModelId.value).toBe("haiku")
 })
 
+test("SessionLaunchFormState applies every available session profile selection together", () => {
+  const form = new SessionLaunchFormState()
+
+  form.launchPreview.value = createLaunchPreview()
+
+  expect(
+    form.applySessionProfile({
+      model: "opus",
+      thoughtLevel: "high",
+      approvalMode: "plan",
+    }),
+  ).toBe(true)
+  expect({
+    model: form.draftModelId.value,
+    thinking: form.draftThinkingValue.value,
+    mode: form.draftModeValue.value,
+  }).toEqual({
+    model: "opus",
+    thinking: "high",
+    mode: "plan",
+  })
+
+  expect(
+    form.applySessionProfile({
+      model: "removed-model",
+      thoughtLevel: "high",
+      approvalMode: "plan",
+    }),
+  ).toBe(false)
+})
+
 test("filterSlashCommandSuggestions preserves the default cap and fuzzy matches command text", () => {
   const suggestions = createLaunchPreview().slashCommands
 

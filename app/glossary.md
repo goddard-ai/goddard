@@ -54,3 +54,6 @@
 - `Agent Harness`
   - A user-facing session launcher integration that supplies an agent runtime and its launch options.
   - Why: so app UI uses product terminology instead of implementation terminology.
+- `Session Profile`
+  - One fixed `Routine`, `Debug`, or `Deep` combination of model, thinking level, and approval mode saved for an agent harness.
+  - Why: so developers can select an explicit reusable configuration without implying that Goddard classifies model cost or capability.
