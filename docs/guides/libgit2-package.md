@@ -18,15 +18,14 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a la
 ## Git API Contract
 
 - `GitApi` groups the supported Git capability areas:
-  - `repository` resolves repository roots, Git directories, common directories, Git paths, and bare repository status.
-  - `refs` resolves refs, checks ref and branch existence, updates and deletes refs, reads symbolic refs, reads the current branch, and lists local branches.
+  - `repository` resolves repository roots, Git directories, common directories, and bare repository status.
+  - `refs` resolves refs, checks branch existence, updates and deletes refs, reads symbolic refs, reads the current branch, and lists local branches.
   - `history` resolves `HEAD`, checks ancestor relationships, finds merge bases, and counts commits in a range.
   - `status` reads working tree status, clean or dirty state, and non-ignored untracked paths.
   - `config` reads resolved repository configuration values.
   - `ignore` checks paths against repository ignore rules and filters path sets.
   - `index` lists paths currently present in the repository index.
   - `worktrees` lists known worktrees with paths and branch names.
-  - `stash` lists stashes by ref and message.
 - Operations outside this contract, such as checkout workflows, network fetches, rebases, and patch serialization, remain owned by the consuming package.
 
 ## Public Data Types
@@ -35,7 +34,7 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a la
 - `WorkingTreeStatus` describes whether a worktree is clean and includes porcelain-style status entries.
 - `GitPathEntry` describes an untracked path and whether libgit2 reported it as a directory.
 - `GitApi` describes the shared `git` namespace shape.
-- `GitRepositoryApi`, `GitRefsApi`, `GitHistoryApi`, `GitStatusApi`, `GitConfigApi`, `GitIgnoreApi`, `GitIndexApi`, `GitWorktreeApi`, and `GitStashApi` describe each section of the Git API contract.
+- `GitRepositoryApi`, `GitRefsApi`, `GitHistoryApi`, `GitStatusApi`, `GitConfigApi`, `GitIgnoreApi`, `GitIndexApi`, and `GitWorktreeApi` describe each section of the Git API contract.
 
 ## Errors
 

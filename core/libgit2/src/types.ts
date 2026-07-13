@@ -23,8 +23,6 @@ export type GitRepositoryApi = {
   resolveGitDir: (cwd: string) => Promise<string>
   /** Resolves the canonical shared Git metadata directory. */
   resolveCommonDir: (cwd: string) => Promise<string>
-  /** Resolves a Git-private relative path against its per-worktree or shared metadata root. */
-  resolveGitPath: (cwd: string, gitPath: string) => Promise<string>
   /** Reports whether `cwd` belongs to a bare repository. */
   isBareRepository: (cwd: string) => Promise<boolean>
 }
@@ -32,8 +30,6 @@ export type GitRepositoryApi = {
 export type GitRefsApi = {
   /** Resolves a revision expression to its full object ID, or returns null when unresolved. */
   resolve: (cwd: string, refName: string) => Promise<string | null>
-  /** Reports whether a revision expression resolves to an object. */
-  exists: (cwd: string, refName: string) => Promise<boolean>
   /** Creates or force-updates a direct, fully qualified ref to a full object ID. */
   update: (cwd: string, refName: string, oid: string) => Promise<void>
   /** Deletes a fully qualified ref; an absent ref is already considered deleted. */
@@ -42,8 +38,6 @@ export type GitRefsApi = {
   getCurrentBranch: (cwd: string) => Promise<string | null>
   /** Reports whether `refs/heads/<branch>` resolves. */
   branchExists: (cwd: string, branch: string) => Promise<boolean>
-  /** Resolves `refs/heads/<branch>` to its full object ID, or returns null. */
-  getBranchHead: (cwd: string, branch: string) => Promise<string | null>
   /** Returns a symbolic ref's fully qualified target, or null for missing or direct refs. */
   readSymbolic: (cwd: string, refName: string) => Promise<string | null>
   /** Lists sorted short names from `refs/heads/`. */
@@ -95,11 +89,6 @@ export type GitWorktreeApi = {
   list: (cwd: string) => Promise<WorktreeInfo[]>
 }
 
-export type GitStashApi = {
-  /** Maps reflog selectors such as `stash@{0}` to their reflog messages, newest first. */
-  list: (cwd: string) => Promise<Map<string, string>>
-}
-
 /** Shared lazy namespaces for Goddard's supported native Git operations. */
 export type GitApi = {
   repository: GitRepositoryApi
@@ -110,5 +99,4 @@ export type GitApi = {
   ignore: GitIgnoreApi
   index: GitIndexApi
   worktrees: GitWorktreeApi
-  stash: GitStashApi
 }

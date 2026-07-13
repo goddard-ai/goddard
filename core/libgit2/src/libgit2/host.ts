@@ -1,9 +1,8 @@
-import { join, resolve } from "node:path"
+import { resolve } from "node:path"
 
 import { GitHostError, GitNotRepositoryError } from "../errors.ts"
 import { normalizePath } from "../paths.ts"
 import {
-  createLibgit2RefResolver,
   cString,
   ensureLibgit2,
   pointerStorage,
@@ -49,24 +48,11 @@ export const git = defineGitNamespaces({
         }
         return await normalizePath(String(commonDir))
       }),
-    resolveGitPath: (cwd: string, gitPath: string) =>
-      withLibgit2Repository(libgit2, cwd, async (repo) => {
-        const gitDir = libgit2.git_repository_path(repo)
-        const commonDir = libgit2.git_repository_commondir(repo)
-        if (!gitDir || !commonDir) {
-          throw new GitHostError(`libgit2 could not resolve Git path for ${cwd}`)
-        }
-
-        const root = commonGitPathRoots.has(gitPath.split("/")[0] ?? "") ? commonDir : gitDir
-        return join(await normalizePath(String(root)), gitPath)
-      }),
     isBareRepository: (cwd: string) =>
       withLibgit2Repository(libgit2, cwd, (repo) => libgit2.git_repository_is_bare(repo) === 1),
   }),
   refs: (libgit2) => ({
     resolve: (cwd: string, refName: string) => resolveRefWithLibgit2(libgit2, cwd, refName),
-    exists: async (cwd: string, refName: string) =>
-      (await createLibgit2RefResolver(libgit2, cwd, refName)) !== null,
     update: (cwd: string, refName: string, oid: string) =>
       withLibgit2Repository(libgit2, cwd, (repo) => {
         const parsedOid = new Uint8Array(20)
@@ -126,8 +112,6 @@ export const git = defineGitNamespaces({
             toFfiPointer(cString(`refs/heads/${branch}`)),
           ) === 0,
       ),
-    getBranchHead: (cwd: string, branch: string) =>
-      resolveRefWithLibgit2(libgit2, cwd, `refs/heads/${branch}`),
     readSymbolic: (cwd: string, refName: string) =>
       withLibgit2Repository(libgit2, cwd, (repo) => {
         const out = pointerStorage()
@@ -420,37 +404,6 @@ export const git = defineGitNamespaces({
         )
       }),
   }),
-  stash: (libgit2) => ({
-    list: (cwd: string) =>
-      withLibgit2Repository(libgit2, cwd, (repo) => {
-        const out = pointerStorage()
-        const status = libgit2.git_reflog_read(
-          toFfiPointer(out),
-          repo,
-          toFfiPointer(cString("refs/stash")),
-        )
-        if (status !== 0) {
-          if (status === -3) {
-            return new Map<string, string>()
-          }
-          throw new GitHostError(`git_reflog_read failed with status ${status}`)
-        }
-
-        const reflog = readPointer(out)
-        try {
-          const count = Number(libgit2.git_reflog_entrycount(reflog))
-          return new Map(
-            Array.from({ length: count }, (_, index) => {
-              const entry = libgit2.git_reflog_entry_byindex(reflog, index)
-              const message = entry ? libgit2.git_reflog_entry_message(entry) : null
-              return [`stash@{${index}}`, message ? String(message) : ""]
-            }),
-          )
-        } finally {
-          libgit2.git_reflog_free(reflog)
-        }
-      }),
-  }),
 })
 
 /** Loads and initializes libgit2 from the supplied candidates or the runtime defaults. */
@@ -591,19 +544,6 @@ async function listWorktrees(libgit2: Libgit2Symbols, repo: FfiPointer) {
 
   return entries
 }
-
-const commonGitPathRoots = new Set([
-  "config",
-  "hooks",
-  "info",
-  "logs",
-  "modules",
-  "objects",
-  "packed-refs",
-  "refs",
-  "remotes",
-  "worktrees",
-])
 
 // libgit2 v1's git_status_options is 48 bytes on the supported 64-bit targets.
 const statusOptionBytes = 48

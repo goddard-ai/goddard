@@ -12,7 +12,7 @@ The exported `git` namespace now implements these operations with libgit2:
 - status and clean checks, including non-ignored untracked files
 - direct ref resolution, creation, update, deletion, symbolic reads, and local branch listing
 - HEAD resolution, ancestry, merge base, and commit-range counting
-- worktree listing and stash reflog listing
+- worktree listing
 - repository config reads, ignore checks, and index path listing
 
 Review-sync, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam. The desktop runtime and workforce command still have native-compatible read operations to migrate.
@@ -73,6 +73,6 @@ Keep these operations CLI-backed unless a future task explicitly accepts their p
 - broad checkout, reset, clean, and branch-mutation workflows
 - empty untracked directory and custom exclude-file enumeration
 
-Good later native candidates are worktree add/remove, narrowly scoped stash mutation, repository-state probes, and review-sync snapshot creation. Each should be migrated as a complete workflow with real-repository tests rather than as unused bindings.
+Good later native candidates are worktree add/remove, repository-state probes, and review-sync snapshot creation. Each should be migrated as a complete workflow with real-repository tests rather than as unused bindings.
 
 The desktop runtime's repository, status, and worktree reads and workforce's repository-root read are smaller migration candidates because the native API already implements most or all of their behavior.

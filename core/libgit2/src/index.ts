@@ -11,7 +11,6 @@ export type {
   GitPathEntry,
   GitRefsApi,
   GitRepositoryApi,
-  GitStashApi,
   GitStatusApi,
   GitWorktreeApi,
   WorkingTreeStatus,

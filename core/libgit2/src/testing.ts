@@ -15,18 +15,15 @@ export function createFakeGitApi(overrides: DeepPartial<GitApi> = {}): GitApi {
       resolveRoot: fail,
       resolveGitDir: fail,
       resolveCommonDir: fail,
-      resolveGitPath: fail,
       isBareRepository: fail,
       ...overrides.repository,
     },
     refs: {
       resolve: fail,
-      exists: fail,
       update: fail,
       delete: fail,
       getCurrentBranch: fail,
       branchExists: fail,
-      getBranchHead: fail,
       readSymbolic: fail,
       listLocalBranches: fail,
       ...overrides.refs,
@@ -60,10 +57,6 @@ export function createFakeGitApi(overrides: DeepPartial<GitApi> = {}): GitApi {
     worktrees: {
       list: fail,
       ...overrides.worktrees,
-    },
-    stash: {
-      list: fail,
-      ...overrides.stash,
     },
   }
 }

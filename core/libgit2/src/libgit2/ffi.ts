@@ -204,26 +204,6 @@ function loadLibgit2(candidates = libgit2PathCandidates()) {
           args: [FFIType.ptr],
           returns: FFIType.void,
         },
-        git_reflog_read: {
-          args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
-          returns: FFIType.i32,
-        },
-        git_reflog_entrycount: {
-          args: [FFIType.ptr],
-          returns: FFIType.u64,
-        },
-        git_reflog_entry_byindex: {
-          args: [FFIType.ptr, FFIType.u64],
-          returns: FFIType.ptr,
-        },
-        git_reflog_entry_message: {
-          args: [FFIType.ptr],
-          returns: FFIType.cstring,
-        },
-        git_reflog_free: {
-          args: [FFIType.ptr],
-          returns: FFIType.void,
-        },
         git_config_get_string: {
           args: [FFIType.ptr, FFIType.ptr, FFIType.cstring],
           returns: FFIType.i32,
@@ -262,22 +242,6 @@ function libgit2PathCandidates() {
     `/opt/homebrew/lib/libgit2.${suffix}`,
     `/usr/local/lib/libgit2.${suffix}`,
   ].filter((path) => typeof path === "string")
-}
-
-export async function createLibgit2RefResolver(
-  libgit2: Libgit2Symbols,
-  cwd: string,
-  refName: string,
-) {
-  return await withLibgit2Repository(libgit2, cwd, (repo) => {
-    const object = resolveLibgit2Object(libgit2, repo, refName)
-    if (!object) {
-      return null
-    }
-
-    libgit2.git_object_free(object)
-    return refName
-  })
 }
 
 export function resolveLibgit2Object(libgit2: Libgit2Symbols, repo: FfiPointer, refName: string) {

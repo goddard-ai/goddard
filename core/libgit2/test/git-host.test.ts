@@ -70,15 +70,12 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   await expect(git.refs.getCurrentBranch(repoDir)).resolves.toBe("main")
   await expect(git.refs.branchExists(repoDir, "main")).resolves.toBe(true)
   await expect(git.refs.resolve(repoDir, "HEAD")).resolves.toBe(branchHead)
-  await expect(git.refs.getBranchHead(repoDir, "main")).resolves.toBe(branchHead)
   await expect(git.history.resolveHead(repoDir)).resolves.toBe(branchHead)
   await expect(git.history.isAncestor(repoDir, branchHead, featureHead)).resolves.toBe(true)
   await expect(git.history.getMergeBase(repoDir, "main", "feature")).resolves.toBe(branchHead)
   await expect(git.repository.isBareRepository(repoDir)).resolves.toBe(false)
-  await expect(git.repository.resolveGitPath(repoDir, "info/exclude")).resolves.toEndWith(
-    ".git/info/exclude",
-  )
   await expect(git.status.isWorktreeClean(repoDir)).resolves.toBe(true)
+  await expect(git.index.listPaths(repoDir)).resolves.toEqual(["README.md"])
 
   await writeFile(join(repoDir, "untracked.txt"), "untracked\n")
   await expect(git.status.getWorkingTreeStatus(repoDir)).resolves.toEqual({
@@ -104,28 +101,6 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
 
   const linkedWorktreeDir = join(repoDir, "..", "linked")
   await runGit(repoDir, ["worktree", "add", linkedWorktreeDir, "feature"])
-  const expectedInfoPath = (
-    await runGit(linkedWorktreeDir, [
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-path",
-      "info/exclude",
-    ])
-  ).stdout.trim()
-  const expectedOperationPath = (
-    await runGit(linkedWorktreeDir, [
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-path",
-      "MERGE_HEAD",
-    ])
-  ).stdout.trim()
-  await expect(git.repository.resolveGitPath(linkedWorktreeDir, "info/exclude")).resolves.toBe(
-    await normalizePath(expectedInfoPath),
-  )
-  await expect(git.repository.resolveGitPath(linkedWorktreeDir, "MERGE_HEAD")).resolves.toBe(
-    expectedOperationPath,
-  )
   await expect(git.worktrees.list(linkedWorktreeDir)).resolves.toEqual([
     { path: await normalizePath(repoDir), branch: "main" },
     { path: await normalizePath(linkedWorktreeDir), branch: "feature" },
@@ -144,12 +119,6 @@ test("libgit2 host uses a valid libgit2 candidate for read operations", async ()
   await expect(git.refs.readSymbolic(repoDir, "refs/remotes/origin/HEAD")).resolves.toBe(
     "refs/remotes/origin/main",
   )
-
-  await runGit(repoDir, ["stash", "push", "--include-untracked", "-m", "native stash"])
-  await expect(git.stash.list(repoDir)).resolves.toEqual(
-    new Map([["stash@{0}", "On main: native stash"]]),
-  )
-  await expect(git.index.listPaths(repoDir)).resolves.toEqual(["README.md"])
 
   await writeFile(join(repoDir, ".gitignore"), "ignored/\n")
   await mkdir(join(repoDir, "ignored"))
