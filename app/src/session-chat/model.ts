@@ -11,8 +11,9 @@ import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"
 import { isObject } from "radashi"
 
-import { writeRendererError } from "~/lib/renderer-log-capture.ts"
+import { startDaemonEventStream } from "~/lib/daemon-event-stream.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { invalidateSessionDetail } from "~/sessions/cache.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
 import { buildSessionChatTranscript } from "./transcript-items.ts"
 
@@ -1075,34 +1076,38 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   onSetup() {
-    const controller = new AbortController()
-
-    void (async () => {
-      try {
-        const messages = await goddardSdk.events.stream(
+    const sessionId = this.session.id
+    const stop = startDaemonEventStream({
+      failureLogMessage: "app.session.message_subscription_failed",
+      logProperties: { sessionId },
+      streamName: "session.message",
+      open: (signal) =>
+        goddardSdk.events.stream(
           {
             names: ["session.message"],
-            where: [{ path: "id", equals: this.session.id }],
+            where: [{ path: "id", equals: sessionId }],
           },
-          { signal: controller.signal },
-        )
-        for await (const event of messages) {
-          const { message } = event.payload
-          this.receiveMessage(message)
+          { signal },
+        ),
+      reconcile: async (signal) => {
+        const [history, { session }] = await Promise.all([
+          goddardSdk.session.history({ id: sessionId }),
+          goddardSdk.session.get({ id: sessionId }),
+        ])
+        if (signal.aborted) {
+          return
         }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          writeRendererError("app.session.message_subscription_failed", error, {
-            sessionId: this.session.id,
-          })
-        }
-      }
-    })()
+
+        this.syncLoadedData({ history, session })
+        invalidateSessionDetail(sessionId)
+      },
+      onEvent: (event) => this.receiveMessage(event.payload.message),
+    })
 
     return [
       () => {
         this.#clearQueuedChunks()
-        controller.abort()
+        stop()
       },
     ]
   }

@@ -16,6 +16,13 @@ export function invalidateSessionDetail(sessionId: DaemonSession["id"]) {
   queryClient.invalidate(goddardSdk.session.worktree.mergeReadiness, [{ id: sessionId }])
 }
 
+/** Invalidates every cached session view after the lifecycle stream reconnects. */
+export function invalidateAllSessionViews() {
+  invalidateSessionLists()
+  queryClient.invalidate(goddardSdk.session.get)
+  queryClient.invalidate(goddardSdk.session.history)
+}
+
 /** Invalidates session reads that can change after a session lifecycle mutation. */
 export function invalidateSessionViews(sessionId: DaemonSession["id"]) {
   invalidateSessionLists()
