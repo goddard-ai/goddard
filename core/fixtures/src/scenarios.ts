@@ -208,6 +208,7 @@ export function createBlockedSessionScenario(
     worktree: {
       branchName: "codex/dev-states",
       effectiveCwd: fixtureProjectPath,
+      mergeTargetBranch: null,
       poweredBy: "goddard",
       repoRoot: fixtureProjectPath,
       requestedCwd: fixtureProjectPath,

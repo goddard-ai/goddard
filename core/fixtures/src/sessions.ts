@@ -227,6 +227,7 @@ export function createSessionWorktreeResponse(
     worktree: input.worktree ?? {
       branchName: "codex/fixtures",
       effectiveCwd: fixtureProjectPath,
+      mergeTargetBranch: null,
       poweredBy: "goddard",
       repoRoot: fixtureProjectPath,
       requestedCwd: fixtureProjectPath,
