@@ -63,6 +63,15 @@ test("TerminalDaemonEvent accepts lifecycle events and connection-scoped errors"
       recoverable: true,
     }).success,
   ).toBe(true)
+
+  expect(
+    TerminalDaemonEvent.safeParse({
+      type: "terminal.title",
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      title: "unsupported",
+    }).success,
+  ).toBe(false)
 })
 
 test("terminal stream filters and requests reject empty connection-local ids", () => {

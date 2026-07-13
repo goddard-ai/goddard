@@ -159,22 +159,6 @@ export const TerminalExitEvent = TerminalInstanceEvent.extend({
 
 export type TerminalExitEvent = z.infer<typeof TerminalExitEvent>
 
-/** Daemon stream event emitted when a terminal title changes. */
-export const TerminalTitleEvent = TerminalInstanceEvent.extend({
-  type: z.literal("terminal.title"),
-  title: z.string(),
-})
-
-export type TerminalTitleEvent = z.infer<typeof TerminalTitleEvent>
-
-/** Daemon stream event emitted when a terminal reports a current working directory change. */
-export const TerminalCwdEvent = TerminalInstanceEvent.extend({
-  type: z.literal("terminal.cwd"),
-  cwd: z.string().min(1),
-})
-
-export type TerminalCwdEvent = z.infer<typeof TerminalCwdEvent>
-
 /** Stable error categories for terminal request or stream failures. */
 export const TerminalErrorCode = z.enum([
   "invalid-request",
@@ -207,8 +191,6 @@ export const TerminalDaemonEvent = z.discriminatedUnion("type", [
   TerminalCreatedEvent,
   TerminalOutputEvent,
   TerminalExitEvent,
-  TerminalTitleEvent,
-  TerminalCwdEvent,
   TerminalErrorEvent,
 ])
 

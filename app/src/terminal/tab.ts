@@ -8,7 +8,7 @@ import { getErrorMessage } from "radashi"
 
 import { goddardSdk } from "~/sdk.ts"
 import { workbenchTabLifecycle } from "~/workbench-tab-lifecycle.ts"
-import { TerminalSession, type TerminalViewportChunk } from "./terminal-session.ts"
+import { TerminalSession } from "./terminal-session.ts"
 
 const DEFAULT_TERMINAL_ID = "main"
 
@@ -52,11 +52,7 @@ export class TerminalTab extends Sigma<TerminalTabState> {
   /** SDK connection owning this tab's daemon terminal stream and terminal instance. */
   #connection: GoddardTerminalConnection | null = null
   /** Stream unsubscribe returned by the SDK terminal subscription. */
-  #unsubscribe: (() => void) | null = null
-  /** Append-only output chunks replayed into the retained terminal viewport. */
-  #chunks: TerminalViewportChunk[] = []
-  /** Monotonic chunk id counter used to preserve stable output chunk ordering. */
-  #nextChunkId = 0
+  #unsubscribe: (() => Promise<void>) | null = null
   /** In-flight start operation reused to avoid duplicate daemon terminals during remounts. */
   #startPromise: Promise<void> | null = null
   /** Whether this tab has been torn down and must ignore late daemon events. */
@@ -181,30 +177,37 @@ export class TerminalTab extends Sigma<TerminalTabState> {
   async #connect() {
     const terminal = goddardSdk.terminal as GoddardTerminalNamespace
     const connection = await terminal.connect()
-
-    if (this.#isDisposed) {
-      await connection.disconnect().catch(() => {})
-      return
-    }
-
-    const unsubscribe = await connection.subscribe((event) => {
-      this.#handleEvent(event)
-    })
-
-    if (this.#isDisposed) {
-      unsubscribe()
-      await connection.disconnect().catch(() => {})
-      return
-    }
-
     this.#connection = connection
-    this.#unsubscribe = unsubscribe
 
-    const response = await connection.create({
-      instanceId: DEFAULT_TERMINAL_ID,
-      options: this.#terminalOptions(),
-    })
-    this.#applyMetadata(response.terminal)
+    if (this.#isDisposed) {
+      await this.#disconnect()
+      return
+    }
+
+    try {
+      const unsubscribe = await connection.subscribe(
+        (event) => this.#handleEvent(event),
+        (error) => this.#handleStreamEnd(connection, error),
+      )
+      this.#unsubscribe = unsubscribe
+
+      if (this.#isDisposed) {
+        await this.#disconnect()
+        return
+      }
+
+      const response = await connection.create({
+        instanceId: DEFAULT_TERMINAL_ID,
+        options: this.#terminalOptions(),
+      })
+      if (this.#connection !== connection || this.#isDisposed) {
+        return
+      }
+      this.#applyMetadata(response.terminal)
+    } catch (error) {
+      await this.#disconnect()
+      throw error
+    }
   }
 
   #terminalOptions() {
@@ -217,7 +220,7 @@ export class TerminalTab extends Sigma<TerminalTabState> {
     }
   }
 
-  #handleEvent(event: TerminalDaemonEvent) {
+  async #handleEvent(event: TerminalDaemonEvent) {
     if (this.#isDisposed) {
       return
     }
@@ -230,7 +233,7 @@ export class TerminalTab extends Sigma<TerminalTabState> {
         return
       case "terminal.output":
         if (event.instanceId === DEFAULT_TERMINAL_ID) {
-          this.#appendOutput(event.data)
+          await this.terminal.writeOutput(event.data)
         }
         return
       case "terminal.exit":
@@ -238,16 +241,6 @@ export class TerminalTab extends Sigma<TerminalTabState> {
           this.status = "exited"
           this.exitCode = event.exitCode
           this.signal = event.signal
-        }
-        return
-      case "terminal.title":
-        if (event.instanceId === DEFAULT_TERMINAL_ID) {
-          this.title = event.title
-        }
-        return
-      case "terminal.cwd":
-        if (event.instanceId === DEFAULT_TERMINAL_ID) {
-          this.cwd = event.cwd
         }
         return
       case "terminal.error":
@@ -259,19 +252,8 @@ export class TerminalTab extends Sigma<TerminalTabState> {
     }
   }
 
-  #appendOutput(data: string) {
-    this.#nextChunkId += 1
-    this.#chunks.push({
-      id: `${this.terminalId}:${this.#nextChunkId}`,
-      data,
-    })
-    this.terminal.syncChunks(this.#chunks)
-  }
-
   #clearOutput() {
-    this.#chunks = []
-    this.#nextChunkId = 0
-    this.terminal.syncChunks(this.#chunks)
+    this.terminal.clearOutput()
   }
 
   #applyMetadata(metadata: TerminalMetadata) {
@@ -290,8 +272,19 @@ export class TerminalTab extends Sigma<TerminalTabState> {
     this.#unsubscribe = null
     this.#connection = null
 
-    unsubscribe?.()
+    await unsubscribe?.().catch(() => {})
     await connection?.disconnect().catch(() => {})
+  }
+
+  #handleStreamEnd(connection: GoddardTerminalConnection, error: unknown) {
+    if (this.#connection !== connection || this.#isDisposed) {
+      return
+    }
+
+    this.#connection = null
+    this.#unsubscribe = null
+    this.status = "error"
+    this.statusMessage = error ? getErrorMessage(error) : "Terminal connection closed unexpectedly."
   }
 }
 

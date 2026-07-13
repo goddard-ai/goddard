@@ -207,6 +207,25 @@ export class TerminalSession extends SigmaTarget<TerminalViewportEvents, Termina
     this.emit("input", { data })
   }
 
+  /** Writes one ordered daemon output chunk into the bounded headless terminal buffer. */
+  async writeOutput(data: string | Uint8Array) {
+    if (!this.#terminal) {
+      return
+    }
+
+    await writeToTerminal(this.#terminal, data)
+    this.refreshSnapshot()
+  }
+
+  /** Clears rendered output without retaining a second app-owned scrollback copy. */
+  clearOutput() {
+    this.#processedChunkCount = 0
+    this.#writeVersion += 1
+    this.#terminal?.reset()
+    this.#terminal?.clear()
+    this.refreshSnapshot()
+  }
+
   /** Emits paste and input events for the owner to forward to its PTY. */
   forwardPaste(data: string) {
     this.emit("paste", { data })

@@ -1261,6 +1261,7 @@ describe("@goddard-ai/sdk terminal namespace", () => {
   test("terminal.connect returns a connection-scoped request and stream helper", async () => {
     const { sdk, send, subscribe } = createSdkWithClient()
     const onEvent = vi.fn()
+    const onEnd = vi.fn()
     const unsubscribe = vi.fn()
 
     send.mockResolvedValueOnce({ connectionId: "term-conn-1" })
@@ -1303,14 +1304,14 @@ describe("@goddard-ai/sdk terminal namespace", () => {
     )
 
     const terminal = await sdk.terminal.connect()
-    const stop = await terminal.subscribe(onEvent)
+    const stop = await terminal.subscribe(onEvent, onEnd)
     await terminal.create({ instanceId: "primary", options: { cwd: "/repo" } })
     await terminal.write({ instanceId: "primary", data: "ls\n" })
     await terminal.resize({ instanceId: "primary", dimensions: { cols: 100, rows: 30 } })
     await terminal.restart({ instanceId: "primary", options: { cwd: "/repo" } })
     await terminal.close({ instanceId: "primary" })
     await terminal.disconnect()
-    stop()
+    await stop()
 
     expect(terminal.connectionId).toBe("term-conn-1")
     expect(onEvent).toHaveBeenCalledWith({
@@ -1348,5 +1349,6 @@ describe("@goddard-ai/sdk terminal namespace", () => {
       connectionId: "term-conn-1",
     })
     expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(onEnd).not.toHaveBeenCalled()
   })
 })

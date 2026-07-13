@@ -43,27 +43,27 @@ test("GoddardTerminalConnection models HTTP controls and stream events", async (
     disconnect: async () => {
       sent.push("disconnect")
     },
-    subscribe: async (handler) => {
+    subscribe: async (handler, _onEnd) => {
       handler({
         type: "terminal.output",
         connectionId: "term-conn-1",
         instanceId: "primary",
         data: "ok\n",
       })
-      return () => {
+      return async () => {
         sent.push("unsubscribe")
       }
     },
   }
 
-  const unsubscribe = await terminal.subscribe(onEvent)
+  const unsubscribe = await terminal.subscribe(onEvent, () => {})
   await terminal.create({ instanceId: "primary", options: { cwd: "/repo" } })
   await terminal.write({ instanceId: "primary", data: "ls\n" })
   await terminal.resize({ instanceId: "primary", dimensions: { cols: 100, rows: 30 } })
   await terminal.restart({ instanceId: "primary", options: { cwd: "/repo" } })
   await terminal.close({ instanceId: "primary" })
   await terminal.disconnect()
-  unsubscribe()
+  await unsubscribe()
 
   expect(onEvent).toHaveBeenCalledWith({
     type: "terminal.output",

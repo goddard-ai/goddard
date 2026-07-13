@@ -14,8 +14,14 @@ import { defineSdkPlugin } from "@goddard-ai/sdk-plugin"
 
 import { terminalIpcRoutes } from "./daemon-ipc.ts"
 
-/** Callback shape used by clients to receive daemon terminal lifecycle events. */
-export type TerminalEventHandler = (event: TerminalDaemonEvent) => void
+/** Callback shape used by clients to receive daemon terminal lifecycle events in stream order. */
+export type TerminalEventHandler = (event: TerminalDaemonEvent) => void | Promise<void>
+
+/** Callback invoked when a terminal stream ends without an explicit client stop. */
+export type TerminalStreamEndHandler = (error?: unknown) => void
+
+/** Awaitable terminal stream teardown. */
+export type StopTerminalSubscription = () => Promise<void>
 
 /** SDK input for writing terminal data through the request surface. */
 export type TerminalWriteInput = TerminalInputRequest
@@ -29,7 +35,10 @@ export interface GoddardTerminalConnection {
   restart(input: Omit<TerminalRestartRequest, "connectionId">): Promise<TerminalCreateResponse>
   close(input: Omit<TerminalCloseRequest, "connectionId">): Promise<void>
   disconnect(): Promise<void>
-  subscribe(handler: TerminalEventHandler): Promise<() => void>
+  subscribe(
+    handler: TerminalEventHandler,
+    onEnd: TerminalStreamEndHandler,
+  ): Promise<StopTerminalSubscription>
 }
 
 /** SDK namespace for daemon-managed terminal instances. */
@@ -41,7 +50,11 @@ export type GoddardTerminalNamespace = {
   restart(input: TerminalRestartRequest): Promise<TerminalCreateResponse>
   close(input: TerminalCloseRequest): Promise<void>
   disconnect(input: TerminalDisconnectRequest): Promise<void>
-  subscribe(input: TerminalDisconnectRequest, handler: TerminalEventHandler): Promise<() => void>
+  subscribe(
+    input: TerminalDisconnectRequest,
+    handler: TerminalEventHandler,
+    onEnd: TerminalStreamEndHandler,
+  ): Promise<StopTerminalSubscription>
 }
 
 export const terminalSdkPlugin = defineSdkPlugin({
@@ -49,47 +62,73 @@ export const terminalSdkPlugin = defineSdkPlugin({
   ipcRoutes: terminalIpcRoutes,
   wrap({ client }) {
     function createTerminalConnection(connectionId: string): GoddardTerminalConnection {
+      let pendingOperation = Promise.resolve()
+
+      function enqueue<T>(operation: () => Promise<T>) {
+        const result = pendingOperation.then(operation)
+        pendingOperation = result.then(
+          () => undefined,
+          () => undefined,
+        )
+        return result
+      }
+
       return {
         connectionId,
-        create: async (input) => client.terminal.create({ ...input, connectionId }),
-        write: async (input) => {
-          await client.terminal.write({ ...input, connectionId })
-        },
-        resize: async (input) => {
-          await client.terminal.resize({ ...input, connectionId })
-        },
-        restart: async (input) => client.terminal.restart({ ...input, connectionId }),
-        close: async (input) => {
-          await client.terminal.close({ ...input, connectionId })
-        },
-        disconnect: async () => {
-          await client.terminal.disconnect({ connectionId })
-        },
-        subscribe: async (handler) => subscribe({ connectionId }, handler),
+        create: (input) => enqueue(() => client.terminal.create({ ...input, connectionId })),
+        write: (input) =>
+          enqueue(async () => {
+            await client.terminal.write({ ...input, connectionId })
+          }),
+        resize: (input) =>
+          enqueue(async () => {
+            await client.terminal.resize({ ...input, connectionId })
+          }),
+        restart: (input) => enqueue(() => client.terminal.restart({ ...input, connectionId })),
+        close: (input) =>
+          enqueue(async () => {
+            await client.terminal.close({ ...input, connectionId })
+          }),
+        disconnect: () =>
+          enqueue(async () => {
+            await client.terminal.disconnect({ connectionId })
+          }),
+        subscribe: async (handler, onEnd) => subscribe({ connectionId }, handler, onEnd),
       }
     }
 
-    async function subscribe(input: TerminalDisconnectRequest, handler: TerminalEventHandler) {
+    async function subscribe(
+      input: TerminalDisconnectRequest,
+      handler: TerminalEventHandler,
+      onEnd: TerminalStreamEndHandler,
+    ) {
       const controller = new AbortController()
       const events = await client.terminal.event(input, { signal: controller.signal })
+      let stopped = false
 
-      void (async () => {
+      const consume = (async () => {
+        let streamError: unknown
         try {
           for await (const event of events) {
             if (controller.signal.aborted) {
               break
             }
-            handler(event)
+            await handler(event)
           }
         } catch (error) {
-          if (!controller.signal.aborted) {
-            throw error
+          streamError = error
+        } finally {
+          if (!stopped) {
+            controller.abort()
+            onEnd(streamError)
           }
         }
       })()
 
-      return () => {
+      return async () => {
+        stopped = true
         controller.abort()
+        await consume
       }
     }
 

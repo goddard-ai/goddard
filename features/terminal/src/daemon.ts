@@ -6,6 +6,7 @@ import type {
 
 import { terminalIpcRoutes } from "./daemon-ipc.ts"
 import { DaemonTerminalConnectionRegistry } from "./daemon/connections.ts"
+import { TerminalEventQueue } from "./daemon/event-queue.ts"
 import { DaemonTerminalError } from "./daemon/runtime.ts"
 
 export { runTerminalRuntimeCheck, type TerminalRuntimeCheckResult } from "./daemon/self-test.ts"
@@ -41,7 +42,7 @@ export const terminalPlugin = definePlugin({
       filter: TerminalEventStreamFilter,
       signal: AbortSignal,
     ) {
-      const queue: TerminalDaemonEvent[] = []
+      const queue = new TerminalEventQueue()
       let wake: (() => void) | undefined
       const listener = (event: TerminalDaemonEvent) => {
         if (event.connectionId !== filter.connectionId) {
@@ -59,6 +60,10 @@ export const terminalPlugin = definePlugin({
       signal.addEventListener("abort", abort)
       try {
         while (!signal.aborted) {
+          if (queue.overflowed) {
+            throw new Error("Terminal event stream exceeded its buffer limit.")
+          }
+
           const event = queue.shift()
           if (event) {
             yield event
@@ -101,8 +106,9 @@ export const terminalPlugin = definePlugin({
             runTerminalRequest(() => terminalConnections.disconnect(body))
             return { success: true as const }
           },
-          event: async function* (ctx) {
-            yield* subscribeTerminalEvents(ctx.query, ctx.request.signal)
+          event: (ctx) => {
+            terminalConnections.requireConnection(ctx.query)
+            return subscribeTerminalEvents(ctx.query, ctx.request.signal)
           },
         },
       },

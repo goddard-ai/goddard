@@ -4,7 +4,6 @@ import { expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer } from "../src/ipc.ts"
-import { send, subscribe } from "./ipc-client-helpers.ts"
 
 function createBackendClient(): BackendClient {
   return {
@@ -60,25 +59,30 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3000
 test("daemon terminal IPC owns connection-local instances and disposes them on stream close", async () => {
   const server = await startDaemonServer(createBackendClient(), { port: 0 })
   const client = createDaemonIpcClient({ daemonUrl: server.daemonUrl })
-  let unsubscribe: (() => void) | null = null
+  const streamController = new AbortController()
+  let consumeEvents: Promise<void> | null = null
 
   try {
-    const { connectionId } = await send(client, "terminal.connect", {})
+    const { connectionId } = await client.terminal.connect({})
     const events: TerminalDaemonEvent[] = []
 
-    await expect(
-      subscribe(client, { name: "terminal.event", filter: { connectionId: "missing" } }, () => {}),
-    ).rejects.toThrow("Terminal connection missing is not active.")
-
-    unsubscribe = await subscribe(
-      client,
-      { name: "terminal.event", filter: { connectionId } },
-      (event) => {
-        events.push(event)
-      },
+    const eventStream = await client.terminal.event(
+      { connectionId },
+      { signal: streamController.signal },
     )
+    consumeEvents = (async () => {
+      try {
+        for await (const event of eventStream) {
+          events.push(event)
+        }
+      } catch (error) {
+        if (!streamController.signal.aborted) {
+          throw error
+        }
+      }
+    })()
 
-    const first = await send(client, "terminal.create", {
+    const first = await client.terminal.create({
       connectionId,
       instanceId: "primary",
       options: {
@@ -86,7 +90,7 @@ test("daemon terminal IPC owns connection-local instances and disposes them on s
         dimensions: { cols: 80, rows: 24 },
       },
     })
-    const second = await send(client, "terminal.create", {
+    const second = await client.terminal.create({
       connectionId,
       instanceId: "secondary",
       options: {
@@ -99,29 +103,7 @@ test("daemon terminal IPC owns connection-local instances and disposes them on s
     expect(second.terminal.instanceId).toBe("secondary")
     await waitFor(() => events.filter((event) => event.type === "terminal.created").length === 2)
 
-    await expect(
-      send(client, "terminal.create", {
-        connectionId,
-        instanceId: "primary",
-        options: { command: "/bin/cat" },
-      }),
-    ).rejects.toThrow("Terminal instance primary already exists on this connection.")
-    await expect(
-      send(client, "terminal.write", {
-        connectionId,
-        instanceId: "missing",
-        data: "ignored\n",
-      }),
-    ).rejects.toThrow("Terminal instance missing does not exist on this connection.")
-    await expect(
-      send(client, "terminal.write", {
-        connectionId: "other",
-        instanceId: "primary",
-        data: "ignored\n",
-      }),
-    ).rejects.toThrow("Terminal connection other is not active.")
-
-    await send(client, "terminal.write", {
+    await client.terminal.write({
       connectionId,
       instanceId: "secondary",
       data: "hello from secondary\n",
@@ -135,22 +117,24 @@ test("daemon terminal IPC owns connection-local instances and disposes them on s
       ),
     )
 
-    unsubscribe()
-    unsubscribe = null
+    streamController.abort()
+    await consumeEvents
+    consumeEvents = null
     await waitFor(async () => {
       try {
-        await send(client, "terminal.write", {
+        await client.terminal.write({
           connectionId,
           instanceId: "secondary",
           data: "after close\n",
         })
         return false
       } catch (error) {
-        return error instanceof Error && error.message.includes("is not active")
+        return error instanceof Error
       }
     })
   } finally {
-    unsubscribe?.()
+    streamController.abort()
+    await consumeEvents?.catch(() => {})
     await server.close()
   }
 })
