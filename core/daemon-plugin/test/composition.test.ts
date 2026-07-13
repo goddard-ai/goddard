@@ -218,7 +218,7 @@ describe("daemon plugin composition", () => {
     const composition = composePlugins([inbox, session])
 
     expect(composition.events["session.turn.ended"]).toBeDefined()
-    expect(composition.events["session.turn.ended"]?.log).toEqual({
+    expect(composition.events["session.turn.ended"]?.options).toEqual({
       debug: "session.lifecycle",
     })
   })
@@ -235,7 +235,7 @@ describe("daemon plugin composition", () => {
       envelopes.push({
         name: envelope.name,
         payload: envelope.payload,
-        debug: envelope.log?.debug,
+        debug: envelope.options?.debug,
       })
       calls.push(`observer:${(envelope.payload as { id: string }).id}`)
     })
