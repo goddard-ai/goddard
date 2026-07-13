@@ -1,6 +1,6 @@
 # libgit2 Package
 
-The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a lazy Git API backed by the packaged native library and keeps command-line Git outside this package.
+The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a lazy native Git API and keeps command-line Git outside this package.
 
 ## Package Entrypoints
 
@@ -11,6 +11,7 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a la
 
 - `git` is the shared libgit2-backed Git API namespace.
 - Accessing a direct namespace such as `git.repository` or `git.refs` lazily loads the libgit2 runtime once and reuses it.
+- The packaged macOS arm64 daemon runtime supplies an explicit library path. Source checkouts can use a locally built artifact or an explicit environment override.
 - `validateLibgit2Runtime(options)` verifies that a libgit2 runtime can be loaded from the supplied candidates.
 - `resetGitForTests()` clears cached libgit2 and Git API state between tests.
 
@@ -31,7 +32,7 @@ The libgit2 package owns Goddard's direct `libgit2` integration. It exposes a la
 ## Public Data Types
 
 - `WorktreeInfo` describes a worktree path and its branch name when one is available.
-- `WorkingTreeStatus` describes whether a worktree is clean and includes raw porcelain status entries.
+- `WorkingTreeStatus` describes whether a worktree is clean and includes porcelain-style status entries.
 - `GitPathEntry` describes an untracked path and whether libgit2 reported it as a directory.
 - `GitApi` describes the shared `git` namespace shape.
 - `GitRepositoryApi`, `GitRefsApi`, `GitHistoryApi`, `GitStatusApi`, `GitConfigApi`, `GitIgnoreApi`, `GitIndexApi`, `GitWorktreeApi`, and `GitStashApi` describe each section of the Git API contract.

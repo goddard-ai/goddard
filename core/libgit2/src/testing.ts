@@ -4,6 +4,7 @@ type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends (...args: never[]) => unknown ? T[K] : DeepPartial<T[K]>
 }
 
+/** Creates an in-memory Git API whose non-overridden operations fail when called. */
 export function createFakeGitApi(overrides: DeepPartial<GitApi> = {}): GitApi {
   const fail = async () => {
     throw new Error("Fake Git API method was not implemented for this test.")

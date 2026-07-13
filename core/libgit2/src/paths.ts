@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 
+/** Resolves an existing filesystem path to its canonical absolute path. */
 export async function normalizePath(path: string) {
   return await realpath(resolve(path))
 }

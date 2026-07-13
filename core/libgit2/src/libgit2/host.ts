@@ -22,6 +22,7 @@ import {
 
 const namespaceResets: Array<() => void> = []
 
+/** Shared lazy namespaces for Goddard's supported native Git operations. */
 export const git = defineGitNamespaces({
   repository: (libgit2) => ({
     resolveRoot: (cwd: string) =>
@@ -452,10 +453,12 @@ export const git = defineGitNamespaces({
   }),
 })
 
+/** Loads and initializes libgit2 from the supplied candidates or the runtime defaults. */
 export function validateLibgit2Runtime(options: { libgit2PathCandidates?: string[] } = {}) {
   ensureLibgit2(options.libgit2PathCandidates)
 }
 
+/** Clears the loaded native library and initialized namespace instances between tests. */
 export function resetGitForTests() {
   resetLibgit2ForTests()
   for (const reset of namespaceResets) {
