@@ -1,5 +1,5 @@
 /** ACP launch-preview model normalization helpers shared by SDK consumers. */
-import type { InitialSessionConfigOption } from "@goddard-ai/session/schema"
+import type { InitialSessionConfigOption, SessionProfile } from "@goddard-ai/session/schema"
 import * as acp from "acp-client/protocol"
 
 const derivedThinkingConfigId = "_goddard_derived_thinking_level"
@@ -30,6 +30,22 @@ function findModelConfigOption(configOptions: acp.SessionConfigOption[]) {
         option.category === "model" && option.type === "select",
     ) ?? null
   )
+}
+
+function findSelectConfigOption(
+  configOptions: acp.SessionConfigOption[],
+  category: "mode" | "thought_level",
+) {
+  return (
+    configOptions.find(
+      (option): option is SelectSessionConfigOption =>
+        option.category === category && option.type === "select",
+    ) ?? null
+  )
+}
+
+function hasConfigOptionValue(option: SelectSessionConfigOption, value: string) {
+  return flattenConfigOptionValues(option).some((entry) => entry.value === value)
 }
 
 function parseThinkingModelName(name: string) {
@@ -359,5 +375,146 @@ export function deriveSessionLaunchModelConfig(input: {
         ],
       }
     },
+  }
+}
+
+/** Derives fixed session-profile creation, availability, and matching from live ACP options. */
+export function deriveSessionProfileConfig(input: { configOptions: acp.SessionConfigOption[] }) {
+  const launchConfig = deriveSessionLaunchModelConfig(input)
+  const modelOption = findModelConfigOption(input.configOptions)
+  const rawModels = createSessionModelStateFromConfigOption(modelOption)
+  const thinkingOption = findSelectConfigOption(launchConfig.configOptions, "thought_level")
+  const approvalModeOption = findSelectConfigOption(launchConfig.configOptions, "mode")
+
+  function resolveDisplayModelId(concreteModelId: string) {
+    const availableModels = launchConfig.models?.availableModels ?? []
+    if (availableModels.some((model) => model.modelId === concreteModelId)) {
+      return concreteModelId
+    }
+
+    const concreteModel = rawModels?.availableModels.find(
+      (model) => model.modelId === concreteModelId,
+    )
+    const parsedModel = concreteModel ? parseThinkingModel(concreteModel) : null
+    if (!parsedModel) {
+      return null
+    }
+
+    return (
+      availableModels.find((model) => model.name.trim() === parsedModel.baseName)?.modelId ?? null
+    )
+  }
+
+  function readConcreteModelId(selection: ReturnType<typeof launchConfig.resolveSelection>) {
+    if (!modelOption) {
+      return selection.initialModelId ?? null
+    }
+
+    const modelSelection = selection.initialConfigOptions?.find(
+      (option) => option.configId === modelOption.id && "value" in option,
+    )
+    return typeof modelSelection?.value === "string" ? modelSelection.value : null
+  }
+
+  function resolveProfile(profile: SessionProfile) {
+    if (
+      !modelOption ||
+      !thinkingOption ||
+      !approvalModeOption ||
+      !hasConfigOptionValue(thinkingOption, profile.thoughtLevel) ||
+      !hasConfigOptionValue(approvalModeOption, profile.approvalMode)
+    ) {
+      return { status: "unavailable" as const }
+    }
+
+    const modelId = resolveDisplayModelId(profile.model)
+    if (!modelId) {
+      return { status: "unavailable" as const }
+    }
+
+    const selection = launchConfig.resolveSelection({
+      modelId,
+      configOptions: [
+        {
+          configId: thinkingOption.id,
+          value: profile.thoughtLevel,
+        },
+        {
+          configId: approvalModeOption.id,
+          value: profile.approvalMode,
+        },
+      ],
+    })
+
+    if (readConcreteModelId(selection) !== profile.model) {
+      return { status: "unavailable" as const }
+    }
+
+    return {
+      status: "available" as const,
+      modelId,
+      thinkingValue: profile.thoughtLevel,
+      approvalModeValue: profile.approvalMode,
+      selection,
+    }
+  }
+
+  function createProfile(selection: {
+    modelId: string | null
+    thinkingValue: string | null
+    approvalModeValue: string | null
+  }) {
+    if (
+      !selection.modelId ||
+      !selection.thinkingValue ||
+      !selection.approvalModeValue ||
+      !thinkingOption ||
+      !approvalModeOption ||
+      !hasConfigOptionValue(thinkingOption, selection.thinkingValue) ||
+      !hasConfigOptionValue(approvalModeOption, selection.approvalModeValue)
+    ) {
+      return null
+    }
+
+    const resolvedSelection = launchConfig.resolveSelection({
+      modelId: selection.modelId,
+      configOptions: [
+        {
+          configId: thinkingOption.id,
+          value: selection.thinkingValue,
+        },
+        {
+          configId: approvalModeOption.id,
+          value: selection.approvalModeValue,
+        },
+      ],
+    })
+    const model = readConcreteModelId(resolvedSelection)
+    if (!model) {
+      return null
+    }
+
+    const profile = {
+      model,
+      thoughtLevel: selection.thinkingValue,
+      approvalMode: selection.approvalModeValue,
+    } satisfies SessionProfile
+
+    return resolveProfile(profile).status === "available" ? profile : null
+  }
+
+  function matchesProfile(profile: SessionProfile) {
+    return (
+      resolveProfile(profile).status === "available" &&
+      modelOption?.currentValue === profile.model &&
+      thinkingOption?.currentValue === profile.thoughtLevel &&
+      approvalModeOption?.currentValue === profile.approvalMode
+    )
+  }
+
+  return {
+    createProfile,
+    matchesProfile,
+    resolveProfile,
   }
 }

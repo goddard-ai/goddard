@@ -154,6 +154,10 @@ async function resolveConfigValue(
   user: unknown,
   project: unknown,
 ) {
+  if (project !== undefined && !definition.scopes?.includes("project")) {
+    throw new Error(`\`${key}\` is only supported in the global Goddard config.`)
+  }
+
   if (definition.resolve) {
     return definition.resolve({
       user,

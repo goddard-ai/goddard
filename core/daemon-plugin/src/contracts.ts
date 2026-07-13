@@ -140,6 +140,14 @@ export type DaemonConfigProvider<TConfig extends object = Record<string, unknown
   readonly getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot<TConfig> | null
 }
 
+/** Daemon-owned serialized mutation boundary for the global root config document. */
+export type DaemonConfigWriter = {
+  readonly getGlobalConfig: () => Promise<Record<string, unknown>>
+  readonly updateGlobalConfig: (
+    update: (config: Readonly<Record<string, unknown>>) => Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>
+}
+
 /** Shared daemon logger surface exposed to daemon plugins. */
 export type DaemonLogger = {
   readonly log: (event: string, fields?: Record<string, unknown>) => void
@@ -312,6 +320,7 @@ export type DaemonSetupSubstrate = {
     readonly set: (token: string) => void | Promise<void>
     readonly delete: () => void | Promise<void>
   }
+  readonly configWriter: DaemonConfigWriter
   readonly log: DaemonLogService
   readonly metadataStore: DaemonMetadataStore
   readonly sessionContext: DaemonSessionContextService

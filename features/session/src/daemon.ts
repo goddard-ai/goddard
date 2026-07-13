@@ -5,6 +5,7 @@ import { isObject } from "radashi"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
 import { createSessionManager } from "./daemon/manager.ts"
+import { createSessionProfilesService } from "./daemon/session-profiles.ts"
 import { sessionEvents } from "./events.ts"
 import {
   DaemonLaunchWorktree,
@@ -13,6 +14,7 @@ import {
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
   DaemonWorktree,
+  SessionProfilesConfig,
   SessionsConfig,
   SessionTitlesConfig,
   StaticSessionParams,
@@ -234,6 +236,10 @@ export const sessionPlugin = definePlugin({
       schema: SessionTitlesConfig,
       scopes: ["user", "project"],
     },
+    sessionProfiles: {
+      schema: SessionProfilesConfig,
+      scopes: ["user"],
+    },
     subpackages: {
       schema: SubpackagesConfig,
       scopes: ["user", "project"],
@@ -295,7 +301,17 @@ export const sessionPlugin = definePlugin({
   events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
   consumes: [agentPlugin],
-  setup({ configProvider, daemonRuntime, db, events, ipc, log, agent, sessionContext }) {
+  setup({
+    configProvider,
+    configWriter,
+    daemonRuntime,
+    db,
+    events,
+    ipc,
+    log,
+    agent,
+    sessionContext,
+  }) {
     const streamDebug = log.createDebug("session.stream")
     const sessionManager = createSessionManager({
       db,
@@ -307,6 +323,10 @@ export const sessionPlugin = definePlugin({
       sessionContext,
       events,
       idleSessionShutdownTimeoutMs: daemonRuntime.idleSessionShutdownTimeoutMs,
+    })
+    const sessionProfiles = createSessionProfilesService({
+      configWriter,
+      logger: log.createLogger(),
     })
 
     events.onSubscription(async (subscription) => {
@@ -412,6 +432,11 @@ export const sessionPlugin = definePlugin({
             set: async ({ body }) => ({
               session: await sessionManager.setSessionModel(body),
             }),
+          },
+          profile: {
+            list: async () => sessionProfiles.list(),
+            set: async ({ body }) => sessionProfiles.set(body),
+            remove: async ({ body }) => sessionProfiles.remove(body),
           },
           complete: async ({ body: { id } }) => ({
             session: await sessionManager.completeSession(id),

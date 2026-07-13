@@ -48,6 +48,28 @@ test("daemon root config schema accepts managed agent policies", () => {
   })
 })
 
+test("daemon root config schema accepts fixed session profiles", () => {
+  const config = buildRootConfigSchema().parse({
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+          thoughtLevel: "low",
+          approvalMode: "default",
+        },
+      },
+    },
+  }) as { sessionProfiles?: Record<string, unknown> }
+
+  expect(config.sessionProfiles?.["codex-acp"]).toEqual({
+    routine: {
+      model: "gpt-5.4-mini-low",
+      thoughtLevel: "low",
+      approvalMode: "default",
+    },
+  })
+})
+
 test("managed agent policies must declare install or update intent", () => {
   expect(() =>
     buildRootConfigSchema().parse({
@@ -133,4 +155,45 @@ test("root config merging keeps managed agents global only", async () => {
       },
     }),
   ).rejects.toThrow("`agents.managed` is only supported in the global Goddard config.")
+})
+
+test("root config merging keeps session profiles global only", async () => {
+  await expect(
+    mergeRootConfigLayers(
+      {
+        sessionProfiles: {
+          "codex-acp": {
+            routine: {
+              model: "gpt-5.4-mini-low",
+              thoughtLevel: "low",
+              approvalMode: "default",
+            },
+          },
+        },
+      },
+      undefined,
+    ),
+  ).resolves.toMatchObject({
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+        },
+      },
+    },
+  })
+
+  await expect(
+    mergeRootConfigLayers(undefined, {
+      sessionProfiles: {
+        "codex-acp": {
+          routine: {
+            model: "gpt-5.4-mini-low",
+            thoughtLevel: "low",
+            approvalMode: "default",
+          },
+        },
+      },
+    }),
+  ).rejects.toThrow("`sessionProfiles` is only supported in the global Goddard config.")
 })

@@ -30,6 +30,7 @@ export const SessionErrorCodes = {
   NotReconnectable: "session.not_reconnectable",
   NoWorktree: "session.no_worktree",
   PromptAborted: "session.prompt_aborted",
+  ProfileConfigurationFailed: "session.profile_configuration_failed",
   UnsupportedMessage: "session.unsupported_message",
 } as const
 
@@ -55,6 +56,7 @@ export const SessionErrorCode = z.enum([
   SessionErrorCodes.NotReconnectable,
   SessionErrorCodes.NoWorktree,
   SessionErrorCodes.PromptAborted,
+  SessionErrorCodes.ProfileConfigurationFailed,
   SessionErrorCodes.UnsupportedMessage,
 ])
 
@@ -198,6 +200,10 @@ export const SessionIpcErrors = {
       sessionId: SessionId,
     }),
   },
+  ProfileConfigurationFailed: {
+    code: SessionErrorCodes.ProfileConfigurationFailed,
+    details: z.undefined(),
+  },
   UnsupportedMessage: {
     code: SessionErrorCodes.UnsupportedMessage,
     details: z.strictObject({
@@ -217,6 +223,34 @@ export const DaemonSessionStopReason = z.enum([
 ])
 
 export type DaemonSessionStopReason = z.output<typeof DaemonSessionStopReason>
+
+/** Fixed user-facing session profile slots available for each agent harness. */
+export const SessionProfileId = z.enum(["routine", "debug", "deep"])
+
+export type SessionProfileId = z.infer<typeof SessionProfileId>
+
+/** Exact semantic ACP selections captured by one session profile. */
+export const SessionProfile = z.strictObject({
+  model: z.string().min(1),
+  thoughtLevel: z.string().min(1),
+  approvalMode: z.string().min(1),
+})
+
+export type SessionProfile = z.infer<typeof SessionProfile>
+
+/** Optional fixed profile slots configured for one agent harness. */
+export const AgentSessionProfiles = z.strictObject({
+  routine: SessionProfile.optional(),
+  debug: SessionProfile.optional(),
+  deep: SessionProfile.optional(),
+})
+
+export type AgentSessionProfiles = z.infer<typeof AgentSessionProfiles>
+
+/** Global user-owned session profiles keyed by agent harness id. */
+export const SessionProfilesConfig = z.record(z.string().min(1), AgentSessionProfiles)
+
+export type SessionProfilesConfig = z.infer<typeof SessionProfilesConfig>
 
 export const DaemonSessionStatus = z.enum([
   "idle",
@@ -742,6 +776,28 @@ export const SetSessionModelRequest = SessionIdParams.extend({
 
 export type SetSessionModelRequest = z.infer<typeof SetSessionModelRequest>
 
+/** Empty request used to read globally configured session profiles. */
+export const ListSessionProfilesRequest = z.strictObject({})
+
+export type ListSessionProfilesRequest = z.infer<typeof ListSessionProfilesRequest>
+
+/** Request used to replace one fixed profile for an agent harness. */
+export const SetSessionProfileRequest = z.strictObject({
+  agentId: z.string().min(1),
+  profileId: SessionProfileId,
+  profile: SessionProfile,
+})
+
+export type SetSessionProfileRequest = z.infer<typeof SetSessionProfileRequest>
+
+/** Request used to remove one fixed profile from an agent harness. */
+export const RemoveSessionProfileRequest = z.strictObject({
+  agentId: z.string().min(1),
+  profileId: SessionProfileId,
+})
+
+export type RemoveSessionProfileRequest = z.infer<typeof RemoveSessionProfileRequest>
+
 /** Request payload used to declare the current initiative for one daemon session. */
 export const DeclareSessionInitiativeRequest = SessionIdParams.extend({
   title: z.string().trim().min(1),
@@ -784,6 +840,11 @@ export type SetSessionConfigOptionResponse = {
 /** Response payload returned after updating the active ACP session model. */
 export type SetSessionModelResponse = {
   session: DaemonSession
+}
+
+/** Response returned by all global session-profile management operations. */
+export type SessionProfilesResponse = {
+  profiles: SessionProfilesConfig
 }
 
 /** Response payload returned after marking one session completed. */

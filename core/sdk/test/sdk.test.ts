@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "bun:test"
 import {
   AgentSession,
   deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
   GoddardSdk,
   type GoddardClient,
 } from "../src/index.ts"
@@ -665,6 +666,46 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.profile forwards global profile management requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+    const profiles = {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+          thoughtLevel: "low",
+          approvalMode: "default",
+        },
+      },
+    }
+    send.mockResolvedValue({ profiles })
+
+    await expect(sdk.session.profile.list({})).resolves.toEqual({ profiles })
+    await expect(
+      sdk.session.profile.set({
+        agentId: "codex-acp",
+        profileId: "routine",
+        profile: profiles["codex-acp"].routine,
+      }),
+    ).resolves.toEqual({ profiles })
+    await expect(
+      sdk.session.profile.remove({
+        agentId: "codex-acp",
+        profileId: "routine",
+      }),
+    ).resolves.toEqual({ profiles })
+
+    expect(send).toHaveBeenNthCalledWith(1, "session.profile.list", {})
+    expect(send).toHaveBeenNthCalledWith(2, "session.profile.set", {
+      agentId: "codex-acp",
+      profileId: "routine",
+      profile: profiles["codex-acp"].routine,
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "session.profile.remove", {
+      agentId: "codex-acp",
+      profileId: "routine",
+    })
+  })
+
   test("session.subpackages forwards launch working directory discovery requests", async () => {
     const { sdk, send } = createSdkWithClient()
 
@@ -809,6 +850,82 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
     })
+  })
+
+  test("deriveSessionProfileConfig creates, resolves, and matches exact ACP selections", () => {
+    const configOptions: acp.SessionConfigOption[] = [
+      createFixtureModelConfigOption({
+        currentValue: "gpt-5.4-mini-low",
+        models: [
+          {
+            modelId: "gpt-5.4-mini-low",
+            name: "GPT-5.4 Mini (Low)",
+          },
+          {
+            modelId: "gpt-5.4-mini-high",
+            name: "GPT-5.4 Mini (High)",
+          },
+        ],
+      }),
+      {
+        id: "mode",
+        type: "select",
+        name: "Approval preset",
+        category: "mode",
+        currentValue: "default",
+        options: [
+          { value: "default", name: "Default" },
+          { value: "full-access", name: "Full access" },
+        ],
+      },
+    ]
+    const profileConfig = deriveSessionProfileConfig({ configOptions })
+    const launchConfig = deriveSessionLaunchModelConfig({ configOptions })
+    const modelId = launchConfig.models?.currentModelId ?? null
+
+    expect(
+      profileConfig.createProfile({
+        modelId,
+        thinkingValue: "low",
+        approvalModeValue: "default",
+      }),
+    ).toEqual({
+      model: "gpt-5.4-mini-low",
+      thoughtLevel: "low",
+      approvalMode: "default",
+    })
+    expect(
+      profileConfig.resolveProfile({
+        model: "gpt-5.4-mini-high",
+        thoughtLevel: "high",
+        approvalMode: "full-access",
+      }),
+    ).toMatchObject({
+      status: "available",
+      modelId,
+      thinkingValue: "high",
+      approvalModeValue: "full-access",
+      selection: {
+        initialConfigOptions: [
+          { configId: "mode", value: "full-access" },
+          { configId: "model", value: "gpt-5.4-mini-high" },
+        ],
+      },
+    })
+    expect(
+      profileConfig.matchesProfile({
+        model: "gpt-5.4-mini-low",
+        thoughtLevel: "low",
+        approvalMode: "default",
+      }),
+    ).toBe(true)
+    expect(
+      profileConfig.resolveProfile({
+        model: "removed-model",
+        thoughtLevel: "high",
+        approvalMode: "full-access",
+      }),
+    ).toEqual({ status: "unavailable" })
   })
 
   test("deriveSessionLaunchModelConfig folds slash-delimited thinking model ids", () => {

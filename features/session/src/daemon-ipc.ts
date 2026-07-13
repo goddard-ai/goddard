@@ -9,11 +9,13 @@ import {
   GetSessionHistoryRequest as GetSessionHistoryRequestSchema,
   GetSessionWorktreeMergeReadinessRequest,
   GetSessionWorktreeRequest,
+  ListSessionProfilesRequest,
   ListSessionsRequest,
   MergeSessionWorktreeRequest,
   PrepareSessionLaunchWorktreeRequest,
   ReleaseSessionLaunchLeaseRequest,
   ReleaseSessionLaunchWorktreeRequest,
+  RemoveSessionProfileRequest,
   ReportSessionBlockerRequest,
   ReportSessionTurnEndedRequest,
   ResolveSessionTokenRequest,
@@ -26,6 +28,7 @@ import {
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
   SetSessionWorktreeMergeTargetBranchRequest,
+  SetSessionProfileRequest,
   SteerSessionRequest,
   type CancelSessionResponse,
   type CompleteSessionResponse,
@@ -45,6 +48,7 @@ import {
   type ReportSessionResponse,
   type SessionComposerSuggestionsResponse,
   type SessionLaunchPreviewResponse,
+  type SessionProfilesResponse,
   type SessionSubpackagesResponse,
   type SetSessionConfigOptionResponse,
   type SetSessionModelResponse,
@@ -291,6 +295,35 @@ export const sessionIpcRoutes = defineIpcRoutes({
         }),
         body: SetSessionModelRequest,
         response: $type<SetSessionModelResponse>(),
+      }),
+    }),
+    profile: http.resource("profile", {
+      ...metadata({
+        description: "Global session profile management.",
+      }),
+      /** Lists globally configured session profiles. */
+      list: http.post("list", {
+        ...metadata({
+          description: "Lists globally configured session profiles.",
+        }),
+        body: ListSessionProfilesRequest,
+        response: $type<SessionProfilesResponse>(),
+      }),
+      /** Replaces one fixed session profile for an agent harness. */
+      set: http.post("set", {
+        ...metadata({
+          description: "Replaces one fixed session profile for an agent harness.",
+        }),
+        body: SetSessionProfileRequest,
+        response: $type<SessionProfilesResponse>(),
+      }),
+      /** Removes one fixed session profile from an agent harness. */
+      remove: http.post("remove", {
+        ...metadata({
+          description: "Removes one fixed session profile from an agent harness.",
+        }),
+        body: RemoveSessionProfileRequest,
+        response: $type<SessionProfilesResponse>(),
       }),
     }),
     /** Marks one session inbox row completed without shutting down the session. */

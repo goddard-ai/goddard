@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -157,6 +157,131 @@ test("config manager promotes valid root config edits and preserves the last goo
   expect(fallbackSnapshot.version).toBeGreaterThanOrEqual(recoveredSnapshot!.version)
   expect(fallbackSnapshot.config.session?.agent).toBe("claude-acp")
   expect(fallbackSnapshot.config.actions?.session?.agent).toBe("gemini-acp")
+})
+
+test("config manager serializes atomic global updates and preserves unrelated config", async () => {
+  await useTempHome()
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-writer-repo-"))
+  cleanup.push(() => removeTemporaryPath(repoDir))
+  await writeGlobalRootConfig({
+    agents: {
+      default: "codex-acp",
+    },
+  })
+
+  const configManager = createConfigManager()
+  cleanup.push(() => closeConfigManager(configManager))
+  await configManager.getRootConfig(repoDir)
+
+  await Promise.all([
+    configManager.updateGlobalConfig((config) => ({
+      ...config,
+      sessionProfiles: {
+        "codex-acp": {
+          routine: {
+            model: "gpt-5.4-mini-low",
+            thoughtLevel: "low",
+            approvalMode: "default",
+          },
+        },
+      },
+    })),
+    configManager.updateGlobalConfig((config) => ({
+      ...config,
+      security: {
+        pullRequests: {
+          submit: "deny",
+        },
+      },
+    })),
+  ])
+
+  const persisted = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(persisted).toMatchObject({
+    $schema: rootConfigSchemaUrl,
+    agents: {
+      default: "codex-acp",
+    },
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+        },
+      },
+    },
+  })
+  expect(configManager.getLastKnownRootConfig(repoDir)?.config).toMatchObject({
+    agents: {
+      default: "codex-acp",
+    },
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+        },
+      },
+    },
+  })
+})
+
+test("session profile IPC manages fixed profiles in global config", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    agents: {
+      default: "codex-acp",
+    },
+  })
+
+  const configManager = createConfigManager()
+  cleanup.push(() => closeConfigManager(configManager))
+  const daemon = await startServer(configManager)
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  await expect(client.session.profile.list({})).resolves.toEqual({ profiles: {} })
+
+  const configured = await client.session.profile.set({
+    agentId: "codex-acp",
+    profileId: "debug",
+    profile: {
+      model: "gpt-5.4-medium",
+      thoughtLevel: "medium",
+      approvalMode: "default",
+    },
+  })
+  expect(configured.profiles).toEqual({
+    "codex-acp": {
+      debug: {
+        model: "gpt-5.4-medium",
+        thoughtLevel: "medium",
+        approvalMode: "default",
+      },
+    },
+  })
+
+  const persisted = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(persisted.agents).toEqual({ default: "codex-acp" })
+  expect(persisted.sessionProfiles).toEqual(configured.profiles)
+
+  await expect(
+    client.session.profile.remove({
+      agentId: "codex-acp",
+      profileId: "debug",
+    }),
+  ).resolves.toEqual({ profiles: {} })
+
+  const removed = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(removed.agents).toEqual({ default: "codex-acp" })
+  expect(removed.sessionProfiles).toBeUndefined()
 })
 
 test(

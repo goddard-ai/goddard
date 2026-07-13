@@ -140,6 +140,10 @@ export async function createDaemonRuntime(
         store.metadata.delete("authToken")
       },
     },
+    configWriter: {
+      getGlobalConfig: configManager.getGlobalConfig,
+      updateGlobalConfig: configManager.updateGlobalConfig,
+    },
     log: {
       createDebug,
       createLogger,
