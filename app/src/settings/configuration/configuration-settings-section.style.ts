@@ -1,0 +1,237 @@
+import { css } from "@goddard-ai/styled-system/css"
+
+export default {
+  formSurface: css({
+    display: "grid",
+    gap: "10px",
+    minWidth: "0",
+    "& form": {
+      display: "grid",
+      gap: "0",
+    },
+    "& fieldset": {
+      display: "grid",
+      gap: "8px",
+      minWidth: "0",
+      margin: "0",
+      padding: "0",
+      border: "0",
+    },
+    "& form > fieldset > .rjsf-field": {
+      paddingBlock: "11px",
+      borderTop: "1px solid {colors.border}",
+    },
+    "& form > fieldset > .rjsf-field:first-child": {
+      borderTop: "0",
+    },
+    "& fieldset fieldset": {
+      marginBlockStart: "4px",
+      paddingInlineStart: "12px",
+      borderInlineStart: "1px solid {colors.border}",
+    },
+    "& .rjsf-object-details": {
+      minWidth: "0",
+      paddingBlock: "9px",
+      borderBlockStart: "1px solid {colors.border}",
+    },
+    "& .rjsf-object-details:first-child": {
+      borderBlockStart: "0",
+    },
+    "& .rjsf-object-details > summary": {
+      color: "text",
+      fontSize: "0.86rem",
+      fontWeight: "680",
+      lineHeight: "1.4",
+      cursor: "pointer",
+      _focusVisible: {
+        outline: "2px solid {colors.accent}",
+        outlineOffset: "2px",
+      },
+    },
+    "& .rjsf-object-details-content": {
+      display: "grid",
+      gap: "8px",
+      minWidth: "0",
+      paddingBlockStart: "8px",
+      paddingInlineStart: "14px",
+      borderInlineStart: "1px solid {colors.border}",
+    },
+    "& .rjsf-object-details-content > .rjsf-object-details": {
+      borderBlockStart: "0",
+    },
+    "& legend": {
+      width: "100%",
+      padding: "0",
+      color: "text",
+      fontSize: "0.86rem",
+      fontWeight: "680",
+      lineHeight: "1.4",
+    },
+    "& legend .pull-right": {
+      float: "right",
+    },
+    "& .form-group": {
+      display: "grid",
+      gap: "5px",
+      minWidth: "0",
+      margin: "0",
+    },
+    "& label": {
+      color: "text",
+      fontSize: "0.82rem",
+      fontWeight: "620",
+      lineHeight: "1.4",
+    },
+    "& .field-description": {
+      color: "muted",
+      fontSize: "0.78rem",
+      lineHeight: "1.5",
+    },
+    "& input:not([type=checkbox]), & select, & textarea": {
+      width: "100%",
+      minWidth: "0",
+      minHeight: "34px",
+      paddingInline: "9px",
+      border: "1px solid {colors.border}",
+      borderRadius: "6px",
+      outline: "none",
+      backgroundColor: "background",
+      color: "text",
+      fontSize: "0.82rem",
+      _focusVisible: {
+        borderColor: "accentStrong",
+        outline: "2px solid {colors.accent}",
+        outlineOffset: "1px",
+      },
+      _disabled: {
+        cursor: "not-allowed",
+        opacity: "0.62",
+      },
+    },
+    "& textarea": {
+      minHeight: "76px",
+      paddingBlock: "7px",
+      resize: "vertical",
+    },
+    "& .checkbox > label": {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      minHeight: "32px",
+      cursor: "pointer",
+    },
+    "& input[type=checkbox], & input[type=radio]": {
+      width: "16px",
+      height: "16px",
+      margin: "0",
+      accentColor: "accentStrong",
+    },
+    "& button": {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      width: "28px",
+      height: "28px",
+      padding: "0",
+      border: "1px solid {colors.border}",
+      borderRadius: "6px",
+      backgroundColor: "background",
+      color: "muted",
+      cursor: "pointer",
+      _hover: {
+        backgroundColor: "surface",
+        color: "text",
+      },
+      _focusVisible: {
+        outline: "2px solid {colors.accent}",
+        outlineOffset: "2px",
+      },
+      _disabled: {
+        cursor: "not-allowed",
+        opacity: "0.5",
+      },
+    },
+    "& .row": {
+      display: "flex",
+      alignItems: "end",
+      gap: "8px",
+      minWidth: "0",
+    },
+    "& .row > *": {
+      minWidth: "0",
+    },
+    "& .array-item-list": {
+      display: "grid",
+      alignItems: "stretch",
+    },
+    "& .array-item": {
+      paddingBlock: "5px",
+      borderBlockEnd: "1px solid {colors.border}",
+    },
+    "& .array-item-toolbox, & .btn-group": {
+      display: "flex",
+      alignItems: "center",
+      gap: "4px",
+    },
+    "& .form-additional": {
+      flex: "1 1 0",
+    },
+    "& .error-detail": {
+      margin: "0",
+      paddingInlineStart: "18px",
+      color: "danger",
+      fontSize: "0.78rem",
+      lineHeight: "1.45",
+    },
+    "& .rjsf-field-error input, & .rjsf-field-error select, & .rjsf-field-error textarea": {
+      borderColor: "danger",
+    },
+  }),
+  errorText: css({
+    margin: "0",
+    color: "danger",
+    fontSize: "0.8rem",
+    lineHeight: "1.5",
+  }),
+  restartNotice: css({
+    margin: "0",
+    padding: "8px 10px",
+    borderInlineStart: "2px solid {colors.accentStrong}",
+    color: "text",
+    fontSize: "0.8rem",
+    lineHeight: "1.5",
+  }),
+  stateText: css({
+    margin: "0",
+    color: "muted",
+    fontSize: "0.82rem",
+    lineHeight: "1.5",
+  }),
+  loadError: css({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+  }),
+  retryButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    minHeight: "30px",
+    paddingInline: "10px",
+    border: "1px solid {colors.border}",
+    borderRadius: "6px",
+    backgroundColor: "background",
+    color: "text",
+    fontSize: "0.8rem",
+    fontWeight: "620",
+    cursor: "pointer",
+    _hover: {
+      backgroundColor: "surface",
+    },
+    _focusVisible: {
+      outline: "2px solid {colors.accent}",
+      outlineOffset: "2px",
+    },
+  }),
+}

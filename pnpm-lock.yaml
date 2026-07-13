@@ -232,6 +232,15 @@ importers:
       '@preact/signals-core':
         specifier: ^1.14.1
         version: 1.14.2
+      '@rjsf/core':
+        specifier: ^6.6.2
+        version: 6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@rjsf/utils@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)))
+      '@rjsf/utils':
+        specifier: ^6.6.2
+        version: 6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))
+      '@rjsf/validator-ajv8':
+        specifier: ^6.6.2
+        version: 6.6.2(@rjsf/utils@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)))
       '@tanstack/react-virtual':
         specifier: ^3.13.24
         version: 3.13.26(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@preact/compat@18.3.2(preact@11.0.0-beta.1))
@@ -244,6 +253,9 @@ importers:
       acp-client:
         specifier: 'catalog:'
         version: 0.5.3(zod@4.4.3)
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
       comark:
         specifier: 0.2.1
         version: 0.2.1(@types/markdown-it@14.1.2)(markdown-it@14.2.0)(shiki@4.0.2)
@@ -3146,6 +3158,25 @@ packages:
   '@remix-run/route-pattern@0.22.1':
     resolution: {integrity: sha512-czdGJWh09Lapvcqt7Vb09KlrU2PhRJ8xQaI+AItTuD9aDJ5MAgxnS38lnys6Ll+6RJEqPiaUqTwIQhVLwFvv+w==}
 
+  '@rjsf/core@6.6.2':
+    resolution: {integrity: sha512-rmckOHIc0N3Vu0egcjrm4aRnw4ETW1i4fGdm0m63qd/298zHfF7x2md2rDh8F5HLgoxW3X/LdvrCHcsD1lxbGw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@rjsf/utils': ^6.6.x
+      react: '>=18'
+
+  '@rjsf/utils@6.6.2':
+    resolution: {integrity: sha512-npqdWuuFmCkiXETrDLRx8a4EwDJoUdTTnGhJA/774bwDgT99u4nAEyXbJd75VuobunewcLm2FOS2cErD3e28cg==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: '>=18'
+
+  '@rjsf/validator-ajv8@6.6.2':
+    resolution: {integrity: sha512-pi+CBfkXxyR1JhEveuwi7qA9NcqYvFSvadY8LkQDC6wP89bZS8TYXzolirvXC7okDdI3WCtPjx/FYnxYpXbj7Q==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@rjsf/utils': ^6.6.x
+
   '@rolldown/binding-android-arm64@1.0.0-rc.17':
     resolution: {integrity: sha512-s70pVGhw4zqGeFnXWvAzJDlvxhlRollagdCCKRgOsgUOH3N1l0LIxf83AtGzmb5SiVM4Hjl5HyarMRfdfj3DaQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -3781,6 +3812,9 @@ packages:
     resolution: {integrity: sha512-tcZAhrpx6oVlkEsRngeTEEE7I5/QdLjeEz4IlekabGaESP7+Dkm/6a9KcF1KdCBB7mO9PXtBkwCuTCt8+UPg8Q==}
     engines: {node: '>=18.0.0'}
 
+  '@x0k/json-schema-merge@1.0.4':
+    resolution: {integrity: sha512-KvmMgAftbVzATq4IRnkno/SKSu+gjaR2ZUPJG5JUlY4W3twRJo03sk2914u8scmosibBZ0m7s6euZlJuqpv8Ww==}
+
   '@xmldom/xmldom@0.9.10':
     resolution: {integrity: sha512-A9gOqLdi6cV4ibazAjcQufGj0B1y/vDqYrcuP6d/6x8P27gRS8643Dj9o1dEKtB6O7fwxb2FgBmJS2mX7gpvdw==}
     engines: {node: '>=14.6'}
@@ -3826,6 +3860,14 @@ packages:
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
+
+  ajv-formats@2.1.1:
+    resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
+    peerDependencies:
+      ajv: ^8.0.0
+    peerDependenciesMeta:
+      ajv:
+        optional: true
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -4577,6 +4619,10 @@ packages:
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
+  fast-equals@6.0.0:
+    resolution: {integrity: sha512-PFhhIGgdM79r5Uztdj9Zb6Tt1zKafqVfdMGwVca1z5z6fbX7DmsySSuJd8HiP6I1j505DCS83cLxo5rmSNeVEA==}
+    engines: {node: '>=6.0.0'}
+
   fast-glob@3.3.3:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
     engines: {node: '>=8.6.0'}
@@ -4973,6 +5019,10 @@ packages:
   jsonfile@6.2.1:
     resolution: {integrity: sha512-zwOTdL3rFQ/lRdBnntKVOX6k5cKJwEc1HdilT71BWEu7J41gXIB2MRp+vxduPSwZJPWBxEzv4yH1wYLJGUHX4Q==}
 
+  jsonpointer@5.0.1:
+    resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
+    engines: {node: '>=0.10.0'}
+
   jsonwebtoken@9.0.3:
     resolution: {integrity: sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g==}
     engines: {node: '>=12', npm: '>=6'}
@@ -5183,6 +5233,9 @@ packages:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
     engines: {node: '>=10'}
 
+  lodash-es@4.18.1:
+    resolution: {integrity: sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==}
+
   lodash.includes@4.3.0:
     resolution: {integrity: sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==}
 
@@ -5210,12 +5263,19 @@ packages:
   lodash.truncate@4.4.2:
     resolution: {integrity: sha512-jttmRe7bRse52OsWIMDLaXxWqRAmtIUccAQ3garviCqJjafXOfNMO0yMfNpdD6zbGaTU0P5Nz7e7gAT6cKmJRw==}
 
+  lodash@4.18.1:
+    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
+
   log-symbols@7.0.1:
     resolution: {integrity: sha512-ja1E3yCr9i/0hmBVaM0bfwDjnGy8I/s6PP4DFp+yP+a+mrHO4Rm7DtmnqROTUkHIkqffC84YY7AeqX6oFk0WFg==}
     engines: {node: '>=18'}
 
   look-it-up@2.1.0:
     resolution: {integrity: sha512-nMoGWW2HurtuJf6XAL56FWTDCWLOTSsanrgwOyaR5Y4e3zfG5N/0cU5xWZSEU3tBxhQugRbV1xL9jb+ug7yZww==}
+
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
+    hasBin: true
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
@@ -5238,6 +5298,24 @@ packages:
   markdown-it@14.2.0:
     resolution: {integrity: sha512-1TGiQiJVRQ3NPmZH6sx5Cfnmg6GQm9jvC1ch4TK511NjSJvjzKLzn5pPfZRNZkRPZP0HqCioSndqH8v2nRaWVQ==}
     hasBin: true
+
+  markdown-to-jsx@9.8.2:
+    resolution: {integrity: sha512-rWUuxKB5NsuJmSfUOuXkQ0O5qk0J/Lr3Lk6dzxKoKQI/jeHYlsVfz3zJdMLAhI46hHoXDYERWhtBOiqtWDZ4LA==}
+    engines: {node: '>= 18'}
+    peerDependencies:
+      react: '>= 16.0.0'
+      react-native: '*'
+      solid-js: '>=1.0.0'
+      vue: '>=3.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-native:
+        optional: true
+      solid-js:
+        optional: true
+      vue:
+        optional: true
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -5681,6 +5759,9 @@ packages:
     resolution: {integrity: sha512-NxNv/kLguCA7p3jE8oL2aEBsrJWgAakBpgmgK6lpPWV+WuOmY6r2/zbAVnP+T8bQlA0nzHXSJSJW0Hq7ylaD2Q==}
     engines: {node: '>= 6'}
 
+  prop-types@15.8.1:
+    resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
+
   property-information@7.1.0:
     resolution: {integrity: sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ==}
 
@@ -5742,6 +5823,9 @@ packages:
     resolution: {integrity: sha512-3DpCr5HVdZ0caUjYE/kIHBEJN0mNP3ZCgf16c48uJ5TbWjorKVp+YG8W3XqlJ7vJAVNw6wNIImyPXmFydwmyng==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
+
+  react-is@16.13.1:
+    resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
@@ -8431,6 +8515,38 @@ snapshots:
 
   '@remix-run/route-pattern@0.22.1': {}
 
+  '@rjsf/core@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))(@rjsf/utils@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)))':
+    dependencies:
+      '@rjsf/utils': 6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))
+      lodash: 4.18.1
+      lodash-es: 4.18.1
+      markdown-to-jsx: 9.8.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))
+      prop-types: 15.8.1
+      react: '@preact/compat@18.3.2(preact@11.0.0-beta.1)'
+    transitivePeerDependencies:
+      - react-native
+      - solid-js
+      - vue
+
+  '@rjsf/utils@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))':
+    dependencies:
+      '@x0k/json-schema-merge': 1.0.4
+      fast-equals: 6.0.0
+      fast-uri: 3.1.2
+      jsonpointer: 5.0.1
+      lodash: 4.18.1
+      lodash-es: 4.18.1
+      react: '@preact/compat@18.3.2(preact@11.0.0-beta.1)'
+      react-is: 18.3.1
+
+  '@rjsf/validator-ajv8@6.6.2(@rjsf/utils@6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)))':
+    dependencies:
+      '@rjsf/utils': 6.6.2(@preact/compat@18.3.2(preact@11.0.0-beta.1))
+      ajv: 8.20.0
+      ajv-formats: 2.1.1(ajv@8.20.0)
+      lodash: 4.18.1
+      lodash-es: 4.18.1
+
   '@rolldown/binding-android-arm64@1.0.0-rc.17':
     optional: true
 
@@ -9002,6 +9118,10 @@ snapshots:
       fast-querystring: 1.1.2
       tslib: 2.8.1
 
+  '@x0k/json-schema-merge@1.0.4':
+    dependencies:
+      '@types/json-schema': 7.0.15
+
   '@xmldom/xmldom@0.9.10': {}
 
   '@xterm/headless@6.0.0': {}
@@ -9043,6 +9163,10 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       '@opentelemetry/api': 1.9.1
       zod: 4.4.3
+
+  ajv-formats@2.1.1(ajv@8.20.0):
+    optionalDependencies:
+      ajv: 8.20.0
 
   ajv-formats@3.0.1(ajv@8.20.0):
     optionalDependencies:
@@ -9730,6 +9854,8 @@ snapshots:
 
   fast-deep-equal@3.1.3: {}
 
+  fast-equals@6.0.0: {}
+
   fast-glob@3.3.3:
     dependencies:
       '@nodelib/fs.stat': 2.0.5
@@ -10098,6 +10224,8 @@ snapshots:
     optionalDependencies:
       graceful-fs: 4.2.11
 
+  jsonpointer@5.0.1: {}
+
   jsonwebtoken@9.0.3:
     dependencies:
       jws: 4.0.1
@@ -10273,6 +10401,8 @@ snapshots:
     dependencies:
       p-locate: 5.0.0
 
+  lodash-es@4.18.1: {}
+
   lodash.includes@4.3.0: {}
 
   lodash.isboolean@3.0.3: {}
@@ -10291,12 +10421,18 @@ snapshots:
 
   lodash.truncate@4.4.2: {}
 
+  lodash@4.18.1: {}
+
   log-symbols@7.0.1:
     dependencies:
       is-unicode-supported: 2.1.0
       yoctocolors: 2.1.2
 
   look-it-up@2.1.0: {}
+
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
 
   lru-cache@5.1.1:
     dependencies:
@@ -10330,6 +10466,10 @@ snapshots:
       mdurl: 2.0.0
       punycode.js: 2.3.1
       uc.micro: 2.1.0
+
+  markdown-to-jsx@9.8.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)):
+    optionalDependencies:
+      react: '@preact/compat@18.3.2(preact@11.0.0-beta.1)'
 
   math-intrinsics@1.1.0: {}
 
@@ -10772,6 +10912,12 @@ snapshots:
       kleur: 3.0.3
       sisteransi: 1.0.5
 
+  prop-types@15.8.1:
+    dependencies:
+      loose-envify: 1.4.0
+      object-assign: 4.1.1
+      react-is: 16.13.1
+
   property-information@7.1.0: {}
 
   proxy-addr@2.0.7:
@@ -10830,6 +10976,8 @@ snapshots:
   react-error-boundary@6.1.2(@preact/compat@18.3.2(preact@11.0.0-beta.1)):
     dependencies:
       react: '@preact/compat@18.3.2(preact@11.0.0-beta.1)'
+
+  react-is@16.13.1: {}
 
   react-is@18.3.1: {}
 

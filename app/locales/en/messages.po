@@ -17,19 +17,57 @@ msgstr ""
 msgid " opens menu"
 msgstr " opens menu"
 
+#. placeholder {0}: props.tabTitle
+#: src/app-shell/chrome.tsrx:412
+msgid "\"{0}\" has unsubmitted or unsaved changes."
+msgstr "\"{0}\" has unsubmitted or unsaved changes."
+
 #. placeholder {0}: props.selectedCount
 #: src/inbox/bulk-toolbar.tsrx:44
 msgid "{0, plural, one {# selected} other {# selected}}"
 msgstr "{0, plural, one {# selected} other {# selected}}"
+
+#. placeholder {0}: params[0] ?? ""
+#. placeholder {1}: params[1] ?? ""
+#. placeholder {2}: params[2] ?? ""
+#: src/settings/configuration/configuration-form.tsx:415
+msgid "{0} ({1}, {2} bytes)"
+msgstr "{0} ({1}, {2} bytes)"
+
+#. placeholder {0}: params[0] ?? ""
+#: src/settings/configuration/configuration-form.tsx:406
+msgid "{0} (deprecated)"
+msgstr "{0} (deprecated)"
 
 #. placeholder {0}: filter.label
 #: src/inbox/list.tsrx:56
 msgid "{0} inbox items"
 msgstr "{0} inbox items"
 
+#. placeholder {0}: params[0] ?? ""
+#: src/settings/configuration/configuration-form.tsx:404
+msgid "{0} key"
+msgstr "{0} key"
+
+#. placeholder {0}: params[0] ?? ""
+#. placeholder {1}: params[1] ?? ""
+#: src/settings/configuration/configuration-form.tsx:402
+msgid "{0} option {1}"
+msgstr "{0} option {1}"
+
+#. placeholder {0}: getSessionProfileLabel(props.profileId)
+#: src/settings/session-profiles-section.tsrx:117
+msgid "{0} profile saved"
+msgstr "{0} profile saved"
+
 #: src/projects/switch-project-dropdown.tsrx:228
 msgid "Active"
 msgstr "Active"
+
+#: src/settings/configuration/configuration-form.tsx:54
+#: src/settings/configuration/configuration-form.tsx:363
+msgid "Add"
+msgstr "Add"
 
 #: src/projects/projects-page.tsrx:88
 msgid "Add a local directory to establish the app's explicit working set."
@@ -38,6 +76,18 @@ msgstr "Add a local directory to establish the app's explicit working set."
 #: src/projects/switch-project-dropdown.tsrx:215
 msgid "Add a local project from your filesystem."
 msgstr "Add a local project from your filesystem."
+
+#: src/settings/session-profiles-section.tsrx:360
+msgid "Add a project to configure session profiles."
+msgstr "Add a project to configure session profiles."
+
+#: src/settings/configuration/configuration-form.tsx:365
+msgid "Add item"
+msgstr "Add item"
+
+#: src/settings/configuration/configuration-form.tsx:388
+msgid "Add optional setting"
+msgstr "Add optional setting"
 
 #: src/projects/projects-page.tsrx:77
 #: src/projects/projects-page.tsrx:99
@@ -52,13 +102,14 @@ msgstr "Add project"
 msgid "Add shortcut"
 msgstr "Add shortcut"
 
-#: src/sessions/launch-form-selectors.tsrx:45
-#: src/sessions/launch-form-selectors.tsrx:87
+#: src/sessions/launch-form-selectors.tsrx:54
+#: src/sessions/launch-form-selectors.tsrx:97
+#: src/settings/session-profiles-section.tsrx:304
 msgid "Agent harness"
 msgstr "Agent harness"
 
 #. placeholder {0}: selectedAgent.name
-#: src/app-shell/agent-selector.tsrx:176
+#: src/app-shell/agent-selector.tsrx:179
 msgid "Agent harness: {0}"
 msgstr "Agent harness: {0}"
 
@@ -82,7 +133,8 @@ msgid "Appearance"
 msgstr "Appearance"
 
 #: src/session-input/session-mode-selector.tsrx:20
-#: src/sessions/launch-form-selectors.tsrx:49
+#: src/sessions/launch-form-selectors.tsrx:59
+#: src/settings/session-profiles-section.tsrx:213
 msgid "Approval preset"
 msgstr "Approval preset"
 
@@ -93,7 +145,7 @@ msgid "Archive"
 msgstr "Archive"
 
 #: src/inbox/bulk-toolbar.tsrx:85
-#: src/inbox/page.tsrx:161
+#: src/inbox/page.tsrx:146
 msgid "Archive selected"
 msgstr "Archive selected"
 
@@ -106,6 +158,10 @@ msgstr "Archived"
 #: src/settings/adapter-installations-section.tsrx:253
 msgid "Available agents"
 msgstr "Available agents"
+
+#: src/app-shell/tab-strip.tsrx:224
+msgid "Back"
+msgstr "Back"
 
 #. placeholder {0}: summary.behind
 #: src/projects/project-page.tsrx:116
@@ -120,6 +176,7 @@ msgstr "Blocked"
 msgid "Browse"
 msgstr "Browse"
 
+#: src/app-shell/chrome.tsrx:421
 #: src/projects/projects-page.tsrx:381
 #: src/shortcuts/capture-dialog.tsrx:167
 msgid "Cancel"
@@ -135,7 +192,7 @@ msgstr "Cancelled"
 msgid "Change shortcut"
 msgstr "Change shortcut"
 
-#: src/sessions/launch-form-selectors.tsrx:142
+#: src/sessions/launch-form-selectors.tsrx:154
 msgid "Choose a branch"
 msgstr "Choose a branch"
 
@@ -159,21 +216,43 @@ msgstr "Choose the project, agent harness, launch options, and initial prompt."
 msgid "Choose which agent harnesses are available when launching sessions."
 msgstr "Choose which agent harnesses are available when launching sessions."
 
+#: src/session-chat/view.tsrx:1005
+msgid "Clean the primary checkout before merging."
+msgstr "Clean the primary checkout before merging."
+
+#: src/settings/configuration/configuration-form.tsx:57
+#: src/settings/configuration/configuration-form.tsx:378
+msgid "Clear"
+msgstr "Clear"
+
 #: src/inbox/bulk-toolbar.tsrx:92
 msgid "Clear selection"
 msgstr "Clear selection"
 
 #: src/commands/command-dialog.tsrx:91
+#: src/settings/configuration/configuration-form.tsx:357
 msgid "Close"
 msgstr "Close"
 
-#: src/commands/app-command-definitions.ts:36
+#: src/commands/app-command-definitions.ts:40
 msgid "Close Active Tab"
 msgstr "Close Active Tab"
 
 #: src/sessions/dialog.tsrx:205
 msgid "Close launch session dialog"
 msgstr "Close launch session dialog"
+
+#: src/app-shell/chrome.tsrx:428
+msgid "Close Tab"
+msgstr "Close Tab"
+
+#: src/app-shell/chrome.tsrx:409
+msgid "Close tab?"
+msgstr "Close tab?"
+
+#: src/recent-tabs-palette.tsrx:23
+msgid "Closed"
+msgstr "Closed"
 
 #: src/appearance/appearance-settings-section.tsrx:82
 msgid "Color mode"
@@ -183,16 +262,20 @@ msgstr "Color mode"
 msgid "Command"
 msgstr "Command"
 
-#: src/command-palette.tsrx:93
-#: src/command-palette.tsrx:120
+#: src/command-palette.tsrx:52
+#: src/command-palette.tsrx:55
 msgid "Command menu"
 msgstr "Command menu"
+
+#: src/session-chat/view.tsrx:1001
+msgid "Commit or discard worktree changes before merging."
+msgstr "Commit or discard worktree changes before merging."
 
 #: src/session-chat/request-error.ts:42
 msgid "Commit or stash local changes before starting this branch session."
 msgstr "Commit or stash local changes before starting this branch session."
 
-#: src/sessions/launch-form-selectors.tsrx:152
+#: src/sessions/launch-form-selectors.tsrx:164
 msgid "Commit or stash local changes to launch from another branch."
 msgstr "Commit or stash local changes to launch from another branch."
 
@@ -205,16 +288,16 @@ msgstr "Commit or stash worktree changes before completing this session."
 msgid "Complete"
 msgstr "Complete"
 
-#: src/session-chat/view.tsrx:292
+#: src/session-chat/view.tsrx:328
 msgid "Complete failed"
 msgstr "Complete failed"
 
-#: src/commands/app-command-definitions.ts:257
-#: src/session-chat/view.tsrx:278
+#: src/commands/app-command-definitions.ts:286
+#: src/session-chat/view.tsrx:314
 msgid "Complete Session"
 msgstr "Complete Session"
 
-#: src/session-chat/view.tsrx:275
+#: src/session-chat/view.tsrx:311
 msgid "Complete unavailable while agent is active"
 msgstr "Complete unavailable while agent is active"
 
@@ -224,12 +307,30 @@ msgstr "Complete unavailable while agent is active"
 msgid "Completed"
 msgstr "Completed"
 
-#: src/session-chat/view.tsrx:277
+#: src/session-chat/view.tsrx:313
 msgid "Completing session"
 msgstr "Completing session"
 
+#: src/settings/configuration/configuration-settings-section.tsrx:30
+msgid "Configuration"
+msgstr "Configuration"
+
+#: src/settings/configuration/configuration-settings-section.tsrx:145
+msgid "Configuration could not be loaded."
+msgstr "Configuration could not be loaded."
+
+#: src/settings/configuration/configuration-settings-section.tsrx:159
+#: src/settings/configuration/configuration-settings-section.tsrx:175
+msgid "Configuration could not be saved."
+msgstr "Configuration could not be saved."
+
+#: src/settings/configuration/configuration-settings-section.tsrx:169
+msgid "Configuration is not valid."
+msgstr "Configuration is not valid."
+
 #: src/settings/adapter-installations-section.tsrx:46
 #: src/settings/adapter-installations-section.tsrx:117
+#: src/settings/session-profiles-section.tsrx:156
 msgid "Configured"
 msgstr "Configured"
 
@@ -240,6 +341,11 @@ msgstr "Context"
 #: src/appearance/appearance-settings-section.tsrx:116
 msgid "Contrast"
 msgstr "Contrast"
+
+#: src/settings/configuration/configuration-form.tsx:60
+#: src/settings/configuration/configuration-form.tsx:367
+msgid "Copy"
+msgstr "Copy"
 
 #: src/inbox/list.tsrx:32
 msgid "Couldn't load inbox"
@@ -258,15 +364,15 @@ msgstr "Couldn't load pull request"
 msgid "Couldn't load sessions"
 msgstr "Couldn't load sessions"
 
-#: src/inbox/page.tsrx:337
+#: src/inbox/page.tsrx:268
 msgid "Couldn't open inbox item"
 msgstr "Couldn't open inbox item"
 
-#: src/app-shell/chrome.tsrx:337
+#: src/app-shell/chrome.tsrx:489
 msgid "Couldn't open next item"
 msgstr "Couldn't open next item"
 
-#: src/sessions/launch-form-selectors.tsrx:125
+#: src/sessions/launch-form-selectors.tsrx:137
 msgid "Current branch"
 msgstr "Current branch"
 
@@ -282,7 +388,12 @@ msgstr "Current git diff for this session workspace."
 msgid "Current shortcut"
 msgstr "Current shortcut"
 
-#: src/commands/app-command-definitions.ts:198
+#: src/session-chat/view.tsrx:597
+#: src/sessions/launch-form-selectors.tsrx:546
+msgid "Custom"
+msgstr "Custom"
+
+#: src/commands/app-command-definitions.ts:227
 msgid "Cycle Launch Location"
 msgstr "Cycle Launch Location"
 
@@ -294,9 +405,21 @@ msgstr "Daemon-managed pull request linked from the inbox."
 msgid "Dark"
 msgstr "Dark"
 
-#: src/commands/app-command-definitions.ts:228
+#: src/sessions/session-profiles.ts:21
+msgid "Debug"
+msgstr "Debug"
+
+#: src/commands/app-command-definitions.ts:257
 msgid "Decrease Thinking Level"
 msgstr "Decrease Thinking Level"
+
+#: src/settings/configuration/configuration-form.tsx:384
+msgid "Decrease value by 1"
+msgstr "Decrease value by 1"
+
+#: src/sessions/session-profiles.ts:23
+msgid "Deep"
+msgstr "Deep"
 
 #: src/projects/projects-page.tsrx:365
 msgid "Derived from folder name"
@@ -327,6 +450,10 @@ msgstr "Dismiss notification"
 msgid "Display name"
 msgstr "Display name"
 
+#: src/settings/configuration/configuration-settings-section.tsrx:27
+msgid "Edit user-scoped defaults for the Goddard runtime."
+msgstr "Edit user-scoped defaults for the Goddard runtime."
+
 #: src/appearance/appearance-settings-section.tsrx:130
 msgid "Enabled"
 msgstr "Enabled"
@@ -338,6 +465,10 @@ msgstr "Entity-specific completed items will appear here."
 #: src/sessions/list-row.tsrx:86
 msgid "Error"
 msgstr "Error"
+
+#: src/settings/configuration/configuration-form.tsx:359
+msgid "Errors"
+msgstr "Errors"
 
 #: src/session-chat/transcript-items.ts:834
 msgid "Failed"
@@ -356,7 +487,11 @@ msgstr "Filter available agents"
 msgid "Follow the operating system appearance."
 msgstr "Follow the operating system appearance."
 
-#: src/sessions/launch-form-selectors.tsrx:140
+#: src/app-shell/tab-strip.tsrx:242
+msgid "Forward"
+msgstr "Forward"
+
+#: src/sessions/launch-form-selectors.tsrx:152
 #: src/sessions/launch-form.tsrx:161
 msgid "Git branch"
 msgstr "Git branch"
@@ -386,18 +521,22 @@ msgstr "Host"
 msgid "Idle"
 msgstr "Idle"
 
-#: src/inbox/toolbar.tsrx:22
+#: src/inbox/toolbar.tsrx:21
 #: src/main-tab-items.ts:10
 msgid "Inbox"
 msgstr "Inbox"
 
-#: src/inbox/toolbar.tsrx:24
+#: src/inbox/toolbar.tsrx:23
 msgid "Inbox filters"
 msgstr "Inbox filters"
 
-#: src/commands/app-command-definitions.ts:234
+#: src/commands/app-command-definitions.ts:263
 msgid "Increase Thinking Level"
 msgstr "Increase Thinking Level"
+
+#: src/settings/configuration/configuration-form.tsx:386
+msgid "Increase value by 1"
+msgstr "Increase value by 1"
 
 #: src/settings/adapter-installations-section.tsrx:120
 msgid "Install"
@@ -415,6 +554,14 @@ msgstr "Installed agents"
 msgid "Interrupted"
 msgstr "Interrupted"
 
+#: src/settings/configuration/configuration-form.tsx:408
+msgid "Invalid object field configuration."
+msgstr "Invalid object field configuration."
+
+#: src/settings/configuration/configuration-form.tsx:347
+msgid "Item"
+msgstr "Item"
+
 #: src/inbox/filters.ts:49
 msgid "Items handed back to an agent through a reply will appear here."
 msgstr "Items handed back to an agent through a reply will appear here."
@@ -431,7 +578,7 @@ msgstr "Items you park for later will appear here."
 msgid "Keep an explicit set of local roots available to the workbench."
 msgstr "Keep an explicit set of local roots available to the workbench."
 
-#: src/sessions/launch-form-selectors.tsrx:226
+#: src/sessions/launch-form-selectors.tsrx:240
 #: src/sessions/launch-form.tsrx:156
 msgid "Launch location"
 msgstr "Launch location"
@@ -460,7 +607,7 @@ msgstr "Light"
 msgid "Listening..."
 msgstr "Listening..."
 
-#: src/app-shell/chrome.tsrx:127
+#: src/app-shell/chrome.tsrx:183
 msgid "Loading agent harness selector"
 msgstr "Loading agent harness selector"
 
@@ -468,12 +615,16 @@ msgstr "Loading agent harness selector"
 msgid "Loading agent harnesses."
 msgstr "Loading agent harnesses."
 
+#: src/settings/configuration/configuration-settings-section.tsrx:138
+msgid "Loading configuration."
+msgstr "Loading configuration."
+
 #: src/inbox/list.tsrx:24
 msgid "Loading inbox..."
 msgstr "Loading inbox..."
 
-#: src/session-input/select-menu.tsrx:556
-#: src/sessions/launch-form-selectors.tsrx:37
+#: src/session-input/select-menu.tsrx:560
+#: src/sessions/launch-form-selectors.tsrx:46
 msgid "Loading options..."
 msgstr "Loading options..."
 
@@ -482,13 +633,17 @@ msgstr "Loading options..."
 msgid "Loading project dashboard."
 msgstr "Loading project dashboard."
 
-#: src/app-shell/chrome.tsrx:166
+#: src/app-shell/chrome.tsrx:222
 msgid "Loading project subfolder selector"
 msgstr "Loading project subfolder selector"
 
 #: src/pull-requests/view.tsrx:41
 msgid "Loading pull request"
 msgstr "Loading pull request"
+
+#: src/settings/session-profiles-section.tsrx:367
+msgid "Loading session profile options."
+msgstr "Loading session profile options."
 
 #: src/sessions/list.tsrx:17
 msgid "Loading sessions..."
@@ -502,7 +657,7 @@ msgstr "Loading suggestions..."
 msgid "Loading the daemon-managed pull request record."
 msgstr "Loading the daemon-managed pull request record."
 
-#: src/workbench-tab-set.ts:38
+#: src/workbench-tab-set.ts:54
 msgid "Main"
 msgstr "Main"
 
@@ -511,12 +666,12 @@ msgid "Mark read"
 msgstr "Mark read"
 
 #: src/inbox/bulk-toolbar.tsrx:50
-#: src/inbox/page.tsrx:165
+#: src/inbox/page.tsrx:150
 msgid "Mark selected read"
 msgstr "Mark selected read"
 
 #: src/inbox/bulk-toolbar.tsrx:57
-#: src/inbox/page.tsrx:168
+#: src/inbox/page.tsrx:153
 msgid "Mark selected unread"
 msgstr "Mark selected unread"
 
@@ -524,32 +679,95 @@ msgstr "Mark selected unread"
 msgid "Mark unread"
 msgstr "Mark unread"
 
+#: src/session-chat/view.tsrx:433
+msgid "Merge failed"
+msgstr "Merge failed"
+
+#: src/session-chat/view.tsrx:422
+msgid "Merge skipped"
+msgstr "Merge skipped"
+
+#: src/session-chat/view.tsrx:384
+msgid "Merge target branch (leave empty to clear)"
+msgstr "Merge target branch (leave empty to clear)"
+
+#. placeholder {0}: props.mergeReadiness.mergeTargetBranch
+#: src/session-chat/view.tsrx:519
+#: src/session-chat/view.tsrx:527
+msgid "Merge target branch: {0}"
+msgstr "Merge target branch: {0}"
+
 #: src/session-chat/request-error.ts:27
 msgid "Merge the worktree commits before completing this session."
 msgstr "Merge the worktree commits before completing this session."
 
-#: src/session-chat/view.tsrx:505
-#: src/sessions/launch-form-selectors.tsrx:46
-#: src/sessions/launch-form-selectors.tsrx:440
+#: src/session-chat/view.tsrx:538
+#: src/session-chat/view.tsrx:538
+#: src/session-chat/view.tsrx:540
+msgid "Merge worktree"
+msgstr "Merge worktree"
+
+#: src/settings/configuration/configuration-form.tsx:349
+msgid "Missing items definition"
+msgstr "Missing items definition"
+
+#: src/session-chat/view.tsrx:727
+#: src/sessions/launch-form-selectors.tsrx:56
+#: src/sessions/launch-form-selectors.tsrx:458
+#: src/settings/session-profiles-section.tsrx:188
 msgid "Model"
 msgstr "Model"
+
+#: src/settings/configuration/configuration-form.tsx:63
+#: src/settings/configuration/configuration-form.tsx:369
+msgid "Move down"
+msgstr "Move down"
+
+#: src/settings/configuration/configuration-form.tsx:66
+#: src/settings/configuration/configuration-form.tsx:371
+msgid "Move up"
+msgstr "Move up"
+
+#: src/app-shell/tab-strip.tsrx:229
+msgid "Navigate back"
+msgstr "Navigate back"
+
+#: src/commands/app-command-definitions.ts:47
+msgid "Navigate Back"
+msgstr "Navigate Back"
+
+#: src/app-shell/tab-strip.tsrx:247
+msgid "Navigate forward"
+msgstr "Navigate forward"
+
+#: src/commands/app-command-definitions.ts:54
+msgid "Navigate Forward"
+msgstr "Navigate Forward"
 
 #: src/commands/app-command.ts:23
 msgid "Navigation"
 msgstr "Navigation"
 
-#: src/sessions/launch-form-selectors.tsrx:215
+#: src/settings/configuration/configuration-form.tsx:361
+msgid "New value"
+msgstr "New value"
+
+#: src/sessions/launch-form-selectors.tsrx:229
 msgid "New worktree"
 msgstr "New worktree"
 
-#: src/app-shell/chrome.tsrx:353
-#: src/app-shell/chrome.tsrx:366
+#: src/app-shell/chrome.tsrx:505
+#: src/app-shell/chrome.tsrx:518
 msgid "Next"
 msgstr "Next"
 
-#: src/session-chat/view.tsrx:360
+#: src/session-chat/view.tsrx:458
 msgid "Next prompt"
 msgstr "Next prompt"
+
+#: src/settings/configuration/configuration-form.tsx:355
+msgid "No"
+msgstr "No"
 
 #: src/settings/adapter-installations-section.tsrx:227
 msgid "No agent harnesses are available."
@@ -575,19 +793,27 @@ msgstr "No changes"
 msgid "No completed inbox items"
 msgstr "No completed inbox items"
 
+#: src/settings/session-profiles-section.tsrx:296
+msgid "No installed agent harnesses are available."
+msgstr "No installed agent harnesses are available."
+
 #: src/settings/adapter-installations-section.tsrx:234
 msgid "No installed agents."
 msgstr "No installed agents."
+
+#: src/settings/configuration/configuration-form.tsx:351
+msgid "No items yet."
+msgstr "No items yet."
 
 #: src/session-input/input-menu.tsrx:132
 msgid "No matches for this trigger yet."
 msgstr "No matches for this trigger yet."
 
-#: src/app-shell/agent-selector.tsrx:242
+#: src/app-shell/agent-selector.tsrx:245
 msgid "No matching agents."
 msgstr "No matching agents."
 
-#: src/command-palette.tsrx:123
+#: src/command-palette.tsrx:50
 msgid "No matching commands."
 msgstr "No matching commands."
 
@@ -599,7 +825,7 @@ msgstr "No matching directories."
 msgid "No matching inbox items"
 msgstr "No matching inbox items"
 
-#: src/session-input/select-menu.tsrx:561
+#: src/session-input/select-menu.tsrx:565
 msgid "No matching options."
 msgstr "No matching options."
 
@@ -623,6 +849,10 @@ msgstr "No projects yet"
 msgid "No recent sessions are linked to this project."
 msgstr "No recent sessions are linked to this project."
 
+#: src/recent-tabs-palette.tsrx:34
+msgid "No recent tabs."
+msgstr "No recent tabs."
+
 #: src/inbox/filters.ts:46
 msgid "No replied inbox items"
 msgstr "No replied inbox items"
@@ -635,7 +865,7 @@ msgstr "No saved inbox items"
 msgid "No sessions yet"
 msgstr "No sessions yet"
 
-#: src/settings/page.tsrx:65
+#: src/settings/page.tsrx:85
 msgid "No settings found"
 msgstr "No settings found"
 
@@ -651,43 +881,65 @@ msgstr "No unread inbox items"
 msgid "No unread or read inbox messages are linked to this project."
 msgstr "No unread or read inbox messages are linked to this project."
 
+#: src/settings/configuration/configuration-form.tsx:392
+msgid "No value for this optional setting"
+msgstr "No value for this optional setting"
+
+#: src/settings/session-profiles-section.tsrx:157
+msgid "Not configured"
+msgstr "Not configured"
+
 #: src/settings/adapter-installations-section.tsrx:57
 msgid "Not installed"
 msgstr "Not installed"
 
-#: src/sessions/launch-form-selectors.tsrx:384
+#: src/settings/configuration/configuration-form.tsx:375
+msgid "Now"
+msgstr "Now"
+
+#: src/sessions/launch-form-selectors.tsrx:400
 msgid "Off"
 msgstr "Off"
 
-#: src/sessions/launch-form-selectors.tsrx:380
+#: src/sessions/launch-form-selectors.tsrx:396
 msgid "On"
 msgstr "On"
+
+#: src/settings/session-profiles-section.tsrx:227
+msgid "One or more saved options are no longer advertised by this agent "
+"harness."
+msgstr "One or more saved options are no longer advertised by this agent "
+"harness."
+
+#: src/recent-tabs-palette.tsrx:23
+msgid "Open"
+msgstr "Open"
 
 #: src/app-shell/onboarding.tsrx:13
 msgid "Open a project"
 msgstr "Open a project"
 
-#: src/commands/app-command-definitions.ts:170
+#: src/commands/app-command-definitions.ts:199
 msgid "Open a project from your filesystem."
 msgstr "Open a project from your filesystem."
 
-#: src/commands/app-command-definitions.ts:192
+#: src/commands/app-command-definitions.ts:221
 msgid "Open Agent Harness Selector"
 msgstr "Open Agent Harness Selector"
 
-#: src/commands/app-command-definitions.ts:210
+#: src/commands/app-command-definitions.ts:239
 msgid "Open Approval Preset Selector"
 msgstr "Open Approval Preset Selector"
 
-#: src/commands/app-command-definitions.ts:204
+#: src/commands/app-command-definitions.ts:233
 msgid "Open Branch Selector"
 msgstr "Open Branch Selector"
 
-#: src/commands/app-command-definitions.ts:66
+#: src/commands/app-command-definitions.ts:95
 msgid "Open Command Menu"
 msgstr "Open Command Menu"
 
-#: src/commands/app-command-definitions.ts:166
+#: src/commands/app-command-definitions.ts:195
 msgid "Open Folder"
 msgstr "Open Folder"
 
@@ -695,27 +947,27 @@ msgstr "Open Folder"
 msgid "Open folder..."
 msgstr "Open folder..."
 
-#: src/commands/app-command-definitions.ts:78
+#: src/commands/app-command-definitions.ts:107
 msgid "Open Inbox"
 msgstr "Open Inbox"
 
-#: src/commands/app-command-definitions.ts:72
+#: src/commands/app-command-definitions.ts:101
 msgid "Open Keyboard Shortcuts"
 msgstr "Open Keyboard Shortcuts"
 
-#: src/commands/app-command-definitions.ts:216
+#: src/commands/app-command-definitions.ts:245
 msgid "Open Model Selector"
 msgstr "Open Model Selector"
 
-#: src/commands/app-command-definitions.ts:54
+#: src/commands/app-command-definitions.ts:78
 msgid "Open New Session Dialog"
 msgstr "Open New Session Dialog"
 
-#: src/app-shell/chrome.tsrx:358
+#: src/app-shell/chrome.tsrx:510
 msgid "Open next unread inbox item"
 msgstr "Open next unread inbox item"
 
-#: src/commands/app-command-definitions.ts:84
+#: src/commands/app-command-definitions.ts:113
 msgid "Open Next Unread Inbox Item"
 msgstr "Open Next Unread Inbox Item"
 
@@ -728,31 +980,35 @@ msgstr "Open on GitHub"
 msgid "Open project"
 msgstr "Open project"
 
-#: src/commands/app-command-definitions.ts:180
+#: src/commands/app-command-definitions.ts:209
 msgid "Open Project Selector"
 msgstr "Open Project Selector"
 
-#: src/commands/app-command-definitions.ts:48
+#: src/commands/app-command-definitions.ts:72
 msgid "Open Propose Task Dialog"
 msgstr "Open Propose Task Dialog"
 
-#: src/commands/app-command-definitions.ts:114
+#: src/commands/app-command-definitions.ts:61
+msgid "Open Recent Tabs"
+msgstr "Open Recent Tabs"
+
+#: src/commands/app-command-definitions.ts:143
 msgid "Open Roadmap"
 msgstr "Open Roadmap"
 
-#: src/commands/app-command-definitions.ts:96
+#: src/commands/app-command-definitions.ts:125
 msgid "Open Search"
 msgstr "Open Search"
 
-#: src/commands/app-command-definitions.ts:90
+#: src/commands/app-command-definitions.ts:119
 msgid "Open Sessions"
 msgstr "Open Sessions"
 
-#: src/commands/app-command-definitions.ts:120
+#: src/commands/app-command-definitions.ts:149
 msgid "Open Settings"
 msgstr "Open Settings"
 
-#: src/commands/app-command-definitions.ts:102
+#: src/commands/app-command-definitions.ts:131
 msgid "Open Specs"
 msgstr "Open Specs"
 
@@ -760,17 +1016,22 @@ msgstr "Open Specs"
 msgid "Open tab"
 msgstr "Open tab"
 
-#: src/commands/app-command-definitions.ts:108
+#: src/commands/app-command-definitions.ts:137
 msgid "Open Tasks"
 msgstr "Open Tasks"
 
-#: src/commands/app-command-definitions.ts:222
+#: src/commands/app-command-definitions.ts:251
 msgid "Open Thinking Level Selector"
 msgstr "Open Thinking Level Selector"
 
-#: src/commands/app-command-definitions.ts:186
+#: src/commands/app-command-definitions.ts:215
 msgid "Open Working Directory Selector"
 msgstr "Open Working Directory Selector"
+
+#. placeholder {0}: params[0] ?? ""
+#: src/settings/configuration/configuration-form.tsx:400
+msgid "Option {0}"
+msgstr "Option {0}"
 
 #: src/pull-requests/view.tsrx:79
 msgid "Owner"
@@ -780,6 +1041,10 @@ msgstr "Owner"
 msgid "Path"
 msgstr "Path"
 
+#: src/session-chat/view.tsrx:993
+msgid "PR-scoped sessions cannot merge back into the primary checkout."
+msgstr "PR-scoped sessions cannot merge back into the primary checkout."
+
 #: src/session-chat/transcript.tsrx:642
 msgid "Preparing transcript layout..."
 msgstr "Preparing transcript layout..."
@@ -788,17 +1053,31 @@ msgstr "Preparing transcript layout..."
 msgid "Press the shortcut you want to use"
 msgstr "Press the shortcut you want to use"
 
-#: src/session-chat/view.tsrx:345
+#: src/settings/configuration/configuration-form.tsx:382
+msgid "Preview"
+msgstr "Preview"
+
+#: src/session-chat/view.tsrx:443
 msgid "Previous prompt"
 msgstr "Previous prompt"
 
-#: src/app-shell/chrome.tsrx:214
+#: src/app-shell/chrome.tsrx:270
 msgid "Primary"
 msgstr "Primary"
 
 #: src/projects/project-page.tsrx:607
 msgid "Primary checkout"
 msgstr "Primary checkout"
+
+#: src/settings/session-profiles-section.tsrx:352
+msgid "Profile definitions"
+msgstr "Profile definitions"
+
+#: src/settings/session-profiles-section.tsrx:355
+msgid "Profiles are global and use options advertised in the current project "
+"context."
+msgstr "Profiles are global and use options advertised in the current project "
+"context."
 
 #: src/sessions/launch-form.tsrx:90
 msgid "Project"
@@ -818,12 +1097,12 @@ msgstr "Project path"
 
 #: src/app-shell/subfolder-selector.tsrx:81
 #: src/app-shell/subfolder-selector.tsrx:176
-#: src/sessions/launch-form-selectors.tsrx:272
-#: src/sessions/launch-form-selectors.tsrx:331
+#: src/sessions/launch-form-selectors.tsrx:286
+#: src/sessions/launch-form-selectors.tsrx:345
 msgid "Project root"
 msgstr "Project root"
 
-#: src/app-shell/chrome.tsrx:157
+#: src/app-shell/chrome.tsrx:213
 msgid "Project switcher unavailable"
 msgstr "Project switcher unavailable"
 
@@ -836,7 +1115,7 @@ msgstr "Project unavailable"
 msgid "Projects"
 msgstr "Projects"
 
-#: src/session-chat/view.tsrx:643
+#: src/session-chat/view.tsrx:877
 msgid "Prompt wasn't sent"
 msgstr "Prompt wasn't sent"
 
@@ -848,14 +1127,28 @@ msgstr "Pull request"
 msgid "Pull request details"
 msgstr "Pull request details"
 
+#. placeholder {0}: readiness.mergeTargetBranch
+#: src/session-chat/view.tsrx:976
+msgid "Ready to merge into {0}."
+msgstr "Ready to merge into {0}."
+
+#: src/session-chat/view.tsrx:977
+msgid "Ready to merge."
+msgstr "Ready to merge."
+
 #: src/inbox/page.tsrx:121
 #: src/inbox/page.tsrx:384
-msgid "Realtime inbox updates are unavailable. Manual refresh still works."
-msgstr "Realtime inbox updates are unavailable. Manual refresh still works."
+#~ msgid "Realtime inbox updates are unavailable. Manual refresh still works."
+#~ msgstr "Realtime inbox updates are unavailable. Manual refresh still works."
 
 #: src/projects/project-page.tsrx:488
 msgid "Recent sessions"
 msgstr "Recent sessions"
+
+#: src/recent-tabs-palette.tsrx:36
+#: src/recent-tabs-palette.tsrx:39
+msgid "Recent tabs"
+msgstr "Recent tabs"
 
 #: src/shortcuts/view.tsrx:295
 msgid "Record key binding search"
@@ -863,8 +1156,8 @@ msgstr "Record key binding search"
 
 #: src/inbox/toolbar.tsrx:62
 #: src/inbox/toolbar.tsrx:63
-msgid "Refresh inbox"
-msgstr "Refresh inbox"
+#~ msgid "Refresh inbox"
+#~ msgstr "Refresh inbox"
 
 #: src/projects/project-page.tsrx:466
 msgid "Related inbox"
@@ -872,8 +1165,23 @@ msgstr "Related inbox"
 
 #: src/projects/projects-page.tsrx:204
 #: src/settings/adapter-installations-section.tsrx:119
+#: src/settings/configuration/configuration-form.tsx:69
+#: src/settings/configuration/configuration-form.tsx:373
 msgid "Remove"
 msgstr "Remove"
+
+#. placeholder {0}: getSessionProfileLabel(props.profileId)
+#: src/settings/session-profiles-section.tsrx:162
+msgid "Remove {0} profile"
+msgstr "Remove {0} profile"
+
+#: src/settings/configuration/configuration-form.tsx:390
+msgid "Remove optional setting"
+msgstr "Remove optional setting"
+
+#: src/settings/session-profiles-section.tsrx:165
+msgid "Remove profile"
+msgstr "Remove profile"
 
 #: src/shortcuts/capture-dialog.tsrx:178
 #: src/shortcuts/view.tsrx:594
@@ -889,23 +1197,41 @@ msgstr "Replied"
 msgid "Repository"
 msgstr "Repository"
 
+#: src/settings/configuration/configuration-settings-section.tsrx:67
+msgid "Resolve the invalid setting before editing another section."
+msgstr "Resolve the invalid setting before editing another section."
+
+#: src/settings/configuration/configuration-settings-section.tsrx:109
+msgid "Restart the daemon to apply the saved daemon settings."
+msgstr "Restart the daemon to apply the saved daemon settings."
+
 #: src/projects/project-page.tsrx:255
 #: src/projects/project-page.tsrx:576
 #: src/settings/adapter-installations-section.tsrx:333
+#: src/settings/configuration/configuration-settings-section.tsrx:149
+#: src/settings/session-profiles-section.tsrx:375
 msgid "Retry"
 msgstr "Retry"
 
-#: src/app-shell/chrome.tsrx:137
+#: src/app-shell/chrome.tsrx:193
 msgid "Retry agent harness selector"
 msgstr "Retry agent harness selector"
 
-#: src/app-shell/chrome.tsrx:178
+#: src/app-shell/chrome.tsrx:234
 msgid "Retry project subfolder selector"
 msgstr "Retry project subfolder selector"
+
+#: src/session-chat/view.tsrx:972
+msgid "Review sync will unmount automatically before merge."
+msgstr "Review sync will unmount automatically before merge."
 
 #: src/main-tab-items.ts:45
 msgid "Roadmap"
 msgstr "Roadmap"
+
+#: src/sessions/session-profiles.ts:19
+msgid "Routine"
+msgstr "Routine"
 
 #: src/sessions/list-row.tsrx:68
 msgid "Running"
@@ -913,11 +1239,18 @@ msgstr "Running"
 
 #: src/inbox/row.tsrx:197
 #: src/inbox/row.tsrx:203
+#: src/settings/session-profiles-section.tsrx:178
 msgid "Save"
 msgstr "Save"
 
+#: src/settings/session-profiles-section.tsrx:47
+msgid "Save exact model, thinking, and approval selections for each agent "
+"harness."
+msgstr "Save exact model, thinking, and approval selections for each agent "
+"harness."
+
 #: src/inbox/bulk-toolbar.tsrx:64
-#: src/inbox/page.tsrx:171
+#: src/inbox/page.tsrx:156
 msgid "Save selected"
 msgstr "Save selected"
 
@@ -930,11 +1263,15 @@ msgstr "Save shortcut"
 msgid "Saved"
 msgstr "Saved"
 
-#: src/session-chat/view.tsrx:362
+#: src/settings/session-profiles-section.tsrx:178
+msgid "Saving"
+msgstr "Saving"
+
+#: src/session-chat/view.tsrx:460
 msgid "Scroll to next user prompt"
 msgstr "Scroll to next user prompt"
 
-#: src/session-chat/view.tsrx:348
+#: src/session-chat/view.tsrx:446
 msgid "Scroll to previous user prompt"
 msgstr "Scroll to previous user prompt"
 
@@ -946,11 +1283,11 @@ msgstr "Search"
 msgid "Search commands, shortcuts, or when clauses"
 msgstr "Search commands, shortcuts, or when clauses"
 
-#: src/inbox/toolbar.tsrx:52
+#: src/inbox/toolbar.tsrx:51
 msgid "Search inbox"
 msgstr "Search inbox"
 
-#: src/inbox/toolbar.tsrx:46
+#: src/inbox/toolbar.tsrx:45
 msgid "Search inbox items"
 msgstr "Search inbox items"
 
@@ -964,8 +1301,8 @@ msgstr "Search projects"
 msgid "Search session titles"
 msgstr "Search session titles"
 
-#: src/settings/page.tsrx:37
-#: src/settings/page.tsrx:42
+#: src/settings/page.tsrx:53
+#: src/settings/page.tsrx:58
 msgid "Search settings"
 msgstr "Search settings"
 
@@ -977,6 +1314,10 @@ msgstr "Search shortcuts"
 msgid "See full message"
 msgstr "See full message"
 
+#: src/settings/configuration/configuration-form.tsx:380
+msgid "Select a date"
+msgstr "Select a date"
+
 #: src/sessions/launch-form.tsrx:92
 msgid "Select a project"
 msgstr "Select a project"
@@ -985,28 +1326,45 @@ msgstr "Select a project"
 msgid "Select a project to inspect its configured path and display name."
 msgstr "Select a project to inspect its configured path and display name."
 
-#: src/app-shell/agent-selector.tsrx:176
-#: src/sessions/launch-form-selectors.tsrx:89
+#: src/session-chat/view.tsrx:985
+msgid "Select a target branch before merging."
+msgstr "Select a target branch before merging."
+
+#: src/app-shell/agent-selector.tsrx:179
+#: src/sessions/launch-form-selectors.tsrx:99
+#: src/settings/session-profiles-section.tsrx:306
 msgid "Select agent harness"
 msgstr "Select agent harness"
 
-#: src/commands/app-command-definitions.ts:155
+#: src/settings/session-profiles-section.tsrx:218
+msgid "Select approval preset"
+msgstr "Select approval preset"
+
+#: src/commands/app-command-definitions.ts:184
 msgid "Select Archived Inbox Filter"
 msgstr "Select Archived Inbox Filter"
 
-#: src/commands/app-command-definitions.ts:149
+#: src/commands/app-command-definitions.ts:178
 msgid "Select Completed Inbox Filter"
 msgstr "Select Completed Inbox Filter"
 
-#: src/commands/app-command-definitions.ts:143
+#: src/settings/session-profiles-section.tsrx:190
+msgid "Select model"
+msgstr "Select model"
+
+#: src/commands/app-command-definitions.ts:172
 msgid "Select Replied Inbox Filter"
 msgstr "Select Replied Inbox Filter"
 
-#: src/commands/app-command-definitions.ts:137
+#: src/commands/app-command-definitions.ts:166
 msgid "Select Saved Inbox Filter"
 msgstr "Select Saved Inbox Filter"
 
-#: src/commands/app-command-definitions.ts:131
+#: src/settings/session-profiles-section.tsrx:206
+msgid "Select thinking level"
+msgstr "Select thinking level"
+
+#: src/commands/app-command-definitions.ts:160
 msgid "Select Unread Inbox Filter"
 msgstr "Select Unread Inbox Filter"
 
@@ -1026,7 +1384,7 @@ msgstr "Selected project metadata for the current workspace."
 msgid "Session"
 msgstr "Session"
 
-#: src/session-chat/view.tsrx:273
+#: src/session-chat/view.tsrx:309
 msgid "Session completed"
 msgstr "Session completed"
 
@@ -1048,6 +1406,26 @@ msgstr "Session not found. Refresh and try again."
 msgid "Session option"
 msgstr "Session option"
 
+#: src/session-chat/view.tsrx:595
+#: src/sessions/launch-form-selectors.tsrx:55
+#: src/sessions/launch-form-selectors.tsrx:544
+msgid "Session profile"
+msgstr "Session profile"
+
+#: src/settings/session-profiles-section.tsrx:50
+msgid "Session profiles"
+msgstr "Session profiles"
+
+#: src/session-chat/request-error.ts:57
+msgid "Session profiles could not be saved. Check the configuration and try "
+"again."
+msgstr "Session profiles could not be saved. Check the configuration and try "
+"again."
+
+#: src/session-chat/view.tsrx:981
+msgid "Session worktree is missing on disk."
+msgstr "Session worktree is missing on disk."
+
 #: src/main-tab-items.ts:17
 msgid "Sessions"
 msgstr "Sessions"
@@ -1060,26 +1438,32 @@ msgstr "Sessions will appear here once the daemon has created them."
 msgid "Set low priority"
 msgstr "Set low priority"
 
+#: src/session-chat/view.tsrx:520
+#: src/session-chat/view.tsrx:523
+#: src/session-chat/view.tsrx:528
+msgid "Set merge target branch"
+msgstr "Set merge target branch"
+
 #: src/inbox/row.tsrx:85
 msgid "Set normal priority"
 msgstr "Set normal priority"
 
 #: src/inbox/bulk-toolbar.tsrx:71
-#: src/inbox/page.tsrx:174
+#: src/inbox/page.tsrx:159
 msgid "Set selected low priority"
 msgstr "Set selected low priority"
 
 #: src/inbox/bulk-toolbar.tsrx:78
-#: src/inbox/page.tsrx:177
+#: src/inbox/page.tsrx:162
 msgid "Set selected normal priority"
 msgstr "Set selected normal priority"
 
-#: src/app-shell/chrome.tsrx:203
-#: src/settings/page.tsrx:77
+#: src/app-shell/chrome.tsrx:259
+#: src/settings/page.tsrx:97
 msgid "Settings"
 msgstr "Settings"
 
-#: src/settings/page.tsrx:75
+#: src/settings/page.tsrx:95
 msgid "Settings sections"
 msgstr "Settings sections"
 
@@ -1091,15 +1475,15 @@ msgstr "Shortcut"
 msgid "Show commands with same shortcut"
 msgstr "Show commands with same shortcut"
 
-#: src/commands/app-command-definitions.ts:269
+#: src/commands/app-command-definitions.ts:298
 msgid "Skip to Next Prompt"
 msgstr "Skip to Next Prompt"
 
-#: src/commands/app-command-definitions.ts:263
+#: src/commands/app-command-definitions.ts:292
 msgid "Skip to Previous Prompt"
 msgstr "Skip to Previous Prompt"
 
-#: src/inbox/page.tsrx:302
+#: src/inbox/page.tsrx:245
 msgid "Some inbox items were missing"
 msgstr "Some inbox items were missing"
 
@@ -1115,13 +1499,13 @@ msgstr "Start the branch session from a repository checkout."
 msgid "Start the session from a non-bare repository checkout."
 msgstr "Start the session from a non-bare repository checkout."
 
-#: src/session-chat/view.tsrx:403
-#: src/session-chat/view.tsrx:403
-#: src/session-chat/view.tsrx:405
+#: src/session-chat/view.tsrx:501
+#: src/session-chat/view.tsrx:501
+#: src/session-chat/view.tsrx:503
 msgid "Stop active turn"
 msgstr "Stop active turn"
 
-#: src/session-chat/view.tsrx:335
+#: src/session-chat/view.tsrx:371
 msgid "Stop failed"
 msgstr "Stop failed"
 
@@ -1129,19 +1513,23 @@ msgstr "Stop failed"
 msgid "Stop recording key binding search"
 msgstr "Stop recording key binding search"
 
-#: src/session-chat/view.tsrx:322
+#: src/session-chat/view.tsrx:358
 msgid "Stop skipped"
 msgstr "Stop skipped"
+
+#: src/session-chat/view.tsrx:997
+msgid "Stop the session before merging."
+msgstr "Stop the session before merging."
 
 #: src/session-chat/transcript-items.ts:856
 msgid "Stopped"
 msgstr "Stopped"
 
-#: src/commands/app-command-definitions.ts:240
+#: src/commands/app-command-definitions.ts:269
 msgid "Submit"
 msgstr "Submit"
 
-#: src/commands/app-command-definitions.ts:60
+#: src/commands/app-command-definitions.ts:89
 #: src/projects/switch-project-dropdown.tsrx:139
 #: src/projects/switch-project-dropdown.tsrx:159
 msgid "Switch Project"
@@ -1155,6 +1543,15 @@ msgstr "System"
 msgid "Target"
 msgstr "Target"
 
+#: src/session-chat/view.tsrx:402
+msgid "Target branch update failed"
+msgstr "Target branch update failed"
+
+#. placeholder {0}: props.mergeReadiness.mergeTargetBranch
+#: src/session-chat/view.tsrx:522
+msgid "Target branch: {0}"
+msgstr "Target branch: {0}"
+
 #: src/main-tab-items.ts:38
 msgid "Tasks"
 msgstr "Tasks"
@@ -1167,12 +1564,16 @@ msgstr "The agent cleared its plan."
 msgid "The branch checkout failed. Check the project and try again."
 msgstr "The branch checkout failed. Check the project and try again."
 
-#: src/session-chat/view.tsrx:323
+#: src/session-chat/view.tsrx:359
 msgid "The daemon did not find an active turn to stop."
 msgstr "The daemon did not find an active turn to stop."
 
+#: src/session-chat/view.tsrx:423
+msgid "The daemon rejected the merge."
+msgstr "The daemon rejected the merge."
+
 #: src/inbox/list.tsrx:35
-#: src/inbox/page.tsrx:50
+#: src/inbox/page.tsrx:49
 msgid "The daemon-backed inbox request failed."
 msgstr "The daemon-backed inbox request failed."
 
@@ -1188,8 +1589,8 @@ msgstr "The daemon-backed pull request record could not be loaded."
 msgid "The daemon-backed session list request failed."
 msgstr "The daemon-backed session list request failed."
 
-#: src/app-shell/chrome.tsrx:335
-#: src/inbox/page.tsrx:335
+#: src/app-shell/chrome.tsrx:487
+#: src/inbox/page.tsrx:266
 msgid "The linked daemon entity could not be loaded."
 msgstr "The linked daemon entity could not be loaded."
 
@@ -1212,7 +1613,11 @@ msgstr "The queued prompt was cancelled."
 msgid "The request failed."
 msgstr "The request failed."
 
-#: src/inbox/page.tsrx:309
+#: src/session-chat/view.tsrx:989
+msgid "The saved target branch no longer exists locally."
+msgstr "The saved target branch no longer exists locally."
+
+#: src/inbox/page.tsrx:252
 msgid "The selected inbox rows could not be updated."
 msgstr "The selected inbox rows could not be updated."
 
@@ -1229,14 +1634,23 @@ msgstr "The session data is out of date. Refresh and try again."
 msgid "The session request is not supported."
 msgstr "The session request is not supported."
 
+#: src/session-chat/view.tsrx:1009
+msgid "The session worktree has no commits ahead of the target branch."
+msgstr "The session worktree has no commits ahead of the target branch."
+
+#: src/session-chat/view.tsrx:1013
+msgid "The target branch has diverged. Fast-forward merge is unavailable."
+msgstr "The target branch has diverged. Fast-forward merge is unavailable."
+
 #: src/session-chat/request-error.ts:29
 msgid "The worktree state could not be inspected. Try again after checking the "
 "project."
 msgstr "The worktree state could not be inspected. Try again after checking the "
 "project."
 
-#: src/sessions/launch-form-selectors.tsrx:47
-#: src/sessions/launch-form-selectors.tsrx:456
+#: src/sessions/launch-form-selectors.tsrx:57
+#: src/sessions/launch-form-selectors.tsrx:474
+#: src/settings/session-profiles-section.tsrx:198
 msgid "Thinking level"
 msgstr "Thinking level"
 
@@ -1276,6 +1690,14 @@ msgstr "This session link is no longer valid."
 msgid "This session workspace is currently clean."
 msgstr "This session workspace is currently clean."
 
+#: src/settings/configuration/configuration-settings-section.tsrx:173
+msgid "This setting could not be updated."
+msgstr "This setting could not be updated."
+
+#: src/settings/configuration/configuration-settings-section.tsrx:85
+msgid "This value is not valid."
+msgstr "This value is not valid."
+
 #: src/session-chat/transcript/work-drawer-row.tsrx:61
 msgid "Thought"
 msgstr "Thought"
@@ -1284,7 +1706,7 @@ msgstr "Thought"
 msgid "Tightens muted text and border separation across the app."
 msgstr "Tightens muted text and border separation across the app."
 
-#: src/settings/page.tsrx:68
+#: src/settings/page.tsrx:88
 msgid "Try a different search term."
 msgstr "Try a different search term."
 
@@ -1301,7 +1723,11 @@ msgstr "Try a shorter title query or different keywords."
 msgid "Try again"
 msgstr "Try again"
 
-#: src/command-palette.tsrx:112
+#: src/settings/configuration/configuration-form.tsx:394
+msgid "Type"
+msgstr "Type"
+
+#: src/command-palette.tsrx:54
 msgid "Type a command"
 msgstr "Type a command"
 
@@ -1313,18 +1739,28 @@ msgstr "Type a key binding"
 msgid "Type a key combination or sequence"
 msgstr "Type a key combination or sequence"
 
-#: src/app-shell/agent-selector.tsrx:212
+#: src/recent-tabs-palette.tsrx:38
+msgid "Type a tab"
+msgstr "Type a tab"
+
+#: src/app-shell/agent-selector.tsrx:215
 #: src/app-shell/subfolder-selector.tsrx:217
-#: src/session-input/select-menu.tsrx:542
+#: src/session-input/select-menu.tsrx:546
 msgid "Type to filter"
 msgstr "Type to filter"
 
 #: src/settings/adapter-installations-section.tsrx:54
+#: src/settings/session-profiles-section.tsrx:154
 msgid "Unavailable"
 msgstr "Unavailable"
 
-#: src/app-shell/agent-selector.tsrx:277
-#: src/sessions/launch-form-selectors.tsrx:68
+#. placeholder {0}: params[0] ?? ""
+#: src/settings/configuration/configuration-form.tsx:398
+msgid "Unknown field type {0}"
+msgstr "Unknown field type {0}"
+
+#: src/app-shell/agent-selector.tsrx:282
+#: src/sessions/launch-form-selectors.tsrx:78
 #: src/settings/adapter-installations-section.tsrx:133
 msgid "Unofficial"
 msgstr "Unofficial"
@@ -1339,14 +1775,18 @@ msgid "Unread and acknowledged items that remain in the active queue will "
 msgstr "Unread and acknowledged items that remain in the active queue will "
 "appear here."
 
+#: src/settings/configuration/configuration-form.tsx:413
+msgid "Unsupported field schema."
+msgstr "Unsupported field schema."
+
 #: src/session-input/session-mode-selector.tsrx:21
 #: src/session-input/session-mode-selector.tsrx:56
-#: src/sessions/launch-form-selectors.tsrx:458
+#: src/sessions/launch-form-selectors.tsrx:476
 msgid "Use the agent harness default"
 msgstr "Use the agent harness default"
 
-#: src/session-chat/view.tsrx:507
-#: src/sessions/launch-form-selectors.tsrx:442
+#: src/session-chat/view.tsrx:729
+#: src/sessions/launch-form-selectors.tsrx:460
 msgid "Use the agent harness default model"
 msgstr "Use the agent harness default model"
 
@@ -1358,12 +1798,24 @@ msgstr "Use the dark built-in palette."
 msgid "Use the light built-in palette."
 msgstr "Use the light built-in palette."
 
-#: src/commands/app-command-definitions.ts:251
+#: src/settings/configuration/configuration-settings-section.tsrx:128
+msgid "User configuration"
+msgstr "User configuration"
+
+#: src/settings/configuration/configuration-settings-section.tsrx:131
+msgid "Valid changes are saved immediately and apply to future work."
+msgstr "Valid changes are saved immediately and apply to future work."
+
+#: src/settings/configuration/configuration-form.tsx:396
+msgid "Value"
+msgstr "Value"
+
+#: src/commands/app-command-definitions.ts:280
 #: src/projects/project-page.tsrx:638
 msgid "View Changes"
 msgstr "View Changes"
 
-#: src/session-chat/view.tsrx:376
+#: src/session-chat/view.tsrx:474
 msgid "View session changes"
 msgstr "View session changes"
 
@@ -1380,7 +1832,7 @@ msgstr "Website"
 msgid "When"
 msgstr "When"
 
-#: src/sessions/launch-form-selectors.tsrx:210
+#: src/sessions/launch-form-selectors.tsrx:224
 msgid "Work locally"
 msgstr "Work locally"
 
@@ -1388,7 +1840,7 @@ msgstr "Work locally"
 msgid "Workbench"
 msgstr "Workbench"
 
-#: src/app-shell/tab-strip.tsrx:214
+#: src/app-shell/tab-strip.tsrx:259
 msgid "Workbench tabs"
 msgstr "Workbench tabs"
 
@@ -1396,7 +1848,7 @@ msgstr "Workbench tabs"
 msgid "Working"
 msgstr "Working"
 
-#: src/sessions/launch-form-selectors.tsrx:329
+#: src/sessions/launch-form-selectors.tsrx:343
 #: src/sessions/launch-form.tsrx:107
 msgid "Working directory"
 msgstr "Working directory"
@@ -1417,103 +1869,10 @@ msgstr "Workspace"
 msgid "Worktree"
 msgstr "Worktree"
 
-#. placeholder {0}: getSessionProfileLabel(props.profileId)
-#: src/settings/session-profiles-section.tsrx:117
-msgid "{0} profile saved"
-msgstr "{0} profile saved"
+#: src/settings/configuration/configuration-form.tsx:353
+msgid "Yes"
+msgstr "Yes"
 
-#: src/settings/session-profiles-section.tsrx:360
-msgid "Add a project to configure session profiles."
-msgstr "Add a project to configure session profiles."
-
-#: src/session-chat/view.tsrx:474 src/sessions/launch-form-selectors.tsrx:544
-msgid "Custom"
-msgstr "Custom"
-
-#: src/sessions/session-profiles.ts:17
-msgid "Debug"
-msgstr "Debug"
-
-#: src/sessions/session-profiles.ts:19
-msgid "Deep"
-msgstr "Deep"
-
-#: src/settings/session-profiles-section.tsrx:367
-msgid "Loading session profile options."
-msgstr "Loading session profile options."
-
-#: src/settings/session-profiles-section.tsrx:296
-msgid "No installed agent harnesses are available."
-msgstr "No installed agent harnesses are available."
-
-#: src/settings/session-profiles-section.tsrx:157
-msgid "Not configured"
-msgstr "Not configured"
-
-#: src/settings/session-profiles-section.tsrx:227
-msgid ""
-"One or more saved options are no longer advertised by this agent harness."
-msgstr ""
-"One or more saved options are no longer advertised by this agent harness."
-
-#: src/settings/session-profiles-section.tsrx:352
-msgid "Profile definitions"
-msgstr "Profile definitions"
-
-#: src/settings/session-profiles-section.tsrx:355
-msgid ""
-"Profiles are global and use options advertised in the current project "
-"context."
-msgstr ""
-"Profiles are global and use options advertised in the current project "
-"context."
-
-#. placeholder {0}: getSessionProfileLabel(props.profileId)
-#: src/settings/session-profiles-section.tsrx:162
-msgid "Remove {0} profile"
-msgstr "Remove {0} profile"
-
-#: src/settings/session-profiles-section.tsrx:165
-msgid "Remove profile"
-msgstr "Remove profile"
-
-#: src/sessions/session-profiles.ts:15
-msgid "Routine"
-msgstr "Routine"
-
-#: src/settings/session-profiles-section.tsrx:47
-msgid ""
-"Save exact model, thinking, and approval selections for each agent harness."
-msgstr ""
-"Save exact model, thinking, and approval selections for each agent harness."
-
-#: src/settings/session-profiles-section.tsrx:178
-msgid "Saving"
-msgstr "Saving"
-
-#: src/settings/session-profiles-section.tsrx:218
-msgid "Select approval preset"
-msgstr "Select approval preset"
-
-#: src/settings/session-profiles-section.tsrx:190
-msgid "Select model"
-msgstr "Select model"
-
-#: src/settings/session-profiles-section.tsrx:206
-msgid "Select thinking level"
-msgstr "Select thinking level"
-
-#: src/session-chat/view.tsrx:472 src/sessions/launch-form-selectors.tsrx:55
-#: src/sessions/launch-form-selectors.tsrx:542
-msgid "Session profile"
-msgstr "Session profile"
-
-#: src/settings/session-profiles-section.tsrx:50
-msgid "Session profiles"
-msgstr "Session profiles"
-
-#: src/session-chat/request-error.ts:57
-msgid ""
-"Session profiles could not be saved. Check the configuration and try again."
-msgstr ""
-"Session profiles could not be saved. Check the configuration and try again."
+#: src/session-chat/view.tsrx:663
+#~ msgid "Your draft is still here. Try again when the session is available."
+#~ msgstr "Your draft is still here. Try again when the session is available."

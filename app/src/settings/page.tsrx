@@ -14,6 +14,10 @@ import {
   sessionProfilesSettingsSectionMetadata,
   SessionProfilesSettingsSection,
 } from "./session-profiles-section.tsrx"
+import {
+  configurationSettingsSectionMetadata,
+  ConfigurationSettingsSection,
+} from "./configuration/configuration-settings-section.tsrx"
 import { filterPreparedSettingsSearchSections, prepareSettingsSearchSections } from "./search.ts"
 import styles from "./page.style.ts"
 
@@ -31,6 +35,10 @@ export default function SettingsPage() @{
     {
       ...adapterInstallationsSettingsSectionMetadata,
       href: `#${adapterInstallationsSettingsSectionMetadata.id}`,
+    },
+    {
+      ...configurationSettingsSectionMetadata,
+      href: `#${configurationSettingsSectionMetadata.id}`,
     },
   ]
   const preparedSettingsSections = prepareSettingsSearchSections(settingsSections)
@@ -64,6 +72,8 @@ export default function SettingsPage() @{
           <SessionProfilesSettingsSection key={section.id} />
         } @else if (section.id === adapterInstallationsSettingsSectionMetadata.id) {
           <AdapterInstallationsSettingsSection key={section.id} />
+        } @else if (section.id === configurationSettingsSectionMetadata.id) {
+          <ConfigurationSettingsSection key={section.id} />
         } @else {
           <></>
         }
