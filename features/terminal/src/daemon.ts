@@ -7,18 +7,28 @@ import type {
 import { terminalIpcRoutes } from "./daemon-ipc.ts"
 import { DaemonTerminalConnectionRegistry } from "./daemon/connections.ts"
 import { TerminalEventQueue } from "./daemon/event-queue.ts"
-import { DaemonTerminalError } from "./daemon/runtime.ts"
+import { DaemonTerminalError, DaemonTerminalProcessService } from "./daemon/runtime.ts"
 
 export { runTerminalRuntimeCheck, type TerminalRuntimeCheckResult } from "./daemon/self-test.ts"
-export { DaemonTerminalConnection, DaemonTerminalError } from "./daemon/runtime.ts"
-export type { DaemonTerminalConnectionOptions } from "./daemon/runtime.ts"
+export {
+  DaemonTerminalConnection,
+  DaemonTerminalError,
+  DaemonTerminalProcessService,
+} from "./daemon/runtime.ts"
+export type {
+  DaemonTerminalConnectionOptions,
+  DaemonTerminalProcess,
+  DaemonTerminalProcessInput,
+} from "./daemon/runtime.ts"
 
 export const terminalPlugin = definePlugin({
   name: "terminal",
   ipcRoutes: terminalIpcRoutes,
   setup() {
     const eventListeners = new Set<(event: TerminalDaemonEvent) => void>()
+    const terminal = new DaemonTerminalProcessService()
     const terminalConnections = new DaemonTerminalConnectionRegistry({
+      processService: terminal,
       publishEvent(event) {
         for (const listener of eventListeners) {
           listener(event)
@@ -82,8 +92,12 @@ export const terminalPlugin = definePlugin({
     }
 
     return {
+      provides: {
+        terminal,
+      },
       close: () => {
         terminalConnections.closeAll()
+        terminal.closeAll()
       },
       ipcHandlers: {
         terminal: {

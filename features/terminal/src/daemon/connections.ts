@@ -15,11 +15,16 @@ import type {
   TerminalRestartRequest,
 } from "@goddard-ai/schema/daemon/terminals"
 
-import { DaemonTerminalConnection, DaemonTerminalError } from "./runtime.ts"
+import {
+  DaemonTerminalConnection,
+  DaemonTerminalError,
+  type DaemonTerminalProcessService,
+} from "./runtime.ts"
 
 /** Options that connect terminal connection state to the daemon IPC stream publisher. */
 export type DaemonTerminalConnectionRegistryOptions = {
   publishEvent: (event: TerminalDaemonEvent) => void
+  processService: DaemonTerminalProcessService
 }
 
 /** Tracks active terminal connections and enforces connection-local instance ownership. */
@@ -27,9 +32,11 @@ export class DaemonTerminalConnectionRegistry {
   readonly #terminalConnections = new Map<TerminalConnectionId, DaemonTerminalConnection>()
   readonly #subscribedConnections = new Set<TerminalConnectionId>()
   readonly #publishEvent: (event: TerminalDaemonEvent) => void
+  readonly #processService: DaemonTerminalProcessService
 
   constructor(options: DaemonTerminalConnectionRegistryOptions) {
     this.#publishEvent = options.publishEvent
+    this.#processService = options.processService
   }
 
   get size() {
@@ -42,6 +49,7 @@ export class DaemonTerminalConnectionRegistry {
       connectionId,
       new DaemonTerminalConnection({
         connectionId,
+        processService: this.#processService,
         onEvent: (event) => this.#publishEvent(event),
       }),
     )

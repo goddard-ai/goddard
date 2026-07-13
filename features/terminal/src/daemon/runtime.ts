@@ -25,10 +25,52 @@ const DEFAULT_TERMINAL_DIMENSIONS = {
 type TerminalProcess = ReturnType<typeof Bun.spawn>
 type NativeTerminal = NonNullable<TerminalProcess["terminal"]>
 
+/** Input accepted by the daemon-internal PTY process service. */
+export type DaemonTerminalProcessInput = {
+  options: TerminalSpawnOptions
+  onOutput?: (data: string) => void
+}
+
+/** PTY-backed process handle exposed to daemon feature consumers. */
+export type DaemonTerminalProcess = {
+  readonly exit: Promise<{ exitCode: number | null; signal: string | null }>
+  write(data: string): void
+  resize(dimensions: TerminalDimensions): void
+  close(signal?: string): void
+}
+
+/** Tracks daemon-internal PTY processes so daemon shutdown releases every child. */
+export class DaemonTerminalProcessService {
+  readonly #processes = new Set<DaemonTerminalProcess>()
+
+  get size() {
+    return this.#processes.size
+  }
+
+  spawn(input: DaemonTerminalProcessInput) {
+    const process = spawnDaemonTerminalProcess(input)
+    this.#processes.add(process)
+    void process.exit.then(
+      () => this.#processes.delete(process),
+      () => this.#processes.delete(process),
+    )
+    return process
+  }
+
+  closeAll() {
+    const processes = [...this.#processes]
+    this.#processes.clear()
+    for (const process of processes) {
+      process.close()
+    }
+  }
+}
+
 /** Options used to connect one daemon terminal connection to its owning event stream. */
 export type DaemonTerminalConnectionOptions = {
   connectionId: TerminalConnectionId
   onEvent?: (event: TerminalDaemonEvent) => void
+  processService?: DaemonTerminalProcessService
 }
 
 /** Error raised when a terminal control request cannot be applied to daemon terminal state. */
@@ -56,10 +98,12 @@ export class DaemonTerminalConnection {
   readonly #terminals = new Map<TerminalInstanceId, Terminal>()
   readonly #connectionId: TerminalConnectionId
   readonly #onEvent: (event: TerminalDaemonEvent) => void
+  readonly #processService: DaemonTerminalProcessService
 
   constructor(options: DaemonTerminalConnectionOptions) {
     this.#connectionId = options.connectionId
     this.#onEvent = options.onEvent ?? (() => {})
+    this.#processService = options.processService ?? new DaemonTerminalProcessService()
   }
 
   get size() {
@@ -83,6 +127,7 @@ export class DaemonTerminalConnection {
         this.#connectionId,
         request.instanceId,
         request.options ?? {},
+        this.#processService,
         (event) => {
           if (event.type === "terminal.exit") {
             this.#terminals.delete(event.instanceId)
@@ -177,10 +222,8 @@ class Terminal {
   readonly instanceId: TerminalInstanceId
   readonly options: TerminalSpawnOptions
   readonly #command: string
-  readonly #process: TerminalProcess
-  readonly #terminal: NativeTerminal
+  readonly #process: DaemonTerminalProcess
   readonly #onEvent: (event: TerminalDaemonEvent) => void
-  readonly #decoder = new TextDecoder()
   #dimensions: TerminalDimensions
   #state: TerminalRuntimeMetadata["state"] = "running"
   #exitCode: number | null = null
@@ -191,6 +234,7 @@ class Terminal {
     connectionId: TerminalConnectionId,
     instanceId: TerminalInstanceId,
     options: TerminalSpawnOptions,
+    processService: DaemonTerminalProcessService,
     onEvent: (event: TerminalDaemonEvent) => void,
   ) {
     this.connectionId = connectionId
@@ -203,25 +247,15 @@ class Terminal {
       cols: options.dimensions?.cols ?? DEFAULT_TERMINAL_DIMENSIONS.cols,
       rows: options.dimensions?.rows ?? DEFAULT_TERMINAL_DIMENSIONS.rows,
     }
-    this.#process = Bun.spawn([this.#command, ...launch.args], {
-      cwd: options.cwd,
-      env: resolveTerminalEnv(options.env),
-      terminal: {
-        name: DEFAULT_TERMINAL_NAME,
-        cols: this.#dimensions.cols,
-        rows: this.#dimensions.rows,
-        data: (_terminal, data) => {
-          this.#emitOutput(this.#decoder.decode(data, { stream: true }))
-        },
+    this.#process = processService.spawn({
+      options,
+      onOutput: (data) => {
+        this.#emitOutput(data)
       },
     })
-    if (!this.#process.terminal) {
-      throw new Error("Bun did not create a native terminal for the spawned process.")
-    }
-    this.#terminal = this.#process.terminal
-    void this.#process.exited.then(
-      (exitCode) => {
-        this.#recordExit(exitCode, null)
+    void this.#process.exit.then(
+      ({ exitCode, signal }) => {
+        this.#recordExit(exitCode, signal)
       },
       (error) => {
         const message = error instanceof Error ? error.message : String(error)
@@ -251,12 +285,12 @@ class Terminal {
   }
 
   write(data: string) {
-    this.#terminal.write(data)
+    this.#process.write(data)
   }
 
   resize(dimensions: TerminalDimensions) {
     this.#dimensions = dimensions
-    this.#terminal.resize(dimensions.cols, dimensions.rows)
+    this.#process.resize(dimensions)
   }
 
   close() {
@@ -265,8 +299,7 @@ class Terminal {
     }
 
     this.#closed = true
-    this.#terminal.close()
-    this.#process.kill()
+    this.#process.close()
     this.#recordExit(null, null)
   }
 
@@ -275,7 +308,6 @@ class Terminal {
       return
     }
 
-    this.#emitOutput(this.#decoder.decode())
     this.#state = this.#closed ? "closed" : "exited"
     this.#exitCode = exitCode
     this.#signal = signal
@@ -298,6 +330,79 @@ class Terminal {
       instanceId: this.instanceId,
       data,
     })
+  }
+}
+
+function spawnDaemonTerminalProcess(input: DaemonTerminalProcessInput): DaemonTerminalProcess {
+  const launch = resolveTerminalLaunch(input.options, process.platform, process.env)
+  const dimensions = {
+    cols: input.options.dimensions?.cols ?? DEFAULT_TERMINAL_DIMENSIONS.cols,
+    rows: input.options.dimensions?.rows ?? DEFAULT_TERMINAL_DIMENSIONS.rows,
+  }
+  const decoder = new TextDecoder()
+  let closed = false
+  let flushed = false
+
+  const child = Bun.spawn([launch.command, ...launch.args], {
+    cwd: input.options.cwd,
+    env: resolveTerminalEnv(input.options.env),
+    terminal: {
+      name: DEFAULT_TERMINAL_NAME,
+      cols: dimensions.cols,
+      rows: dimensions.rows,
+      data: (_terminal, data) => {
+        emitOutput(decoder.decode(data, { stream: true }))
+      },
+    },
+  })
+  if (!child.terminal) {
+    child.kill()
+    throw new Error("Bun did not create a native terminal for the spawned process.")
+  }
+  const terminal: NativeTerminal = child.terminal
+
+  function emitOutput(data: string) {
+    if (data.length > 0) {
+      input.onOutput?.(data)
+    }
+  }
+
+  function flushOutput() {
+    if (flushed) {
+      return
+    }
+    flushed = true
+    emitOutput(decoder.decode())
+  }
+
+  const exit = child.exited.then(
+    (exitCode) => {
+      flushOutput()
+      return { exitCode, signal: null }
+    },
+    (error) => {
+      flushOutput()
+      throw error
+    },
+  )
+
+  return {
+    exit,
+    write(data) {
+      terminal.write(data)
+    },
+    resize(nextDimensions) {
+      terminal.resize(nextDimensions.cols, nextDimensions.rows)
+    },
+    close(signal) {
+      if (closed) {
+        return
+      }
+      closed = true
+      flushOutput()
+      terminal.close()
+      child.kill(signal as never)
+    },
   }
 }
 
