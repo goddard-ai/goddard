@@ -14,6 +14,7 @@ import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
+  invalidateSessionChanges,
   invalidateSessionLaunchPreview,
   invalidateSessionLists,
   invalidateSessionViews,
@@ -142,6 +143,9 @@ export async function setSessionWorktreeMergeTargetBranch(
 export async function mergeSessionWorktree(input: MergeSessionWorktreeRequest) {
   const result = await goddardSdk.session.worktree.merge(input)
   invalidateSessionViews(input.id)
+  if (result.merged) {
+    invalidateSessionChanges(input.id)
+  }
   return result
 }
 

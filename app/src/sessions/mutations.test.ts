@@ -1,4 +1,8 @@
-import { createFixtureSession, createSessionHistoryResponse } from "@goddard-ai/fixtures"
+import {
+  createFixtureSession,
+  createSessionChangesResponse,
+  createSessionHistoryResponse,
+} from "@goddard-ai/fixtures"
 import type { CreateSessionRequest, DaemonSession, SessionLifecycleEvent } from "@goddard-ai/sdk"
 import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
@@ -30,6 +34,9 @@ function resetSdk() {
   }))
   sessionClient.history = vi.fn(async ({ id }: { id: DaemonSession["id"] }) =>
     createSessionHistoryResponse({ session: createFixtureSession({ id }) }),
+  )
+  sessionClient.changes = vi.fn(async ({ id }: { id: DaemonSession["id"] }) =>
+    createSessionChangesResponse({ session: createFixtureSession({ id }) }),
   )
   sessionClient.worktree = {
     get: vi.fn(async ({ id }: { id: DaemonSession["id"] }) => ({
@@ -262,7 +269,6 @@ test("createSession refreshes session lists and launch previews", async () => {
 test("session mutations refresh list, detail, and transcript queries", async () => {
   const {
     cancelSessionTurn,
-    mergeSessionWorktree,
     popQueuedSessionPrompt,
     reconnectSession,
     respondSessionPermission,
@@ -373,10 +379,6 @@ test("session mutations refresh list, detail, and transcript queries", async () 
           mergeTargetBranch: "release/1.x",
         }),
     },
-    {
-      run: () => mergeSessionWorktree({ id: sessionId }),
-      assert: () => expect(sessionClient.worktree.merge).toHaveBeenCalledWith({ id: sessionId }),
-    },
   ]
 
   for (const item of cases) {
@@ -390,6 +392,20 @@ test("session mutations refresh list, detail, and transcript queries", async () 
     await expectSessionViewsRefreshed()
     item.assert()
   }
+})
+
+test("mergeSessionWorktree refreshes session views and changes after a successful merge", async () => {
+  const { mergeSessionWorktree } = await import("./mutations.ts")
+  const sessionId = "ses_session_1" as DaemonSession["id"]
+
+  await activateSessionViewQueries(sessionId)
+  await activateCachedQuery(sessionClient.changes, [{ id: sessionId }])
+
+  await mergeSessionWorktree({ id: sessionId })
+  await expectSessionViewsRefreshed()
+  await waitFor(() => sessionClient.changes.mock.calls.length === 1)
+
+  expect(sessionClient.worktree.merge).toHaveBeenCalledWith({ id: sessionId })
 })
 
 test("completeSession uses the inbox completion mutation and refreshes session plus inbox queries", async () => {
