@@ -14,6 +14,8 @@ import type {
   TerminalSpawnOptions,
 } from "@goddard-ai/schema/daemon/terminals"
 
+import { resolveTerminalLaunch } from "./command.ts"
+
 const DEFAULT_TERMINAL_NAME = "xterm-256color"
 const DEFAULT_TERMINAL_DIMENSIONS = {
   cols: 80,
@@ -195,12 +197,13 @@ class Terminal {
     this.instanceId = instanceId
     this.options = options
     this.#onEvent = onEvent
-    this.#command = resolveTerminalCommand(options.command)
+    const launch = resolveTerminalLaunch(options, process.platform, process.env)
+    this.#command = launch.command
     this.#dimensions = {
       cols: options.dimensions?.cols ?? DEFAULT_TERMINAL_DIMENSIONS.cols,
       rows: options.dimensions?.rows ?? DEFAULT_TERMINAL_DIMENSIONS.rows,
     }
-    this.#process = Bun.spawn([this.#command, ...resolveTerminalArgs(options)], {
+    this.#process = Bun.spawn([this.#command, ...launch.args], {
       cwd: options.cwd,
       env: resolveTerminalEnv(options.env),
       terminal: {
@@ -296,19 +299,6 @@ class Terminal {
       data,
     })
   }
-}
-
-/** Resolves the executable used for a terminal when the client did not request one. */
-function resolveTerminalCommand(command: string | undefined) {
-  return command ?? process.env.SHELL ?? "/bin/sh"
-}
-
-/** Resolves shell args without forcing login-shell flags onto explicit commands. */
-function resolveTerminalArgs(options: TerminalSpawnOptions) {
-  if (options.args) {
-    return options.args
-  }
-  return options.command ? [] : ["-l"]
 }
 
 /** Builds a PTY environment that preserves daemon process defaults unless overridden. */

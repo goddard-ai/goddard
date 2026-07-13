@@ -85,7 +85,7 @@ function collectOutput(events: TerminalDaemonEvent[]) {
 }
 
 function resolveCheckShell() {
-  return process.platform === "win32" ? "cmd.exe" : "/bin/sh"
+  return process.platform === "win32" ? (process.env.COMSPEC ?? "cmd.exe") : "/bin/sh"
 }
 
 function buildMarkerCommand() {
