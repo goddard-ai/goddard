@@ -1,3 +1,4 @@
+import { writeRendererError } from "~/lib/renderer-log-capture.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { invalidateSessionLifecycleEvent } from "./cache.ts"
 
@@ -16,7 +17,7 @@ export function startSessionLifecycleSubscription() {
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        console.error("Failed to subscribe to session lifecycle updates.", error)
+        writeRendererError("app.session.lifecycle_subscription_failed", error)
       }
     }
   })()

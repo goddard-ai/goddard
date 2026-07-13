@@ -12,6 +12,7 @@ import {
   embeddedRuntimeDirName,
   type EmbeddedRuntimeManifest,
 } from "./embedded-runtime-manifest.ts"
+import { getAppDebug, writeAppError, writeAppLog } from "./logging.ts"
 
 type InstalledDaemonState = {
   runtimeHash: string
@@ -32,19 +33,50 @@ let ensuredRuntime: Promise<{ daemonUrl: string }> | undefined
 
 /** Ensures the desktop-managed daemon install is current, registered, and accepting IPC traffic. */
 export function ensureDaemonRuntime() {
-  ensuredRuntime ??= ensureDaemonRuntimeInner().catch((error) => {
-    ensuredRuntime = undefined
-    throw error
-  })
+  if (!ensuredRuntime) {
+    const startedAt = Date.now()
+    const mode = isDevelopmentRuntime() ? "development" : "packaged"
+    ensuredRuntime = ensureDaemonRuntimeInner()
+      .then((runtime) => {
+        writeAppLog({
+          source: "host",
+          level: "info",
+          message: "app.daemon.ready",
+          properties: {
+            daemonUrl: runtime.daemonUrl,
+            durationMs: Date.now() - startedAt,
+            mode,
+          },
+        })
+        return runtime
+      })
+      .catch((error) => {
+        ensuredRuntime = undefined
+        writeAppError("app.daemon.runtime_failed", error, {
+          durationMs: Date.now() - startedAt,
+          mode,
+        })
+        throw error
+      })
+  }
   return ensuredRuntime
 }
 
 /** Reads the app-bundled manifest, installs runtime files, and starts or updates the daemon service. */
 async function ensureDaemonRuntimeInner() {
+  const debug = getAppDebug("daemon.runtime")
   const daemon = resolveDaemonConnection()
+  const mode = isDevelopmentRuntime() ? "development" : "packaged"
+  debug("app.daemon.runtime.ensure_started", {
+    daemonUrl: daemon.daemonUrl,
+    mode,
+  })
 
-  if (isDevelopmentRuntime()) {
+  if (mode === "development") {
     await ensureDevelopmentDaemonRuntime(daemon.daemonUrl)
+    debug("app.daemon.runtime.development_ready", {
+      daemonUrl: daemon.daemonUrl,
+    })
     return { daemonUrl: daemon.daemonUrl }
   }
 
@@ -52,14 +84,25 @@ async function ensureDaemonRuntimeInner() {
   const baseUrl = await resolveDaemonBaseUrl()
   const installedState = await readInstalledDaemonState()
   const preparedRuntime = await prepareDaemonRuntime(manifest)
+  const daemonResponded = await pingDaemon(daemon.daemonUrl).catch(() => false)
+  const canReuseRuntime =
+    installedState?.runtimeHash === preparedRuntime.runtimeHash && daemonResponded
 
-  if (
-    installedState?.runtimeHash === preparedRuntime.runtimeHash &&
-    (await pingDaemon(daemon.daemonUrl).catch(() => false))
-  ) {
+  debug("app.daemon.runtime.reuse_resolved", {
+    daemonResponded,
+    installedRuntimeHash: installedState?.runtimeHash ?? null,
+    runtimeHash: preparedRuntime.runtimeHash,
+    reusable: canReuseRuntime,
+  })
+  if (canReuseRuntime) {
     return { daemonUrl: daemon.daemonUrl }
   }
 
+  const installStartedAt = Date.now()
+  debug("app.daemon.runtime.install_started", {
+    platform: process.platform,
+    runtimeHash: preparedRuntime.runtimeHash,
+  })
   if (process.platform === "win32") {
     await installWindowsDaemonStartup(preparedRuntime, baseUrl, daemon.port)
   } else {
@@ -68,6 +111,11 @@ async function ensureDaemonRuntimeInner() {
 
   await waitForDaemonReady(daemon.daemonUrl)
   await writeInstalledDaemonState({ runtimeHash: preparedRuntime.runtimeHash })
+  debug("app.daemon.runtime.install_completed", {
+    durationMs: Date.now() - installStartedAt,
+    platform: process.platform,
+    runtimeHash: preparedRuntime.runtimeHash,
+  })
 
   return { daemonUrl: daemon.daemonUrl }
 }
@@ -303,16 +351,35 @@ async function installWindowsDaemonStartup(
 
 /** Waits for the daemon IPC endpoint to accept health checks after install or restart. */
 async function waitForDaemonReady(daemonUrl: string, timeoutMs = 15_000) {
+  const debug = getAppDebug("daemon.runtime")
+  const startedAt = Date.now()
   const deadline = Date.now() + timeoutMs
+  let attempt = 0
+  debug("app.daemon.runtime.readiness_wait_started", {
+    daemonUrl,
+    timeoutMs,
+  })
 
   while (Date.now() < deadline) {
+    attempt += 1
     if (await pingDaemon(daemonUrl).catch(() => false)) {
+      debug("app.daemon.runtime.readiness_succeeded", {
+        attempt,
+        daemonUrl,
+        durationMs: Date.now() - startedAt,
+      })
       return
     }
 
     await Bun.sleep(250)
   }
 
+  debug("app.daemon.runtime.readiness_timed_out", {
+    attempt,
+    daemonUrl,
+    durationMs: Date.now() - startedAt,
+    timeoutMs,
+  })
   throw new Error(`Timed out waiting for the Goddard daemon at ${daemonUrl}`)
 }
 

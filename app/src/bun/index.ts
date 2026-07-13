@@ -3,7 +3,12 @@ import { BrowserWindow, Screen, Updater } from "electrobun/bun"
 import { activateDefaultLocale } from "~/language/i18n.ts"
 import { loadAppStateSnapshot } from "./app-state-store.ts"
 import { ensureDaemonRuntime } from "./daemon-runtime.ts"
-import { installAppFatalErrorCapture, installAppLogCapture, writeAppError } from "./logging.ts"
+import {
+  installAppFatalErrorCapture,
+  installAppLogCapture,
+  writeAppError,
+  writeAppLog,
+} from "./logging.ts"
 import { getMainWindow, setMainWindow, showMainWindow } from "./main-window.ts"
 import { installApplicationMenu } from "./menu.ts"
 import { appRpc } from "./rpc.ts"
@@ -42,7 +47,12 @@ function createMainWindow(url: string, frame: WindowFrame) {
 function installMainWindowReadyFallback() {
   setTimeout(() => {
     if (showMainWindow()) {
-      console.error("Renderer did not signal readiness before the main window fallback expired.")
+      writeAppLog({
+        source: "host",
+        level: "warn",
+        message: "app.renderer.ready_timeout",
+        properties: { timeoutMs: MAIN_WINDOW_READY_FALLBACK_MS },
+      })
     }
   }, MAIN_WINDOW_READY_FALLBACK_MS)
 }
@@ -119,6 +129,14 @@ installAppLogCapture()
 installAppFatalErrorCapture()
 
 async function main() {
+  writeAppLog({
+    source: "host",
+    level: "info",
+    message: "app.host.startup",
+    properties: {
+      platform: process.platform,
+    },
+  })
   activateDefaultLocale()
   installApplicationMenu(getMainWindow)
 

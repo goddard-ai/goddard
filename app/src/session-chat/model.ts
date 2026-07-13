@@ -11,6 +11,7 @@ import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"
 import { isObject } from "radashi"
 
+import { writeRendererError } from "~/lib/renderer-log-capture.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
 import { buildSessionChatTranscript } from "./transcript-items.ts"
@@ -1091,7 +1092,9 @@ export class SessionChat extends Sigma<SessionChatState> {
         }
       } catch (error) {
         if (!controller.signal.aborted) {
-          console.error("Failed to subscribe to session chat updates.", error)
+          writeRendererError("app.session.message_subscription_failed", error, {
+            sessionId: this.session.id,
+          })
         }
       }
     })()

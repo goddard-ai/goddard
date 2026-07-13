@@ -1,3 +1,4 @@
+import { writeRendererError } from "~/lib/renderer-log-capture.ts"
 import { goddardSdk } from "~/sdk.ts"
 import { invalidateInboxQueries } from "./mutations.ts"
 import { handleInboxItemsLoaded } from "./session-visit.ts"
@@ -18,7 +19,7 @@ export function startInboxUpdateStream() {
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        console.error("Failed to subscribe to inbox updates.", error)
+        writeRendererError("app.inbox.subscription_failed", error)
       }
     }
   })()

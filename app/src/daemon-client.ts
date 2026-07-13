@@ -4,6 +4,9 @@ import {
 } from "@goddard-ai/daemon-client/browser"
 import type { GoddardClient } from "@goddard-ai/sdk"
 
+import { formatClientIpcLogEvent } from "./lib/ipc-log-event.ts"
+import { writeRendererDebug } from "./lib/renderer-log-capture.ts"
+
 const browserDaemonUrlKey = "goddard.daemonUrl"
 const browserDaemonTokenKey = "goddard.daemonBrowserToken"
 
@@ -19,6 +22,10 @@ export const browserDaemonClient = createBrowserDaemonClient() as GoddardClient
 export function createBrowserDaemonClient(): GoddardClient {
   return createBrowserDaemonIpcClient({
     access: resolveDaemonAccess,
+    ipcHook(event) {
+      const { message, properties } = formatClientIpcLogEvent(event)
+      writeRendererDebug("ipc.client", message, properties)
+    },
   })
 }
 

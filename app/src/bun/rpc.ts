@@ -31,7 +31,13 @@ export const appRpc: AppRpc = BrowserView.defineRPC<AppDesktopRpc>({
       },
       daemonWebviewAccess: async (input) => await daemonWebviewAccess(input),
       mainWindowReady: async () => {
-        showMainWindow()
+        const windowShown = showMainWindow()
+        writeAppLog({
+          source: "host",
+          level: "info",
+          message: "app.renderer.ready",
+          properties: { windowShown },
+        })
         return {}
       },
       maximizeWindow: async () => {

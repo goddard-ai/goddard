@@ -8,6 +8,7 @@ import { LaunchableStates } from "~/dev/view.tsrx"
 import { desktopHost, initializeDesktopHost, mainWindowReady } from "~/desktop-host.ts"
 import { activateLocale, defaultLocale } from "~/language/i18n.ts"
 import { startQueryWindowReactivationRefetch } from "~/lib/query.ts"
+import { writeRendererError } from "~/lib/renderer-log-capture.ts"
 
 async function main() {
   initializeDesktopHost()
@@ -34,9 +35,11 @@ async function main() {
 
   requestAnimationFrame(() => {
     void mainWindowReady().catch((error) => {
-      console.error("Failed to signal main window readiness.", error)
+      writeRendererError("app.renderer.ready_failed", error)
     })
   })
 }
 
-void main()
+void main().catch((error) => {
+  writeRendererError("app.renderer.startup_failed", error)
+})
