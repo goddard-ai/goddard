@@ -1,107 +1,72 @@
 # Git CLI Coverage
 
-This document tracks Git behavior that is still implemented through `git` CLI subprocesses outside `@goddard-ai/libgit2`. Use it to decide which libgit2 bindings are worth adding next.
+This document tracks Git behavior that daemon packages still implement through `git` subprocesses instead of `@goddard-ai/libgit2`.
 
-Last reviewed: 2026-06-25.
+Last reviewed: 2026-07-12.
 
-## Scope
+## Native Coverage
 
-- The subprocess seams are expected to live in package-local `git/` folders.
-- `core/review-sync` has a package-local runner in `src/git/command.ts`, but several concrete command call sites still live outside `src/git/`. Those call sites are included here because they represent remaining CLI-owned behavior.
-- Commands that already route through `@goddard-ai/libgit2.git` are not listed as CLI gaps, even when the libgit2 method currently throws an unsupported-operation error.
+The exported `git` namespace now implements these operations with libgit2:
+
+- repository root, Git directory, common directory, Git-private paths, and bare-repository checks
+- status and clean checks, including non-ignored untracked files
+- direct ref resolution, creation, update, deletion, symbolic reads, and local branch listing
+- HEAD resolution, ancestry, merge base, and commit-range counting
+- worktree listing and stash reflog listing
+- repository config reads, ignore checks, and index path listing
+
+Review-sync, sprint-branch, session, and pull-request callers use these native methods where their required behavior matches libgit2. The pull-request feature no longer has a Git CLI subprocess seam.
 
 ## Core Review Sync
 
-Subprocess seam:
+Subprocess seam: `core/review-sync/src/git/command.ts`.
 
-- `core/review-sync/src/git/command.ts`
+| CLI-owned capability | Command shapes | Why it remains CLI-backed |
+| --- | --- | --- |
+| Checkout and branch mutation | `checkout`, `checkout --detach`, `branch`, `branch -D` | Review and recovery flows depend on Git porcelain's validation and worktree safety behavior. Convert only as an end-to-end workflow with equivalent failure tests. |
+| Reset and clean | `reset --hard`, `reset --mixed`, `clean -fd` | These destructive multi-surface mutations need explicit index, worktree, and untracked-file parity before migration. |
+| Patch validation and application | `apply --check --binary`, `apply --binary` | Human review patches require compatibility with Git's binary patch format and preflight semantics. |
+| Synthetic snapshots | `read-tree`, `add -A`, `write-tree`, `commit-tree` | libgit2 can build indexes, trees, and commits, but review-sync's exact snapshot behavior should move as one separately tested unit. |
+| Patch serialization | `diff --binary` | The serialized patch is an interchange format, so byte-level compatibility matters more than avoiding a subprocess. |
+| Rebase-state probe | `rebase --show-current-patch` | This currently distinguishes stale metadata from an active rebase. It is a candidate for repository-state inspection without performing a native rebase. |
 
-Package-local adapter methods in `core/review-sync/src/git.ts`:
-
-| Git capability | CLI command shape | Current purpose | Likely libgit2 surface |
-| --- | --- | --- | --- |
-| Repository root | `rev-parse --show-toplevel` | Resolve repository root for user paths. | Already covered by `git.repository.resolveRoot`. |
-| Git dirs | `rev-parse --git-common-dir`, `rev-parse --git-dir` | Resolve common and per-worktree metadata dirs. | Already covered by `git.repository.resolveCommonDir` and `git.repository.resolveGitDir`. |
-| Current branch | `symbolic-ref --quiet --short HEAD` | Read attached branch, returning null when detached. | Already covered by `git.refs.getCurrentBranch`. |
-| Branch existence | `show-ref --verify --quiet refs/heads/<branch>` | Validate local branch availability. | Already covered by `git.refs.branchExists`. |
-| Status clean check | `status --porcelain=v1 --untracked-files=all` | Block sync when user work is pending. | Implement `git.status.getWorkingTreeStatus` and `git.status.isWorktreeClean`. |
-| Ref resolution | `rev-parse --verify -q <ref>` | Resolve hidden refs and HEAD-like names. | Mostly covered by `git.refs.resolve`; verify peeled commit behavior. |
-| Ref mutation | `update-ref <ref> <oid>`, `update-ref -d <ref>` | Record and clean hidden review-sync refs. | Implement `git.refs.update` and `git.refs.delete`. |
-| Worktree listing | `worktree list --porcelain` | Detect checked-out review branches and session worktrees. | Implement `git.worktrees.list`. |
-
-Other review-sync call sites using the package runner:
-
-| Git capability | CLI command shape | Current purpose | Likely libgit2 surface |
-| --- | --- | --- | --- |
-| Ancestry and merge base | `merge-base --is-ancestor`, `merge-base <left> <right>` | Review history checks. | Already covered by `git.history.isAncestor` and `git.history.getMergeBase`; call sites can move to `src/git/` wrappers. |
-| Checkout and branch mutation | `checkout`, `checkout --detach`, `checkout -B`, `branch`, `branch -D` | Move review and agent worktrees between review/session branches. | Add checkout, branch create/reset/delete APIs only if review-sync mutation flows move native. |
-| Reset and clean | `reset --hard`, `reset --mixed`, `clean -fd` | Restore worktrees and discard generated review state. | Add reset and clean APIs if native mutation coverage is required. |
-| Patch application | `apply --check --binary`, `apply --binary` | Validate and apply human review patches. | Bind libgit2 apply APIs. |
-| Index and tree writes | `read-tree`, `add -A`, `write-tree`, `commit-tree` | Build synthetic snapshots and commits. | Bind index, tree, and commit creation APIs. |
-| Binary diffs | `diff --binary ...` | Compute patches for review-sync transfer. | Native diff support must preserve binary patch format or keep CLI for patch serialization. |
-| Rebase state probe | `rebase --show-current-patch` | Distinguish stale `REBASE_HEAD` from active rebase. | Likely inspect rebase metadata directly rather than binding a rebase operation. |
+Several concrete review-sync command calls still live outside `src/git/`. Moving those command-specific wrappers under `src/git/` remains package-local organization work and does not require expanding `@goddard-ai/libgit2`.
 
 ## Core Sprint Branch
 
-Subprocess seam:
+Subprocess seam: `core/sprint-branch/src/git/command.ts`.
 
-- `core/sprint-branch/src/git/command.ts`
+| CLI-owned capability | Command shapes | Why it remains CLI-backed |
+| --- | --- | --- |
+| Checkout and branch mutation | `checkout`, `checkout --detach`, `branch`, `branch --force`, `branch -d/-D` | Sprint transitions coordinate branch ownership, worktree state, and recovery. Migrate only a complete transition with parity tests. |
+| Merge and rebase | `merge --ff-only`, `rebase`, `rebase --onto` | Git porcelain owns sequencing, conflict metadata, continuation state, and diagnostics. These are intentionally CLI-backed. |
+| Reset | `reset --hard` | This is part of branch movement and should migrate with that workflow, not as an isolated binding. |
+| Stash mutation | `stash push --include-untracked`, `stash apply` | Native stash mutation is feasible, but the current recovery flow depends on porcelain conflict behavior. Stash reads are already native. |
+| Human diff command | `diff` with user-selected display flags | The command's formatted text is the user-facing output, so CLI formatting is the contract. |
 
-Current CLI-owned behavior:
-
-| Git capability | CLI command shape | Current purpose | Likely libgit2 surface |
-| --- | --- | --- | --- |
-| Generic command execution | package-local `runGit(cwd, args)` | Sprint mutation flows still call arbitrary CLI commands outside the read wrappers. | Continue moving concrete commands into `src/git/` modules before adding native bindings. |
-| Git-private path resolution | currently calls `git.repository.resolveGitPath` | Used for `.git/info/exclude` and operation markers. | Implement `git.repository.resolveGitPath`. |
-| Status | currently calls `git.status.getWorkingTreeStatus` | Detect worktree dirtiness. | Implement `git.status.getWorkingTreeStatus`. |
-| Stash listing | currently calls `git.stash.list` | Check recorded sprint stashes. | Implement `git.stash.list`. |
-
-The read-only refs/history/repository calls in `src/git/refs.ts` and parts of `src/git/repository.ts` already route through `@goddard-ai/libgit2.git`.
-
-## Pull Request Feature
-
-Subprocess seam:
-
-- `features/pull-request/src/daemon/git/command.ts`
-
-Current CLI-owned behavior:
-
-| Git capability | CLI command shape | Current purpose | Likely libgit2 surface |
-| --- | --- | --- | --- |
-| Remote HEAD symbolic ref | `symbolic-ref refs/remotes/origin/<ref>` | Infer the origin default branch. | Add remote-tracking symbolic ref lookup or generic symbolic ref read. |
-| Remote URL config | `config --get remote.origin.url` | Infer GitHub repository owner/name. | Add config read support for repository config. |
-
-Current branch inference already uses `git.refs.getCurrentBranch`.
+Most sprint mutation call sites still invoke the package runner outside `src/git/`. They should first move into capability-oriented `src/git/` modules so future native migration does not leak command arguments through feature logic.
 
 ## Session Feature
 
-Subprocess seam:
+Subprocess seam: `features/session/src/daemon/git/command.ts`.
 
-- `features/session/src/daemon/git/command.ts`
+| CLI-owned capability | Command shapes | Why it remains CLI-backed |
+| --- | --- | --- |
+| Checkout and branch reset | `checkout`, `checkout -B` | Session setup combines branch creation/reset and checkout semantics; migrate as one workflow with failure coverage. |
+| Worktree mutation | `worktree add --detach`, `worktree remove --force` | Native worktree mutation is feasible but needs cleanup, lock, and partial-failure tests. Worktree listing is already native. |
+| Pull request fetch | `fetch origin pull/<n>/head:<branch>` | Keep network operations on CLI until native credential, proxy, certificate, and progress handling are designed. |
+| Binary diff serialization | `diff --binary --full-index`, `diff --no-index` | Session patches must remain compatible with Git's patch parser, including binary files and added-file formatting. |
+| Empty-directory discovery | `ls-files --others --exclude-standard --directory` | libgit2 status does not report empty untracked directories; session bootstrap intentionally copies an empty `node_modules`. |
+| Custom include matching | `ls-files --others --ignored --exclude-from=<file>` | `.worktreeinclude` relies on Git's exclude-file matching and directory collapsing. Keep it on CLI unless a native implementation proves equivalent pattern semantics. |
 
-Current CLI-owned behavior:
+## Recommended Boundary
 
-| Git capability | CLI command shape | Current purpose | Likely libgit2 surface |
-| --- | --- | --- | --- |
-| Checkout | `checkout <branch>`, `checkout -B ...` | Move session worktrees onto target branches. | Add checkout APIs if worktree mutation becomes native. |
-| Diff serialization | `diff --no-ext-diff --binary --full-index`, `diff --no-index ...` | Build tracked, untracked, and initial workspace patches. | Native diff support must preserve binary/full-index patch output. |
-| HEAD existence | `rev-parse --verify --quiet HEAD` | Decide whether a workspace has a commit baseline. | Already covered by `git.history.resolveHead`; call site can move. |
-| File listing | `ls-files --others --exclude-standard`, `ls-files --cached --others --exclude-standard`, ignored variants | List untracked, cached, ignored, and excluded paths. | Add index/status path listing with ignore support. |
-| Commit count | `rev-list --count <base>..HEAD` | Count unmerged worktree commits. | Add revwalk count support. |
-| Ignore checks | `check-ignore -q`, `check-ignore --stdin -z` | Filter ignored paths and ignored directories. | Add ignore/pathspec matching support. |
-| Local branch listing | `for-each-ref --format=... refs/heads` | List branches and identify the current one. | Add refs iteration for local branches. |
-| Worktree add/remove/list | `worktree add --detach`, `worktree remove --force`, `worktree list` | Create, remove, and locate daemon worktrees. | Add worktree create/remove/list support. |
-| Fetch PR head | `fetch origin pull/<n>/head:<branch>` | Materialize pull request refs in session worktrees. | Add remote fetch/refspec support only if PR worktree setup moves native. |
+Keep these operations CLI-backed unless a future task explicitly accepts their parity and recovery risk:
 
-Several session modules also call `@goddard-ai/libgit2.git` directly for repository root, git dirs, branch existence, branch reads, status, and HEAD reads. The unsupported native gaps currently visible there are status, bare repository checks, and any other methods still throwing from `core/libgit2`.
+- binary patch serialization, validation, and application
+- fetch and other network operations
+- merge and rebase porcelain
+- broad checkout, reset, clean, and branch-mutation workflows
+- empty untracked directory and custom exclude-file enumeration
 
-## Suggested Binding Order
-
-1. `git.status.isWorktreeClean` and `git.status.getWorkingTreeStatus`.
-2. `git.repository.resolveGitPath`.
-3. `git.refs.update` and `git.refs.delete`.
-4. `git.worktrees.list`.
-5. `git.stash.list`.
-6. Config and symbolic-ref reads needed by pull-request defaults.
-7. Ignore/path listing and revwalk count needed by session.
-8. Mutation-heavy flows: checkout, branch create/delete, reset, clean, apply, index/tree/commit creation, fetch, and worktree add/remove.
+Good later native candidates are worktree add/remove, narrowly scoped stash mutation, repository-state probes, and review-sync snapshot creation. Each should be migrated as a complete workflow with real-repository tests rather than as unused bindings.
