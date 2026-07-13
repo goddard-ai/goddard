@@ -6,6 +6,7 @@ import {
   type EventBus,
   type DaemonEventEnvelope as PluginDaemonEventEnvelope,
 } from "@goddard-ai/daemon-plugin"
+import { toErrorProperties } from "@goddard-ai/logs"
 import { getErrorMessage, isObject } from "radashi"
 
 import { createBackendClient, type BackendClient } from "./backend.ts"
@@ -64,7 +65,14 @@ export async function createDaemonRuntime(
     baseUrl: options.baseUrl,
     port: options.port,
   })
-  const store = options.store ?? openComposedDaemonStore()
+  const store =
+    options.store ??
+    openComposedDaemonStore(undefined, ({ error, filename }) => {
+      logger.log("daemon.store_recreated", {
+        filename,
+        ...toErrorProperties(error),
+      })
+    })
   const metadataStore = store.metadata as {
     get: (key: string) => unknown
     set: (key: string, value: unknown) => void
@@ -195,12 +203,21 @@ async function setupDaemonPlugins(
   plugins: readonly ComposedDaemonPlugin[],
   events: EventBus,
 ) {
+  const logger = createLogger()
+  const debug = createDebug("daemon.plugins")
   const extensions: Record<string, unknown> = {}
   const backendEventHandlers: BackendEventHandler<any>[] = []
   const ipcHandlers: Record<string, unknown> = {}
-  const closeHandlers: Array<() => void | Promise<void>> = []
+  const closeHandlers: Array<{
+    pluginName: string
+    close: () => void | Promise<void>
+  }> = []
 
   for (const plugin of plugins) {
+    const startedAt = Date.now()
+    debug("daemon.plugins.setup_started", {
+      pluginName: plugin.name,
+    })
     // Runtime setup intentionally shares full daemon resources; plugin isolation is type-level.
     const context = Object.assign(
       Object.create(substrate) as DaemonSetupSubstrate,
@@ -212,7 +229,17 @@ async function setupDaemonPlugins(
       },
       extensions,
     )
-    const setup = await plugin.setup?.(context)
+    let setup: Awaited<ReturnType<NonNullable<typeof plugin.setup>>>
+    try {
+      setup = await plugin.setup?.(context)
+    } catch (error) {
+      logger.log("daemon.plugin_setup_failed", {
+        pluginName: plugin.name,
+        durationMs: Date.now() - startedAt,
+        ...toErrorProperties(error),
+      })
+      throw error
+    }
 
     if (setup?.ipcHandlers) {
       mergeIpcHandlers(ipcHandlers, setup.ipcHandlers as Record<string, unknown>)
@@ -223,12 +250,20 @@ async function setupDaemonPlugins(
     }
 
     if (setup?.close) {
-      closeHandlers.push(setup.close)
+      closeHandlers.push({
+        pluginName: plugin.name,
+        close: setup.close,
+      })
     }
 
     if (setup?.provides) {
       Object.assign(extensions, setup.provides)
     }
+
+    debug("daemon.plugins.setup_completed", {
+      pluginName: plugin.name,
+      durationMs: Date.now() - startedAt,
+    })
   }
 
   return {
@@ -236,7 +271,29 @@ async function setupDaemonPlugins(
     ipcHandlers,
     close: async () => {
       for (let index = closeHandlers.length - 1; index >= 0; index -= 1) {
-        await closeHandlers[index]?.()
+        const closeHandler = closeHandlers[index]
+        if (!closeHandler) {
+          continue
+        }
+
+        const startedAt = Date.now()
+        debug("daemon.plugins.close_started", {
+          pluginName: closeHandler.pluginName,
+        })
+        try {
+          await closeHandler.close()
+        } catch (error) {
+          logger.log("daemon.plugin_close_failed", {
+            pluginName: closeHandler.pluginName,
+            durationMs: Date.now() - startedAt,
+            ...toErrorProperties(error),
+          })
+          throw error
+        }
+        debug("daemon.plugins.close_completed", {
+          pluginName: closeHandler.pluginName,
+          durationMs: Date.now() - startedAt,
+        })
       }
     },
   }
