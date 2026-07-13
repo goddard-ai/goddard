@@ -6,7 +6,10 @@ import { inboxSdkPlugin } from "@goddard-ai/inbox/sdk"
 import { loopSdkPlugin } from "@goddard-ai/loop/sdk"
 import { pullRequestSdkPlugin } from "@goddard-ai/pull-request/sdk"
 import { reviewSessionSdkPlugin } from "@goddard-ai/review-session/sdk"
-import type { DaemonEventsStreamRequest } from "@goddard-ai/schema/daemon-ipc"
+import type {
+  DaemonEventsStreamRequest,
+  UpdateUserConfigRequest,
+} from "@goddard-ai/schema/daemon-ipc"
 import {
   composeSdkPlugins,
   type EventDefinition,
@@ -92,6 +95,16 @@ export type GoddardEventEnvelope = EventEnvelopeUnion<FeatureSdkEvents>
 /** Constructor options for the browser-safe daemon-backed SDK facade. */
 export type GoddardClientOptions = IpcClientOptions
 
+/** Builds the user configuration namespace with thin methods for daemon-owned persistence. */
+function createConfigNamespace(client: any) {
+  return {
+    /** Reads the persisted user configuration and composed rendering schema. */
+    get: async () => client.config.get(),
+    /** Applies one validated field update to the persisted user configuration. */
+    update: async (input: UpdateUserConfigRequest) => client.config.update(input),
+  }
+}
+
 /** Builds the health namespace with one thin method per daemon health IPC action. */
 function createDaemonNamespace(client: any) {
   return {
@@ -144,6 +157,7 @@ function createSessionNamespace(client: any, sessionFeature: FeatureSdkNamespace
 export class GoddardSdk {
   readonly #client: GoddardClient
 
+  readonly config: ReturnType<typeof createConfigNamespace>
   readonly daemon: ReturnType<typeof createDaemonNamespace>
   readonly events: EventsNamespace<FeatureSdkEvents>
   readonly auth: FeatureSdkNamespaces["auth"]
@@ -165,6 +179,7 @@ export class GoddardSdk {
       client: this.#client,
     }) as FeatureSdkNamespaces
 
+    this.config = createConfigNamespace(this.#client)
     this.daemon = createDaemonNamespace(this.#client)
     this.events = createEventsNamespace<FeatureSdkEvents>(this.#client)
     this.auth = features.auth

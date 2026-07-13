@@ -22,6 +22,14 @@ The daemon watches persisted Goddard configuration while it runs, but active wor
 - Runtime input supplies one-invocation overrides that do not implicitly become persisted preferences.
 - The useful user question is which scope supplied the current effective behavior, not which file the daemon happened to read first.
 
+## User configuration updates
+
+- Authorized daemon clients can read the current user-scoped root document together with the composed JSON Schema for the running daemon build.
+- Clients update one field at a time. The daemon applies each update to the latest document, validates the complete result, and atomically replaces the user config file while preserving unrelated fields.
+- The daemon owns the persisted `$schema` marker. Optional values and schema defaults remain absent until a client explicitly updates them.
+- Updates to daemon startup settings are saved but report that a daemon restart is required before they take effect.
+- Repository configuration and one-invocation runtime overrides are not changed by user configuration updates.
+
 ## Trust boundary
 
 - Repository-local configuration may shape non-executable daemon behavior such as session worktree preparation intent.

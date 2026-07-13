@@ -107,9 +107,10 @@ async function waitForCondition(condition: () => boolean) {
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
-  test("assigns daemon and feature namespaces during construction", () => {
+  test("assigns config, daemon, and feature namespaces during construction", () => {
     const { sdk } = createSdkWithClient()
 
+    expect(Object.hasOwn(sdk, "config")).toBe(true)
     expect(Object.hasOwn(sdk, "daemon")).toBe(true)
     expect(Object.hasOwn(sdk, "events")).toBe(true)
     expect(Object.hasOwn(sdk, "auth")).toBe(true)

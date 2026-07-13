@@ -29,6 +29,7 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 Use `@goddard-ai/sdk` when you need to:
 
 - Call daemon IPC actions through one stable SDK instance.
+- Inspect and update user-scoped root configuration through `sdk.config`.
 - Work from a browser-safe or other non-Node host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
@@ -53,6 +54,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 
 Namespaces:
 
+- `sdk.config`
 - `sdk.daemon`
 - `sdk.auth`
 - `sdk.pr`

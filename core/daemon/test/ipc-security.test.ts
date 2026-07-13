@@ -247,6 +247,21 @@ test("daemon browser pairing issues origin-bound revocable tokens", async () => 
   await expect(browserClient.auth.whoami()).resolves.toMatchObject({
     githubUsername: "alec",
   })
+  const userConfig = await browserClient.config.get()
+  expect(userConfig.schema).toMatchObject({
+    type: "object",
+    properties: { agents: expect.any(Object) },
+  })
+  await expect(
+    browserClient.config.update({
+      operation: "set",
+      path: "/agents/default",
+      value: "pi-acp",
+    }),
+  ).resolves.toMatchObject({
+    document: { agents: { default: "pi-acp" } },
+    restartRequired: false,
+  })
 
   seedAuthorizedSession({
     sessionId: "ses_browser_direct",

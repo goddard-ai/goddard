@@ -11,6 +11,7 @@ import {
   type BrowserAccessPairingStartRequest,
   type BrowserAccessWebviewTokenCreateRequest,
   type DaemonEventsStreamRequest,
+  type UpdateUserConfigRequest,
 } from "@goddard-ai/schema/daemon-ipc"
 import { createDaemonUrl } from "@goddard-ai/schema/daemon-url"
 import { type DaemonSession } from "@goddard-ai/session/schema"
@@ -24,6 +25,7 @@ import {
 import { IpcRequestContext } from "../context.ts"
 import { createDebug, createLogger, readSessionIdForLog } from "../logging.ts"
 import type { DaemonRuntime } from "../runtime.ts"
+import { createUserConfigService } from "../user-config.ts"
 import type { DaemonServer } from "./types.ts"
 
 export async function startDaemonServer(
@@ -40,7 +42,12 @@ export async function startDaemonServer(
     rootConfig.config.daemon?.browserAccess,
   )
   const browserAccessService = createBrowserAccessService(store, browserAccessConfig)
+  const userConfigService = createUserConfigService()
   const ipcHandlers = {
+    config: {
+      get: () => userConfigService.get(),
+      update: ({ body }: { body: UpdateUserConfigRequest }) => userConfigService.update(body),
+    },
     daemon: {
       health: async () => ({ ok: true }),
       browserAccess: {

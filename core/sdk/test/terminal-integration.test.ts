@@ -1,5 +1,5 @@
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
-import { startDaemonServer } from "@goddard-ai/daemon/ipc"
+import { createDaemonRuntime, startDaemonServer } from "@goddard-ai/daemon/ipc"
 import type { IpcClientHookEvent } from "@goddard-ai/ipc"
 import { expect, test } from "bun:test"
 
@@ -45,6 +45,15 @@ function createBackendClient() {
   }
 }
 
+async function startTestServer() {
+  const runtime = await createDaemonRuntime({
+    backendClient: createBackendClient() as never,
+    port: 0,
+  })
+  const server = await startDaemonServer(runtime)
+  return { runtime, server }
+}
+
 async function waitFor(check: () => boolean, timeoutMs = 3000) {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
@@ -57,7 +66,7 @@ async function waitFor(check: () => boolean, timeoutMs = 3000) {
 }
 
 test("SDK terminal connections serialize HTTP controls", async () => {
-  const server = await startDaemonServer(createBackendClient() as never, { port: 0 })
+  const { runtime, server } = await startTestServer()
   const writeLifecycle: IpcClientHookEvent["type"][] = []
   const client = createDaemonIpcClient({
     daemonUrl: server.daemonUrl,
@@ -91,11 +100,12 @@ test("SDK terminal connections serialize HTTP controls", async () => {
   } finally {
     await stop?.()
     await server.close()
+    await runtime.close()
   }
 })
 
 test("SDK terminal subscriptions report unexpected stream failure", async () => {
-  const server = await startDaemonServer(createBackendClient() as never, { port: 0 })
+  const { runtime, server } = await startTestServer()
   const client = createDaemonIpcClient({ daemonUrl: server.daemonUrl })
   const terminal = await new GoddardSdk({ client }).terminal.connect()
   const streamFailure = new Error("output handler failed")
@@ -119,5 +129,6 @@ test("SDK terminal subscriptions report unexpected stream failure", async () => 
     ).rejects.toThrow()
   } finally {
     await server.close()
+    await runtime.close()
   }
 })

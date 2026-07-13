@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test"
 
 import { buildRootConfigSchema, mergeRootConfigLayers } from "../src/config-schema.ts"
-import { buildGeneratedSchemaArtifacts } from "../src/json-schemas.ts"
+import {
+  buildEditableRootConfigJsonSchema,
+  buildGeneratedSchemaArtifacts,
+} from "../src/json-schemas.ts"
 
 test("daemon root config schema accepts session title generator model config", () => {
   const config = buildRootConfigSchema().parse({
@@ -95,6 +98,19 @@ test("generated goddard schema embeds the model schema once under local defs", (
   expect((defs.SessionTitlesConfig?.properties as Record<string, unknown>)?.generator).toEqual({
     $ref: "#/$defs/ModelConfig",
   })
+})
+
+test("editable root config schema embeds every referenced ACP definition", () => {
+  const schema = buildEditableRootConfigJsonSchema()
+  const references = collectSchemaReferences(schema)
+  const defs = schema.$defs as Record<string, unknown>
+
+  expect(references.some((reference) => reference.startsWith("http"))).toBe(false)
+  for (const reference of references) {
+    expect(reference.startsWith("#/$defs/")).toBe(true)
+    expect(defs[reference.slice("#/$defs/".length)]).toBeTruthy()
+  }
+  expect(defs.ACP_McpServer).toBeTruthy()
 })
 
 test("root config merging rejects non-object config fragments before merging", async () => {
@@ -197,3 +213,18 @@ test("root config merging keeps session profiles global only", async () => {
     }),
   ).rejects.toThrow("`sessionProfiles` is only supported in the global Goddard config.")
 })
+
+function collectSchemaReferences(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(collectSchemaReferences)
+  }
+  if (typeof value !== "object" || value === null) {
+    return []
+  }
+
+  const record = value as Record<string, unknown>
+  return [
+    ...(typeof record.$ref === "string" ? [record.$ref] : []),
+    ...Object.values(record).flatMap(collectSchemaReferences),
+  ]
+}

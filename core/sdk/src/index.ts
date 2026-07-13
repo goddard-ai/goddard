@@ -9,7 +9,14 @@ export type {
   DaemonEventOptions,
   DaemonEventPropertyFilter,
   DaemonEventsStreamRequest,
+  GetUserConfigResponse,
+  UpdateUserConfigRequest,
+  UpdateUserConfigResponse,
+  UserConfigDocument,
+  UserConfigIpcError,
+  UserConfigJsonSchema,
 } from "@goddard-ai/schema/daemon-ipc"
+export { UserConfigErrorCodes, UserConfigIpcErrors } from "@goddard-ai/schema/daemon-ipc"
 export type {
   FileSearchComposerEntriesRequest,
   FileSearchComposerEntriesResponse,

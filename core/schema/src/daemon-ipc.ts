@@ -1,4 +1,12 @@
-import { $type, defineIpcRoutes, http, metadata, ndjson } from "@goddard-ai/ipc"
+import {
+  $type,
+  defineIpcRoutes,
+  http,
+  metadata,
+  ndjson,
+  type IpcErrorRegistry,
+  type IpcErrorRegistryError,
+} from "@goddard-ai/ipc"
 import { z } from "zod"
 
 /** Core IPC error codes shared by clients and non-feature surfaces. */
@@ -13,6 +21,73 @@ export const DaemonIpcErrorCode = z.enum([
   DaemonIpcErrorCodes.InvalidRequest,
   DaemonIpcErrorCodes.Unavailable,
 ])
+
+/** Client-visible user configuration error codes shared across daemon, SDK, and app layers. */
+export const UserConfigErrorCodes = {
+  InvalidDocument: "config.invalid_document",
+  InvalidPatch: "config.invalid_patch",
+  Unavailable: "config.unavailable",
+} as const
+
+/** Structured client-visible errors produced by user configuration operations. */
+export const UserConfigIpcErrors = {
+  InvalidDocument: {
+    code: UserConfigErrorCodes.InvalidDocument,
+    details: z.strictObject({
+      paths: z.array(z.string()),
+    }),
+  },
+  InvalidPatch: {
+    code: UserConfigErrorCodes.InvalidPatch,
+    details: z.strictObject({
+      path: z.string(),
+    }),
+  },
+  Unavailable: {
+    code: UserConfigErrorCodes.Unavailable,
+    details: z.undefined(),
+  },
+} as const satisfies IpcErrorRegistry
+
+/** Client-visible error union produced by user configuration operations. */
+export type UserConfigIpcError = IpcErrorRegistryError<typeof UserConfigIpcErrors>
+
+/** JSON-compatible root user configuration document without its daemon-owned schema marker. */
+export type UserConfigDocument = Record<string, unknown>
+
+/** Composed JSON Schema used by clients to render root user configuration. */
+export type UserConfigJsonSchema = Record<string, unknown>
+
+/** Current root user configuration and the schema that governs it. */
+export type GetUserConfigResponse = {
+  document: UserConfigDocument
+  schema: UserConfigJsonSchema
+}
+
+const JsonPointer = z.string().regex(/^\/(?:[^~/]|~[01])*(?:\/(?:[^~/]|~[01])*)*$/)
+
+export const UpdateUserConfigRequest = z.strictObject({
+  operation: z.enum(["set", "remove"]),
+  path: JsonPointer,
+  value: z.unknown().optional(),
+})
+
+export type UpdateUserConfigRequest =
+  | {
+      operation: "set"
+      path: string
+      value: unknown
+    }
+  | {
+      operation: "remove"
+      path: string
+    }
+
+/** Persisted document and runtime restart status after one field update. */
+export type UpdateUserConfigResponse = {
+  document: UserConfigDocument
+  restartRequired: boolean
+}
 
 export const BrowserAccessPairingStartRequest = z.strictObject({
   label: z.string().min(1).max(120).optional(),
@@ -120,6 +195,24 @@ export type DaemonEventsStreamRequest = z.infer<typeof DaemonEventsStreamRequest
 
 /** Core IPC routes that are not owned by feature packages. */
 export const coreDaemonIpcRoutes = defineIpcRoutes({
+  config: http.resource("config", {
+    ...metadata({
+      description: "User-scoped Goddard runtime configuration.",
+    }),
+    get: http.get("get", {
+      ...metadata({
+        description: "Reads the user configuration document and active composed JSON Schema.",
+      }),
+      response: $type<GetUserConfigResponse>(),
+    }),
+    update: http.post("update", {
+      ...metadata({
+        description: "Applies one validated field update to the user configuration document.",
+      }),
+      body: UpdateUserConfigRequest,
+      response: $type<UpdateUserConfigResponse>(),
+    }),
+  }),
   daemon: http.resource("daemon", {
     ...metadata({
       description: "Core health and browser-access control.",

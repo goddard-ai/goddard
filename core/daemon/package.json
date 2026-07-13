@@ -29,6 +29,7 @@
     "test": "bun test --dots --timeout=90000"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "catalog:",
     "@b9g/async-context": "catalog:",
     "@goddard-ai/action": "workspace:*",
     "@goddard-ai/auth": "workspace:*",
@@ -59,7 +60,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "catalog:",
     "@goddard-ai/backend": "workspace:*",
     "@goddard-ai/fixtures": "workspace:*",
     "@goddard-ai/worktree-plugin": "workspace:*",

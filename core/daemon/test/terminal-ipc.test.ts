@@ -3,7 +3,7 @@ import type { TerminalDaemonEvent } from "@goddard-ai/schema/daemon/terminals"
 import { expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { startDaemonServer } from "../src/ipc.ts"
+import { createDaemonRuntime, startDaemonServer } from "../src/ipc.ts"
 
 function createBackendClient(): BackendClient {
   return {
@@ -57,7 +57,11 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3000
 }
 
 test("daemon terminal IPC owns connection-local instances and disposes them on stream close", async () => {
-  const server = await startDaemonServer(createBackendClient(), { port: 0 })
+  const runtime = await createDaemonRuntime({
+    backendClient: createBackendClient(),
+    port: 0,
+  })
+  const server = await startDaemonServer(runtime)
   const client = createDaemonIpcClient({ daemonUrl: server.daemonUrl })
   const streamController = new AbortController()
   let consumeEvents: Promise<void> | null = null
@@ -136,5 +140,6 @@ test("daemon terminal IPC owns connection-local instances and disposes them on s
     streamController.abort()
     await consumeEvents?.catch(() => {})
     await server.close()
+    await runtime.close()
   }
 })
