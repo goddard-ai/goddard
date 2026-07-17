@@ -1,23 +1,20 @@
-import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createDaemonIpcClient } from "@goddard-ai/daemon-client/node"
 import { getGlobalConfigPath, getLocalConfigPath } from "@goddard-ai/paths/node"
+import { REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED } from "@goddard-ai/remote-repo/backend"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import type { DaemonSession } from "@goddard-ai/session/schema"
 import { afterEach, expect, test } from "bun:test"
 
 import { settleWindowsHandles } from "../../test-support/windows-fixtures.ts"
 import type { BackendClient } from "../src/backend.ts"
 import { createConfigManager } from "../src/config-manager.ts"
-import { resolveRuntimeConfig } from "../src/config.ts"
-import { SetupContext } from "../src/context.ts"
-import type { FeedbackEvent } from "../src/feedback.ts"
-import { startDaemonServer } from "../src/ipc.ts"
-import { configureLogging } from "../src/logging.ts"
-import { runPrFeedbackFlow } from "../src/pr-feedback-run.ts"
+import { createDaemonRuntime, startDaemonServer, type DaemonServer } from "../src/ipc.ts"
+import type { DaemonRuntime } from "../src/runtime.ts"
 import { createWrappedNodeAgent } from "./acp-fixture.ts"
-import { send } from "./ipc-client-helpers.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -48,19 +45,22 @@ test("config manager promotes valid root config edits and preserves the last goo
   await useTempHome()
   const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-manager-repo-"))
   cleanup.push(() => removeTemporaryPath(repoDir))
-
-  const output: string[] = []
-  const restoreLogging = configureLogging({
-    mode: "json",
-    writeLine: (line) => {
-      output.push(line)
+  const reloadFailedEvents: Array<{
+    name: string
+    payload: {
+      watchScope?: string
+      localConfigPath?: string
+      errorMessage?: string
+    }
+  }> = []
+  const configManager = createConfigManager({
+    onReloadFailed: (payload) => {
+      reloadFailedEvents.push({
+        name: "config.reload.failed",
+        payload,
+      })
     },
   })
-  cleanup.push(async () => {
-    restoreLogging()
-  })
-
-  const configManager = createConfigManager()
   cleanup.push(() => closeConfigManager(configManager))
 
   const firstSnapshot = await configManager.getRootConfig(repoDir)
@@ -138,11 +138,18 @@ test("config manager promotes valid root config edits and preserves the last goo
   expect(recoveredSnapshot).toBeTruthy()
   expect(recoveredSnapshot!.version).toBeGreaterThan(renamedSnapshot!.version)
 
-  const previousLocalFailureCount = countLocalReloadFailures(output)
+  const previousLocalFailureCount = countLocalReloadFailures(reloadFailedEvents)
   await writeFile(localConfigPath, "{ invalid json\n", "utf-8")
 
   await waitFor(() => {
-    return countLocalReloadFailures(output) > previousLocalFailureCount
+    return countLocalReloadFailures(reloadFailedEvents) > previousLocalFailureCount
+  })
+  expect(reloadFailedEvents.at(-1)).toMatchObject({
+    name: "config.reload.failed",
+    payload: {
+      watchScope: "local",
+      localConfigPath,
+    },
   })
 
   const fallbackSnapshot = await configManager.getRootConfig(repoDir)
@@ -150,6 +157,131 @@ test("config manager promotes valid root config edits and preserves the last goo
   expect(fallbackSnapshot.version).toBeGreaterThanOrEqual(recoveredSnapshot!.version)
   expect(fallbackSnapshot.config.session?.agent).toBe("claude-acp")
   expect(fallbackSnapshot.config.actions?.session?.agent).toBe("gemini-acp")
+})
+
+test("config manager serializes atomic global updates and preserves unrelated config", async () => {
+  await useTempHome()
+  const repoDir = await mkdtemp(join(tmpdir(), "goddard-config-writer-repo-"))
+  cleanup.push(() => removeTemporaryPath(repoDir))
+  await writeGlobalRootConfig({
+    agents: {
+      default: "codex-acp",
+    },
+  })
+
+  const configManager = createConfigManager()
+  cleanup.push(() => closeConfigManager(configManager))
+  await configManager.getRootConfig(repoDir)
+
+  await Promise.all([
+    configManager.updateGlobalConfig((config) => ({
+      ...config,
+      sessionProfiles: {
+        "codex-acp": {
+          routine: {
+            model: "gpt-5.4-mini-low",
+            thoughtLevel: "low",
+            approvalMode: "default",
+          },
+        },
+      },
+    })),
+    configManager.updateGlobalConfig((config) => ({
+      ...config,
+      security: {
+        pullRequests: {
+          submit: "deny",
+        },
+      },
+    })),
+  ])
+
+  const persisted = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(persisted).toMatchObject({
+    $schema: rootConfigSchemaUrl,
+    agents: {
+      default: "codex-acp",
+    },
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+        },
+      },
+    },
+  })
+  expect(configManager.getLastKnownRootConfig(repoDir)?.config).toMatchObject({
+    agents: {
+      default: "codex-acp",
+    },
+    security: {
+      pullRequests: {
+        submit: "deny",
+      },
+    },
+    sessionProfiles: {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+        },
+      },
+    },
+  })
+})
+
+test("session profile IPC manages fixed profiles in global config", async () => {
+  await useTempHome()
+  await writeGlobalRootConfig({
+    agents: {
+      default: "codex-acp",
+    },
+  })
+
+  const configManager = createConfigManager()
+  cleanup.push(() => closeConfigManager(configManager))
+  const daemon = await startServer(configManager)
+  const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
+
+  await expect(client.session.profile.list({})).resolves.toEqual({ profiles: {} })
+
+  const configured = await client.session.profile.set({
+    agentId: "codex-acp",
+    profileId: "debug",
+    profile: {
+      model: "gpt-5.4-medium",
+      thoughtLevel: "medium",
+      approvalMode: "default",
+    },
+  })
+  expect(configured.profiles).toEqual({
+    "codex-acp": {
+      debug: {
+        model: "gpt-5.4-medium",
+        thoughtLevel: "medium",
+        approvalMode: "default",
+      },
+    },
+  })
+
+  const persisted = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(persisted.agents).toEqual({ default: "codex-acp" })
+  expect(persisted.sessionProfiles).toEqual(configured.profiles)
+
+  await expect(
+    client.session.profile.remove({
+      agentId: "codex-acp",
+      profileId: "debug",
+    }),
+  ).resolves.toEqual({ profiles: {} })
+
+  const removed = JSON.parse(await readFile(getGlobalConfigPath(), "utf8"))
+  expect(removed.agents).toEqual({ default: "codex-acp" })
+  expect(removed.sessionProfiles).toBeUndefined()
 })
 
 test(
@@ -213,7 +345,7 @@ test(
 )
 
 test(
-  "runPrFeedbackFlow picks up updated root-config agent defaults without restarting the daemon",
+  "pull request feedback handler picks up updated root-config agent defaults without restarting the daemon",
   async () => {
     await useTempHome()
     const repoDir = await mkdtemp(join(tmpdir(), "goddard-pr-feedback-reload-repo-"))
@@ -231,55 +363,119 @@ test(
     cleanup.push(() => closeConfigManager(configManager))
     const daemon = await startServer(configManager)
     const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
-
-    const firstExitCode = await runPrFeedbackFlow({
-      event: createFeedbackEvent(),
-      prompt: "Reply briefly.",
-      daemonUrl: daemon.daemonUrl,
-      agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
-      configManager,
-      store: db,
-      resolveProjectDir: () => repoDir,
-    })
-    expect(firstExitCode).toBe(0)
-
-    const firstSessions = db.sessions.findMany()
-    const firstSessionIds = new Set(firstSessions.map((session: DaemonSession) => session.id))
-    expect(firstSessions.map((session: DaemonSession) => session.agentName)).toEqual([
-      "Node Agent A",
-    ])
-
-    await writeGlobalRootConfig({
-      session: {
-        agent: agentB,
+    const feedbackFinishedEvents: Array<{
+      name?: string
+      payload?: { repository?: string; prNumber?: number; feedbackType?: string; exitCode?: number }
+    }> = []
+    const feedbackFailedEvents: Array<{
+      name?: string
+      payload?: { repository?: string; prNumber?: number; feedbackType?: string; phase?: string }
+    }> = []
+    const abortController = new AbortController()
+    const eventStream = await client.events.stream(
+      {
+        names: ["pull_request.feedback.finished", "pull_request.feedback.failed"],
       },
-    })
+      {
+        signal: abortController.signal,
+      },
+    )
+    const eventsDone = (async () => {
+      for await (const event of eventStream) {
+        if (event && typeof event === "object" && "name" in event) {
+          if ((event as { name?: string }).name === "pull_request.feedback.finished") {
+            feedbackFinishedEvents.push(event as (typeof feedbackFinishedEvents)[number])
+            continue
+          }
+          if ((event as { name?: string }).name === "pull_request.feedback.failed") {
+            feedbackFailedEvents.push(event as (typeof feedbackFailedEvents)[number])
+          }
+        }
+      }
+    })()
+    const unsubscribeEvents = () => {
+      abortController.abort()
+      return eventsDone.catch(() => {})
+    }
+    const feedbackHandler = daemon.backendEventHandlers.find(
+      (handler) => handler.name === "pull-request.feedback",
+    )
+    expect(feedbackHandler).toBeDefined()
+    db.pullRequests.putByUnique(
+      {
+        host: "github",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+      },
+      {
+        host: "github",
+        owner: "acme",
+        repo: "widgets",
+        prNumber: 12,
+        cwd: repoDir,
+      },
+    )
 
-    await waitFor(() => {
-      const agent = configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent
-      return typeof agent === "object" && agent?.name === "Node Agent B"
-    })
+    try {
+      await feedbackHandler?.handle(createFeedbackBackendEvent())
 
-    const secondExitCode = await runPrFeedbackFlow({
-      event: createFeedbackEvent(),
-      prompt: "Reply briefly.",
-      daemonUrl: daemon.daemonUrl,
-      agentBinDir: fileURLToPath(new URL("../agent-bin", import.meta.url)),
-      configManager,
-      store: db,
-      resolveProjectDir: () => repoDir,
-    })
-    expect(secondExitCode).toBe(0)
+      await waitFor(async () => {
+        if (feedbackFinishedEvents.length !== 1) {
+          return false
+        }
+        const listed = await client.session.list({ limit: 50 })
+        return listed.sessions.length === 1
+      })
 
-    const secondSession = db.sessions
-      .findMany()
-      .find((session: DaemonSession) => firstSessionIds.has(session.id) === false)
-    expect(secondSession?.agentName).toBe("Node Agent B")
+      const firstListed = await client.session.list({ limit: 50 })
+      const firstSessionIds = new Set(
+        firstListed.sessions.map((session: DaemonSession) => session.id),
+      )
+      const firstSession = await client.session.get({ id: firstListed.sessions[0].id })
+      expect(firstSession.session.agentName).toBe("Node Agent A")
 
-    for (const sessionId of [...firstSessionIds, secondSession?.id].filter(
-      (value) => value != null,
-    )) {
-      await send(client, "session.shutdown", { id: sessionId })
+      await writeGlobalRootConfig({
+        session: {
+          agent: agentB,
+        },
+      })
+
+      await waitFor(() => {
+        const agent = configManager.getLastKnownRootConfig(repoDir)?.config.session?.agent
+        return typeof agent === "object" && agent?.name === "Node Agent B"
+      })
+
+      await feedbackHandler?.handle(createFeedbackBackendEvent())
+
+      await waitFor(async () => {
+        if (feedbackFinishedEvents.length !== 2) {
+          return false
+        }
+        const listed = await client.session.list({ limit: 50 })
+        return listed.sessions.length === 2
+      })
+
+      const secondListed = await client.session.list({ limit: 50 })
+      const secondSessionSummary = secondListed.sessions.find(
+        (session: DaemonSession) => firstSessionIds.has(session.id) === false,
+      )
+      expect(secondSessionSummary).toBeTruthy()
+      const secondSession = await client.session.get({ id: secondSessionSummary!.id })
+      expect(secondSession.session.agentName).toBe("Node Agent B")
+      expect(feedbackFailedEvents).toHaveLength(0)
+      expect(
+        feedbackFinishedEvents.map(
+          (event) =>
+            `${event.payload?.repository}#${event.payload?.prNumber}:${event.payload?.feedbackType}:${event.payload?.exitCode}`,
+        ),
+      ).toEqual(["acme/widgets#12:comment:0", "acme/widgets#12:comment:0"])
+
+      for (const sessionId of secondListed.sessions.map((session: DaemonSession) => session.id)) {
+        await client.session.shutdown({ id: sessionId })
+      }
+    } finally {
+      await Promise.resolve(unsubscribeEvents()).catch(() => {})
     }
   },
   AGENT_LAUNCH_TEST_TIMEOUT_MS,
@@ -293,9 +489,10 @@ function createFixtureAgent(name: string) {
   }
 }
 
-function createFeedbackEvent(): FeedbackEvent {
+function createFeedbackEvent(): Extract<RepoEvent, { type: "comment" }> {
   return {
     type: "comment",
+    provider: "github",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,
@@ -306,22 +503,39 @@ function createFeedbackEvent(): FeedbackEvent {
   }
 }
 
+function createFeedbackBackendEvent() {
+  return {
+    name: REMOTE_REPO_PULL_REQUEST_COMMENT_CREATED,
+    payload: createFeedbackEvent(),
+  }
+}
+
 async function startServer(configManager: ReturnType<typeof createConfigManager>) {
-  const runtime = resolveRuntimeConfig({
-    port: 0,
-  })
   const daemonClient = createTestBackendClient()
-  const daemon = await SetupContext.run({ runtime, configManager }, () =>
-    startDaemonServer(daemonClient, {
-      port: runtime.port,
-      agentBinDir: runtime.agentBinDir,
-      store: db,
-    }),
-  )
-  cleanup.push(async () => {
-    await daemon.close()
+  const daemonRuntime = await createDaemonRuntime({
+    backendClient: daemonClient,
+    configManager,
+    port: 0,
+    store: db,
   })
-  return daemon
+  const daemon = await startDaemonServer(daemonRuntime)
+  const closeDaemonServer = daemon.close
+  const server = Object.assign(daemon, {
+    backendEventHandlers: daemonRuntime.backendEventHandlers,
+    close: () => closeServerAndRuntime(closeDaemonServer, daemonRuntime),
+  })
+  cleanup.push(async () => {
+    await server.close()
+  })
+  return server
+}
+
+async function closeServerAndRuntime(
+  closeDaemonServer: DaemonServer["close"],
+  runtime: DaemonRuntime,
+) {
+  await closeDaemonServer()
+  await runtime.close()
 }
 
 function createTestBackendClient(): BackendClient {
@@ -359,16 +573,13 @@ function createTestBackendClient(): BackendClient {
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    remoteRepo: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
+    events: {
+      stream: async () => emptyBackendEvents(),
     },
   } as unknown as BackendClient
 }
+
+async function* emptyBackendEvents(): AsyncIterable<never> {}
 
 async function closeConfigManager(configManager: ReturnType<typeof createConfigManager>) {
   await configManager.close()
@@ -416,16 +627,11 @@ async function writePromptOnlyAction(repoDir: string, actionName: string, prompt
   await writeFile(join(actionsDir, `${actionName}.md`), `${prompt}\n`, "utf-8")
 }
 
-function readLogs(lines: string[]) {
-  return lines
-    .flatMap((chunk) => chunk.split("\n"))
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-}
-
-function countLocalReloadFailures(lines: string[]) {
-  return readLogs(lines).filter(
-    (entry) => entry.event === "config.reload_failed" && entry.watchScope === "local",
+function countLocalReloadFailures(
+  events: Array<{ name: string; payload: { watchScope?: string } }>,
+) {
+  return events.filter(
+    (event) => event.name === "config.reload.failed" && event.payload.watchScope === "local",
   ).length
 }
 

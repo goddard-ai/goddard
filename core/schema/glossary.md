@@ -57,3 +57,9 @@
 - `Agent Loop`
   - A repeated prompting workflow built on top of a daemon-backed session.
   - Why: so long-running agent behavior can be described as a stable contract with pacing and retry semantics.
+- `Terminal Instance`
+  - A daemon-managed PTY identified by a client-chosen id that is local to one terminal connection.
+  - Why: so terminal control requests cannot address terminals created by another client connection.
+- `Terminal Lifecycle Event`
+  - A daemon-to-client stream event describing terminal creation, output, process exit, title, cwd, or runtime errors.
+  - Why: so desktop hosts can keep terminal state synchronized without treating terminals as durable daemon records.

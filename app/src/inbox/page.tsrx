@@ -2,10 +2,8 @@ import { t } from "@lingui/core/macro"
 import { useEffect, useMemo, useState } from "preact/hooks"
 import type {
   BulkUpdateInboxItemsRequest,
-  CompleteSessionInboxItemRequest,
   InboxEntityId,
   InboxItem,
-  UpdateInboxItemRequest,
 } from "@goddard-ai/inbox/schema"
 import { useSearchNavigation } from "@goddard-ai/ui-primitives"
 
@@ -24,11 +22,11 @@ import {
 } from "./filters.ts"
 import { InboxList } from "./list.tsrx"
 import {
-  bulkUpdateInboxItems as runBulkUpdateInboxItems,
-  completeSessionInboxItem as runCompleteSessionInboxItem,
+  bulkUpdateInboxItems,
+  completeSessionInboxItem,
   InboxPageMutations,
   invalidateInboxQueries,
-  updateInboxItem as runUpdateInboxItem,
+  updateInboxItem,
 } from "./mutations.ts"
 import { InboxToolbar } from "./toolbar.tsrx"
 import { getInboxListRequest } from "./queries.ts"
@@ -40,6 +38,7 @@ import {
 } from "./search.ts"
 import { openInboxItemInWorkbench } from "./open.ts"
 import { handleInboxItemsLoaded } from "./session-visit.ts"
+import { startInboxUpdateStream } from "./update-stream.ts"
 import styles from "./page.style.ts"
 
 function getErrorMessage(error: unknown) {
@@ -52,7 +51,6 @@ function getErrorMessage(error: unknown) {
 
 function InboxQueryContent(props: {
   filterId: InboxFilterId;
-  realtimeErrorMessage: string | null;
   searchQuery: string;
   selectedEntityIds: ReadonlySet<InboxEntityId>;
   showProjectNames: boolean;
@@ -61,7 +59,6 @@ function InboxQueryContent(props: {
   onFilterSelect: (id: InboxFilterId) => void;
   onItemSelectionChange: (item: InboxItem, isSelected: boolean) => void;
   onOpenItem: (item: InboxItem) => void;
-  onRefresh: () => void;
   onSearchInput: (value: string) => void;
 }) @{
   const parsedSearch = parseInboxSearchQuery(props.searchQuery)
@@ -109,19 +106,9 @@ function InboxQueryContent(props: {
       onBulkAction={props.onBulkAction}
       onClearSelectedItems={props.onClearSelectedItems}
       onFilterSelect={props.onFilterSelect}
-      onRefresh={() => {
-        navigation.resetActiveIndex()
-        props.onRefresh()
-      }}
       onSearchInput={props.onSearchInput}
     />
     <div class={styles.listBody}>
-      @if (props.realtimeErrorMessage) {
-        <div class={styles.realtimeNotice} role="status" title={props.realtimeErrorMessage}>
-          {t`Realtime inbox updates are unavailable. Manual refresh still works.`}
-        </div>
-      }
-
       <InboxList
         filterId={props.filterId}
         itemRef={navigation.itemRef}
@@ -143,7 +130,6 @@ function InboxPageControls(props: {
   onBulkAction: (label: string, input: Omit<BulkUpdateInboxItemsRequest, "entityIds">) => void;
   onClearSelectedItems: () => void;
   onFilterSelect: (id: InboxFilterId) => void;
-  onRefresh: () => void;
   onSearchInput: (value: string) => void;
 }) @{
   <>
@@ -152,7 +138,6 @@ function InboxPageControls(props: {
       inputRef={props.inputRef}
       searchQuery={props.searchQuery}
       onFilterSelect={props.onFilterSelect}
-      onRefresh={props.onRefresh}
       onSearchInput={props.inputRef ? undefined : props.onSearchInput}
     />
     <InboxBulkToolbar
@@ -184,7 +169,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
   const workbenchTabSet = useWorkbenchTabSet()
   const [filterId, setFilterId] = useState<InboxFilterId>(DEFAULT_INBOX_FILTER_ID)
   const [searchQuery, setSearchQuery] = useState("")
-  const [realtimeErrorMessage, setRealtimeErrorMessage] = useState<string | null>(null)
   const [selectedEntityIds, setSelectedEntityIds] = useState<ReadonlySet<InboxEntityId>>(
     () => new Set(),
   )
@@ -216,36 +200,7 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     selectInboxFilter("archived")
   })
 
-  useEffect(() => {
-    const controller = new AbortController()
-
-    void (async () => {
-      try {
-        const items = await goddardSdk.inbox.streamItems(undefined, { signal: controller.signal })
-        const iterator = items[Symbol.asyncIterator]()
-        while (!controller.signal.aborted) {
-          const result = await iterator.next()
-          if (result.done) {
-            break
-          }
-
-          const item = result.value
-          setRealtimeErrorMessage(null)
-          handleInboxItemsLoaded([item])
-          invalidateInboxQueries()
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.error("Failed to subscribe to inbox updates.", error)
-          setRealtimeErrorMessage(getErrorMessage(error))
-        }
-      }
-    })()
-
-    return () => {
-      controller.abort()
-    }
-  }, [])
+  useEffect(() => startInboxUpdateStream(), [])
 
   function clearSelectedInboxItems() {
     setSelectedEntityIds(new Set())
@@ -261,18 +216,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
       }
       return nextIds
     })
-  }
-
-  function runBulkActionFromControls(
-    label: string,
-    input: Omit<BulkUpdateInboxItemsRequest, "entityIds">,
-  ) {
-    void runBulkInboxAction(label, input)
-  }
-
-  function refreshInboxList() {
-    clearSelectedInboxItems()
-    invalidateInboxQueries()
   }
 
   function updateSearchQuery(value: string) {
@@ -314,18 +257,6 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
     }
   }
 
-  async function updateInboxItem(input: UpdateInboxItemRequest) {
-    return await runUpdateInboxItem(input)
-  }
-
-  async function bulkUpdateInboxItems(input: BulkUpdateInboxItemsRequest) {
-    return await runBulkUpdateInboxItems(input)
-  }
-
-  async function completeSessionInboxItem(input: CompleteSessionInboxItemRequest) {
-    return await runCompleteSessionInboxItem(input)
-  }
-
   async function openInboxItem(item: InboxItem) {
     try {
       await openInboxItemInWorkbench({ item, workbenchTabSet })
@@ -352,18 +283,14 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
       @try {
         <InboxQueryContent
           {filterId}
-          {realtimeErrorMessage}
           {searchQuery}
           {selectedEntityIds}
           showProjectNames={!props.projectPath}
-          onBulkAction={runBulkActionFromControls}
+          onBulkAction={runBulkInboxAction}
           onClearSelectedItems={clearSelectedInboxItems}
           onFilterSelect={selectInboxFilter}
           onItemSelectionChange={setInboxItemSelected}
-          onOpenItem={(item) => {
-            void openInboxItem(item)
-          }}
-          onRefresh={refreshInboxList}
+          onOpenItem={openInboxItem}
           onSearchInput={updateSearchQuery}
         />
       } @pending {
@@ -372,19 +299,12 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             {filterId}
             {searchQuery}
             selectedCount={selectedEntityIds.size}
-            onBulkAction={runBulkActionFromControls}
+            onBulkAction={runBulkInboxAction}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
-            onRefresh={refreshInboxList}
             onSearchInput={updateSearchQuery}
           />
           <div class={styles.listBody}>
-            @if (realtimeErrorMessage) {
-              <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
-                {t`Realtime inbox updates are unavailable. Manual refresh still works.`}
-              </div>
-            }
-
             <InboxList
               {filterId}
               items={[]}
@@ -398,7 +318,8 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
         </>
       } @catch (error, retry) {
         const resetInboxBoundary = () => {
-          refreshInboxList()
+          clearSelectedInboxItems()
+          invalidateInboxQueries()
           retry()
         }
         useErrorBoundaryReset(resetInboxBoundary)
@@ -408,19 +329,12 @@ export default function InboxPage(props: { projectName?: string; projectPath?: s
             {filterId}
             {searchQuery}
             selectedCount={selectedEntityIds.size}
-            onBulkAction={runBulkActionFromControls}
+            onBulkAction={runBulkInboxAction}
             onClearSelectedItems={clearSelectedInboxItems}
             onFilterSelect={selectInboxFilter}
-            onRefresh={refreshInboxList}
             onSearchInput={updateSearchQuery}
           />
           <div class={styles.listBody}>
-            @if (realtimeErrorMessage) {
-              <div class={styles.realtimeNotice} role="status" title={realtimeErrorMessage}>
-                Realtime inbox updates are unavailable. Manual refresh still works.
-              </div>
-            }
-
             <InboxList
               errorMessage={getErrorMessage(error)}
               {filterId}

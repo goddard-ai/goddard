@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./**/*.ts", "../daemon-ipc.ts", "../index.ts"],
+  "exclude": [],
+  "compilerOptions": {
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "types": [],
+    "rootDir": ".."
+  }
+}

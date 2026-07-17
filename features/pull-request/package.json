@@ -29,6 +29,14 @@
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
     },
+    "./events": {
+      "types": {
+        "source": "./src/events.ts",
+        "default": "./dist/events.d.mts"
+      },
+      "bun": "./src/events.ts",
+      "import": "./dist/events.mjs"
+    },
     "./schema": {
       "types": {
         "source": "./src/schema.ts",
@@ -57,6 +65,8 @@
     "@goddard-ai/auth": "workspace:*",
     "@goddard-ai/backend-plugin": "workspace:*",
     "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/github": "workspace:*",
+    "@goddard-ai/libgit2": "workspace:*",
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/remote-repo": "workspace:*",

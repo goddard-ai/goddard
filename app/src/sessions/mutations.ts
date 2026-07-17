@@ -1,10 +1,14 @@
 import type {
   CreateSessionRequest,
   DaemonSession,
+  MergeSessionWorktreeRequest,
+  RemoveSessionProfileRequest,
   SessionPermissionResponseRequest,
   SessionPromptRequest,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
+  SetSessionProfileRequest,
   SteerSessionRequest,
 } from "@goddard-ai/sdk"
 
@@ -12,6 +16,7 @@ import { createMutationsProvider } from "~/lib/mutations-provider.tsx"
 import { queryClient } from "~/lib/query.ts"
 import { goddardSdk } from "~/sdk.ts"
 import {
+  invalidateSessionChanges,
   invalidateSessionLaunchPreview,
   invalidateSessionLists,
   invalidateSessionViews,
@@ -97,6 +102,20 @@ export async function setSessionModel(props: SetSessionModelRequest) {
   return result
 }
 
+/** Replaces one global session profile and refreshes profile selectors. */
+export async function setSessionProfile(props: SetSessionProfileRequest) {
+  const result = await goddardSdk.session.profile.set(props)
+  queryClient.invalidate(goddardSdk.session.profile.list)
+  return result
+}
+
+/** Removes one global session profile and refreshes profile selectors. */
+export async function removeSessionProfile(props: RemoveSessionProfileRequest) {
+  const result = await goddardSdk.session.profile.remove(props)
+  queryClient.invalidate(goddardSdk.session.profile.list)
+  return result
+}
+
 /**
  * Responds to one ACP permission request and refreshes the affected session views.
  */
@@ -120,6 +139,29 @@ export async function reconnectSession(sessionId: DaemonSession["id"]) {
 export async function cancelSessionTurn(sessionId: DaemonSession["id"]) {
   const result = await goddardSdk.session.cancel({ id: sessionId })
   invalidateSessionViews(sessionId)
+  return result
+}
+
+/**
+ * Updates one persisted worktree merge target branch and refreshes the affected session views.
+ */
+export async function setSessionWorktreeMergeTargetBranch(
+  input: SetSessionWorktreeMergeTargetBranchRequest,
+) {
+  const result = await goddardSdk.session.worktree.mergeTargetBranch.set(input)
+  invalidateSessionViews(input.id)
+  return result
+}
+
+/**
+ * Merges one session worktree into its persisted target branch and refreshes the affected views.
+ */
+export async function mergeSessionWorktree(input: MergeSessionWorktreeRequest) {
+  const result = await goddardSdk.session.worktree.merge(input)
+  invalidateSessionViews(input.id)
+  if (result.merged) {
+    invalidateSessionChanges(input.id)
+  }
   return result
 }
 

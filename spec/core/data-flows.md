@@ -15,6 +15,8 @@ This file captures durable cross-component flow guarantees. Wire formats, API pa
 - Desktop app and SDK hosts request authentication only when a protected action requires backend or external service identity.
 - Authentication uses a device authorization challenge that can be completed in the user's browser.
 - Hosts persist authorized session material using host-appropriate storage after completion.
+- GitHub sign-in may serve as the user's visible identity, but backend-protected actions and streams use backend-issued session material.
+- Backend session authorization is independent of any client-held GitHub credential and may be revoked or expired without requiring local GitHub token handling.
 
 ## Real-Time Event Subscription (Background Runtime)
 
@@ -22,6 +24,9 @@ This file captures durable cross-component flow guarantees. Wire formats, API pa
 - Events owned by the authenticated user may arrive from multiple repositories over one stream.
 - Unmanaged pull requests and events owned by other users must not be delivered on that stream.
 - Local hosts may use delivered feedback events to update workspace state or launch PR feedback handling.
+- A local host maintains the backend event stream only while at least one enabled capability can handle backend-originated events.
+- When no enabled capability can handle backend-originated events, the host must not open the backend event stream and must close any active backend event stream.
+- Backend stream health is a host-level runtime concern, separate from product behavior triggered by delivered events.
 
 ## Workforce Orchestration (Daemon-Owned)
 

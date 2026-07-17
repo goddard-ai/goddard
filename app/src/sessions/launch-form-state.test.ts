@@ -1,31 +1,31 @@
 import { createFixtureModelConfigOption } from "@goddard-ai/fixtures"
-import type { ListAdaptersResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
+import type { ListAgentsResponse, SessionLaunchPreviewResponse } from "@goddard-ai/sdk"
 import { expect, test } from "vitest"
 
 import { filterSlashCommandSuggestions, SessionLaunchFormState } from "./launch-form-state.ts"
 import { preferredLaunchAgentId } from "./launch-preferences.ts"
 
-function createAdapterCatalog(input: {
-  adapterIds: readonly string[]
-  defaultAdapterId: string | null
-}): ListAdaptersResponse {
+function createManagedAgentCatalog(input: {
+  agentIds: readonly string[]
+  defaultAgentId: string | null
+}): ListAgentsResponse {
   return {
-    adapters: input.adapterIds.map((id) => ({
+    agents: input.agentIds.map((id) => ({
       id,
       name: id,
       version: "1.0.0",
-      description: `${id} test adapter`,
+      description: `${id} test managed agent`,
       distribution: { npx: { package: id } },
       source: "config",
       unofficial: false,
     })),
-    installations: input.adapterIds.map((id) => ({
-      adapterId: id,
+    installations: input.agentIds.map((id) => ({
+      agentId: id,
       installed: true,
       installable: false,
       method: "config",
     })),
-    defaultAdapterId: input.defaultAdapterId,
+    defaultAgentId: input.defaultAgentId,
     registrySource: "cache",
     lastSuccessfulSyncAt: "2026-06-10T00:00:00.000Z",
     stale: false,
@@ -104,9 +104,9 @@ test("SessionLaunchFormState builds a worktree launch request from selected cont
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex", "pi"],
-    defaultAdapterId: "pi",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    agentIds: ["codex", "pi"],
+    defaultAgentId: "pi",
   })
   form.draftProjectPath.value = "/repo"
   form.draftSubpackagePath.value = "/repo/packages/app"
@@ -152,9 +152,9 @@ test("SessionLaunchFormState keeps launch leases only for unchanged local branch
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()
@@ -179,9 +179,9 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/bare-repo"
   form.launchPreview.value = createLaunchPreview({
@@ -201,13 +201,13 @@ test("SessionLaunchFormState forces bare repositories into worktree launches", (
   })
 })
 
-test("SessionLaunchFormState falls back to the first valid model when adapter models change", () => {
+test("SessionLaunchFormState falls back to the first valid model when managed-agent models change", () => {
   preferredLaunchAgentId.value = null
   const form = new SessionLaunchFormState()
 
-  form.adapterCatalog.value = createAdapterCatalog({
-    adapterIds: ["codex"],
-    defaultAdapterId: "codex",
+  form.managedAgentCatalog.value = createManagedAgentCatalog({
+    agentIds: ["codex"],
+    defaultAgentId: "codex",
   })
   form.draftProjectPath.value = "/repo"
   form.launchPreview.value = createLaunchPreview()
@@ -227,6 +227,37 @@ test("SessionLaunchFormState falls back to the first valid model when adapter mo
   })
 
   expect(form.draftModelId.value).toBe("haiku")
+})
+
+test("SessionLaunchFormState applies every available session profile selection together", () => {
+  const form = new SessionLaunchFormState()
+
+  form.launchPreview.value = createLaunchPreview()
+
+  expect(
+    form.applySessionProfile({
+      model: "opus",
+      thoughtLevel: "high",
+      approvalMode: "plan",
+    }),
+  ).toBe(true)
+  expect({
+    model: form.draftModelId.value,
+    thinking: form.draftThinkingValue.value,
+    mode: form.draftModeValue.value,
+  }).toEqual({
+    model: "opus",
+    thinking: "high",
+    mode: "plan",
+  })
+
+  expect(
+    form.applySessionProfile({
+      model: "removed-model",
+      thoughtLevel: "high",
+      approvalMode: "plan",
+    }),
+  ).toBe(false)
 })
 
 test("filterSlashCommandSuggestions preserves the default cap and fuzzy matches command text", () => {

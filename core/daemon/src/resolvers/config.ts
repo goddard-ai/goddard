@@ -6,12 +6,31 @@ import {
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
+import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
+import type {
+  AgentsConfig,
+  DaemonConfig,
+  SecurityConfig,
+  StaticSessionParams,
+} from "@goddard-ai/schema/config"
 import { getErrorMessage, isObject, omit } from "radashi"
 import { z } from "zod"
 
 import { buildRootConfigSchema, mergeRootConfigLayers } from "../config-schema.ts"
 
-export type RootConfig = Record<string, any>
+export type RootConfig = Record<string, unknown> & {
+  actions?: {
+    session?: StaticSessionParams
+  }
+  agents?: AgentsConfig
+  daemon?: DaemonConfig
+  loops?: {
+    session?: StaticSessionParams
+  }
+  registry?: Record<string, AgentDistribution>
+  security?: SecurityConfig
+  session?: StaticSessionParams
+}
 
 /** Paths and merged root config for one daemon-side config resolution request. */
 export type ResolvedConfigRoots = {

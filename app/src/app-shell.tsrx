@@ -60,6 +60,10 @@ export function AppShell() @{
           command={AppCommand.navigation.openCommandPalette}
           content={() => import("~/command-palette.tsrx")}
         />
+        <CommandDialog
+          command={AppCommand.workbench.openRecentTabs}
+          content={() => import("~/recent-tabs-palette.tsrx")}
+        />
         <AppShellChrome />
         <CommandDialog
           command={AppCommand.navigation.openNewSessionDialog}

@@ -369,6 +369,9 @@
     "sessionTitles": {
       "$ref": "#/$defs/SessionTitlesConfig"
     },
+    "sessionProfiles": {
+      "$ref": "#/$defs/SessionProfilesConfig"
+    },
     "subpackages": {
       "$ref": "#/$defs/SubpackagesConfig"
     },
@@ -1052,6 +1055,76 @@
         }
       },
       "additionalProperties": false
+    },
+    "SessionProfilesConfig": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "routine": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thoughtLevel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "approvalMode": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["model", "thoughtLevel", "approvalMode"],
+            "additionalProperties": false
+          },
+          "debug": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thoughtLevel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "approvalMode": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["model", "thoughtLevel", "approvalMode"],
+            "additionalProperties": false
+          },
+          "deep": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "thoughtLevel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "approvalMode": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["model", "thoughtLevel", "approvalMode"],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "SubpackagesConfig": {
       "type": "object",

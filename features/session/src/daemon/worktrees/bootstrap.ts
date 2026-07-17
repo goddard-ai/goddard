@@ -1,6 +1,7 @@
 /** Session-owned preparation helpers for fresh linked session worktrees. */
 import { readFile, stat } from "node:fs/promises"
 import * as path from "node:path"
+import { git } from "@goddard-ai/libgit2"
 
 import type { WorktreeBootstrapConfig, WorktreeBootstrapPackageManager } from "../../schema.ts"
 import { seedUntrackedPaths } from "./bootstrap/seed.ts"
@@ -196,17 +197,7 @@ async function resolvePackageManagerFromPackageJson(repoRoot: string) {
  * Resolves one HEAD commit OID when the checkout currently has one.
  */
 async function resolveHeadOid(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "HEAD"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
-    return null
-  }
-
-  const oid = result.stdout.trim()
-  return oid.length > 0 ? oid : null
+  return await git.history.resolveHead(cwd)
 }
 
 /**

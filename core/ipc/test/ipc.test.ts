@@ -171,11 +171,15 @@ function createTestStream<TPayload>() {
 
 async function requestRaw(
   address: { hostname: string; port: number },
-  input: { method: string; path: string; body?: unknown },
+  input: { method: string; path: string; body?: unknown; headers?: Record<string, string> },
 ) {
   const payload = input.body === undefined ? undefined : JSON.stringify(input.body)
 
-  return new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+  return new Promise<{
+    statusCode: number
+    headers: Record<string, string | string[]>
+    body: string
+  }>((resolve, reject) => {
     const req = request(
       {
         hostname: address.hostname,
@@ -184,8 +188,9 @@ async function requestRaw(
         method: input.method,
         headers:
           payload === undefined
-            ? undefined
+            ? input.headers
             : {
+                ...input.headers,
                 "Content-Type": "application/json",
                 "Content-Length": Buffer.byteLength(payload),
               },
@@ -199,6 +204,7 @@ async function requestRaw(
         res.on("end", () => {
           resolve({
             statusCode: res.statusCode ?? 0,
+            headers: res.headers as Record<string, string | string[]>,
             body: responseBody,
           })
         })
@@ -222,6 +228,51 @@ function readTcpAddress(server: Server) {
   return {
     hostname: address.address,
     port: address.port,
+  }
+}
+
+async function createBrowserAccessFixture(
+  allowedOrigins = ["https://app.goddardai.org"],
+  isAllowedOrigin?: (origin: string) => boolean,
+) {
+  let pingCount = 0
+  const ipcServer = createServer({
+    port: 0,
+    routes,
+    browserAccess: {
+      allowedOrigins,
+      isAllowedOrigin,
+    },
+    handlers: {
+      ping: () => {
+        pingCount += 1
+        return { ok: true as const }
+      },
+      echo: ({ body: { text } }) => ({ echoed: text }),
+      add: ({ body: { a, b } }) => ({ sum: a + b }),
+      systemAlert: () => [],
+      userAlert: () => [],
+    },
+  })
+
+  await once(ipcServer.server, "listening")
+  const address = readTcpAddress(ipcServer.server)
+
+  cleanups.push(async () => {
+    await new Promise<void>((resolve, reject) => {
+      ipcServer.server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+  })
+
+  return {
+    address,
+    readPingCount: () => pingCount,
   }
 }
 
@@ -337,7 +388,25 @@ describe("core/ipc", () => {
 
     const response = await requestRaw(address, { method: "POST", path: "/echo" })
     expect(response.statusCode).toBe(400)
-    expect(JSON.parse(response.body)).toMatchObject({ message: "Invalid request body" })
+    const payload = JSON.parse(response.body) as { message: string }
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("Unexpected end")
+  })
+
+  test("describes raw request body schema failures", async () => {
+    const { address } = await createFixture()
+
+    const response = await requestRaw(address, {
+      method: "POST",
+      path: "/echo",
+      body: { text: 123 },
+    })
+    expect(response.statusCode).toBe(400)
+    const payload = JSON.parse(response.body) as { message: string }
+    expect(payload.message).toContain("Invalid request body")
+    expect(payload.message).toContain("text")
+    expect(payload.message).toContain("expected")
+    expect(payload.message).toContain("string")
   })
 
   test("returns not found for unknown routes", async () => {
@@ -345,10 +414,165 @@ describe("core/ipc", () => {
 
     await expect(
       requestRaw(address, { method: "POST", path: "/missing", body: {} }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       statusCode: 404,
       body: "Not Found",
     })
+  })
+
+  test("preserves non-browser requests when browser access is configured", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+
+    const response = await requestRaw(address, { method: "GET", path: "/ping" })
+
+    expect(response.statusCode).toBe(200)
+    expect(JSON.parse(response.body)).toEqual({ ok: true })
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined()
+    expect(readPingCount()).toBe(1)
+  })
+
+  test("adds CORS headers for configured browser origins", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+
+    const response = await requestRaw(address, {
+      method: "GET",
+      path: "/ping",
+      headers: {
+        Origin: "https://app.goddardai.org",
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(JSON.parse(response.body)).toEqual({ ok: true })
+    expect(response.headers["access-control-allow-origin"]).toBe("https://app.goddardai.org")
+    expect(response.headers["access-control-allow-credentials"]).toBeUndefined()
+    expect(readPingCount()).toBe(1)
+  })
+
+  test("adds CORS headers for predicate-allowed browser origins", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture(
+      [],
+      (origin) => origin === "http://127.0.0.1:5173",
+    )
+
+    const response = await requestRaw(address, {
+      method: "GET",
+      path: "/ping",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(JSON.parse(response.body)).toEqual({ ok: true })
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:5173")
+    expect(readPingCount()).toBe(1)
+  })
+
+  test("answers private-network preflights for configured browser origins", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+
+    const response = await requestRaw(address, {
+      method: "OPTIONS",
+      path: "/ping",
+      headers: {
+        Origin: "https://app.goddardai.org",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Private-Network": "true",
+      },
+    })
+
+    expect(response.statusCode).toBe(204)
+    expect(response.headers["access-control-allow-origin"]).toBe("https://app.goddardai.org")
+    expect(response.headers["access-control-allow-private-network"]).toBe("true")
+    expect(response.headers["access-control-allow-methods"]).toBe("GET, POST, OPTIONS")
+    expect(response.headers["access-control-allow-headers"]).toBe("authorization, content-type")
+    expect(response.headers["access-control-allow-credentials"]).toBeUndefined()
+    expect(response.body).toBe("")
+    expect(readPingCount()).toBe(0)
+  })
+
+  test("fails closed for unconfigured browser origins before handlers run", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+
+    const response = await requestRaw(address, {
+      method: "GET",
+      path: "/ping",
+      headers: {
+        Origin: "https://evil.example",
+      },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined()
+    expect(JSON.parse(response.body)).toEqual({ error: "Forbidden" })
+    expect(readPingCount()).toBe(0)
+  })
+
+  test("fails closed for malformed, null, missing, and unconfigured preflight origins", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+    const originCases: Array<Record<string, string>> = [
+      {},
+      { Origin: "null" },
+      { Origin: "https://[invalid" },
+      { Origin: "https://evil.example" },
+    ]
+
+    for (const headers of originCases) {
+      const response = await requestRaw(address, {
+        method: "OPTIONS",
+        path: "/ping",
+        headers: {
+          ...headers,
+          "Access-Control-Request-Method": "GET",
+          "Access-Control-Request-Private-Network": "true",
+        },
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.headers["access-control-allow-origin"]).toBeUndefined()
+      expect(response.headers["access-control-allow-private-network"]).toBeUndefined()
+      expect(JSON.parse(response.body)).toEqual({ error: "Forbidden" })
+    }
+
+    expect(readPingCount()).toBe(0)
+  })
+
+  test("rejects wildcard browser access configuration", () => {
+    expect(() =>
+      createServer({
+        port: 0,
+        routes,
+        browserAccess: {
+          allowedOrigins: ["*"],
+        },
+        handlers: {
+          ping: () => ({ ok: true as const }),
+          echo: ({ body: { text } }) => ({ echoed: text }),
+          add: ({ body: { a, b } }) => ({ sum: a + b }),
+          systemAlert: () => [],
+          userAlert: () => [],
+        },
+      }),
+    ).toThrow("Browser access origin must be explicit: *")
+  })
+
+  test("rejects invalid browser access hosts before handlers run", async () => {
+    const { address, readPingCount } = await createBrowserAccessFixture()
+
+    const response = await requestRaw(address, {
+      method: "GET",
+      path: "/ping",
+      headers: {
+        Host: `evil.example:${address.port}`,
+        Origin: "https://app.goddardai.org",
+      },
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined()
+    expect(JSON.parse(response.body)).toEqual({ error: "Forbidden" })
+    expect(readPingCount()).toBe(0)
   })
 
   test("creates request context and fires request lifecycle hooks", async () => {
@@ -837,7 +1061,7 @@ describe("core/ipc", () => {
       body: { a: 1, b: 2 },
     })
 
-    expect(response).toEqual({
+    expect(response).toMatchObject({
       statusCode: 500,
       body: JSON.stringify({ error: "Internal server error" }),
     })

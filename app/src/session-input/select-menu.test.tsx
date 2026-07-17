@@ -39,6 +39,24 @@ async function flushEffects() {
   })
 }
 
+function dispatchPointerEvent(
+  element: Element,
+  type: "pointerdown" | "pointerup",
+  pointerId: number,
+) {
+  const event = new Event(type, {
+    bubbles: true,
+    cancelable: true,
+  })
+
+  Object.defineProperties(event, {
+    button: { value: 0 },
+    pointerId: { value: pointerId },
+  })
+
+  element.dispatchEvent(event)
+}
+
 test("SessionInputSelect focuses the active option when a non-searchable menu opens", async () => {
   captureFocusedPrompt = false
   captureFocusedPromptCalls = 0
@@ -131,6 +149,66 @@ test("SessionInputSelect restores a focused prompt after the menu closes", async
 
   expect(captureFocusedPromptCalls).toBe(1)
   expect(restoreFocusedPromptCalls).toBe(1)
+
+  render(null, container)
+})
+
+test("SessionInputSelect selects an option when trigger press releases over it", async () => {
+  captureFocusedPrompt = false
+  captureFocusedPromptCalls = 0
+  restoreFocusedPromptCalls = 0
+
+  const container = document.createElement("div")
+  const menuRoot = document.createElement("div")
+  const open = signal(false)
+  const selectedValues: string[] = []
+
+  document.body.append(container, menuRoot)
+  setOverlayPortalRoots({
+    menu: menuRoot,
+  })
+
+  await act(async () => {
+    render(
+      <SessionInputSelect
+        filterable={false}
+        items={[
+          { value: "alpha", label: "Alpha" },
+          { value: "beta", label: "Beta" },
+        ]}
+        label="Mode"
+        open={open}
+        placeholder="Choose mode"
+        value="alpha"
+        onValueChange={(value) => {
+          selectedValues.push(value)
+        }}
+      />,
+      container,
+    )
+  })
+
+  const trigger = container.querySelector<HTMLButtonElement>("button[aria-label='Mode: Alpha']")
+
+  await act(async () => {
+    dispatchPointerEvent(trigger!, "pointerdown", 42)
+  })
+  await flushEffects()
+
+  expect(open.value).toBe(true)
+  expect(selectedValues).toEqual([])
+
+  const betaOption = Array.from(menuRoot.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes("Beta"),
+  )
+
+  await act(async () => {
+    dispatchPointerEvent(betaOption!, "pointerup", 42)
+  })
+  await flushEffects()
+
+  expect(selectedValues).toEqual(["beta"])
+  expect(open.value).toBe(false)
 
   render(null, container)
 })

@@ -33,9 +33,10 @@ contribute namespaced config schemas through daemon plugins, but config files,
 scope precedence, validation errors, persistence, and hot reload remain daemon
 or core config responsibilities.
 
-The adapter feature owns adapter catalog request handling and catalog
-merge/parsing helpers. The daemon still owns the registry cache service and
-root-config manager that supply substrate data to that feature.
+The agent feature owns launchable ACP agent discovery, catalog request
+handling, local launch visibility markers, managed install process resolution,
+and proactive managed install update policy. The daemon still owns the root
+config and persistence substrate that supply shared data to that feature.
 
 `features/inbox` is the current reference daemon feature package. It owns the
 inbox IPC contract and request-handler factory while the daemon composition root
@@ -127,6 +128,23 @@ Future mock fixtures should be added only when they exercise a named
 user-visible screen state or workflow. Avoid adding rows solely because a schema
 field or enum exists.
 
+## Terminal Runtime
+
+Terminal PTY support lives in the internal `features/terminal` package. The
+daemon includes that package as a feature contribution so PTY ownership stays
+inside the daemon process without making terminal code part of the daemon
+substrate.
+
+Terminal instances are in-memory and scoped to one terminal stream connection;
+closing that connection should call `closeAll()` so no PTY outlives its owning
+app connection.
+
+Use the diagnostic command to validate native PTY loading, spawn, write, resize, and close behavior in the daemon runtime:
+
+```sh
+goddard-daemon terminal-check --json
+```
+
 ## Standalone Build
 
 Build standalone Bun executables for the daemon and bundled helper tools with:
@@ -140,7 +158,11 @@ The command runs the normal package build first, then emits a platform-specific 
 - `bin/goddard-daemon`
 - `agent-bin/goddard`
 - `agent-bin/workforce`
+- `native/libgit2/`
+- `runtime/` when launchers share the app-bundled Bun executable
 - `manifest.json`
+
+The build resolves the matching package-owned libgit2 target, runs its pinned native build and verification pipeline, and records the staged library in `manifest.json`. A target without a declared libgit2 artifact fails packaging instead of depending on a host installation.
 
 ## Issues & Feature Requests
 

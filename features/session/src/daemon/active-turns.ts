@@ -1,4 +1,3 @@
-import type { DaemonLogger } from "@goddard-ai/daemon-plugin"
 import { getAcpMessageResult } from "acp-client"
 import type * as acp from "acp-client/protocol"
 
@@ -26,7 +25,6 @@ type SessionTurnDraftDoc = DaemonSessionTurnDraft
 export function createActiveTurnStore({
   db,
   debug,
-  emitDiagnostic,
   publishSessionUpdated,
   refreshIdleShutdownState,
   updateSessionAvailableCommands,
@@ -34,12 +32,6 @@ export function createActiveTurnStore({
 }: {
   db: SessionDb
   debug: (event: string, fields?: Record<string, unknown>) => void
-  emitDiagnostic: (
-    sessionId: ActiveSession["id"],
-    type: string,
-    detail?: Record<string, unknown>,
-    diagnosticLogger?: DaemonLogger,
-  ) => void
   publishSessionUpdated: (
     id: ActiveSession["id"],
     changed: readonly SessionLifecycleField[],
@@ -95,18 +87,6 @@ export function createActiveTurnStore({
       messageCount: activeTurn.messages.length,
       updatedExistingDraft: Boolean(existingDraft),
     })
-
-    emitDiagnostic(
-      active.id,
-      "session_turn_draft_flushed",
-      {
-        reason,
-        turnId: activeTurn.turnId,
-        sequence: activeTurn.sequence,
-        messageCount: activeTurn.messages.length,
-      },
-      active.logger,
-    )
   }
 
   function scheduleActiveTurnDraftFlush(active: ActiveSession, reason: string, immediate = false) {
@@ -149,7 +129,6 @@ export function createActiveTurnStore({
   function persistTurnDraftAsInterruptedTurn(
     sessionId: ActiveSession["id"],
     draftRecord: SessionTurnDraftDoc,
-    diagnosticLogger: DaemonLogger,
   ) {
     const existingTurn =
       db.sessionTurns.first({
@@ -182,15 +161,6 @@ export function createActiveTurnStore({
       replacedExistingTurn: Boolean(existingTurn),
       messageCount: draftRecord.messages.length,
     })
-    emitDiagnostic(
-      sessionId,
-      "session_turn_draft_promoted",
-      {
-        turnId: draftRecord.turnId,
-        sequence: draftRecord.sequence,
-      },
-      diagnosticLogger,
-    )
     return createdTurn
   }
 
@@ -308,18 +278,6 @@ export function createActiveTurnStore({
       stopReason: stopReason ?? undefined,
       messageCount: completedTurn.messages.length,
     })
-    emitDiagnostic(
-      active.id,
-      "session_turn_persisted",
-      {
-        turnId: completedTurn.turnId,
-        sequence: completedTurn.sequence,
-        completionKind: completedTurn.completionKind,
-        stopReason: completedTurn.stopReason ?? undefined,
-        messageCount: completedTurn.messages.length,
-      },
-      active.logger,
-    )
   }
 
   return {

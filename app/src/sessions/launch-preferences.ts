@@ -1,4 +1,4 @@
-import type { ListAdaptersResponse } from "@goddard-ai/sdk"
+import type { ListAgentsResponse } from "@goddard-ai/sdk"
 import { signal } from "@preact/signals"
 
 export const preferredLaunchAgentId = signal<string | null>(null)
@@ -37,16 +37,21 @@ export function resolvePreferredLaunchCwd(
   return projectPath
 }
 
-export function resolvePreferredLaunchAgentId(adapterCatalog: ListAdaptersResponse) {
-  const availableAdapterIds = new Set(adapterCatalog.adapters.map((adapter) => adapter.id))
+export function resolvePreferredLaunchAgentId(managedAgentCatalog: ListAgentsResponse) {
+  const availableAgentIds = new Set(
+    managedAgentCatalog.agents.map((managedAgent) => managedAgent.id),
+  )
 
-  if (preferredLaunchAgentId.value && availableAdapterIds.has(preferredLaunchAgentId.value)) {
+  if (preferredLaunchAgentId.value && availableAgentIds.has(preferredLaunchAgentId.value)) {
     return preferredLaunchAgentId.value
   }
 
-  if (adapterCatalog.defaultAdapterId && availableAdapterIds.has(adapterCatalog.defaultAdapterId)) {
-    return adapterCatalog.defaultAdapterId
+  if (
+    managedAgentCatalog.defaultAgentId &&
+    availableAgentIds.has(managedAgentCatalog.defaultAgentId)
+  ) {
+    return managedAgentCatalog.defaultAgentId
   }
 
-  return adapterCatalog.adapters[0]?.id ?? null
+  return managedAgentCatalog.agents[0]?.id ?? null
 }

@@ -1108,10 +1108,8 @@ async function createWatchFingerprint(
 /** Captures the branch, HEAD, and snapshot tree for one worktree. */
 async function createAgentWorktreeFingerprint(cwd: string, context: RuntimeContext) {
   const [branch, head, tree] = await Promise.all([
-    git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
-      allowFailure: true,
-    }),
-    git(cwd, ["rev-parse", "HEAD"], context),
+    resolveCurrentBranch(cwd, context),
+    resolveRef(cwd, "HEAD", context),
     createSnapshotTree({
       cwd,
       context,
@@ -1119,8 +1117,8 @@ async function createAgentWorktreeFingerprint(cwd: string, context: RuntimeConte
   ])
 
   return {
-    branch: branch.status === 0 ? branch.stdout.trim() : null,
-    head: head.stdout.trim(),
+    branch,
+    head,
     tree,
   }
 }
@@ -1128,10 +1126,8 @@ async function createAgentWorktreeFingerprint(cwd: string, context: RuntimeConte
 /** Captures review content and HEAD so review commits can be synchronized. */
 async function createReviewWorktreeFingerprint(cwd: string, context: RuntimeContext) {
   const [branch, head, tree] = await Promise.all([
-    git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], context, {
-      allowFailure: true,
-    }),
-    git(cwd, ["rev-parse", "HEAD"], context),
+    resolveCurrentBranch(cwd, context),
+    resolveRef(cwd, "HEAD", context),
     createSnapshotTree({
       cwd,
       context,
@@ -1139,8 +1135,8 @@ async function createReviewWorktreeFingerprint(cwd: string, context: RuntimeCont
   ])
 
   return {
-    branch: branch.status === 0 ? branch.stdout.trim() : null,
-    head: head.stdout.trim(),
+    branch,
+    head,
     tree,
   }
 }

@@ -26,5 +26,5 @@
       }
     ]
   },
-  "ignorePatterns": ["**/.agents/**"]
+  "ignorePatterns": ["**/.agents/**", "**/alchemy-typings.d.ts"]
 }

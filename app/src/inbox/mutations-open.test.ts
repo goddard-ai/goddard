@@ -14,12 +14,12 @@ import { queryClient } from "~/lib/query.ts"
 const inboxClient: any = {}
 const sessionClient: any = {}
 const prClient: any = {}
-const adapterClient: any = {}
+const agentClient: any = {}
 const cleanups: Array<() => void> = []
 
 vi.mock("~/sdk.ts", () => ({
   goddardSdk: {
-    adapter: adapterClient,
+    agent: agentClient,
     inbox: inboxClient,
     pr: prClient,
     session: sessionClient,
@@ -73,8 +73,8 @@ function resetSdk() {
   prClient.get = vi.fn(async ({ id }: { id: DaemonPullRequest["id"] }) => ({
     pullRequest: createFixturePullRequest({ id }),
   }))
-  adapterClient.list = vi.fn(async () => ({
-    adapters: [],
+  agentClient.list = vi.fn(async () => ({
+    agents: [],
   }))
 }
 
@@ -190,7 +190,7 @@ test("openInboxItemInWorkbench opens session inbox rows as session chat tabs", a
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_session_1",
   })
-  expect(adapterClient.list).toHaveBeenCalledWith({
+  expect(agentClient.list).toHaveBeenCalledWith({
     cwd: "/Users/alec/Projects/goddard-ai",
     includeUninstalled: true,
   })
@@ -234,7 +234,7 @@ test("prepareInboxItemWorkbenchTarget eagerly warms session tabs without opening
   expect(sessionClient.worktree.get).toHaveBeenCalledWith({
     id: "ses_prepared",
   })
-  expect(adapterClient.list).toHaveBeenCalledWith({
+  expect(agentClient.list).toHaveBeenCalledWith({
     cwd: "/Users/alec/Projects/goddard-ai",
     includeUninstalled: true,
   })
@@ -268,7 +268,7 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
   sessionClient.get.mockClear()
   sessionClient.history.mockClear()
   sessionClient.worktree.get.mockClear()
-  adapterClient.list.mockClear()
+  agentClient.list.mockClear()
 
   await openInboxItemInWorkbench({
     item,
@@ -279,9 +279,64 @@ test("openInboxItemInWorkbench reuses a matching prepared session target", async
   expect(sessionClient.get).not.toHaveBeenCalled()
   expect(sessionClient.history).not.toHaveBeenCalled()
   expect(sessionClient.worktree.get).not.toHaveBeenCalled()
-  expect(adapterClient.list).not.toHaveBeenCalled()
+  expect(agentClient.list).not.toHaveBeenCalled()
   expect(workbenchTabSet.activeClosableTab).toMatchObject({
     id: "session:ses_reused",
+    kind: "sessionChat",
+  })
+})
+
+test("openInboxItemInWorkbench closes the previous clean tab when requested", async () => {
+  const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  workbenchTabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "ses_previous",
+      sessionTitle: "Previous session",
+    },
+  })
+
+  await openInboxItemInWorkbench({
+    closeCurrentCleanTab: true,
+    item: createFixtureInboxItem({ entityId: "ses_next" }),
+    workbenchTabSet,
+  })
+
+  expect(workbenchTabSet.tabs["session:ses_previous"]).toBeUndefined()
+  expect(workbenchTabSet.activeClosableTab).toMatchObject({
+    id: "session:ses_next",
+    kind: "sessionChat",
+  })
+})
+
+test("openInboxItemInWorkbench keeps the previous dirty tab when requested", async () => {
+  const { openInboxItemInWorkbench } = await import("./open.ts")
+  const { WorkbenchTabSet } = await import("~/workbench-tab-set.ts")
+  const workbenchTabSet = new WorkbenchTabSet()
+
+  workbenchTabSet.openOrFocusTab({
+    kind: "sessionChat",
+    props: {
+      relatedFilesystemPath: null,
+      sessionId: "ses_previous_dirty",
+      sessionTitle: "Previous dirty session",
+    },
+  })
+  workbenchTabSet.setTabDirty("session:ses_previous_dirty", true)
+
+  await openInboxItemInWorkbench({
+    closeCurrentCleanTab: true,
+    item: createFixtureInboxItem({ entityId: "ses_next_dirty" }),
+    workbenchTabSet,
+  })
+
+  expect(workbenchTabSet.tabs["session:ses_previous_dirty"]).toBeDefined()
+  expect(workbenchTabSet.activeClosableTab).toMatchObject({
+    id: "session:ses_next_dirty",
     kind: "sessionChat",
   })
 })

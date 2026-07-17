@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import * as fs from "node:fs/promises"
-import { createDaemonIpcClientFromEnv } from "@goddard-ai/daemon-client/node"
+import {
+  createDaemonIpcClientFromEnv,
+  createDaemonIpcCommand,
+} from "@goddard-ai/daemon-client/node"
 import type { AttentionMetadataInput } from "@goddard-ai/schema/attention"
 import { SessionId, type DaemonSession } from "@goddard-ai/session/schema"
 import { command, option, optional, run, string, subcommands } from "cmd-ts"
@@ -109,6 +112,8 @@ export async function main(argv: string[]) {
   const app = subcommands({
     name: "goddard",
     cmds: {
+      ipc: createDaemonIpcCommand(),
+
       "declare-initiative": command({
         name: "declare-initiative",
         description: "Declare the next initiative you are working on.",

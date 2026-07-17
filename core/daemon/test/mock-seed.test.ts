@@ -9,8 +9,8 @@ import type { BackendClient } from "../src/backend.ts"
 import { startDaemonServer } from "../src/ipc/server.ts"
 import { main } from "../src/main.ts"
 import { openComposedDaemonStore } from "../src/plugins.ts"
+import { createDaemonRuntime } from "../src/runtime.ts"
 import { seedMockData } from "../src/seed/mock.ts"
-import { send } from "./ipc-client-helpers.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
 const cleanup: Array<() => Promise<void>> = []
@@ -34,13 +34,18 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   expect(process.env.GODDARD_DATA_PROFILE).toBe(originalDataProfile)
 
   process.env.GODDARD_DATA_PROFILE = "mock"
-  const daemon = await startDaemonServer(createTestBackendClient(), { port: 0 })
+  const runtime = await createDaemonRuntime({
+    backendClient: createTestBackendClient(),
+    port: 0,
+  })
+  const daemon = await startDaemonServer(runtime)
   cleanup.push(async () => {
     await daemon.close().catch(() => {})
+    await runtime.close().catch(() => {})
   })
   const client = createDaemonIpcClient({ daemonUrl: daemon.daemonUrl })
 
-  const sessions = await send(client, "session.list", { limit: 20 })
+  const sessions = await client.session.list({ limit: 20 })
   expect(sessions.sessions).toHaveLength(12)
   expect(sessions.sessions.every((session: any) => !session.activeDaemonSession)).toBe(true)
   expect(sessions.sessions.every((session: any) => session.connectionMode !== "live")).toBe(true)
@@ -51,11 +56,11 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   expect(sessions.sessions.some((session: any) => session.contextUsage?.used > 190_000)).toBe(true)
   expect(sessions.sessions.some((session: any) => session.id === "ses_launch_blocked")).toBe(true)
 
-  await expect(send(client, "session.connect", { id: "ses_mock_review_boundary" })).rejects.toThrow(
+  await expect(client.session.connect({ id: "ses_mock_review_boundary" })).rejects.toThrow(
     /archived/i,
   )
 
-  const history = await send(client, "session.history", { id: "ses_mock_review_boundary" })
+  const history = await client.session.history({ id: "ses_mock_review_boundary" })
   expect(history.connection).toEqual({
     mode: "history",
     reconnectable: false,
@@ -63,10 +68,10 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   })
   expect(history.turns).toHaveLength(2)
 
-  const launchableHistory = await send(client, "session.history", { id: "ses_launch_blocked" })
+  const launchableHistory = await client.session.history({ id: "ses_launch_blocked" })
   expect(launchableHistory.turns).toHaveLength(1)
 
-  const contextLimit = await send(client, "session.get", { id: "ses_mock_context_limit" })
+  const contextLimit = await client.session.get({ id: "ses_mock_context_limit" })
   expect(contextLimit.session.configOptions).toContainEqual(
     expect.objectContaining({
       id: "model",
@@ -76,7 +81,7 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
   )
   expect(contextLimit.session.configOptions).toHaveLength(2)
 
-  const inbox = await send(client, "inbox.list", {
+  const inbox = await client.inbox.list({
     statuses: ["unread", "read", "saved", "archived", "replied", "completed"],
     limit: 20,
   })
@@ -90,21 +95,21 @@ test("seed mock writes deterministic isolated fixture data through the daemon IP
       .map((item: any) => item.reason),
   ).toEqual(expect.arrayContaining(["pull_request.created", "pull_request.updated"]))
 
-  const pullRequest = await send(client, "pr.get", { id: "pr_mock_123" })
+  const pullRequest = await client.pr.get({ id: "pr_mock_123" })
   expect(pullRequest.pullRequest).toMatchObject({
     host: "github",
     owner: "goddard-ai",
     repo: "goddard-ai",
     prNumber: 123,
   })
-  const docsPullRequest = await send(client, "pr.get", { id: "pr_mock_docs_7" })
+  const docsPullRequest = await client.pr.get({ id: "pr_mock_docs_7" })
   expect(docsPullRequest.pullRequest).toMatchObject({
     host: "github",
     owner: "goddard-ai",
     repo: "docs",
     prNumber: 7,
   })
-  const launchablePullRequest = await send(client, "pr.get", { id: "pr_launch_review" })
+  const launchablePullRequest = await client.pr.get({ id: "pr_launch_review" })
   expect(launchablePullRequest.pullRequest).toMatchObject({
     host: "github",
     owner: "goddard-ai",
@@ -188,16 +193,13 @@ function createTestBackendClient(): BackendClient {
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    remoteRepo: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
+    events: {
+      stream: async () => emptyBackendEvents(),
     },
   } as unknown as BackendClient
 }
+
+async function* emptyBackendEvents(): AsyncIterable<never> {}
 
 function restoreEnv(key: string, value: string | undefined) {
   if (value === undefined) {

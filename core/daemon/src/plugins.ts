@@ -4,6 +4,7 @@ import {
   openDaemonStore,
   type DaemonStore,
   type StoreConnectionOptions,
+  type StoreRecoveryHandler,
 } from "./persistence/store.ts"
 
 export type { DaemonStore, StoreConnectionOptions } from "./persistence/store.ts"
@@ -20,6 +21,9 @@ export function getDaemonPluginComposition() {
 }
 
 /** Opens a daemon store using the schema contributed by the composed daemon plugins. */
-export function openComposedDaemonStore(connection?: StoreConnectionOptions): ComposedDaemonStore {
-  return openDaemonStore(getDaemonPluginComposition().db, connection)
+export function openComposedDaemonStore(
+  connection?: StoreConnectionOptions,
+  onRecovery?: StoreRecoveryHandler,
+): ComposedDaemonStore {
+  return openDaemonStore(getDaemonPluginComposition().db, connection, onRecovery)
 }

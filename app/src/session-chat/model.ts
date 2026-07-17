@@ -11,7 +11,9 @@ import { castDraft } from "immer"
 import { Sigma, type Immutable } from "preact-sigma"
 import { isObject } from "radashi"
 
+import { startDaemonEventStream } from "~/lib/daemon-event-stream.ts"
 import { goddardSdk } from "~/sdk.ts"
+import { invalidateSessionDetail } from "~/sessions/cache.ts"
 import { getSessionDisplayTitle, getSessionRepositoryLabel } from "~/sessions/display.ts"
 import { buildSessionChatTranscript } from "./transcript-items.ts"
 
@@ -1074,32 +1076,38 @@ export class SessionChat extends Sigma<SessionChatState> {
   }
 
   onSetup() {
-    const controller = new AbortController()
-
-    void (async () => {
-      try {
-        const messages = await goddardSdk.session.streamMessages(
-          { id: this.session.id },
-          { signal: controller.signal },
-        )
-        for await (const message of messages) {
-          if (controller.signal.aborted) {
-            break
-          }
-
-          this.receiveMessage(message)
+    const sessionId = this.session.id
+    const stop = startDaemonEventStream({
+      failureLogMessage: "app.session.message_subscription_failed",
+      logProperties: { sessionId },
+      streamName: "session.message",
+      open: (signal) =>
+        goddardSdk.events.stream(
+          {
+            names: ["session.message"],
+            where: [{ path: "id", equals: sessionId }],
+          },
+          { signal },
+        ),
+      reconcile: async (signal) => {
+        const [history, { session }] = await Promise.all([
+          goddardSdk.session.history({ id: sessionId }),
+          goddardSdk.session.get({ id: sessionId }),
+        ])
+        if (signal.aborted) {
+          return
         }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.error("Failed to subscribe to session chat updates.", error)
-        }
-      }
-    })()
+
+        this.syncLoadedData({ history, session })
+        invalidateSessionDetail(sessionId)
+      },
+      onEvent: (event) => this.receiveMessage(event.payload.message),
+    })
 
     return [
       () => {
         this.#clearQueuedChunks()
-        controller.abort()
+        stop()
       },
     ]
   }

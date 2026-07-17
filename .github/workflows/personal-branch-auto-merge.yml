@@ -7,8 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
+  checks: read
   contents: write
   pull-requests: write
+  statuses: read
 
 concurrency:
   group: personal-branch-auto-merge-aleclarson
@@ -23,45 +25,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Find open PR
-        id: pr
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
 
-          pr_number="$(
-            gh pr list \
-              --repo "${{ github.repository }}" \
-              --base "$BASE_BRANCH" \
-              --head "$USER_BRANCH" \
-              --state open \
-              --json number \
-              --jq '.[0].number // empty'
-          )"
-          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: ".bun-version"
 
       - name: Merge when ready
-        if: steps.pr.outputs.number != ''
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          merge_state="$(
-            gh pr view "${{ steps.pr.outputs.number }}" \
-              --repo "${{ github.repository }}" \
-              --json isDraft,mergeStateStatus \
-              --jq 'if .isDraft then "DRAFT" else .mergeStateStatus end'
-          )"
-
-          if [ "$merge_state" != "CLEAN" ]; then
-            echo "PR #${{ steps.pr.outputs.number }} is not ready to merge; mergeStateStatus=$merge_state."
-            exit 0
-          fi
-
-          gh pr merge "${{ steps.pr.outputs.number }}" \
-            --repo "${{ github.repository }}" \
-            --rebase
+        run: bun run ./scripts/personal-branch-auto-merge.ts

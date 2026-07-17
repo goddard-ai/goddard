@@ -10,6 +10,14 @@ import {
   adapterInstallationsSettingsSectionMetadata,
   AdapterInstallationsSettingsSection,
 } from "./adapter-installations-section.tsrx"
+import {
+  sessionProfilesSettingsSectionMetadata,
+  SessionProfilesSettingsSection,
+} from "./session-profiles-section.tsrx"
+import {
+  configurationSettingsSectionMetadata,
+  ConfigurationSettingsSection,
+} from "./configuration/configuration-settings-section.tsrx"
 import { filterPreparedSettingsSearchSections, prepareSettingsSearchSections } from "./search.ts"
 import styles from "./page.style.ts"
 
@@ -21,8 +29,16 @@ export default function SettingsPage() @{
       href: `#${appearanceSettingsSectionMetadata.id}`,
     },
     {
+      ...sessionProfilesSettingsSectionMetadata,
+      href: `#${sessionProfilesSettingsSectionMetadata.id}`,
+    },
+    {
       ...adapterInstallationsSettingsSectionMetadata,
       href: `#${adapterInstallationsSettingsSectionMetadata.id}`,
+    },
+    {
+      ...configurationSettingsSectionMetadata,
+      href: `#${configurationSettingsSectionMetadata.id}`,
     },
   ]
   const preparedSettingsSections = prepareSettingsSearchSections(settingsSections)
@@ -52,8 +68,12 @@ export default function SettingsPage() @{
       @for (const section of visibleSections) {
         @if (section.id === appearanceSettingsSectionMetadata.id) {
           <AppearanceSettingsSection key={section.id} />
+        } @else if (section.id === sessionProfilesSettingsSectionMetadata.id) {
+          <SessionProfilesSettingsSection key={section.id} />
         } @else if (section.id === adapterInstallationsSettingsSectionMetadata.id) {
           <AdapterInstallationsSettingsSection key={section.id} />
+        } @else if (section.id === configurationSettingsSectionMetadata.id) {
+          <ConfigurationSettingsSection key={section.id} />
         } @else {
           <></>
         }

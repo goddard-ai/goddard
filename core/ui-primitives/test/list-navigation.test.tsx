@@ -16,6 +16,20 @@ async function flushEffects() {
   })
 }
 
+function setMaxTouchPoints(value: number) {
+  const descriptor = Object.getOwnPropertyDescriptor(navigator, "maxTouchPoints")
+
+  Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value })
+
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(navigator, "maxTouchPoints", descriptor)
+    } else {
+      delete (navigator as { maxTouchPoints?: number }).maxTouchPoints
+    }
+  }
+}
+
 function pressKey(controller: ListNavigationController, key: string) {
   const event = new KeyboardEvent("keydown", { key, cancelable: true })
 
@@ -24,6 +38,7 @@ function pressKey(controller: ListNavigationController, key: string) {
 }
 
 function renderListNavigation(props: {
+  activeAttribute?: string
   count: Signal<number>
   capture: (controller: ListNavigationController) => void
   disabledIndexes?: Set<number>
@@ -39,6 +54,7 @@ function renderListNavigation(props: {
 
   function TestHarness() {
     const navigation = useListNavigation({
+      activeAttribute: props.activeAttribute,
       count: () => props.count.value,
       onActivate: props.onActivate,
       onActiveIndexChange: props.onActiveIndexChange,
@@ -81,6 +97,7 @@ function renderListNavigation(props: {
 }
 
 function renderSearchNavigation(props: {
+  activeAttribute?: string
   count: Signal<number>
   capture: (controller: SearchNavigationController) => void
   onActivate?: (index: number) => void
@@ -94,6 +111,7 @@ function renderSearchNavigation(props: {
 
   function TestHarness() {
     const navigation = useSearchNavigation({
+      activeAttribute: props.activeAttribute,
       count: () => props.count.value,
       onActivate: props.onActivate,
       onActiveIndexChange: props.onActiveIndexChange,
@@ -129,6 +147,59 @@ function renderSearchNavigation(props: {
     },
   }
 }
+
+test("useListNavigation never exposes its activation target as selected on touch", async () => {
+  const restoreMaxTouchPoints = setMaxTouchPoints(1)
+  const activatedIndexes: number[] = []
+  const count = signal(2)
+  let navigation: ListNavigationController | null = null
+  const harness = renderListNavigation({
+    activeAttribute: "aria-selected",
+    count,
+    onActivate(index) {
+      activatedIndexes.push(index)
+    },
+    capture(controller) {
+      navigation = controller
+    },
+  })
+
+  try {
+    await harness.render()
+
+    const buttons = harness.container.querySelectorAll("button")
+    expect(navigation!.activeIndex()).toBe(0)
+    expect([...buttons].map((button) => button.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
+    ])
+
+    pressKey(navigation!, "Enter")
+    expect(activatedIndexes).toEqual([0])
+
+    pressKey(navigation!, "ArrowDown")
+    expect(navigation!.activeIndex()).toBe(1)
+    expect([...buttons].map((button) => button.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
+    ])
+
+    navigation!.setActiveIndex(0)
+    expect([...buttons].map((button) => button.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
+    ])
+
+    navigation!.resetActiveIndex()
+    expect([...buttons].map((button) => button.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "false",
+    ])
+  } finally {
+    harness.cleanup()
+    restoreMaxTouchPoints()
+  }
+})
 
 test("useListNavigation wraps by default and scrolls the active item into view", async () => {
   const scrollIntoView = vi
@@ -245,6 +316,7 @@ test("useSearchNavigation wires input changes, reset, Enter activation, and Esca
   const onQueryChange = vi.fn()
   let navigation: SearchNavigationController | null = null
   const harness = renderSearchNavigation({
+    activeAttribute: "aria-selected",
     count,
     onActivate,
     onEscape,
@@ -264,6 +336,11 @@ test("useSearchNavigation wires input changes, reset, Enter activation, and Esca
 
   expect(onQueryChange).toHaveBeenCalledWith("abc")
   expect(navigation!.activeIndex()).toBe(0)
+  expect(
+    [...harness.container.querySelectorAll("button")].map((button) =>
+      button.getAttribute("aria-selected"),
+    ),
+  ).toEqual(["true", "false", "false"])
 
   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }))
   expect(onActivate).toHaveBeenCalledWith(0)
@@ -392,10 +469,6 @@ test("useListNavigation does not scroll when pointer movement highlights an item
 
   expect(navigation!.activeIndex()).toBe(1)
   expect(buttons[1]?.getAttribute("data-highlighted")).toBe("true")
-  expect(scrollIntoView).not.toHaveBeenCalled()
-
-  await harness.render()
-  expect(navigation!.activeIndex()).toBe(1)
   expect(scrollIntoView).not.toHaveBeenCalled()
 
   scrollIntoView.mockRestore()

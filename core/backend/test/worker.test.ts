@@ -2,16 +2,19 @@ import { expect, test } from "bun:test"
 
 import { UserStream } from "../src/worker.ts"
 
-test("user stream durable object fans out published events to subscribers", async () => {
+test("user stream durable object fans out published events as ndjson", async () => {
   const stream = new UserStream()
   const controller = new AbortController()
   const response = await stream.fetch(
     new Request("https://user-stream.internal/subscribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ names: ["comment"] }),
       signal: controller.signal,
     }),
   )
 
-  const eventPromise = readFirstSseEvent(response)
+  const eventPromise = readFirstNdjsonEvent(response)
 
   const publishResponse = await stream.fetch(
     new Request("https://user-stream.internal/publish", {
@@ -20,6 +23,7 @@ test("user stream durable object fans out published events to subscribers", asyn
       body: JSON.stringify({
         event: {
           type: "comment",
+          provider: "github",
           owner: "goddard-ai",
           repo: "sdk",
           prNumber: 1,
@@ -33,18 +37,16 @@ test("user stream durable object fans out published events to subscribers", asyn
   )
 
   expect(publishResponse.status).toBe(204)
-  const payload = (await eventPromise) as {
-    event: { type: string; prNumber: number }
-  }
-  expect(payload.event.type).toBe("comment")
-  expect(payload.event.prNumber).toBe(1)
+  const payload = (await eventPromise) as { type: string; prNumber: number }
+  expect(payload.type).toBe("comment")
+  expect(payload.prNumber).toBe(1)
 
   controller.abort()
 })
 
-async function readFirstSseEvent(response: Response): Promise<unknown> {
+async function readFirstNdjsonEvent(response: Response): Promise<unknown> {
   if (!response.body) {
-    throw new Error("Missing SSE response body")
+    throw new Error("Missing NDJSON response body")
   }
 
   const reader = response.body.getReader()
@@ -59,24 +61,19 @@ async function readFirstSseEvent(response: Response): Promise<unknown> {
 
     buffer += decoder.decode(value, { stream: true })
 
-    let separatorIndex = buffer.indexOf("\n\n")
+    let separatorIndex = buffer.indexOf("\n")
     while (separatorIndex !== -1) {
-      const rawEvent = buffer.slice(0, separatorIndex)
-      buffer = buffer.slice(separatorIndex + 2)
+      const line = buffer.slice(0, separatorIndex).trim()
+      buffer = buffer.slice(separatorIndex + 1)
 
-      const dataLines = rawEvent
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice("data:".length).trimStart())
-
-      if (dataLines.length > 0) {
+      if (line) {
         await reader.cancel()
-        return JSON.parse(dataLines.join("\n"))
+        return JSON.parse(line)
       }
 
-      separatorIndex = buffer.indexOf("\n\n")
+      separatorIndex = buffer.indexOf("\n")
     }
   }
 
-  throw new Error("SSE stream ended before emitting data")
+  throw new Error("NDJSON stream ended before emitting data")
 }

@@ -1,0 +1,47 @@
+{
+  "name": "@goddard-ai/github",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./backend": {
+      "types": {
+        "source": "./src/backend.ts",
+        "default": "./dist/backend.d.mts"
+      },
+      "bun": "./src/backend.ts",
+      "import": "./dist/backend.mjs"
+    },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon.ts",
+        "default": "./dist/daemon.d.mts"
+      },
+      "bun": "./src/daemon.ts",
+      "import": "./dist/daemon.mjs"
+    },
+    "./schema": {
+      "types": {
+        "source": "./src/schema.ts",
+        "default": "./dist/schema.d.mts"
+      },
+      "bun": "./src/schema.ts",
+      "import": "./dist/schema.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "@goddard-ai/auth": "workspace:*",
+    "@goddard-ai/backend-plugin": "workspace:*",
+    "@goddard-ai/remote-repo": "workspace:*",
+    "octokit": "^5.0.5",
+    "zod": "catalog:"
+  }
+}

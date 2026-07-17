@@ -1,4 +1,4 @@
-import { spawnSync, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { readFile, rm } from "node:fs/promises"
 
 const WINDOWS_BUSY_ERROR_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"])
@@ -65,9 +65,15 @@ export async function readTextWhenAvailable(path: string): Promise<string | null
   }
 }
 
-export function terminateProcessTree(child: ChildProcess) {
+export async function terminateProcessTree(child: ChildProcess) {
   if (process.platform === "win32" && child.pid) {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" })
+    await new Promise<void>((resolve) => {
+      const taskkill = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+      })
+      taskkill.once("exit", () => resolve())
+      taskkill.once("error", () => resolve())
+    })
     return
   }
 

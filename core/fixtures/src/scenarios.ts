@@ -208,6 +208,7 @@ export function createBlockedSessionScenario(
     worktree: {
       branchName: "codex/dev-states",
       effectiveCwd: fixtureProjectPath,
+      mergeTargetBranch: null,
       poweredBy: "goddard",
       repoRoot: fixtureProjectPath,
       requestedCwd: fixtureProjectPath,
@@ -265,11 +266,24 @@ export function createActiveSessionScenario(
       },
     ],
   })
+  const worktreeResponse = createSessionWorktreeResponse({
+    session,
+    worktree: {
+      branchName: "codex/tab-restore",
+      effectiveCwd: fixtureProjectPath,
+      mergeTargetBranch: null,
+      poweredBy: "goddard",
+      repoRoot: fixtureProjectPath,
+      requestedCwd: fixtureProjectPath,
+      worktreeDir: "/Users/alec/.codex/worktrees/tab-restore/goddard-ai",
+    },
+  })
 
   return {
     session,
     sessionResponse,
     historyResponse,
+    worktreeResponse,
   }
 }
 

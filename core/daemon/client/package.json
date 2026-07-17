@@ -20,6 +20,15 @@
       "bun": "./src/node/index.ts",
       "import": "./dist/node/index.mjs"
     },
+    "./browser": {
+      "types": {
+        "source": "./src/browser/index.ts",
+        "default": "./dist/browser/index.d.mts"
+      },
+      "browser": "./src/browser/index.ts",
+      "bun": "./src/browser/index.ts",
+      "import": "./dist/browser/index.mjs"
+    },
     "./daemon-ipc": {
       "types": {
         "source": "./src/daemon-ipc.ts",
@@ -33,7 +42,7 @@
     "build": "tsdown --unused",
     "lint": "oxlint",
     "fmt": "prettier -w .",
-    "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit && tsgo -p test --noEmit",
+    "typecheck": "tsgo --noEmit && tsgo -p src/node --noEmit && tsgo -p src/browser --noEmit && tsgo -p test --noEmit",
     "test": "bun test --dots"
   },
   "dependencies": {
@@ -41,6 +50,8 @@
     "@goddard-ai/ipc": "workspace:*",
     "@goddard-ai/paths": "workspace:*",
     "@goddard-ai/schema": "workspace:*",
-    "radashi": "catalog:"
+    "cmd-ts": "catalog:",
+    "radashi": "catalog:",
+    "zod": "catalog:"
   }
 }

@@ -3,9 +3,13 @@ import { css, cx } from "@goddard-ai/styled-system/css"
 import { token } from "@goddard-ai/styled-system/tokens"
 import type { InboxItem } from "@goddard-ai/inbox/schema"
 import { ChevronRight, Folder } from "lucide-react"
-import { useEffect, useRef } from "preact/hooks"
+import { useEffect, useRef, useState } from "preact/hooks"
 
-import { useMainTab, useWorkbenchTabSet } from "~/app-state-context.tsrx"
+import {
+  useMainTab,
+  useProjectContext,
+  useWorkbenchTabSet,
+} from "~/app-state-context.tsrx"
 import { AppCommand, useAppCommand } from "~/commands/app-command.ts"
 import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { maximizeWindow } from "~/desktop-host.ts"
@@ -16,6 +20,7 @@ import {
   prepareInboxItemWorkbenchTarget,
   warmPreparedInboxWorkbenchTargetOnIdle,
 } from "~/inbox/open.ts"
+import { getUnreadInboxAttentionListRequest } from "~/inbox/queries.ts"
 import { useErrorBoundaryReset } from "~/lib/error-boundary-reset.ts"
 import { appToaster } from "~/lib/good-toaster.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
@@ -24,7 +29,7 @@ import type { MainTabItem, MainTabItemId } from "~/main-tab-items.ts"
 import { SwitchProjectDropdown } from "~/projects/switch-project-dropdown.tsrx"
 import { goddardSdk } from "~/sdk.ts"
 import { getWorkbenchTabIcon, shouldRestoreWorkbenchTabScroll } from "~/workbench-tab-registry.ts"
-import { WORKBENCH_MAIN_TAB } from "~/workbench-tab-set.ts"
+import { WORKBENCH_MAIN_TAB, type WorkbenchNavigationLocation } from "~/workbench-tab-set.ts"
 import { AppShellAgentSelector } from "./agent-selector.tsrx"
 import styles from "./chrome.style.ts"
 import {
@@ -52,19 +57,66 @@ const mainTabCommands: Record<MainTabItemId, AppCommand> = {
 /** Renders the merged shell chrome and owns its local interaction wiring. */
 export function AppShellChrome() @{
   const mainTab = useMainTab()
+  const projectContext = useProjectContext()
   const workbenchTabSet = useWorkbenchTabSet()
+  const [confirmCloseTabId, setConfirmCloseTabId] = useState<string | null>(null)
   const topBarSelectorShortcutActive = workbenchTabSet.activeClosableTab?.kind !== "project"
   const selectedMainTab = mainTab.items.find((item) => item.id === mainTab.selectedKind)
+  const confirmCloseTab = confirmCloseTabId ? workbenchTabSet.tabs[confirmCloseTabId] ?? null : null
 
   function navigateMainTab(id: MainTabItemId) {
     mainTab.selectKind(id)
-    workbenchTabSet.activateTab(WORKBENCH_MAIN_TAB.id)
+    workbenchTabSet.activateMainTab(id)
+  }
+
+  function applyWorkbenchNavigation(location: WorkbenchNavigationLocation | null) {
+    if (location?.kind === "main") {
+      mainTab.selectKind(location.mainTabKind)
+    }
+  }
+
+  function requestCloseTab(tabId: string) {
+    const tab = workbenchTabSet.tabs[tabId]
+
+    if (!tab) {
+      return
+    }
+
+    if (tab.dirty) {
+      setConfirmCloseTabId(tab.id)
+      return
+    }
+
+    workbenchTabSet.closeTab(tab.id)
+  }
+
+  function openTerminalTab() {
+    const terminalId = crypto.randomUUID()
+    const terminalCount = workbenchTabSet.tabList.filter((tab) => tab.kind === "terminal").length
+
+    workbenchTabSet.openOrFocusTab({
+      kind: "terminal",
+      props: {
+        tabId: `terminal:${terminalId}`,
+        terminalId,
+        title: `Terminal ${terminalCount + 1}`,
+        cwd: projectContext.activeProjectPath,
+      },
+    })
   }
 
   useAppCommand(AppCommand.workbench.closeActiveTab, () => {
     if (workbenchTabSet.activeTabId !== WORKBENCH_MAIN_TAB.id) {
-      workbenchTabSet.closeTab(workbenchTabSet.activeTabId)
+      requestCloseTab(workbenchTabSet.activeTabId)
     }
+  })
+
+  useAppCommand(AppCommand.workbench.navigateBack, () => {
+    applyWorkbenchNavigation(workbenchTabSet.navigateBack())
+  })
+
+  useAppCommand(AppCommand.workbench.navigateForward, () => {
+    applyWorkbenchNavigation(workbenchTabSet.navigateForward())
   })
 
   useAppCommand(AppCommand.navigation.openKeyboardShortcuts, () => {
@@ -72,6 +124,10 @@ export function AppShellChrome() @{
       kind: "keyboardShortcuts",
       props: {},
     })
+  })
+
+  useAppCommand(AppCommand.navigation.openTerminal, () => {
+    openTerminalTab()
   })
 
   useAppCommand(AppCommand.navigation.openInbox, () => {
@@ -238,15 +294,27 @@ export function AppShellChrome() @{
     <div class={styles.main}>
       <AppShellTabStrip
         activeTabId={workbenchTabSet.activeTabId}
+        canNavigateBack={workbenchTabSet.canNavigateBack}
+        canNavigateForward={workbenchTabSet.canNavigateForward}
         endAccessory={<AppShellNextInboxAttentionSlot {workbenchTabSet} />}
         selectedMainTabId={mainTab.selectedKind}
         selectedMainTabTitle={selectedMainTab?.label ?? WORKBENCH_MAIN_TAB.title}
         tabs={workbenchTabSet.tabList}
         onActivateTab={(id) => {
-          workbenchTabSet.activateTab(id)
+          if (id === WORKBENCH_MAIN_TAB.id) {
+            workbenchTabSet.activateMainTab(mainTab.selectedKind)
+          } else {
+            workbenchTabSet.activateTab(id)
+          }
         }}
         onCloseTab={(id) => {
-          workbenchTabSet.closeTab(id)
+          requestCloseTab(id)
+        }}
+        onNavigateBack={() => {
+          applyWorkbenchNavigation(workbenchTabSet.navigateBack())
+        }}
+        onNavigateForward={() => {
+          applyWorkbenchNavigation(workbenchTabSet.navigateForward())
         }}
         onMoveTab={(sourceId, targetId, placement) => {
           workbenchTabSet.moveTab(sourceId, targetId, placement)
@@ -278,7 +346,90 @@ export function AppShellChrome() @{
         }
       </div>
     </div>
+
+    @if (confirmCloseTab?.dirty) {
+      <AppShellDirtyTabCloseDialog
+        tabTitle={confirmCloseTab.title}
+        onCancel={() => {
+          setConfirmCloseTabId(null)
+        }}
+        onConfirm={() => {
+          workbenchTabSet.closeTab(confirmCloseTab.id)
+          setConfirmCloseTabId(null)
+        }}
+      />
+    }
   </div>
+}
+
+function AppShellDirtyTabCloseDialog(props: {
+  tabTitle: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) @{
+  const dialogRef = useRef<HTMLDialogElement | null>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+
+    if (!dialog) {
+      return
+    }
+
+    if (!dialog.open) {
+      dialog.showModal()
+    }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close()
+      }
+    }
+  }, [])
+
+  <dialog
+    ref={dialogRef}
+    aria-labelledby="dirty-tab-close-title"
+    class={styles.confirmDialog}
+    onCancel={(event) => {
+      event.preventDefault()
+      props.onCancel()
+    }}
+  >
+    <form
+      class={styles.confirmDialogContent}
+      method="dialog"
+      onSubmit={(event) => {
+        event.preventDefault()
+        props.onConfirm()
+      }}
+    >
+      <div>
+        <h2 id="dirty-tab-close-title" class={styles.confirmDialogTitle}>
+          {t`Close tab?`}
+        </h2>
+        <p class={styles.confirmDialogBody}>
+          {t`"${props.tabTitle}" has unsubmitted or unsaved changes.`}
+        </p>
+      </div>
+      <div class={styles.confirmDialogActions}>
+        <button
+          class={cx(styles.confirmDialogButton, styles.confirmDialogCancelButton)}
+          type="button"
+          onClick={props.onCancel}
+        >
+          {t`Cancel`}
+        </button>
+        <button
+          autoFocus={true}
+          class={cx(styles.confirmDialogButton, styles.confirmDialogConfirmButton)}
+          type="submit"
+        >
+          {t`Close Tab`}
+        </button>
+      </div>
+    </form>
+  </dialog>
 }
 
 function AppShellNextInboxAttentionSlot(props: {
@@ -312,7 +463,7 @@ function AppShellNextInboxAttentionButton(props: {
   })
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
-      { statuses: ["unread"], limit: 100 },
+      getUnreadInboxAttentionListRequest(),
     ],
   })
   const nextItem = getNextUnreadInboxAttentionItem(items)
@@ -325,6 +476,7 @@ function AppShellNextInboxAttentionButton(props: {
     try {
       const preparedTarget = await preloaderRef.current?.resolve(item) ?? null
       await openInboxItemInWorkbench({
+        closeCurrentCleanTab: true,
         item,
         preparedTarget,
         workbenchTabSet: props.workbenchTabSet,
@@ -379,7 +531,7 @@ function AppShellSidebarQueryContent(props: {
 }) @{
   const { items } = useQuery(goddardSdk.inbox.list, {
     params: [
-      { statuses: ["unread"], limit: 100 },
+      getUnreadInboxAttentionListRequest(),
     ],
   })
 

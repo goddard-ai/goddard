@@ -3,5 +3,12 @@
   "compilerOptions": {
     "types": ["bun", "node", "@cloudflare/workers-types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "bin/**/*.ts", "alchemy.run.ts", "drizzle.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "bin/**/*.ts",
+    "alchemy.run.ts",
+    "alchemy-typings.d.ts",
+    "drizzle.config.ts"
+  ]
 }

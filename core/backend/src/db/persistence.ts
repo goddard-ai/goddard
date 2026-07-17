@@ -4,24 +4,28 @@ import type {
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+  ProviderIdentity,
 } from "@goddard-ai/auth/schema"
+import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import {
-  normalizeGitHubWebhookEvent,
-  type RemoteRepoStreamService,
-} from "@goddard-ai/remote-repo/backend"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RemoteRepoStreamService } from "@goddard-ai/remote-repo/backend"
+import type { RemoteRepositoryRef, RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { type Client } from "@libsql/client"
 import { and, eq, gt } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 
 import {
   assertRepo,
-  createPrViaApp,
+  createPrViaProvider,
   HttpError,
-  postPrCommentViaApp,
+  postPrCommentViaProvider,
   type BackendControlPlane,
 } from "../api/control-plane.ts"
+import {
+  getPrincipalDisplayName,
+  sessionToPrincipal,
+  type BackendPrincipal,
+} from "../api/events.ts"
 import type { Env } from "../env.ts"
 import { hashToInteger } from "../utils.ts"
 import * as schema from "./schema.ts"
@@ -46,45 +50,53 @@ export class TursoBackendControlPlane
     return {
       deviceCode,
       userCode,
-      verificationUri: "https://github.com/login/device",
+      verificationUri: "https://auth.local/device",
       expiresIn,
       interval: 5,
     }
   }
 
   async completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> {
-    const githubUsername = input.githubUsername.trim()
-    if (!githubUsername) {
-      throw new HttpError(400, "githubUsername is required")
-    }
-
     const token = `tok_${randomBytes(32).toString("hex")}`
-    const githubUserId = hashToInteger(githubUsername)
+    const providerIdentity = input.providerIdentity
+    const principal = createPrincipal(providerIdentity)
     const expiresAt = Date.now() + 1000 * 60 * 60 * 24
 
     await this.#db.transaction(async (tx) => {
       await tx
         .insert(schema.users)
         .values({
-          githubUserId,
-          githubUsername,
+          id: principal.id,
+          createdAt: new Date().toISOString(),
+        })
+        .onConflictDoNothing()
+
+      await tx
+        .insert(schema.providerIdentities)
+        .values({
+          provider: providerIdentity.provider,
+          subject: providerIdentity.subject,
+          principalId: principal.id,
+          displayName: providerIdentity.displayName,
           createdAt: new Date().toISOString(),
         })
         .onConflictDoUpdate({
-          target: schema.users.githubUserId,
-          set: { githubUsername },
+          target: [schema.providerIdentities.provider, schema.providerIdentities.subject],
+          set: {
+            principalId: principal.id,
+            displayName: providerIdentity.displayName,
+          },
         })
 
       await tx.insert(schema.authSessions).values({
         token,
-        githubUserId,
-        githubUsername,
+        principalId: principal.id,
         expiresAt,
         createdAt: new Date().toISOString(),
       })
     })
 
-    return { token, githubUsername, githubUserId }
+    return { token, principal }
   }
 
   async getSession(token: string): Promise<AuthSession> {
@@ -102,9 +114,31 @@ export class TursoBackendControlPlane
 
     return {
       token: session.token,
-      githubUsername: session.githubUsername,
-      githubUserId: session.githubUserId,
+      principal: await this.#getPrincipalById(session.principalId),
     }
+  }
+
+  async getPrincipal(token: string): Promise<BackendPrincipal> {
+    const session = await this.getSession(token)
+    return sessionToPrincipal(
+      session,
+      await this.#listRepositoriesForPrincipal(session.principal.id),
+    )
+  }
+
+  async getPrincipalForId(principalId: string): Promise<BackendPrincipal> {
+    const [user] = await this.#db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, principalId))
+      .limit(1)
+
+    if (!user) {
+      throw new HttpError(401, "Unknown principal")
+    }
+
+    const principal = await this.#getPrincipalById(user.id)
+    return { ...principal, repositories: await this.#listRepositoriesForPrincipal(user.id) }
   }
 
   async createPr(token: string, input: CreatePrInput, env?: Env): Promise<PullRequestRecord> {
@@ -115,14 +149,20 @@ export class TursoBackendControlPlane
     }
 
     const now = new Date().toISOString()
-    const body =
-      `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
-    const createdPr = await createPrViaApp(env, input, body)
+    const displayName = getPrincipalDisplayName(session.principal)
+    const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${displayName}`.trim()
+    const createdPr = await createPrViaProvider(
+      env,
+      getDefaultBackendPluginComposition().providers,
+      input,
+      body,
+    )
 
     const [inserted] = await this.#db
       .insert(schema.pullRequests)
       .values({
         number: createdPr.number,
+        provider: input.provider,
         owner: input.owner,
         repo: input.repo,
         title: input.title,
@@ -130,7 +170,7 @@ export class TursoBackendControlPlane
         head: input.head,
         base: input.base,
         url: createdPr.url,
-        createdBy: session.githubUsername,
+        createdBy: session.principal.id,
         createdAt: createdPr.createdAt || now,
       })
       .returning()
@@ -140,7 +180,7 @@ export class TursoBackendControlPlane
 
   async replyToPr(
     token: string,
-    input: { owner: string; repo: string; prNumber: number; body: string },
+    input: { provider: string; owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> {
     const session = await this.getSession(token)
@@ -150,23 +190,25 @@ export class TursoBackendControlPlane
     }
 
     const managed = await this.isManagedPr(
+      input.provider,
       input.owner,
       input.repo,
       input.prNumber,
-      session.githubUsername,
+      session.principal.id,
     )
     if (!managed) {
       throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
+    await postPrCommentViaProvider(env, getDefaultBackendPluginComposition().providers, input)
   }
 
   async isManagedPr(
+    provider: string,
     owner: string,
     repo: string,
     prNumber: number,
-    githubUsername: string,
+    principalId: string,
   ): Promise<boolean> {
     assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
@@ -179,9 +221,10 @@ export class TursoBackendControlPlane
       .where(
         and(
           eq(schema.pullRequests.owner, owner),
+          eq(schema.pullRequests.provider, provider),
           eq(schema.pullRequests.repo, repo),
           eq(schema.pullRequests.number, prNumber),
-          eq(schema.pullRequests.createdBy, githubUsername),
+          eq(schema.pullRequests.createdBy, principalId),
         ),
       )
       .limit(1)
@@ -189,15 +232,9 @@ export class TursoBackendControlPlane
     return Boolean(match)
   }
 
-  async handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> {
-    assertRepo(event.owner, event.repo)
-
-    return normalizeGitHubWebhookEvent(event)
-  }
-
   async resolveEventOwner(event: RepoEvent): Promise<string | undefined> {
     if (event.type === "pr.created") {
-      return event.author
+      return `github:${hashToInteger(event.author)}`
     }
 
     const [match] = await this.#db
@@ -213,5 +250,54 @@ export class TursoBackendControlPlane
       .limit(1)
 
     return match?.createdBy
+  }
+
+  async #listRepositoriesForPrincipal(principalId: string): Promise<RemoteRepositoryRef[]> {
+    const rows = await this.#db
+      .select({
+        provider: schema.pullRequests.provider,
+        owner: schema.pullRequests.owner,
+        repo: schema.pullRequests.repo,
+      })
+      .from(schema.pullRequests)
+      .where(eq(schema.pullRequests.createdBy, principalId))
+
+    const repositories = new Map<string, RemoteRepositoryRef>()
+    for (const row of rows) {
+      repositories.set(`${row.owner}/${row.repo}`, {
+        provider: row.provider,
+        owner: row.owner,
+        repo: row.repo,
+      })
+    }
+
+    return [...repositories.values()]
+  }
+
+  async #getPrincipalById(principalId: string): Promise<AuthSession["principal"]> {
+    const identities = await this.#db
+      .select()
+      .from(schema.providerIdentities)
+      .where(eq(schema.providerIdentities.principalId, principalId))
+
+    if (identities.length === 0) {
+      throw new HttpError(401, "Unknown principal")
+    }
+
+    return {
+      id: principalId,
+      providerIdentities: identities.map((identity) => ({
+        provider: identity.provider,
+        subject: identity.subject,
+        displayName: identity.displayName ?? undefined,
+      })),
+    }
+  }
+}
+
+function createPrincipal(providerIdentity: ProviderIdentity): AuthSession["principal"] {
+  return {
+    id: `${providerIdentity.provider}:${providerIdentity.subject}`,
+    providerIdentities: [providerIdentity],
   }
 }

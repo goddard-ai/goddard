@@ -1,5 +1,9 @@
 import { t } from "@lingui/core/macro"
-import type { SessionSubpackage } from "@goddard-ai/sdk"
+import {
+  deriveSessionProfileConfig,
+  type SessionProfileId,
+  type SessionSubpackage,
+} from "@goddard-ai/sdk"
 import { useSignal } from "@preact/signals"
 import { GitFork, Laptop } from "lucide-react"
 import { useEffect } from "preact/hooks"
@@ -13,6 +17,11 @@ import { goddardSdk } from "~/sdk.ts"
 import { flattenConfigOptionValues, stepConfigOptionValue } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { SessionModeSelector } from "~/session-input/session-mode-selector.tsrx"
+import {
+  findMatchingSessionProfileId,
+  getAvailableSessionProfiles,
+  getSessionProfileLabel,
+} from "./session-profiles.ts"
 import styles from "./launch-form-selectors.style.ts"
 import { type SessionLaunchFormState } from "./launch-form-state.ts"
 import {
@@ -43,6 +52,7 @@ export function SessionLaunchLoadingSelect(props: { label: string; compact?: boo
 export function SessionLaunchPreviewLoadingSelectors(props: { compact?: boolean }) @{
   <div class={styles.composerControls}>
     <SessionLaunchLoadingSelect compact={props.compact} label={t`Agent harness`} />
+    <SessionLaunchLoadingSelect compact={props.compact} label={t`Session profile`} />
     <SessionLaunchLoadingSelect compact={props.compact} label={t`Model`} />
     <SessionLaunchLoadingSelect compact={props.compact} label={t`Thinking level`} />
     <div class={styles.composerApprovalControl}>
@@ -58,10 +68,10 @@ export function AgentHarnessSelector(props: {
 }) @{
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.agent.list, {
     params: [{ cwd: form.effectiveCwd.value ?? undefined }],
   })
-  const items: SessionInputSelectItem[] = adapterCatalog.adapters.map(
+  const items: SessionInputSelectItem[] = managedAgentCatalog.agents.map(
     (adapter) => ({
       value: adapter.id,
       label: adapter.name,
@@ -75,8 +85,8 @@ export function AgentHarnessSelector(props: {
   )
 
   useEffect(() => {
-    form.adapterCatalog.value = adapterCatalog
-  }, [adapterCatalog, form])
+    form.managedAgentCatalog.value = managedAgentCatalog
+  }, [managedAgentCatalog, form])
 
   <SessionInputSelect
     compact={props.compact}
@@ -85,12 +95,12 @@ export function AgentHarnessSelector(props: {
     iconOnlyTrigger={props.compact}
     {items}
     label={t`Agent harness`}
-    open={form.getPickerOpen("adapter")}
+    open={form.getPickerOpen("agent")}
     placeholder={t`Select agent harness`}
     shortcut={adapterShortcut}
-    value={form.draftAdapterId.value}
+    value={form.draftManagedAgentId.value}
     onValueChange={(value) => {
-      form.draftAdapterId.value = value
+      form.draftManagedAgentId.value = value
       recordSessionLaunchAgentUse(value)
       form.launchPreview.value = null
       form.setOpenPicker(null)
@@ -105,12 +115,14 @@ export function SessionLaunchBranchSelector(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]
@@ -162,12 +174,14 @@ export function SessionLaunchLocationSelector(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   const preview = useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]
@@ -348,12 +362,14 @@ export function SessionLaunchPreviewSelectors(props: {
   const { form } = props
   const shortcutRegistry = useShortcutRegistry()
   useQuery(
-    form.effectiveCwd.value && form.draftAdapterId.value ? goddardSdk.session.launchPreview : null,
+    form.effectiveCwd.value && form.draftManagedAgentId.value
+      ? goddardSdk.session.launchPreview
+      : null,
     {
-      params: form.effectiveCwd.value && form.draftAdapterId.value
+      params: form.effectiveCwd.value && form.draftManagedAgentId.value
         ? [
             {
-              agent: form.draftAdapterId.value,
+              agent: form.draftManagedAgentId.value,
               cwd: form.effectiveCwd.value,
             },
           ]
@@ -432,6 +448,8 @@ export function SessionLaunchPreviewSelectors(props: {
   <div class={props.compact ? styles.composerControls : styles.grid}>
     <AgentHarnessSelector compact={props.compact} disabled={props.disabled} {form} />
 
+    <SessionLaunchProfileSelector compact={props.compact} disabled={props.disabled} {form} />
+
     <SessionInputSelect
       compact={props.compact}
       disabled={props.disabled || modelItems.length === 0}
@@ -483,4 +501,59 @@ export function SessionLaunchPreviewSelectors(props: {
       </div>
     }
   </div>
+}
+
+function SessionLaunchProfileSelector(props: {
+  compact?: boolean;
+  disabled?: boolean;
+  form: SessionLaunchFormState;
+}) @{
+  @try {
+    const sessionProfiles = useQuery(goddardSdk.session.profile.list, {
+      params: [{}],
+    })
+    const profileConfig = deriveSessionProfileConfig({
+      configOptions: props.form.launchPreview.value?.configOptions ?? [],
+    })
+    const agentProfiles = props.form.draftManagedAgentId.value
+      ? sessionProfiles.profiles[props.form.draftManagedAgentId.value]
+      : undefined
+    const profileItems: SessionInputSelectItem[] = getAvailableSessionProfiles(
+      agentProfiles,
+      profileConfig,
+    ).map(
+      ({ profileId }) => ({
+        value: profileId,
+        label: getSessionProfileLabel(profileId),
+      }),
+    )
+    const activeProfileId = findMatchingSessionProfileId(agentProfiles, profileConfig, {
+      modelId: props.form.draftModelId.value,
+      thinkingValue: typeof props.form.draftThinkingValue.value === "string"
+        ? props.form.draftThinkingValue.value
+        : null,
+      approvalModeValue: props.form.draftModeValue.value,
+    })
+
+    @if (profileItems.length > 0) {
+      <SessionInputSelect
+        compact={props.compact}
+        disabled={props.disabled}
+        filterable={false}
+        items={profileItems}
+        label={t`Session profile`}
+        open={props.form.getPickerOpen("profile")}
+        placeholder={t`Custom`}
+        value={activeProfileId}
+        onValueChange={(value) => {
+          const profile = agentProfiles?.[value as SessionProfileId]
+          if (profile) {
+            props.form.applySessionProfile(profile)
+          }
+        }}
+      />
+    }
+  } @pending {
+  } @catch {
+  }
 }

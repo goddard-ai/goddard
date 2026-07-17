@@ -4,12 +4,15 @@ import {
   Brain,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Command,
   FileDiff,
   Folder,
   FolderOpen,
   GitBranch,
+  History,
   Inbox,
   Keyboard,
   Lightbulb,
@@ -22,6 +25,7 @@ import {
   Search,
   SendHorizontal,
   Settings,
+  Terminal,
 } from "lucide-react"
 
 import { defineAppCommands } from "./app-command.ts"
@@ -37,6 +41,26 @@ export const AppCommand = defineAppCommands({
         },
         icon: PanelTopClose,
         when: "workbench.hasClosableActiveTab",
+      },
+      navigateBack: {
+        get label() {
+          return t`Navigate Back`
+        },
+        icon: ChevronLeft,
+        when: "workbench.canNavigateBack",
+      },
+      navigateForward: {
+        get label() {
+          return t`Navigate Forward`
+        },
+        icon: ChevronRight,
+        when: "workbench.canNavigateForward",
+      },
+      openRecentTabs: {
+        get label() {
+          return t`Open Recent Tabs`
+        },
+        icon: History,
       },
     },
   },
@@ -54,6 +78,11 @@ export const AppCommand = defineAppCommands({
           return t`Open New Session Dialog`
         },
         icon: MessageSquarePlus,
+      },
+      openTerminal: {
+        label: "Open Terminal",
+        icon: Terminal,
+        keywords: ["shell", "pty"],
       },
       openSwitchProject: {
         get label() {

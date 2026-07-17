@@ -131,13 +131,15 @@ Tooltips use `Popover` with `focusOnOpen={false}`, `restoreFocus={false}`, `role
 Use these hooks for list-like surfaces that keep filtering, item rendering, and
 overlay behavior in the caller but need shared active-row behavior.
 
-`useListNavigation` requires `count: () => number` and returns an active-index
-controller plus `itemRef(index)`. It handles ArrowUp, ArrowDown, Home, End,
+`useListNavigation` requires `count: () => number` and returns an activation-target
+controller plus `itemRef(index)`. The target defaults to the first enabled row so
+Enter can activate it. On non-touch devices that default target receives the active
+DOM attribute immediately. On touch-capable devices no activation target receives
+the active DOM attribute, including after keyboard, pointer, or programmatic
+navigation. Navigation and Enter activation still use the target normally.
+The hook handles ArrowUp, ArrowDown, Home, End,
 Enter activation, pointer hover, registered-row focus helpers, disabled-row
 skipping from DOM state, active DOM attributes, and active-row scroll visibility.
-Pass `onActiveIndexChange(index)` to observe primitive-owned active-row changes
-from keyboard movement, pointer hover, count clamping, reset, and direct setter
-calls.
 When the active registered row changes from keyboard or programmatic movement,
 the hook calls `scrollIntoView` on that row. Pointer-origin hover changes update
 the active row without scrolling. Scrolling is enabled by default with

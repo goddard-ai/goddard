@@ -30,6 +30,7 @@ export const SessionErrorCodes = {
   NotReconnectable: "session.not_reconnectable",
   NoWorktree: "session.no_worktree",
   PromptAborted: "session.prompt_aborted",
+  ProfileConfigurationFailed: "session.profile_configuration_failed",
   UnsupportedMessage: "session.unsupported_message",
 } as const
 
@@ -55,6 +56,7 @@ export const SessionErrorCode = z.enum([
   SessionErrorCodes.NotReconnectable,
   SessionErrorCodes.NoWorktree,
   SessionErrorCodes.PromptAborted,
+  SessionErrorCodes.ProfileConfigurationFailed,
   SessionErrorCodes.UnsupportedMessage,
 ])
 
@@ -198,6 +200,10 @@ export const SessionIpcErrors = {
       sessionId: SessionId,
     }),
   },
+  ProfileConfigurationFailed: {
+    code: SessionErrorCodes.ProfileConfigurationFailed,
+    details: z.undefined(),
+  },
   UnsupportedMessage: {
     code: SessionErrorCodes.UnsupportedMessage,
     details: z.strictObject({
@@ -217,6 +223,34 @@ export const DaemonSessionStopReason = z.enum([
 ])
 
 export type DaemonSessionStopReason = z.output<typeof DaemonSessionStopReason>
+
+/** Fixed user-facing session profile slots available for each agent harness. */
+export const SessionProfileId = z.enum(["routine", "debug", "deep"])
+
+export type SessionProfileId = z.infer<typeof SessionProfileId>
+
+/** Exact semantic ACP selections captured by one session profile. */
+export const SessionProfile = z.strictObject({
+  model: z.string().min(1),
+  thoughtLevel: z.string().min(1),
+  approvalMode: z.string().min(1),
+})
+
+export type SessionProfile = z.infer<typeof SessionProfile>
+
+/** Optional fixed profile slots configured for one agent harness. */
+export const AgentSessionProfiles = z.strictObject({
+  routine: SessionProfile.optional(),
+  debug: SessionProfile.optional(),
+  deep: SessionProfile.optional(),
+})
+
+export type AgentSessionProfiles = z.infer<typeof AgentSessionProfiles>
+
+/** Global user-owned session profiles keyed by agent harness id. */
+export const SessionProfilesConfig = z.record(z.string().min(1), AgentSessionProfiles)
+
+export type SessionProfilesConfig = z.infer<typeof SessionProfilesConfig>
 
 export const DaemonSessionStatus = z.enum([
   "idle",
@@ -402,6 +436,7 @@ export const DaemonWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable().default(null),
   poweredBy: z.string(),
 })
 
@@ -419,6 +454,7 @@ export const DaemonLaunchWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable().default(null),
   poweredBy: z.string(),
   releaseAfter: z.string().nullable(),
 })
@@ -740,6 +776,28 @@ export const SetSessionModelRequest = SessionIdParams.extend({
 
 export type SetSessionModelRequest = z.infer<typeof SetSessionModelRequest>
 
+/** Empty request used to read globally configured session profiles. */
+export const ListSessionProfilesRequest = z.strictObject({})
+
+export type ListSessionProfilesRequest = z.infer<typeof ListSessionProfilesRequest>
+
+/** Request used to replace one fixed profile for an agent harness. */
+export const SetSessionProfileRequest = z.strictObject({
+  agentId: z.string().min(1),
+  profileId: SessionProfileId,
+  profile: SessionProfile,
+})
+
+export type SetSessionProfileRequest = z.infer<typeof SetSessionProfileRequest>
+
+/** Request used to remove one fixed profile from an agent harness. */
+export const RemoveSessionProfileRequest = z.strictObject({
+  agentId: z.string().min(1),
+  profileId: SessionProfileId,
+})
+
+export type RemoveSessionProfileRequest = z.infer<typeof RemoveSessionProfileRequest>
+
 /** Request payload used to declare the current initiative for one daemon session. */
 export const DeclareSessionInitiativeRequest = SessionIdParams.extend({
   title: z.string().trim().min(1),
@@ -782,6 +840,11 @@ export type SetSessionConfigOptionResponse = {
 /** Response payload returned after updating the active ACP session model. */
 export type SetSessionModelResponse = {
   session: DaemonSession
+}
+
+/** Response returned by all global session-profile management operations. */
+export type SessionProfilesResponse = {
+  profiles: SessionProfilesConfig
 }
 
 /** Response payload returned after marking one session completed. */
@@ -1209,6 +1272,7 @@ export const SessionWorktree = z.strictObject({
   effectiveCwd: z.string(),
   worktreeDir: z.string(),
   branchName: z.string(),
+  mergeTargetBranch: z.string().nullable(),
   poweredBy: z.string(),
 })
 
@@ -1229,3 +1293,88 @@ export type GetSessionWorktreeResponse = SessionWorktreeIdentity & {
 export const GetSessionWorktreeRequest = SessionIdParams
 
 export type GetSessionWorktreeRequest = z.infer<typeof GetSessionWorktreeRequest>
+
+/** Status values returned when evaluating whether one session worktree can merge now. */
+export const SessionWorktreeMergeReadinessStatus = z.enum([
+  "ready",
+  "missing_worktree",
+  "merge_target_branch_required",
+  "merge_target_branch_missing",
+  "pr_scoped_session",
+  "session_active",
+  "worktree_dirty",
+  "primary_dirty",
+  "not_ahead",
+  "not_fast_forward",
+  "worktree_missing",
+])
+
+export type SessionWorktreeMergeReadinessStatus = z.infer<
+  typeof SessionWorktreeMergeReadinessStatus
+>
+
+/** Structured readiness facts returned for one session worktree merge evaluation. */
+export const SessionWorktreeMergeReadiness = z.strictObject({
+  status: SessionWorktreeMergeReadinessStatus,
+  mergeTargetBranch: z.string().nullable(),
+  worktreeHeadOid: z.string().nullable(),
+  worktreeHeadBranch: z.string().nullable(),
+  targetBranchHeadOid: z.string().nullable(),
+  aheadCount: z.number().int().nonnegative(),
+  syncMounted: z.boolean(),
+  willAutoUnmountSync: z.boolean(),
+})
+
+export type SessionWorktreeMergeReadiness = z.infer<typeof SessionWorktreeMergeReadiness>
+
+/** Request payload used to read merge readiness for one daemon-managed session worktree. */
+export const GetSessionWorktreeMergeReadinessRequest = SessionIdParams
+
+export type GetSessionWorktreeMergeReadinessRequest = z.infer<
+  typeof GetSessionWorktreeMergeReadinessRequest
+>
+
+/** Response payload returned after reading merge readiness for one session worktree. */
+export type GetSessionWorktreeMergeReadinessResponse = SessionWorktreeIdentity & {
+  readiness: SessionWorktreeMergeReadiness
+}
+
+/** Request payload used to update one persisted session worktree merge target branch. */
+export const SetSessionWorktreeMergeTargetBranchRequest = SessionIdParams.extend({
+  mergeTargetBranch: z.string().nullable(),
+})
+
+export type SetSessionWorktreeMergeTargetBranchRequest = z.infer<
+  typeof SetSessionWorktreeMergeTargetBranchRequest
+>
+
+/** Response payload returned after updating one session worktree merge target branch. */
+export type SetSessionWorktreeMergeTargetBranchResponse = SessionWorktreeIdentity & {
+  mergeTargetBranch: string | null
+  readiness: SessionWorktreeMergeReadiness
+}
+
+/** Request payload used to merge one session worktree into its persisted target branch. */
+export const MergeSessionWorktreeRequest = SessionIdParams
+
+export type MergeSessionWorktreeRequest = z.infer<typeof MergeSessionWorktreeRequest>
+
+/** Response payload returned after one session worktree merge attempt. */
+export type MergeSessionWorktreeResponse = SessionWorktreeIdentity &
+  (
+    | {
+        merged: true
+        targetBranch: string
+        sourceHeadOid: string
+        previousTargetHeadOid: string
+        nextTargetHeadOid: string
+        syncUnmounted: boolean
+        warnings: string[]
+      }
+    | {
+        merged: false
+        readiness: SessionWorktreeMergeReadiness
+        syncUnmounted: boolean
+        warnings: string[]
+      }
+  )

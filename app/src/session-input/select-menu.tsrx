@@ -106,6 +106,8 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
   const typeaheadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const promptRestoreRef = useRef<(() => void) | null>(null)
   const closeReasonRef = useRef<SelectCloseReason | null>(null)
+  const triggerPressPointerIdRef = useRef<number | null>(null)
+  const suppressNextTriggerClickRef = useRef(false)
   const wasOpenRef = useRef(props.open.value)
 
   function closeSelect(reason: SelectCloseReason) {
@@ -193,6 +195,31 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
     }
 
     promptRestoreRef.current = captureFocusedSessionInputPrompt()
+  }
+
+  function openSelectFromTriggerPointer(event: preact.TargetedPointerEvent<HTMLButtonElement>) {
+    if (props.disabled || event.button !== 0) {
+      return
+    }
+
+    const wasOpen = props.open.value
+
+    capturePromptFocusBeforeOpen()
+    triggerPressPointerIdRef.current = event.pointerId
+    suppressNextTriggerClickRef.current = !wasOpen
+    props.open.value = true
+
+    const clearTriggerPress = () => {
+      triggerPressPointerIdRef.current = null
+      window.removeEventListener("pointerup", clearTriggerPress)
+      window.removeEventListener("pointercancel", clearTriggerPress)
+      setTimeout(() => {
+        suppressNextTriggerClickRef.current = false
+      }, 0)
+    }
+
+    window.addEventListener("pointerup", clearTriggerPress)
+    window.addEventListener("pointercancel", clearTriggerPress)
   }
 
   const navigation = useSearchNavigation({
@@ -368,9 +395,15 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
           data-compact={props.compact}
           disabled={props.disabled}
           type="button"
-          onPointerDown={capturePromptFocusBeforeOpen}
+          onPointerDown={openSelectFromTriggerPointer}
           onClick={() => {
             capturePromptFocusBeforeOpen()
+
+            if (suppressNextTriggerClickRef.current) {
+              suppressNextTriggerClickRef.current = false
+              return
+            }
+
             if (props.open.value) {
               closeSelect("trigger")
             } else {
@@ -543,6 +576,14 @@ export function SessionInputSelect(props: SessionInputSelectProps) @{
                   disabled={props.disabled || item.disabled}
                   type="button"
                   data-active="false"
+                  onPointerUp={(event) => {
+                    if (triggerPressPointerIdRef.current !== event.pointerId) {
+                      return
+                    }
+
+                    triggerPressPointerIdRef.current = null
+                    commitSelection(item)
+                  }}
                   onClick={() => {
                     commitSelection(item)
                   }}

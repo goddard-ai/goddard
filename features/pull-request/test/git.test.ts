@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -18,14 +17,14 @@ test("pull request git helpers infer repository and branch defaults", async () =
     await rm(repoDir, { recursive: true, force: true })
   })
 
-  runGit(repoDir, ["init"])
-  runGit(repoDir, ["config", "user.name", "Goddard"])
-  runGit(repoDir, ["config", "user.email", "goddard@example.com"])
+  await runGit(repoDir, ["init"])
+  await runGit(repoDir, ["config", "user.name", "Goddard"])
+  await runGit(repoDir, ["config", "user.email", "goddard@example.com"])
   await writeFile(join(repoDir, "README.md"), "# test\n", "utf-8")
-  runGit(repoDir, ["add", "README.md"])
-  runGit(repoDir, ["commit", "-m", "init"])
-  runGit(repoDir, ["checkout", "-b", "feature/ipc"])
-  runGit(repoDir, ["remote", "add", "origin", "git@github.com:acme/widgets.git"])
+  await runGit(repoDir, ["add", "README.md"])
+  await runGit(repoDir, ["commit", "-m", "init"])
+  await runGit(repoDir, ["checkout", "-b", "feature/ipc"])
+  await runGit(repoDir, ["remote", "add", "origin", "example://acme/widgets"])
   await mkdir(join(repoDir, ".git", "refs", "remotes", "origin"), {
     recursive: true,
   })
@@ -34,12 +33,16 @@ test("pull request git helpers infer repository and branch defaults", async () =
     "ref: refs/remotes/origin/main\n",
   )
 
-  const submit = await resolveSubmitRequestFromGit({
-    cwd: repoDir,
-    title: "Implement IPC routing",
-    body: "Done.",
-  })
+  const submit = await resolveSubmitRequestFromGit(
+    {
+      cwd: repoDir,
+      title: "Implement IPC routing",
+      body: "Done.",
+    },
+    parseExampleRepositoryUrl,
+  )
   expect(submit).toEqual({
+    provider: "example",
     owner: "acme",
     repo: "widgets",
     title: "Implement IPC routing",
@@ -48,12 +51,16 @@ test("pull request git helpers infer repository and branch defaults", async () =
     base: "main",
   })
 
-  runGit(repoDir, ["checkout", "-B", "pr-12"])
-  const reply = await resolveReplyRequestFromGit({
-    cwd: repoDir,
-    message: "Updated per review",
-  })
+  await runGit(repoDir, ["checkout", "-B", "pr-12"])
+  const reply = await resolveReplyRequestFromGit(
+    {
+      cwd: repoDir,
+      message: "Updated per review",
+    },
+    parseExampleRepositoryUrl,
+  )
   expect(reply).toEqual({
+    provider: "example",
     owner: "acme",
     repo: "widgets",
     prNumber: 12,
@@ -61,13 +68,32 @@ test("pull request git helpers infer repository and branch defaults", async () =
   })
 })
 
-function runGit(cwd: string, args: string[]) {
-  const result = spawnSync("git", args, {
+async function runGit(cwd: string, args: string[]) {
+  const subprocess = Bun.spawn(["git", ...args], {
     cwd,
-    encoding: "utf-8",
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   })
+  const [exitCode, stderr] = await Promise.all([
+    subprocess.exited,
+    new Response(subprocess.stderr).text(),
+  ])
 
-  if (result.status !== 0) {
-    throw new Error(result.stderr || `git ${args.join(" ")} failed`)
+  if (exitCode !== 0) {
+    throw new Error(stderr || `git ${args.join(" ")} failed`)
+  }
+}
+
+function parseExampleRepositoryUrl(remote: string) {
+  const match = remote.match(/^example:\/\/(.+?)\/(.+?)$/)
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    provider: "example",
+    owner: match[1],
+    repo: match[2],
   }
 }

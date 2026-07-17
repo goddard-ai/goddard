@@ -1,20 +1,12 @@
-import { definePlugin, event, type DbContext } from "@goddard-ai/daemon-plugin"
+import { agentPlugin } from "@goddard-ai/agent/daemon"
+import { definePlugin, type DbContext } from "@goddard-ai/daemon-plugin"
 import { kind } from "kindstore"
 import { isObject } from "radashi"
 
 import { sessionIpcRoutes } from "./daemon-ipc.ts"
-import {
-  createSessionManager,
-  type SessionActivatedEvent,
-  type SessionAttentionEvent,
-  type SessionBlockedEvent,
-  type SessionIdEvent,
-  type SessionLaunchFailedEvent,
-  type SessionLaunchFinishedEvent,
-  type SessionPersistedEvent,
-  type SessionStoppingEvent,
-  type SessionWorktreePreparedEvent,
-} from "./daemon/manager.ts"
+import { createSessionManager } from "./daemon/manager.ts"
+import { createSessionProfilesService } from "./daemon/session-profiles.ts"
+import { sessionEvents } from "./events.ts"
 import {
   DaemonLaunchWorktree,
   DaemonSession,
@@ -22,23 +14,16 @@ import {
   DaemonSessionTurn,
   DaemonSessionTurnDraft,
   DaemonWorktree,
+  SessionProfilesConfig,
   SessionsConfig,
   SessionTitlesConfig,
   StaticSessionParams,
   SubpackagesConfig,
   WorktreesConfig,
   type SessionId,
-  type SessionLifecycleEvent,
-  type SessionMessageEvent,
   type SessionTurnMessage,
 } from "./schema.ts"
 
-type RoutedSessionMessageEvent = {
-  id: SessionId
-  message: SessionMessageEvent
-}
-
-export { resolveUnmanagedAgentProcessSpec } from "./daemon/agent-process.ts"
 export { injectSystemPrompt } from "./daemon/manager.ts"
 export type {
   LoadSessionParams,
@@ -117,9 +102,23 @@ const sessionDb = {
     type: "text",
   }),
 
-  worktrees: kind("wt", DaemonWorktree).index("sessionId", { type: "text" }),
+  worktrees: kind("wt", DaemonWorktree)
+    .index("sessionId", { type: "text" })
+    .migrate(2, {
+      1: (value) => ({
+        ...value,
+        mergeTargetBranch: value.mergeTargetBranch ?? null,
+      }),
+    }),
 
-  launchWorktrees: kind("lwt", DaemonLaunchWorktree).index("key", { type: "text" }),
+  launchWorktrees: kind("lwt", DaemonLaunchWorktree)
+    .index("key", { type: "text" })
+    .migrate(2, {
+      1: (value) => ({
+        ...value,
+        mergeTargetBranch: value.mergeTargetBranch ?? null,
+      }),
+    }),
 }
 
 type SessionTurnRetentionRecord = {
@@ -237,6 +236,10 @@ export const sessionPlugin = definePlugin({
       schema: SessionTitlesConfig,
       scopes: ["user", "project"],
     },
+    sessionProfiles: {
+      schema: SessionProfilesConfig,
+      scopes: ["user"],
+    },
     subpackages: {
       schema: SubpackagesConfig,
       scopes: ["user", "project"],
@@ -295,155 +298,52 @@ export const sessionPlugin = definePlugin({
       })
     },
   },
-  events: {
-    "session.worktree.prepared": event<SessionWorktreePreparedEvent>(),
-    "session.persisted": event<SessionPersistedEvent>(),
-    "session.activated": event<SessionActivatedEvent>(),
-    "session.launch.finished": event<SessionLaunchFinishedEvent>(),
-    "session.launch.failed": event<SessionLaunchFailedEvent>(),
-    "session.stopping": event<SessionStoppingEvent>(),
-    "session.blocked": event<SessionBlockedEvent>(),
-    "session.turn.ended": event<SessionAttentionEvent>(),
-    "session.replied": event<SessionIdEvent>(),
-    "session.completed": event<SessionIdEvent>(),
-  },
+  events: sessionEvents,
   ipcRoutes: sessionIpcRoutes,
-  setup(context) {
-    const streamDebug = context.log.createDebug("session.stream")
-    const messageListeners = new Set<(event: RoutedSessionMessageEvent) => void>()
-    const lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>()
+  consumes: [agentPlugin],
+  setup({
+    configProvider,
+    configWriter,
+    daemonRuntime,
+    db,
+    events,
+    ipc,
+    log,
+    agent,
+    sessionContext,
+  }) {
+    const streamDebug = log.createDebug("session.stream")
     const sessionManager = createSessionManager({
-      db: context.db,
-      getDaemonUrl: context.daemonRuntime.getDaemonUrl,
-      createAgentEnvironment: context.daemonRuntime.createAgentEnvironment,
-      configProvider: context.configProvider,
-      log: context.log,
-      registryService: context.registryService,
-      agentInstallService: context.agentInstallService,
-      sessionContext: context.sessionContext,
-      events: context.events,
-      idleSessionShutdownTimeoutMs: context.daemonRuntime.idleSessionShutdownTimeoutMs,
-      emitMessage(id, message) {
-        for (const listener of messageListeners) {
-          listener({ id, message })
-        }
-      },
-      emitLifecycleEvent(event) {
-        for (const listener of lifecycleListeners) {
-          listener(event)
-        }
-      },
+      db,
+      getDaemonUrl: daemonRuntime.getDaemonUrl,
+      createAgentEnvironment: daemonRuntime.createAgentEnvironment,
+      configProvider,
+      log,
+      agentService: agent,
+      sessionContext,
+      events,
+      idleSessionShutdownTimeoutMs: daemonRuntime.idleSessionShutdownTimeoutMs,
+    })
+    const sessionProfiles = createSessionProfilesService({
+      configWriter,
+      logger: log.createLogger(),
     })
 
-    async function* subscribeSessionMessages(id: SessionId, signal: AbortSignal) {
-      const queue: SessionMessageEvent[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: RoutedSessionMessageEvent) => {
-        if (event.id !== id) {
-          return
-        }
-        queue.push(event.message)
-        streamDebug("session.stream.message_queued", {
-          sessionId: id,
-          queueLength: queue.length,
-          listenerCount: messageListeners.size,
-        })
-        wake?.()
-      }
-      const abort = () => {
-        streamDebug("session.stream.message_abort_signaled", {
-          sessionId: id,
-          queueLength: queue.length,
-        })
-        wake?.()
+    events.onSubscription(async (subscription) => {
+      const id = readSessionMessageSubscriptionId(subscription.filter)
+      if (!id) {
+        return
       }
 
-      await sessionManager.sessionSubscriberConnected(id)
-      messageListeners.add(listener)
-      streamDebug("session.stream.message_subscriber_attached", {
-        sessionId: id,
-        listenerCount: messageListeners.size,
-      })
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            streamDebug("session.stream.message_yielded", {
-              sessionId: id,
-              queueLength: queue.length,
-            })
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        messageListeners.delete(listener)
-        streamDebug("session.stream.message_subscriber_detached", {
-          sessionId: id,
-          listenerCount: messageListeners.size,
-          aborted: signal.aborted,
-          queueLength: queue.length,
-        })
-        await sessionManager.sessionSubscriberDisconnected(id)
-      }
-    }
-
-    async function* subscribeSessionLifecycle(signal: AbortSignal) {
-      const queue: SessionLifecycleEvent[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: SessionLifecycleEvent) => {
-        queue.push(event)
-        streamDebug("session.stream.lifecycle_queued", {
-          eventKind: event.kind,
-          queueLength: queue.length,
-          listenerCount: lifecycleListeners.size,
-        })
-        wake?.()
-      }
-      const abort = () => {
-        streamDebug("session.stream.lifecycle_abort_signaled", {
-          queueLength: queue.length,
-        })
-        wake?.()
+      if (subscription.state === "started") {
+        await sessionManager.sessionSubscriberConnected(id)
+        streamDebug("session.stream.message_subscriber_attached", { sessionId: id })
+        return
       }
 
-      lifecycleListeners.add(listener)
-      streamDebug("session.stream.lifecycle_subscriber_attached", {
-        listenerCount: lifecycleListeners.size,
-      })
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            streamDebug("session.stream.lifecycle_yielded", {
-              eventKind: event.kind,
-              queueLength: queue.length,
-            })
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        lifecycleListeners.delete(listener)
-        streamDebug("session.stream.lifecycle_subscriber_detached", {
-          listenerCount: lifecycleListeners.size,
-          aborted: signal.aborted,
-          queueLength: queue.length,
-        })
-      }
-    }
+      await sessionManager.sessionSubscriberDisconnected(id)
+      streamDebug("session.stream.message_subscriber_detached", { sessionId: id })
+    })
 
     return {
       provides: {
@@ -458,6 +358,9 @@ export const sessionPlugin = definePlugin({
           completeSession: sessionManager.completeSession,
           getSession: sessionManager.getSession,
           getWorktree: sessionManager.getWorktree,
+          getWorktreeMergeReadiness: sessionManager.getWorktreeMergeReadiness,
+          setWorktreeMergeTargetBranch: sessionManager.setWorktreeMergeTargetBranch,
+          mergeWorktree: sessionManager.mergeWorktree,
           requireWorktree: sessionManager.requireWorktree,
           listWorktrees: sessionManager.listWorktrees,
           findWorktreeByDir: sessionManager.findWorktreeByDir,
@@ -472,7 +375,7 @@ export const sessionPlugin = definePlugin({
             const response = {
               session: await sessionManager.newSession({ request: body }),
             }
-            context.ipc.requestContext.setSessionId(response.session.id)
+            ipc.requestContext.setSessionId(response.session.id)
             return response
           },
           list: async ({ body }) => sessionManager.listSessions(body),
@@ -498,6 +401,13 @@ export const sessionPlugin = definePlugin({
           diagnostics: async ({ body: { id } }) => sessionManager.getDiagnostics(id),
           worktree: {
             get: async ({ body: { id } }) => sessionManager.getWorktree(id),
+            mergeReadiness: async ({ body: { id } }) =>
+              sessionManager.getWorktreeMergeReadiness(id),
+            mergeTargetBranch: {
+              set: async ({ body: { id, mergeTargetBranch } }) =>
+                sessionManager.setWorktreeMergeTargetBranch(id, mergeTargetBranch),
+            },
+            merge: async ({ body: { id } }) => sessionManager.mergeWorktree(id),
           },
           shutdown: async ({ body: { id } }) => ({
             id,
@@ -523,6 +433,11 @@ export const sessionPlugin = definePlugin({
               session: await sessionManager.setSessionModel(body),
             }),
           },
+          profile: {
+            list: async () => sessionProfiles.list(),
+            set: async ({ body }) => sessionProfiles.set(body),
+            remove: async ({ body }) => sessionProfiles.remove(body),
+          },
           complete: async ({ body: { id } }) => ({
             session: await sessionManager.completeSession(id),
           }),
@@ -537,22 +452,27 @@ export const sessionPlugin = definePlugin({
           }),
           resolveToken: async ({ body: { token } }) => {
             const id = await sessionManager.resolveSessionIdByToken(token)
-            context.ipc.requestContext.setSessionId(id)
+            ipc.requestContext.setSessionId(id)
             return {
               id,
             }
-          },
-          streamMessages: async function* (ctx) {
-            const { query } = ctx
-            yield* subscribeSessionMessages(query.id, ctx.request.signal)
-          },
-          streamLifecycle: async function* (ctx) {
-            yield* subscribeSessionLifecycle(ctx.request.signal)
           },
         },
       },
     }
   },
 })
+
+function readSessionMessageSubscriptionId(filter: {
+  readonly names?: readonly string[]
+  readonly where?: readonly { readonly path: string; readonly equals: unknown }[]
+}) {
+  if (!filter.names?.includes("session.message")) {
+    return null
+  }
+
+  const id = filter.where?.find((condition) => condition.path === "id")?.equals
+  return typeof id === "string" && id.startsWith("ses_") ? (id as SessionId) : null
+}
 
 export type SessionDb = DbContext<typeof sessionDb>

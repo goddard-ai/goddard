@@ -3,21 +3,10 @@ import { SigmaTarget } from "preact-sigma"
 import type { AppCommandId } from "./app-commands.ts"
 import type { DebugMenuSurface } from "./debug-menu.ts"
 
-/** One daemon IPC stream name that the app bridge can forward from the Bun host. */
-export type DaemonStreamName = string
-
-/** One daemon stream payload envelope dispatched from the Bun host into the active webview. */
-export type DaemonStreamEventDetail<Name extends DaemonStreamName = DaemonStreamName> = {
-  subscriptionId: string
-  name: Name
-  payload: any
-}
-
 /** Shared typed global events dispatched across the active webview. */
 export type GlobalEvents = {
   appMenu: { command: AppCommandId }
   commandDialogActivated: { dialogId: string }
-  daemonStream: DaemonStreamEventDetail
   debugMenu: { surface: DebugMenuSurface }
 }
 

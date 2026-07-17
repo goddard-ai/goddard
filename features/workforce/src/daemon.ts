@@ -13,11 +13,10 @@ import {
 import { WorkforceActorContext, WorkforceDispatchContext } from "./daemon/context.ts"
 import { createWorkforceManager } from "./daemon/manager.ts"
 import { normalizeWorkforceRootDir } from "./daemon/paths.ts"
+import { workforceEvents } from "./events.ts"
 import {
   DaemonWorkforce,
   WorkforceRootConfig,
-  type WorkforceEventEnvelope,
-  type WorkforceLedgerEvent,
   type WorkforceRootConfig as WorkforceRootConfigType,
 } from "./schema.ts"
 
@@ -35,6 +34,7 @@ export const workforcePlugin = definePlugin({
       workforces: kind("wf", DaemonWorkforce).index("sessionId", { type: "text" }),
     },
   },
+  events: workforceEvents,
   ipcRoutes: workforceIpcRoutes,
   logContext: {
     read: () => ({
@@ -42,8 +42,7 @@ export const workforcePlugin = definePlugin({
       workforceDispatch: WorkforceDispatchContext.get(),
     }),
   },
-  setup({ configProvider, db, ipc, log, session }) {
-    const eventListeners = new Set<(event: WorkforceEventEnvelope) => void>()
+  setup({ configProvider, db, events, ipc, log, session }) {
     const workforce = createWorkforceManager({
       log,
       session,
@@ -64,46 +63,8 @@ export const workforcePlugin = definePlugin({
           db.workforces.create(nextWorkforce)
         }
       },
-      publishEvent: (payload) => {
-        for (const listener of eventListeners) {
-          listener(payload)
-        }
-      },
+      events,
     })
-
-    async function* subscribeWorkforceEvents(rootDir: string, signal: AbortSignal) {
-      const queue: WorkforceLedgerEvent[] = []
-      let wake: (() => void) | undefined
-      const listener = (event: WorkforceEventEnvelope) => {
-        if (event.rootDir !== rootDir) {
-          return
-        }
-        queue.push(event.event)
-        wake?.()
-      }
-      const abort = () => {
-        wake?.()
-      }
-
-      eventListeners.add(listener)
-      signal.addEventListener("abort", abort)
-      try {
-        while (!signal.aborted) {
-          const event = queue.shift()
-          if (event) {
-            yield event
-            continue
-          }
-          await new Promise<void>((resolve) => {
-            wake = resolve
-          })
-          wake = undefined
-        }
-      } finally {
-        signal.removeEventListener("abort", abort)
-        eventListeners.delete(listener)
-      }
-    }
 
     async function resolveWorkforceActor(token: string | undefined, requestedRootDir: string) {
       if (!token) {
@@ -287,11 +248,6 @@ export const workforcePlugin = definePlugin({
               },
               actor,
             )
-          },
-          streamEvents: async (ctx) => {
-            const { query } = ctx
-            const status = await workforce.getWorkforce(query.rootDir)
-            return subscribeWorkforceEvents(status.rootDir, ctx.request.signal)
           },
         },
       },

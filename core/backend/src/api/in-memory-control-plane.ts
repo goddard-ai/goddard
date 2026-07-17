@@ -4,32 +4,45 @@ import type {
   DeviceFlowComplete,
   DeviceFlowSession,
   DeviceFlowStart,
+  ProviderIdentity,
 } from "@goddard-ai/auth/schema"
+import { getDefaultBackendPluginComposition } from "@goddard-ai/default-features/backend"
 import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
 import {
-  isRemoteRepoStreamSink,
-  normalizeGitHubWebhookEvent,
+  createRemoteRepoBackendEvent,
+  remoteRepoBackendEventSources,
   type RemoteRepoEventBroadcaster,
+  type RemoteRepoStreamEvent,
   type RemoteRepoStreamService,
-  type RemoteRepoStreamSink,
 } from "@goddard-ai/remote-repo/backend"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type {
+  BackendEventStreamRequest,
+  RemoteRepositoryRef,
+  RepoEvent,
+} from "@goddard-ai/remote-repo/schema"
 
 import type { Env } from "../env.ts"
-import { hashToInteger, toPublicSession } from "../utils.ts"
+import { filterRepoEvent, toPublicSession } from "../utils.ts"
 import {
   assertRepo,
   HttpError,
-  postPrCommentViaApp,
+  postPrCommentViaProvider,
   type BackendControlPlane,
 } from "./control-plane.ts"
+import {
+  getPrincipalDisplayName,
+  getPrincipalStreamKey,
+  sessionToPrincipal,
+  type BackendPrincipal,
+} from "./events.ts"
 
 /** Stored auth session with an in-memory expiration timestamp. */
 export type SessionRecord = AuthSession & { expiresAt: number }
 
 /** Stored device-code session awaiting completion. */
 export type DeviceSessionRecord = {
-  githubUsername: string
+  provider: string
+  loginHint: string
   createdAt: number
   expiresAt: number
 }
@@ -45,17 +58,19 @@ export class InMemoryBackendControlPlane
   #deviceSessions = new Map<string, DeviceSessionRecord>()
   #authSessions = new Map<string, SessionRecord>()
   #pullRequests: PullRequestRecord[] = []
-  #streamsByUser = new Map<string, Set<RemoteRepoStreamSink>>()
+  #streamsByUser = new Map<string, Set<RemoteRepoEventSubscription>>()
   #nextPrId = 1
 
   startDeviceFlow(input: DeviceFlowStart = {}): DeviceFlowSession {
-    const githubUsername = input.githubUsername?.trim() || "developer"
+    const provider = input.provider?.trim() || "github"
+    const loginHint = input.loginHint?.trim() || "developer"
     const deviceCode = `dev_${randomBytes(32).toString("hex")}`
     const userCode = randomBytes(4).toString("hex").toUpperCase()
     const createdAt = Date.now()
 
     this.#deviceSessions.set(deviceCode, {
-      githubUsername,
+      provider,
+      loginHint,
       createdAt,
       expiresAt: createdAt + DEVICE_FLOW_EXPIRES_IN_SECONDS * 1000,
     })
@@ -63,7 +78,7 @@ export class InMemoryBackendControlPlane
     return {
       deviceCode,
       userCode,
-      verificationUri: "https://github.com/login/device",
+      verificationUri: `https://auth.local/${provider}/device`,
       expiresIn: DEVICE_FLOW_EXPIRES_IN_SECONDS,
       interval: DEVICE_FLOW_INTERVAL_SECONDS,
     }
@@ -80,16 +95,15 @@ export class InMemoryBackendControlPlane
       throw new HttpError(410, "Device code expired")
     }
 
-    const githubUsername = input.githubUsername.trim()
-    if (!githubUsername) {
-      throw new HttpError(400, "githubUsername is required")
+    const providerIdentity = input.providerIdentity
+    if (providerIdentity.provider !== pending.provider) {
+      throw new HttpError(400, "providerIdentity.provider must match the pending device flow")
     }
 
     const expiresAt = Date.now() + AUTH_SESSION_TTL_MS
     const session: SessionRecord = {
       token: `tok_${randomBytes(32).toString("hex")}`,
-      githubUsername,
-      githubUserId: hashToInteger(githubUsername),
+      principal: createPrincipal(providerIdentity),
       expiresAt,
     }
 
@@ -113,6 +127,11 @@ export class InMemoryBackendControlPlane
     return toPublicSession(session)
   }
 
+  getPrincipal(token: string): BackendPrincipal {
+    const session = this.getSession(token)
+    return sessionToPrincipal(session, this.#listRepositoriesForPrincipal(session.principal.id))
+  }
+
   createPr(token: string, input: CreatePrInput): PullRequestRecord {
     const session = this.getSession(token)
     assertRepo(input.owner, input.repo)
@@ -121,20 +140,21 @@ export class InMemoryBackendControlPlane
     }
 
     const prNumber = this.#pullRequests.length + 1
-    const body =
-      `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${session.githubUsername}`.trim()
+    const displayName = getPrincipalDisplayName(session.principal)
+    const body = `${input.body?.trim() ?? ""}\n\nAuthored via CLI by @${displayName}`.trim()
 
     const record: PullRequestRecord = {
       id: this.#nextPrId++,
       number: prNumber,
+      provider: input.provider,
       owner: input.owner,
       repo: input.repo,
       title: input.title,
       body,
       head: input.head,
       base: input.base,
-      url: `https://github.com/${input.owner}/${input.repo}/pull/${prNumber}`,
-      createdBy: session.githubUsername,
+      url: `https://remote-repo.local/${input.provider}/${input.owner}/${input.repo}/pull/${prNumber}`,
+      createdBy: session.principal.id,
       createdAt: new Date().toISOString(),
     }
 
@@ -144,7 +164,7 @@ export class InMemoryBackendControlPlane
 
   async replyToPr(
     token: string,
-    input: { owner: string; repo: string; prNumber: number; body: string },
+    input: { provider: string; owner: string; repo: string; prNumber: number; body: string },
     env?: Env,
   ): Promise<void> {
     const session = this.getSession(token)
@@ -154,19 +174,26 @@ export class InMemoryBackendControlPlane
     }
 
     const managed = this.isManagedPr(
+      input.provider,
       input.owner,
       input.repo,
       input.prNumber,
-      session.githubUsername,
+      session.principal.id,
     )
     if (!managed) {
       throw new HttpError(403, "Cannot reply to a PR that is not managed by you")
     }
 
-    await postPrCommentViaApp(env, input.owner, input.repo, input.prNumber, input.body)
+    await postPrCommentViaProvider(env, getDefaultBackendPluginComposition().providers, input)
   }
 
-  isManagedPr(owner: string, repo: string, prNumber: number, githubUsername: string): boolean {
+  isManagedPr(
+    provider: string,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    principalId: string,
+  ): boolean {
     assertRepo(owner, repo)
     if (!Number.isInteger(prNumber) || prNumber <= 0) {
       throw new HttpError(400, "prNumber must be a positive integer")
@@ -174,64 +201,49 @@ export class InMemoryBackendControlPlane
 
     return this.#pullRequests.some(
       (pullRequest) =>
+        pullRequest.provider === provider &&
         pullRequest.owner === owner &&
         pullRequest.repo === repo &&
         pullRequest.number === prNumber &&
-        pullRequest.createdBy === githubUsername,
+        pullRequest.createdBy === principalId,
     )
   }
 
-  handleGitHubWebhook(event: GitHubWebhookInput): RepoEvent {
-    assertRepo(event.owner, event.repo)
-
-    return normalizeGitHubWebhookEvent(event)
-  }
-
-  addStreamSocket(githubUsername: string, socket: unknown): void {
-    if (!isRemoteRepoStreamSink(socket)) {
-      return
-    }
-
-    const room = this.#streamsByUser.get(githubUsername) ?? new Set<RemoteRepoStreamSink>()
-    room.add(socket)
-    this.#streamsByUser.set(githubUsername, room)
-  }
-
-  removeStreamSocket(githubUsername: string, socket: unknown): void {
-    if (!isRemoteRepoStreamSink(socket)) {
-      return
-    }
-
-    const room = this.#streamsByUser.get(githubUsername)
-    room?.delete(socket)
-    if (room && room.size === 0) {
-      this.#streamsByUser.delete(githubUsername)
-    }
-  }
-
-  broadcastRemoteRepoEvent(event: RepoEvent): void {
-    const githubUsername = this.resolveEventOwner(event)
-    if (!githubUsername) {
-      return
-    }
-
-    const sockets = this.#streamsByUser.get(githubUsername)
-    if (!sockets) {
-      return
-    }
-
-    const payload = JSON.stringify({ event })
-    for (const socket of sockets) {
-      try {
-        socket.send(payload)
-      } catch {
-        sockets.delete(socket)
-        socket.close?.()
+  subscribeRemoteRepoEvents(
+    streamKey: string,
+    filter: BackendEventStreamRequest = {},
+  ): AsyncIterable<RepoEvent> {
+    const subscription = new RemoteRepoEventSubscription(filter, () => {
+      const subscriptions = this.#streamsByUser.get(streamKey)
+      subscriptions?.delete(subscription)
+      if (subscriptions && subscriptions.size === 0) {
+        this.#streamsByUser.delete(streamKey)
       }
+    })
+    const subscriptions =
+      this.#streamsByUser.get(streamKey) ?? new Set<RemoteRepoEventSubscription>()
+    subscriptions.add(subscription)
+    this.#streamsByUser.set(streamKey, subscriptions)
+    return subscription
+  }
+
+  broadcastRemoteRepoEvent(event: RemoteRepoStreamEvent): void {
+    const streamKey = this.#resolveAuthorizedStreamKey(event.payload)
+    if (!streamKey) {
+      return
     }
 
-    if (sockets.size === 0) {
-      this.#streamsByUser.delete(githubUsername)
+    const subscriptions = this.#streamsByUser.get(streamKey)
+    if (!subscriptions) {
+      return
+    }
+
+    for (const subscription of subscriptions) {
+      subscription.publish(event.payload)
+    }
+
+    if (subscriptions.size === 0) {
+      this.#streamsByUser.delete(streamKey)
     }
   }
 
@@ -246,5 +258,127 @@ export class InMemoryBackendControlPlane
         pullRequest.repo === event.repo &&
         pullRequest.number === event.prNumber,
     )?.createdBy
+  }
+
+  #listRepositoriesForPrincipal(principalId: string): RemoteRepositoryRef[] {
+    const repositories = new Map<string, RemoteRepositoryRef>()
+
+    for (const pullRequest of this.#pullRequests) {
+      if (pullRequest.createdBy !== principalId) {
+        continue
+      }
+
+      const key = `${pullRequest.owner}/${pullRequest.repo}`
+      repositories.set(key, {
+        provider: pullRequest.provider,
+        owner: pullRequest.owner,
+        repo: pullRequest.repo,
+      })
+    }
+
+    return [...repositories.values()]
+  }
+
+  #resolveAuthorizedStreamKey(event: RepoEvent): string | undefined {
+    const principalId = this.resolveEventOwner(event)
+    if (!principalId) {
+      return undefined
+    }
+
+    const session = {
+      token: "",
+      principal: createPrincipalFromId(principalId),
+    }
+    const principal = sessionToPrincipal(session, this.#listRepositoriesForPrincipal(principalId))
+    if (
+      !remoteRepoBackendEventSources["remote-repo"].authorize({
+        principal,
+        event: createRemoteRepoBackendEvent(event),
+        providers: getDefaultBackendPluginComposition().providers,
+      })
+    ) {
+      return undefined
+    }
+
+    return getPrincipalStreamKey(principal)
+  }
+}
+
+function createPrincipal(providerIdentity: ProviderIdentity): AuthSession["principal"] {
+  return {
+    id: `${providerIdentity.provider}:${providerIdentity.subject}`,
+    providerIdentities: [providerIdentity],
+  }
+}
+
+function createPrincipalFromId(principalId: string): AuthSession["principal"] {
+  const [provider, ...subjectParts] = principalId.split(":")
+  const subject = subjectParts.join(":") || principalId
+  return {
+    id: principalId,
+    providerIdentities: [
+      {
+        provider: provider || "unknown",
+        subject,
+      },
+    ],
+  }
+}
+
+class RemoteRepoEventSubscription implements AsyncIterable<RepoEvent> {
+  #pendingEvents: RepoEvent[] = []
+  #pendingReads: ((result: IteratorResult<RepoEvent>) => void)[] = []
+  #closed = false
+
+  constructor(
+    readonly filter: BackendEventStreamRequest,
+    readonly onClose: () => void,
+  ) {}
+
+  publish(event: RepoEvent): void {
+    if (this.#closed || !filterRepoEvent(event, this.filter)) {
+      return
+    }
+
+    const resolve = this.#pendingReads.shift()
+    if (resolve) {
+      resolve({ done: false, value: event })
+      return
+    }
+
+    this.#pendingEvents.push(event)
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<RepoEvent> {
+    return {
+      next: async () => {
+        if (this.#pendingEvents.length > 0) {
+          return { done: false, value: this.#pendingEvents.shift()! }
+        }
+        if (this.#closed) {
+          return { done: true, value: undefined }
+        }
+
+        return new Promise<IteratorResult<RepoEvent>>((resolve) => {
+          this.#pendingReads.push(resolve)
+        })
+      },
+      return: async () => {
+        this.close()
+        return { done: true, value: undefined }
+      },
+    }
+  }
+
+  close(): void {
+    if (this.#closed) {
+      return
+    }
+
+    this.#closed = true
+    this.onClose()
+    for (const resolve of this.#pendingReads.splice(0)) {
+      resolve({ done: true, value: undefined })
+    }
   }
 }

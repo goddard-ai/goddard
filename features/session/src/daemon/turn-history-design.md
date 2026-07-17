@@ -14,7 +14,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 ## Context
 
 - The daemon already serializes prompt dispatch so one session has at most one active prompt turn at a time.
-- The live `session.streamMessages` route remains the real-time streaming surface. This design does not change the live stream contract.
+- The live `session.message event stream` route remains the real-time streaming surface. This design does not change the live stream contract.
 - The app transcript and planned turn summary UI already think in prompt-turn units rather than one flat message log.
 - The daemon currently derives slash-command suggestions from `available_commands_update` messages found in session history. If history stops being a raw audit log, that state must move elsewhere.
 - ACP `loadSession` is optional. The installed ACP SDK documents that agents with `loadSession` should restore session context and stream conversation history back via notifications.
@@ -29,7 +29,7 @@ This design replaces per-session message blobs with per-turn persistence. Comple
 - Coalesce high-frequency streamed agent text chunks in memory before persistence.
 - Bound crash loss for the active turn to at most the most recent unflushed draft window, not the entire turn.
 - Preserve enough ACP fidelity inside each turn record for transcript rendering, debugging, and turn-summary derivation.
-- Keep live streaming behavior unchanged for `session.streamMessages` subscribers.
+- Keep live streaming behavior unchanged for `session.message event stream` subscribers.
 
 ## Non-Goals
 
@@ -250,7 +250,7 @@ The daemon coalesces consecutive `agent_message_chunk` updates with `content.typ
 
 Coalescing is applied before draft writes and before completed-turn persistence:
 
-- the live `session.streamMessages` route still emits each raw chunk
+- the live `session.message event stream` route still emits each raw chunk
 - the durable draft stores the coalesced form
 - persisted completed turns store the coalesced form
 
@@ -397,7 +397,7 @@ Required invariants:
 - the latest history page appends the newest in-progress turn at most once
 - at most one draft exists per session
 - a completed turn wins over a stale same-turn draft
-- active-turn coalescing never changes the live `session.streamMessages` stream
+- active-turn coalescing never changes the live `session.message event stream` stream
 
 Required tests:
 
@@ -414,8 +414,8 @@ Required tests:
 
 Observability:
 
-- add diagnostics for turn creation, draft flush, turn persistence, draft cleanup, and history page reads
-- add diagnostics when queued prompts are intentionally excluded from turn persistence
+- use `session.turns`, `session.queue`, and `session.history` debug logs for turn creation, draft flush, turn persistence, draft cleanup, history page reads, and queued prompts intentionally excluded from turn persistence
+- keep persisted diagnostics for user-visible lifecycle outcomes rather than internal turn-storage movement
 
 ## Rollout And Migration
 
@@ -436,7 +436,7 @@ Because the repository is pre-alpha, the daemon does not migrate legacy `session
 
 - Should `AgentSession` keep a convenience helper that flattens one page of turns back into `acp.AnyMessage[]`, or is explicit caller flattening clearer?
 - Should the first cut also coalesce `agent_thought_chunk` and `user_message_chunk`, or should it stay limited to `agent_message_chunk` until a concrete need appears?
-- Should the daemon expose draft-specific diagnostics or metadata in `session.history`, or is the `completedAt: null` shape sufficient for clients?
+- Should the daemon expose draft-specific metadata in `session.history`, or is the `completedAt: null` shape sufficient for clients?
 
 ## Ambiguities And Blockers
 

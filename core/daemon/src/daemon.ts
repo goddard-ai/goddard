@@ -1,57 +1,47 @@
 import { createLogStore, subtractHours, toErrorProperties } from "@goddard-ai/logs"
+import { createRemoteRepoBackendEvent } from "@goddard-ai/remote-repo/backend"
 import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { getErrorMessage } from "radashi"
 
-import {
-  createBackendClient,
-  isBackendUnauthenticatedError,
-  type BackendClient,
-} from "./backend.ts"
-import { createConfigManager } from "./config-manager.ts"
-import { resolveRuntimeConfig } from "./config.ts"
-import { FeedbackEventContext, SetupContext } from "./context.ts"
-import { buildPrompt, isFeedbackEvent } from "./feedback.ts"
+import { isBackendUnauthenticatedError } from "./backend.ts"
+import { DaemonRuntimeEventBus } from "./events.ts"
 import { startDaemonServer, type DaemonServer } from "./ipc.ts"
 import {
   configureLogging,
   createLogger,
-  createPayloadPreview,
   installDaemonFatalErrorCapture,
   type DaemonLogger,
   type LogMode,
 } from "./logging.ts"
-import { openComposedDaemonStore, type ComposedDaemonStore } from "./plugins.ts"
-import { runPrFeedbackFlow } from "./pr-feedback-run.ts"
+import { type ComposedDaemonStore } from "./plugins.ts"
+import { createDaemonRuntime, type DaemonRuntime } from "./runtime.ts"
 
 /** Input used to start the long-running daemon process. */
 export type RunInput = {
-  baseUrl: string
+  baseUrl?: string
   port?: number
   agentBinDir?: string
+  gitLibgit2Path?: string
   enableIpc?: boolean
   enableStream?: boolean
   logMode?: LogMode
   store?: ComposedDaemonStore
 }
 
-type ConfiguredDaemonInput = {
-  agentBinDir: string
-  baseUrl: string
-  configManager: ReturnType<typeof createConfigManager>
-  enableIpc: boolean
-  enableStream: boolean
-  logger: DaemonLogger
-  logStore: ReturnType<typeof createLogStore>
-  ownsStore: boolean
-  port: number
-  store: ComposedDaemonStore
-}
-
 /** Starts the daemon with the requested runtime features and waits for shutdown. */
-export async function runDaemon(input: RunInput): Promise<number> {
+export async function runDaemon({
+  baseUrl,
+  port,
+  agentBinDir,
+  gitLibgit2Path,
+  enableIpc = true,
+  enableStream = true,
+  logMode = "compact",
+  store,
+}: RunInput): Promise<number> {
   const logStore = createLogStore()
   const restoreLogging = configureLogging({
-    mode: input.logMode ?? "compact",
+    mode: logMode,
     writeLine: (line) => {
       process.stdout.write(`${line}\n`)
     },
@@ -61,33 +51,17 @@ export async function runDaemon(input: RunInput): Promise<number> {
   const logger = createLogger()
 
   try {
-    const runtime = resolveRuntimeConfig({
-      baseUrl: input.baseUrl,
-      port: input.port,
-      agentBinDir: input.agentBinDir,
+    return await runConfiguredDaemon({
+      agentBinDir,
+      baseUrl,
+      enableIpc,
+      enableStream,
+      logger,
+      logStore,
+      port,
+      gitLibgit2Path,
+      store,
     })
-    const configManager = createConfigManager()
-    let didHandoffConfigManager = false
-
-    try {
-      const store = input.store ?? openComposedDaemonStore()
-      didHandoffConfigManager = true
-
-      return await runConfiguredDaemon({
-        ...runtime,
-        configManager,
-        enableIpc: input.enableIpc ?? true,
-        enableStream: input.enableStream ?? true,
-        logger,
-        logStore,
-        ownsStore: input.store == null,
-        store,
-      })
-    } finally {
-      if (!didHandoffConfigManager) {
-        await configManager.close().catch(() => {})
-      }
-    }
   } catch (error) {
     logger.log("daemon.run_failed", toErrorProperties(error))
     return 1
@@ -97,27 +71,40 @@ export async function runDaemon(input: RunInput): Promise<number> {
   }
 }
 
-async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number> {
-  const {
-    agentBinDir,
-    baseUrl,
-    configManager,
-    enableIpc,
-    enableStream,
-    logger,
-    logStore,
-    ownsStore,
-    port,
-    store,
-  } = input
+async function runConfiguredDaemon({
+  agentBinDir,
+  baseUrl,
+  enableIpc,
+  enableStream,
+  logger,
+  logStore,
+  port,
+  gitLibgit2Path,
+  store,
+}: {
+  agentBinDir?: string
+  baseUrl?: string
+  enableIpc: boolean
+  enableStream: boolean
+  logger: DaemonLogger
+  logStore: ReturnType<typeof createLogStore>
+  port?: number
+  gitLibgit2Path?: string
+  store?: ComposedDaemonStore
+}): Promise<number> {
   let ipcServer: DaemonServer | undefined
+  let daemonRuntime: DaemonRuntime | undefined
 
   try {
-    logger.log("daemon.startup", {
+    daemonRuntime = await createDaemonRuntime({
+      agentBinDir,
       baseUrl,
       port,
-      agentBinDir,
+      gitLibgit2Path,
+      store,
     })
+    const runtime = daemonRuntime
+    logger.log("daemon.startup", runtime.runtimeConfig)
     void Promise.resolve()
       .then(() => {
         logStore.retainSince(subtractHours(new Date(), 24))
@@ -133,139 +120,131 @@ async function runConfiguredDaemon(input: ConfiguredDaemonInput): Promise<number
       return 0
     }
 
-    const client = await defaultCreateBackendClient(baseUrl, store)
     if (enableIpc) {
-      ipcServer = await SetupContext.run(
-        { runtime: { agentBinDir, baseUrl, port }, configManager },
-        () =>
-          startDaemonServer(client, {
+      ipcServer = await startDaemonServer(runtime)
+    }
+
+    const daemonEvents: Pick<DaemonRuntimeEventBus, "emit"> = runtime.events
+
+    const eventStreamAbort = new AbortController()
+    let eventStreamTask: Promise<void> | null = null
+
+    if (enableStream && ipcServer && runtime.backendEventHandlers.length > 0) {
+      const { daemonUrl, port } = ipcServer
+      const { backendEventHandlers } = runtime
+
+      eventStreamTask = Promise.resolve()
+        .then(async () => {
+          const events = await runtime.client.events.stream(
+            {
+              names: ["comment", "review"],
+            },
+            {
+              signal: eventStreamAbort.signal,
+            },
+          )
+          await daemonEvents.emit("backend.stream.started", {
+            daemonUrl,
             port,
-            agentBinDir,
-            store,
-          }),
-      )
-    }
+          })
 
-    const activeIpcServer = ipcServer
-    // Coalesce feedback per PR so one daemon run owns the repo state until it finishes.
-    const runningPrs = new Set<string>()
-    let subscription: Awaited<ReturnType<BackendClient["stream"]["subscribe"]>> | null = null
-
-    if (enableStream) {
-      try {
-        subscription = await client.stream.subscribe()
-      } catch (error) {
-        const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
-        if (!isBackendUnauthenticatedError(authError)) {
-          throw authError
-        }
-
-        logger.log("repo.subscription_degraded", {
-          reason: "unauthenticated",
-          errorMessage: authError.message,
+          await consumeBackendEvents(
+            events,
+            async (event) => {
+              const payload = createRemoteRepoBackendEvent(event)
+              for (const handler of backendEventHandlers) {
+                try {
+                  if (handler.canHandle(payload)) {
+                    await handler.handle(payload)
+                  }
+                } catch (error) {
+                  logger.log("backend.event_handler_failed", {
+                    handlerName: handler.name,
+                    ...toErrorProperties(error),
+                  })
+                }
+              }
+            },
+            (error) => {
+              logger.log("backend.stream.event_failed", toErrorProperties(error))
+            },
+            eventStreamAbort.signal,
+          )
         })
-      }
-    }
-
-    if (subscription) {
-      logger.log(
-        "repo.subscription_started",
-        activeIpcServer
-          ? {
-              daemonUrl: activeIpcServer.daemonUrl,
-              port: activeIpcServer.port,
-            }
-          : {},
-      )
-
-      subscription.on("event", async (payload) => {
-        try {
-          const event = payload as RepoEvent
-          if (!isFeedbackEvent(event)) {
+        .catch(async (error) => {
+          if (eventStreamAbort.signal.aborted) {
             return
           }
 
-          const feedbackContext = {
-            repository: `${event.owner}/${event.repo}`,
-            prNumber: event.prNumber,
-            feedbackType: event.type,
+          const authError = error instanceof Error ? error : new Error(getErrorMessage(error))
+          if (isBackendUnauthenticatedError(authError)) {
+            await daemonEvents.emit("backend.stream.degraded", {
+              reason: "unauthenticated",
+              errorMessage: authError.message,
+            })
+            return
           }
 
-          await FeedbackEventContext.run(feedbackContext, async () => {
-            if (!activeIpcServer) {
-              logger.log("repo.feedback_ignored", {
-                reason: "ipc_disabled",
-              })
-              return
-            }
-
-            const prompt = buildPrompt(event)
-            const requestKey = `${event.owner}/${event.repo}#${event.prNumber}`
-
-            if (runningPrs.has(requestKey)) {
-              logger.log("repo.feedback_coalesced")
-              return
-            }
-
-            runningPrs.add(requestKey)
-
-            try {
-              const { managed } = await client.pullRequests.managed({
-                owner: event.owner,
-                repo: event.repo,
-                prNumber: event.prNumber,
-              })
-              if (!managed) {
-                logger.log("repo.feedback_ignored", {
-                  reason: "unmanaged_pr",
-                })
-                return
-              }
-
-              logger.log("pr_feedback.launch", {
-                prompt: createPayloadPreview(prompt),
-              })
-              const exitCode = await runPrFeedbackFlow({
-                event,
-                prompt,
-                daemonUrl: activeIpcServer.daemonUrl,
-                agentBinDir,
-                configManager,
-                store,
-              })
-              logger.log("pr_feedback.finish", {
-                exitCode,
-              })
-            } catch (error) {
-              logger.log("pr_feedback.failed", toErrorProperties(error))
-            } finally {
-              runningPrs.delete(requestKey)
-            }
+          await daemonEvents.emit("backend.stream.degraded", {
+            reason: "stream_failed",
+            errorMessage: getErrorMessage(error),
           })
-        } catch (error) {
-          logger.log("repo.event_failed", toErrorProperties(error))
-        }
-      })
+        })
     }
 
     await waitForShutdown(() =>
       Promise.all([
-        subscription ? Promise.resolve(subscription.close()) : Promise.resolve(),
-        activeIpcServer ? activeIpcServer.close() : Promise.resolve(),
+        eventStreamTask
+          ? Promise.resolve()
+              .then(() => eventStreamAbort.abort())
+              .then(() => eventStreamTask)
+              .catch(() => {})
+          : Promise.resolve(),
+        ipcServer ? ipcServer.close() : Promise.resolve(),
       ]).then(() => {}),
     )
     logger.log("daemon.shutdown", {
-      port: ipcServer?.port ?? port,
+      port: ipcServer?.port ?? runtime.runtimeConfig.port,
     })
     return 0
   } finally {
     if (ipcServer) {
       await ipcServer.close().catch(() => {})
     }
-    await configManager.close().catch(() => {})
-    if (ownsStore) {
-      store.close()
+    if (daemonRuntime) {
+      await daemonRuntime.close().catch(() => {})
     }
+  }
+}
+
+async function consumeBackendEvents(
+  events: AsyncIterable<RepoEvent>,
+  handleEvent: (event: RepoEvent) => Promise<void>,
+  handleError: (error: unknown) => void,
+  signal: AbortSignal,
+) {
+  const iterator = events[Symbol.asyncIterator]()
+  const abort = () => {
+    void iterator.return?.()
+  }
+
+  signal.addEventListener("abort", abort, { once: true })
+  try {
+    while (true) {
+      const { done, value } = await iterator.next()
+      if (done) {
+        return
+      }
+
+      try {
+        await handleEvent(value)
+      } catch (error) {
+        handleError(error)
+      }
+    }
+  } finally {
+    signal.removeEventListener("abort", abort)
+    await iterator.return?.()
   }
 }
 
@@ -276,19 +255,5 @@ export async function waitForShutdown(close: () => void | Promise<void>): Promis
       void close()
       resolve()
     })
-  })
-}
-
-/** Creates the daemon-owned backend client with auth headers sourced from daemon persistence. */
-async function defaultCreateBackendClient(
-  baseUrl: string,
-  store: ComposedDaemonStore,
-): Promise<BackendClient> {
-  return createBackendClient({
-    baseUrl,
-    getAuthorizationHeader: async () => {
-      const token = store.metadata.get("authToken") ?? null
-      return token ? `Bearer ${token}` : null
-    },
   })
 }

@@ -23,6 +23,7 @@ const composerClasses: SessionInputClasses = {
 
 export function Composer(props: {
   disabled?: boolean;
+  initialPrompt?: SessionInputPromptBlocks;
   loadSuggestions: SessionInputSuggestionLoader;
   onSubmit: (prompt: SessionInputPromptBlocks, options: {
     mode: SessionInputSubmitMode;
@@ -44,6 +45,7 @@ export function Composer(props: {
     footerControls={props.footerControls}
     helperText={props.helperText}
     iconOnlySubmit={true}
+    initialPrompt={props.initialPrompt}
     activationFocus={true}
     enableQueueSubmitShortcut={props.enableQueueSubmitShortcut}
     loadSuggestions={props.loadSuggestions}

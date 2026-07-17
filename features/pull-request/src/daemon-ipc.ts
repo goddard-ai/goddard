@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 import { z } from "zod"
 
 import {
@@ -24,18 +24,30 @@ export type ReplyPrRouteRequest = z.infer<typeof ReplyPrRouteRequest>
 
 export const pullRequestIpcRoutes = defineIpcRoutes({
   pr: http.resource("pr", {
-    /** Submits one pull request through the daemon PR contract. */
+    ...metadata({
+      description: "Pull request operations.",
+    }),
+    /** Submits one pull request through the PR contract. */
     submit: http.post("submit", {
+      ...metadata({
+        description: "Submits one pull request through the PR contract.",
+      }),
       body: SubmitPrRouteRequest,
       response: $type<SubmitPrResponse>(),
     }),
-    /** Fetches one daemon-managed pull request by tagged id. */
+    /** Fetches one pull request by tagged id. */
     get: http.post("get", {
+      ...metadata({
+        description: "Fetches one pull request by tagged id.",
+      }),
       body: GetPullRequestRequest,
       response: $type<GetPullRequestResponse>(),
     }),
-    /** Posts one pull request reply through the daemon PR contract. */
+    /** Posts one pull request reply through the PR contract. */
     reply: http.post("reply", {
+      ...metadata({
+        description: "Posts one pull request reply through the PR contract.",
+      }),
       body: ReplyPrRouteRequest,
       response: $type<ReplyPrResponse>(),
     }),

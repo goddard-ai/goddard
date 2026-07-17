@@ -1,12 +1,12 @@
 /** Session-owned worktree creation and cleanup helpers with pluggable strategies. */
 import * as fs from "node:fs"
 import * as path from "node:path"
+import { git } from "@goddard-ai/libgit2"
 import type { WorktreePlugin, WorktreeSetupOptions } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../../schema.ts"
 import { defaultPlugin } from "./plugins/default.ts"
 import { worktrunkPlugin } from "./plugins/worktrunk.ts"
-import { runCommand } from "./process.ts"
 
 export type { WorktreePlugin, WorktreeSetupOptions }
 
@@ -44,6 +44,11 @@ export interface CreateWorktreeOptions extends WorktreeOptions {
    * Optional existing branch to seed the new worktree branch from.
    */
   baseBranchName?: string
+
+  /**
+   * The source-checkout branch this worktree should merge back into when known.
+   */
+  mergeTargetBranch?: string | null
 
   /**
    * The requested working directory that should be mapped inside the created worktree.
@@ -113,6 +118,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
           requestedCwd,
           worktreeDir,
           branchName: options.branchName,
+          mergeTargetBranch: options.mergeTargetBranch,
           poweredBy: plugin.name,
         })
       }
@@ -140,6 +146,7 @@ export async function createWorktree(options: CreateWorktreeOptions) {
     requestedCwd,
     worktreeDir,
     branchName: options.branchName,
+    mergeTargetBranch: options.mergeTargetBranch,
     poweredBy: defaultPlugin.name,
   })
 }
@@ -211,6 +218,7 @@ async function createWorktreeMetadata(params: {
   requestedCwd: string
   worktreeDir: string
   branchName: string
+  mergeTargetBranch?: string | null
   poweredBy: string
 }) {
   const normalizedRepoRoot = normalizeExistingPath(params.repoRoot)
@@ -232,6 +240,7 @@ async function createWorktreeMetadata(params: {
         : path.join(normalizedWorktreeDir, relativeCwd),
     worktreeDir: normalizedWorktreeDir,
     branchName: params.branchName,
+    mergeTargetBranch: params.mergeTargetBranch ?? null,
     poweredBy: params.poweredBy,
   } satisfies CreatedWorktree
 }
@@ -273,34 +282,22 @@ async function assertLinkedWorktree(params: {
  * Resolves one repository's git dir as an absolute path when available.
  */
 async function resolveGitDir(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    return normalizeExistingPath(await git.repository.resolveGitDir(cwd))
+  } catch {
     return null
   }
-
-  const gitDir = result.stdout.trim()
-  return gitDir ? normalizeExistingPath(path.resolve(cwd, gitDir)) : null
 }
 
 /**
  * Resolves one repository's common git dir as an absolute path when available.
  */
 async function resolveGitCommonDir(cwd: string) {
-  const result = await runCommand("git", ["rev-parse", "--git-common-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    return normalizeExistingPath(await git.repository.resolveCommonDir(cwd))
+  } catch {
     return null
   }
-
-  const commonDir = result.stdout.trim()
-  return commonDir ? normalizeExistingPath(path.resolve(cwd, commonDir)) : null
 }
 
 /**
@@ -338,12 +335,9 @@ async function assertGitRepository(cwd: string) {
     throw new Error(`Not a git repository: ${cwd}`)
   }
 
-  const result = await runCommand("git", ["rev-parse", "--git-dir"], {
-    cwd,
-    stdin: "ignore",
-  })
-
-  if (result.status !== 0) {
+  try {
+    await git.repository.resolveGitDir(cwd)
+  } catch {
     throw new Error(`Not a git repository: ${cwd}`)
   }
 }

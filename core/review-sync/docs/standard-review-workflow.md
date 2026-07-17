@@ -7,10 +7,10 @@ The standard review workflow shows how a human reviews live agent work from a se
 - Start with the agent branch checked out in an agent worktree.
 - Open a separate local worktree for human review.
 - Run `start <agent-branch>` from the review worktree, or run
-    `watch <agent-branch>` to start and keep watching in one command.
+  `watch <agent-branch>` to start and keep watching in one command.
 - The review worktree is checked out to the derived review branch.
 - The first refresh makes the review worktree index and working tree show the
-    agent branch content.
+  agent branch content.
 
 ## Agent-to-review flow
 
@@ -18,17 +18,17 @@ The standard review workflow shows how a human reviews live agent work from a se
 - Agent changes can be committed or uncommitted.
 - Non-ignored untracked files are included.
 - The review worktree index and working tree are rendered to the latest
-    synchronized agent content.
+  synchronized agent content.
 - Committed agent changes may advance the disposable review branch to the
-    latest real agent commit while remaining uncommitted agent content stays
-    rendered in the index and working tree.
+  latest real agent commit while remaining uncommitted agent content stays
+  rendered in the index and working tree.
 - Sync does not move the visible review branch to synthetic snapshot commits.
 
 ## Human-to-agent flow
 
 - When the human edits the review worktree, the next sync treats those changes as a human patch.
 - When the human commits already-synchronized review content, the next sync
-    can promote that clean commit onto the agent branch.
+  can promote that clean commit onto the agent branch.
 - If the patch applies cleanly:
   - The patch is saved as accepted.
   - The same file changes appear in the agent worktree.
@@ -45,13 +45,13 @@ The standard review workflow shows how a human reviews live agent work from a se
 - With an explicit agent branch, `watch` can start or reuse the session before watching.
 - Run `watch` from the review worktree, starting from a non-`review-sync/*` branch or detached HEAD.
 - If the agent branch is temporarily not checked out, `watch` waits instead of
-    failing the whole review loop.
+  failing the whole review loop.
 - While waiting, `watch` may show the review branch from the agent branch ref
-    when doing so will not discard human work.
+  when doing so will not discard human work.
 - When stopped, `watch` pauses the session and tries to restore the review
-    worktree checkout that was active when watching began.
+  worktree checkout that was active when watching began.
 - The disposable `review-sync/*` branch is deleted before `watch` exits when
-    doing so will not hide unapplied human edits.
+  doing so will not hide unapplied human edits.
 
 ## Pause and resume
 
@@ -76,4 +76,4 @@ The standard review workflow shows how a human reviews live agent work from a se
 - If session inference is ambiguous:
   - Run from a clearer worktree or use an explicit agent branch where supported.
   - Remove stale saved sessions only after checking whether they contain
-      accepted or rejected patches that matter.
+    accepted or rejected patches that matter.

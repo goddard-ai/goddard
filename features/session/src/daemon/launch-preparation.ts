@@ -1,11 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import treeKill from "@alloc/tree-kill"
-import type {
-  ACPRegistryService,
-  DaemonAgentEnvironmentService,
-  DaemonAgentInstallService,
-  DaemonConfigProvider,
-} from "@goddard-ai/daemon-plugin"
+import type { AgentService } from "@goddard-ai/agent/daemon"
+import type { DaemonAgentEnvironmentService, DaemonConfigProvider } from "@goddard-ai/daemon-plugin"
+import { git } from "@goddard-ai/libgit2"
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type { AgentsConfig } from "@goddard-ai/schema/config"
 import { createAcpClient } from "acp-client"
@@ -22,6 +19,8 @@ import {
   getSlashComposerSuggestions,
   MAX_COMPOSER_SUGGESTION_LIMIT,
 } from "./composer-suggestions.ts"
+import { checkoutBranch } from "./git/checkout.ts"
+import { listLocalBranches } from "./git/refs.ts"
 import { createSessionIpcError } from "./ipc-error.ts"
 import { createLaunchLeaseKey, type LaunchLease } from "./launch-lease.ts"
 import type { ActiveSession, SessionMemory } from "./session-memory.ts"
@@ -47,44 +46,7 @@ export async function listLaunchBranches(cwd: string) {
     return { branches: [], currentBranch: null }
   }
 
-  const result = Bun.spawn(
-    ["git", "for-each-ref", "--format=%(if)%(HEAD)%(then)*%(end)%(refname:short)", "refs/heads"],
-    {
-      cwd: source.path,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "ignore",
-    },
-  )
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  if (result.exitCode !== 0) {
-    return { branches: [], currentBranch: null }
-  }
-
-  const branches: string[] = []
-  let currentBranch: string | null = null
-
-  for (const rawLine of stdout.split("\n")) {
-    const line = rawLine.trim()
-    if (!line) {
-      continue
-    }
-
-    const current = line.startsWith("*")
-    const name = current ? line.slice(1) : line
-    if (current) {
-      currentBranch = name
-    }
-
-    branches.push(name)
-  }
-
-  return {
-    branches,
-    currentBranch,
-  }
+  return await listLocalBranches(source.path)
 }
 
 /** Returns true when branch switching in the requested local checkout would risk user work. */
@@ -95,16 +57,8 @@ export async function inspectLaunchCheckoutDirty(cwd: string): Promise<boolean> 
     return false
   }
 
-  const result = Bun.spawn(["git", "status", "--porcelain=v1", "--untracked-files=normal"], {
-    cwd: repoRoot,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-
-  return result.exitCode === 0 && stdout.trim().length > 0
+  const status = await git.status.getWorkingTreeStatus(repoRoot)
+  return status.entries.length > 0
 }
 
 /** Switches the user's local checkout before launching the first prompt. */
@@ -122,15 +76,9 @@ export async function checkoutLocalBranch(params: { cwd: string; branchName: str
     })
   }
 
-  const result = Bun.spawn(["git", "checkout", params.branchName], {
-    cwd: repoRoot,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  })
-  await result.exited
+  const result = await checkoutBranch(repoRoot, params.branchName)
 
-  if (result.exitCode !== 0) {
+  if (result.status !== 0) {
     throw createSessionIpcError(SessionErrorCodes.LaunchCheckoutFailed, {
       branchName: params.branchName,
       cwd: params.cwd,
@@ -146,8 +94,7 @@ export function createLaunchPreparationFeature({
   configProvider,
   getDaemonUrl,
   createAgentEnvironment,
-  registryService,
-  agentInstallService,
+  agentService,
   getPackageVersion,
   handlePermissionRequest,
   handleSessionUpdate,
@@ -157,8 +104,7 @@ export function createLaunchPreparationFeature({
   configProvider: DaemonConfigProvider<LaunchPreparationRootConfig>
   getDaemonUrl: () => string
   createAgentEnvironment: DaemonAgentEnvironmentService["createAgentEnvironment"]
-  registryService: ACPRegistryService
-  agentInstallService: DaemonAgentInstallService
+  agentService: AgentService
   getPackageVersion: () => string
   handlePermissionRequest: (
     active: ActiveSession,
@@ -214,8 +160,7 @@ export function createLaunchPreparationFeature({
       cwd: params.cwd,
       createAgentEnvironment,
       envPolicy: resolvedConfig?.sessions?.envPolicy,
-      registryService,
-      agentInstallService,
+      agentService,
       registry: resolvedRegistry,
       managedAgents: resolvedConfig?.agents?.managed,
     })

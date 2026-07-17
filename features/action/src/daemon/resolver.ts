@@ -4,6 +4,7 @@ import { join, resolve } from "node:path"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
 import type { AgentsConfig, InlineSessionParams } from "@goddard-ai/schema/config"
 import type { CreateSessionRequest } from "@goddard-ai/session/schema"
+import { isObject } from "radashi"
 
 import { ActionConfig, mergeActionConfigLayers } from "../schema.ts"
 
@@ -24,10 +25,6 @@ type ResolvedAction = {
   prompt: string
   config: ActionConfig
   path: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 /** Validates that one parsed action config is an object when present. */
@@ -53,7 +50,7 @@ async function readActionConfig(path: string) {
     throw new Error(`Action config at ${path} must be valid JSON.`, { cause: error })
   }
 
-  const normalized = isRecord(parsed)
+  const normalized = isObject(parsed)
     ? Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== "$schema"))
     : parsed
 

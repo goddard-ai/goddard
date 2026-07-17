@@ -1,34 +1,9 @@
-import { mkdir } from "node:fs/promises"
-import { delimiter, join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { supervise } from "procband"
+import { startElectrobun } from "./electrobun.ts"
+import { startViteDevServer } from "./vite.ts"
 
-const appDir = fileURLToPath(new URL("..", import.meta.url))
-const nodeModulesBin = join(appDir, "node_modules", ".bin")
-const electrobunMainViewDir = join(appDir, "build", "views", "main")
-
-/** Start Vite first, then launch Electrobun watch mode after the ready log appears. */
 async function main() {
-  process.env.NODE_ENV = "development"
-  process.env.FORCE_COLOR = "1"
-  process.env.PATH = process.env.PATH
-    ? `${nodeModulesBin}${delimiter}${process.env.PATH}`
-    : nodeModulesBin
-  process.chdir(appDir)
-
-  const vite = supervise({
-    command: "vite",
-  })
-
-  await vite.waitFor("ready")
-  await mkdir(electrobunMainViewDir, { recursive: true })
-
-  supervise({
-    command: "electrobun",
-    args: ["dev", "--watch"],
-    detached: true,
-    parentExitSignal: "SIGTERM",
-  })
+  await startViteDevServer()
+  await startElectrobun()
 }
 
 await main()

@@ -1,4 +1,3 @@
-import { inboxAppPlugin } from "@goddard-ai/inbox/app"
 import type { DaemonSession } from "@goddard-ai/sdk"
 import { lazy } from "preact/compat"
 
@@ -91,7 +90,7 @@ const workbenchTabDefinitions = {
         : "surface:inbox",
     getTitle: (props: { projectName?: string }) =>
       props.projectName ? `Inbox · ${props.projectName}` : "Inbox",
-    icon: inboxAppPlugin.workbenchTab.icon,
+    icon: "tabs/inbox",
     getRelatedFilesystemPath: (props: { projectPath?: string }) => props.projectPath,
   },
   projects: {
@@ -171,7 +170,7 @@ const workbenchTabDefinitions = {
           force: true,
         }),
         props.relatedFilesystemPath
-          ? queryClient.prefetch(goddardSdk.adapter.list, [
+          ? queryClient.prefetch(goddardSdk.agent.list, [
               { cwd: props.relatedFilesystemPath, includeUninstalled: true },
             ])
           : undefined,
@@ -210,6 +209,14 @@ const workbenchTabDefinitions = {
     getId: () => "debug:terminal",
     getTitle: () => "Terminal Debug",
     icon: "tabs/sessions",
+  },
+  terminal: {
+    component: lazy(() => import("~/terminal/view.tsrx")),
+    getId: (props: { tabId: string }) => props.tabId,
+    getTitle: (props: { title: string }) => props.title,
+    icon: "tabs/sessions",
+    getRelatedFilesystemPath: (props: { cwd: string | null }) => props.cwd,
+    restoreScroll: false,
   },
 } satisfies Record<string, WorkbenchTabDefinition>
 

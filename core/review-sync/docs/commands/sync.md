@@ -20,9 +20,9 @@ The review-sync sync command is part of the local review-sync workflow. This pag
 - Captures the latest agent content after any accepted patch.
 - Renders the review worktree index and working tree to that latest agent content.
 - Promotes a clean review commit onto the agent branch when that commit
-    already has the same content as the latest agent snapshot.
+  already has the same content as the latest agent snapshot.
 - Advances the disposable review branch to the latest real agent commit when
-    synchronized agent content includes committed work.
+  synchronized agent content includes committed work.
 
 ## What it changes
 
@@ -39,7 +39,7 @@ The review-sync sync command is part of the local review-sync workflow. This pag
 - It does not apply a rejected human patch to the agent worktree.
 - It does not move the visible review branch to synthetic snapshot commits.
 - It does not preserve review branch commit history that cannot be promoted
-    onto the agent branch.
+  onto the agent branch.
 - It does not synchronize ignored files.
 
 ## Guardrails
@@ -53,7 +53,7 @@ The review-sync sync command is part of the local review-sync workflow. This pag
 ## Recovery behavior
 
 - On `rejected-human-patch`, inspect the saved rejected patch and rework the
-    change against the current agent content.
+  change against the current agent content.
 - After manual recovery, run `sync` again from either recorded worktree.
 - If the agent worktree is on another branch, return it to the recorded agent
-    branch before retrying one-shot sync.
+  branch before retrying one-shot sync.

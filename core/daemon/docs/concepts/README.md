@@ -1,6 +1,6 @@
 # Daemon Concepts
 
-The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, adapters, and auth. This section defines those concepts independently so feature pages can stay focused.
+The daemon has cross-cutting concepts that appear in many feature workflows, such as launch choices, runtime ownership, configuration, agents, and auth. This section defines those concepts independently so feature pages can stay focused.
 
 ## Purpose
 
@@ -13,6 +13,8 @@ The daemon has cross-cutting concepts that appear in many feature workflows, suc
   - What the daemon owns and what clients may only observe or request.
 - [Daemon server](./daemon-server.md)
   - The local control surface exposed to app, SDK, and operational clients.
+- [Browser access](./browser-access.md)
+  - How hosted browsers and desktop webviews can reach the local daemon safely.
 - [Feature composition](./feature-composition.md)
   - How the default daemon product surface is assembled from feature-owned capabilities.
 
@@ -27,8 +29,8 @@ The daemon has cross-cutting concepts that appear in many feature workflows, suc
 
 ## Agent availability and identity
 
-- [Adapters](./adapters.md)
-  - Launch catalog entries and local adapter install state.
+- [Agents](./agents.md)
+  - Launch catalog entries, local launch visibility, and runnable process resolution.
 - [Managed agent installs](./managed-agent-installs.md)
   - User-authorized install and update behavior for managed ACP agents.
 - [Auth session](./auth-session.md)

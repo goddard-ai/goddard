@@ -1,3 +1,4 @@
+import acpJsonSchema from "@agentclientprotocol/sdk/schema/schema.json" with { type: "json" }
 import { textModelConfigJsonSchema } from "ai-sdk-json-schema"
 import { isObject } from "radashi"
 import { toJSONSchema, z } from "zod"
@@ -5,6 +6,10 @@ import type { ToJSONSchemaParams } from "zod/v4/core"
 
 import { buildRootConfigSchema, registerRootConfigSchemas } from "./config-schema.ts"
 import { getDaemonPluginComposition } from "./plugins.ts"
+
+const acpSchemaUrl =
+  "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/schema.json"
+const embeddedAcpDefinitionPrefix = "ACP_"
 
 /** Builds generated JSON Schema artifacts for daemon-consumed config files. */
 export function buildGeneratedSchemaArtifacts() {
@@ -43,6 +48,80 @@ export function buildGeneratedSchemaArtifacts() {
     }
     return { name, jsonSchema }
   })
+}
+
+/** Builds the composed root schema used to render editable user configuration controls. */
+export function buildEditableRootConfigJsonSchema() {
+  const artifact = buildGeneratedSchemaArtifacts().find(({ name }) => name === "goddard.json")
+  if (!artifact) {
+    throw new Error("Generated root configuration schema is unavailable.")
+  }
+
+  const jsonSchema = structuredClone(artifact.jsonSchema)
+  if (isObject(jsonSchema.properties)) {
+    delete (jsonSchema.properties as Record<string, unknown>).$schema
+  }
+  if (Array.isArray(jsonSchema.required)) {
+    const required = jsonSchema.required.filter((key) => key !== "$schema")
+    if (required.length > 0) {
+      jsonSchema.required = required
+    } else {
+      delete jsonSchema.required
+    }
+  }
+
+  inlineAcpDefinitions(jsonSchema)
+
+  return jsonSchema
+}
+
+function inlineAcpDefinitions(jsonSchema: Record<string, unknown>) {
+  const targetDefs = isObject(jsonSchema.$defs)
+    ? (jsonSchema.$defs as Record<string, unknown>)
+    : ((jsonSchema.$defs = {}) as Record<string, unknown>)
+  const sourceDefs = acpJsonSchema.$defs as Record<string, unknown>
+  const pendingDefinitions = new Set<string>()
+
+  rewriteAcpReferences(jsonSchema, `${acpSchemaUrl}#/$defs/`, pendingDefinitions)
+
+  for (const name of pendingDefinitions) {
+    const sourceDefinition = sourceDefs[name]
+    if (!sourceDefinition) {
+      throw new Error(`ACP schema definition ${name} is unavailable.`)
+    }
+
+    const definition = structuredClone(sourceDefinition)
+    rewriteAcpReferences(definition, "#/$defs/", pendingDefinitions)
+    targetDefs[`${embeddedAcpDefinitionPrefix}${name}`] = definition
+  }
+}
+
+function rewriteAcpReferences(
+  value: unknown,
+  referencePrefix: string,
+  pendingDefinitions: Set<string>,
+) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      rewriteAcpReferences(item, referencePrefix, pendingDefinitions)
+    }
+    return
+  }
+
+  if (!isObject(value)) {
+    return
+  }
+
+  const record = value as Record<string, unknown>
+  if (typeof record.$ref === "string" && record.$ref.startsWith(referencePrefix)) {
+    const name = record.$ref.slice(referencePrefix.length)
+    pendingDefinitions.add(name)
+    record.$ref = `#/$defs/${embeddedAcpDefinitionPrefix}${name}`
+  }
+
+  for (const child of Object.values(record)) {
+    rewriteAcpReferences(child, referencePrefix, pendingDefinitions)
+  }
 }
 
 function replaceSessionTitleModelConfig(jsonSchema: Record<string, unknown>) {

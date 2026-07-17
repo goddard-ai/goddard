@@ -23,7 +23,7 @@ describe("parseScaffoldArgs", () => {
         "--name",
         "inbox",
         "--layers",
-        "daemon,sdk,app",
+        "daemon,sdk,backend",
         "--schema",
         "--daemon-ipc",
         "--dry-run",
@@ -31,7 +31,7 @@ describe("parseScaffoldArgs", () => {
       ]),
     ).toEqual({
       name: "inbox",
-      layers: ["daemon", "sdk", "app"],
+      layers: ["daemon", "sdk", "backend"],
       includeSchema: true,
       includeDaemonIpc: true,
       dryRun: true,
@@ -46,9 +46,8 @@ describe("createFeatureScaffoldPlan", () => {
     const plan = createFeatureScaffoldPlan({
       name: "inbox",
       rootDir,
-      layers: ["daemon", "sdk", "app"],
+      layers: ["daemon", "sdk"],
       includeDaemonIpc: true,
-      includeStyledSystem: false,
     })
 
     expect(plan.files.map((file) => file.path)).toEqual([
@@ -57,7 +56,6 @@ describe("createFeatureScaffoldPlan", () => {
       join(rootDir, "features", "inbox", "test", "tsconfig.json"),
       join(rootDir, "features", "inbox", "tsdown.config.ts"),
       join(rootDir, "features", "inbox", "test", "feature.test.ts"),
-      join(rootDir, "features", "inbox", "src", "app.tsx"),
       join(rootDir, "features", "inbox", "src", "daemon.ts"),
       join(rootDir, "features", "inbox", "src", "daemon-ipc.ts"),
       join(rootDir, "features", "inbox", "src", "sdk.ts"),
@@ -69,22 +67,6 @@ describe("createFeatureScaffoldPlan", () => {
       "@goddard-ai/ipc": "workspace:*",
       "@goddard-ai/sdk-plugin": "workspace:*",
     })
-    expect(packageJson.dependencies).not.toHaveProperty("@goddard-ai/styled-system")
-  })
-
-  test("adds app style dependencies only when generated app styles need them", () => {
-    const plan = createFeatureScaffoldPlan({
-      name: "project-activity",
-      rootDir: "/repo",
-      layers: ["app"],
-      includeStyledSystem: true,
-    })
-
-    const packageJson = JSON.parse(plan.files[0]!.content)
-    expect(packageJson.dependencies).toEqual({
-      "@goddard-ai/styled-system": "workspace:*",
-    })
-    expect(plan.files.some((file) => file.path.endsWith("src/app.style.ts"))).toBe(true)
   })
 })
 

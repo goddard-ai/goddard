@@ -1,4 +1,5 @@
 import { existsSync, watch, type FSWatcher } from "node:fs"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { basename, dirname, resolve } from "node:path"
 import {
   getGlobalConfigPath,
@@ -6,8 +7,10 @@ import {
   getGoddardLocalDir,
   getLocalConfigPath,
 } from "@goddard-ai/paths/node"
-import { getErrorMessage } from "radashi"
+import { getErrorMessage, isObject, omit } from "radashi"
 
+import { buildRootConfigSchema } from "./config-schema.ts"
+import type { ConfigReloadFailedEvent } from "./events.ts"
 import { createDebug, createLogger } from "./logging.ts"
 import { readMergedRootConfig, type RootConfig } from "./resolvers/config.ts"
 
@@ -30,6 +33,10 @@ export type RootConfigSnapshot = {
 export interface ConfigManager {
   getRootConfig: (cwd?: string) => Promise<RootConfigSnapshot>
   getLastKnownRootConfig: (cwd?: string) => RootConfigSnapshot | null
+  getGlobalConfig: () => Promise<Record<string, unknown>>
+  updateGlobalConfig: (
+    update: (config: Readonly<Record<string, unknown>>) => Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>
   ensureWatching: (cwd: string) => Promise<void>
   close: () => Promise<void>
 }
@@ -58,14 +65,20 @@ type CachedRootConfigEntry = {
   debounceHandle: ReturnType<typeof setTimeout> | null
 }
 
+type CreateConfigManagerOptions = {
+  onReloadFailed?: (event: ConfigReloadFailedEvent) => void | Promise<void>
+}
+
 /** Creates the daemon-owned config manager for merged persisted root-config snapshots. */
-export function createConfigManager() {
+export function createConfigManager(options: CreateConfigManagerOptions = {}) {
   const logger = createLogger()
   const debug = createDebug("config.watch")
+  const { onReloadFailed } = options
   const entries = new Map<string, CachedRootConfigEntry>()
   const globalRoot = resolve(getGoddardGlobalDir())
   const globalConfigPath = resolve(getGlobalConfigPath())
   const globalWatchState = createWatchedConfigState("global", globalRoot, globalConfigPath)
+  let globalUpdateTask = Promise.resolve()
   let closed = false
 
   ensureWatchTarget(globalWatchState, () => {
@@ -182,12 +195,6 @@ export function createConfigManager() {
     }
 
     const nextTarget = resolveWatchTarget(state)
-    debug("config.watch.target_resolved", {
-      watchScope: state.scope,
-      watchMode: nextTarget.watchMode,
-      watchRoot: nextTarget.watchedDir,
-      configPath: state.configPath,
-    })
     if (
       state.watcher &&
       state.watchMode === nextTarget.watchMode &&
@@ -197,6 +204,13 @@ export function createConfigManager() {
     }
 
     closeWatchTarget(state)
+
+    debug("config.watch.target_resolved", {
+      watchScope: state.scope,
+      watchMode: nextTarget.watchMode,
+      watchRoot: nextTarget.watchedDir,
+      configPath: state.configPath,
+    })
 
     let watcher: FSWatcher
     try {
@@ -367,12 +381,18 @@ export function createConfigManager() {
             continue
           }
 
-          logger.log("config.reload_failed", {
+          const reloadFailedEvent = {
             watchScope: changedLayer,
+            cwd: entry.cwd,
             localConfigPath: entry.localConfigPath,
             errorMessage: getErrorMessage(error),
             version: entry.snapshot?.version,
-          })
+          } satisfies ConfigReloadFailedEvent
+          if (onReloadFailed) {
+            await onReloadFailed(reloadFailedEvent)
+          } else {
+            logger.log("config.reload_failed", reloadFailedEvent)
+          }
           if (entry.snapshot) {
             return entry.snapshot
           }
@@ -399,6 +419,67 @@ export function createConfigManager() {
     })
   }
 
+  async function readGlobalConfigForUpdate() {
+    let rawConfig: unknown
+
+    try {
+      rawConfig = JSON.parse(await readFile(globalConfigPath, "utf8"))
+    } catch (error) {
+      if (isMissingWatchTarget(error)) {
+        return {
+          schemaReference: undefined,
+          config: {},
+        }
+      }
+      throw error
+    }
+
+    if (!isObject(rawConfig) || Array.isArray(rawConfig)) {
+      throw new Error(`Global config at ${globalConfigPath} must be a JSON object.`)
+    }
+    const rawConfigRecord = rawConfig as Record<string, unknown>
+
+    return {
+      schemaReference:
+        typeof rawConfigRecord.$schema === "string" ? rawConfigRecord.$schema : undefined,
+      config: omit(rawConfigRecord, ["$schema"]),
+    }
+  }
+
+  async function writeGlobalConfig(
+    update: (config: Readonly<Record<string, unknown>>) => Record<string, unknown>,
+  ) {
+    const { schemaReference, config } = await readGlobalConfigForUpdate()
+    const rootConfigSchema = buildRootConfigSchema()
+    const currentConfig = rootConfigSchema.parse(config)
+    const nextConfig = rootConfigSchema.parse(update(currentConfig))
+    const serializedConfig = schemaReference
+      ? { $schema: schemaReference, ...nextConfig }
+      : nextConfig
+    const temporaryPath = `${globalConfigPath}.${crypto.randomUUID()}.tmp`
+
+    await mkdir(globalRoot, { recursive: true })
+    try {
+      await writeFile(temporaryPath, `${JSON.stringify(serializedConfig, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+      })
+      await rename(temporaryPath, globalConfigPath)
+    } finally {
+      await rm(temporaryPath, { force: true }).catch(() => {})
+    }
+
+    await Promise.all([...entries.values()].map((entry) => refreshEntry(entry, "global")))
+
+    return nextConfig
+  }
+
+  async function getGlobalConfig() {
+    await globalUpdateTask
+    const { config } = await readGlobalConfigForUpdate()
+    return buildRootConfigSchema().parse(config)
+  }
+
   return {
     async getRootConfig(cwd: string = process.cwd()) {
       const entry = getOrCreateEntry(cwd)
@@ -414,6 +495,20 @@ export function createConfigManager() {
       return entries.get(resolve(getLocalConfigPath(resolve(cwd))))?.snapshot ?? null
     },
 
+    getGlobalConfig,
+
+    updateGlobalConfig(update) {
+      const nextTask = globalUpdateTask.then(
+        () => writeGlobalConfig(update),
+        () => writeGlobalConfig(update),
+      )
+      globalUpdateTask = nextTask.then(
+        () => undefined,
+        () => undefined,
+      )
+      return nextTask
+    },
+
     async ensureWatching(cwd: string) {
       await ensureEntryWatching(getOrCreateEntry(cwd))
     },
@@ -423,6 +518,8 @@ export function createConfigManager() {
         return
       }
       closed = true
+
+      await globalUpdateTask
 
       closeWatchTarget(globalWatchState)
 

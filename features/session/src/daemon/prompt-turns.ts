@@ -106,7 +106,6 @@ export function createPromptTurnFeature({
   memory,
   log,
   events,
-  emitMessage,
   activeTurns,
   idleShutdown,
   sessionTitles,
@@ -118,22 +117,15 @@ export function createPromptTurnFeature({
   memory: SessionMemory
   log: DaemonLogService
   events: SessionEventEmitter
-  emitMessage: (id: SessionId, message: SessionMessageEvent) => void
   activeTurns: ReturnType<typeof createActiveTurnStore>
   idleShutdown: ReturnType<typeof createIdleShutdownController>
   sessionTitles: ReturnType<typeof createSessionTitleRuntime>
-  emitDiagnostic: (
-    sessionId: SessionId,
-    type: string,
-    detail?: Record<string, unknown>,
-    diagnosticLogger?: ReturnType<DaemonLogService["createLogger"]>,
-  ) => void
+  emitDiagnostic: (sessionId: SessionId, type: string, detail?: Record<string, unknown>) => void
   publishSessionUpdated: (id: SessionId, changed: readonly SessionLifecycleField[]) => void
   updateSessionActivity: (
     id: SessionId,
     update: Partial<DaemonSession>,
     detail?: Record<string, unknown>,
-    diagnosticLogger?: ReturnType<DaemonLogService["createLogger"]>,
   ) => void
 }) {
   const activeSessions = memory.activeSessions
@@ -154,12 +146,12 @@ export function createPromptTurnFeature({
         : null
     const messageEvent = options.messageEvent ?? turnMessage
     if (messageEvent) {
-      emitMessage(active.id, messageEvent)
+      void events.emit("session.message", { id: active.id, message: messageEvent })
       return
     }
 
     if (isContextUsageUpdateMessage(message)) {
-      emitMessage(active.id, message)
+      void events.emit("session.message", { id: active.id, message })
       return
     }
 
@@ -197,15 +189,6 @@ export function createPromptTurnFeature({
       method: "method" in message ? message.method : undefined,
       message: log.createPayloadPreview(message, { maxStringLength: 160 }),
     })
-    emitDiagnostic(
-      active.id,
-      "session_message_sent",
-      {
-        hasId: "id" in message && message.id != null,
-        method: "method" in message ? message.method : undefined,
-      },
-      active.logger,
-    )
     const messageEvent = options.onBeforePublish?.(message) ?? undefined
     publishSessionMessage(active, message, {
       persistTurnMessage: options.persistTurnMessage,
@@ -459,7 +442,7 @@ export function createPromptTurnFeature({
         where: { sessionId: active.id },
       }) ?? null
     if (existingDraft) {
-      activeTurns.persistTurnDraftAsInterruptedTurn(active.id, existingDraft, active.logger)
+      activeTurns.persistTurnDraftAsInterruptedTurn(active.id, existingDraft)
       active.nextTurnSequence = resolveLatestStoredTurnSequence(db, active.id) + 1
     }
 
@@ -484,16 +467,11 @@ export function createPromptTurnFeature({
     idleShutdown.refreshIdleShutdownState(active.id, "turn_started")
 
     try {
-      emitDiagnostic(
-        active.id,
-        "session_turn_started",
-        {
-          turnId: activeTurn.turnId,
-          sequence: activeTurn.sequence,
-          promptRequestId: activeTurn.promptRequestId,
-        },
-        active.logger,
-      )
+      emitDiagnostic(active.id, "session_turn_started", {
+        turnId: activeTurn.turnId,
+        sequence: activeTurn.sequence,
+        promptRequestId: activeTurn.promptRequestId,
+      })
       queueDebug("session.queue.prompt_dispatching", {
         sessionId: active.id,
         requestId: nextPrompt.requestId,
@@ -751,7 +729,6 @@ export function createPromptTurnFeature({
       sessionTitles.queueSessionTitlePreparation({
         id: active.id,
         prompt: message.params.prompt,
-        diagnosticLogger: active.logger,
       })
       active.promptQueue.push({
         requestId: message.id,
@@ -772,10 +749,6 @@ export function createPromptTurnFeature({
         sessionId: id,
       })
       idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
-      emitDiagnostic(active.id, "session_prompt_enqueued", {
-        requestId: message.id,
-        queueLength: active.promptQueue.length,
-      })
       await processPromptQueue(active)
       return
     }
@@ -824,7 +797,6 @@ export function createPromptTurnFeature({
     sessionTitles.queueSessionTitlePreparation({
       id: active.id,
       prompt,
-      diagnosticLogger: active.logger,
     })
     const requestId = randomUUID()
     const response = new Promise<acp.PromptResponse>((resolve, reject) => {
@@ -852,15 +824,6 @@ export function createPromptTurnFeature({
     updateSessionActivity(active.id, {})
     publishSessionUpdated(active.id, ["queue"])
     idleShutdown.refreshIdleShutdownState(active.id, "prompt_enqueued")
-    emitDiagnostic(
-      active.id,
-      "session_prompt_enqueued",
-      {
-        requestId,
-        queueLength: active.promptQueue.length,
-      },
-      active.logger,
-    )
     await processPromptQueue(active)
     return await response
   }
@@ -902,10 +865,6 @@ export function createPromptTurnFeature({
       queueLength: active.promptQueue.length,
     })
     idleShutdown.refreshIdleShutdownState(active.id, "queued_prompt_popped")
-    emitDiagnostic(active.id, "session_prompt_queue_popped", {
-      requestId: queuedPrompt.requestId,
-      queueLength: active.promptQueue.length,
-    })
 
     return {
       id,

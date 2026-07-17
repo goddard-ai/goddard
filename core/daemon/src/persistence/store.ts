@@ -17,8 +17,37 @@ export type StoreConnectionOptions = {
   databaseOptions?: DatabaseOptions
 }
 
+export type StoreRecoveryHandler = (input: {
+  filename: string
+  error: UnrecoverableStoreOpenError
+}) => void
+
 const metadata = {
   authToken: z.string(),
+  browserAccess: z.strictObject({
+    pendingPairings: z.record(
+      z.string(),
+      z.strictObject({
+        origin: z.string(),
+        codeHash: z.string(),
+        label: z.string().nullable(),
+        createdAt: z.string(),
+        expiresAt: z.string(),
+        confirmedAt: z.string().nullable(),
+        completedAt: z.string().nullable(),
+      }),
+    ),
+    browserTokens: z.record(
+      z.string(),
+      z.strictObject({
+        origin: z.string(),
+        tokenHash: z.string(),
+        label: z.string().nullable(),
+        createdAt: z.string(),
+        revokedAt: z.string().nullable(),
+      }),
+    ),
+  }),
   managedAgentUpdateChecks: z.record(
     z.string(),
     z.strictObject({
@@ -82,6 +111,7 @@ function removeDatabaseArtifacts(filename: string) {
 export function openDaemonStore<const TSchema extends KindRegistry>(
   pluginDb: DaemonDbDefinition<TSchema>,
   connection: StoreConnectionOptions = { filename: getDatabasePath() },
+  onRecovery?: StoreRecoveryHandler,
 ): DaemonStore<TSchema> {
   const schema = mergeDbSchema(pluginDb.schema)
   const db = { schema, migrate: pluginDb.migrate }
@@ -93,6 +123,11 @@ export function openDaemonStore<const TSchema extends KindRegistry>(
       throw error
     }
 
+    try {
+      onRecovery?.({ filename: connection.filename, error })
+    } catch {
+      // Recovery must remain available when its observability callback fails.
+    }
     removeDatabaseArtifacts(connection.filename)
     return openKindstore({ ...connection, ...db })
   }

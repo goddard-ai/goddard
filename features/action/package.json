@@ -5,14 +5,6 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./app": {
-      "types": {
-        "source": "./src/app.tsx",
-        "default": "./dist/app.d.mts"
-      },
-      "bun": "./src/app.tsx",
-      "import": "./dist/app.mjs"
-    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -61,6 +53,7 @@
     "@goddard-ai/schema": "workspace:*",
     "@goddard-ai/sdk-plugin": "workspace:*",
     "@goddard-ai/session": "workspace:*",
+    "radashi": "catalog:",
     "zod": "catalog:"
   }
 }

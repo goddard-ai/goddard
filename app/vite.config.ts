@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 
+import { resolve } from "node:path"
 import { lingui } from "@lingui/vite-plugin"
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
@@ -8,6 +9,10 @@ import { sculpted } from "sculpted/vite"
 import { defineConfig } from "vite"
 
 import svgIcons from "./plugins/svg-icon-build-plugin.ts"
+
+const devServerUrl = process.env.GODDARD_APP_DEV_SERVER_URL
+  ? new URL(process.env.GODDARD_APP_DEV_SERVER_URL)
+  : undefined
 
 /** Vite config for the desktop webview source rooted at src/main. */
 export default defineConfig({
@@ -41,8 +46,8 @@ export default defineConfig({
     }),
   ],
   server: {
-    host: "127.0.0.1",
-    port: 5173,
+    host: devServerUrl?.hostname ?? "127.0.0.1",
+    port: Number(devServerUrl?.port ?? 5173),
     strictPort: true,
   },
   build: {
@@ -50,7 +55,17 @@ export default defineConfig({
     outDir: "../../build/views/main",
     emptyOutDir: true,
   },
+  optimizeDeps: {
+    exclude: ["state-launcher"],
+  },
   resolve: {
+    alias: {
+      "@goddard-ai/ui-primitives": resolve(
+        import.meta.dirname,
+        "../core/ui-primitives/src/index.ts",
+      ),
+      "~": resolve(import.meta.dirname, "src"),
+    },
     conditions: ["bun"],
     tsconfigPaths: true,
   },

@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "bun:test"
 import {
   AgentSession,
   deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
   GoddardSdk,
   type GoddardClient,
 } from "../src/index.ts"
@@ -106,12 +107,14 @@ async function waitForCondition(condition: () => boolean) {
 }
 
 describe("@goddard-ai/sdk session namespace", () => {
-  test("assigns daemon and feature namespaces during construction", () => {
+  test("assigns config, daemon, and feature namespaces during construction", () => {
     const { sdk } = createSdkWithClient()
 
+    expect(Object.hasOwn(sdk, "config")).toBe(true)
     expect(Object.hasOwn(sdk, "daemon")).toBe(true)
+    expect(Object.hasOwn(sdk, "events")).toBe(true)
     expect(Object.hasOwn(sdk, "auth")).toBe(true)
-    expect(Object.hasOwn(sdk, "adapter")).toBe(true)
+    expect(Object.hasOwn(sdk, "agent")).toBe(true)
     expect(Object.hasOwn(sdk, "fileSearch")).toBe(true)
     expect(Object.hasOwn(sdk, "pr")).toBe(true)
     expect(Object.hasOwn(sdk, "inbox")).toBe(true)
@@ -119,60 +122,48 @@ describe("@goddard-ai/sdk session namespace", () => {
     expect(Object.hasOwn(sdk, "reviewSession")).toBe(true)
     expect(Object.hasOwn(sdk, "action")).toBe(true)
     expect(Object.hasOwn(sdk, "loop")).toBe(true)
+    expect(Object.hasOwn(sdk, "task")).toBe(true)
+    expect(Object.hasOwn(sdk, "vscodeTask")).toBe(true)
     expect(Object.hasOwn(sdk, "workforce")).toBe(true)
   })
 
-  test("inbox.streamItems streams daemon inbox item updates", async () => {
+  test("events.stream maps to the unified daemon event stream and aborts", async () => {
     const { sdk, subscribe } = createSdkWithClient()
     const unsubscribe = vi.fn()
     const controller = new AbortController()
+    const filter = {
+      names: ["session.activated"],
+      where: [{ path: "sessionId", equals: "ses_1" }],
+    }
 
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("inbox.streamItems")
-        handler({
-          id: "inb_1",
-          entityId: "ses_1",
-          reason: "session.turn_ended",
-          status: "unread",
-          priority: "normal",
-          updatedAt: 1,
-          readAt: null,
-          scope: "Checkout flow",
-          headline: "Review needed",
-          turnId: "turn-1",
-        })
-        return unsubscribe
+    subscribe.mockImplementationOnce(async () => unsubscribe)
+
+    const events = await sdk.events.stream(filter, { signal: controller.signal })
+    const iterator = events[Symbol.asyncIterator]()
+    const result = iterator.next()
+
+    await waitForCondition(() => subscribe.mock.calls.length === 1)
+    expect(subscribe).toHaveBeenCalledWith(
+      {
+        name: "events.stream",
+        filter,
       },
+      expect.any(Function),
     )
 
-    const events = await sdk.inbox.streamItems(undefined, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith("inbox.streamItems", expect.any(Function))
-    expect(result.value).toEqual({
-      id: "inb_1",
-      entityId: "ses_1",
-      reason: "session.turn_ended",
-      status: "unread",
-      priority: "normal",
-      updatedAt: 1,
-      readAt: null,
-      scope: "Checkout flow",
-      headline: "Review needed",
-      turnId: "turn-1",
-    })
     controller.abort()
-    await iterator.return?.()
+    await expect(result).resolves.toEqual({
+      done: true,
+      value: undefined,
+    })
     expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
-  test("adapter.list forwards to adapter.list", async () => {
+  test("agent.list forwards to agent.list", async () => {
     const { sdk, send } = createSdkWithClient()
 
     send.mockResolvedValueOnce({
-      adapters: [
+      agents: [
         {
           id: "pi-acp",
           name: "Pi ACP",
@@ -191,15 +182,15 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
       installations: [],
-      defaultAdapterId: "pi-acp",
+      defaultAgentId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
       stale: false,
       lastError: null,
     })
 
-    await expect(sdk.adapter.list({ cwd: "/tmp/project" })).resolves.toEqual({
-      adapters: [
+    await expect(sdk.agent.list({ cwd: "/tmp/project" })).resolves.toEqual({
+      agents: [
         {
           id: "pi-acp",
           name: "Pi ACP",
@@ -218,14 +209,14 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
       installations: [],
-      defaultAdapterId: "pi-acp",
+      defaultAgentId: "pi-acp",
       registrySource: "cache",
       lastSuccessfulSyncAt: "2026-04-11T00:00:00.000Z",
       stale: false,
       lastError: null,
     })
 
-    expect(send).toHaveBeenCalledWith("adapter.list", { cwd: "/tmp/project" })
+    expect(send).toHaveBeenCalledWith("agent.list", { cwd: "/tmp/project" })
   })
 
   test("fileSearch.composerEntries forwards to fileSearch.composerEntries", async () => {
@@ -460,104 +451,65 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
-  test("session.streamMessages streams daemon-side session messages", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
+  test("session worktree merge helpers forward the expected daemon requests", async () => {
+    const { sdk, send } = createSdkWithClient()
 
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toEqual({
-          name: "session.streamMessages",
-          filter: { id: "ses_1" },
-        })
-        handler({
-          jsonrpc: "2.0",
-          method: acp.CLIENT_METHODS.session_update,
-          params: { value: "kept" },
-        })
-        return unsubscribe
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      readiness: {
+        status: "ready",
+        mergeTargetBranch: "main",
+        worktreeHeadOid: "abc123",
+        worktreeHeadBranch: "goddard-ses_1",
+        targetBranchHeadOid: "def456",
+        aheadCount: 2,
+        syncMounted: false,
+        willAutoUnmountSync: false,
       },
-    )
-
-    const events = await sdk.session.streamMessages({ id: "ses_1" }, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.streamMessages", filter: { id: "ses_1" } },
-      expect.any(Function),
-    )
-    expect(result.value).toEqual({
-      jsonrpc: "2.0",
-      method: acp.CLIENT_METHODS.session_update,
-      params: { value: "kept" },
     })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
-  })
-
-  test("session.streamLifecycle streams daemon session lifecycle events", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toBe("session.streamLifecycle")
-        handler({
-          kind: "sessionUpdated",
-          session: {
-            id: "ses_1",
-            createdAt: 1,
-            lastSessionActivityAt: 2,
-            acpSessionId: "acp_1",
-            status: "done",
-            stopReason: "end_turn",
-            agent: null,
-            agentName: "Agent",
-            cwd: "/repo",
-            title: "Session",
-            titleState: "generated",
-            mcpServers: [],
-            connectionMode: "history",
-            supportsLoadSession: true,
-            activeDaemonSession: false,
-            completedHidden: false,
-            errorMessage: null,
-            blockedReason: null,
-            initiative: null,
-            inboxScope: null,
-            lastAgentMessage: "Finished",
-            repository: null,
-            prNumber: null,
-            token: null,
-            permissions: null,
-            metadata: null,
-            configOptions: [],
-            availableCommands: [],
-            contextUsage: null,
-          },
-          changed: ["status", "connection"],
-        })
-        return unsubscribe
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      mergeTargetBranch: "release/1.x",
+      readiness: {
+        status: "ready",
+        mergeTargetBranch: "release/1.x",
+        worktreeHeadOid: "abc123",
+        worktreeHeadBranch: "goddard-ses_1",
+        targetBranchHeadOid: "def456",
+        aheadCount: 2,
+        syncMounted: false,
+        willAutoUnmountSync: false,
       },
-    )
-
-    const events = await sdk.session.streamLifecycle(undefined, { signal: controller.signal })
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith("session.streamLifecycle", expect.any(Function))
-    expect(result.value).toMatchObject({
-      kind: "sessionUpdated",
-      session: { id: "ses_1", status: "done" },
-      changed: ["status", "connection"],
     })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    send.mockResolvedValueOnce({
+      id: "ses_1",
+      acpSessionId: "acp-session-1",
+      merged: true,
+      targetBranch: "release/1.x",
+      sourceHeadOid: "abc123",
+      previousTargetHeadOid: "def456",
+      nextTargetHeadOid: "abc123",
+      syncUnmounted: false,
+      warnings: [],
+    })
+
+    await sdk.session.worktree.mergeReadiness({ id: "ses_1" })
+    await sdk.session.worktree.mergeTargetBranch.set({
+      id: "ses_1",
+      mergeTargetBranch: "release/1.x",
+    })
+    await sdk.session.worktree.merge({ id: "ses_1" })
+
+    expect(send).toHaveBeenNthCalledWith(1, "session.worktree.mergeReadiness", {
+      id: "ses_1",
+    })
+    expect(send).toHaveBeenNthCalledWith(2, "session.worktree.mergeTargetBranch.set", {
+      id: "ses_1",
+      mergeTargetBranch: "release/1.x",
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "session.worktree.merge", { id: "ses_1" })
   })
 
   test("session.composerSuggestions forwards session-scoped suggestion reads", async () => {
@@ -716,6 +668,46 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
   })
 
+  test("session.profile forwards global profile management requests", async () => {
+    const { sdk, send } = createSdkWithClient()
+    const profiles = {
+      "codex-acp": {
+        routine: {
+          model: "gpt-5.4-mini-low",
+          thoughtLevel: "low",
+          approvalMode: "default",
+        },
+      },
+    }
+    send.mockResolvedValue({ profiles })
+
+    await expect(sdk.session.profile.list({})).resolves.toEqual({ profiles })
+    await expect(
+      sdk.session.profile.set({
+        agentId: "codex-acp",
+        profileId: "routine",
+        profile: profiles["codex-acp"].routine,
+      }),
+    ).resolves.toEqual({ profiles })
+    await expect(
+      sdk.session.profile.remove({
+        agentId: "codex-acp",
+        profileId: "routine",
+      }),
+    ).resolves.toEqual({ profiles })
+
+    expect(send).toHaveBeenNthCalledWith(1, "session.profile.list", {})
+    expect(send).toHaveBeenNthCalledWith(2, "session.profile.set", {
+      agentId: "codex-acp",
+      profileId: "routine",
+      profile: profiles["codex-acp"].routine,
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "session.profile.remove", {
+      agentId: "codex-acp",
+      profileId: "routine",
+    })
+  })
+
   test("session.subpackages forwards launch working directory discovery requests", async () => {
     const { sdk, send } = createSdkWithClient()
 
@@ -860,6 +852,82 @@ describe("@goddard-ai/sdk session namespace", () => {
         },
       ],
     })
+  })
+
+  test("deriveSessionProfileConfig creates, resolves, and matches exact ACP selections", () => {
+    const configOptions: acp.SessionConfigOption[] = [
+      createFixtureModelConfigOption({
+        currentValue: "gpt-5.4-mini-low",
+        models: [
+          {
+            modelId: "gpt-5.4-mini-low",
+            name: "GPT-5.4 Mini (Low)",
+          },
+          {
+            modelId: "gpt-5.4-mini-high",
+            name: "GPT-5.4 Mini (High)",
+          },
+        ],
+      }),
+      {
+        id: "mode",
+        type: "select",
+        name: "Approval preset",
+        category: "mode",
+        currentValue: "default",
+        options: [
+          { value: "default", name: "Default" },
+          { value: "full-access", name: "Full access" },
+        ],
+      },
+    ]
+    const profileConfig = deriveSessionProfileConfig({ configOptions })
+    const launchConfig = deriveSessionLaunchModelConfig({ configOptions })
+    const modelId = launchConfig.models?.currentModelId ?? null
+
+    expect(
+      profileConfig.createProfile({
+        modelId,
+        thinkingValue: "low",
+        approvalModeValue: "default",
+      }),
+    ).toEqual({
+      model: "gpt-5.4-mini-low",
+      thoughtLevel: "low",
+      approvalMode: "default",
+    })
+    expect(
+      profileConfig.resolveProfile({
+        model: "gpt-5.4-mini-high",
+        thoughtLevel: "high",
+        approvalMode: "full-access",
+      }),
+    ).toMatchObject({
+      status: "available",
+      modelId,
+      thinkingValue: "high",
+      approvalModeValue: "full-access",
+      selection: {
+        initialConfigOptions: [
+          { configId: "mode", value: "full-access" },
+          { configId: "model", value: "gpt-5.4-mini-high" },
+        ],
+      },
+    })
+    expect(
+      profileConfig.matchesProfile({
+        model: "gpt-5.4-mini-low",
+        thoughtLevel: "low",
+        approvalMode: "default",
+      }),
+    ).toBe(true)
+    expect(
+      profileConfig.resolveProfile({
+        model: "removed-model",
+        thoughtLevel: "high",
+        approvalMode: "full-access",
+      }),
+    ).toEqual({ status: "unavailable" })
   })
 
   test("deriveSessionLaunchModelConfig folds slash-delimited thinking model ids", () => {
@@ -1062,7 +1130,13 @@ describe("@goddard-ai/sdk session namespace", () => {
       oneShot: undefined,
     })
     expect(subscribe).toHaveBeenCalledWith(
-      { name: "session.streamMessages", filter: { id: "ses_1" } },
+      {
+        name: "events.stream",
+        filter: {
+          names: ["session.message"],
+          where: [{ path: "id", equals: "ses_1" }],
+        },
+      },
       expect.any(Function),
     )
     expect(send).toHaveBeenNthCalledWith(2, "session.shutdown", { id: "ses_1" })
@@ -1143,33 +1217,41 @@ describe("@goddard-ai/sdk session namespace", () => {
     )
 
     publishStreamMessage?.({
-      jsonrpc: "2.0",
-      id: "prompt-1",
-      method: acp.AGENT_METHODS.session_prompt,
-      params: {
-        sessionId: "acp-session-1",
-        prompt: [{ type: "text", text: "Review the diff." }],
+      payload: {
+        message: {
+          jsonrpc: "2.0",
+          id: "prompt-1",
+          method: acp.AGENT_METHODS.session_prompt,
+          params: {
+            sessionId: "acp-session-1",
+            prompt: [{ type: "text", text: "Review the diff." }],
+          },
+        },
       },
     })
     publishStreamMessage?.({
-      jsonrpc: "2.0",
-      id: "permission-1",
-      method: acp.CLIENT_METHODS.session_request_permission,
-      params: {
-        sessionId: "acp-session-1",
-        options: [
-          {
-            optionId: "reject-once",
-            name: "Reject once",
-            kind: "reject_once",
+      payload: {
+        message: {
+          jsonrpc: "2.0",
+          id: "permission-1",
+          method: acp.CLIENT_METHODS.session_request_permission,
+          params: {
+            sessionId: "acp-session-1",
+            options: [
+              {
+                optionId: "reject-once",
+                name: "Reject once",
+                kind: "reject_once",
+              },
+            ],
+            toolCall: {
+              toolCallId: "tool-1",
+              title: "Read file",
+              kind: "read",
+              status: "pending",
+              locations: [],
+            },
           },
-        ],
-        toolCall: {
-          toolCallId: "tool-1",
-          title: "Read file",
-          kind: "read",
-          status: "pending",
-          locations: [],
         },
       },
     })
@@ -1207,57 +1289,6 @@ describe("@goddard-ai/sdk session namespace", () => {
     })
 
     await session!.stop()
-  })
-
-  test("workforce.streamEvents streams ledger events", async () => {
-    const { sdk, subscribe } = createSdkWithClient()
-    const unsubscribe = vi.fn()
-    const controller = new AbortController()
-
-    subscribe.mockImplementationOnce(
-      async (target: unknown, handler: (payload: unknown) => void) => {
-        expect(target).toEqual({
-          name: "workforce.streamEvents",
-          filter: { rootDir: "/repo" },
-        })
-        handler({
-          id: "evt-1",
-          at: "2026-03-31T00:00:00.000Z",
-          type: "request",
-          requestId: "req-1",
-          toAgentId: "root",
-          fromAgentId: null,
-          intent: "default",
-          input: "Review the queue.",
-        })
-        return unsubscribe
-      },
-    )
-
-    const events = await sdk.workforce.streamEvents(
-      { rootDir: "/repo" },
-      { signal: controller.signal },
-    )
-    const iterator = events[Symbol.asyncIterator]()
-    const result = await iterator.next()
-
-    expect(subscribe).toHaveBeenCalledWith(
-      { name: "workforce.streamEvents", filter: { rootDir: "/repo" } },
-      expect.any(Function),
-    )
-    expect(result.value).toEqual({
-      id: "evt-1",
-      at: "2026-03-31T00:00:00.000Z",
-      type: "request",
-      requestId: "req-1",
-      toAgentId: "root",
-      fromAgentId: null,
-      intent: "default",
-      input: "Review the queue.",
-    })
-    controller.abort()
-    await iterator.return?.()
-    expect(unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   test("AgentSession.setAgentModel uses the daemon-owned model path", async () => {
@@ -1343,5 +1374,101 @@ describe("@goddard-ai/sdk session namespace", () => {
       id: "ses_daemon-session-1",
       prompt: "Focus on the lint failure.",
     })
+  })
+})
+
+describe("@goddard-ai/sdk terminal namespace", () => {
+  test("terminal.connect returns a connection-scoped request and stream helper", async () => {
+    const { sdk, send, subscribe } = createSdkWithClient()
+    const onEvent = vi.fn()
+    const onEnd = vi.fn()
+    const unsubscribe = vi.fn()
+
+    send.mockResolvedValueOnce({ connectionId: "term-conn-1" })
+    send.mockResolvedValueOnce({
+      terminal: {
+        instanceId: "primary",
+        state: "running",
+        cwd: "/repo",
+        title: null,
+        dimensions: { cols: 80, rows: 24 },
+      },
+    })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({
+      terminal: {
+        instanceId: "primary",
+        state: "running",
+        cwd: "/repo",
+        title: null,
+        dimensions: { cols: 100, rows: 30 },
+      },
+    })
+    send.mockResolvedValueOnce({ success: true })
+    send.mockResolvedValueOnce({ success: true })
+    subscribe.mockImplementationOnce(
+      async (target: unknown, handler: (payload: unknown) => void) => {
+        expect(target).toEqual({
+          name: "terminal.event",
+          filter: { connectionId: "term-conn-1" },
+        })
+        handler({
+          type: "terminal.output",
+          connectionId: "term-conn-1",
+          instanceId: "primary",
+          data: "ok\n",
+        })
+        return unsubscribe
+      },
+    )
+
+    const terminal = await sdk.terminal.connect()
+    const stop = await terminal.subscribe(onEvent, onEnd)
+    await terminal.create({ instanceId: "primary", options: { cwd: "/repo" } })
+    await terminal.write({ instanceId: "primary", data: "ls\n" })
+    await terminal.resize({ instanceId: "primary", dimensions: { cols: 100, rows: 30 } })
+    await terminal.restart({ instanceId: "primary", options: { cwd: "/repo" } })
+    await terminal.close({ instanceId: "primary" })
+    await terminal.disconnect()
+    await stop()
+
+    expect(terminal.connectionId).toBe("term-conn-1")
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "terminal.output",
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      data: "ok\n",
+    })
+    expect(send).toHaveBeenNthCalledWith(1, "terminal.connect", {})
+    expect(send).toHaveBeenNthCalledWith(2, "terminal.create", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      options: { cwd: "/repo" },
+    })
+    expect(send).toHaveBeenNthCalledWith(3, "terminal.write", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      data: "ls\n",
+    })
+    expect(send).toHaveBeenNthCalledWith(4, "terminal.resize", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      dimensions: { cols: 100, rows: 30 },
+    })
+    expect(send).toHaveBeenNthCalledWith(5, "terminal.restart", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+      options: { cwd: "/repo" },
+    })
+    expect(send).toHaveBeenNthCalledWith(6, "terminal.close", {
+      connectionId: "term-conn-1",
+      instanceId: "primary",
+    })
+    expect(send).toHaveBeenNthCalledWith(7, "terminal.disconnect", {
+      connectionId: "term-conn-1",
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(onEnd).not.toHaveBeenCalled()
   })
 })

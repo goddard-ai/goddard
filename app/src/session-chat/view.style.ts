@@ -48,9 +48,9 @@ export default {
     },
   }),
   headerControls: css({
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "8px",
+    display: "grid",
+    justifyItems: "end",
+    gap: "4px",
     flexShrink: "0",
     minWidth: "0",
   }),
@@ -59,6 +59,13 @@ export default {
     alignItems: "center",
     gap: "6px",
     flexShrink: "0",
+  }),
+  headerStatusText: css({
+    maxWidth: "320px",
+    color: "muted",
+    fontSize: "0.74rem",
+    lineHeight: "1.45",
+    textAlign: "right",
   }),
   headerActionButton: css({
     display: "inline-flex",

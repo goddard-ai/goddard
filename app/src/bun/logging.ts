@@ -108,10 +108,15 @@ export function writeAppLog(input: AppLogInput) {
 }
 
 /** Appends one structured app-host error entry into the shared SQLite log store. */
-export function writeAppError(message: string, error: unknown) {
+export function writeAppError(
+  message: string,
+  error: unknown,
+  properties: Record<string, unknown> = {},
+) {
   try {
     getAppLogger().error(message, {
       source: "host",
+      ...properties,
       ...toErrorProperties(error),
     })
   } catch (loggingError) {

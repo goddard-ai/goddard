@@ -82,6 +82,11 @@ const sessionErrorCases = [
   ],
   [SessionErrorCodes.NoWorktree, { sessionId }, "This session does not have a worktree."],
   [SessionErrorCodes.PromptAborted, { sessionId }, "The queued prompt was cancelled."],
+  [
+    SessionErrorCodes.ProfileConfigurationFailed,
+    undefined,
+    "Session profiles could not be saved. Check the configuration and try again.",
+  ],
   [SessionErrorCodes.UnsupportedMessage, { sessionId }, "The session request is not supported."],
 ] as const
 

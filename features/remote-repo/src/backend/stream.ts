@@ -1,31 +1,20 @@
-import type { RepoEvent } from "../schema.ts"
-
-/** Minimal sink contract used by remote-repo server-sent-event fanout. */
-export type RemoteRepoStreamSink = {
-  send: (payload: string) => void
-  close?: () => void
-}
+import type { BackendEventStreamRequest, RepoEvent } from "../schema.ts"
+import type { RemoteRepoBackendEvent } from "./events.ts"
 
 /** Feature-owned service boundary for ephemeral remote repository stream delivery. */
 export type RemoteRepoStreamService = {
-  addStreamSocket(streamKey: string, socket: unknown): void
-  removeStreamSocket(streamKey: string, socket: unknown): void
+  subscribeRemoteRepoEvents(
+    streamKey: string,
+    filter?: BackendEventStreamRequest,
+  ): AsyncIterable<RepoEvent>
   resolveEventOwner(event: RepoEvent): Promise<string | undefined> | string | undefined
 }
 
+export type RemoteRepoStreamEvent = RemoteRepoBackendEvent
+
 /** Optional in-process broadcaster used by local backend servers. */
 export type RemoteRepoEventBroadcaster = {
-  broadcastRemoteRepoEvent(event: RepoEvent): void
-}
-
-/** Returns whether a value supports the minimal send/close contract used by SSE fanout. */
-export function isRemoteRepoStreamSink(value: unknown): value is RemoteRepoStreamSink {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    "send" in value &&
-    typeof (value as RemoteRepoStreamSink).send === "function"
-  )
+  broadcastRemoteRepoEvent(event: RemoteRepoStreamEvent): void
 }
 
 /** Returns whether a value implements remote-repo stream socket registration. */
@@ -33,10 +22,8 @@ export function isRemoteRepoStreamService(value: unknown): value is RemoteRepoSt
   return (
     !!value &&
     typeof value === "object" &&
-    "addStreamSocket" in value &&
-    typeof (value as RemoteRepoStreamService).addStreamSocket === "function" &&
-    "removeStreamSocket" in value &&
-    typeof (value as RemoteRepoStreamService).removeStreamSocket === "function" &&
+    "subscribeRemoteRepoEvents" in value &&
+    typeof (value as RemoteRepoStreamService).subscribeRemoteRepoEvents === "function" &&
     "resolveEventOwner" in value &&
     typeof (value as RemoteRepoStreamService).resolveEventOwner === "function"
   )

@@ -24,6 +24,15 @@ export type EmbeddedRuntimeManifest = {
       goddard: string
       workforce: string
     }
+    sharedBunLauncherPaths?: string[]
+    nativeLibraries?: {
+      libgit2?: {
+        target: string
+        path: string
+        version?: string
+        sha256: string
+      }
+    }
   }
   serviceman: {
     version: string

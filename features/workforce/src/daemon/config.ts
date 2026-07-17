@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
-import { promisify } from "node:util"
 import { resolveDefaultAgent } from "@goddard-ai/config/node"
+import { git } from "@goddard-ai/libgit2"
 import { getErrorMessage, isObject } from "radashi"
 
 import type { WorkforceAgentConfig, WorkforceConfig } from "../schema.ts"
 import { buildWorkforcePaths, normalizeWorkforceRootDir } from "./paths.ts"
-
-const execFileAsync = promisify(execFile)
 
 // Common directory names skipped during workspace package discovery.
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "dist", "node_modules"])
@@ -227,10 +224,8 @@ export async function ensureWorkforceFiles(rootDir: string): Promise<void> {
 /** Resolves the nearest git repository root from one starting directory. */
 export async function resolveRepositoryRoot(startDir: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--show-toplevel"], {
-      cwd: resolve(startDir),
-    })
-    return await normalizeWorkforceRootDir(stdout.trim())
+    const rootDir = await git.repository.resolveRoot(resolve(startDir))
+    return await normalizeWorkforceRootDir(rootDir)
   } catch (error) {
     throw new Error(
       `Unable to resolve the repository root from ${resolve(startDir)}: ${getErrorMessage(error)}`,

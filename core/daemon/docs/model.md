@@ -21,7 +21,7 @@ The daemon is the local process that owns the lifecycle of Goddard automation, i
 ## Daemon server
 
 - Exposes local control and observation to app, SDK, and operational tools.
-- Provides health, session, inbox, pull request, review session, adapter, auth, action, loop, and workforce capabilities in the default product surface.
+- Provides health, session, inbox, pull request, review session, agent, auth, action, loop, and workforce capabilities in the default product surface.
 - Streams live events for surfaces that need to observe changes without owning the runtime.
 
 ## Feature composition
@@ -42,7 +42,7 @@ The daemon is the local process that owns the lifecycle of Goddard automation, i
   - actions
   - loops
   - workforce
-  - adapters
+  - agents
   - auth
 - Feature packages own their product behavior while the daemon keeps shared runtime boundaries coherent.
 

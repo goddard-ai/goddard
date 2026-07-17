@@ -1,6 +1,7 @@
 /** SDK-owned session helpers and wrapper params for daemon-backed sessions. */
 import type { AgentDistribution } from "@goddard-ai/schema/agent-distribution"
 import type {
+  AgentSessionProfiles,
   CreateSessionRequest,
   CreateSessionResponse,
   DaemonSession,
@@ -9,9 +10,13 @@ import type {
   GetSessionChangesResponse,
   GetSessionHistoryRequest,
   GetSessionHistoryResponse,
+  GetSessionWorktreeMergeReadinessResponse,
   InitialSessionConfigOption,
+  ListSessionProfilesRequest,
   ListSessionsRequest,
   ListSessionsResponse,
+  MergeSessionWorktreeRequest,
+  MergeSessionWorktreeResponse,
   PopQueuedSessionPromptResponse,
   PrepareSessionLaunchWorktreeRequest,
   PrepareSessionLaunchWorktreeResponse,
@@ -19,6 +24,7 @@ import type {
   ReleaseSessionLaunchLeaseResponse,
   ReleaseSessionLaunchWorktreeRequest,
   ReleaseSessionLaunchWorktreeResponse,
+  RemoveSessionProfileRequest,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
@@ -31,6 +37,10 @@ import type {
   SessionLifecycleField,
   SessionLocalCheckoutParams,
   SessionMessageEvent,
+  SessionProfile,
+  SessionProfileId,
+  SessionProfilesConfig,
+  SessionProfilesResponse,
   SessionSubpackage,
   SessionSubpackagesRequest,
   SessionSubpackagesResponse,
@@ -39,6 +49,9 @@ import type {
   SessionWorktreeParams,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
+  SetSessionWorktreeMergeTargetBranchResponse,
+  SetSessionProfileRequest,
   ShutdownSessionResponse,
   SteerSessionRequest,
   SteerSessionResponse,
@@ -47,6 +60,7 @@ import type { AcpAdapterId } from "acp-client"
 import * as acp from "acp-client/protocol"
 
 export type {
+  AgentSessionProfiles,
   CreateSessionRequest,
   CreateSessionResponse,
   DaemonSession,
@@ -55,15 +69,26 @@ export type {
   GetSessionHistoryRequest,
   SessionHistoryMessage,
   GetSessionHistoryResponse,
+  GetSessionWorktreeMergeReadinessResponse,
   InitialSessionConfigOption,
+  MergeSessionWorktreeRequest,
+  MergeSessionWorktreeResponse,
+  ListSessionProfilesRequest,
   SessionComposerSuggestionsRequest,
   SessionComposerSuggestionsResponse,
   SessionDraftSuggestionsRequest,
   SessionHistoryTurn,
   SessionLaunchPreviewRequest,
   SessionLaunchPreviewResponse,
+  SessionProfile,
+  SessionProfileId,
+  SessionProfilesConfig,
+  SessionProfilesResponse,
   SetSessionConfigOptionRequest,
   SetSessionModelRequest,
+  SetSessionWorktreeMergeTargetBranchRequest,
+  SetSessionWorktreeMergeTargetBranchResponse,
+  SetSessionProfileRequest,
   SteerSessionRequest,
   SteerSessionResponse,
   SessionId,
@@ -84,13 +109,17 @@ export type {
   ReleaseSessionLaunchLeaseResponse,
   ReleaseSessionLaunchWorktreeRequest,
   ReleaseSessionLaunchWorktreeResponse,
+  RemoveSessionProfileRequest,
   SessionLocalCheckoutParams,
   ShutdownSessionResponse,
 }
 export type { SessionIpcError, SessionWorktreeParams } from "@goddard-ai/session/schema"
 export { SessionErrorCodes, SessionIpcErrors } from "@goddard-ai/session/schema"
 
-export { deriveSessionLaunchModelConfig } from "./session-launch-model-config.ts"
+export {
+  deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
+} from "./session-launch-model-config.ts"
 
 export type SessionPromptRequest = {
   id: SessionId

@@ -14,6 +14,7 @@ import type {
 import { resolveAvailableWorktreeBranchName } from "./worktree-branch.ts"
 import {
   cleanupSessionWorktree,
+  resolveGitHeadRef,
   resolveGitWorktreeSource,
   toPreparedSessionWorktree,
   type PreparedSessionWorktree,
@@ -172,6 +173,7 @@ export function createLaunchWorktreeFeature({
       worktree = await createWorktree({
         cwd: source.path,
         requestedCwd: params.cwd,
+        mergeTargetBranch: await resolveGitHeadRef(source.path).catch(() => null),
         branchName: await resolveAvailableWorktreeBranchName({
           cwd: source.path,
           branchPrefix: config?.worktrees?.branchPrefix,

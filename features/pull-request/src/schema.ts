@@ -48,6 +48,7 @@ export type ManagedPrQuery = z.infer<typeof ManagedPrQuery>
 export const PullRequestRecord = z.object({
   id: z.number(),
   number: z.number(),
+  provider: z.string(),
   owner: z.string(),
   repo: z.string(),
   title: z.string(),
@@ -63,7 +64,7 @@ export type PullRequestRecord = z.infer<typeof PullRequestRecord>
 
 /** Persisted daemon-managed pull request record owned by the pull-request feature. */
 export const DaemonPullRequest = z.strictObject({
-  host: z.enum(["github"]),
+  host: z.string().min(1),
   owner: z.string(),
   repo: z.string(),
   prNumber: z.number().int(),

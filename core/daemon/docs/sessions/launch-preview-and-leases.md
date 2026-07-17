@@ -9,7 +9,7 @@ Launch preview lets a client inspect agent and repository capabilities before cr
 
 ## Launch preview
 
-- Answers which adapter and repository capabilities are available for a proposed launch.
+- Answers which agent and repository capabilities are available for a proposed launch.
 - Supports launch dialogs that need model, config, or repository capability information before session creation.
 - Does not by itself create the final durable daemon session.
 - If preview cannot resolve a required launch choice, the client should present that as a launch problem before session creation.

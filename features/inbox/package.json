@@ -5,14 +5,6 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./app": {
-      "types": {
-        "source": "./src/app.tsx",
-        "default": "./dist/app.d.mts"
-      },
-      "bun": "./src/app.tsx",
-      "import": "./dist/app.mjs"
-    },
     "./daemon": {
       "types": {
         "source": "./src/daemon.ts",
@@ -28,6 +20,14 @@
       },
       "bun": "./src/daemon-ipc.ts",
       "import": "./dist/daemon-ipc.mjs"
+    },
+    "./events": {
+      "types": {
+        "source": "./src/events.ts",
+        "default": "./dist/events.d.mts"
+      },
+      "bun": "./src/events.ts",
+      "import": "./dist/events.mjs"
     },
     "./schema": {
       "types": {

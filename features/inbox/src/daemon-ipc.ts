@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http, ndjson } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   BulkUpdateInboxItemsRequest,
@@ -7,36 +7,46 @@ import {
   UpdateInboxItemRequest,
   type BulkUpdateInboxItemsResponse,
   type CompleteSessionInboxItemResponse,
-  type InboxItem,
   type ListInboxResponse,
   type UpdateInboxItemResponse,
 } from "./schema.ts"
 
 export const inboxIpcRoutes = defineIpcRoutes({
   inbox: http.resource("inbox", {
-    /** Lists daemon-local inbox rows using daemon ordering and filtering. */
+    ...metadata({
+      description: "Inbox row management.",
+    }),
+    /** Lists inbox rows using stable ordering and filtering. */
     list: http.post("list", {
+      ...metadata({
+        description: "Lists inbox rows using stable ordering and filtering.",
+      }),
       body: ListInboxRequest,
       response: $type<ListInboxResponse>(),
     }),
-    /** Updates one daemon-local inbox row by entity id. */
+    /** Updates one inbox row by entity id. */
     update: http.post("update", {
+      ...metadata({
+        description: "Updates one inbox row by entity id.",
+      }),
       body: UpdateInboxItemRequest,
       response: $type<UpdateInboxItemResponse>(),
     }),
-    /** Updates many daemon-local inbox rows with one shared daemon timestamp. */
+    /** Updates many inbox rows with one shared timestamp. */
     bulkUpdate: http.post("bulk-update", {
+      ...metadata({
+        description: "Updates many inbox rows with one shared timestamp.",
+      }),
       body: BulkUpdateInboxItemsRequest,
       response: $type<BulkUpdateInboxItemsResponse>(),
     }),
-    /** Validates and completes the inbox row for one daemon-managed session. */
+    /** Validates and completes the inbox row for one session. */
     completeSession: http.post("complete-session", {
+      ...metadata({
+        description: "Validates and completes the inbox row for one session.",
+      }),
       body: CompleteSessionInboxItemRequest,
       response: $type<CompleteSessionInboxItemResponse>(),
-    }),
-    /** Streams daemon-published inbox item updates. */
-    streamItems: http.get("stream-items", {
-      response: ndjson.$type<InboxItem>(),
     }),
   }),
 })

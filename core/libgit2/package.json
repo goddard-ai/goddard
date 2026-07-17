@@ -1,0 +1,32 @@
+{
+  "name": "@goddard-ai/libgit2",
+  "version": "0.1.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": {
+        "source": "./src/index.ts",
+        "default": "./dist/index.d.mts"
+      },
+      "bun": "./src/index.ts",
+      "import": "./dist/index.mjs"
+    },
+    "./testing": {
+      "types": {
+        "source": "./src/testing.ts",
+        "default": "./dist/testing.d.mts"
+      },
+      "bun": "./src/testing.ts",
+      "import": "./dist/testing.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test --dots --timeout=90000"
+  }
+}

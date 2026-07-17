@@ -1,30 +1,18 @@
+import { startDaemonEventStream } from "~/lib/daemon-event-stream.ts"
 import { goddardSdk } from "~/sdk.ts"
-import { invalidateSessionLifecycleEvent } from "./cache.ts"
+import { invalidateAllSessionViews, invalidateSessionLifecycleEvent } from "./cache.ts"
 
 /** Starts the app-wide daemon session lifecycle subscription for the current webview. */
 export function startSessionLifecycleSubscription() {
-  const controller = new AbortController()
-
-  void (async () => {
-    try {
-      const events = await goddardSdk.session.streamLifecycle(undefined, {
-        signal: controller.signal,
-      })
-      for await (const event of events) {
-        if (controller.signal.aborted) {
-          break
-        }
-
-        invalidateSessionLifecycleEvent(event)
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        console.error("Failed to subscribe to session lifecycle updates.", error)
-      }
-    }
-  })()
-
-  return () => {
-    controller.abort()
-  }
+  return startDaemonEventStream({
+    failureLogMessage: "app.session.lifecycle_subscription_failed",
+    streamName: "session.lifecycle",
+    open: (signal) =>
+      goddardSdk.events.stream(
+        { names: ["session.lifecycle.updated", "session.lifecycle.deleted"] },
+        { signal },
+      ),
+    reconcile: invalidateAllSessionViews,
+    onEvent: (event) => invalidateSessionLifecycleEvent(event.payload),
+  })
 }

@@ -1,0 +1,99 @@
+{
+  "name": "@goddard-ai/agent",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./catalog": {
+      "types": {
+        "source": "./src/catalog.ts",
+        "default": "./dist/catalog.d.mts"
+      },
+      "bun": "./src/catalog.ts",
+      "import": "./dist/catalog.mjs"
+    },
+    "./daemon": {
+      "types": {
+        "source": "./src/daemon.ts",
+        "default": "./dist/daemon.d.mts"
+      },
+      "bun": "./src/daemon.ts",
+      "import": "./dist/daemon.mjs"
+    },
+    "./daemon-ipc": {
+      "types": {
+        "source": "./src/daemon-ipc.ts",
+        "default": "./dist/daemon-ipc.d.mts"
+      },
+      "bun": "./src/daemon-ipc.ts",
+      "import": "./dist/daemon-ipc.mjs"
+    },
+    "./daemon/install-service": {
+      "types": {
+        "source": "./src/daemon/install-service.ts",
+        "default": "./dist/daemon/install-service.d.mts"
+      },
+      "bun": "./src/daemon/install-service.ts",
+      "import": "./dist/daemon/install-service.mjs"
+    },
+    "./daemon/launch-process": {
+      "types": {
+        "source": "./src/daemon/launch-process.ts",
+        "default": "./dist/daemon/launch-process.d.mts"
+      },
+      "bun": "./src/daemon/launch-process.ts",
+      "import": "./dist/daemon/launch-process.mjs"
+    },
+    "./schema": {
+      "types": {
+        "source": "./src/schema.ts",
+        "default": "./dist/schema.d.mts"
+      },
+      "bun": "./src/schema.ts",
+      "import": "./dist/schema.mjs"
+    },
+    "./installations": {
+      "types": {
+        "source": "./src/installations.ts",
+        "default": "./dist/installations.d.mts"
+      },
+      "bun": "./src/installations.ts",
+      "import": "./dist/installations.mjs"
+    },
+    "./list-agents": {
+      "types": {
+        "source": "./src/list-agents.ts",
+        "default": "./dist/list-agents.d.mts"
+      },
+      "bun": "./src/list-agents.ts",
+      "import": "./dist/list-agents.mjs"
+    },
+    "./sdk": {
+      "types": {
+        "source": "./src/sdk.ts",
+        "default": "./dist/sdk.d.mts"
+      },
+      "bun": "./src/sdk.ts",
+      "import": "./dist/sdk.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --unused",
+    "lint": "oxlint",
+    "fmt": "prettier -w .",
+    "typecheck": "tsgo --noEmit && tsgo -p test --noEmit",
+    "test": "bun test --dots"
+  },
+  "dependencies": {
+    "@goddard-ai/config": "workspace:*",
+    "@goddard-ai/daemon-plugin": "workspace:*",
+    "@goddard-ai/ipc": "workspace:*",
+    "@goddard-ai/paths": "workspace:*",
+    "@goddard-ai/schema": "workspace:*",
+    "@goddard-ai/sdk-plugin": "workspace:*",
+    "acp-client": "catalog:",
+    "radashi": "catalog:",
+    "zod": "catalog:"
+  }
+}

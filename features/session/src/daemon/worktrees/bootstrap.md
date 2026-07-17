@@ -249,7 +249,7 @@ The daemon adds an internal preparation module, for example `core/daemon/src/wor
 - evaluate the same-`HEAD` seeding gate
 - resolve and copy seed candidates
 - run the bootstrap install command
-- emit diagnostics and structured logs
+- emit session diagnostics
 
 The `@goddard-ai/worktree-plugin` contract does not change in v1.
 
@@ -392,7 +392,7 @@ The implementation should add tests for:
 
 ### Observability
 
-The daemon should emit structured logs and session diagnostics for:
+The daemon should emit session diagnostics for:
 
 - preparation started
 - preparation skipped, including the skip reason
@@ -401,7 +401,7 @@ The daemon should emit structured logs and session diagnostics for:
 - bootstrap command success
 - bootstrap command failure
 
-Diagnostics should include `repoRoot`, `worktreeDir`, `poweredBy`, and the selected package manager when one exists.
+Diagnostics should include `repoRoot`, `worktreeDir`, `poweredBy`, and the selected package manager when one exists. Use focused debug logs for internal bootstrap troubleshooting that does not need to appear in the persisted session timeline.
 
 ## Rollout and Migration
 
@@ -421,7 +421,7 @@ Because the feature is pre-alpha and config-driven, rollback is straightforward:
 
 ## Open Questions
 
-- Should the desktop app eventually surface explicit worktree preparation status in session UI, or are diagnostics and logs sufficient for v1?
+- Should the desktop app eventually surface explicit worktree preparation status in session UI, or are diagnostics sufficient for v1?
 
 ## Ambiguities and Blockers
 

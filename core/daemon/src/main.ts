@@ -65,6 +65,15 @@ function applyDataProfile(value?: (typeof daemonDataProfiles)[number]) {
   process.env.GODDARD_DATA_PROFILE = value
 }
 
+/** Persists packaged Git native library location before runtime modules initialize. */
+function applyGitLibgit2Path(value?: string) {
+  if (!value) {
+    return
+  }
+
+  process.env.GODDARD_GIT_LIBGIT2_PATH = value
+}
+
 function resolveCliPort(value?: string) {
   if (!value) {
     return undefined
@@ -90,9 +99,8 @@ export async function main(argv = process.argv.slice(2)) {
         description: "Start the daemon runtime and background services",
         args: {
           baseUrl: option({
-            type: string,
+            type: optional(string),
             long: "base-url",
-            defaultValue: () => "https://goddardai.org/api",
             description: "Base URL for the Goddard API",
           }),
           port: option({
@@ -104,6 +112,11 @@ export async function main(argv = process.argv.slice(2)) {
             type: optional(string),
             long: "agent-bin-dir",
             description: "Directory containing agent executables used by daemon-managed sessions",
+          }),
+          gitLibgit2Path: option({
+            type: optional(string),
+            long: "git-libgit2-path",
+            description: "Private packaged libgit2 path used by daemon Git hosts",
           }),
           dataProfile: option({
             type: optional(oneOf(daemonDataProfiles)),
@@ -128,6 +141,8 @@ export async function main(argv = process.argv.slice(2)) {
         },
         handler: async (args) => {
           applyDataProfile(args.dataProfile)
+          const gitLibgit2Path = args.gitLibgit2Path
+          applyGitLibgit2Path(gitLibgit2Path)
 
           // Load the runtime only when executing `run` so `--help` stays side-effect free.
           const { runDaemon } = await import("./daemon.ts")
@@ -136,6 +151,7 @@ export async function main(argv = process.argv.slice(2)) {
             baseUrl: args.baseUrl,
             port: resolveCliPort(args.port),
             agentBinDir: args.agentBinDir,
+            gitLibgit2Path,
             enableIpc: featureFlags.enableIpc,
             enableStream: featureFlags.enableStream,
             logMode: resolveLogMode(args),
@@ -163,6 +179,26 @@ export async function main(argv = process.argv.slice(2)) {
             const result = await seedMockData({ reset })
             console.log(`Seeded mock daemon data at ${result.databasePath}`)
           }
+        },
+      }),
+      "terminal-check": command({
+        name: "terminal-check",
+        description: "Validate daemon PTY spawn, write, resize, and close behavior",
+        args: {
+          json: flag({
+            long: "json",
+            description: "Render the terminal runtime check result as JSON",
+          }),
+        },
+        handler: async (args) => {
+          const { runTerminalRuntimeCheck } = await import("@goddard-ai/terminal/daemon")
+          const result = await runTerminalRuntimeCheck()
+          if (args.json) {
+            console.log(JSON.stringify(result))
+          } else {
+            console.log(result.ok ? "daemon terminal runtime ok" : "daemon terminal runtime failed")
+          }
+          process.exit(result.ok ? 0 : 1)
         },
       }),
     },

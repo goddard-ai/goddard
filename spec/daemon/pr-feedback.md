@@ -13,19 +13,20 @@ Real-time feedback can trigger focused local handling without requiring a human 
 `Idle -> Connected -> EventReceived -> EligibilityChecked -> FeedbackQueued -> FeedbackHandling -> FeedbackHandled -> Connected`
 
 ## Capabilities
-- Each daemon process maintains one authenticated event stream for the current user.
+- The local host uses one authenticated event stream for the current user when PR feedback handling is enabled.
 - That stream may carry feedback from multiple repositories when those pull requests are owned by the current user.
-- The runtime evaluates incoming events for PR feedback eligibility and queues work by pull request, never by repository subscription boundaries.
+- PR feedback handling owns the feedback-specific evaluation of incoming events and queues work by pull request, never by repository subscription boundaries.
 - Each PR feedback session always uses the repository and pull request context carried by the event.
 - After each PR feedback session completes, the runtime returns to connected listening mode.
 
 ## Boundaries
 - Trigger only on pull request comment and review feedback events.
-- Consume a single authenticated stream per daemon process.
+- Use the host's single authenticated backend event stream rather than a separate PR-specific connection.
 - React only to pull requests owned by the authenticated user.
 - Avoid overlapping PR feedback handling for the same pull request.
 - Continue running until interrupted by host supervisor.
 - Stream disconnects should trigger reconnect attempts with bounded backoff.
+- Stream health and authentication degradation are host-level runtime outcomes, not PR feedback outcomes.
 - PR feedback launch failures must be logged with pull request context and must not crash the runtime.
 - If multiple events arrive while a pull request task is active, the runtime should coalesce or queue by pull request and never run concurrently for the same pull request.
 - This runtime does not implement long-running autonomous planning.

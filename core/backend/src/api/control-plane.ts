@@ -4,34 +4,38 @@ import type {
   DeviceFlowSession,
   DeviceFlowStart,
 } from "@goddard-ai/auth/schema"
-import type { CreatePrInput, PullRequestRecord } from "@goddard-ai/pull-request/schema"
-import type { GitHubWebhookInput, RepoEvent } from "@goddard-ai/remote-repo/schema"
-import { getErrorMessage } from "radashi"
+import {
+  getBackendProviderCapability,
+  type BackendProviderCapabilityDefinitions,
+} from "@goddard-ai/backend-plugin"
+import type {
+  CreatePrInput,
+  PullRequestRecord,
+  ReplyPrInput,
+} from "@goddard-ai/pull-request/schema"
 
 import type { Env } from "../env.ts"
+import type { BackendPrincipal } from "./events.ts"
 
 /** Backend operations that the HTTP router can delegate to a storage implementation. */
 export interface BackendControlPlane {
   startDeviceFlow(input?: DeviceFlowStart): Promise<DeviceFlowSession> | DeviceFlowSession
   completeDeviceFlow(input: DeviceFlowComplete): Promise<AuthSession> | AuthSession
   getSession(token: string): Promise<AuthSession> | AuthSession
+  getPrincipal(token: string): Promise<BackendPrincipal> | BackendPrincipal
   createPr(
     token: string,
     input: CreatePrInput,
     env?: Env,
   ): Promise<PullRequestRecord> | PullRequestRecord
   isManagedPr(
+    provider: string,
     owner: string,
     repo: string,
     prNumber: number,
-    githubUsername: string,
+    principalId: string,
   ): Promise<boolean> | boolean
-  replyToPr(
-    token: string,
-    input: { owner: string; repo: string; prNumber: number; body: string },
-    env?: Env,
-  ): Promise<void> | void
-  handleGitHubWebhook(event: GitHubWebhookInput): Promise<RepoEvent> | RepoEvent
+  replyToPr(token: string, input: ReplyPrInput, env?: Env): Promise<void> | void
 }
 
 /** HTTP-friendly error type that preserves the intended response status code. */
@@ -44,82 +48,74 @@ export class HttpError extends Error {
   }
 }
 
-/** Validates that a GitHub repository reference contains both owner and repo names. */
+/** Validates that a repository reference contains both owner and repo names. */
 export function assertRepo(owner: string, repo: string): void {
   if (!owner?.trim() || !repo?.trim()) {
     throw new HttpError(400, "owner and repo are required")
   }
 }
 
-/** Posts a managed PR reply through the configured GitHub App installation. */
-export async function postPrCommentViaApp(
+/** Posts a managed PR reply through the composed provider capability. */
+export async function postPrCommentViaProvider(
   env: Env | undefined,
-  owner: string,
-  repo: string,
-  prNumber: number,
-  body: string,
+  providers: BackendProviderCapabilityDefinitions,
+  input: ReplyPrInput,
 ): Promise<void> {
-  const octokit = await createInstallationOctokit(env, owner, repo)
-
   try {
-    await octokit.rest.issues.createComment({
-      owner,
-      repo,
-      issue_number: prNumber,
-      body,
+    const provider = getBackendProviderCapability(providers, input.provider)
+    if (!provider.createPullRequestComment) {
+      throw new HttpError(
+        500,
+        `Backend provider cannot comment on pull requests: ${input.provider}`,
+      )
+    }
+
+    await provider.createPullRequestComment({
+      env,
+      ...input,
     })
   } catch (error) {
-    throw new HttpError(500, `Failed to post comment to GitHub: ${getErrorMessage(error)}`)
+    throw toHttpError(error)
   }
 }
 
-/** Creates a pull request through the configured GitHub App and returns its durable identity. */
-export async function createPrViaApp(
+/** Creates a pull request through the composed provider capability. */
+export async function createPrViaProvider(
   env: Env | undefined,
+  providers: BackendProviderCapabilityDefinitions,
   input: CreatePrInput,
   body: string,
 ): Promise<{ number: number; url: string; createdAt: string }> {
-  const octokit = await createInstallationOctokit(env, input.owner, input.repo)
-
   try {
-    const { data } = await octokit.rest.pulls.create({
-      owner: input.owner,
-      repo: input.repo,
-      title: input.title,
+    const provider = getBackendProviderCapability(providers, input.provider)
+    if (!provider.createPullRequest) {
+      throw new HttpError(500, `Backend provider cannot create pull requests: ${input.provider}`)
+    }
+
+    const result = await provider.createPullRequest({
+      env,
+      ...input,
       body,
-      head: input.head,
-      base: input.base,
     })
 
     return {
-      number: data.number,
-      url: data.html_url,
-      createdAt: data.created_at,
+      number: result.number,
+      url: result.url,
+      createdAt: result.createdAt ?? new Date().toISOString(),
     }
   } catch (error) {
-    throw new HttpError(500, `Failed to create pull request on GitHub: ${getErrorMessage(error)}`)
+    throw toHttpError(error)
   }
 }
 
-/** Resolves the GitHub App installation that grants backend authority for one repository. */
-async function createInstallationOctokit(env: Env | undefined, owner: string, repo: string) {
-  if (!env?.GITHUB_APP_ID || !env?.GITHUB_APP_PRIVATE_KEY) {
-    throw new HttpError(500, "GitHub App credentials are not configured on the backend")
+function toHttpError(error: unknown): HttpError {
+  if (error instanceof HttpError) {
+    return error
   }
-
-  const { App } = await import("octokit")
-  const app = new App({
-    appId: env.GITHUB_APP_ID,
-    privateKey: env.GITHUB_APP_PRIVATE_KEY,
-  })
-
-  try {
-    const { data } = await app.octokit.request("GET /repos/{owner}/{repo}/installation", {
-      owner,
-      repo,
-    })
-    return app.getInstallationOctokit(data.id)
-  } catch {
-    throw new HttpError(500, `Failed to get GitHub App installation for ${owner}/${repo}`)
+  if (error && typeof error === "object" && "statusCode" in error && "message" in error) {
+    const statusCode = Number((error as { statusCode: unknown }).statusCode)
+    const message = String((error as { message: unknown }).message)
+    return new HttpError(Number.isFinite(statusCode) ? statusCode : 500, message)
   }
+  return new HttpError(500, error instanceof Error ? error.message : String(error))
 }

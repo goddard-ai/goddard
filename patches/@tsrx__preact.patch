@@ -1,0 +1,27 @@
+diff --git a/src/index.js b/src/index.js
+index 29f735d873fe0076766391e08d0c01c9c61521ca..fd90cb4b9afe69c59da728946728cb7be264a94a 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -74,6 +74,7 @@ export function compile_to_volar_mappings(source, filename, options) {
+ 		...options,
+ 		collect: true,
+ 		loose: !!options?.loose,
++		moduleScopedHookComponents: false,
+ 		typeOnly: true,
+ 		errors,
+ 		comments,
+diff --git a/src/transform.js b/src/transform.js
+index af0ca78adf4744ba0105009742a8401638eaba65..01fd9e20235d3da197229f0459fd279cb2a872aa 100644
+--- a/src/transform.js
++++ b/src/transform.js
+@@ -49,6 +49,10 @@ const preact_platform = {
+ 	validation: {
+ 		requireUseServerForAwait: false,
+ 	},
++	hooks: {
++		moduleScopedHookComponents: true,
++		componentBodyHookHelpers: true,
++	},
+ };
+ 
+ export const transform = createJsxTransform(preact_platform);

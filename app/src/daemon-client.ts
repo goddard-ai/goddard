@@ -1,76 +1,53 @@
+import {
+  BrowserDaemonAuthorizationError,
+  createBrowserDaemonIpcClient,
+} from "@goddard-ai/daemon-client/browser"
 import type { GoddardClient } from "@goddard-ai/sdk"
 
-import type { DaemonRequestName, DaemonRequestPayload } from "~/shared/desktop-rpc.ts"
-import { daemonSend, daemonSubscribe } from "./desktop-host.ts"
+import { formatClientIpcLogEvent } from "./lib/ipc-log-event.ts"
+import { writeRendererDebug } from "./lib/renderer-log-capture.ts"
 
-/** Browser-safe daemon client adapter backed by the Electrobun Bun host bridge. */
-export const desktopDaemonClient = createDesktopDaemonClient() as GoddardClient
+const browserDaemonUrlKey = "goddard.daemonUrl"
+const browserDaemonTokenKey = "goddard.daemonBrowserToken"
 
-function createDesktopDaemonClient() {
-  return new Proxy(
-    {},
-    {
-      get(_target, property) {
-        return createDesktopRouteNode([String(property)])
-      },
-    },
-  )
+type DaemonAccess = {
+  daemonUrl: string
+  token: string
 }
 
-function createDesktopRouteNode(path: readonly string[]): unknown {
-  const route = async (
-    payload: DaemonRequestPayload<DaemonRequestName> = undefined,
-    options?: { signal?: AbortSignal },
-  ) => {
-    const name = path.join(".") as DaemonRequestName
-    if (!options?.signal) {
-      return await daemonSend(name, payload)
-    }
+/** Browser-safe daemon client that uses direct loopback IPC instead of Bun request proxying. */
+export const browserDaemonClient = createBrowserDaemonClient() as GoddardClient
 
-    return createDesktopStream(name, payload, options.signal)
-  }
-
-  return new Proxy(route, {
-    get(_target, property) {
-      if (property === "then") {
-        return undefined
-      }
-
-      return createDesktopRouteNode([...path, String(property)])
+/** Creates an isolated direct daemon client proxy for browser or desktop webview runtimes. */
+export function createBrowserDaemonClient(): GoddardClient {
+  return createBrowserDaemonIpcClient({
+    access: resolveDaemonAccess,
+    ipcHook(event) {
+      const { message, properties } = formatClientIpcLogEvent(event)
+      writeRendererDebug("ipc.client", message, properties)
     },
   })
 }
 
-async function* createDesktopStream(
-  name: DaemonRequestName,
-  filter: DaemonRequestPayload<DaemonRequestName>,
-  signal: AbortSignal,
-) {
-  const queue: unknown[] = []
-  let wake: (() => void) | undefined
-  const unsubscribe = await daemonSubscribe({ name, filter }, (payload) => {
-    queue.push(payload)
-    wake?.()
-  })
-  const abort = () => {
-    wake?.()
+async function resolveDaemonAccess(): Promise<DaemonAccess> {
+  // Do not import from ~/desktop-host.ts here; the app may be running in an actual browser.
+  const desktopBridge = globalThis.window?.__goddardDesktop
+  if (desktopBridge) {
+    const access = await desktopBridge.createDaemonWebviewAccessToken(window.location.origin)
+    return {
+      daemonUrl: access.daemonUrl,
+      token: access.token,
+    }
   }
 
-  signal.addEventListener("abort", abort)
-  try {
-    while (!signal.aborted) {
-      const payload = queue.shift()
-      if (payload !== undefined) {
-        yield payload
-        continue
-      }
-      await new Promise<void>((resolve) => {
-        wake = resolve
-      })
-      wake = undefined
-    }
-  } finally {
-    signal.removeEventListener("abort", abort)
-    await Promise.resolve(unsubscribe()).catch(() => {})
+  const daemonUrl = window.localStorage.getItem(browserDaemonUrlKey)
+  const token = window.localStorage.getItem(browserDaemonTokenKey)
+  if (!daemonUrl || !token) {
+    throw new BrowserDaemonAuthorizationError("Browser daemon access is not paired.", 403)
+  }
+
+  return {
+    daemonUrl,
+    token,
   }
 }

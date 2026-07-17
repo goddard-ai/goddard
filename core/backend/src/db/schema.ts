@@ -1,17 +1,29 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const users = sqliteTable("users", {
-  githubUserId: integer("github_user_id").primaryKey(),
-  githubUsername: text("github_username").notNull(),
+  id: text("id").primaryKey(),
   createdAt: text("created_at").notNull(),
 })
 
+export const providerIdentities = sqliteTable(
+  "provider_identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    principalId: text("principal_id")
+      .notNull()
+      .references(() => users.id),
+    displayName: text("display_name"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.provider, table.subject] })],
+)
+
 export const authSessions = sqliteTable("auth_sessions", {
   token: text("token").primaryKey(),
-  githubUserId: integer("github_user_id")
+  principalId: text("principal_id")
     .notNull()
-    .references(() => users.githubUserId),
-  githubUsername: text("github_username").notNull(),
+    .references(() => users.id),
   expiresAt: integer("expires_at").notNull(),
   createdAt: text("created_at").notNull(),
 })
@@ -19,6 +31,7 @@ export const authSessions = sqliteTable("auth_sessions", {
 export const pullRequests = sqliteTable("pull_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   number: integer("number").notNull(),
+  provider: text("provider").notNull(),
   owner: text("owner").notNull(),
   repo: text("repo").notNull(),
   title: text("title").notNull(),

@@ -11,8 +11,8 @@ import { cancel, confirm, intro, isCancel, log, multiselect, outro, text } from 
 import { command, flag, option, optional, run, string } from "cmd-ts"
 import { dedent, getErrorMessage } from "radashi"
 
-const FEATURE_LAYERS = ["daemon", "sdk", "app", "backend"] as const
-const DEFAULT_LAYERS = ["daemon", "sdk", "app"] as const
+const FEATURE_LAYERS = ["daemon", "sdk", "backend"] as const
+const DEFAULT_LAYERS = ["daemon", "sdk"] as const
 const FEATURE_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 const RESERVED_IDENTIFIERS = new Set([
   "class",
@@ -54,7 +54,6 @@ export type FeatureScaffoldOptions = {
   layers: readonly FeatureLayer[]
   includeSchema?: boolean
   includeDaemonIpc?: boolean
-  includeStyledSystem?: boolean
 }
 
 type ParsedScaffoldArgs = {
@@ -62,7 +61,6 @@ type ParsedScaffoldArgs = {
   layers?: FeatureLayer[]
   includeSchema?: boolean
   includeDaemonIpc?: boolean
-  includeStyledSystem?: boolean
   dryRun?: boolean
   rootDir?: string
   skipInstall?: boolean
@@ -74,7 +72,6 @@ type RawScaffoldArgs = {
   includeSchema: boolean
   includeDaemonIpc: boolean
   skipDaemonIpc: boolean
-  includeStyledSystem: boolean
   dryRun: boolean
   rootDir?: string
   skipInstall: boolean
@@ -140,10 +137,6 @@ function isDaemonIpcNeeded(options: FeatureScaffoldOptions) {
   )
 }
 
-function isStyledSystemNeeded(options: FeatureScaffoldOptions) {
-  return options.includeStyledSystem === true && hasLayer(options.layers, "app")
-}
-
 function formatJson(value: unknown) {
   return `${JSON.stringify(value, null, 2)}\n`
 }
@@ -175,10 +168,6 @@ function createPackageJson(options: FeatureScaffoldOptions, packageName: string)
   const dependencies: Record<string, string> = {}
   const exports: Record<string, ReturnType<typeof createExportTarget>> = {}
 
-  if (hasLayer(options.layers, "app")) {
-    exports["./app"] = createExportTarget("app.tsx")
-  }
-
   if (hasLayer(options.layers, "backend")) {
     dependencies["@goddard-ai/backend-plugin"] = "workspace:*"
     exports["./backend"] = createExportTarget("backend.ts")
@@ -204,10 +193,6 @@ function createPackageJson(options: FeatureScaffoldOptions, packageName: string)
     exports["./schema"] = createExportTarget("schema.ts")
   }
 
-  if (isStyledSystemNeeded(options)) {
-    dependencies["@goddard-ai/styled-system"] = "workspace:*"
-  }
-
   return {
     name: packageName,
     version: "0.1.0",
@@ -226,25 +211,19 @@ function createPackageJson(options: FeatureScaffoldOptions, packageName: string)
   }
 }
 
-function createTsconfig(options: FeatureScaffoldOptions) {
+function createTsconfig() {
   return {
     extends: "../../tsconfig.base.json",
-    compilerOptions: hasLayer(options.layers, "app")
-      ? {
-          jsx: "react-jsx",
-        }
-      : undefined,
-    include: hasLayer(options.layers, "app") ? ["src/**/*.ts", "src/**/*.tsx"] : ["src/**/*.ts"],
+    include: ["src/**/*.ts"],
   }
 }
 
-function createTestTsconfig(options: FeatureScaffoldOptions) {
+function createTestTsconfig() {
   return {
     extends: "../tsconfig.json",
     compilerOptions: {
       types: ["bun"],
       rootDir: "..",
-      ...(hasLayer(options.layers, "app") ? { jsx: "react-jsx" } : {}),
     },
     include: ["."],
   }
@@ -252,7 +231,6 @@ function createTestTsconfig(options: FeatureScaffoldOptions) {
 
 function createTsdownConfig(options: FeatureScaffoldOptions) {
   const entries = [
-    hasLayer(options.layers, "app") ? "./src/app.tsx" : undefined,
     hasLayer(options.layers, "backend") ? "./src/backend.ts" : undefined,
     hasLayer(options.layers, "daemon") ? "./src/daemon.ts" : undefined,
     isDaemonIpcNeeded(options) ? "./src/daemon-ipc.ts" : undefined,
@@ -321,39 +299,6 @@ function createDaemonEntrypoint(options: FeatureScaffoldOptions, name: string) {
   `}\n`
 }
 
-function createAppEntrypoint(options: FeatureScaffoldOptions, name: string) {
-  const identifier = toIdentifier(name)
-  const imports = isStyledSystemNeeded(options)
-    ? `import { ${identifier}RootClass } from "./app.style.ts"\n`
-    : ""
-  const sdkRequirement = hasLayer(options.layers, "sdk")
-    ? `,\n  sdk: {\n    namespaces: ["${identifier}"],\n  }`
-    : ""
-  const styles = isStyledSystemNeeded(options)
-    ? `,\n  styles: {\n    rootClass: ${identifier}RootClass,\n  }`
-    : ""
-
-  return `${imports}${imports ? "\n" : ""}${dedent`
-    export const ${identifier}AppPlugin = {
-      name: "${name}",
-      routes: [],
-      commands: []${sdkRequirement}${styles},
-    } as const
-  `}\n`
-}
-
-function createAppStyle(name: string) {
-  const identifier = toIdentifier(name)
-
-  return `${dedent`
-    import { css } from "@goddard-ai/styled-system/css"
-
-    export const ${identifier}RootClass = css({
-      display: "contents",
-    })
-  `}\n`
-}
-
 function createBackendEntrypoint() {
   return `export * from "./backend/routes.ts"\n`
 }
@@ -384,9 +329,6 @@ function createSchemaEntrypoint(name: string) {
 function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
   const identifier = toIdentifier(name)
   const imports = [
-    hasLayer(options.layers, "app")
-      ? `import { ${identifier}AppPlugin } from "../src/app.tsx"`
-      : undefined,
     hasLayer(options.layers, "backend")
       ? `import { ${identifier}BackendRoutes } from "../src/backend.ts"`
       : undefined,
@@ -405,9 +347,6 @@ function createEntrypointTest(options: FeatureScaffoldOptions, name: string) {
   ].filter((entry): entry is string => Boolean(entry))
 
   const assertions = [
-    hasLayer(options.layers, "app")
-      ? `    expect(${identifier}AppPlugin.name).toBe("${name}")`
-      : undefined,
     hasLayer(options.layers, "backend")
       ? `    expect(${identifier}BackendRoutes).toEqual({})`
       : undefined,
@@ -461,18 +400,10 @@ export function createFeatureScaffoldPlan(options: FeatureScaffoldOptions) {
   const files: ScaffoldFile[] = []
 
   addFile(files, featureDir, "package.json", formatJson(createPackageJson(options, packageName)))
-  addFile(files, featureDir, "tsconfig.json", formatJson(createTsconfig(options)))
-  addFile(files, featureDir, "test/tsconfig.json", formatJson(createTestTsconfig(options)))
+  addFile(files, featureDir, "tsconfig.json", formatJson(createTsconfig()))
+  addFile(files, featureDir, "test/tsconfig.json", formatJson(createTestTsconfig()))
   addFile(files, featureDir, "tsdown.config.ts", createTsdownConfig(options))
   addFile(files, featureDir, "test/feature.test.ts", createEntrypointTest(options, name))
-
-  if (hasLayer(options.layers, "app")) {
-    addFile(files, featureDir, "src/app.tsx", createAppEntrypoint(options, name))
-  }
-
-  if (isStyledSystemNeeded(options)) {
-    addFile(files, featureDir, "src/app.style.ts", createAppStyle(name))
-  }
 
   if (hasLayer(options.layers, "backend")) {
     addFile(files, featureDir, "src/backend.ts", createBackendEntrypoint())
@@ -566,10 +497,6 @@ function resolveRawScaffoldArgs(raw: RawScaffoldArgs) {
     parsed.includeSchema = true
   }
 
-  if (raw.includeStyledSystem) {
-    parsed.includeStyledSystem = true
-  }
-
   if (raw.skipDaemonIpc) {
     parsed.includeDaemonIpc = false
   } else if (raw.includeDaemonIpc) {
@@ -596,7 +523,7 @@ const scaffoldCommandArgs = {
   layers: option({
     type: optional(string),
     long: "layers",
-    description: "Comma-separated layers: daemon,sdk,app,backend",
+    description: "Comma-separated layers: daemon,sdk,backend",
   }),
   includeSchema: flag({
     long: "schema",
@@ -611,11 +538,6 @@ const scaffoldCommandArgs = {
   skipDaemonIpc: flag({
     long: "no-daemon-ipc",
     description: "Skip src/daemon-ipc.ts",
-    defaultValue: () => false,
-  }),
-  includeStyledSystem: flag({
-    long: "styled-system",
-    description: "Generate app.style.ts and depend on @goddard-ai/styled-system",
     defaultValue: () => false,
   }),
   dryRun: flag({
@@ -683,7 +605,6 @@ async function promptForOptions(parsed: ParsedScaffoldArgs) {
       options: [
         { value: "daemon", label: "daemon", hint: "local runtime, IPC handlers, background work" },
         { value: "sdk", label: "sdk", hint: "public SDK namespace bundled by core/sdk" },
-        { value: "app", label: "app", hint: "UI, commands, navigation metadata" },
         { value: "backend", label: "backend", hint: "worker-hosted authority or persistence" },
       ],
     }))
@@ -701,22 +622,6 @@ async function promptForOptions(parsed: ParsedScaffoldArgs) {
 
   const resolvedIncludeSchema = getPromptValue<boolean>(
     includeSchema,
-    "Feature scaffold cancelled.",
-  )
-
-  const includeStyledSystem =
-    parsed.includeStyledSystem ??
-    (usePromptDefaults
-      ? false
-      : hasLayer(resolvedLayers, "app")
-        ? await confirm({
-            message: "Generate app style entrypoint with @goddard-ai/styled-system?",
-            initialValue: false,
-          })
-        : false)
-
-  const resolvedIncludeStyledSystem = getPromptValue<boolean>(
-    includeStyledSystem,
     "Feature scaffold cancelled.",
   )
 
@@ -741,7 +646,6 @@ async function promptForOptions(parsed: ParsedScaffoldArgs) {
     rootDir: parsed.rootDir,
     layers: resolvedLayers,
     includeSchema: resolvedIncludeSchema,
-    includeStyledSystem: resolvedIncludeStyledSystem,
     includeDaemonIpc: resolvedIncludeDaemonIpc,
   } satisfies FeatureScaffoldOptions
 }

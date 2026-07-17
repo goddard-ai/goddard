@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -8,7 +8,7 @@ import { readDaemonTcpAddressFromDaemonUrl } from "@goddard-ai/schema/daemon-url
 import { afterEach, expect, test } from "bun:test"
 
 import type { BackendClient } from "../src/backend.ts"
-import { startDaemonServer } from "../src/ipc.ts"
+import { createDaemonRuntime, startDaemonServer } from "../src/ipc.ts"
 import { resetComposedDaemonStore, type ComposedDaemonStore } from "./support/store.ts"
 import { removeTemporaryPath } from "./support/temp.ts"
 
@@ -17,6 +17,22 @@ const originalHome = process.env.HOME
 const rootConfigSchemaUrl =
   "https://raw.githubusercontent.com/goddard-ai/core/refs/heads/main/schema/json/goddard.json"
 let db: ComposedDaemonStore = resetComposedDaemonStore({ filename: ":memory:" })
+
+async function runGit(cwd: string, args: string[]) {
+  const child = spawn("git", args, {
+    cwd,
+    stdio: "ignore",
+  })
+
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    child.on("error", reject)
+    child.on("exit", resolve)
+  })
+
+  if (exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed with exit code ${exitCode}`)
+  }
+}
 
 afterEach(async () => {
   while (cleanup.length > 0) {
@@ -54,14 +70,17 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
     JSON.stringify({ name: "@repo/ui", private: true }, null, 2),
     "utf-8",
   )
-  expect(spawnSync("git", ["init"], { cwd: repoDir }).status).toBe(0)
+  await runGit(repoDir, ["init"])
 
-  const daemon = await startDaemonServer(createTestBackendClient(), {
+  const runtime = await createDaemonRuntime({
+    backendClient: createTestBackendClient(),
     port: 0,
     store: db,
   })
+  const daemon = await startDaemonServer(runtime)
   cleanup.push(async () => {
     await daemon.close()
+    await runtime.close()
   })
 
   const client = createDaemonClient(daemon.daemonUrl)
@@ -92,26 +111,6 @@ test("daemon IPC discovers and initializes workforce config through daemon-owned
   expect(config.rootAgentId).toBe("root")
   expect(config.agents.map((agent) => agent.cwd)).toEqual([".", "packages/ui"])
   await expect(readFile(initialized.initialized.ledgerPath, "utf-8")).resolves.toBe("")
-})
-
-test("daemon workforce event stream rejects inactive repositories", async () => {
-  const rootDir = await mkdtemp(join(tmpdir(), "goddard-workforce-stream-"))
-  cleanup.push(() => removeTemporaryPath(rootDir))
-
-  const daemon = await startDaemonServer(createTestBackendClient(), {
-    port: 0,
-    store: db,
-  })
-  cleanup.push(async () => {
-    await daemon.close()
-  })
-
-  const client = createDaemonClient(daemon.daemonUrl)
-  const normalizedRootDir = await realpath(rootDir)
-
-  await expect(client.workforce.streamEvents({ rootDir })).rejects.toThrow(
-    `No workforce is running for ${normalizedRootDir}`,
-  )
 })
 
 function createDaemonClient(daemonUrl: string) {
@@ -172,13 +171,10 @@ function createTestBackendClient(): BackendClient {
     webhooks: {
       github: async () => ({ type: "noop" }),
     },
-    remoteRepo: {
-      stream: async () => new Response(),
-    },
-    stream: {
-      subscribe: async () => {
-        throw new Error("not used")
-      },
+    events: {
+      stream: async () => emptyBackendEvents(),
     },
   } as unknown as BackendClient
 }
+
+async function* emptyBackendEvents(): AsyncIterable<never> {}

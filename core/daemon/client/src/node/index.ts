@@ -1,6 +1,6 @@
 /** Node-specific daemon IPC client helpers built on the shared daemon client types. */
 import { readFileSync } from "node:fs"
-import { createRouteClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
+import { createClient, IpcClientError, ndjson, type IpcClientHook } from "@goddard-ai/ipc"
 import { getGlobalConfigPath } from "@goddard-ai/paths/node"
 import { readDaemonConfigFromRootConfig } from "@goddard-ai/schema/config"
 import { createDaemonUrl, DEFAULT_DAEMON_PORT } from "@goddard-ai/schema/daemon-url"
@@ -20,6 +20,8 @@ export type {
   DaemonIpcClientFactory,
   DaemonIpcClientFactoryInput,
 } from "../index.ts"
+export { createDaemonIpcCommand } from "./ipc-command.ts"
+export type { DaemonIpcCommandOptions } from "./ipc-command.ts"
 
 /** Creates one daemon IPC client for a Node host using either the default or injected transport. */
 export function createDaemonIpcClient<TClient = DaemonIpcClient>(options: {
@@ -80,11 +82,18 @@ export function resolveDaemonUrl(env: DaemonClientEnv = process.env) {
 
 /** Creates the default Node daemon IPC transport from one daemon URL. */
 function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClient {
-  return createRouteClient({
+  return createClient({
     baseURL: input.daemonUrl,
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
     clientHook: input.ipcHook,
+    fetch: (async (request, init) => {
+      try {
+        return await fetch(request, init)
+      } catch (error) {
+        throw toDaemonConnectionError(error, input.daemonUrl)
+      }
+    }) as typeof fetch,
     onJsonError: async (response) => {
       const body = (await response.json().catch(() => undefined)) as
         | {
@@ -108,6 +117,32 @@ function createDefaultClient(input: DaemonIpcClientFactoryInput): DaemonIpcClien
       throw new Error(message)
     },
   }) as DaemonIpcClient
+}
+
+function toDaemonConnectionError(error: unknown, daemonUrl: string) {
+  if (!(error instanceof Error)) {
+    return error
+  }
+
+  const errorCode =
+    (error as Error & { code?: unknown }).code ??
+    (error.cause as (Error & { code?: unknown }) | undefined)?.code
+  if (
+    errorCode !== "ECONNREFUSED" &&
+    errorCode !== "EHOSTUNREACH" &&
+    errorCode !== "ENOTFOUND" &&
+    !error.message.includes("Unable to connect")
+  ) {
+    return error
+  }
+
+  return new IpcClientError(
+    `Could not connect to IPC server at ${daemonUrl}. ` +
+      "The server may not be running, or the daemon URL may be wrong.",
+    {
+      cause: error,
+    },
+  )
 }
 
 function isStructuredIpcError(value: unknown): value is {

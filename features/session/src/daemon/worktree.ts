@@ -1,9 +1,11 @@
 /** Daemon helpers for reusing and cleaning up session-owned worktrees. */
 import { realpathSync } from "node:fs"
 import { resolve } from "node:path"
+import { git, GitNotRepositoryError } from "@goddard-ai/libgit2"
 import type { WorktreePlugin } from "@goddard-ai/worktree-plugin"
 
 import type { DaemonWorktree } from "../schema.ts"
+import { countCommitsAhead } from "./git/history.ts"
 import { deleteWorktree } from "./worktrees/index.ts"
 
 const builtinWorktreePluginNames = new Set(["default", "worktrunk"])
@@ -44,7 +46,7 @@ export async function reuseExistingWorktree(
     )
   }
 
-  const headRef = await resolveExistingWorktreeHeadRef(worktree.worktreeDir)
+  const headRef = await resolveGitHeadRef(worktree.worktreeDir)
   if (headRef) {
     worktree.branchName = headRef
   }
@@ -75,24 +77,23 @@ export async function cleanupSessionWorktree(
  * Resolves the containing git repository root for one requested session cwd when one exists.
  */
 export async function resolveGitRepoRoot(cwd: string) {
-  const { success, stdout } = await runGit(cwd, ["rev-parse", "--show-toplevel"])
-  if (!success) {
+  try {
+    return resolve(await git.repository.resolveRoot(cwd))
+  } catch {
     return null
   }
-
-  const repoRoot = stdout.trim()
-  if (!repoRoot) {
-    return null
-  }
-
-  return resolve(repoRoot)
 }
 
 /** Returns true when the requested cwd points at a bare git repository. */
 export async function inspectGitBareRepository(cwd: string) {
-  const { success, stdout } = await runGit(cwd, ["rev-parse", "--is-bare-repository"])
-
-  return success && stdout.trim() === "true"
+  try {
+    return await git.repository.isBareRepository(cwd)
+  } catch (error) {
+    if (error instanceof GitNotRepositoryError) {
+      return false
+    }
+    throw error
+  }
 }
 
 /** Resolves the git source directory that can create linked worktrees for one launch cwd. */
@@ -116,6 +117,20 @@ export async function resolveGitWorktreeSource(cwd: string) {
 }
 
 /**
+ * Resolves the currently attached branch for one existing worktree folder when HEAD is not detached.
+ */
+export async function resolveGitHeadRef(cwd: string) {
+  const resolvedCwd = resolve(realpathSync.native(cwd))
+  try {
+    await git.repository.resolveGitDir(resolvedCwd)
+  } catch {
+    throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
+  }
+
+  return await git.refs.getCurrentBranch(resolvedCwd)
+}
+
+/**
  * Converts persisted worktree metadata into the logging wrapper used by session launch.
  */
 export function toPreparedSessionWorktree(state: SessionWorktreeState): PreparedSessionWorktree {
@@ -135,75 +150,15 @@ export async function inspectWorktreeCompletionState(
   worktree: SessionWorktreeState,
 ): Promise<SessionWorktreeCompletionState> {
   const [status, primaryHead] = await Promise.all([
-    runGit(worktree.worktreeDir, ["status", "--porcelain=v1", "--untracked-files=normal"]),
-    runGit(worktree.repoRoot, ["rev-parse", "--verify", "HEAD"]),
+    git.status.getWorkingTreeStatus(worktree.worktreeDir),
+    git.history.resolveHead(worktree.repoRoot),
   ])
-  if (!status.success) {
-    throw new Error("Unable to inspect worktree status")
-  }
-
-  if (!primaryHead.success) {
+  if (!primaryHead) {
     throw new Error("Unable to inspect primary checkout HEAD")
   }
 
-  const ahead = await runGit(worktree.worktreeDir, [
-    "rev-list",
-    "--count",
-    `${primaryHead.stdout.trim()}..HEAD`,
-  ])
-  if (!ahead.success) {
-    throw new Error("Unable to inspect worktree commits")
-  }
-
   return {
-    dirty: status.stdout.trim().length > 0,
-    unmergedCommits: Number(ahead.stdout.trim()) > 0,
-  }
-}
-
-/**
- * Resolves the currently attached branch for one existing worktree folder when HEAD is not detached.
- */
-async function resolveExistingWorktreeHeadRef(cwd: string) {
-  const resolvedCwd = resolve(realpathSync.native(cwd))
-  const gitWorktreeCheck = await runGit(resolvedCwd, ["rev-parse", "--git-dir"])
-  if (!gitWorktreeCheck.success) {
-    throw new Error(`Existing worktree folder must be a git worktree: ${resolvedCwd}`)
-  }
-
-  const { success, stdout } = await runGit(resolvedCwd, [
-    "symbolic-ref",
-    "--quiet",
-    "--short",
-    "HEAD",
-  ])
-  if (!success) {
-    return null
-  }
-
-  const headRef = stdout.trim()
-  if (!headRef) {
-    return null
-  }
-
-  return headRef
-}
-
-/**
- * Runs one git subprocess asynchronously using Bun's native subprocess API.
- */
-async function runGit(cwd: string, args: string[]) {
-  const result = Bun.spawn(["git", ...args], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-
-  const stdout = result.stdout ? await new Response(result.stdout).text() : ""
-  await result.exited
-  return {
-    success: result.exitCode === 0,
-    stdout,
+    dirty: status.entries.length > 0,
+    unmergedCommits: (await countCommitsAhead(worktree.worktreeDir, primaryHead)) > 0,
   }
 }

@@ -8,9 +8,12 @@ import {
   type Edge,
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge"
 import { token } from "@goddard-ai/styled-system/tokens"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { OverlayScrollbars } from "overlayscrollbars"
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks"
 
+import { AppCommand } from "~/commands/app-command.ts"
+import { AppCommandTooltip } from "~/commands/app-command-tooltip.tsrx"
 import { GoodIcon, type SvgIconName } from "~/lib/good-icon.tsrx"
 import { getWorkbenchTabIcon } from "~/workbench-tab-registry.ts"
 import { WORKBENCH_MAIN_TAB, type WorkbenchTab } from "~/workbench-tab-set.ts"
@@ -199,6 +202,8 @@ function useAppShellTabStrip(
 
 export function AppShellTabStrip(props: {
   activeTabId: string;
+  canNavigateBack: boolean;
+  canNavigateForward: boolean;
   endAccessory?: preact.ComponentChildren;
   selectedMainTabId: string;
   selectedMainTabTitle: string;
@@ -206,10 +211,50 @@ export function AppShellTabStrip(props: {
   onActivateTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onMoveTab: (sourceId: string, targetId: string, placement: WorkbenchTabDragPlacement) => void;
+  onNavigateBack: () => void;
+  onNavigateForward: () => void;
 }) @{
   const tabStrip = useAppShellTabStrip(props.activeTabId, props.selectedMainTabId, props.tabs)
 
   <div class={styles.tabStripRow}>
+    <div class={styles.tabNavigationGroup}>
+      <AppCommandTooltip
+        command={AppCommand.workbench.navigateBack}
+        group="app-shell-tab-navigation"
+        label={t`Back`}
+        side="bottom"
+        sideOffset={8}
+      >
+        <button
+          aria-label={t`Navigate back`}
+          class={styles.tabNavigationButton}
+          disabled={!props.canNavigateBack}
+          type="button"
+          onClick={props.onNavigateBack}
+        >
+          <ChevronLeft aria-hidden={true} size={15} strokeWidth={2.2} />
+        </button>
+      </AppCommandTooltip>
+
+      <AppCommandTooltip
+        command={AppCommand.workbench.navigateForward}
+        group="app-shell-tab-navigation"
+        label={t`Forward`}
+        side="bottom"
+        sideOffset={8}
+      >
+        <button
+          aria-label={t`Navigate forward`}
+          class={styles.tabNavigationButton}
+          disabled={!props.canNavigateForward}
+          type="button"
+          onClick={props.onNavigateForward}
+        >
+          <ChevronRight aria-hidden={true} size={15} strokeWidth={2.2} />
+        </button>
+      </AppCommandTooltip>
+    </div>
+
     <div ref={tabStrip.tabStripRef} class={styles.tabStrip} data-overlayscrollbars-initialize="">
       <div class={styles.tabList} role="tablist" aria-label={t`Workbench tabs`}>
         <TabButton
@@ -289,7 +334,7 @@ function TabButton(props: {
   const [isDragging, setIsDragging] = useState(false)
   const tabRef = useRef<HTMLDivElement | null>(null)
   const tabButtonRef = useRef<HTMLButtonElement | null>(null)
-  const showCloseButton = isActive || isHovered
+  const showCloseButton = isHovered
   const iconColor =
     isActive
       ? isHome
@@ -431,22 +476,20 @@ function TabButton(props: {
       >{props.title}</span>
     </button>
 
-    @if (!isHome) {
+    @if (!isHome && (props.dirty || showCloseButton)) {
       <div
         class={styles.tabTail}
         onClick={() => {
           props.onSelect(props.id)
         }}
       >
-        @if (props.dirty) {
-          <span
-            aria-hidden="true"
-            class={styles.tabDirty}
-            style={{
-              opacity: showCloseButton ? "0" : "1",
-            }}
-          />
-        }
+        <span
+          aria-hidden="true"
+          class={styles.tabTailMask}
+          style={{
+            opacity: showCloseButton ? "1" : "0",
+          }}
+        />
 
         <button
           aria-label={`Close ${props.title}`}
@@ -463,6 +506,10 @@ function TabButton(props: {
         >
           <InlineSvgIcon icon="close-tab" size="9px" />
         </button>
+
+        @if (props.dirty) {
+          <span aria-hidden="true" class={styles.tabDirty} />
+        }
       </div>
     }
   </div>

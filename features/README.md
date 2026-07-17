@@ -35,6 +35,14 @@ feature becomes part of a supported product surface.
 - Layer entrypoints such as `src/daemon.ts` should stay as thin plugin
   entrypoints. Feature-owned daemon implementation can live in focused modules
   under `src/daemon/` and be reached from the entrypoint.
+- Backend-capable features export a backend plugin definition from `./backend`.
+  The plugin declares that feature's backend routes, event definitions, and event
+  sources; default product composition imports the plugin definition rather than
+  individual contribution constants.
+- Provider feature tests own provider-specific parsing, signature verification,
+  filtering, provenance, and raw upstream fixtures. Core backend tests should
+  cover composition, publication, authorization, and fanout without duplicating
+  provider fixture variants.
 - JSON configuration is not a feature package. Daemon plugins may contribute
   namespaced config fragments, but daemon/core packages own
   `~/.goddard/config.json`, project-level `.goddard/config.json`, merge
@@ -52,16 +60,31 @@ roots, and SDK action namespace construction. Config file storage and hot
 reload remain daemon/core substrate, and session execution is consumed through
 the first-class session feature extension.
 
-`features/auth` owns auth schemas, backend auth route contracts, daemon auth IPC
-handlers, and SDK auth namespace construction. Backend storage, GitHub device
-flow persistence, daemon token persistence, and HTTP/router substrate remain in
-core packages.
+`features/auth` owns provider-neutral auth schemas, backend auth route
+contracts, daemon auth IPC handlers, and SDK auth namespace construction.
+Backend storage, provider login adapters, daemon token persistence, and
+HTTP/router substrate remain outside the auth feature.
+
+`features/github` owns GitHub provider integration: identity mapping, repository
+grants, the `/webhooks/github` backend route, raw webhook parsing, signature
+verification, bot filtering, provider provenance, GitHub App PR operations, and
+GitHub repository URL parsing. It exposes those capabilities through backend and
+daemon provider surfaces. It maps supported GitHub facts into provider-neutral
+feature contracts but does not own provider-agnostic event definitions or pull
+request workflow policy.
 
 `features/file-search` owns file search schemas, file-search daemon IPC
 handlers, SDK file-search namespace construction, and daemon-local file/folder
 entry discovery for app composer suggestions. App composer UI, prompt chip
 serialization, and session execution remain outside the file-search feature
 boundary.
+
+`features/agent` owns launchable ACP agent discovery, registry and
+config-declared catalog merge behavior, local launch visibility markers,
+managed install status and process-spec resolution, managed install usage/update
+policy, daemon IPC handlers, and SDK agent namespace construction.
+Root config file loading, daemon process lifecycle, generic persistence, and
+session process lifecycle remain core or session-feature substrate.
 
 `features/inbox` owns inbox IPC, SDK namespace construction, inbox manager
 logic, inbox metadata resolution, and inbox item state transitions. Daemon
@@ -73,16 +96,35 @@ loop manager/runtime modules. JSON config file loading/persistence, daemon
 process lifecycle, and session lifecycle mechanics remain core or
 session-feature substrate.
 
-`features/pull-request` owns pull-request schemas, backend PR route and webhook
-contracts, daemon PR IPC handlers, SDK PR namespace construction, git-backed PR
-request resolution, and PR inbox attention behavior. Backend transport, daemon
-IPC server mechanics, and daemon persistence substrate remain in core packages.
+`features/remote-repo` owns provider-neutral remote repository identities,
+backend event vocabulary, event envelope producers, and provider capability
+authorization dispatch. It does not own provider-specific webhook routes,
+payload parsing, signatures, or account access logic.
+
+`features/pull-request` owns pull-request schemas, backend PR routes, daemon PR
+IPC handlers, SDK PR namespace construction, provider-qualified PR request
+resolution, PR feedback automation, and PR inbox attention behavior. Provider
+packages own provider-specific PR operations and repository URL parsing; remote
+repository event production, backend transport, daemon IPC server mechanics, and
+daemon persistence substrate remain outside the pull-request feature boundary.
 
 `features/session` owns session feature schemas, session-owned daemon IPC
 routes, session lifecycle implementation modules, SDK session method fragments,
 and the first-class daemon `context.session` extension that downstream feature
 packages consume. Low-level linked-worktree substrate and third-party worktree
 provider contracts remain in core packages.
+
+`features/task` owns repository-scoped task schemas, current task state,
+immutable task activity, generic task links, claim rules, daemon IPC handlers,
+feature events, and SDK task namespace construction. Sessions own execution,
+workforce requests own delegated runtime work, inbox items own human attention,
+and daemon/core packages own process and database lifecycle.
+
+`features/vscode-task` owns workspace `.vscode/tasks.json` inspection, daemon
+task-graph execution, connection-scoped lifecycle and output streams, stable
+task IPC errors, and SDK namespace construction. The task engine owns supported
+VS Code task semantics, while PTY process realization is consumed from the
+terminal feature. App task UI and Actions remain outside this feature boundary.
 
 `features/workforce` owns workforce schemas, workforce IPC, daemon workforce
 configuration discovery and initialization, workforce manager/runtime modules,

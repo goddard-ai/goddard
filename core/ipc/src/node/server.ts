@@ -33,6 +33,7 @@ function getErrorResponse(error: unknown): {
 type RequestHookInput = {
   name: string
   payload: unknown
+  request: Request
 }
 
 /** Lifecycle data passed to request-received hooks. */
@@ -59,6 +60,13 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
   hostname?: string
   routes: TRoutes
   handlers: RouteRequestHandlerMap<TRoutes>
+  browserAccess?: {
+    readonly allowedOrigins: readonly string[]
+    readonly isAllowedOrigin?: (origin: string) => boolean
+    readonly authorizeRequest?: (
+      request: Request,
+    ) => Promise<Response | null | undefined> | Response | null | undefined
+  }
   runHandler?: RunHandlerHook
   onRequestReceived?: (input: RequestReceivedHookInput) => Promise<void> | void
   onResponseSent?: (input: ResponseSentHookInput) => Promise<void> | void
@@ -68,8 +76,16 @@ type CreateServerConfig<TRoutes extends HttpRouteTree> = {
 /** Creates the Node IPC server for one TCP-backed Rouzer route tree. */
 export function createServer<TRoutes extends HttpRouteTree>(config: CreateServerConfig<TRoutes>) {
   const { port, hostname = "127.0.0.1", routes } = config
+  const browserAccess = config.browserAccess
+    ? {
+        allowedOrigins: new Set(config.browserAccess.allowedOrigins.map(normalizeAllowedOrigin)),
+        isAllowedOrigin: config.browserAccess.isAllowedOrigin,
+        authorizeRequest: config.browserAccess.authorizeRequest,
+      }
+    : null
   const handlers = wrapHandlers(routes, config.handlers, config)
   const router = createRouter({
+    debug: true,
     plugins: [ndjson.routerPlugin],
   }).use(routes, handlers as RouteRequestHandlerMap<TRoutes, any>)
 
@@ -81,7 +97,45 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
     const responseHeaders = new Headers()
     let webRequest: { readonly request: Request; readonly cleanup: () => void } | undefined
     try {
+      if (browserAccess) {
+        const host = validateBrowserAccessHost(req, server, hostname, port)
+        if (!host.valid) {
+          await writeResponse(res, forbiddenResponse())
+          return
+        }
+
+        const browserHeaders = resolveBrowserAccessHeaders(req, browserAccess)
+        if (req.method === "OPTIONS") {
+          await writeResponse(
+            res,
+            browserHeaders
+              ? new Response(null, { status: 204, headers: browserHeaders })
+              : forbiddenResponse(),
+          )
+          return
+        }
+
+        if (hasOriginHeader(req) && !browserHeaders) {
+          await writeResponse(res, forbiddenResponse())
+          return
+        }
+
+        if (browserHeaders) {
+          for (const [name, value] of browserHeaders) {
+            responseHeaders.set(name, value)
+          }
+        }
+      }
+
       webRequest = await createWebRequest(req, res, hostname, port)
+      if (browserAccess && hasOriginHeader(req) && browserAccess.authorizeRequest) {
+        const authorizationResponse = await browserAccess.authorizeRequest(webRequest.request)
+        if (authorizationResponse) {
+          await writeResponse(res, mergeResponseHeaders(authorizationResponse, responseHeaders))
+          return
+        }
+      }
+
       const response = await router({
         request: webRequest.request,
         ip: req.socket.remoteAddress ?? "",
@@ -118,6 +172,100 @@ export function createServer<TRoutes extends HttpRouteTree>(config: CreateServer
   server.listen(port, hostname)
 
   return { server }
+}
+
+function forbiddenResponse() {
+  return Response.json({ error: "Forbidden" }, { status: 403 })
+}
+
+function normalizeAllowedOrigin(origin: string) {
+  if (origin === "*" || origin === "null") {
+    throw new Error(`Browser access origin must be explicit: ${origin}`)
+  }
+
+  const url = new URL(origin)
+  if (url.origin !== origin) {
+    throw new Error(`Browser access origin must not include a path, query, or hash: ${origin}`)
+  }
+
+  return url.origin
+}
+
+function validateBrowserAccessHost(
+  req: http.IncomingMessage,
+  server: http.Server,
+  hostname: string,
+  configuredPort: number,
+) {
+  const host = req.headers.host
+  if (!host) {
+    return { valid: false }
+  }
+
+  const address = server.address()
+  const port =
+    address && typeof address !== "string"
+      ? address.port
+      : configuredPort === 0
+        ? null
+        : configuredPort
+  if (port === null) {
+    return { valid: false }
+  }
+
+  const expectedHosts = new Set([
+    `${hostname}:${port}`,
+    `127.0.0.1:${port}`,
+    `localhost:${port}`,
+    `[::1]:${port}`,
+  ])
+
+  return { valid: expectedHosts.has(host) }
+}
+
+function hasOriginHeader(req: http.IncomingMessage) {
+  return req.headers.origin !== undefined
+}
+
+function resolveBrowserAccessHeaders(
+  req: http.IncomingMessage,
+  browserAccess: {
+    readonly allowedOrigins: ReadonlySet<string>
+    readonly isAllowedOrigin?: (origin: string) => boolean
+  },
+): Headers | null {
+  const origin = req.headers.origin
+  if (typeof origin !== "string") {
+    return null
+  }
+
+  let normalizedOrigin: string
+  try {
+    normalizedOrigin = new URL(origin).origin
+  } catch {
+    return null
+  }
+
+  if (
+    normalizedOrigin !== origin ||
+    (!browserAccess.allowedOrigins.has(normalizedOrigin) &&
+      browserAccess.isAllowedOrigin?.(normalizedOrigin) !== true)
+  ) {
+    return null
+  }
+
+  const headers = new Headers({
+    "Access-Control-Allow-Origin": normalizedOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, content-type",
+    Vary: "Origin, Access-Control-Request-Private-Network",
+  })
+
+  if (req.headers["access-control-request-private-network"] === "true") {
+    headers.set("Access-Control-Allow-Private-Network", "true")
+  }
+
+  return headers
 }
 
 function wrapHandlers(
@@ -158,11 +306,12 @@ function wrapRequestHandler(
     "runHandler" | "onRequestReceived" | "onResponseSent" | "onRequestFailed"
   >,
 ) {
-  return async (context: { body?: unknown; query?: unknown }) => {
+  return async (context: { body?: unknown; query?: unknown; request: Request }) => {
     const startedAt = Date.now()
     const requestInput: RequestHookInput = {
       name,
       payload: "body" in context ? context.body : context.query,
+      request: context.request,
     }
 
     const processRequest = async () => {

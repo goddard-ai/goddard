@@ -1,6 +1,12 @@
+import { parseGitHubRepositoryUrl } from "@goddard-ai/github/daemon"
+import { git } from "@goddard-ai/libgit2"
+
 import type { ReplyPrRequest, SubmitPrRequest } from "../schema.ts"
+import { readOriginRef } from "./git/refs.ts"
+import { readOriginRemoteUrl } from "./git/remotes.ts"
 
 type PrCreateInput = {
+  provider: string
   owner: string
   repo: string
   title: string
@@ -10,99 +16,84 @@ type PrCreateInput = {
 }
 
 type PrReplyInput = {
+  provider: string
   owner: string
   repo: string
   prNumber: number
   body: string
 }
 
+type RepositoryUrlParser = (remote: string) =>
+  | {
+      provider: string
+      owner: string
+      repo: string
+    }
+  | undefined
+
 /** Resolves PR creation defaults from the local Git checkout. */
-export async function resolveSubmitRequestFromGit(input: SubmitPrRequest): Promise<PrCreateInput> {
-  const repoRef = inferRepoFromGit(input.cwd)
-  const { owner, repo } = splitRepo(repoRef)
+export async function resolveSubmitRequestFromGit(
+  input: SubmitPrRequest,
+  parseRepositoryUrl: RepositoryUrlParser = parseGitHubRepositoryUrl,
+): Promise<PrCreateInput> {
+  const { provider, owner, repo } = await inferRepoFromGit(input.cwd, parseRepositoryUrl)
 
   return {
+    provider,
     owner,
     repo,
     title: input.title,
     body: input.body,
-    head: input.head || inferCurrentBranch(input.cwd),
-    base: input.base || inferBaseBranch(input.cwd),
+    head: input.head || (await inferCurrentBranch(input.cwd)),
+    base: input.base || (await inferBaseBranch(input.cwd)),
   }
 }
 
 /** Resolves PR reply defaults from the local Git checkout. */
-export async function resolveReplyRequestFromGit(input: ReplyPrRequest): Promise<PrReplyInput> {
-  const repoRef = inferRepoFromGit(input.cwd)
-  const { owner, repo } = splitRepo(repoRef)
+export async function resolveReplyRequestFromGit(
+  input: ReplyPrRequest,
+  parseRepositoryUrl: RepositoryUrlParser = parseGitHubRepositoryUrl,
+): Promise<PrReplyInput> {
+  const { provider, owner, repo } = await inferRepoFromGit(input.cwd, parseRepositoryUrl)
 
   return {
+    provider,
     owner,
     repo,
-    prNumber: input.prNumber ?? inferPrNumberFromGit(input.cwd),
+    prNumber: input.prNumber ?? (await inferPrNumberFromGit(input.cwd)),
     body: input.message,
   }
 }
 
-function splitRepo(repo: string) {
-  const [owner, name] = repo.split("/")
-  if (!owner || !name || repo.split("/").length !== 2) {
-    throw new Error(`Invalid repository '${repo}'. Expected owner/name.`)
-  }
-
-  return { owner, repo: name }
-}
-
-function inferRepoFromGit(cwd: string): string {
-  const remote = runGit(cwd, ["config", "--get", "remote.origin.url"])
-  const httpsMatch = remote.match(/^https:\/\/github\.com\/(.+?)\/(.+?)(\.git)?$/)
-  if (httpsMatch) {
-    return `${httpsMatch[1]}/${httpsMatch[2]}`
-  }
-
-  const sshMatch = remote.match(/^git@github\.com:(.+?)\/(.+?)(\.git)?$/)
-  if (sshMatch) {
-    return `${sshMatch[1]}/${sshMatch[2]}`
+async function inferRepoFromGit(cwd: string, parseRepositoryUrl: RepositoryUrlParser) {
+  const remote = await readOriginRemoteUrl(cwd)
+  const repository = parseRepositoryUrl(remote)
+  if (repository) {
+    return repository
   }
 
   throw new Error(`Unsupported origin remote URL: ${remote}`)
 }
 
-function inferCurrentBranch(cwd: string): string {
-  return runGit(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+async function inferCurrentBranch(cwd: string): Promise<string> {
+  return (await git.refs.getCurrentBranch(cwd)) ?? "HEAD"
 }
 
-function inferBaseBranch(cwd: string): string {
+async function inferBaseBranch(cwd: string): Promise<string> {
   try {
-    const headRef = runGit(cwd, ["symbolic-ref", "refs/remotes/origin/HEAD"])
+    const headRef = await readOriginRef(cwd, "HEAD")
     return headRef.replace(/^refs\/remotes\/origin\//, "") || "main"
   } catch {
     return "main"
   }
 }
 
-function inferPrNumberFromGit(cwd: string): number {
-  const branch = inferCurrentBranch(cwd)
+async function inferPrNumberFromGit(cwd: string): Promise<number> {
+  const branch = await inferCurrentBranch(cwd)
   const match = branch.match(/^pr-(\d+)$/)
   if (!match) {
     throw new Error("Unable to infer PR number from current branch. Expected pr-<number>.")
   }
 
   return Number.parseInt(match[1], 10)
-}
-
-function runGit(cwd: string, args: string[]): string {
-  const result = Bun.spawnSync(["git", ...args], {
-    cwd,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-
-  if (!result.success) {
-    const stderr = Buffer.from(result.stderr).toString("utf8").trim()
-    throw new Error(stderr || `git ${args.join(" ")} failed in ${cwd}`)
-  }
-
-  return Buffer.from(result.stdout).toString("utf8").trim()
 }

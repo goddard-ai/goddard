@@ -226,6 +226,7 @@ export function useAppState() {
           projectRegistry: sigma.captureState(appState.projectRegistry),
           workbenchTabSet: getRestorableWorkbenchTabSetState(
             sigma.captureState(appState.workbenchTabSet),
+            appState.mainTab.selectedKind,
           ),
         }),
         writeSnapshot: (snapshot) => {
@@ -259,7 +260,10 @@ export function useAppState() {
           sigma.replaceState(appState.projectRegistry, snapshot.projectRegistry)
           sigma.replaceState(
             appState.workbenchTabSet,
-            getRestorableWorkbenchTabSetState(snapshot.workbenchTabSet),
+            getRestorableWorkbenchTabSetState(
+              snapshot.workbenchTabSet,
+              appState.mainTab.selectedKind,
+            ),
           )
         }
 

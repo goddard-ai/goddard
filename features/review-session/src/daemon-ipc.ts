@@ -1,4 +1,4 @@
-import { $type, defineIpcRoutes, http } from "@goddard-ai/ipc"
+import { $type, defineIpcRoutes, http, metadata } from "@goddard-ai/ipc"
 
 import {
   GetReviewSessionRequest,
@@ -10,23 +10,38 @@ import {
 
 export const reviewSessionIpcRoutes = defineIpcRoutes({
   reviewSession: http.resource("review-session", {
-    /** Reads review-session state for one daemon-managed session worktree. */
+    ...metadata({
+      description: "Review-session state and lifecycle control.",
+    }),
+    /** Reads review-session state for one session worktree. */
     get: http.post("get", {
+      ...metadata({
+        description: "Reads review-session state for one session worktree.",
+      }),
       body: GetReviewSessionRequest,
       response: $type<ReviewSessionResponse>(),
     }),
-    /** Mounts a review session for one daemon-managed session worktree. */
+    /** Mounts a review session for one session worktree. */
     mount: http.post("mount", {
+      ...metadata({
+        description: "Mounts a review session for one session worktree.",
+      }),
       body: MountReviewSessionRequest,
       response: $type<ReviewSessionResponse>(),
     }),
     /** Runs one mounted review session immediately. */
     run: http.post("run", {
+      ...metadata({
+        description: "Runs one mounted review session immediately.",
+      }),
       body: RunReviewSessionRequest,
       response: $type<ReviewSessionResponse>(),
     }),
-    /** Unmounts a review session from one daemon-managed session worktree. */
+    /** Unmounts a review session from one session worktree. */
     unmount: http.post("unmount", {
+      ...metadata({
+        description: "Unmounts a review session from one session worktree.",
+      }),
       body: UnmountReviewSessionRequest,
       response: $type<ReviewSessionResponse>(),
     }),

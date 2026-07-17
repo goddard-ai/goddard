@@ -20,10 +20,12 @@ afterEach(() => {
   store.close()
 })
 
-const publishNoInboxEvent = () => {}
+const noopInboxEvents: Parameters<typeof createInboxManager>[0]["events"] = {
+  emit: async () => {},
+}
 
 function createTestInboxManager() {
-  return createInboxManager({ db: store, publishEvent: publishNoInboxEvent })
+  return createInboxManager({ db: store, events: noopInboxEvents })
 }
 
 function newSessionId() {
@@ -160,20 +162,22 @@ test("generic inbox updates reject entity-specific completion", () => {
   expect(inbox.completeSession(sessionId)?.status).toBe("completed")
 })
 
-test("inbox manager emits one event per changed item", () => {
+test("inbox manager emits one daemon event per changed item", () => {
   const events: Array<{
+    name: string
     entityId: string
-    mutation: string
     status: string
   }> = []
   const inbox = createInboxManager({
     db: store,
-    publishEvent: ({ item, mutation }) => {
-      events.push({
-        entityId: item.entityId,
-        mutation,
-        status: item.status,
-      })
+    events: {
+      emit: async (name, item) => {
+        events.push({
+          name,
+          entityId: item.entityId,
+          status: item.status,
+        })
+      },
     },
   })
   const firstSessionId = newSessionId()
@@ -200,13 +204,13 @@ test("inbox manager emits one event per changed item", () => {
   inbox.completeSession(secondSessionId)
 
   expect(events).toEqual([
-    { entityId: firstSessionId, mutation: "touched", status: "unread" },
-    { entityId: secondSessionId, mutation: "touched", status: "unread" },
-    { entityId: firstSessionId, mutation: "updated", status: "read" },
-    { entityId: firstSessionId, mutation: "bulk_updated", status: "read" },
-    { entityId: secondSessionId, mutation: "bulk_updated", status: "unread" },
-    { entityId: firstSessionId, mutation: "replied", status: "replied" },
-    { entityId: secondSessionId, mutation: "completed", status: "completed" },
+    { name: "inbox.item.updated", entityId: firstSessionId, status: "unread" },
+    { name: "inbox.item.updated", entityId: secondSessionId, status: "unread" },
+    { name: "inbox.item.updated", entityId: firstSessionId, status: "read" },
+    { name: "inbox.item.updated", entityId: firstSessionId, status: "read" },
+    { name: "inbox.item.updated", entityId: secondSessionId, status: "unread" },
+    { name: "inbox.item.updated", entityId: firstSessionId, status: "replied" },
+    { name: "inbox.item.updated", entityId: secondSessionId, status: "completed" },
   ])
   expect(store.inboxItems.findMany({ where: { entityId: firstSessionId } })).toHaveLength(1)
   expect(store.inboxItems.findMany({ where: { entityId: secondSessionId } })).toHaveLength(1)

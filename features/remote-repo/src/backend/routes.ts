@@ -1,19 +1,21 @@
 import { BearerHeaders } from "@goddard-ai/auth/schema"
-import { $type, defineBackendRoutes, http } from "@goddard-ai/backend-plugin"
+import { defineBackendRoutes, http, metadata, ndjson } from "@goddard-ai/backend-plugin"
 
-import type { RepoEvent } from "../schema.ts"
+import { BackendEventStreamRequest, type RepoEvent } from "../schema.ts"
 
 /** Remote-repo-owned backend routes. */
 export const remoteRepoBackendRoutes = defineBackendRoutes({
-  remoteRepo: http.resource("remote-repo", {
-    stream: http.get("stream", {
-      headers: BearerHeaders,
+  events: http.resource("events", {
+    ...metadata({
+      description: "Backend remote repository event streaming.",
     }),
-  }),
-  webhooks: http.resource("webhooks", {
-    github: http.post("github", {
-      body: http.rawBody(),
-      response: $type<RepoEvent>(),
+    stream: http.post("stream", {
+      ...metadata({
+        description: "Streams backend remote repository events.",
+      }),
+      headers: BearerHeaders,
+      body: BackendEventStreamRequest,
+      response: ndjson.$type<RepoEvent>(),
     }),
   }),
 })

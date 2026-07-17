@@ -25,6 +25,7 @@ export const inboxAttentionResponse = inboxAttentionQueue.response
 export const reviewPullRequestResponse = inboxAttentionQueue.pullRequestResponse
 export const activeSessionResponse = activeSessionDetail.sessionResponse
 export const activeSessionHistoryResponse = activeSessionDetail.historyResponse
+export const activeSessionWorktreeResponse = activeSessionDetail.worktreeResponse
 export const blockedSessionResponse = blockedSessionDetail.sessionResponse
 export const blockedSessionHistoryResponse = blockedSessionDetail.historyResponse
 export const blockedSessionWorktreeResponse = blockedSessionDetail.worktreeResponse

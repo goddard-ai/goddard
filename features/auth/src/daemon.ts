@@ -7,7 +7,8 @@ export const authPlugin = definePlugin({
   name: "auth",
   backendRoutes: authBackendRoutes,
   ipcRoutes: authIpcRoutes,
-  setup({ authTokenStore, backend }) {
+  setup({ authTokenStore, backend, log }) {
+    const logger = log.createLogger()
     return {
       ipcHandlers: {
         auth: {
@@ -16,12 +17,14 @@ export const authPlugin = definePlugin({
             complete: async ({ body }) => {
               const session = await backend.auth.device.complete(body)
               await authTokenStore.set(session.token)
+              logger.log("auth.login.completed")
               return session
             },
           },
           whoami: async () => backend.auth.session.current(),
           logout: async () => {
             await authTokenStore.delete()
+            logger.log("auth.logout.completed")
             return { success: true as const }
           },
         },

@@ -3,7 +3,12 @@ import { signal } from "@preact/signals"
 import { createPageModelContext } from "~/lib/page-model-context.tsrx"
 import { createKeyedTask, createTask } from "~/lib/task.ts"
 
-export type SessionChatHeaderAction = "cancel" | "complete" | "reconnect"
+export type SessionChatHeaderAction =
+  | "cancel"
+  | "complete"
+  | "merge"
+  | "reconnect"
+  | "setMergeTargetBranch"
 
 export type SessionChatHeaderActionError = {
   description: string

@@ -21,8 +21,11 @@ Read this ruleset when debugging Goddard daemon behavior, app behavior, daemon/a
 - When inspecting daemon persistence directly, remember development runs use the development data profile. The dev daemon DB is `~/.goddard/development/goddard.db`; `~/.goddard/goddard.db` is the non-development profile and may be stale or unrelated.
 - Remember that large property values are collapsed and likely secrets are redacted before persistence, so absence of a raw value in logs is expected.
 - Prefer adding or improving structured log fields over relying on long free-form messages when a debugging gap requires a code change.
+- Use daemon events for ephemeral facts that another daemon plugin, the app, or any SDK consumer could reasonably react to, especially when the fact is not already apparent from an IPC response or from a consumed plugin `provides` method return value.
+- Back routine daemon events with `event(..., { debug: "<scope>" })` when they are useful to observers but do not belong in the default operational log timeline.
 - Use normal logs for events that belong in the default operational timeline: startup/shutdown, lifecycle transitions, auth/config changes, IPC/app-daemon handoffs, user-visible failures, degraded behavior, and actionable warnings/errors.
 - Use `createDebug("<scope>")` for focused subsystem traces that are useful only when investigating that scope: queue movement, stream/message flow, retries, timing/order details, state counters, handled noisy errors, and internal branch decisions.
-- If the event changes the durable story of what happened, use a normal log. If it only explains how one subsystem got there and would clutter default logs, use debug.
+- Use session diagnostics only for persisted, per-session facts meant for later session inspection; do not use diagnostics as a substitute for events, normal logs, or debug traces.
+- If the event changes the durable story of what happened for operators, use a normal log. If another component may need to react, use a daemon event. If it only explains how one subsystem got there and would clutter default logs, use debug.
 - Keep debug scopes stable and dotted, and reuse nearby scopes when possible.
 - Do not hide important failures only in debug logs.

@@ -1,5 +1,5 @@
 import { t } from "@lingui/core/macro"
-import type { AdapterCatalogEntry, AdapterInstallationState } from "@goddard-ai/sdk"
+import type { AgentCatalogEntry, AgentInstallationState } from "@goddard-ai/sdk"
 import { Download, GitBranch, Globe, Search, Trash2 } from "lucide-react"
 import * as fuzzysort from "fuzzysort2"
 import { useState } from "preact/hooks"
@@ -21,10 +21,10 @@ import {
 } from "./styled.tsrx"
 import styles from "./adapter-installations-section.style.ts"
 
-const availableAdapterMinimumFuzzyScore = 0.12
+const availableAgentMinimumFuzzyScore = 0.12
 
 export const adapterInstallationsSettingsSectionMetadata = {
-  id: "settings-adapter-installations",
+  id: "settings-agent-installations",
   get description() {
     return t`Choose which agent harnesses are available when launching sessions.`
   },
@@ -33,15 +33,15 @@ export const adapterInstallationsSettingsSectionMetadata = {
   },
 }
 
-type SearchableAdapterCatalogEntry = {
-  adapter: AdapterCatalogEntry;
+type SearchableAgentCatalogEntry = {
+  agent: AgentCatalogEntry;
   preparedDescription: fuzzysort.PreparedTarget;
   preparedId: fuzzysort.PreparedTarget;
   preparedName: fuzzysort.PreparedTarget;
   preparedVersion: fuzzysort.PreparedTarget;
 }
 
-function getInstallationDetail(installation: AdapterInstallationState) {
+function getInstallationDetail(installation: AgentInstallationState) {
   if (installation.method === "config") {
     return t`Configured`
   }
@@ -70,45 +70,45 @@ function isGithubRepository(repository: string | null | undefined) {
   }
 }
 
-function prepareAdapterSearchItems(adapters: readonly AdapterCatalogEntry[]) {
-  return adapters.map(
-    (adapter): SearchableAdapterCatalogEntry => ({
-      adapter,
-      preparedDescription: fuzzysort.prepare(adapter.description),
-      preparedId: fuzzysort.prepare(adapter.id),
-      preparedName: fuzzysort.prepare(adapter.name),
-      preparedVersion: fuzzysort.prepare(adapter.version),
+function prepareAgentSearchItems(agents: readonly AgentCatalogEntry[]) {
+  return agents.map(
+    (agent): SearchableAgentCatalogEntry => ({
+      agent,
+      preparedDescription: fuzzysort.prepare(agent.description),
+      preparedId: fuzzysort.prepare(agent.id),
+      preparedName: fuzzysort.prepare(agent.name),
+      preparedVersion: fuzzysort.prepare(agent.version),
     }),
   )
 }
 
-function filterPreparedAvailableAdapters(
-  adapters: readonly SearchableAdapterCatalogEntry[],
+function filterPreparedAvailableAgents(
+  agents: readonly SearchableAgentCatalogEntry[],
   searchQuery: string,
 ) {
   if (isEmptyQuery(searchQuery)) {
-    return adapters.map((entry) => entry.adapter)
+    return agents.map((entry) => entry.agent)
   }
 
   return fuzzysort.searchFields(
     searchQuery,
-    adapters,
+    agents,
     [
       { key: "name", extract: (entry) => entry.preparedName },
       { key: "id", extract: (entry) => entry.preparedId },
       { key: "description", extract: (entry) => entry.preparedDescription },
       { key: "version", extract: (entry) => entry.preparedVersion },
     ],
-    { threshold: availableAdapterMinimumFuzzyScore },
-  ).items.map((item) => item.value.adapter)
+    { threshold: availableAgentMinimumFuzzyScore },
+  ).items.map((item) => item.value.agent)
 }
 
-function AdapterInstallationRow(props: {
-  adapter: AdapterCatalogEntry;
-  installation: AdapterInstallationState;
+function AgentInstallationRow(props: {
+  agent: AgentCatalogEntry;
+  installation: AgentInstallationState;
   pending: boolean;
-  onInstall: (adapterId: string) => Promise<void>;
-  onUninstall: (adapterId: string) => Promise<void>;
+  onInstall: (agentId: string) => Promise<void>;
+  onUninstall: (agentId: string) => Promise<void>;
 }) @{
   const actionDisabled =
     props.pending || props.installation.method === "config" || !props.installation.installable
@@ -123,29 +123,29 @@ function AdapterInstallationRow(props: {
   <li class={styles.adapterItem}>
     <span class={styles.adapterBody}>
       <span class={styles.adapterTitleRow}>
-        <AcpAgentIcon class={styles.adapterIcon} icon={props.adapter.icon ?? null} />
-        <span class={styles.adapterName}>{props.adapter.name}</span>
+        <AcpAgentIcon class={styles.adapterIcon} icon={props.agent.icon ?? null} />
+        <span class={styles.adapterName}>{props.agent.name}</span>
       </span>
       <span class={styles.adapterMeta}>
-        {props.adapter.version}
+        {props.agent.version}
         {" · "}
         {getInstallationDetail(props.installation)}
-        {props.adapter.unofficial ? ` · ${t`Unofficial`}` : ""}
+        {props.agent.unofficial ? ` · ${t`Unofficial`}` : ""}
       </span>
-      <span class={styles.adapterDescription}>{props.adapter.description}</span>
+      <span class={styles.adapterDescription}>{props.agent.description}</span>
 
-      @if (props.adapter.website || props.adapter.repository) {
+      @if (props.agent.website || props.agent.repository) {
         <span class={styles.adapterLinks}>
-          @if (props.adapter.website) {
-            <ExternalLink class={styles.adapterLink} href={props.adapter.website}>
+          @if (props.agent.website) {
+            <ExternalLink class={styles.adapterLink} href={props.agent.website}>
               <Globe aria-hidden={true} size={14} strokeWidth={2.1} />
               {t`Website`}
             </ExternalLink>
           }
 
-          @if (props.adapter.repository) {
-            <ExternalLink class={styles.adapterLink} href={props.adapter.repository}>
-              @if (isGithubRepository(props.adapter.repository)) {
+          @if (props.agent.repository) {
+            <ExternalLink class={styles.adapterLink} href={props.agent.repository}>
+              @if (isGithubRepository(props.agent.repository)) {
                 <svg aria-hidden={true} class={styles.githubIcon} viewBox="0 0 16 16">
                   <path
                     fill="currentColor"
@@ -168,11 +168,11 @@ function AdapterInstallationRow(props: {
       type="button"
       onClick={async () => {
         if (props.installation.installed) {
-          await props.onUninstall(props.adapter.id)
+          await props.onUninstall(props.agent.id)
           return
         }
 
-        await props.onInstall(props.adapter.id)
+        await props.onInstall(props.agent.id)
       }}
     >
       <ActionIcon aria-hidden={true} size={15} strokeWidth={2.2} />
@@ -181,68 +181,68 @@ function AdapterInstallationRow(props: {
   </li>
 }
 
-function AdapterInstallationList() @{
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+function AgentInstallationList() @{
+  const agentCatalog = useQuery(goddardSdk.agent.list, {
     params: [{ includeUninstalled: true }],
   })
-  const [pendingAdapterId, setPendingAdapterId] = useState<string | null>(null)
+  const [pendingAgentId, setPendingAgentId] = useState<string | null>(null)
   const [availableAgentSearchQuery, setAvailableAgentSearchQuery] = useState("")
-  const installationsByAdapterId = new Map(adapterCatalog.installations.map(
-    (installation) => [installation.adapterId, installation],
+  const installationsByAgentId = new Map(agentCatalog.installations.map(
+    (installation) => [installation.agentId, installation],
   ))
-  const installedAdapters = adapterCatalog.adapters.filter((adapter) => {
-    return installationsByAdapterId.get(adapter.id)?.installed
+  const installedAgents = agentCatalog.agents.filter((agent) => {
+    return installationsByAgentId.get(agent.id)?.installed
   })
-  const availableAdapters = adapterCatalog.adapters.filter((adapter) => {
-    const installation = installationsByAdapterId.get(adapter.id)
+  const availableAgents = agentCatalog.agents.filter((agent) => {
+    const installation = installationsByAgentId.get(agent.id)
     return installation && !installation.installed
   })
-  const visibleAvailableAdapters = filterPreparedAvailableAdapters(
-    prepareAdapterSearchItems(availableAdapters),
+  const visibleAvailableAgents = filterPreparedAvailableAgents(
+    prepareAgentSearchItems(availableAgents),
     availableAgentSearchQuery,
   )
 
-  async function installAdapter(adapterId: string) {
-    setPendingAdapterId(adapterId)
+  async function installAgent(agentId: string) {
+    setPendingAgentId(agentId)
     try {
-      await goddardSdk.adapter.install({ adapterId })
-      queryClient.invalidate(goddardSdk.adapter.list)
+      await goddardSdk.agent.install({ agentId })
+      queryClient.invalidate(goddardSdk.agent.list)
     } finally {
-      setPendingAdapterId(null)
+      setPendingAgentId(null)
     }
   }
 
-  async function uninstallAdapter(adapterId: string) {
-    setPendingAdapterId(adapterId)
+  async function uninstallAgent(agentId: string) {
+    setPendingAgentId(agentId)
     try {
-      await goddardSdk.adapter.uninstall({ adapterId })
-      queryClient.invalidate(goddardSdk.adapter.list)
+      await goddardSdk.agent.uninstall({ agentId })
+      queryClient.invalidate(goddardSdk.agent.list)
     } finally {
-      setPendingAdapterId(null)
+      setPendingAgentId(null)
     }
   }
 
-  @if (adapterCatalog.adapters.length === 0) {
+  @if (agentCatalog.agents.length === 0) {
     <p class={styles.emptyText}>
       {t`No agent harnesses are available.`}
     </p>
   } @else {
     <div class={styles.agentGroups}>
       <section class={styles.agentGroup}>
-        @if (installedAdapters.length === 0) {
+        @if (installedAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No installed agents.`}
           </p>
         } @else {
           <ul class={styles.adapterList}>
-            @for (const adapter of installedAdapters) {
-              <AdapterInstallationRow
-                key={adapter.id}
-                {adapter}
-                installation={installationsByAdapterId.get(adapter.id)!}
-                pending={pendingAdapterId === adapter.id}
-                onInstall={installAdapter}
-                onUninstall={uninstallAdapter}
+            @for (const agent of installedAgents) {
+              <AgentInstallationRow
+                key={agent.id}
+                {agent}
+                installation={installationsByAgentId.get(agent.id)!}
+                pending={pendingAgentId === agent.id}
+                onInstall={installAgent}
+                onUninstall={uninstallAgent}
               />
             }
           </ul>
@@ -253,7 +253,7 @@ function AdapterInstallationList() @{
           {t`Available agents`}
         </h3>
 
-        @if (availableAdapters.length > 0) {
+        @if (availableAgents.length > 0) {
           <label class={styles.searchField}>
             <span class={styles.srOnly}>
               {t`Filter available agents`}
@@ -270,24 +270,24 @@ function AdapterInstallationList() @{
             />
           </label>
         }
-        @if (availableAdapters.length === 0) {
+        @if (availableAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No available agents.`}
           </p>
-        } @else if (visibleAvailableAdapters.length === 0) {
+        } @else if (visibleAvailableAgents.length === 0) {
           <p class={styles.emptyText}>
             {t`No available agents match this search.`}
           </p>
         } @else {
           <ul class={styles.adapterList}>
-            @for (const adapter of visibleAvailableAdapters) {
-              <AdapterInstallationRow
-                key={adapter.id}
-                {adapter}
-                installation={installationsByAdapterId.get(adapter.id)!}
-                pending={pendingAdapterId === adapter.id}
-                onInstall={installAdapter}
-                onUninstall={uninstallAdapter}
+            @for (const agent of visibleAvailableAgents) {
+              <AgentInstallationRow
+                key={agent.id}
+                {agent}
+                installation={installationsByAgentId.get(agent.id)!}
+                pending={pendingAgentId === agent.id}
+                onInstall={installAgent}
+                onUninstall={uninstallAgent}
               />
             }
           </ul>
@@ -300,11 +300,11 @@ function AdapterInstallationList() @{
 export function AdapterInstallationsSettingsSection() @{
   <SettingsSection
     id={adapterInstallationsSettingsSectionMetadata.id}
-    aria-labelledby="settings-adapter-installations-heading"
+    aria-labelledby="settings-agent-installations-heading"
   >
     <SettingsSectionHeader>
       <SettingsSectionTitle
-        id="settings-adapter-installations-heading"
+        id="settings-agent-installations-heading"
       >{adapterInstallationsSettingsSectionMetadata.title}</SettingsSectionTitle>
       <SettingsSectionDescription>{adapterInstallationsSettingsSectionMetadata.description}</SettingsSectionDescription>
     </SettingsSectionHeader>
@@ -317,7 +317,7 @@ export function AdapterInstallationsSettingsSection() @{
       </SettingsHelperText>
 
       @try {
-        <AdapterInstallationList />
+        <AgentInstallationList />
       } @pending {
         <p class={styles.emptyText}>
           {t`Loading agent harnesses.`}

@@ -1,5 +1,3 @@
-import { inboxAppPlugin } from "@goddard-ai/inbox/app"
-
 import type { MainTabItemId } from "~/main-tab-items.ts"
 
 /** App-shell state available to sidebar indicator rules without hiding hook calls in config. */
@@ -21,7 +19,7 @@ export const appShellDefaultSidebarDot: AppShellSidebarDot = {
 
 /** Optional dot predicates keyed by sidebar main tab item. */
 export const appShellSidebarDots: Partial<Record<MainTabItemId, AppShellSidebarDot>> = {
-  [inboxAppPlugin.navigation.id]: {
+  inbox: {
     getAriaLabel: (label) => `${label}, unread items`,
     isVisible: (state) => state.hasUnreadInboxItems,
   },

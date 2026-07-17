@@ -14,19 +14,19 @@ Goddard daemon launch currently needs:
 - `sessions.envPolicy` filtering applied across inherited host env, config-set env, agent distribution env, and per-session env.
 - Process stderr mirrored to the daemon temp log directory for diagnostics.
 - Launch-preview leases that keep a preinitialized process and ACP session alive before the durable daemon session is created.
-- Managed install resolution through `DaemonAgentInstallService` when `agents.managed[agent].install === "beforeUse"`.
+- Managed-agent launch process resolution when `agents.managed[agent].install === "beforeUse"`.
 - Explicit process ownership so persisted session state, active-session maps, shutdown, and daemon reconciliation stay under the session manager boundary.
 
-`createNodeAcpClient()` accepts `env`, `registry`, `registryService`, `binaryCacheDir`, and close policy, but it does not expose hooks for Goddard's environment assembly, stderr logging, launch-lease handoff, or managed-install process-spec resolution.
+`createNodeAcpClient()` accepts `env`, registry inputs, binary cache location, and close policy, but it does not expose hooks for Goddard's environment assembly, stderr logging, launch-lease handoff, or agent process-spec resolution.
 
 ## Safe Delegation Boundary
 
 The daemon should continue to use acp-client for:
 
 - ACP protocol client/session lifecycle via `createAcpClient()`.
-- Registry lookup through the daemon registry service backed by `createAcpRegistryService()`.
+- Registry lookup and runnable process-spec resolution through the agent feature.
 - Managed install/update/status/process-spec operations through `acp-client/node` managed install APIs.
-- Low-level archive helpers only where Goddard still owns an explicit local adapter or unmanaged binary cache path.
+- Low-level archive helpers only where Goddard still owns an explicit unmanaged binary cache path.
 
 The daemon should not move to `createNodeAcpClient()` until acp-client can provide process-launch hooks without taking over daemon-owned policy and persistence boundaries.
 
@@ -47,7 +47,7 @@ Please consider exposing one of these smaller primitives:
 Required behavior:
 
 - Preserve existing registry and inline distribution resolution.
-- Allow callers to provide `registryService`, inline `registry`, binary cache location, and managed install cache location.
+- Allow callers to provide registry inputs, binary cache location, and managed install cache location.
 - Let callers inject or filter environment variables after distribution env resolution and before spawn.
 - Let callers observe or redirect stderr.
 - Let callers keep the process handle separate from the initialized ACP client so launch-preview leases can transfer ownership into a later durable session.

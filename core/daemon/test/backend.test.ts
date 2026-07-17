@@ -10,10 +10,10 @@ test("daemon backend client creates PRs and checks managed status through rouzer
   let authorization: string | null = null
 
   try {
-    const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
+    const flow = controlPlane.startDeviceFlow(githubStart("alec"))
     const session = controlPlane.completeDeviceFlow({
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
     authorization = `Bearer ${session.token}`
 
@@ -22,6 +22,7 @@ test("daemon backend client creates PRs and checks managed status through rouzer
       getAuthorizationHeader: () => authorization,
     })
     const pr = await client.pullRequests.create({
+      provider: "github",
       owner: "goddard-ai",
       repo: "sdk",
       title: "Add daemon backend route client",
@@ -33,6 +34,7 @@ test("daemon backend client creates PRs and checks managed status through rouzer
     expect(pr.number).toBe(1)
     await expect(
       client.pullRequests.managed({
+        provider: "github",
         owner: "goddard-ai",
         repo: "sdk",
         prNumber: pr.number,
@@ -54,10 +56,10 @@ test("daemon backend client uses injected auth state for authenticated requests"
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    const start = await client.auth.device.start({ githubUsername: "alec" })
+    const start = await client.auth.device.start(githubStart("alec"))
     const session = await client.auth.device.complete({
       deviceCode: start.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
 
     authorization = `Bearer ${session.token}`
@@ -72,15 +74,12 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
   const server = await startBackendServer(controlPlane, { port: 0 })
   const baseUrl = `http://127.0.0.1:${server.port}`
   let authorization: string | null = null
-  let subscription: Awaited<
-    ReturnType<ReturnType<typeof createBackendClient>["stream"]["subscribe"]>
-  > | null = null
 
   try {
-    const flow = controlPlane.startDeviceFlow({ githubUsername: "alec" })
+    const flow = controlPlane.startDeviceFlow(githubStart("alec"))
     const session = controlPlane.completeDeviceFlow({
       deviceCode: flow.deviceCode,
-      githubUsername: "alec",
+      providerIdentity: githubIdentity("alec"),
     })
     authorization = `Bearer ${session.token}`
 
@@ -88,13 +87,12 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       baseUrl,
       getAuthorizationHeader: () => authorization,
     })
-    subscription = await client.stream.subscribe()
-
-    const eventPromise = new Promise<unknown>((resolve) => {
-      subscription!.on("event", resolve)
-    })
+    const eventsPromise = client.events.stream({ names: ["pr.created"] })
+    const eventPromise = eventsPromise.then(readFirstEvent)
+    await Bun.sleep(10)
 
     const pr = await client.pullRequests.create({
+      provider: "github",
       owner: "goddard-ai",
       repo: "sdk",
       title: "Stream me",
@@ -103,24 +101,47 @@ test("daemon backend client subscribes to unified stream via rouzer route respon
       base: "main",
     })
 
-    const event = (await eventPromise) as { type: string; prNumber: number }
+    const event = await eventPromise
     expect(pr.number).toBe(1)
     expect(event.type).toBe("pr.created")
     expect(event.prNumber).toBe(1)
   } finally {
-    subscription?.close()
-    await Bun.sleep(10)
     await server.close()
   }
 })
 
+function githubStart(login: string) {
+  return {
+    provider: "github",
+    loginHint: login,
+  }
+}
+
+function githubIdentity(login: string) {
+  return {
+    provider: "github",
+    subject: String(hashTestIdentity(login)),
+    displayName: login,
+  }
+}
+
+function hashTestIdentity(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash) + 1000
+}
+
 test("daemon backend client reports missing stream auth as unauthenticated errors", async () => {
   const client = createBackendClient({
     baseUrl: "https://goddardai.org/api",
+    fetchImpl: async () => new Response("unauthorized", { status: 401 }),
     getAuthorizationHeader: () => null,
   })
 
-  await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+  await expect(client.events.stream({})).rejects.toBeInstanceOf(BackendUnauthenticatedError)
 })
 
 test("daemon backend client reports stream auth failures as unauthenticated errors", async () => {
@@ -134,8 +155,16 @@ test("daemon backend client reports stream auth failures as unauthenticated erro
       getAuthorizationHeader: () => "Bearer invalid-token",
     })
 
-    await expect(client.stream.subscribe()).rejects.toBeInstanceOf(BackendUnauthenticatedError)
+    await expect(client.events.stream({})).rejects.toBeInstanceOf(BackendUnauthenticatedError)
   } finally {
     await server.close()
   }
 })
+
+async function readFirstEvent<T>(events: AsyncIterable<T>): Promise<T> {
+  for await (const event of events) {
+    return event
+  }
+
+  throw new Error("Backend event stream ended before emitting data")
+}

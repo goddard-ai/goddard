@@ -872,6 +872,16 @@ function createTestLogService(
 
   return {
     createLogger: () => logger,
+    createDebug:
+      (debugScope) =>
+      (event, fields = {}) => {
+        output.push({
+          debugScope,
+          event,
+          ...readContext(),
+          ...fields,
+        })
+      },
     isVerboseLogging: () => false,
     createPayloadPreview: (value) => value,
     createChunkPreview: (value) => ({

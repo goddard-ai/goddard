@@ -6,6 +6,7 @@ const accentStrongColor = token.var("colors.accentStrong")
 const backgroundColor = token.var("colors.background")
 const borderColor = token.var("colors.border")
 const panelColor = token.var("colors.panel")
+const surfaceColor = token.var("colors.surface")
 const textColor = token.var("colors.text")
 
 export default {
@@ -188,6 +189,48 @@ export default {
     backgroundColor: "surface",
     boxShadow: `inset 0 -0.5px 0 ${borderColor}`,
   }),
+  tabNavigationGroup: css({
+    display: "flex",
+    alignItems: "center",
+    gap: "1px",
+    height: "31px",
+    paddingLeft: "5px",
+    paddingRight: "4px",
+    flexShrink: "0",
+    backgroundColor: "surface",
+  }),
+  tabNavigationButton: css({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "23px",
+    height: "23px",
+    padding: "0",
+    border: "none",
+    borderRadius: "6px",
+    backgroundColor: "transparent",
+    color: `color-mix(in srgb, ${textColor} 48%, transparent)`,
+    cursor: "pointer",
+    transition:
+      "background-color 160ms cubic-bezier(0.23, 1, 0.32, 1), color 160ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms cubic-bezier(0.23, 1, 0.32, 1)",
+    _disabled: {
+      color: `color-mix(in srgb, ${textColor} 20%, transparent)`,
+      cursor: "default",
+    },
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "-2px",
+    },
+    _hover: {
+      backgroundColor: `color-mix(in srgb, ${textColor} 8%, transparent)`,
+      color: "text",
+      _disabled: {
+        backgroundColor: "transparent",
+        color: `color-mix(in srgb, ${textColor} 20%, transparent)`,
+      },
+    },
+  }),
   tabStrip: css({
     position: "relative",
     flex: "1 1 auto",
@@ -341,24 +384,35 @@ export default {
     transition: "color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
   tabTail: css({
-    display: "grid",
-    placeItems: "center",
-    width: "32px",
+    position: "relative",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "7px",
     height: "30px",
-    marginRight: "0",
-    flexShrink: "0",
+    minWidth: "20px",
+    paddingRight: "8px",
+    boxSizing: "border-box",
     cursor: "pointer",
+    zIndex: "1",
   }),
-  tabDirty: css({
-    gridArea: "1 / 1",
-    width: "6px",
-    height: "6px",
-    borderRadius: "999px",
-    backgroundColor: "accentStrong",
+  tabTailMask: css({
+    position: "absolute",
+    inset: "0",
+    background: `linear-gradient(90deg, transparent 0, ${surfaceColor} 26px, ${surfaceColor} 100%)`,
+    pointerEvents: "none",
     transition: "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1)",
   }),
+  tabDirty: css({
+    width: "6px",
+    height: "6px",
+    flexShrink: "0",
+    borderRadius: "999px",
+    backgroundColor: "accentStrong",
+    pointerEvents: "none",
+    zIndex: "1",
+  }),
   tabClose: css({
-    gridArea: "1 / 1",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -373,6 +427,7 @@ export default {
     opacity: "0",
     transition:
       "opacity 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1), color 180ms cubic-bezier(0.23, 1, 0.32, 1)",
+    zIndex: "1",
     _focusVisible: {
       outline: "2px solid",
       outlineColor: "accentStrong",
@@ -383,6 +438,76 @@ export default {
     _hover: {
       backgroundColor: `color-mix(in srgb, ${textColor} 10%, transparent)`,
       color: "text",
+    },
+  }),
+  confirmDialog: css({
+    width: "min(360px, calc(100vw - 32px))",
+    padding: "0",
+    border: "1px solid {colors.border}",
+    borderRadius: "8px",
+    backgroundColor: "panel",
+    color: "text",
+    boxShadow: `0 18px 48px color-mix(in srgb, ${backgroundColor} 72%, transparent)`,
+    _backdrop: {
+      backgroundColor: `color-mix(in srgb, ${backgroundColor} 82%, transparent)`,
+    },
+  }),
+  confirmDialogContent: css({
+    display: "grid",
+    gap: "14px",
+    padding: "16px",
+  }),
+  confirmDialogTitle: css({
+    margin: "0",
+    color: "text",
+    fontSize: "14px",
+    fontWeight: "620",
+    letterSpacing: "0",
+    lineHeight: "1.2",
+  }),
+  confirmDialogBody: css({
+    margin: "7px 0 0",
+    color: "muted",
+    fontSize: "13px",
+    fontWeight: "400",
+    letterSpacing: "0",
+    lineHeight: "1.35",
+  }),
+  confirmDialogActions: css({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "8px",
+  }),
+  confirmDialogButton: css({
+    height: "28px",
+    padding: "0 10px",
+    border: "1px solid {colors.border}",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "560",
+    letterSpacing: "0",
+    lineHeight: "1",
+    _focusVisible: {
+      outline: "2px solid",
+      outlineColor: "accentStrong",
+      outlineOffset: "2px",
+    },
+  }),
+  confirmDialogCancelButton: css({
+    backgroundColor: "transparent",
+    color: "text",
+    _hover: {
+      backgroundColor: `color-mix(in srgb, ${textColor} 8%, transparent)`,
+    },
+  }),
+  confirmDialogConfirmButton: css({
+    borderColor: "accentStrong",
+    backgroundColor: "accentStrong",
+    color: "background",
+    _hover: {
+      backgroundColor: `color-mix(in srgb, ${accentStrongColor} 86%, ${backgroundColor})`,
     },
   }),
   icon: css({

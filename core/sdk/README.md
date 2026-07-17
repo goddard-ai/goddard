@@ -29,12 +29,13 @@ Use `@goddard-ai/daemon-client/node` when you need to:
 Use `@goddard-ai/sdk` when you need to:
 
 - Call daemon IPC actions through one stable SDK instance.
+- Inspect and update user-scoped root configuration through `sdk.config`.
 - Work from a browser-safe or other non-Node host with an explicit daemon client.
 - Use the same auth, PR, session, action, loop, and workforce method shapes as other hosts.
 - Create or reconnect one live daemon-backed agent session through `sdk.session.run(...)`.
 - Keep a stable `AgentSession` object for prompts, daemon-owned turn cancellation, steering, history, shutdown, and model changes.
 - Stream live daemon-filtered session updates through generated stream routes such as
-  `sdk.session.streamMessages(...)`.
+  `sdk.session.message event stream(...)`.
 
 Use `@goddard-ai/sdk/node` when you need to:
 
@@ -53,6 +54,7 @@ Use `@goddard-ai/sdk/node` when you need to:
 
 Namespaces:
 
+- `sdk.config`
 - `sdk.daemon`
 - `sdk.auth`
 - `sdk.pr`
@@ -79,13 +81,13 @@ Browser-safe explicit client:
 
 ```ts
 import { daemonIpcRoutes } from "@goddard-ai/daemon-client/daemon-ipc"
-import { createRouteClient, ndjson } from "@goddard-ai/ipc"
+import { createClient, ndjson } from "@goddard-ai/ipc"
 import { GoddardSdk } from "@goddard-ai/sdk"
 
 const desktopHost = globalThis.desktopHost
 
 const sdk = new GoddardSdk({
-  client: createRouteClient({
+  client: createClient({
     baseURL: "http://127.0.0.1:49827/",
     routes: daemonIpcRoutes,
     plugins: [ndjson.clientPlugin],
@@ -103,7 +105,7 @@ const loop = await sdk.loop.get({
   loopName: "triage",
 })
 const abortController = new AbortController()
-const messages = await sdk.session.streamMessages(
+const messages = await sdk.session.message event stream(
   { id: "session-1" },
   { signal: abortController.signal },
 )

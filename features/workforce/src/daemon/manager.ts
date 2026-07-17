@@ -44,7 +44,7 @@ export type WorkforceManagerMutation =
 /** Optional lifecycle dependencies used to build new runtime instances. */
 export interface WorkforceManagerDeps extends WorkforceRuntimeDeps {
   log: DaemonLogService
-  createRuntime?: (rootDir: string, deps: WorkforceRuntimeDeps) => Promise<WorkforceRuntime>
+  createRuntime?: (rootDir: string, runtimeDeps: WorkforceRuntimeDeps) => Promise<WorkforceRuntime>
 }
 
 /** Daemon-owned runtime registry keyed by normalized repository root. */
@@ -61,8 +61,15 @@ export interface WorkforceManager {
   close: () => Promise<void>
 }
 
-export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceManager {
-  const logger = deps.log.createLogger()
+export function createWorkforceManager({
+  log,
+  session,
+  attachSession,
+  runSession,
+  events,
+  createRuntime,
+}: WorkforceManagerDeps): WorkforceManager {
+  const logger = log.createLogger()
   const runtimes = new Map<string, WorkforceRuntime>()
 
   async function getRuntime(
@@ -93,12 +100,12 @@ export function createWorkforceManager(deps: WorkforceManagerDeps): WorkforceMan
 
       let runtime: WorkforceRuntime
       try {
-        runtime = await (deps.createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
-          log: deps.log,
-          session: deps.session,
-          attachSession: deps.attachSession,
-          runSession: deps.runSession,
-          publishEvent: deps.publishEvent,
+        runtime = await (createRuntime ?? WorkforceRuntime.start)(normalizedRootDir, {
+          log,
+          session,
+          attachSession,
+          runSession,
+          events,
         })
       } catch (error) {
         logger.log("workforce.runtime_start_failed", {

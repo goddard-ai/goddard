@@ -2,20 +2,19 @@ import type { Socket } from "node:net"
 import {
   isRemoteRepoEventBroadcaster,
   isRemoteRepoStreamService,
+  type RemoteRepoStreamEvent,
 } from "@goddard-ai/remote-repo/backend"
-import { type RepoEvent } from "@goddard-ai/remote-repo/schema"
+import type { RepoEvent } from "@goddard-ai/remote-repo/schema"
 import { createServer as createNodeServer } from "@hattip/adapter-node"
 import { getErrorMessage } from "radashi"
 
 import { type BackendControlPlane } from "./api/control-plane.ts"
 import { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 import { createBackendRouter } from "./api/router.ts"
-import { createSseSession } from "./utils.ts"
 
 export * from "./api/control-plane.ts"
 export { InMemoryBackendControlPlane } from "./api/in-memory-control-plane.ts"
 export { TursoBackendControlPlane } from "./db/persistence.ts"
-export * from "./github-app.ts"
 
 // Optional host and port overrides for the local Node backend server.
 type StartServerOptions = {
@@ -39,31 +38,15 @@ export async function startBackendServer(
 
   const router = createBackendRouter({
     createControlPlane: () => controlPlane,
-    broadcastEvent: async (_env, event) => {
-      broadcastToInMemoryStreams(controlPlane, event)
+    broadcastEvent: async (_env, publication) => {
+      broadcastToInMemoryStreams(controlPlane, publication.event)
     },
-    handleUserStream: async (_env, githubUsername, request) => {
-      const sseSession = createSseSession(() => {
-        if (isRemoteRepoStreamService(controlPlane)) {
-          controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
-        }
-      })
-
+    handleUserEvents: (_env, githubUsername, filter) => {
       if (isRemoteRepoStreamService(controlPlane)) {
-        controlPlane.addStreamSocket(githubUsername, sseSession.sink)
+        return controlPlane.subscribeRemoteRepoEvents(githubUsername, filter)
       }
-      request.signal.addEventListener(
-        "abort",
-        () => {
-          if (isRemoteRepoStreamService(controlPlane)) {
-            controlPlane.removeStreamSocket(githubUsername, sseSession.sink)
-          }
-          sseSession.sink.close?.()
-        },
-        { once: true },
-      )
 
-      return sseSession.response
+      return emptyRemoteRepoEvents()
     },
   })
 
@@ -118,8 +101,13 @@ export async function startBackendServer(
   }
 }
 
-function broadcastToInMemoryStreams(controlPlane: BackendControlPlane, event: RepoEvent): void {
+function broadcastToInMemoryStreams(
+  controlPlane: BackendControlPlane,
+  event: RemoteRepoStreamEvent,
+): void {
   if (isRemoteRepoEventBroadcaster(controlPlane)) {
     controlPlane.broadcastRemoteRepoEvent(event)
   }
 }
+
+async function* emptyRemoteRepoEvents(): AsyncIterable<RepoEvent> {}

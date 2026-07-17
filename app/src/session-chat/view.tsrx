@@ -1,13 +1,21 @@
 import { t } from "@lingui/core/macro"
-import { deriveSessionLaunchModelConfig, type DaemonSession } from "@goddard-ai/sdk"
+import {
+  deriveSessionLaunchModelConfig,
+  deriveSessionProfileConfig,
+  type DaemonSession,
+  type GetSessionWorktreeMergeReadinessResponse,
+  type SessionProfileId,
+} from "@goddard-ai/sdk"
 import { cx } from "@goddard-ai/styled-system/css"
-import { useSignal } from "@preact/signals"
+import { signal, type Signal, useSignal } from "@preact/signals"
 import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   FileDiff,
+  GitBranch,
   GitFork,
+  GitMerge,
   Laptop,
   XCircle,
 } from "lucide-react"
@@ -16,6 +24,7 @@ import { castProtected, SigmaTarget, useSigmaSync } from "preact-sigma"
 import { isObject } from "radashi"
 
 import { Composer } from "./composer.tsrx"
+import { hasPromptContent } from "./composer-content.ts"
 import { loadSessionChatComposerSuggestions } from "./composer-suggestion-loader.ts"
 import { SessionChat } from "./model.ts"
 import type { SessionChatPageEvents } from "./page-events.ts"
@@ -40,6 +49,12 @@ import {
 } from "~/session-input/config-options.ts"
 import { SessionInputSelect, type SessionInputSelectItem } from "~/session-input/select-menu.tsrx"
 import { AcpAgentIcon } from "~/sessions/acp-agent-icon.tsrx"
+import { applySessionControlUpdates } from "~/sessions/apply-session-controls.ts"
+import {
+  findMatchingSessionProfileId,
+  getAvailableSessionProfiles,
+  getSessionProfileLabel,
+} from "~/sessions/session-profiles.ts"
 import {
   SessionConfigOptionSelector,
   SessionModeSelector,
@@ -47,14 +62,18 @@ import {
 import {
   cancelSessionTurn,
   completeSession,
+  mergeSessionWorktree,
   popQueuedSessionPrompt,
   reconnectSession,
   respondSessionPermission,
+  setSessionWorktreeMergeTargetBranch,
   setSessionConfigOption,
   submitSessionPrompt,
   steerSessionPrompt,
 } from "~/sessions/mutations.ts"
 import { invalidateSessionChanges, invalidateSessionDetail } from "~/sessions/cache.ts"
+import type { SessionInputPromptBlocks } from "~/session-input/input.tsrx"
+import { useTabContext } from "~/tab-context.tsrx"
 import { useWorkbenchCachedValue } from "~/use-workbench-cached-value.ts"
 
 export default function SessionChatView(props: {
@@ -78,7 +97,7 @@ function SessionChatViewContent(props: {
 
   <main class={styles.root}>
     @try {
-      const [sessionHistory, { session }, sessionWorktree] = useQueries(
+      const [sessionHistory, { session }, sessionWorktree, mergeReadiness] = useQueries(
         (query) => [
           query(goddardSdk.session.history, {
             params: [{ id: props.sessionId }],
@@ -88,6 +107,9 @@ function SessionChatViewContent(props: {
             params: [{ id: props.sessionId }],
           }),
           query(goddardSdk.session.worktree.get, {
+            params: [{ id: props.sessionId }],
+          }),
+          query(goddardSdk.session.worktree.mergeReadiness, {
             params: [{ id: props.sessionId }],
           }),
         ],
@@ -164,8 +186,18 @@ function SessionChatViewContent(props: {
           </div>
           <div class={styles.headerControls}>
             <div class={styles.headerActions}>
-              <SessionChatHeaderActions {canNavigatePrompts} {chat} {page} />
+              <SessionChatHeaderActions
+                {canNavigatePrompts}
+                {chat}
+                mergeReadiness={mergeReadiness.readiness}
+                {page}
+              />
             </div>
+            {getMergeStatusText(mergeReadiness.readiness)
+              ? <span class={styles.headerStatusText}>{getMergeStatusText(
+                  mergeReadiness.readiness,
+                )}</span>
+              : null}
           </div>
         </header>
 
@@ -246,10 +278,14 @@ function SessionChatViewContent(props: {
 function SessionChatHeaderActions(props: {
   canNavigatePrompts: boolean;
   chat: SessionChat;
+  mergeReadiness: GetSessionWorktreeMergeReadinessResponse["readiness"];
   page: ReturnType<typeof useSessionChatPageModel>;
 }) @{
   const workbenchTabSet = useWorkbenchTabSet()
   const activeHeaderAction = props.page.headerAction.activeKey.value
+  const shouldRenderMergeControls =
+    props.mergeReadiness.status !== "missing_worktree" &&
+      props.mergeReadiness.status !== "worktree_missing"
 
   function openSessionChanges() {
     invalidateSessionChanges(props.chat.session.id)
@@ -339,6 +375,68 @@ function SessionChatHeaderActions(props: {
     }).catch(() => {})
   }
 
+  const setMergeTargetBranch = async () => {
+    if (!shouldRenderMergeControls) {
+      return
+    }
+
+    const nextMergeTargetBranch = globalThis.prompt(
+      t`Merge target branch (leave empty to clear)`,
+      props.mergeReadiness.mergeTargetBranch ?? "",
+    )
+    if (nextMergeTargetBranch === null) {
+      return
+    }
+
+    await props.page.headerAction.run("setMergeTargetBranch", async () => {
+      try {
+        await setSessionWorktreeMergeTargetBranch({
+          id: props.chat.session.id,
+          mergeTargetBranch: nextMergeTargetBranch.trim().length > 0
+            ? nextMergeTargetBranch.trim()
+            : null,
+        })
+      } catch (error) {
+        console.error("Failed to update merge target branch.", error)
+        throw {
+          title: t`Target branch update failed`,
+          description: formatSessionRequestError(error),
+        }
+      }
+    }).catch(() => {})
+  }
+
+  const mergeCurrentWorktree = async () => {
+    if (props.mergeReadiness.status !== "ready") {
+      return
+    }
+
+    await props.page.headerAction.run("merge", async () => {
+      try {
+        const result = await mergeSessionWorktree({
+          id: props.chat.session.id,
+        })
+
+        if (!result.merged) {
+          throw {
+            title: t`Merge skipped`,
+            description: getMergeStatusText(result.readiness) ?? t`The daemon rejected the merge.`,
+          }
+        }
+      } catch (error) {
+        if (isSessionChatHeaderActionError(error)) {
+          throw error
+        }
+
+        console.error("Failed to merge session worktree.", error)
+        throw {
+          title: t`Merge failed`,
+          description: formatSessionRequestError(error),
+        }
+      }
+    }).catch(() => {})
+  }
+
   <>
     <AppCommandTooltip
       command={AppCommand.sessionChat.skipToPreviousPrompt}
@@ -413,7 +511,107 @@ function SessionChatHeaderActions(props: {
           </button>
         </GoodTooltip>
       : null}
+
+    {shouldRenderMergeControls
+      ? <>
+          <GoodTooltip
+            ariaLabel={props.mergeReadiness.mergeTargetBranch
+              ? t`Merge target branch: ${props.mergeReadiness.mergeTargetBranch}`
+              : t`Set merge target branch`}
+            content={props.mergeReadiness.mergeTargetBranch
+              ? t`Target branch: ${props.mergeReadiness.mergeTargetBranch}`
+              : t`Set merge target branch`}
+          >
+            <button
+              aria-label={props.mergeReadiness.mergeTargetBranch
+                ? t`Merge target branch: ${props.mergeReadiness.mergeTargetBranch}`
+                : t`Set merge target branch`}
+              class={styles.headerActionButton}
+              disabled={activeHeaderAction !== null}
+              type="button"
+              onClick={setMergeTargetBranch}
+            >
+              <GitBranch size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
+
+          <GoodTooltip ariaLabel={t`Merge worktree`} content={t`Merge worktree`}>
+            <button
+              aria-label={t`Merge worktree`}
+              class={styles.headerActionButton}
+              disabled={activeHeaderAction !== null || props.mergeReadiness.status !== "ready"}
+              type="button"
+              onClick={mergeCurrentWorktree}
+            >
+              <GitMerge size={15} strokeWidth={2.1} />
+            </button>
+          </GoodTooltip>
+        </>
+      : null}
   </>
+}
+
+function SessionChatProfileSelector(props: {
+  agentId: string | null;
+  approvalModeValue: string | null;
+  configOptions: DaemonSession["configOptions"];
+  modelId: string | null;
+  open: Signal<boolean>;
+  thinkingValue: string | null;
+  onSelect: (selection: {
+    modelId: string;
+    thinkingValue: string;
+    approvalModeValue: string;
+  }) => void;
+}) @{
+  @try {
+    const sessionProfiles = useQuery(goddardSdk.session.profile.list, {
+      params: [{}],
+    })
+    const profileConfig = deriveSessionProfileConfig({
+      configOptions: props.configOptions,
+    })
+    const agentProfiles = props.agentId ? sessionProfiles.profiles[props.agentId] : undefined
+    const profileItems: SessionInputSelectItem[] = getAvailableSessionProfiles(
+      agentProfiles,
+      profileConfig,
+    ).map(
+      ({ profileId }) => ({
+        value: profileId,
+        label: getSessionProfileLabel(profileId),
+      }),
+    )
+    const activeProfileId = findMatchingSessionProfileId(agentProfiles, profileConfig, {
+      modelId: props.modelId,
+      thinkingValue: props.thinkingValue,
+      approvalModeValue: props.approvalModeValue,
+    })
+
+    @if (profileItems.length > 0) {
+      <SessionInputSelect
+        compact={true}
+        filterable={false}
+        items={profileItems}
+        label={t`Session profile`}
+        open={props.open}
+        placeholder={t`Custom`}
+        value={activeProfileId}
+        onValueChange={(value) => {
+          const profile = agentProfiles?.[value as SessionProfileId]
+          if (!profile) {
+            return
+          }
+
+          const resolvedProfile = profileConfig.resolveProfile(profile)
+          if (resolvedProfile.status === "available") {
+            props.onSelect(resolvedProfile)
+          }
+        }}
+      />
+    }
+  } @pending {
+  } @catch {
+  }
 }
 
 function SessionChatComposerDock(props: {
@@ -426,22 +624,33 @@ function SessionChatComposerDock(props: {
   const submitError = props.page.submitPrompt.error.value
   const modePickerOpen = useSignal(false)
   const modelPickerOpen = useSignal(false)
+  const profilePickerOpen = useSignal(false)
   const thinkingPickerOpen = useSignal(false)
   const draftModeValue = useSignal<string | null>(null)
   const draftModelId = useSignal<string | null>(null)
   const draftThinkingValue = useSignal<string | null>(null)
   const shortcutRegistry = useShortcutRegistry()
+  const tabContext = useTabContext()
+  const workbenchTabSet = useWorkbenchTabSet()
+  const draftPromptBlocks = useWorkbenchCachedValue(
+    "sessionChatComposerDraft",
+    () => ({
+      value: signal<SessionInputPromptBlocks>([]),
+    }),
+  )
   const sessionModelConfig = deriveSessionLaunchModelConfig({
     configOptions: props.chat.session.configOptions,
   })
-  const adapterCatalog = useQuery(goddardSdk.adapter.list, {
+  const managedAgentCatalog = useQuery(goddardSdk.agent.list, {
     params: [
       { cwd: props.chat.session.cwd, includeUninstalled: true },
     ],
   })
   const agentAdapter =
     typeof props.chat.session.agent === "string"
-      ? adapterCatalog.adapters.find((adapter) => adapter.id === props.chat.session.agent) ?? null
+      ? managedAgentCatalog.agents.find(
+        (adapter) => adapter.id === props.chat.session.agent,
+      ) ?? null
       : null
   const agentIcon =
     typeof props.chat.session.agent === "string"
@@ -497,6 +706,19 @@ function SessionChatComposerDock(props: {
                 </div>
               </GoodTooltip>
             : null}
+          <SessionChatProfileSelector
+            agentId={typeof props.chat.session.agent === "string" ? props.chat.session.agent : null}
+            approvalModeValue={draftModeValue.value ?? modeOption?.currentValue ?? null}
+            configOptions={props.chat.session.configOptions}
+            modelId={draftModelId.value ?? currentModelId}
+            open={profilePickerOpen}
+            thinkingValue={draftThinkingValue.value ?? thinkingOption?.currentValue ?? null}
+            onSelect={(selection) => {
+              draftModelId.value = selection.modelId
+              draftThinkingValue.value = selection.thinkingValue
+              draftModeValue.value = selection.approvalModeValue
+            }}
+          />
           {modelItems.length > 0
             ? <SessionInputSelect
                 compact={true}
@@ -583,6 +805,10 @@ function SessionChatComposerDock(props: {
     )
   }, { active: thinkingOption !== null })
 
+  useEffect(() => {
+    workbenchTabSet.setTabDirty(tabContext.id, hasPromptContent(draftPromptBlocks.value))
+  }, [draftPromptBlocks, tabContext.id, workbenchTabSet])
+
   async function applyDraftSessionControls() {
     const selectedModeValue = draftModeValue.value ?? modeOption?.currentValue ?? null
     const selectedThinkingValue = draftThinkingValue.value ?? thinkingOption?.currentValue ?? null
@@ -605,35 +831,43 @@ function SessionChatComposerDock(props: {
       modelId: draftModelId.value,
       configOptions: selectedConfigOptions,
     })
-    let latestSession: DaemonSession | null = null
+    const updates = [
+      ...(shouldApplyMode && typeof selectedModeValue === "string"
+        ? [
+            {
+              id: props.chat.session.id,
+              configId: modeOption.id,
+              value: selectedModeValue,
+            },
+          ]
+        : []),
+      ...(shouldApplyModel
+        ? (resolvedSelection.initialConfigOptions ?? []).map(
+            (configOption) => ({
+              id: props.chat.session.id,
+              configId: configOption.configId,
+              value: String(configOption.value),
+            }),
+          )
+        : []),
+    ]
 
-    if (shouldApplyMode && typeof selectedModeValue === "string") {
-      const result = await setSessionConfigOption({
-        id: props.chat.session.id,
-        configId: modeOption.id,
-        value: selectedModeValue,
+    try {
+      await applySessionControlUpdates({
+        updates,
+        apply: setSessionConfigOption,
+        refresh: async () => {
+          invalidateSessionDetail(props.chat.session.id)
+          const { session } = await goddardSdk.session.get({ id: props.chat.session.id })
+          return session
+        },
+        sync: (session) => props.chat.syncSession(session),
       })
-      latestSession = result.session
+    } finally {
+      draftModeValue.value = null
+      draftModelId.value = null
+      draftThinkingValue.value = null
     }
-
-    if (shouldApplyModel) {
-      for (const configOption of resolvedSelection.initialConfigOptions ?? []) {
-        const result = await setSessionConfigOption({
-          id: props.chat.session.id,
-          configId: configOption.configId,
-          value: String(configOption.value),
-        })
-        latestSession = result.session
-      }
-    }
-
-    if (latestSession) {
-      props.chat.syncSession(latestSession)
-    }
-
-    draftModeValue.value = null
-    draftModelId.value = null
-    draftThinkingValue.value = null
   }
 
   <footer class={styles.composerDock}>
@@ -642,9 +876,9 @@ function SessionChatComposerDock(props: {
           <strong class={styles.composerErrorTitle}>
             {t`Prompt wasn't sent`}
           </strong>
-          <span class={styles.composerErrorDescription}>
-            {t`Your draft is still here. Try again when the session is available.`}
-          </span>
+          <span class={styles.composerErrorDescription}>{formatSessionRequestError(
+            submitError,
+          )}</span>
         </div>
       : null}
 
@@ -654,6 +888,7 @@ function SessionChatComposerDock(props: {
       enableQueueSubmitShortcut={true}
       footerControls={footerControls}
       helperText={null}
+      initialPrompt={draftPromptBlocks.value}
       loadSuggestions={async (input) => {
         return loadSessionChatComposerSuggestions({
           cwd: props.chat.session.cwd,
@@ -663,7 +898,10 @@ function SessionChatComposerDock(props: {
           query: input.query,
         })
       }}
-      onPromptChange={() => {
+      onPromptChange={(prompt) => {
+        draftPromptBlocks.value = prompt
+        workbenchTabSet.setTabDirty(tabContext.id, hasPromptContent(prompt))
+
         if (submitError) {
           props.page.submitPrompt.clearError()
         }
@@ -726,6 +964,56 @@ function SessionChatStateMessage(props: {
         >{props.actionLabel}</button>
       : null}
   </div>
+}
+
+function getMergeStatusText(readiness: GetSessionWorktreeMergeReadinessResponse["readiness"]) {
+  if (readiness.status === "ready") {
+    if (readiness.willAutoUnmountSync) {
+      return t`Review sync will unmount automatically before merge.`
+    }
+
+    return readiness.mergeTargetBranch
+      ? t`Ready to merge into ${readiness.mergeTargetBranch}.`
+      : t`Ready to merge.`
+  }
+
+  if (readiness.status === "worktree_missing") {
+    return t`Session worktree is missing on disk.`
+  }
+
+  if (readiness.status === "merge_target_branch_required") {
+    return t`Select a target branch before merging.`
+  }
+
+  if (readiness.status === "merge_target_branch_missing") {
+    return t`The saved target branch no longer exists locally.`
+  }
+
+  if (readiness.status === "pr_scoped_session") {
+    return t`PR-scoped sessions cannot merge back into the primary checkout.`
+  }
+
+  if (readiness.status === "session_active") {
+    return t`Stop the session before merging.`
+  }
+
+  if (readiness.status === "worktree_dirty") {
+    return t`Commit or discard worktree changes before merging.`
+  }
+
+  if (readiness.status === "primary_dirty") {
+    return t`Clean the primary checkout before merging.`
+  }
+
+  if (readiness.status === "not_ahead") {
+    return t`The session worktree has no commits ahead of the target branch.`
+  }
+
+  if (readiness.status === "not_fast_forward") {
+    return t`The target branch has diverged. Fast-forward merge is unavailable.`
+  }
+
+  return null
 }
 
 function isSessionChatHeaderActionError(error: unknown) {
