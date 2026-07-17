@@ -4,8 +4,8 @@ import { resolve } from "node:path"
 import { statusReviewSession, stopReviewSession } from "@goddard-ai/review-sync"
 
 import type { SessionWorktreeMergeReadiness } from "../../schema.ts"
+import { runGitCommand } from "../git/command.ts"
 import { resolveGitHeadRef } from "../worktree.ts"
-import { runCommand } from "./process.ts"
 
 type MergePrimaryHeadIdentity = {
   headOid: string
@@ -365,8 +365,7 @@ async function runGit(
     stdin?: "ignore" | string
   } = {},
 ) {
-  const result = await runCommand("git", args, {
-    cwd,
+  const result = await runGitCommand(cwd, args, {
     stdin: options.stdin,
   }).catch((error) => {
     if (options.allowFailure) {
