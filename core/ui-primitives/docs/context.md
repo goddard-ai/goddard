@@ -49,12 +49,16 @@ Use `Tooltip` for non-interactive explanatory content attached to one trigger el
 Use `useListNavigation` for indexed list surfaces that need shared keyboard movement,
 active-row DOM attributes, disabled-row skipping, pointer hover highlighting, and
 scroll-into-view behavior without giving the primitive ownership of item rendering.
-The hook keeps keyboard and programmatic active-row movement visible by calling
-`scrollIntoView` with default `{ block: "nearest" }`; pointer-origin hover
-changes update the active row without scrolling. Callers still own the scroll
-container, overflow styling, item rendering, and `itemRef(index)` wiring. It also
-exposes focus helpers for registered rows and lets callers suppress pointer
-highlighting while keyboard or typeahead movement is in progress.
+The first enabled row is always the initial Enter activation target. It is visibly
+active by default on non-touch devices. Touch-capable devices never expose the
+activation target through the active DOM attribute, while keyboard, pointer, focus,
+and Enter behavior continue to use that target normally.
+The hook keeps keyboard and programmatic activation targets within the viewport by
+calling `scrollIntoView` with default `{ block: "nearest" }`; pointer-origin hover
+changes update the target without scrolling. Callers still own the scroll container,
+overflow styling, item rendering, and `itemRef(index)` wiring. It also exposes focus
+helpers for registered rows and lets callers suppress pointer highlighting while
+keyboard or typeahead movement is in progress.
 
 Use `useSearchNavigation` when a search input should wire input, keyboard, active-row,
 and activation behavior through DOM refs while inheriting `useListNavigation`
