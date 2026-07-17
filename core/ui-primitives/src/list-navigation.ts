@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from "preact/hooks"
 
 /** Imperative controller for a DOM-backed indexed list navigation surface. */
 export type ListNavigationController = {
-  /** Returns the currently active item index after clamping and disabled-row skipping. */
+  /** Returns the current activation target after clamping and disabled-row skipping. */
   activeIndex: () => number
   /** Moves DOM focus to the currently active registered item, if it is mounted. */
   focusActiveItem: () => void
@@ -23,9 +23,9 @@ export type ListNavigationController = {
    * Returns `true` when it handled the event and prevented the default action.
    */
   onKeyDown: (event: KeyboardEvent) => boolean
-  /** Resets the active index to the first enabled row. */
+  /** Resets the activation target to the first enabled row. */
   resetActiveIndex: () => void
-  /** Sets the active index directly, clamping to the current count and skipping disabled rows. */
+  /** Sets the activation target, clamping to the current count and skipping disabled rows. */
   setActiveIndex: (index: number) => void
 }
 
@@ -35,7 +35,8 @@ export type ListNavigationOptions = {
    * DOM attribute used to mark active rows.
    *
    * Defaults to `data-highlighted`; the active row receives `"true"` and other
-   * registered rows receive `"false"`.
+   * registered rows receive `"false"`. Touch-capable devices always receive
+   * `"false"` so activation targets do not appear selected there.
    */
   activeAttribute?: string
   /**
@@ -88,6 +89,11 @@ export type SearchNavigationOptions = ListNavigationOptions & {
 const defaultActiveAttribute = "data-highlighted"
 const defaultScrollOptions: ScrollIntoViewOptions = { block: "nearest" }
 type ActiveIndexOrigin = "navigation" | "pointer"
+
+// Browsers expose touch capability, but no reliable equivalent for keyboard support.
+function shouldExposeActiveIndex() {
+  return typeof navigator === "undefined" || !navigator.maxTouchPoints
+}
 
 /**
  * Manages DOM-backed active-row state for indexed list surfaces.
@@ -210,7 +216,11 @@ export function useListNavigation(options: ListNavigationOptions): ListNavigatio
           continue
         }
 
-        if (index === activeIndexRef.current && !isItemDisabled(index)) {
+        if (
+          shouldExposeActiveIndex() &&
+          index === activeIndexRef.current &&
+          !isItemDisabled(index)
+        ) {
           element.setAttribute(activeAttribute, "true")
           if (options?.allowScroll && activeIndexOriginRef.current === "navigation") {
             suppressPointerHighlightUntilMove()
