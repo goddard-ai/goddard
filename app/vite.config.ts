@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 
+import { resolve } from "node:path"
 import { lingui } from "@lingui/vite-plugin"
 import preact from "@preact/preset-vite"
 import tsrxPreact from "@tsrx/vite-plugin-preact"
@@ -58,6 +59,13 @@ export default defineConfig({
     exclude: ["state-launcher"],
   },
   resolve: {
+    alias: {
+      "@goddard-ai/ui-primitives": resolve(
+        import.meta.dirname,
+        "../core/ui-primitives/src/index.ts",
+      ),
+      "~": resolve(import.meta.dirname, "src"),
+    },
     conditions: ["bun"],
     tsconfigPaths: true,
   },
