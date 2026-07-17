@@ -60,7 +60,7 @@ describe("daemon workspace task execution", () => {
     expect(result.errors.some((error) => error.code === "unknown_dependency")).toBe(true)
   })
 
-  test("resolves and runs process and shell dependencies in sequence through PTYs", async () => {
+  test("runs process and shell dependencies in sequence through PTYs", async () => {
     const processMarker = "__goddard_process_task__"
     const shellMarker = "__goddard_shell_task__"
     const workspaceRoot = await createWorkspace({
@@ -88,10 +88,6 @@ describe("daemon workspace task execution", () => {
     const { manager, events } = createManager()
     const { connectionId } = manager.connect()
     manager.streamConnected(connectionId)
-
-    const preview = await manager.resolve({ workspaceRoot, label: "build" })
-    expect(preview.task.kind).toBe("compound")
-    expect(preview.task.dependencies.map((task) => task.label)).toEqual(["prepare", "report"])
 
     const run = await manager.run({ connectionId, workspaceRoot, label: "build" })
     const completed = await waitForEvent(

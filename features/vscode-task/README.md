@@ -8,7 +8,6 @@ Daemon-backed workspace task support for the custom-task subset implemented by
 This package owns:
 
 - `.vscode/tasks.json` loading, inspection, and structured errors
-- resolved task previews
 - explicit task-graph execution and cancellation
 - connection-scoped lifecycle and PTY output streams
 - the `vscodeTask` SDK namespace

@@ -104,43 +104,6 @@ export const InspectVscodeTasksResponse = z.strictObject({
 
 export type InspectVscodeTasksResponse = z.infer<typeof InspectVscodeTasksResponse>
 
-/** Fully resolved task and dependency plan exposed for explicit pre-run inspection. */
-export const ResolvedVscodeTaskPlan = z.strictObject({
-  label: z.string().min(1),
-  kind: VscodeTaskKind,
-  command: z.string().nullable(),
-  args: z.array(z.string()),
-  cwd: z.string().min(1),
-  env: z.record(z.string(), z.string()),
-  shell: z
-    .strictObject({
-      executable: z.string().nullable(),
-      args: z.array(z.string()).nullable(),
-    })
-    .nullable(),
-  hidden: z.boolean(),
-  group: VscodeTaskGroup.nullable(),
-  dependsOn: z.array(z.string()),
-  dependsOrder: VscodeTaskDependsOrder,
-  get dependencies() {
-    return z.array(ResolvedVscodeTaskPlan)
-  },
-})
-
-export type ResolvedVscodeTaskPlan = z.infer<typeof ResolvedVscodeTaskPlan>
-
-export const ResolveVscodeTaskRequest = InspectVscodeTasksRequest.extend({
-  label: z.string().min(1),
-})
-
-export type ResolveVscodeTaskRequest = z.infer<typeof ResolveVscodeTaskRequest>
-
-export const ResolveVscodeTaskResponse = z.strictObject({
-  task: ResolvedVscodeTaskPlan,
-})
-
-export type ResolveVscodeTaskResponse = z.infer<typeof ResolveVscodeTaskResponse>
-
 export const VscodeTaskConnectRequest = z.strictObject({})
 
 export type VscodeTaskConnectRequest = z.infer<typeof VscodeTaskConnectRequest>

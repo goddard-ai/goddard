@@ -8,7 +8,6 @@ import {
   TaskResolutionError,
   type Platform,
   type ResolveContext,
-  type ResolvedTaskPlan,
   type TaskAnalysis,
   type TaskAnalysisError,
   type TaskRecord,
@@ -18,9 +17,6 @@ import {
   VscodeTaskErrorCodes,
   type InspectVscodeTasksRequest,
   type InspectVscodeTasksResponse,
-  type ResolvedVscodeTaskPlan,
-  type ResolveVscodeTaskRequest,
-  type ResolveVscodeTaskResponse,
   type VscodeTaskAnalysisError,
   type VscodeTaskSummary,
 } from "../schema.ts"
@@ -36,15 +32,6 @@ export async function inspectVscodeTasks(
   request: InspectVscodeTasksRequest,
 ): Promise<InspectVscodeTasksResponse> {
   return (await loadVscodeTasks(request)).inspection
-}
-
-export async function resolveVscodeTask(
-  request: ResolveVscodeTaskRequest,
-): Promise<ResolveVscodeTaskResponse> {
-  const loaded = await loadVscodeTasks(request)
-  return {
-    task: resolveLoadedVscodeTask(loaded, request.label),
-  }
 }
 
 export async function loadVscodeTasks(
@@ -89,12 +76,9 @@ export async function loadVscodeTasks(
   }
 }
 
-export function resolveLoadedVscodeTask(
-  loaded: LoadedVscodeTasks,
-  label: string,
-): ResolvedVscodeTaskPlan {
+export function assertLoadedVscodeTaskRunnable(loaded: LoadedVscodeTasks, label: string) {
   try {
-    return toResolvedTaskPlan(resolveTask(loaded.analysis, label, loaded.context))
+    resolveTask(loaded.analysis, label, loaded.context)
   } catch (error) {
     if (error instanceof TaskResolutionError) {
       throw createVscodeTaskIpcError(VscodeTaskErrorCodes.TaskUnavailable, { label })
@@ -143,28 +127,6 @@ function toAnalysisError(error: TaskAnalysisError): VscodeTaskAnalysisError {
     message: error.message,
     taskId: error.taskId ?? null,
     label: error.label ?? null,
-  }
-}
-
-function toResolvedTaskPlan(task: ResolvedTaskPlan): ResolvedVscodeTaskPlan {
-  return {
-    label: task.label,
-    kind: task.kind,
-    command: task.command ?? null,
-    args: task.args,
-    cwd: task.cwd,
-    env: task.env,
-    shell: task.shell
-      ? {
-          executable: task.shell.executable ?? null,
-          args: task.shell.args ?? null,
-        }
-      : null,
-    hidden: task.hidden,
-    group: task.group ?? null,
-    dependsOn: task.dependsOn,
-    dependsOrder: task.dependsOrder,
-    dependencies: task.dependencies.map(toResolvedTaskPlan),
   }
 }
 

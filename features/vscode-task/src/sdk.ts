@@ -4,8 +4,6 @@ import { vscodeTaskIpcRoutes } from "./daemon-ipc.ts"
 import type {
   InspectVscodeTasksRequest,
   InspectVscodeTasksResponse,
-  ResolveVscodeTaskRequest,
-  ResolveVscodeTaskResponse,
   VscodeTaskCancelRequest,
   VscodeTaskConnectRequest,
   VscodeTaskConnectResponse,
@@ -26,7 +24,6 @@ export interface GoddardVscodeTaskConnection {
 
 export type GoddardVscodeTaskNamespace = {
   inspect(input: InspectVscodeTasksRequest): Promise<InspectVscodeTasksResponse>
-  resolve(input: ResolveVscodeTaskRequest): Promise<ResolveVscodeTaskResponse>
   connect(input?: VscodeTaskConnectRequest): Promise<GoddardVscodeTaskConnection>
 }
 
@@ -89,7 +86,6 @@ export const vscodeTaskSdkPlugin = defineSdkPlugin({
 
     const vscodeTask: GoddardVscodeTaskNamespace = {
       inspect: async (input) => client.vscodeTask.inspect(input),
-      resolve: async (input) => client.vscodeTask.resolve(input),
       connect: async (input = {}) => {
         const response = await client.vscodeTask.connect(input)
         return createConnection(response.connectionId)

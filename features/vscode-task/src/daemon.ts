@@ -62,7 +62,6 @@ export const vscodeTaskPlugin = definePlugin({
       ipcHandlers: {
         vscodeTask: {
           inspect: async ({ body }) => manager.inspect(body),
-          resolve: async ({ body }) => manager.resolve(body),
           connect: async () => manager.connect(),
           run: async ({ body }) => manager.run(body),
           cancel: async ({ body }) => manager.cancel(body),

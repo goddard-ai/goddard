@@ -5,7 +5,6 @@ import { runTask, type TaskRun, type TaskRunEvent, type TaskRunResult } from "vs
 import {
   VscodeTaskErrorCodes,
   type InspectVscodeTasksRequest,
-  type ResolveVscodeTaskRequest,
   type VscodeTaskCancelRequest,
   type VscodeTaskConnectionId,
   type VscodeTaskConnectResponse,
@@ -16,12 +15,7 @@ import {
   type VscodeTaskRunResponse,
   type VscodeTaskRunResult,
 } from "../schema.ts"
-import {
-  inspectVscodeTasks,
-  loadVscodeTasks,
-  resolveLoadedVscodeTask,
-  resolveVscodeTask,
-} from "./document.ts"
+import { assertLoadedVscodeTaskRunnable, inspectVscodeTasks, loadVscodeTasks } from "./document.ts"
 import { createVscodeTaskHost } from "./host.ts"
 import { createVscodeTaskIpcError } from "./ipc-error.ts"
 
@@ -53,10 +47,6 @@ export class VscodeTaskManager {
     return inspectVscodeTasks(request)
   }
 
-  resolve(request: ResolveVscodeTaskRequest) {
-    return resolveVscodeTask(request)
-  }
-
   connect(): VscodeTaskConnectResponse {
     const connectionId = `vstc_${randomUUID()}` as VscodeTaskConnectionId
     this.#connections.set(connectionId, {
@@ -69,7 +59,7 @@ export class VscodeTaskManager {
   async run(request: VscodeTaskRunRequest): Promise<VscodeTaskRunResponse> {
     this.#requireConnection(request.connectionId)
     const loaded = await loadVscodeTasks(request)
-    resolveLoadedVscodeTask(loaded, request.label)
+    assertLoadedVscodeTaskRunnable(loaded, request.label)
     // Stream teardown may have removed ownership while the workspace file was loading.
     const connection = this.#requireConnection(request.connectionId)
 
