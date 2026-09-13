@@ -1,4 +1,4 @@
-// Included in the pinned SDK's ABI module when building Waku's native host.
+// Included in the pinned SDK's ABI module when building Goddard's native host.
 // Extend host initialization only: all tools, authorization and rendering stay
 // in Cua. Language-SDK create() intentionally has no native cursor facility.
 #[no_mangle]
@@ -33,7 +33,7 @@ pub unsafe extern "C" fn waku_cua_driver_create_v1(
 #[no_mangle]
 pub extern "C" fn waku_cua_driver_run_cursor_v1() {
     // Windows/Linux start their native overlay thread during registration.
-    // AppKit requires the actual OS main thread, owned by Waku's signed host.
+    // AppKit requires the actual OS main thread, owned by Goddard's signed host.
     #[cfg(target_os = "macos")]
     if platform_macos::session::has_graphic_access() {
         platform_macos::cursor::overlay::run_on_main_thread();

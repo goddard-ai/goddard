@@ -2,7 +2,7 @@
 name = "waku-client"
 version = "0.1.0"
 edition = "2024"
-description = "Rust client and daemon process supervisor for Waku"
+description = "Rust client and daemon process supervisor for Goddard"
 license = "GPL-3.0-only"
 
 [dependencies]

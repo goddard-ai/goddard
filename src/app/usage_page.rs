@@ -1423,7 +1423,7 @@ impl Waku {
         ))
     }
 
-    /// Display name and path caption for a project row: a known Waku
+    /// Display name and path caption for a project row: a known Goddard
     /// project's name when the path is one, else the directory's own name
     /// alongside its complete path, shortening only the home prefix.
     fn usage_project_identity(&self, project: &ProjectSlice) -> (String, Option<String>) {

@@ -1,9 +1,9 @@
 //! Shared application identity used by the daemon and desktop client.
 
 #[cfg(debug_assertions)]
-pub const APP_NAME: &str = "Waku Debug";
+pub const APP_NAME: &str = "Goddard Debug";
 #[cfg(not(debug_assertions))]
-pub const APP_NAME: &str = "Waku";
+pub const APP_NAME: &str = "Goddard";
 
 #[cfg(debug_assertions)]
 pub const APP_ID: &str = "sh.waku.dev";

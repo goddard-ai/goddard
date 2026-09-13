@@ -1,7 +1,7 @@
 import Foundation
 
 // The released C ABI is Cua's native SDK boundary. One runtime belongs to
-// each Waku helper connection; capture and input never cross into a Cua daemon.
+// each Goddard helper connection; capture and input never cross into a Cua daemon.
 final class CuaDriver: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let lock = NSLock()
@@ -13,7 +13,7 @@ final class CuaDriver: @unchecked Sendable {
         version.struct_size = UInt32(MemoryLayout<CuaDriverAbiVersion>.size)
         guard cua_driver_abi_version_v1(&version) == 0,
               cua_driver_abi_is_compatible_v1(UInt16(CUA_DRIVER_ABI_MAJOR), UInt16(CUA_DRIVER_ABI_MINOR)) else {
-            throw CuaError("This Cua Driver library is incompatible with Waku.")
+            throw CuaError("This Cua Driver library is incompatible with Goddard.")
         }
         var error = CuaDriverBuffer()
         defer { cua_driver_buffer_free_v1(&error) }

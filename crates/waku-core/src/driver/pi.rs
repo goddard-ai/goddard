@@ -31,7 +31,7 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 /// more headroom than a request against the already-running process.
 const CLONE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Oh My Pi refuses to reassemble beyond this, so neither should Waku.
+/// Oh My Pi refuses to reassemble beyond this, so neither should Goddard.
 const MAX_REASSEMBLED_FRAME_BYTES: usize = 64 * 1024 * 1024;
 
 /// Which dialect of the Pi RPC protocol a session speaks.
@@ -50,7 +50,7 @@ impl PiFlavor {
     }
 
     /// Pi has no permission system and only needs project-local files trusted;
-    /// Oh My Pi does have one, and Waku only ever runs these in Full access.
+    /// Oh My Pi does have one, and Goddard only ever runs these in Full access.
     fn full_access_arg(self) -> &'static str {
         match self {
             Self::Pi => "--approve",
@@ -105,7 +105,7 @@ impl PiFlavor {
         matches!(self, Self::OhMyPi)
     }
 
-    /// Waku's computer-use bridge is a Pi extension written against Pi's
+    /// Goddard's computer-use bridge is a Pi extension written against Pi's
     /// extension API. Oh My Pi ships its own `/computer` instead.
     fn supports_waku_computer_use(self) -> bool {
         matches!(self, Self::Pi)
@@ -755,7 +755,7 @@ impl DriverControl for PiDriver {
     fn apply_options(&self, options: SessionOptions) -> bool {
         // Both flavors have setters for the model and thinking level, so those
         // apply to the live session. Neither exposes one for permissions — and
-        // Waku only runs them with Full access anyway, so a mode change asks
+        // Goddard only runs them with Full access anyway, so a mode change asks
         // for a fresh start, which is where that is reported.
         if options.mode != RuntimeMode::FullAccess {
             return false;
@@ -1033,7 +1033,7 @@ fn pi_context_usage(state: &Value, stats: Option<&Value>) -> Option<(Option<u64>
 
 /// Pi's providers normally fill `totalTokens`, but Pi itself deliberately
 /// falls back to the four component counters when a provider leaves it zero.
-/// Keep Waku's meter aligned with that provider-native calculation.
+/// Keep Goddard's meter aligned with that provider-native calculation.
 fn pi_message_context_tokens(message: &Value) -> Option<u64> {
     let usage = message.get("usage")?;
     usage
@@ -1141,7 +1141,7 @@ fn pi_fork_request(
     let name = flavor.display_name();
     if turns_to_remove > messages.len() {
         return Err(format!(
-            "{name} has only {} native turns, but Waku needs to remove {turns_to_remove}",
+            "{name} has only {} native turns, but Goddard needs to remove {turns_to_remove}",
             messages.len()
         ));
     }
@@ -1811,9 +1811,9 @@ mod tests {
     #[test]
     fn pi_computer_use_uses_only_session_scoped_extension_and_skill_arguments() {
         let config = computer_use_runtime::ComputerUseConfig {
-            server_path: PathBuf::from("/tmp/Waku Computer Use"),
-            repl_path: PathBuf::from("/Applications/Waku.app/Resources/waku_js_repl"),
-            skill_path: PathBuf::from("/Applications/Waku.app/Resources/skills/SKILL.md"),
+            server_path: PathBuf::from("/tmp/Goddard Computer Use"),
+            repl_path: PathBuf::from("/Applications/Goddard.app/Resources/waku_js_repl"),
+            skill_path: PathBuf::from("/Applications/Goddard.app/Resources/skills/SKILL.md"),
             process_directory: PathBuf::from("/tmp/waku-computer-use/session"),
         };
         let mut command = std::process::Command::new("pi");
@@ -1822,7 +1822,7 @@ mod tests {
             &mut command,
             Some((
                 &config,
-                Path::new("/Applications/Waku.app/Resources/computer-use/pi-extension.ts"),
+                Path::new("/Applications/Goddard.app/Resources/computer-use/pi-extension.ts"),
             )),
         );
 
@@ -1834,9 +1834,9 @@ mod tests {
             arguments,
             [
                 "--extension",
-                "/Applications/Waku.app/Resources/computer-use/pi-extension.ts",
+                "/Applications/Goddard.app/Resources/computer-use/pi-extension.ts",
                 "--skill",
-                "/Applications/Waku.app/Resources/skills/SKILL.md",
+                "/Applications/Goddard.app/Resources/skills/SKILL.md",
             ]
         );
         let environment = command
@@ -1851,7 +1851,7 @@ mod tests {
         assert_eq!(
             environment.get("WAKU_JS_REPL_SERVER"),
             Some(&Some(
-                "/Applications/Waku.app/Resources/waku_js_repl".into()
+                "/Applications/Goddard.app/Resources/waku_js_repl".into()
             ))
         );
         assert_eq!(
@@ -2165,7 +2165,7 @@ mod tests {
         assert!(assembly.accept(plain).is_err());
         assert!(assembly.active.is_none());
 
-        // A run that starts mid-sequence is not a frame Waku can trust.
+        // A run that starts mid-sequence is not a frame Goddard can trust.
         let mut assembly = ChunkAssembly::default();
         assert!(assembly.accept(chunk(1, second)).is_err());
     }

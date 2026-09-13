@@ -1014,7 +1014,7 @@ export function WakuApp() {
           project={activeProject}
           session={activeSession}
           sidebarVisible={sidebarVisible}
-          title={newTaskMode ? t('menu.new_task') : current ? displayTitle(current) : 'Waku'}
+          title={newTaskMode ? t('menu.new_task') : current ? displayTitle(current) : 'Goddard'}
         />
 
         {newTaskMode ? (

@@ -1,8 +1,8 @@
 # Commit-message generation
 
-When the commit dialog's message box is left empty, Waku generates the subject
+When the commit dialog's message box is left empty, Goddard generates the subject
 line by running **the session's own agent CLI** once, headlessly. No coding
-agent exposes a commit-message endpoint and Waku holds no provider API key, so
+agent exposes a commit-message endpoint and Goddard holds no provider API key, so
 the CLI binary is the only route to a model.
 
 Every provider gets the same prompt. The only per-provider code is the argument
@@ -84,7 +84,7 @@ argument**; `NO_COLOR=1` and `CI=1` are set for all of them.
 
 Where a provider is not simply "flags plus prompt":
 
-- **Amp** has no flag that disables tools, so Waku writes a throwaway settings
+- **Amp** has no flag that disables tools, so Goddard writes a throwaway settings
   file to the temp directory —
   `{"amp.tools.enable":[],"amp.notifications.enabled":false,"amp.skills.disableClaudeCodeSkills":true}`
   — passes it with `--settings-file`, and deletes it afterwards, including on
@@ -93,7 +93,7 @@ Where a provider is not simply "flags plus prompt":
 - **Claude Code** runs in `plan` permission mode with an empty `--tools` list,
   and `--no-session-persistence` keeps the run out of `~/.claude/projects`,
   where it would look like a task the user started. Haiku exposes no reasoning
-  tiers in Waku's catalog, but the CLI still accepts `--effort low` for it.
+  tiers in Goddard's catalog, but the CLI still accepts `--effort low` for it.
 - **Codex** runs `exec` as an ephemeral read-only turn; `--skip-git-repo-check`
   lets a workspace that is not a repo root run. Effort rides on a `-c` config
   override because `codex exec` has no flag for it.

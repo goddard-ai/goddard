@@ -3,7 +3,7 @@
 /**
  * Filesystem context a task runs in.
  *
- * Drafts may carry [`Self::NewWorktree`] until their first prompt. Waku then
+ * Drafts may carry [`Self::NewWorktree`] until their first prompt. Goddard then
  * creates the Git worktree and replaces it with [`Self::Worktree`] before any
  * checkpoint or provider process can observe the task.
  */

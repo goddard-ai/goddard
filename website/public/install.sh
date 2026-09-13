@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Installs Waku for Linux into ~/.local — no root, no package manager.
+# Installs Goddard for Linux into ~/.local — no root, no package manager.
 # Downloads the release tarball from https://releases.waku.sh, unpacks it as
 # ~/.local/waku.app, links the binary onto PATH, and registers the desktop
 # entry. docs/linux.md documents the equivalent manual steps.
@@ -15,14 +15,14 @@ set -eu
 
 usage() {
     cat <<'USAGE'
-Install Waku for Linux into ~/.local.
+Install Goddard for Linux into ~/.local.
 
 Usage:
   curl -fsSL https://waku.sh/install.sh | sh
   curl -fsSL https://waku.sh/install.sh | sh -s -- --uninstall
 
 Options:
-  --uninstall   Remove Waku, leaving ~/.waku (projects and settings) alone
+  --uninstall   Remove Goddard, leaving ~/.waku (projects and settings) alone
   --help        Show this help
 USAGE
 }
@@ -46,7 +46,7 @@ main() {
 
     platform="$(uname -s)"
     if [ "$platform" = "Darwin" ]; then
-        echo "Waku for macOS ships as a signed .dmg that updates itself." >&2
+        echo "Goddard for macOS ships as a signed .dmg that updates itself." >&2
         echo "Download it from https://waku.sh" >&2
         exit 1
     fi
@@ -93,12 +93,12 @@ main() {
             version="$(printf '%s' "$version" | tr -d '[:space:]')"
         fi
         if [ -z "$version" ]; then
-            echo "No Waku version published for Linux yet." >&2
+            echo "No Goddard version published for Linux yet." >&2
             exit 1
         fi
-        echo "Downloading Waku $version for $machine"
-        if ! fetch "$releases/waku-$version-$target.tar.gz" >"$archive"; then
-            echo "Download failed: $releases/waku-$version-$target.tar.gz" >&2
+        echo "Downloading Goddard $version for $machine"
+        if ! fetch "$releases/Goddard-$version-$target.tar.gz" >"$archive"; then
+            echo "Download failed: $releases/Goddard-$version-$target.tar.gz" >&2
             exit 1
         fi
     fi
@@ -116,7 +116,7 @@ main() {
     mkdir -p "$staging" "$(dirname "$bin_link")" "$(dirname "$desktop_file")"
     tar -xzf "$archive" --strip-components=1 -C "$staging"
 
-    # Waku resolves its daemon and self-update helper next to its own
+    # Goddard resolves its daemon and self-update helper next to its own
     # executable, so all three must stay together in bin/. Linking only the
     # main binary onto PATH is safe — current_exe() resolves the symlink back
     # into waku.app.
@@ -149,10 +149,10 @@ main() {
         fi
     fi
 
-    # Waku is a desktop app and takes no arguments, so the launcher entry is
+    # Goddard is a desktop app and takes no arguments, so the launcher entry is
     # the way in. The PATH link is a convenience for starting it from a
     # terminal to watch its output.
-    echo "Waku is installed."
+    echo "Goddard is installed."
     if [ -f "$desktop_file" ]; then
         echo "Open it from your applications menu."
     fi
@@ -165,7 +165,7 @@ main() {
 
 uninstall() {
     if [ ! -d "$app_dir" ] && [ ! -L "$bin_link" ]; then
-        echo "Waku is not installed at $app_dir." >&2
+        echo "Goddard is not installed at $app_dir." >&2
         exit 1
     fi
     # Only reclaim the symlink and desktop entry this script created; a
@@ -177,7 +177,7 @@ uninstall() {
         rm -f "$desktop_file"
     fi
     rm -rf "$app_dir"
-    echo "Waku is uninstalled. Projects and settings remain in ~/.waku."
+    echo "Goddard is uninstalled. Projects and settings remain in ~/.waku."
 }
 
 main "$@"

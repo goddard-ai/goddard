@@ -1147,7 +1147,7 @@ fn render_menu_item(
             value,
             items: _,
         } => {
-            // Waku currently exposes one flyout level. Keeping a nested
+            // Goddard currently exposes one flyout level. Keeping a nested
             // submenu row inert prevents a child builder from accidentally
             // stealing the parent flyout's keyboard state.
             if in_submenu {

@@ -3,7 +3,7 @@
 //! `dsh web` is the Harness client API: unary session operations travel over
 //! typed HTTP envelopes while ordered session events, projections, approval
 //! requests, questions, and background jobs arrive on its downlink streams.
-//! Keeping that protocol intact gives Waku native resume/fork semantics and
+//! Keeping that protocol intact gives Goddard native resume/fork semantics and
 //! avoids reverse-engineering the human CLI output.
 
 use std::collections::{HashMap, HashSet};

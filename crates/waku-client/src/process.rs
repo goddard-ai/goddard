@@ -142,7 +142,7 @@ impl DaemonProcess {
     ) -> anyhow::Result<Self> {
         let settings = settings.validate()?;
         let token = settings.token.clone();
-        let app_executable = std::env::current_exe().context("could not locate Waku executable")?;
+        let app_executable = std::env::current_exe().context("could not locate Goddard executable")?;
         let mut command = ProcessCommand::new(executable);
         // The desktop is a GUI-subsystem binary on Windows, so a console
         // child would get a console window of its own. `stderr` still reaches
@@ -176,7 +176,7 @@ impl DaemonProcess {
         let stdout = child
             .stdout
             .take()
-            .context("Waku daemon did not expose its readiness stream")?;
+            .context("Goddard daemon did not expose its readiness stream")?;
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("waku-daemon-ready".into())
@@ -187,13 +187,13 @@ impl DaemonProcess {
                     .map_err(anyhow::Error::from)
                     .and_then(|bytes| {
                         if bytes == 0 {
-                            bail!("Waku daemon exited before becoming ready")
+                            bail!("Goddard daemon exited before becoming ready")
                         }
                         serde_json::from_str::<DaemonReady>(&line).map_err(anyhow::Error::from)
                     });
                 let _ = ready_tx.send(result);
             })
-            .context("could not start Waku daemon readiness reader")?;
+            .context("could not start Goddard daemon readiness reader")?;
         let ready = match ready_rx.recv_timeout(START_TIMEOUT) {
             Ok(Ok(ready)) => ready,
             Ok(Err(error)) => {
@@ -204,7 +204,7 @@ impl DaemonProcess {
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                bail!("timed out waiting for Waku daemon: {error}");
+                bail!("timed out waiting for Goddard daemon: {error}");
             }
         };
         if ready.protocol_version != PROTOCOL_VERSION {
@@ -267,7 +267,7 @@ impl Drop for DaemonProcess {
 fn desktop_client_address(address: &str) -> anyhow::Result<String> {
     let address = address
         .parse::<std::net::SocketAddr>()
-        .with_context(|| format!("Waku daemon returned an invalid address {address:?}"))?;
+        .with_context(|| format!("Goddard daemon returned an invalid address {address:?}"))?;
     let ip = if address.ip().is_unspecified() {
         if address.is_ipv4() {
             std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
@@ -364,7 +364,7 @@ impl DaemonSupervisor {
         std::thread::Builder::new()
             .name("waku-daemon-supervisor".into())
             .spawn(move || monitor_daemon(weak_inner, Some(initial_stamp), watch_for_rebuilds))
-            .context("could not start Waku daemon supervisor")?;
+            .context("could not start Goddard daemon supervisor")?;
         Ok(supervisor)
     }
 
@@ -387,7 +387,7 @@ impl DaemonSupervisor {
         std::thread::Builder::new()
             .name("waku-remote-daemon-supervisor".into())
             .spawn(move || monitor_daemon(weak_inner, None, false))
-            .context("could not start remote Waku daemon supervisor")?;
+            .context("could not start remote Goddard daemon supervisor")?;
         Ok(supervisor)
     }
 
@@ -415,7 +415,7 @@ impl DaemonSupervisor {
         std::thread::Builder::new()
             .name("waku-daemon-settings".into())
             .spawn(move || persist_settings(weak_inner, settings_update_rx))
-            .context("could not start Waku daemon settings writer")?;
+            .context("could not start Goddard daemon settings writer")?;
         Ok(Self { inner })
     }
 
@@ -452,7 +452,7 @@ impl DaemonSupervisor {
             .inner
             .executable
             .as_ref()
-            .context("the connected daemon is managed outside Waku Desktop")?
+            .context("the connected daemon is managed outside Goddard Desktop")?
             .clone();
         let _restart = self.inner.restart.lock();
         let previous = self
@@ -491,7 +491,7 @@ impl DaemonSupervisor {
         self.inner
             .settings_updates
             .send(settings)
-            .map_err(|_| anyhow::anyhow!("Waku daemon settings writer is closed"))
+            .map_err(|_| anyhow::anyhow!("Goddard daemon settings writer is closed"))
     }
 }
 
@@ -579,7 +579,7 @@ fn monitor_daemon(
         match replace_local_daemon(&inner, executable, &exposure) {
             Ok(()) => {}
             Err(error) => {
-                eprintln!("could not restart rebuilt Waku daemon: {error:#}");
+                eprintln!("could not restart rebuilt Goddard daemon: {error:#}");
                 continue;
             }
         }
@@ -601,7 +601,7 @@ fn replace_local_daemon(
         let mut target = inner.target.lock();
         match &*target {
             DaemonTarget::Remote { .. } => {
-                bail!("the connected daemon is managed outside Waku Desktop")
+                bail!("the connected daemon is managed outside Goddard Desktop")
             }
             DaemonTarget::Restarting(_) => None,
             DaemonTarget::Local(process) => {
@@ -637,7 +637,7 @@ fn queue_settings_refresh(inner: &SupervisorInner) {
 fn read_settings(client: &DaemonClient) -> anyhow::Result<DaemonSettings> {
     match client.request(Uuid::nil(), Uuid::nil(), Command::GetSettings)? {
         ResponsePayload::Settings { settings } => Ok(settings),
-        _ => bail!("Waku daemon returned an invalid settings response"),
+        _ => bail!("Goddard daemon returned an invalid settings response"),
     }
 }
 
@@ -674,10 +674,10 @@ fn persist_settings(
                     break;
                 }
                 Ok(_) => {
-                    eprintln!("Waku daemon returned an invalid settings update response");
+                    eprintln!("Goddard daemon returned an invalid settings update response");
                 }
                 Err(error) => {
-                    eprintln!("could not persist Waku daemon settings: {error:#}");
+                    eprintln!("could not persist Goddard daemon settings: {error:#}");
                 }
             }
             drop(inner);

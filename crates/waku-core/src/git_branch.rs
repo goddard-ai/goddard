@@ -336,7 +336,7 @@ mod tests {
             &root,
             &[
                 "-c",
-                "user.name=Waku Tests",
+                "user.name=Goddard Tests",
                 "-c",
                 "user.email=waku@example.com",
                 "commit",

@@ -37,7 +37,7 @@ export function normalizeDaemonAddress(
     window.location.protocol === 'https:' &&
     url.protocol !== 'wss:'
   ) {
-    throw new Error(t?.('web.error_secure_websocket_required') ?? 'A secure Waku Web page can only connect through wss://')
+    throw new Error(t?.('web.error_secure_websocket_required') ?? 'A secure Goddard Web page can only connect through wss://')
   }
 
   url.pathname = ''

@@ -4,7 +4,7 @@ import type { Message } from "./Message";
 
 /**
  * The displayable portion of a provider-native conversation imported into a
- * Waku task. Provider history remains authoritative; unsupported native
+ * Goddard task. Provider history remains authoritative; unsupported native
  * items such as private reasoning or provider-only control records are
  * intentionally absent.
  */

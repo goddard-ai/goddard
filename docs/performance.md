@@ -1,6 +1,6 @@
 # Streaming render performance
 
-How Waku keeps CPU flat while a provider streams, what each piece of the
+How Goddard keeps CPU flat while a provider streams, what each piece of the
 pipeline is allowed to cost, and how to measure before changing any of it.
 This encodes the results of the 2026-08-16 streaming investigation, which took
 sustained streaming CPU from 40–60% to under ~10% average (debug build) across

@@ -1,6 +1,6 @@
 # waku-core
 
-`waku-core` is Waku's daemon-only runtime. It contains the native session
+`waku-core` is Goddard's daemon-only runtime. It contains the native session
 drivers, provider discovery and model metadata, task persistence, attachment
 storage, workspace filesystem and Git services, Computer Use process control,
 and daemon-owned settings. It depends on the serializable contract in
@@ -12,7 +12,7 @@ increasing sequence numbers and runtime-generation IDs. The server keeps a
 bounded replay journal, and stale events or commands from a replaced runtime
 are ignored.
 
-`DaemonClient` lives in [`waku-client`](../waku-client), which is what Waku
+`DaemonClient` lives in [`waku-client`](../waku-client), which is what Goddard
 Desktop depends on. `serve` and `WakuBackend` are used by the `waku-daemon`
 binary.
 

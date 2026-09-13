@@ -1,4 +1,4 @@
-//! Signed, rollback-safe updates for Waku's managed Linux tarball install.
+//! Signed, rollback-safe updates for Goddard's managed Linux tarball install.
 //!
 //! Checks, downloads, signature verification, and extraction all run on a
 //! worker thread. Once an archive is fully staged, `waku-updater` validates
@@ -156,7 +156,7 @@ impl Updater {
         }
         FEED_URL?;
         if verifying_key().is_none() {
-            eprintln!("Waku updater: SUPublicEDKey is not a valid ed25519 key");
+            eprintln!("Goddard updater: SUPublicEDKey is not a valid ed25519 key");
             return None;
         }
 
@@ -245,7 +245,7 @@ impl Updater {
                         if report {
                             let _ = events.try_send(UpdaterEvent::Failed(error.to_string()));
                         } else {
-                            eprintln!("Waku updater: {error:#}");
+                            eprintln!("Goddard updater: {error:#}");
                         }
                     }
                 }
@@ -510,7 +510,7 @@ fn validate_packaged_layout(prefix: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(
         marker_metadata.file_type().is_file()
             && fs::read_to_string(&marker).ok().as_deref() == Some(MANAGED_MARKER_CONTENTS),
-        "the install is not marked as a Waku-managed tarball"
+        "the install is not marked as a Goddard-managed tarball"
     );
     for executable in ["waku", "waku-daemon", HELPER_EXECUTABLE] {
         let path = prefix.join("bin").join(executable);

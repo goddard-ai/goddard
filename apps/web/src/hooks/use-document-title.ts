@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-export const WAKU_DOCUMENT_TITLE = 'Waku Web'
+export const WAKU_DOCUMENT_TITLE = 'Goddard Web'
 
 export function formatDocumentTitle(section?: string | null): string {
   const normalized = section?.trim()

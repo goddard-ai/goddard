@@ -1073,7 +1073,7 @@ pub(crate) fn command(
 /// Lists undelivered inbox entries.
 ///
 /// The entries are left as raw JSON because the union also carries synthetic,
-/// compaction and move payloads Waku has no use for; callers filter on `type`
+/// compaction and move payloads Goddard has no use for; callers filter on `type`
 /// and decode only what they recognize.
 pub(crate) fn list_inbox(endpoint: &Endpoint, session: &str) -> Result<Vec<Value>> {
     let path = format!("/api/session/{}/inbox", encode_path_segment(session));
@@ -1165,7 +1165,7 @@ pub(crate) fn list_permissions(
 /// Answers one permission request.
 ///
 /// `always` is rejected here, not upstream: it writes a persistent allow rule
-/// into the user's own OpenCode permission config, which is a decision Waku
+/// into the user's own OpenCode permission config, which is a decision Goddard
 /// has no mandate to make on the user's behalf from a transcript button.
 pub(crate) fn reply_permission(
     endpoint: &Endpoint,

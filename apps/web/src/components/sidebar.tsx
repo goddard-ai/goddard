@@ -109,7 +109,7 @@ export function Sidebar({
       >
         <header className="flex h-12 shrink-0 items-center px-2.5">
           <img
-            alt="Waku"
+            alt="Goddard"
             className="size-6 rounded-md"
             draggable={false}
             src={wakuAppIconUrl}

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Waku",
+    "name": "Goddard",
     "slug": "waku-mobile",
     "version": "1.0.0",
     "orientation": "default",
@@ -12,7 +12,7 @@
       "bundleIdentifier": "sh.waku.mobile",
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocalNetworkUsageDescription": "Waku connects directly to daemon hosts you add on your local or private network.",
+        "NSLocalNetworkUsageDescription": "Goddard connects directly to daemon hosts you add on your local or private network.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -57,8 +57,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Waku to choose photos to attach to tasks.",
-          "cameraPermission": "Allow Waku to take photos to attach to tasks.",
+          "photosPermission": "Allow Goddard to choose photos to attach to tasks.",
+          "cameraPermission": "Allow Goddard to take photos to attach to tasks.",
           "microphonePermission": false
         }
       ],

@@ -102,7 +102,7 @@ impl Waku {
             .into_any_element()
     }
 
-    /// Render the window controls Waku owns: the desktop's configured button
+    /// Render the window controls Goddard owns: the desktop's configured button
     /// order when GPUI had to fall back from server-side to client-side
     /// decorations, and the platform order on Windows.
     pub(super) fn render_client_window_controls(

@@ -1,13 +1,13 @@
 ---
 name: waku-computer-use
-description: Control local macOS, Windows, and Linux apps through Waku Computer Use. Prefer purpose-built connectors, APIs, or CLIs when available.
+description: Control local macOS, Windows, and Linux apps through Goddard Computer Use. Prefer purpose-built connectors, APIs, or CLIs when available.
 ---
 
-# Waku Computer Use
+# Goddard Computer Use
 
 Use the `js` tool from `waku_js_repl` for computer interactions. It runs a
 persistent QuickJS kernel. Use the direct `cua` methods documented here;
-all methods are available immediately after bootstrap. Waku shows Cua's native
+all methods are available immediately after bootstrap. Goddard shows Cua's native
 virtual cursor automatically while actions run; no cursor setup is needed.
 
 ## Bootstrap
@@ -21,7 +21,7 @@ if (!globalThis.cua) {
 ```
 
 After `js_reset`, bootstrap again before using `cua`. Module imports and Node
-subprocess APIs are unavailable. The native runtime is managed by Waku.
+subprocess APIs are unavailable. The native runtime is managed by Goddard.
 
 Use `jsRepl.write(value)` for text or structured output and
 `await jsRepl.emitImage(image)` to show a returned image. Prefer top-level `var`
@@ -169,7 +169,7 @@ returned capability information when choosing another route.
 Prefer background delivery. An unsupported route does not authorize an
 automatic foreground retry. Windows secure/elevated desktops and Linux
 compositor restrictions remain in effect. `cua.check_permissions()` reports
-capabilities; macOS permission prompts belong to Waku Settings > Computer Use.
+capabilities; macOS permission prompts belong to Goddard Settings > Computer Use.
 
 Stop, reset, and disconnect end the helper's work. An interrupted action may
 have completed, so inspect fresh state before retrying it. One implicit session

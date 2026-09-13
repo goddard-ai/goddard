@@ -69,7 +69,7 @@ mod linux {
         }
         wait_for_parent(handoff.parent_pid);
         if let Err(error) = apply_update(&handoff) {
-            eprintln!("Waku updater: {error:#}");
+            eprintln!("Goddard updater: {error:#}");
             std::process::exit(1);
         }
     }
@@ -120,7 +120,7 @@ mod linux {
                 bail!("refusing to self-update from a root desktop session");
             }
             if arguments.parent_pid != unsafe { libc::getppid() as u32 } {
-                bail!("the update helper was not launched directly by Waku");
+                bail!("the update helper was not launched directly by Goddard");
             }
 
             let install_dir = arguments
@@ -155,7 +155,7 @@ mod linux {
                 .and_then(OsStr::to_str)
                 .is_some_and(|name| name.starts_with(&expected_staging_prefix))
             {
-                bail!("the staged install name does not belong to this Waku prefix");
+                bail!("the staged install name does not belong to this Goddard prefix");
             }
 
             validate_packaged_layout(&install_dir)?;
@@ -206,7 +206,7 @@ mod linux {
     fn apply_update(handoff: &Handoff) -> anyhow::Result<()> {
         let backup = handoff.unique_path("update-backup")?;
         if let Err(error) = fs::rename(&handoff.install_dir, &backup) {
-            let message = format!("could not preserve the current Waku install: {error}");
+            let message = format!("could not preserve the current Goddard install: {error}");
             record_error(handoff, &message);
             let _ = launch(&handoff.install_dir, None);
             bail!(message);
@@ -220,7 +220,7 @@ mod linux {
                 )
             })?;
             sync_directory(&handoff.parent);
-            let message = format!("could not activate the staged Waku install: {error}");
+            let message = format!("could not activate the staged Goddard install: {error}");
             record_error(handoff, &message);
             let _ = launch(&handoff.install_dir, None);
             bail!(message);
@@ -238,7 +238,7 @@ mod linux {
         let mut replacement = match launch(&handoff.install_dir, Some(&ready_path)) {
             Ok(child) => child,
             Err(error) => {
-                let message = format!("the updated Waku build could not start: {error}");
+                let message = format!("the updated Goddard build could not start: {error}");
                 rollback(handoff, &backup, &message)?;
                 bail!(message);
             }
@@ -249,7 +249,7 @@ mod linux {
                 let _ = fs::remove_file(&ready_path);
                 if let Err(error) = fs::remove_dir_all(&backup) {
                     eprintln!(
-                        "Waku updater: update succeeded but the rollback copy {} could not be removed: {error}",
+                        "Goddard updater: update succeeded but the rollback copy {} could not be removed: {error}",
                         backup.display()
                     );
                 }
@@ -258,7 +258,7 @@ mod linux {
             }
             RelaunchState::Exited(status) => {
                 let message =
-                    format!("the updated Waku build exited before its window opened ({status})");
+                    format!("the updated Goddard build exited before its window opened ({status})");
                 rollback(handoff, &backup, &message)?;
                 bail!(message)
             }
@@ -267,7 +267,7 @@ mod linux {
                 // remains active and the exact rollback directory is retained
                 // for manual recovery instead of being destructively guessed.
                 eprintln!(
-                    "Waku updater: the new build stayed alive but did not acknowledge startup; retaining {}",
+                    "Goddard updater: the new build stayed alive but did not acknowledge startup; retaining {}",
                     backup.display()
                 );
                 Ok(())
@@ -281,13 +281,13 @@ mod linux {
             .context("could not move the failed update out of the install path")?;
         if let Err(error) = fs::rename(backup, &handoff.install_dir) {
             let _ = fs::rename(&failed, &handoff.install_dir);
-            return Err(error).context("could not restore the previous Waku install");
+            return Err(error).context("could not restore the previous Goddard install");
         }
         sync_directory(&handoff.parent);
         let _ = fs::remove_dir_all(&failed);
         record_error(handoff, message);
         launch(&handoff.install_dir, None)
-            .context("the previous Waku build was restored but could not be relaunched")?;
+            .context("the previous Goddard build was restored but could not be relaunched")?;
         Ok(())
     }
 
@@ -319,7 +319,7 @@ mod linux {
                 Ok(Some(status)) => return RelaunchState::Exited(status.to_string()),
                 Ok(None) => {}
                 Err(error) => {
-                    eprintln!("Waku updater: could not observe the relaunched app: {error}");
+                    eprintln!("Goddard updater: could not observe the relaunched app: {error}");
                     return RelaunchState::TimedOut;
                 }
             }
@@ -333,14 +333,14 @@ mod linux {
     fn validate_packaged_layout(prefix: &Path) -> anyhow::Result<()> {
         let metadata = fs::symlink_metadata(prefix)?;
         if !metadata.file_type().is_dir() {
-            bail!("the Waku prefix is not a real directory");
+            bail!("the Goddard prefix is not a real directory");
         }
         let marker = prefix.join(MANAGED_MARKER);
         let marker_metadata = fs::symlink_metadata(&marker)?;
         if !marker_metadata.file_type().is_file()
             || fs::read_to_string(&marker).ok().as_deref() != Some(MANAGED_MARKER_CONTENTS)
         {
-            bail!("the install is not marked as a Waku-managed tarball");
+            bail!("the install is not marked as a Goddard-managed tarball");
         }
         for executable in ["waku", "waku-daemon", HELPER_EXECUTABLE] {
             let path = prefix.join("bin").join(executable);

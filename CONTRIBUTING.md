@@ -1,6 +1,6 @@
-# Contributing to Waku
+# Contributing to Goddard
 
-Thanks for helping improve Waku. Bug reports, focused fixes, tests, and
+Thanks for helping improve Goddard. Bug reports, focused fixes, tests, and
 well-scoped features are welcome.
 
 ## Development setup
@@ -32,7 +32,7 @@ bun install
 bun run dev
 ```
 
-On macOS the watcher builds and signs `target/debug/Waku Debug.app`; on Linux
+On macOS the watcher builds and signs `target/debug/Goddard Debug.app`; on Linux
 and Windows it builds `target/debug/waku`. In both cases the provider daemon remains an
 external `target/debug/waku-debug-daemon`: provider-only edits rebuild and
 hot-swap that process without relaunching the app, while desktop edits rebuild
@@ -67,7 +67,7 @@ users run to install that archive. Point it at a local build to exercise it
 without publishing:
 
 ```sh
-WAKU_BUNDLE_PATH=target/release/waku-<version>-<target>.tar.gz \
+WAKU_BUNDLE_PATH=target/release/Goddard-<version>-<target>.tar.gz \
   sh website/public/install.sh
 ```
 
@@ -82,7 +82,7 @@ bun scripts/bundle-windows.ts
 ```
 
 Both land under `target/release`. The zip holds the two executables side by
-side beneath one versioned directory — the layout Waku needs to find its
+side beneath one versioned directory — the layout Goddard needs to find its
 daemon — and the installer is built from
 [`resources/windows/waku.iss`](resources/windows/waku.iss), so Inno Setup 6.3
 or newer must be installed (`choco install innosetup`) — the architecture
@@ -155,7 +155,7 @@ your responses in your own words.
   future.
 
 AI-assisted contributions are welcome. This policy aims to prevent low-effort
-submissions and preserve Waku's standards for code quality, performance, and
+submissions and preserve Goddard's standards for code quality, performance, and
 maintainability.
 
 ## License

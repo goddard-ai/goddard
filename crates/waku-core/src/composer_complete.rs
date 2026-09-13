@@ -106,12 +106,12 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 ///
 /// - Claude Code: `.claude/commands` and `.claude/skills` in the project and
 ///   the config dir (`$CLAUDE_CONFIG_DIR`, default `~/.claude`).
-/// - Codex: `~/.codex/prompts`, expanded by Waku at submit.
+/// - Codex: `~/.codex/prompts`, expanded by Goddard at submit.
 /// - OpenCode: `.opencode/command` and `~/.config/opencode/command`, resolved
 ///   by the server's native command endpoint.
-/// - Cursor: `.cursor/commands` in the project and home, expanded by Waku.
+/// - Cursor: `.cursor/commands` in the project and home, expanded by Goddard.
 /// - Pi: prompt templates in `.pi/prompts` and `~/.pi/agent/prompts`,
-///   expanded by Waku, plus skills in `.pi/skills` and `~/.pi/agent/skills`.
+///   expanded by Goddard, plus skills in `.pi/skills` and `~/.pi/agent/skills`.
 /// - Oh My Pi: the same layout under its own root — commands in
 ///   `.omp/commands` and `~/.omp/agent/commands`, skills in `.omp/skills`
 ///   and `~/.omp/agent/skills`.
@@ -127,7 +127,7 @@ pub fn detect_trigger(text: &str, cursor: usize) -> Option<Trigger> {
 /// Pi and Oh My Pi skills retain their short name and resolve to
 /// `/skill:name` there.
 ///
-/// On top of provider sources, every provider reads Waku's user-defined layer
+/// On top of provider sources, every provider reads Goddard's user-defined layer
 /// (`.waku/commands` and `~/.config/waku/commands`).
 pub fn discover_slash_commands(
     provider: ProviderKind,
@@ -327,11 +327,11 @@ fn assemble_slash_commands(
         }
         // Harness commands are session-scoped and reported live by the Host,
         // and Kimi Code likewise publishes its whole command set over ACP
-        // rather than from files Waku could scan.
+        // rather than from files Goddard could scan.
         ProviderKind::DeepSeek | ProviderKind::Grok | ProviderKind::Kimi => {}
     }
     // The cross-tool skill standard, read by Amp and OpenCode among others;
-    // Waku lists it for every provider.
+    // Goddard lists it for every provider.
     scan_skill_files(
         provider,
         &project_root.join(".agents/skills"),
@@ -356,7 +356,7 @@ fn assemble_slash_commands(
     }
     commands.extend(cli_commands);
     let mut commands = dedup_and_sort_commands(commands);
-    // `/resume` belongs to Waku rather than any one provider. Reserve the
+    // `/resume` belongs to Goddard rather than any one provider. Reserve the
     // name after provider/project discovery so every composer exposes the
     // same picker and submitting it can never leak into an agent turn.
     commands.retain(|command| command.name != "resume");

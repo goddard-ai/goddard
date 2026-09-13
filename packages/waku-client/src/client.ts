@@ -57,7 +57,7 @@ export type WakuConnectionFailure =
   | "rejected"
   /** The daemon speaks another protocol version. */
   | "protocol"
-  /** Whatever answered did not speak the Waku protocol. */
+  /** Whatever answered did not speak the Goddard protocol. */
   | "handshake"
   /** The socket failed or closed before the handshake completed. */
   | "unreachable"
@@ -94,7 +94,7 @@ interface LastSequence {
   sequence: number;
 }
 
-/** Browser-safe client for Waku's versioned JSON-over-WebSocket protocol. */
+/** Browser-safe client for Goddard's versioned JSON-over-WebSocket protocol. */
 export class WakuClient {
   readonly clientId: string;
 
@@ -165,7 +165,7 @@ export class WakuClient {
   connect(): Promise<void> {
     if (this.state === "connected") return Promise.resolve();
     if (this.state === "connecting") {
-      return Promise.reject(new Error("Waku client is already connecting"));
+      return Promise.reject(new Error("Goddard client is already connecting"));
     }
 
     this.setConnectionState("connecting");
@@ -200,7 +200,7 @@ export class WakuClient {
         ++this.connectionGeneration;
         if (this.socket === socket) this.socket = undefined;
         failHandshake(
-          new WakuConnectionError("timeout", "timed out connecting to Waku daemon"),
+          new WakuConnectionError("timeout", "timed out connecting to Goddard daemon"),
         );
         socket.close(1000, "connect timeout");
       }, this.connectTimeoutMs);
@@ -224,7 +224,7 @@ export class WakuClient {
           message = JSON.parse(String(event.data)) as ServerMessage;
         } catch {
           failHandshake(
-            new WakuConnectionError("handshake", "Waku daemon sent invalid JSON"),
+            new WakuConnectionError("handshake", "Goddard daemon sent invalid JSON"),
           );
           return;
         }
@@ -257,7 +257,7 @@ export class WakuClient {
           failHandshake(
             new WakuConnectionError(
               "handshake",
-              "Waku daemon sent an invalid handshake response",
+              "Goddard daemon sent an invalid handshake response",
             ),
           );
           socket.close(1002, "invalid handshake");
@@ -279,12 +279,12 @@ export class WakuClient {
             "unreachable",
             reason ||
               (socketErrored
-                ? "Waku daemon connection failed"
-                : "Waku daemon disconnected during handshake"),
+                ? "Goddard daemon connection failed"
+                : "Goddard daemon disconnected during handshake"),
           ),
         );
         this.markDisconnected(
-          new WakuConnectionError("closed", "Waku daemon disconnected"),
+          new WakuConnectionError("closed", "Goddard daemon disconnected"),
         );
       });
     });
@@ -314,7 +314,7 @@ export class WakuClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error("timed out waiting for Waku daemon"));
+        reject(new Error("timed out waiting for Goddard daemon"));
       }, options.timeoutMs ?? this.requestTimeoutMs);
       this.pending.set(requestId, { resolve, reject, timeout });
       try {
@@ -385,11 +385,11 @@ export class WakuClient {
 
   /** Closes only this client connection; it never stops a remotely managed daemon. */
   disconnect(): void {
-    this.rejectConnect?.(new WakuConnectionError("aborted", "Waku client disconnected"));
+    this.rejectConnect?.(new WakuConnectionError("aborted", "Goddard client disconnected"));
     ++this.connectionGeneration;
     const socket = this.socket;
     this.socket = undefined;
-    this.markDisconnected(new WakuConnectionError("aborted", "Waku client disconnected"));
+    this.markDisconnected(new WakuConnectionError("aborted", "Goddard client disconnected"));
     socket?.close(1000, "client disconnected");
   }
 
@@ -402,7 +402,7 @@ export class WakuClient {
 
   private requireSocket(): WebSocketLike {
     if (this.state !== "connected" || !this.socket || this.socket.readyState !== OPEN) {
-      throw new Error("Waku daemon is disconnected");
+      throw new Error("Goddard daemon is disconnected");
     }
     return this.socket;
   }

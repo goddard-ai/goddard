@@ -1,5 +1,5 @@
 // Build the pinned Cua SDK with its native host/cursor entrypoints exposed.
-// Keep its dependency graph and lockfile isolated from Waku's GPUI workspace.
+// Keep its dependency graph and lockfile isolated from Goddard's GPUI workspace.
 import { $ } from "bun";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";

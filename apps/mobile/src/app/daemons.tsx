@@ -89,7 +89,7 @@ export default function DaemonsScreen() {
               />
               <Text style={[styles.footerText, { color: theme.textTertiary }]}>
                 Only the selected daemon stays connected. Credentials are protected by the device
-                keychain and never pass through a Waku service.
+                keychain and never pass through a Goddard service.
               </Text>
             </View>
           </>
@@ -97,7 +97,7 @@ export default function DaemonsScreen() {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No saved daemons</Text>
             <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
-              Add the address and token shown in Waku Desktop’s Daemon settings.
+              Add the address and token shown in Goddard Desktop’s Daemon settings.
             </Text>
           </View>
         )}

@@ -265,7 +265,7 @@ fn truncate_at_turn(
     if cutoff.is_none() {
         turns = values.iter().filter(|value| is_prompt(value)).count();
         if turns < retained_turns {
-            bail!("Grok has only {turns} native turns, but Waku needs {retained_turns}");
+            bail!("Grok has only {turns} native turns, but Goddard needs {retained_turns}");
         }
     }
     Ok(values[..cutoff.unwrap_or(values.len())].to_vec())

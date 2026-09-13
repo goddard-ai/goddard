@@ -19,7 +19,7 @@ pub struct UpdaterState(pub Option<Updater>);
 
 impl Global for UpdaterState {}
 
-/// The compact state rendered by Waku. Update details remain owned by
+/// The compact state rendered by Goddard. Update details remain owned by
 /// Sparkle and never enter a frame path.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UpdateStatus {
@@ -83,7 +83,7 @@ mod macos {
 
     struct UserDriverIvars {
         /// Explicit checks and the one-time automatic-check permission prompt
-        /// use Sparkle's own windows. Scheduled checks stay inside Waku.
+        /// use Sparkle's own windows. Scheduled checks stay inside Goddard.
         standard_driver: Retained<AnyObject>,
         standard_presentation: Cell<bool>,
         standard_update_check: Cell<Option<isize>>,
@@ -607,7 +607,7 @@ mod macos {
                         .to_string_lossy()
                         .into_owned()
                 };
-                eprintln!("Waku updater: failed to load Sparkle: {reason}");
+                eprintln!("Goddard updater: failed to load Sparkle: {reason}");
                 return None;
             }
 
@@ -656,7 +656,7 @@ mod macos {
                 ]
             };
             if !started {
-                eprintln!("Waku updater: Sparkle rejected its updater configuration");
+                eprintln!("Goddard updater: Sparkle rejected its updater configuration");
                 return None;
             }
 
@@ -767,7 +767,7 @@ mod macos {
     }
 
     /// The embedded framework's dylib next to the running executable
-    /// (Contents/MacOS/Waku → Contents/Frameworks/Sparkle.framework/Sparkle).
+    /// (Contents/MacOS/Goddard → Contents/Frameworks/Sparkle.framework/Sparkle).
     fn sparkle_library_path() -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().ok()?;
         let contents = executable.parent()?.parent()?;
@@ -786,7 +786,7 @@ mod macos {
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
             let library = target_dir
-                .join("debug/Waku Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
+                .join("debug/Goddard Debug.app/Contents/Frameworks/Sparkle.framework/Sparkle");
             if !library.exists() {
                 return;
             }
@@ -877,7 +877,7 @@ mod feed {
         compare_versions(candidate, current) == std::cmp::Ordering::Greater
     }
 
-    /// Compare dotted release numbers field by field. Waku's versions are
+    /// Compare dotted release numbers field by field. Goddard's versions are
     /// plain `major.minor.patch`; anything after a `-` or `+` is build
     /// metadata and is not ordered.
     fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
@@ -915,12 +915,12 @@ mod feed {
     <item>
       <title>0.1.4</title>
       <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
-      <enclosure url="https://releases.waku.sh/Waku-0.1.4-x86_64-Setup.exe" length="1024" type="application/octet-stream" sparkle:edSignature="oldsig" />
+      <enclosure url="https://releases.waku.sh/Goddard-0.1.4-x86_64-Setup.exe" length="1024" type="application/octet-stream" sparkle:edSignature="oldsig" />
     </item>
     <item>
       <title>0.2.0</title>
       <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-      <enclosure url="https://releases.waku.sh/Waku-0.2.0-x86_64-Setup.exe" length="2048" type="application/octet-stream" sparkle:edSignature="newsig" />
+      <enclosure url="https://releases.waku.sh/Goddard-0.2.0-x86_64-Setup.exe" length="2048" type="application/octet-stream" sparkle:edSignature="newsig" />
     </item>
   </channel>
 </rss>"#;
@@ -932,7 +932,7 @@ mod feed {
             assert_eq!(item.version, "0.2.0");
             assert_eq!(item.signature, "newsig");
             assert_eq!(item.length, Some(2048));
-            assert!(item.url.ends_with("Waku-0.2.0-x86_64-Setup.exe"));
+            assert!(item.url.ends_with("Goddard-0.2.0-x86_64-Setup.exe"));
         }
 
         #[test]
@@ -1042,7 +1042,7 @@ mod windows {
                 return None;
             }
             if verifying_key().is_none() {
-                eprintln!("Waku updater: SUPublicEDKey is not a valid ed25519 key");
+                eprintln!("Goddard updater: SUPublicEDKey is not a valid ed25519 key");
                 return None;
             }
 
@@ -1143,7 +1143,7 @@ mod windows {
                             if report {
                                 let _ = events.try_send(UpdaterEvent::Failed(error.to_string()));
                             } else {
-                                eprintln!("Waku updater: {error}");
+                                eprintln!("Goddard updater: {error}");
                             }
                         }
                     }
@@ -1264,7 +1264,7 @@ mod windows {
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory)?;
-        let installer = directory.join("Waku-Setup.exe");
+        let installer = directory.join("Goddard-Setup.exe");
 
         curl(&["-fsSL", "--max-time", "600", "-o"], &installer, &item.url)?;
 
@@ -1396,7 +1396,7 @@ mod windows {
         fn a_signature_from_the_release_script_verifies_here() {
             const PUBLIC: &str = "7gZ3dbx+MPQD4vc2dk7olL9QU66JIjpJ1iqNNafU2lQ=";
             const SIGNATURE: &str = "eBIPKGvQSxFIVNwOzNjzHYs/AGiYFIe3pGulv0TeocoMN0+0l28OJZrlJ2ZuQnNBfif10VW3virGo+7GP3TwCw==";
-            const PAYLOAD: &[u8] = b"Waku-0.0.0-x86_64-Setup.exe contents";
+            const PAYLOAD: &[u8] = b"Goddard-0.0.0-x86_64-Setup.exe contents";
 
             let decode = |value: &str| {
                 base64::engine::general_purpose::STANDARD

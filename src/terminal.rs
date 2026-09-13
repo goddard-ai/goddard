@@ -1813,7 +1813,7 @@ mod tests {
             None
         );
 
-        let term = parse_terminal(b"x\x1b]8;;https://waku.gg\x1b\\Waku\x1b]8;;\x1b\\ y");
+        let term = parse_terminal(b"x\x1b]8;;https://waku.gg\x1b\\Goddard\x1b]8;;\x1b\\ y");
         let (value, bounds) = hyperlink_at(&term, TerminalPoint::new(Line(0), Column(2))).unwrap();
         assert_eq!(value, "https://waku.gg");
         assert_eq!(

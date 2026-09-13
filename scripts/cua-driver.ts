@@ -1,5 +1,5 @@
 // Pinned SDK artifacts, shared by every packager and the dev watcher.
-// Only libraries/support files are bundled; Waku never runs cua-driver serve.
+// Only libraries/support files are bundled; Goddard never runs cua-driver serve.
 import { $ } from "bun";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";

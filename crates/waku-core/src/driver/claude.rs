@@ -1514,7 +1514,7 @@ fn handle_message(
             {
                 return;
             }
-            // `--replay-user-messages` echoes Waku's own prompts back; they are
+            // `--replay-user-messages` echoes Goddard's own prompts back; they are
             // an acknowledgement, not transcript content.
             if value.get("isReplay").and_then(Value::as_bool) == Some(true) {
                 return;
@@ -2286,7 +2286,7 @@ mod tests {
                 "tool_use_id": "toolu-agent",
                 "status": "completed",
                 "output_file": "",
-                "summary": "I have a complete map.\n\n# Waku Right Panel\nDetails…"
+                "summary": "I have a complete map.\n\n# Goddard Right Panel\nDetails…"
             }),
             "s",
             &events,
@@ -2311,7 +2311,7 @@ mod tests {
         );
         assert_eq!(
             settled.output.as_deref(),
-            Some("I have a complete map.\n\n# Waku Right Panel\nDetails…"),
+            Some("I have a complete map.\n\n# Goddard Right Panel\nDetails…"),
             "the final report belongs in the output pane"
         );
     }
@@ -2473,7 +2473,7 @@ mod tests {
         // Payloads copied from a live streaming-input session.
         let wire = [
             json!({"type":"system","subtype":"init","session_id":"s","tools":[]}),
-            // Waku's own prompt, echoed by --replay-user-messages.
+            // Goddard's own prompt, echoed by --replay-user-messages.
             json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"go"}]},"isReplay":true}),
             json!({"type":"stream_event","event":{"type":"message_start","message":{"role":"assistant"}}}),
             json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"pondering"}}}),

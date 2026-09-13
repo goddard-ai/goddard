@@ -1,4 +1,4 @@
-//! Ctrl-Tab switching across Waku tasks.
+//! Ctrl-Tab switching across Goddard tasks.
 //!
 //! The task order is snapshotted when Control-Tab opens the overlay. Repeated
 //! presses move only the highlight; releasing Control commits once, so a

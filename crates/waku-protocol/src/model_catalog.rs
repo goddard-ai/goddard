@@ -219,7 +219,7 @@ pub fn cursor_catalog_model<'a>(
     })
 }
 
-/// Cursor advertises extra-high as both `xhigh` and `extra-high`. Waku stores
+/// Cursor advertises extra-high as both `xhigh` and `extra-high`. Goddard stores
 /// the former so the picker label and Codex-style ladder stay one vocabulary.
 pub fn normalize_cursor_reasoning_effort(value: &str) -> String {
     let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");

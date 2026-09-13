@@ -7,11 +7,11 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const isMacOS = process.platform === "darwin";
-const appName = "Waku Debug";
+const appName = "Goddard Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const appPath = isMacOS
-  ? join(targetDir, "debug/Waku Debug.app")
+  ? join(targetDir, "debug/Goddard Debug.app")
   : join(targetDir, `debug/waku${executableSuffix}`);
 const daemonPath = join(
   targetDir,
@@ -214,7 +214,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
           return
         end
 
-        -- Swapping with each preceding singleton column rotates Waku into the
+        -- Swapping with each preceding singleton column rotates Goddard into the
         -- desired slot while preserving the order of all intervening columns.
         -- A stacked or custom-width column cannot be rotated through this API
         -- without changing its membership or sizing, so leave it untouched.
@@ -265,7 +265,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
       const detail =
         result.stderr.toString().trim() || result.stdout.toString().trim();
       console.warn(
-        `[waku-dev] Could not pin Waku to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
+        `[waku-dev] Could not pin Goddard to its Hyprland workspace${detail ? `: ${detail}` : "."}`,
       );
       hyprlandWarningShown = true;
     }
@@ -274,7 +274,7 @@ async function prepareHyprlandLaunch(): Promise<void> {
 
   if (!hyprlandRulesInstalled) {
     console.log(
-      `[waku-dev] Keeping Waku beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
+      `[waku-dev] Keeping Goddard beside the watcher on Hyprland workspace ${hyprlandWorkspace.name}.`,
     );
   }
   hyprlandRulesInstalled = true;
@@ -474,7 +474,7 @@ async function drainBuildQueue(): Promise<void> {
       if (target === "daemon") {
         if (daemonChangeRevision === buildDaemonRevision) {
           console.log(
-            "[waku-dev] Daemon rebuilt; Waku will swap the process without relaunching.",
+            "[waku-dev] Daemon rebuilt; Goddard will swap the process without relaunching.",
           );
         }
         continue;
@@ -535,5 +535,5 @@ if (appChangeRevision === initialAppRevision) {
 }
 
 console.log(
-  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Waku.",
+  "[waku-dev] Watching for source changes. Daemon-only edits hot-reload without relaunching Goddard.",
 );

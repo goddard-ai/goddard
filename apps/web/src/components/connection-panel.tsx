@@ -45,7 +45,7 @@ export function ConnectionPanel({ title }: { title?: string } = {}) {
       <div className="w-full max-w-[520px]">
         <div className="text-center">
           <img
-            alt="Waku"
+            alt="Goddard"
             className="mx-auto size-8 rounded-[8px]"
             draggable={false}
             src={wakuAppIconUrl}

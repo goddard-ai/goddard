@@ -352,7 +352,7 @@ fn retain_through_turn(messages: &[Value], retained_turns: usize) -> anyhow::Res
         retained.push(message.clone());
     }
     if turns < retained_turns {
-        bail!("Amp has only {turns} native turns, but Waku needs {retained_turns}");
+        bail!("Amp has only {turns} native turns, but Goddard needs {retained_turns}");
     }
     Ok(retained)
 }

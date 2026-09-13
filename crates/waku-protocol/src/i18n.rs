@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The language preference Waku persists. `System` resolves to one of the
-/// locales Waku deliberately ships today.
+/// The language preference Goddard persists. `System` resolves to one of the
+/// locales Goddard deliberately ships today.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AppLanguage {
@@ -190,7 +190,7 @@ mod tests {
                 locale = "zh-CN",
                 app = "Finder"
             ),
-            "允许 Waku 控制“Finder”吗？"
+            "允许 Goddard 控制“Finder”吗？"
         );
         assert_eq!(
             &*rust_i18n::t!("session.rewound", locale = "zh-CN", turn = 3),
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(&*rust_i18n::t!("settings.general", locale = "ja"), "一般");
         assert_eq!(
             &*rust_i18n::t!("computer_use.allow_control", locale = "ja", app = "Finder"),
-            "Waku に「Finder」の操作を許可しますか？"
+            "Goddard に「Finder」の操作を許可しますか？"
         );
         assert_eq!(
             &*rust_i18n::t!("session.rewound", locale = "ja", turn = 3),

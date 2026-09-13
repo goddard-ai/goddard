@@ -1510,11 +1510,11 @@ impl Waku {
         if let Some(previous_kinds) = previous_kinds.as_deref() {
             self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
         }
-        // A provider runtime owns its Waku JavaScript REPL and Computer Use
+        // A provider runtime owns its Goddard JavaScript REPL and Computer Use
         // descendants. Normally Stop closes that process tree and the next
         // prompt resumes the same provider thread with a fresh runtime. A
         // detached process or subagent is the exception: its provider must
-        // remain resident so Waku can keep observing and stopping it.
+        // remain resident so Goddard can keep observing and stopping it.
         if retain_runtime && keep_runtime {
             if let Some(runtime) = runtime.take() {
                 self.runtimes.insert(session_id, runtime);

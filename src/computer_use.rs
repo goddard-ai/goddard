@@ -1,4 +1,4 @@
-//! Native presentation helpers layered over Waku's headless Computer Use core.
+//! Native presentation helpers layered over Goddard's headless Computer Use core.
 
 use std::sync::Arc;
 

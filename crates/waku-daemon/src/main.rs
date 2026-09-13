@@ -10,13 +10,13 @@ use waku_protocol::{DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION};
 fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse(std::env::args().skip(1))?;
     let token =
-        std::env::var(DAEMON_TOKEN_ENV).context("Waku daemon authentication token is missing")?;
+        std::env::var(DAEMON_TOKEN_ENV).context("Goddard daemon authentication token is missing")?;
     // The bearer capability belongs only to this server process. Remove it
     // before any provider or workspace subprocess can inherit the daemon's
     // environment.
     unsafe { std::env::remove_var(DAEMON_TOKEN_ENV) };
     let listener = TcpListener::bind(&arguments.bind)
-        .with_context(|| format!("could not bind Waku daemon to {}", arguments.bind))?;
+        .with_context(|| format!("could not bind Goddard daemon to {}", arguments.bind))?;
     let address = listener.local_addr()?;
     ensure_bind_allowed(address, arguments.allow_non_loopback)?;
     let ready = DaemonReady {

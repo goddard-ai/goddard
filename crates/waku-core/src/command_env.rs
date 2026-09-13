@@ -33,7 +33,7 @@ type ShellEnvironment = Vec<(OsString, OsString)>;
 static LOGIN_SHELL_ENVIRONMENT: OnceLock<RwLock<Option<ShellEnvironment>>> = OnceLock::new();
 static SHELL_ENV_CAPTURE_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Build a command with the environment a terminal-launched Waku normally
+/// Build a command with the environment a terminal-launched Goddard normally
 /// inherits. Apps opened through LaunchServices do not receive variables
 /// exported by the user's shell, including the PATH needed by script-based
 /// CLIs whose shebang uses `/usr/bin/env` (for example, an npm-installed Codex
@@ -50,7 +50,7 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
-/// The `PATH` a provider CLI runs with: every directory Waku itself searched,
+/// The `PATH` a provider CLI runs with: every directory Goddard itself searched,
 /// plus the one the binary was found in.
 ///
 /// Detection resolves CLIs from more directories than the desktop process
@@ -65,7 +65,7 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
 ///
 /// Windows needs this most: the login-shell probe there is best-effort — no
 /// PowerShell may be present, and a profile can refuse to load — so a
-/// GUI-launched Waku can still be running with only the `PATH` it inherited.
+/// GUI-launched Goddard can still be running with only the `PATH` it inherited.
 fn child_search_path(program: &Path) -> Option<OsString> {
     let mut directories = executable_search_paths();
     // Last, not first: an install outside the known prefixes still finds its
@@ -83,7 +83,7 @@ fn child_search_path(program: &Path) -> Option<OsString> {
 
 /// A command that never flashes a console window.
 ///
-/// Waku's Windows build is a GUI-subsystem binary with no console of its own,
+/// Goddard's Windows build is a GUI-subsystem binary with no console of its own,
 /// so `CreateProcess` allocates one for every console child — `git`, a
 /// provider CLI, the daemon — and flashes it on screen. `CREATE_NO_WINDOW`
 /// keeps the child's console hidden while its pipes still work.
@@ -128,7 +128,7 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
     spawn(command)?.wait_with_output()
 }
 
-/// Normalize a Waku-owned provider thread before a dependency spawns the child
+/// Normalize a Goddard-owned provider thread before a dependency spawns the child
 /// internally. The ACP SDK owns its `async_process::Command`, so its dedicated
 /// connection thread uses this once at startup instead of [`spawn`].
 pub(crate) fn unblock_sigchld_for_current_thread() -> io::Result<()> {
@@ -291,7 +291,7 @@ pub fn refresh_from_default_shell() -> bool {
 }
 
 /// Windows has no login shell, but it still needs this probe. A GUI-launched
-/// Waku inherits explorer's `PATH`, which predates later installs, and the
+/// Goddard inherits explorer's `PATH`, which predates later installs, and the
 /// package managers users actually add to it — fnm, Volta, nvm — extend
 /// `PATH` only in the PowerShell profile, which never reaches the machine or
 /// user environment block. Probe PowerShell with the profile loaded, capture

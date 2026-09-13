@@ -18,7 +18,7 @@ const icons = Object.fromEntries(
 function readIcon(file: string) {
   const source = readFileSync(`${iconDirectory}/${file}`, 'utf8')
   const svg = source.match(/<svg\b([^>]*)>([\s\S]*)<\/svg>/i)
-  if (!svg) throw new Error(`Invalid Waku icon: ${file}`)
+  if (!svg) throw new Error(`Invalid Goddard icon: ${file}`)
 
   const viewBox = svg[1]!.match(/viewBox="([^"]+)"/i)?.[1]
     ?.trim()

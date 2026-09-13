@@ -2,7 +2,7 @@
 name = "waku-core"
 version = "0.1.0"
 edition = "2024"
-description = "Headless provider, persistence, and workspace runtime for Waku"
+description = "Headless provider, persistence, and workspace runtime for Goddard"
 license = "GPL-3.0-only"
 readme = "README.md"
 

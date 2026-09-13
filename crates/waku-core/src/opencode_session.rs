@@ -28,7 +28,7 @@ const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 ///
 /// ACP `session/list` is project-scoped: OpenCode resolves the request `cwd`,
 /// or the process cwd without one, to a project and lists only that project's
-/// sessions, so a catalog launched from Waku's isolated temp directory saw
+/// sessions, so a catalog launched from Goddard's isolated temp directory saw
 /// nothing but the "global" project. The server's `/experimental/session`
 /// route is the one cross-project listing OpenCode exposes, and each entry
 /// carries the directory the session was started in.
@@ -135,7 +135,7 @@ pub(crate) fn fork_session_removing_turns_on_server(
 fn retained_turn_count(total_turns: usize, turns_to_remove: usize) -> anyhow::Result<usize> {
     total_turns.checked_sub(turns_to_remove).ok_or_else(|| {
         anyhow!(
-            "OpenCode has only {total_turns} native turns, but Waku needs to remove {turns_to_remove}"
+            "OpenCode has only {total_turns} native turns, but Goddard needs to remove {turns_to_remove}"
         )
     })
 }
@@ -183,7 +183,7 @@ fn fork_session_with_message_ids(
 fn fork_message_id(message_ids: &[String], retained_turns: usize) -> anyhow::Result<Option<&str>> {
     if retained_turns > message_ids.len() {
         bail!(
-            "OpenCode has only {} native turns, but Waku needs {retained_turns}",
+            "OpenCode has only {} native turns, but Goddard needs {retained_turns}",
             message_ids.len()
         );
     }
@@ -454,7 +454,7 @@ mod tests {
         let response = json!([
             {
                 "id": "ses_waku",
-                "title": "Review and merge Waku PR #113",
+                "title": "Review and merge Goddard PR #113",
                 "directory": waku_directory,
                 "time": { "created": 1_787_000_000_123_u64, "updated": 1_787_000_100_999_u64 },
                 "project": { "id": "prj_waku", "worktree": waku_directory }
@@ -479,7 +479,7 @@ mod tests {
                 session_id: "ses_waku".into()
             }
         );
-        assert_eq!(sessions[0].title, "Review and merge Waku PR #113");
+        assert_eq!(sessions[0].title, "Review and merge Goddard PR #113");
         assert_eq!(sessions[0].cwd, waku_directory);
         assert_eq!(sessions[0].created_at, 1_787_000_000);
         assert_eq!(sessions[0].updated_at, 1_787_000_100);
@@ -513,7 +513,7 @@ mod tests {
     }
 
     /// Exercises the same cold-session path used when an edited message is
-    /// submitted after Waku has relaunched. The source session is supplied by
+    /// submitted after Goddard has relaunched. The source session is supplied by
     /// the caller so this never creates provider traffic; it only forks the
     /// already-completed native transcript and removes the test fork again.
     #[test]

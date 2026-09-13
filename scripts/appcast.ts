@@ -5,7 +5,7 @@
 // Usage:
 //   bun scripts/appcast.ts <updates-dir>
 //
-// <updates-dir> holds the packaged archives (e.g. Waku-0.2.0.zip) plus any
+// <updates-dir> holds the packaged archives (e.g. Goddard-0.2.0.zip) plus any
 // older archives so Sparkle can build binary deltas. appcast.xml is written
 // into that directory. The private EdDSA key is read from SPARKLE_PRIVATE_KEY
 // when set, otherwise from the login keychain (see RELEASING.md).
@@ -58,7 +58,7 @@ export async function generateAppcast(
     );
   }
   console.log(`Using: ${generator}`);
-  // Same prefix for both: archives and the Waku-<version>.md release notes are
+  // Same prefix for both: archives and the Goddard-<version>.md release notes are
   // served from the same origin. The notes prefix makes generate_appcast emit
   // <sparkle:releaseNotesLink> for any notes file matching an archive name.
   const privateKey = process.env.SPARKLE_PRIVATE_KEY?.trim();

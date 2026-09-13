@@ -24,7 +24,7 @@ export const WINDOWS_ARCHITECTURES = [
 // direct link needs the resolved version; without one the menu falls back to
 // the docs page rather than guessing a URL that would 404.
 export function windowsInstallerUrl(version: string, arch: string) {
-  return `${RELEASES_BASE}/Waku-${version}-${arch}-Setup.exe`
+  return `${RELEASES_BASE}/Goddard-${version}-${arch}-Setup.exe`
 }
 
 // The Sparkle appcast has no CORS headers, so resolve it on the server.
@@ -44,7 +44,7 @@ const fetchLatestRelease = createServerFn({ method: 'GET' }).handler(
       const pubDate = xml.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1] ?? null
       return {
         version,
-        url: `${RELEASES_BASE}/Waku-${version}.dmg`,
+        url: `${RELEASES_BASE}/Goddard-${version}.dmg`,
         pubDate,
       }
     } catch {

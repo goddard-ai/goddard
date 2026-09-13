@@ -6,7 +6,7 @@ import { Type } from "typebox";
 type JsonObject = Record<string, unknown>;
 
 const jsToolDescription =
-  "Run JavaScript in Waku's persistent QuickJS kernel for Computer Use. Initialize `cua` with `await setupComputerUseRuntime({ globals: globalThis })`, then call native tools directly, such as `cua.list_apps()` and `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Calls time out after 30000 ms (30 seconds) unless `timeout_ms` is provided. Use `jsRepl.write(...)` for text and `await jsRepl.emitImage(...)` for images. Bindings and scheduled timers persist until the JavaScript kernel is reset.";
+  "Run JavaScript in Goddard's persistent QuickJS kernel for Computer Use. Initialize `cua` with `await setupComputerUseRuntime({ globals: globalThis })`, then call native tools directly, such as `cua.list_apps()` and `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Calls time out after 30000 ms (30 seconds) unless `timeout_ms` is provided. Use `jsRepl.write(...)` for text and `await jsRepl.emitImage(...)` for images. Bindings and scheduled timers persist until the JavaScript kernel is reset.";
 
 class WakuMcpClient {
   private child: ChildProcessWithoutNullStreams | undefined;
@@ -42,13 +42,13 @@ class WakuMcpClient {
     lines.on("line", (line) => this.handleLine(line));
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
-      if (message) console.error(`Waku JavaScript REPL: ${message}`);
+      if (message) console.error(`Goddard JavaScript REPL: ${message}`);
     });
     child.once("error", (error) => this.handleExit(error));
     child.once("exit", (code, signal) => {
       this.handleExit(
         new Error(
-          `Waku JavaScript REPL exited${code === null ? "" : ` with ${code}`}${
+          `Goddard JavaScript REPL exited${code === null ? "" : ` with ${code}`}${
             signal ? ` (${signal})` : ""
           }`,
         ),
@@ -98,7 +98,7 @@ class WakuMcpClient {
 
   private requestWithoutStart(method: string, params: JsonObject): Promise<unknown> {
     const child = this.child;
-    if (!child) return Promise.reject(new Error("Waku JavaScript REPL is not running"));
+    if (!child) return Promise.reject(new Error("Goddard JavaScript REPL is not running"));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -147,7 +147,7 @@ function toolResult(result: JsonObject) {
       )
       .map((item) => item.text)
       .join("\n");
-    throw new Error(message || "Waku JavaScript execution failed");
+    throw new Error(message || "Goddard JavaScript execution failed");
   }
   return { content, details: result._meta ?? {} };
 }

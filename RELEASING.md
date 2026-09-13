@@ -1,6 +1,6 @@
-# Releasing Waku
+# Releasing Goddard
 
-Waku ships signed in-app updates on macOS, Linux, and Windows. Releases live in
+Goddard ships signed in-app updates on macOS, Linux, and Windows. Releases live in
 a **Cloudflare R2** bucket served at **`https://releases.waku.sh`**. macOS uses
 [Sparkle](https://sparkle-project.org), including binary deltas when available;
 the native Linux and Windows updaters read architecture-specific feeds and
@@ -47,7 +47,7 @@ The release runs on [Bun](https://bun.sh) and needs
 Updates are signed with an ed25519 key; the private half stays in the login
 keychain and the public half ships in Info.plist as `SUPublicEDKey`.
 
-**This Mac already has the key** — Waku signs with the same default-account
+**This Mac already has the key** — Goddard signs with the same default-account
 Sparkle key as kero, and the matching public key is already in Info.plist.
 Nothing to do.
 
@@ -65,7 +65,7 @@ build, or download the release from
 > ⚠️ Lose the private key and existing installs can never update again. Keep
 > the backup current.
 
-To split Waku onto its own key later: `generate_keys --account waku`, put the
+To split Goddard onto its own key later: `generate_keys --account waku`, put the
 new public key in Info.plist, and pass `--account waku` through to
 `generate_appcast` in `scripts/appcast.ts`. Users on old builds only trust the
 old key, so do this on a release that still signs with the old key… in other
@@ -129,7 +129,7 @@ section as release notes, regenerates the signed `appcast.xml`, and uploads
 everything with immutable cache headers (the appcast itself stays
 `max-age=300`). When it finishes:
 
-- **Download link**: `https://releases.waku.sh/Waku-<version>.dmg`
+- **Download link**: `https://releases.waku.sh/Goddard-<version>.dmg`
 - **In-app updates**: served from the same origin via the appcast.
 
 Test by keeping an older build around, launching it, and choosing
@@ -148,30 +148,30 @@ The Release workflow runs two ways:
 macOS CI runs `bun run release --local`, which signs, notarizes, and writes the
 same artifacts as a local release:
 
-- `Waku-<version>.dmg`
-- `Waku-<version>.zip`
+- `Goddard-<version>.dmg`
+- `Goddard-<version>.zip`
 - `appcast.xml` (Sparkle-signed)
 
 Linux CI adds:
 
-- `waku-<version>-x86_64-unknown-linux-gnu.tar.gz`
-- `waku-<version>-aarch64-unknown-linux-gnu.tar.gz`
+- `Goddard-<version>-x86_64-unknown-linux-gnu.tar.gz`
+- `Goddard-<version>-aarch64-unknown-linux-gnu.tar.gz`
 - `appcast-linux-x86_64.xml`, `appcast-linux-aarch64.xml`
 - `latest-linux.txt` — the version `install.sh` resolves "latest" to
 
 Windows CI adds:
 
-- `Waku-<version>-x86_64-Setup.exe`
-- `Waku-<version>-aarch64-Setup.exe`
-- `waku-<version>-x86_64-pc-windows-msvc.zip` (portable)
-- `waku-<version>-aarch64-pc-windows-msvc.zip` (portable)
+- `Goddard-<version>-x86_64-Setup.exe`
+- `Goddard-<version>-aarch64-Setup.exe`
+- `Goddard-<version>-x86_64-pc-windows-msvc.zip` (portable)
+- `Goddard-<version>-aarch64-pc-windows-msvc.zip` (portable)
 - `appcast-windows-x86_64.xml`, `appcast-windows-aarch64.xml`
 - `latest-windows.txt` — the version the download page resolves "latest" to
 
 [`scripts/bundle-windows.ts`](scripts/bundle-windows.ts) builds both, driving
 [`resources/windows/waku.iss`](resources/windows/waku.iss) through Inno Setup's
 `ISCC`. The installer is **per-user** (`PrivilegesRequired=lowest`,
-`%LOCALAPPDATA%\Programs\Waku`) — no elevation, which is exactly what lets the
+`%LOCALAPPDATA%\Programs\Goddard`) — no elevation, which is exactly what lets the
 updater re-run it silently. The script signs the two executables and the
 installer with Authenticode when `WINDOWS_CERTIFICATE` and
 `WINDOWS_CERTIFICATE_PASSWORD` are set, and packages them unsigned otherwise,
@@ -207,7 +207,7 @@ rolls back if the replacement cannot open its main window.
 
 Both Linux jobs run on **Ubuntu 22.04**, and that choice is load-bearing: the
 binaries link against the build machine's glibc, so the runner sets the oldest
-distribution Waku can start on (2.35 — Ubuntu 22.04, Debian 12, Fedora 36).
+distribution Goddard can start on (2.35 — Ubuntu 22.04, Debian 12, Fedora 36).
 Moving those jobs to a newer runner silently drops support for everything
 older.
 
@@ -270,7 +270,7 @@ secrets first:
   at the DMG.
 - **Debug builds never update themselves.** `Updater::init` returns `None`
   under `debug_assertions`, so the dev watcher's app can't offer to replace
-  itself with a production Waku. Set `WAKU_FORCE_UPDATER=1` to exercise the
+  itself with a production Goddard. Set `WAKU_FORCE_UPDATER=1` to exercise the
   real Sparkle flow from a debug bundle anyway. A bare `cargo run` binary has
   no embedded framework and also degrades to no updater. For UI-only testing,
   start the watcher with `WAKU_PREVIEW_UPDATE=1`; the sidebar immediately
@@ -287,7 +287,7 @@ secrets first:
 - **First-run consent:** Sparkle shows its one-time "check automatically?"
   prompt on the second launch. The Settings → General toggle reads and writes
   the same persisted value.
-- **Waku isn't sandboxed**, so Sparkle's XPC services are unnecessary;
+- **Goddard isn't sandboxed**, so Sparkle's XPC services are unnecessary;
   `bundle.sh` strips them (plus headers/modules) from the embedded framework
   and re-signs the rest with the app's identity — hardened-runtime library
   validation requires the identities to match.
@@ -295,11 +295,11 @@ secrets first:
   the recent history is staged locally under `dist/updates/` (git-ignored).
 - **Platform artifacts:** keep the bucket layout flat and platform-tagged by
   artifact name/extension — today's macOS names
-  (`Waku-<v>.dmg`, `Waku-<v>.zip`, `appcast.xml`) must keep their URLs.
-  Linux CI releases produce `waku-<v>-<target>.tar.gz` with
-  `scripts/bundle-linux.sh`, Windows CI produces `waku-<v>-<target>.zip` with
+  (`Goddard-<v>.dmg`, `Goddard-<v>.zip`, `appcast.xml`) must keep their URLs.
+  Linux CI releases produce `Goddard-<v>-<target>.tar.gz` with
+  `scripts/bundle-linux.sh`, Windows CI produces `Goddard-<v>-<target>.zip` with
   `scripts/bundle-windows.ts`, and both land in GitHub Releases, then R2 via
-  the sync workflow. Windows also ships `Waku-<v>-<arch>-Setup.exe`; each
+  the sync workflow. Windows also ships `Goddard-<v>-<arch>-Setup.exe`; each
   native client updates from `appcast-<platform>-<arch>.xml` while the Linux
   installer resolves `latest-linux.txt`. `src/updater.rs` is the per-platform
   seam, and everything

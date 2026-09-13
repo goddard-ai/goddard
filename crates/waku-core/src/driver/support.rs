@@ -235,7 +235,7 @@ fn build_grok_computer_use_config(
         });
     let rules = fs::read_to_string(&base.skill_path).with_context(|| {
         format!(
-            "could not read Waku Computer Use skill {}",
+            "could not read Goddard Computer Use skill {}",
             base.skill_path.display()
         )
     })?;
@@ -373,7 +373,7 @@ pub(super) fn classify_tool(name: &str) -> ActivityKind {
 /// one-shot provider reply and keeps the rule in driver-local state. On v1
 /// that protected a per-workspace pooled server. On v2 it is more
 /// load-bearing still: an `always` reply writes into `/api/permission/saved`,
-/// a GLOBAL store shared with the user's own terminal, so a Full Access Waku
+/// a GLOBAL store shared with the user's own terminal, so a Full Access Goddard
 /// task would silently disarm prompts in every other workspace and in the
 /// user's TUI. `always` is never put on the wire.
 #[derive(Clone, Debug)]
@@ -509,10 +509,10 @@ mod tests {
 
     fn computer_use_config() -> computer_use_runtime::ComputerUseConfig {
         computer_use_runtime::ComputerUseConfig {
-            server_path: PathBuf::from("/tmp/Waku Computer Use"),
-            repl_path: PathBuf::from("/Applications/Waku.app/Contents/Resources/waku_js_repl"),
+            server_path: PathBuf::from("/tmp/Goddard Computer Use"),
+            repl_path: PathBuf::from("/Applications/Goddard.app/Contents/Resources/waku_js_repl"),
             skill_path: PathBuf::from(
-                "/Applications/Waku.app/Contents/Resources/skills/waku-computer-use/SKILL.md",
+                "/Applications/Goddard.app/Contents/Resources/skills/waku-computer-use/SKILL.md",
             ),
             process_directory: PathBuf::from("/tmp/waku-computer-use/session"),
         }
@@ -550,10 +550,10 @@ mod tests {
                     "plugin": ["existing-plugin"]
                 }"#,
             ),
-            Path::new("/Applications/Waku Computer Use"),
-            Path::new("/Applications/Waku.app/Contents/Resources/waku_js_repl"),
+            Path::new("/Applications/Goddard Computer Use"),
+            Path::new("/Applications/Goddard.app/Contents/Resources/waku_js_repl"),
             Path::new(
-                "/Applications/Waku.app/Contents/Resources/skills/waku-computer-use/SKILL.md",
+                "/Applications/Goddard.app/Contents/Resources/skills/waku-computer-use/SKILL.md",
             ),
             Path::new("/tmp/waku computer use/session"),
         )
@@ -570,20 +570,20 @@ mod tests {
             value
                 .pointer("/mcp/waku_js_repl/command/0")
                 .and_then(Value::as_str),
-            Some("/Applications/Waku.app/Contents/Resources/waku_js_repl")
+            Some("/Applications/Goddard.app/Contents/Resources/waku_js_repl")
         );
         assert_eq!(
             value
                 .pointer("/mcp/waku_js_repl/environment/WAKU_COMPUTER_USE_SERVER")
                 .and_then(Value::as_str),
-            Some("/Applications/Waku Computer Use")
+            Some("/Applications/Goddard Computer Use")
         );
         assert_eq!(
             value.get("instructions").and_then(Value::as_array).unwrap(),
             &[
                 Value::String("existing.md".into()),
                 Value::String(
-                    "/Applications/Waku.app/Contents/Resources/skills/waku-computer-use/SKILL.md"
+                    "/Applications/Goddard.app/Contents/Resources/skills/waku-computer-use/SKILL.md"
                         .into(),
                 ),
             ]
@@ -632,14 +632,14 @@ mod tests {
             .unwrap();
         assert_eq!(
             server.get("command").and_then(toml::Value::as_str),
-            Some("/Applications/Waku.app/Contents/Resources/waku_js_repl")
+            Some("/Applications/Goddard.app/Contents/Resources/waku_js_repl")
         );
         assert_eq!(
             server
                 .get("env")
                 .and_then(|env| env.get("WAKU_COMPUTER_USE_SERVER"))
                 .and_then(toml::Value::as_str),
-            Some("/tmp/Waku Computer Use")
+            Some("/tmp/Goddard Computer Use")
         );
     }
 
@@ -649,10 +649,10 @@ mod tests {
             base: computer_use_config(),
             grok_home: PathBuf::from("/tmp/waku-computer-use/session/grok-home"),
             auth_path: Some(PathBuf::from("/Users/test/.grok/auth.json")),
-            rules: "Waku Computer Use rules".into(),
+            rules: "Goddard Computer Use rules".into(),
         };
         let (arguments, environment) = grok_computer_use_launch_configuration(Some(&config));
-        assert_eq!(arguments, ["--rules=Waku Computer Use rules"]);
+        assert_eq!(arguments, ["--rules=Goddard Computer Use rules"]);
         let environment = environment.into_iter().collect::<HashMap<_, _>>();
         assert_eq!(
             environment.get("GROK_HOME"),

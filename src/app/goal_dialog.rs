@@ -100,7 +100,7 @@ impl Waku {
             status_focus: cx.focus_handle(),
             clear_focus: cx.focus_handle(),
         });
-        // Like Waku's other deferred surfaces, the modal joins the dispatch
+        // Like Goddard's other deferred surfaces, the modal joins the dispatch
         // tree only after it has drawn. Focus it two frames later so typing
         // cannot fall through to the composer beneath it.
         window.on_next_frame(move |window, _| {
@@ -122,7 +122,7 @@ impl Waku {
     /// Hand a goal operation to the session's runtime, starting one first
     /// when none exists yet. Goals attach to the provider thread, not to any
     /// turn — the Codex CLI opens its thread at launch, so `/goal` works
-    /// there before the first message. Waku starts providers lazily, so the
+    /// there before the first message. Goddard starts providers lazily, so the
     /// goal path starts the runtime itself and the queued operations drain
     /// the moment it installs.
     pub(super) fn dispatch_goal_operation(

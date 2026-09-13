@@ -2,7 +2,7 @@
 name = "waku-daemon"
 version = "0.1.0"
 edition = "2024"
-description = "Headless Waku provider daemon"
+description = "Headless Goddard provider daemon"
 license = "GPL-3.0-only"
 readme = "README.md"
 

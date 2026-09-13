@@ -76,7 +76,7 @@ export function isFastModeToggleSubmission(
       && command.template === null)
 }
 
-/** Waku's provider-neutral terminal-session picker. */
+/** Goddard's provider-neutral terminal-session picker. */
 export function isResumeSubmission(prompt: string): boolean {
   return prompt.trim() === '/resume'
 }
@@ -90,7 +90,7 @@ export type GoalCommand =
   | { kind: 'set'; objective: string }
 
 /**
- * Parse the submitted text as Codex's native `/goal` command, which Waku
+ * Parse the submitted text as Codex's native `/goal` command, which Goddard
  * bridges to `thread/goal/*`. `null` when it is not one — wrong provider,
  * other text, or a project/user command that deliberately owns `/goal`
  * (resolution precedence stands).

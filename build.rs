@@ -54,7 +54,7 @@ fn embed_windows_resources() {
     let icon = icon.to_string_lossy().replace('\\', "\\\\");
 
     let package_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    // VERSIONINFO wants four numeric fields; Waku's version has three.
+    // VERSIONINFO wants four numeric fields; Goddard's version has three.
     let mut fields = package_version
         .split(['.', '-', '+'])
         .map(|field| field.parse::<u16>().unwrap_or(0))
@@ -84,12 +84,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Waku\0"
+            VALUE "CompanyName", "Goddard\0"
             VALUE "FileDescription", "{description}\0"
             VALUE "FileVersion", "{package_version}\0"
             VALUE "InternalName", "waku\0"
             VALUE "OriginalFilename", "waku.exe\0"
-            VALUE "ProductName", "Waku\0"
+            VALUE "ProductName", "Goddard\0"
             VALUE "ProductVersion", "{package_version}\0"
         END
     END

@@ -22,7 +22,7 @@ struct ContextMessage<'a> {
 
 /// Cursor CLI can resume only the tip of a session and currently has no fork
 /// command. Preserve branch semantics by starting a fresh Cursor session whose
-/// first prompt is seeded with Waku's retained visible conversation.
+/// first prompt is seeded with Goddard's retained visible conversation.
 pub fn fork_session_at_turn(
     session: &AgentSession,
     retained_turns: usize,

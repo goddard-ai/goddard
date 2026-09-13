@@ -10,7 +10,7 @@ import type { ReactNode } from 'react'
 import appCss from '@/styles.css?url'
 
 const SITE_URL = 'https://waku.sh'
-const TITLE = 'Waku — one native app for all your coding agents'
+const TITLE = 'Goddard — one native app for all your coding agents'
 const DESCRIPTION =
   'A fast, native app for local coding agents. Amp, Claude Code, Codex, Cursor, OpenCode, Grok, and Pi — one timeline, entirely on your machine.'
 

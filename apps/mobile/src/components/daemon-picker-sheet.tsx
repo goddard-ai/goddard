@@ -471,7 +471,7 @@ function ConnectionFootnote({
   };
   let message = editing
     ? 'Leave the token blank to keep the saved credential.'
-    : 'Copy the address and token from Waku Desktop → Settings → Daemon.';
+    : 'Copy the address and token from Goddard Desktop → Settings → Daemon.';
 
   if (security === 'invalid') {
     color = theme.danger;

@@ -1,7 +1,7 @@
 //! Agent Client Protocol transport backed by the official Rust SDK.
 //!
 //! The SDK owns JSON-RPC framing, request IDs, response routing, cancellation,
-//! unknown-method errors, stdio lifetime, and protocol type validation. Waku
+//! unknown-method errors, stdio lifetime, and protocol type validation. Goddard
 //! only adapts typed ACP messages to its provider-neutral [`DriverEvent`]s.
 
 use std::collections::{HashMap, HashSet};
@@ -555,7 +555,7 @@ async fn run_sdk_connection(
             let mut client_capabilities = ClientCapabilities::new().terminal(false);
             if provider == ProviderKind::Cursor {
                 // Cursor only exposes its parameterized model controls to
-                // clients that opt in. Waku applies the returned config option
+                // clients that opt in. Goddard applies the returned config option
                 // ids rather than assuming Cursor's private ids stay stable.
                 let mut meta = Map::new();
                 meta.insert("parameterizedModelPicker".to_owned(), Value::Bool(true));
@@ -862,7 +862,7 @@ fn desired_access_mode(
 
 /// Which session config option carries reasoning effort. ACP leaves the id to
 /// the agent: Kimi Code exposes it as its `thinking` level, while the other
-/// agents Waku drives keep it on `mode`. Grok does not use this path: its
+/// agents Goddard drives keep it on `mode`. Grok does not use this path: its
 /// effort rides on `session/set_model` as `_meta.reasoningEffort`. Devin is
 /// excluded from the generic call because its `mode` option is a permission
 /// mode, not effort.
@@ -2174,7 +2174,7 @@ fn handle_session_update(
                 });
             }
         }
-        // `user_message_chunk` is Waku's own prompt echoed back. Other typed
+        // `user_message_chunk` is Goddard's own prompt echoed back. Other typed
         // updates currently have no transcript representation.
         _ => {}
     }

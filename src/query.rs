@@ -1,6 +1,6 @@
 //! A small keyed cache for values that have to be fetched.
 //!
-//! Waku had grown three hand-rolled versions of the same thing — the git branch
+//! Goddard had grown three hand-rolled versions of the same thing — the git branch
 //! per project, the diff file list, session transcripts — each with its own
 //! generation counter to stop a slow result from overwriting a newer one. This
 //! is that pattern once, borrowing the shape of TanStack Query: read from

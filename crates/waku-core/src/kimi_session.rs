@@ -4,7 +4,7 @@
 //! key, a quota wall — only in its own per-session wire log. Over ACP the same
 //! turn simply returns `end_turn` carrying no content at all, with nothing on
 //! stderr and no JSON-RPC error, so a client that trusts the protocol shows an
-//! empty answer and calls it a success. Reading the wire log is what lets Waku
+//! empty answer and calls it a success. Reading the wire log is what lets Goddard
 //! name the real cause instead.
 
 use std::collections::HashSet;
@@ -141,7 +141,7 @@ fn list_provider_sessions_in(home: &Path, limit: usize) -> Vec<ProviderSessionSu
 /// Read Kimi's provider-owned state files without opening any recorded cwd.
 /// ACP `session/list` is workspace-scoped and makes the agent inspect each
 /// historical project, which can trigger macOS Desktop/Downloads/Documents
-/// permission dialogs just by opening Waku's Resume picker.
+/// permission dialogs just by opening Goddard's Resume picker.
 pub fn list_provider_sessions(limit: usize) -> anyhow::Result<Vec<ProviderSessionSummary>> {
     if limit == 0 {
         return Ok(Vec::new());
@@ -191,7 +191,7 @@ fn turn_failure_in(
 }
 
 /// Sessions are filed under a per-workspace directory whose name carries a
-/// hash Waku cannot reproduce, so the session id is matched by scanning.
+/// hash Goddard cannot reproduce, so the session id is matched by scanning.
 fn wire_log(home: &Path, session_id: &str) -> Option<PathBuf> {
     if session_id.is_empty() || session_id.contains(std::path::MAIN_SEPARATOR) {
         return None;

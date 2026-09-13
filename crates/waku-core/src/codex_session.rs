@@ -90,7 +90,7 @@ fn app_server_request_in(binary: &Path, cwd: &Path, request: Value) -> anyhow::R
                 "params": {
                     "clientInfo": {
                         "name": "waku",
-                        "title": "Waku",
+                        "title": "Goddard",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": { "experimentalApi": true }
@@ -240,7 +240,7 @@ fn parse_session_summaries(response: &Value, limit: usize) -> Vec<ProviderSessio
 }
 
 /// Ask Codex for CLI-owned threads, excluding exec, editor, app-server and
-/// sub-agent rollouts. Waku-created app-server threads are filtered again by
+/// sub-agent rollouts. Goddard-created app-server threads are filtered again by
 /// native cursor in the daemon catalog.
 pub fn list_provider_sessions(
     binary: &Path,
@@ -365,7 +365,7 @@ fn retain_recent_messages(history: &mut ProviderSessionHistory, visible_turn_lim
         .retain(|message| message.turn_id.is_some_and(|id| retained.contains(&id)));
 }
 
-/// Load the complete native turn sequence so Waku's provider turn counts stay
+/// Load the complete native turn sequence so Goddard's provider turn counts stay
 /// aligned for later fork and rollback operations. Only recent display text is
 /// retained; Codex remains authoritative for the full conversation context.
 pub fn provider_session_history(

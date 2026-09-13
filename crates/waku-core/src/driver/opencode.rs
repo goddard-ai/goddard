@@ -1,6 +1,6 @@
 //! `opencode serve` is OpenCode's real API: one resident process serves
 //! every session in a workspace, streams server-sent events, and answers
-//! permission requests the user can actually be asked. Waku already started
+//! permission requests the user can actually be asked. Goddard already started
 //! this server for a side-quest — forking a session — while running
 //! conversations through one-shot `opencode run` invocations; this drives
 //! everything through it, pooled per workspace via `opencode_pool` so
@@ -251,7 +251,7 @@ impl OpenCodeDriver {
         };
 
         // OpenCode's build agent allows ordinary shell commands by default.
-        // Waku must therefore install the selected access policy on this
+        // Goddard must therefore install the selected access policy on this
         // native session; listening for permission events alone cannot make
         // Supervised mode ask. Session-local rules are also safe on the shared
         // per-workspace server and replace a previous mode when resuming.
@@ -396,7 +396,7 @@ impl OpenCodeDriver {
                     Ok(Some(stream)) => {
                         // The stream is live before this snapshot is read, so
                         // a request can neither fall between the two nor be
-                        // lost when Waku reconnects after it was asked. Events
+                        // lost when Goddard reconnects after it was asked. Events
                         // that arrive during the snapshot wait in the socket;
                         // request-level de-duplication handles the overlap.
                         if let Ok(pending) = crate::opencode_session::request_json_on_port(
@@ -1029,7 +1029,7 @@ fn rehydrate_pending_permissions(
 
     // A pending native permission proves that the resumed provider turn is
     // still live. Restore this driver-local edge so the eventual
-    // `session.idle` settles Waku's persisted running turn exactly once.
+    // `session.idle` settles Goddard's persisted running turn exactly once.
     *turn_active.lock() = true;
     for request in requests {
         request_permission(request, events, commands, auto_approve, permissions);
@@ -1155,7 +1155,7 @@ fn request_permission(
 
     // OpenCode's `always` response updates a process-wide approval cache. A
     // pooled Full Access task must never suppress prompts in a Supervised task,
-    // so Waku sends only one-shot provider replies and retains durable choices
+    // so Goddard sends only one-shot provider replies and retains durable choices
     // in this driver's session-local state.
     let mut permission_state = permissions.lock();
     if permission_state.pending.contains_key(request_id)

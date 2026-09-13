@@ -1234,7 +1234,7 @@ function AutocompleteRowContents({ row }: { row: ComposerAutocompleteRow }) {
           {command.description}
         </span>
         <span className="flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold text-[var(--text-tertiary)]">
-          {command.scope === 'Waku' ? 'waku' : command.scope}
+          {command.scope === 'Waku' ? 'goddard' : command.scope}
         </span>
       </>
     )

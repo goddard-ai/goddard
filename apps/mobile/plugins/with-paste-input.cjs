@@ -26,7 +26,7 @@ function modifySwiftAppDelegate(contents) {
 module.exports = function withPasteInput(config) {
   return withAppDelegate(config, (nextConfig) => {
     if (nextConfig.modResults.language !== 'swift') {
-      throw new Error('@mattermost/react-native-paste-input requires a Swift AppDelegate in Waku');
+      throw new Error('@mattermost/react-native-paste-input requires a Swift AppDelegate in Goddard');
     }
     nextConfig.modResults.contents = modifySwiftAppDelegate(nextConfig.modResults.contents);
     return nextConfig;

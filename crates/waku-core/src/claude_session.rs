@@ -57,7 +57,7 @@ pub fn list_provider_sessions(limit: usize) -> anyhow::Result<Vec<ProviderSessio
 
 /// Import the visible text of one Claude Code conversation. The native JSONL
 /// remains the source of truth and the returned cursor continues that exact
-/// conversation on the next Waku prompt.
+/// conversation on the next Goddard prompt.
 pub fn provider_session_history(
     session_id: &str,
     turn_limit: usize,
@@ -494,8 +494,8 @@ fn list_provider_sessions_in(
     }
     // `history.jsonl` is Claude's interactive CLI index. Headless `-p` and
     // Agent SDK runs still have transcripts under `projects/` but are absent
-    // from this index, which naturally keeps Waku-created sessions out of the
-    // terminal resume picker even after their Waku task has been deleted.
+    // from this index, which naturally keeps Goddard-created sessions out of the
+    // terminal resume picker even after their Goddard task has been deleted.
     let history_path = projects_directory
         .parent()
         .map(|directory| directory.join("history.jsonl"));
@@ -861,7 +861,7 @@ fn fork_session_at_in(
     output.push(json!({
         "type": "custom-title",
         "sessionId": forked_session_id,
-        "customTitle": if title.trim().is_empty() { "Waku rewind" } else { title.trim() },
+        "customTitle": if title.trim().is_empty() { "Goddard rewind" } else { title.trim() },
         "uuid": Uuid::new_v4().to_string(),
         "timestamp": now,
     }));

@@ -2,7 +2,7 @@
 //!
 //! ACP agents own their storage migrations and visible-history projection. A
 //! one-shot `session/list` or `session/load` therefore stays more accurate than
-//! reading their private stores, while typed updates let Waku discard private
+//! reading their private stores, while typed updates let Goddard discard private
 //! reasoning and provider-only tool records by construction.
 
 use std::collections::HashSet;

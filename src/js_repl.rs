@@ -20,11 +20,11 @@ const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 30_000;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
-// Instructions for Waku's persistent QuickJS runtime and its jsRepl helpers.
+// Instructions for Goddard's persistent QuickJS runtime and its jsRepl helpers.
 const SERVER_INSTRUCTIONS: &str = "Use `js` to run JavaScript in the persistent QuickJS kernel. When a skill or prompt says to use `waku_js_repl`, call this server's `js` execution tool. Calls default to a 30000 ms (30 seconds) timeout when `timeout_ms` is omitted. The runtime exposes `jsRepl.cwd`, `jsRepl.homeDir`, `jsRepl.tmpDir`, `jsRepl.requestMeta`, `jsRepl.setResponseMeta(...)`, and `await jsRepl.emitImage(...)`. Top-level bindings persist across `js` calls until `js_reset`; do not redeclare existing `const` or `let` names. Reuse existing bindings, use top-level `var` for reusable state that may be assigned again, or choose a fresh descriptive name.";
 
 const KERNEL_BOOTSTRAP: &str = include_str!("js_repl_bootstrap.js");
-const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `waku_js_repl` MCP server; use it whenever instructions say to use `waku_js_repl`, the Waku JavaScript REPL MCP, or run Waku JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
+const JS_TOOL_DESCRIPTION: &str = "Run JavaScript in a persistent QuickJS kernel with top-level await. This is the JavaScript execution tool for the `waku_js_repl` MCP server; use it whenever instructions say to use `waku_js_repl`, the Goddard JavaScript REPL MCP, or run Goddard JavaScript REPL code. If `timeout_ms` is omitted, execution times out after 30000 ms (30 seconds); pass a larger `timeout_ms` for slow Computer Use automation or other long-running operations. Use `jsRepl.cwd`, `jsRepl.homeDir`, and `jsRepl.tmpDir` to inspect host paths. Use `jsRepl.requestMeta` to inspect the current MCP request `_meta` object during a tool call. Use `jsRepl.setResponseMeta(meta)` to attach top-level MCP result `_meta`; repeated calls shallow-merge object keys for the current tool call. Use `jsRepl.write(value)` to add output without a newline. Strings are unchanged; other values use console-style formatting, including BigInt and circular objects. Prefer it over `console.log(...)` for final output; `console.log(...)` remains useful for debugging or multiple values. Use `await jsRepl.emitImage(imageLike)` to return images; each call adds one image to the outer tool result, so call it multiple times to emit multiple images. Supported image inputs are a base64 data URL, a file URL, an object with a `url` property, or a Cua image content block with `data` and `mimeType`. Saved references to `jsRepl.write(...)` and `jsRepl.emitImage(...)` stay reusable across calls. Scheduled callbacks only run while a JavaScript execution call is active; overdue timers resume at the start of the next call. Top-level bindings persist across calls until `js_reset`. If a call throws, prior bindings remain available and bindings that finished initializing before the throw often remain reusable. For reusable names that may be assigned again later, prefer top-level `var name = ...`; `var` can be redeclared across calls. If you hit `SyntaxError: Identifier 'x' has already been declared`, reuse the existing binding if possible, reassign it only if it was declared with `let` or `var`, or pick a new name instead of resetting immediately; a previous `const x` cannot be changed into `var x`. Use a short `{ ... }` block only for temporary scratch names, and do not wrap an entire call in block scope if you want those names reusable later. Initialize Cua Driver with `await setupComputerUseRuntime({ globals: globalThis })`, which exposes every native tool as `cua.<tool_name>(arguments)`, such as `cua.list_apps()` or `cua.click(arguments)`. The bundled Computer Use skill documents the method signatures; call the methods directly. Module imports are not supported. Prefer `jsRepl.write(...)` for text or formatted values and `jsRepl.emitImage(...)` for images.";
 
 #[derive(Default)]
 struct CallOutput {
@@ -234,26 +234,26 @@ impl ReplHost {
             Self::Single(repl) => call_tool(repl, params),
             Self::Sessions { directory, kernels } => {
                 // OpenCode supplies this host metadata; it is never an
-                // agent-provided tool argument. Sessions without a Waku
+                // agent-provided tool argument. Sessions without a Goddard
                 // registration cannot use the shared workspace connection.
                 let session = params
                     .pointer("/_meta/sessionID")
                     .and_then(JsonValue::as_str)
                     .filter(|session| !session.is_empty() && session.len() <= 160)
                     .ok_or_else(|| {
-                        anyhow!("OpenCode session metadata is required for Waku Computer Use")
+                        anyhow!("OpenCode session metadata is required for Goddard Computer Use")
                     })?;
                 kernels.retain(|id, _| session_config_path(directory, id).is_file());
                 let config_path = session_config_path(directory, session);
                 let bytes = fs::read(&config_path)
                     .context("Computer Use is not enabled for this OpenCode session")?;
                 let config: SessionConfig = serde_json::from_slice(&bytes)
-                    .context("invalid Waku Computer Use session registration")?;
+                    .context("invalid Goddard Computer Use session registration")?;
                 if !config.process_directory.is_dir() {
                     kernels.remove(session);
-                    bail!("this Waku Computer Use session has ended");
+                    bail!("this Goddard Computer Use session has ended");
                 }
-                // A reattached Waku runtime gets a fresh process directory.
+                // A reattached Goddard runtime gets a fresh process directory.
                 // Reset only that session, leaving other tasks' bindings intact.
                 if kernels
                     .get(session)
@@ -1015,7 +1015,7 @@ impl HelperConnection {
                 .name("waku-js-repl-computer-use-stderr".into())
                 .spawn(move || {
                     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        eprintln!("Waku Computer Use: {line}");
+                        eprintln!("Goddard Computer Use: {line}");
                     }
                 })?;
         }

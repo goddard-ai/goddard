@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only the latest release of Waku receives security fixes. Updates ship
+Only the latest release of Goddard receives security fixes. Updates ship
 through the in-app updater and https://waku.sh.
 
 ## Reporting a Vulnerability
@@ -14,4 +14,4 @@ If that doesn't work for you, email hi@egoist.dev.
 
 Please don't open a public issue for anything you believe is
 exploitable before it has been fixed. Include reproduction steps and
-the Waku version (Waku → About Waku) you tested.
+the Goddard version (Goddard → About Goddard) you tested.

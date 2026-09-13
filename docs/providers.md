@@ -1,11 +1,11 @@
 # Provider integrations
 
-How Waku talks to each coding agent: the process it launches, the wire protocol
+How Goddard talks to each coding agent: the process it launches, the wire protocol
 it speaks, how long that process lives, and what has to be emulated because the
 CLI does not offer it.
 
 How each of them names a session — which are read from the provider, which are
-polled off disk, and the one Waku generates itself — is in
+polled off disk, and the one Goddard generates itself — is in
 [titles.md](titles.md).
 
 Every provider is reached through the same driver abstraction in
@@ -80,7 +80,7 @@ A runtime — and with it that session's provider process — is dropped when:
 | A rewind or branch leaves the driver on a stale native session | [src/app/runtime.rs](../src/app/runtime.rs) |
 | The driver reports `ProcessExited` (the handler returns `false`, so the runtime is not reinserted) | [src/app/streaming.rs:352](../src/app/streaming.rs#L352) |
 | Nobody has touched the session for 30 minutes | `reap_idle_sessions`, [src/app/runtime.rs](../src/app/runtime.rs) |
-| Waku quits | `cx.quit()` |
+| Goddard quits | `cx.quit()` |
 
 Stop drops the runtime for Codex, whose app-server owns the Computer Use process
 tree, and for Amp, which offers no interrupt on its stream — for both, stopping
@@ -139,7 +139,7 @@ of the app — which Pi did until it was given one.
 
 **The OpenCode server is different**: it has no stdin to close, so
 `OpenCodeServer`'s own `Drop` kills and waits on it
-([opencode_session.rs](../crates/waku-core/src/opencode_session.rs)). Waku quitting without
+([opencode_session.rs](../crates/waku-core/src/opencode_session.rs)). Goddard quitting without
 running `Drop` is the one case that could orphan it, where the stdio drivers get
 cleanup from the OS for free.
 
@@ -157,7 +157,7 @@ OpenCode server itself, whose driver kills it explicitly on drop.
 | Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no |
 | Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 | Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approvals | yes | no | no (has them; Waku runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes |
+| Interactive approvals | yes | no | no (has them; Goddard runs `--yolo`) | yes | no | yes | yes | yes | yes | yes | yes |
 | Mid-turn steering | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) | yes (transport) |
 | Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes | yes |
 | Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no | no |
@@ -184,7 +184,7 @@ turned out to already serve a session protocol; nobody had looked.
 overrides when Computer Use is on.
 
 **Protocol** — newline-delimited JSON-RPC over stdio, genuinely bidirectional:
-Codex can send Waku requests (approvals) and Waku answers them by id. Three
+Codex can send Goddard requests (approvals) and Goddard answers them by id. Three
 threads: writer (owns stdin and the command queue), reader (parses stdout),
 stderr collector; a fourth waits on the process and emits `ProcessExited`.
 
@@ -198,7 +198,7 @@ its stdin, never by a signal. See
 
 1. `initialize` (id `0`) with `clientInfo` and `capabilities.experimentalApi`.
 2. `initialized`.
-3. `skills/extraRoots/set` when Computer Use is on, so Waku's bundled skill is
+3. `skills/extraRoots/set` when Computer Use is on, so Goddard's bundled skill is
    discovered like Codex's own skills rather than injected as instructions.
 4. `thread/start` or `thread/resume` (id `1`) with `cwd`, `approvalPolicy`,
    `sandbox`, `approvalsReviewer`, and optional `model` / `serviceTier`.
@@ -227,7 +227,7 @@ retained because `thread/fork` needs a `lastTurnId`.
 request becomes a `Permission` event with `accept` / `acceptForSession` /
 `decline`, and the answer is written back as a JSON-RPC *response*:
 `{"id": <original>, "result": {"decision": …}}`. Because JSON-RPC ids are
-per-peer, the reader only treats method-less messages as replies to Waku's own
+per-peer, the reader only treats method-less messages as replies to Goddard's own
 requests ([driver/codex.rs:779](../crates/waku-core/src/driver/codex.rs#L809)).
 
 **Cancel** — `turn/interrupt {threadId, turnId}`.
@@ -251,9 +251,9 @@ unknown markers are dropped. Private control markers never reach the transcript
 **Models** — a throwaway app-server, `model/list` paged via `nextCursor`, up to
 32 pages ([model_catalog.rs:367](../crates/waku-core/src/model_catalog.rs#L367)).
 
-**Computer Use** — `-c mcp_servers.waku_js_repl.command=…` registers Waku's
+**Computer Use** — `-c mcp_servers.waku_js_repl.command=…` registers Goddard's
 QuickJS MCP server, with several `-c` flags disabling Codex's own external
-computer-use plugin/MCP/skill so only Waku's `js` / `js_reset` surface is
+computer-use plugin/MCP/skill so only Goddard's `js` / `js_reset` surface is
 visible.
 
 ---
@@ -274,8 +274,8 @@ which is what keeps the two from drifting into near-copies:
 | Run settles on | `agent_settled` | `agent_end` |
 | Title event / field | `session_info_changed` / `name` | `session_info_update` / `title` |
 | Branch commands | `get_fork_messages`, `fork` | `get_branch_messages`, `branch` |
-| Whole-session copy | in place | only at launch, so Waku shells out (see below) |
-| Computer Use | Waku's Pi extension | none — Oh My Pi ships its own `/computer` |
+| Whole-session copy | in place | only at launch, so Goddard shells out (see below) |
+| Computer Use | Goddard's Pi extension | none — Oh My Pi ships its own `/computer` |
 | Catalog probe's context-files flag | `--no-context-files` | `--no-rules` |
 
 Everything below is shared unless noted.
@@ -296,7 +296,7 @@ absence is the help being abridged, not the flag being gone. That same
 strictness is why its catalog probe cannot borrow Pi's argument list.
 
 **Protocol** — NDJSON over stdio, but request/response rather than JSON-RPC:
-Waku stamps each request with a string id (`waku-<n>`) and Pi answers with
+Goddard stamps each request with a string id (`waku-<n>`) and Pi answers with
 `{"type": "response", "id", "success", "data"}`. Everything else on the stream
 is an unsolicited event. Requests are issued synchronously by the writer thread
 with a 10 s timeout ([pi.rs:800](../crates/waku-core/src/driver/pi.rs#L800));
@@ -323,13 +323,13 @@ both go into the cursor, and resume needs the **file path**, not just the id.
 | `tool_execution_start` / `_update` / `_end` | `RichActivity` |
 | `auto_retry_end` | clears or sets the failure flag |
 | `agent_settled` (Pi) / `agent_end` (Oh My Pi) | `TurnFinished`, then resets stream state |
-| `extension_ui_request` | auto-cancelled — Waku has no UI for extension prompts |
+| `extension_ui_request` | auto-cancelled — Goddard has no UI for extension prompts |
 
 **Access modes** — Full access only, enforced at driver start rather than
 degraded silently: any other selection fails with "currently supports Full
 access only" ([pi.rs:209](../crates/waku-core/src/driver/pi.rs#L209)).
 Pi has no permission system at all, so `--approve` is the whole story. Oh My Pi
-*does* have one, which Waku's `--yolo` then bypasses — the restriction is Waku's
+*does* have one, which Goddard's `--yolo` then bypasses — the restriction is Goddard's
 here, not the CLI's, and lifting it is a matter of wiring Oh My Pi's permission
 requests to a `Permission` event.
 
@@ -348,7 +348,7 @@ the runtime is dropped, because the RPC process may still be sitting on the fork
 ([runtime.rs](../src/app/runtime.rs)).
 
 **Copying a whole session differs.** Removing no turns is a plain copy, which Pi
-performs in place. Oh My Pi only copies at launch, so Waku shells out to a
+performs in place. Oh My Pi only copies at launch, so Goddard shells out to a
 throwaway `omp --mode rpc --yolo --fork <session file>` and reads the new cursor
 off it ([pi.rs:1108](../crates/waku-core/src/driver/pi.rs#L1108)). That is the
 better shape anyway: the out-of-process copy never moves the live session, so
@@ -371,7 +371,7 @@ yet it is always accepted, so it is added back
 
 **Computer Use** — Pi only: `--extension <waku pi extension>` and
 `--skill <SKILL.md>`, with the REPL and helper paths passed through the
-environment. Waku's bridge is written against Pi's extension API, and Oh My Pi
+environment. Goddard's bridge is written against Pi's extension API, and Oh My Pi
 ships its own `/computer` instead, so the flag is never passed to it.
 
 ---
@@ -406,13 +406,13 @@ as newline-delimited user messages on stdin.
 | `stream_event` → `text_delta`, `thinking_delta` | `TextDelta`, `ReasoningDelta` |
 | `assistant` content blocks | `tool_use` → `RichActivity`; text and thinking only as a fallback when no delta of that kind streamed |
 | `user` with `tool_result` | completes the matching activity |
-| `user` with `isReplay: true` | ignored — Waku's own prompt echoed by `--replay-user-messages` |
+| `user` with `isReplay: true` | ignored — Goddard's own prompt echoed by `--replay-user-messages` |
 | `result` | `TurnFinished` |
 | `system` status/thinking-token notices, `rate_limit_event` | ignored |
 
 **Approvals** — `control_request` / `subtype: "can_use_tool"` carries the tool
 name, input, `tool_use_id`, the `blocked_path` that tripped the check, and
-`permission_suggestions`. Waku answers with a `control_response` whose result is
+`permission_suggestions`. Goddard answers with a `control_response` whose result is
 `{"behavior":"allow"}` or `{"behavior":"deny","message":…}`. Outside Supervised it
 answers allow itself.
 
@@ -430,7 +430,7 @@ was probed the same way and behaves differently — see its section.
 models keeps the session. The permission posture is a launch flag and still
 restarts.
 
-**Native checkpoints** — after each turn Waku reads Claude's own transcript at
+**Native checkpoints** — after each turn Goddard reads Claude's own transcript at
 `$CLAUDE_CONFIG_DIR/projects/**/<session>.jsonl`, walks the `parentUuid` chain to
 find the active branch, and records the latest message uuid as the turn's
 `provider_resume_at` ([claude_session.rs](../crates/waku-core/src/claude_session.rs)). That
@@ -440,7 +440,7 @@ does.
 
 **Rewind and branch** — `claude_session::fork_session_at` rewrites the JSONL
 transcript into a *new* session file, truncated at the checkpoint and re-keyed
-with fresh uuids; the returned id map is applied to Waku's retained turns.
+with fresh uuids; the returned id map is applied to Goddard's retained turns.
 Rewinding to turn zero clears the cursor and starts clean. The CLI also exposes
 `--fork-session` (with `--resume`), which likely replaces this hand-rolled
 rewrite — unverified, and the reason it is still hand-rolled is that the flag was
@@ -448,7 +448,7 @@ found after the fork code was written.
 
 **Models** — the sessionless SDK `initialize` control response publishes the
 same account- and configuration-aware list used by `/model`, including custom
-routes resolved through CC Switch. Waku probes it in the background and caches
+routes resolved through CC Switch. Goddard probes it in the background and caches
 the last successful catalog; the curated list is only the startup/failure
 fallback ([model_catalog.rs](../crates/waku-core/src/model_catalog.rs)).
 
@@ -483,7 +483,7 @@ otherwise. Amp's "models" are agent modes, and the fast service tier is `--fast`
 All three are launch arguments, so changing any of them restarts.
 
 **Approvals** — none. Amp is the one long-lived provider that exposes no
-permission request on its stream; its rules live in `amp permissions`, so Waku
+permission request on its stream; its rules live in `amp permissions`, so Goddard
 still decides the posture at launch with `--dangerously-allow-all`.
 
 **Cancel** — no stream interrupt exists, so Stop ends the process. The thread
@@ -498,7 +498,7 @@ it and one `end_turn` settles everything. Both behaviors probed against the
 real CLI — the plain-message probe is why an unmarked write must never be
 used as a steer.
 
-**Branch** — `amp threads export <id>` dumps the thread, Waku keeps the retained
+**Branch** — `amp threads export <id>` dumps the thread, Goddard keeps the retained
 prefix, `amp threads new` creates an empty thread, and the retained history is
 replayed as a length-delimited envelope prepended to the first prompt
 (`WAKU_AMP_BRANCH_CONTEXT_V1`). Forking a thread that was itself seeded this way
@@ -510,7 +510,7 @@ re-expands the nested envelope first, so branches of branches stay flat
 ## OpenCode server
 
 **Launch** — `opencode serve --hostname 127.0.0.1 --port <ephemeral>`
-([driver/opencode.rs](../crates/waku-core/src/driver/opencode.rs)). Waku already started this
+([driver/opencode.rs](../crates/waku-core/src/driver/opencode.rs)). Goddard already started this
 server to fork a session; it now runs the conversation too.
 
 **Protocol** — OpenCode's own HTTP API plus a server-sent event stream. Routes
@@ -539,7 +539,7 @@ real server by injecting an instruction while a bash `sleep` ran: one idle,
 one reply, honoring both messages.
 
 **Inbound stream** — `GET /event`, server-wide. The per-session route exists
-only under `/api`, and since this server is Waku's alone, filtering by
+only under `/api`, and since this server is Goddard's alone, filtering by
 `properties.sessionID` is enough — and necessary, so one task's traffic cannot
 reach another's transcript.
 
@@ -581,14 +581,14 @@ received them.
 **Protocol** — newline-delimited JSON-RPC over stdio, bidirectional. One agent
 process serves the whole conversation, streams `session/update` notifications,
 and asks the client for tool permission with a real request it expects an answer
-to. Alongside Codex's app-server, this is the only transport where Waku's
+to. Alongside Codex's app-server, this is the only transport where Goddard's
 Supervised mode means what it says.
 
 **Lifetime** — long-lived, like Codex and Pi. Cursor and Grok previously spawned
 a process per turn; Devin, Fx, and Kimi Code arrived on this transport directly.
 
 **Handshake** — `initialize` (advertising **no** `fs` or `terminal` client
-capability, since Waku does not proxy the agent's file or terminal access — an
+capability, since Goddard does not proxy the agent's file or terminal access — an
 advertised capability the client cannot honor strands the agent mid-tool-call;
 Cursor alone receives its `_meta.parameterizedModelPicker` opt-in) →
 `session/resume` when resuming and the agent advertises it (so history is not
@@ -600,21 +600,21 @@ rung — `session/resume`, verified against a session left by an earlier process
 
 Cursor's picker opt-in makes `session/new`, `session/load`, and
 `session/resume` return provider-owned `configOptions`. Model discovery uses
-the same opt-in: Waku calls `cursor/list_available_models` after `initialize`
+the same opt-in: Goddard calls `cursor/list_available_models` after `initialize`
 and maps each model's config options onto the ordinary reasoning-effort,
 service-tier (`fast`), and context-window pickers. The CLI's flat aliases
 (`cursor-grok-4.6-xhigh-fast`) still resolve to the advertised base value,
-then Waku applies `thought_level`/`effort`, `thinking`, `fast`, and `context`
+then Goddard applies `thought_level`/`effort`, `thinking`, `fast`, and `context`
 from the session's traits (or from that alias suffix). If an older Cursor
-agent advertises no model option, Waku retains the legacy `session/set_model`
+agent advertises no model option, Goddard retains the legacy `session/set_model`
 request, and if ACP discovery is empty it falls back to parsing
 `cursor-agent models`.
 
 Fx also returns provider-owned config options, but its first model-category
 option selects an account provider while the option whose id is `model` selects
 the model. AI Gateway IDs such as `openai/gpt-5.6-luna-fast` are absent until
-Waku first selects Fx's `gateway` provider option and reads the refreshed model
-option from that response. Waku then targets the exact `model` id with
+Goddard first selects Fx's `gateway` provider option and reads the refreshed model
+option from that response. Goddard then targets the exact `model` id with
 `session/set_config_option`; falling back to the older `session/set_model`
 extension would not change Fx's model.
 
@@ -661,7 +661,7 @@ or not the account can currently serve a request.
 | `usage_update` | `UsageUpdated` — the context gauge, not transcript content |
 | `available_commands_update` | `AvailableCommands` — the composer's slash-command list |
 | `session_info_update` | `AutoTitleUpdated` when it carries a `title`. Devin's live first turn does not send one; the driver polls `sessions.db` instead. |
-| `user_message_chunk` | ignored — Waku's own prompt echoed back |
+| `user_message_chunk` | ignored — Goddard's own prompt echoed back |
 
 Everything outside `session/update` on that channel is agent-private control
 traffic (Grok emits a stream of `_x.ai/*` notifications) and never reaches the
@@ -670,24 +670,24 @@ transcript.
 Fx emits its context-limit and skill-discovery diagnostics as ordinary
 `agent_message_chunk` updates before the model starts. Their reserved
 `[context]` and `skill discovery warning:` prefixes are provider notices rather
-than assistant content, so Waku filters that prelude from the transcript.
+than assistant content, so Goddard filters that prelude from the transcript.
 
 **Approvals** — `session/request_permission` becomes a `Permission` event whose
 options come straight from the agent, with `kind` (`allow_once`, `allow_always`,
 `reject_once`, `reject_always`) deciding which read as allow. The detail line is
 the agent's own explanation from `toolCall.content` ("Not in allowlist: cat,
 pwd") rather than a sentence synthesized from the tool kind — that reason is the
-whole basis for the user's decision. Outside Supervised, Waku answers for the
+whole basis for the user's decision. Outside Supervised, Goddard answers for the
 user and prefers the durable allow so the agent stops asking about the same tool.
 
 **Why the client advertises no `fs` or `terminal` capability.** Those declare
-services *Waku offers the agent*, not permissions the agent needs. `fs` exists so
+services *Goddard offers the agent*, not permissions the agent needs. `fs` exists so
 an editor can serve unsaved buffer contents in place of what is on disk, and
-`terminal` lets the agent run commands through the client's own terminal. Waku
+`terminal` lets the agent run commands through the client's own terminal. Goddard
 provides neither, so the agent uses its own read and shell tools and reaches the
 filesystem exactly as before — verified against `cursor-agent acp` with both
 declined: it read a file, ran a shell command, and ended the turn normally.
-Advertising a capability Waku cannot service is the harmful choice, because the
+Advertising a capability Goddard cannot service is the harmful choice, because the
 agent would call `fs/read_text_file` and wait forever for a reply.
 
 T3 Code lands in the same place: its `AcpSessionRuntime` defaults to
@@ -696,15 +696,15 @@ passes no override, and Cursor's is only `_meta.parameterizedModelPicker`. The
 handler registration points in its `packages/effect-acp` belong to a
 general-purpose ACP library, not to the app that drives these two providers.
 
-The one case that would justify serving `fs/read_text_file` is Waku's own file
+The one case that would justify serving `fs/read_text_file` is Goddard's own file
 editor, which tracks unsaved buffers
 ([src/app/right_panel.rs:1004](../src/app/right_panel.rs#L1004)): an agent
 reading a file the user has unsaved edits in currently gets the disk copy. That
 is a deliberate future call, not an oversight.
 
-**Access modes** — Fx exposes native `ask` and `code` modes, so Waku maps
+**Access modes** — Fx exposes native `ask` and `code` modes, so Goddard maps
 Supervised to `ask` and the auto modes to `code`. Every other ACP agent stays in
-its ordinary execution mode, and `auto_approve` decides whether Waku answers
+its ordinary execution mode, and `auto_approve` decides whether Goddard answers
 `session/request_permission` on the user's behalf. That is why Kimi and Devin
 are left in `default` rather than switched to `auto` or `yolo`: the permission
 traffic is the feature, not an obstacle. A legacy session still reporting the
@@ -714,7 +714,7 @@ mode when it attaches.
 
 **Model and reasoning effort** — `session/set_model` after the session opens,
 then the effort as a session config option. **The config id is the agent's to
-name**, and the two disagree: Waku sends `mode` by default, but Kimi's `mode` is
+name**, and the two disagree: Goddard sends `mode` by default, but Kimi's `mode` is
 its permission mode and its effort lives on
 `thinking`. `reasoning_effort_config_id` resolves that per provider — sending
 the default id to Kimi would silently set nothing, or worse, move the permission
@@ -728,7 +728,7 @@ Cursor is another exception. Its parameterized picker exposes effort, fast
 mode, thinking, and context as per-model `configOptions` rather than a single
 well-known id. Discovery reads those options from `cursor/list_available_models`;
 the live session applies them with `session/set_config_option` after selecting
-the base model. Fast is Waku's service-tier control (`fast` vs Standard).
+the base model. Fast is Goddard's service-tier control (`fast` vs Standard).
 Thinking is not a separate picker: it turns on when a non-`none` effort is
 applied, because that is what reveals the thought-level option.
 
@@ -753,12 +753,12 @@ on a typical account it may be a single id such as `swe-1-6-slow`, not the
 interactive `devin models list` catalog (which includes `adaptive` and
 hundreds of CLI variants this agent rejects). Discovery opens a short-lived
 ACP session, reads that option, and deletes the session. If ACP discovery
-is empty, Waku falls back to parsing `devin models list --format json`
+is empty, Goddard falls back to parsing `devin models list --format json`
 (`families[].variants[].model_uid`). There is no invented Adaptive fallback:
 an id the session does not advertise would toast `Model not found` on every
 send. Model selection stays in-session via `session/set_config_option`;
 `adaptive` / `auto` map to the advertised current value when they are not
-themselves advertised. Waku does not pass `--model` at `devin acp` launch.
+themselves advertised. Goddard does not pass `--model` at `devin acp` launch.
 
 **Cancel** — `session/cancel`, a notification; the open `session/prompt` reports
 the cancellation.
@@ -774,7 +774,7 @@ Code and Devin take the same path by virtue of the transport, but their
 superseded-prompt policy has not been probed against a live turn.
 
 Fx allows only one active prompt per connection, so its driver does not
-advertise steering. Follow-ups remain in Waku's queue and start after the
+advertise steering. Follow-ups remain in Goddard's queue and start after the
 current prompt settles.
 
 **Rewind and branch** — unchanged and still out of band: Grok forks through its
@@ -805,10 +805,10 @@ which its `--print` transport did not emit at all.
 
 ## Access modes across providers
 
-Waku's `RuntimeMode` (Supervised / Auto-accept edits / Auto / Full access)
+Goddard's `RuntimeMode` (Supervised / Auto-accept edits / Auto / Full access)
 maps into each CLI's own vocabulary.
 
-| Waku | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code |
+| Goddard | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Devin | Fx | OpenCode | Grok | Kimi Code |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user |
 | Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
@@ -823,13 +823,13 @@ in a way the user can actually answer. They decide by launch flag, so
 "Supervised" degrades there to whatever the CLI does without a human at the
 terminal — for Amp because its stream carries no permission request, for Pi
 because it has no permission system to ask with, and for Oh My Pi because
-`--yolo` bypasses the one it has. Only the last of those is Waku's own
+`--yolo` bypasses the one it has. Only the last of those is Goddard's own
 limitation rather than the CLI's.
 
 ## Resume cursors
 
 `ProviderResumeCursor` ([model.rs](../crates/waku-protocol/src/model.rs)) is
-persisted with the session and is what makes a Waku task outlive its process:
+persisted with the session and is what makes a Goddard task outlive its process:
 
 | Provider | Cursor fields | Why |
 | --- | --- | --- |
@@ -858,7 +858,7 @@ own `docs/internals/providers.md`.
 **Its one structural difference: no provider is a per-turn process.** All five
 hold a long-lived session; the transport differs, the lifetime does not.
 
-| Provider | T3 Code transport | Waku transport |
+| Provider | T3 Code transport | Goddard transport |
 | --- | --- | --- |
 | Codex | `codex app-server` JSON-RPC (`packages/effect-codex-app-server`) | same |
 | Claude | `@anthropic-ai/claude-agent-sdk` `query()` with an `AsyncIterable` prompt queue | same protocol, spoken directly — the SDK is a wrapper around these flags |
@@ -868,15 +868,15 @@ hold a long-lived session; the transport differs, the lifetime does not.
 
 **All five now match**, and Claude reaches the same place without the SDK: there
 is no Rust Agent SDK, but the SDK is a wrapper around the `claude` CLI's own
-streaming-input protocol, which Waku speaks directly. No Node sidecar and no npm
+streaming-input protocol, which Goddard speaks directly. No Node sidecar and no npm
 dependency.
 
-Waku goes one further than the comparison: Amp and Pi, which T3 Code does not
+Goddard goes one further than the comparison: Amp and Pi, which T3 Code does not
 support, are long-lived here too. Every provider holds a session.
 
-What the long-lived session buys, and what Waku pays for not having it:
+What the long-lived session buys, and what Goddard pays for not having it:
 
-| Capability | T3 Code | Waku |
+| Capability | T3 Code | Goddard |
 | --- | --- | --- |
 | Interactive approvals | Every provider: Claude via the SDK's `canUseTool` (including `AskUserQuestion` and `ExitPlanMode`), Cursor/Grok via ACP `session/request_permission`, Codex via `*requestApproval*` | Every provider except Amp and Pi, neither of which exposes a request to answer |
 | Interrupt | `session/cancel`, `query.interrupt()` (plus `stopTask()` for runaway subagents) | Protocol interrupt everywhere except Amp, which has none and is stopped outright |
@@ -889,12 +889,12 @@ The adapter contract itself is wider than `DriverControl`:
 `startSession` / `sendTurn` / `interruptTurn` / `respondToRequest` /
 `respondToUserInput` / `stopSession` / `listSessions` / `hasSession` /
 `readThread` / `rollbackThread` / `stopAll` / `streamEvents`, plus a declared
-`capabilities` record. Waku's equivalent surface is split between
+`capabilities` record. Goddard's equivalent surface is split between
 `DriverControl` and the out-of-band `*_session.rs` helpers, which is why
 capabilities like "can this provider fork?" live on `ProviderKind` rather than on
 the driver that would have to implement them.
 
-Note the parts that are *not* a gap. Waku's Codex path is the same app-server
+Note the parts that are *not* a gap. Goddard's Codex path is the same app-server
 protocol against the same methods. Both projects normalize provider events into
 one canonical activity/event stream that the UI consumes provider-agnostically.
 Both keep a per-session resume cursor and both had to special-case Claude's

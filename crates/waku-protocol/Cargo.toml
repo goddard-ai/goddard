@@ -2,7 +2,7 @@
 name = "waku-protocol"
 version = "0.1.0"
 edition = "2024"
-description = "Versioned, transport-neutral wire contract shared by Waku clients and daemon"
+description = "Versioned, transport-neutral wire contract shared by Goddard clients and daemon"
 license = "GPL-3.0-only"
 
 [dependencies]

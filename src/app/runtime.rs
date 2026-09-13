@@ -52,7 +52,7 @@ fn attach_driver(
         supports_steer,
     } = response
     else {
-        anyhow::bail!("Waku daemon returned an invalid runtime attachment response");
+        anyhow::bail!("Goddard daemon returned an invalid runtime attachment response");
     };
     let Some(runtime_id) = runtime_id else {
         return Ok(None);
@@ -84,7 +84,7 @@ fn load_remote_task_state(
         ..
     } = response
     else {
-        anyhow::bail!("Waku daemon returned an invalid task-state response");
+        anyhow::bail!("Goddard daemon returned an invalid task-state response");
     };
     for session in &mut sessions {
         session.detail_loaded = false;
@@ -1448,7 +1448,7 @@ impl Waku {
     }
 
     /// Re-run one provider's model-owned catalog discovery, for selectors whose
-    /// contents can change while Waku stays open — models the user just
+    /// contents can change while Goddard stays open — models the user just
     /// authored in a provider's config, or DeepSeek's custom agent presets.
     /// The stale catalog stays on screen until the fresh probe lands, so an
     /// open menu never blanks into a loading state while it refreshes.

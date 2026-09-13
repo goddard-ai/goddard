@@ -385,7 +385,7 @@ mod host {
     //! An ordinary `ICoreWebView2Controller` cannot be upgraded to a
     //! composition controller after the fact — only the environment creates
     //! one — so none of this is reachable through wry's `WebViewExtWindows`,
-    //! and Waku drives `webview2-com` directly rather than carrying a wry
+    //! and Goddard drives `webview2-com` directly rather than carrying a wry
     //! fork. It uses a narrow slice of it (bounds, visibility, focus,
     //! navigation, six events), so there is little of wry's custom-protocol,
     //! IPC and window-lifecycle machinery to give up.
@@ -447,7 +447,7 @@ mod host {
         }
     }
 
-    /// Where WebView2 keeps its profile: per-user, beside the rest of Waku's
+    /// Where WebView2 keeps its profile: per-user, beside the rest of Goddard's
     /// data, so a per-user install never needs to write into its own
     /// program directory.
     fn user_data_folder() -> Option<HSTRING> {
@@ -1936,7 +1936,7 @@ impl BrowserView {
     /// Run a document editing command in the page.
     ///
     /// WebView2 handles the standard chords itself when the page holds the
-    /// keyboard; this covers the case where Waku's own Browser-scoped
+    /// keyboard; this covers the case where Goddard's own Browser-scoped
     /// bindings claimed the keystroke first.
     #[cfg(target_os = "windows")]
     fn perform_editing_command(&self, command: &str) {

@@ -582,7 +582,7 @@ impl Waku {
                     .child(dismiss)
                     .child(self.toast_selection_input()),
             )
-            // Keep the toast top-centered just beneath Waku's 48px header.
+            // Keep the toast top-centered just beneath Goddard's 48px header.
             // GPUI's animation path honors the system reduce-motion preference
             // and resolves immediately.
             .with_animation(

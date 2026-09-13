@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 
-//! Waku's daemon-side core.
+//! Goddard's daemon-side core.
 //!
 //! Provider, database, filesystem, and Git implementations live here, behind
 //! the transport-neutral contract in `waku-protocol`. Client applications

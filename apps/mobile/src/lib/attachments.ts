@@ -51,7 +51,7 @@ export function attachmentImageQuery(
       profile?.address, attachment.blob_reference, attachment.path, attachment.name,
     ] as const,
     queryFn: () => {
-      if (!client) throw new Error('Waku daemon is disconnected');
+      if (!client) throw new Error('Goddard daemon is disconnected');
       return readAttachmentImage(client, attachment);
     },
     enabled: connected && Boolean(

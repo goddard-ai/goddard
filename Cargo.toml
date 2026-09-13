@@ -160,7 +160,7 @@ embed-resource = "3.0"
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
 # The browser surface. WebView2 is evergreen on Windows 10 and in-box on 11.
-# Waku drives it through `webview2-com` rather than wry because it needs the
+# Goddard drives it through `webview2-com` rather than wry because it needs the
 # *composition* controller, which renders into a DirectComposition visual
 # instead of a child HWND — see `browser::host` for why, and note that only
 # the environment can create one, so it cannot be reached from wry's
@@ -176,7 +176,7 @@ windows = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.61"
-# GPUI does not read the Windows animation preference, so Waku asks
+# GPUI does not read the Windows animation preference, so Goddard asks
 # `SystemParametersInfoW` itself. Same major version as the one already in the
 # graph through GPUI.
 windows-sys = { version = "0.61", features = [

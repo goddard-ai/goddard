@@ -181,6 +181,6 @@ export function useProviderCatalog() {
 }
 
 function requireClient(client: ReturnType<typeof useDaemon>['client']) {
-  if (!client) throw new Error('Waku daemon is disconnected');
+  if (!client) throw new Error('Goddard daemon is disconnected');
   return client;
 }

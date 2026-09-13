@@ -120,7 +120,7 @@ impl ProviderKind {
     /// Kimi Code, Fx, and Devin are deliberately absent from this list and from
     /// [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork` copies a
     /// whole session and takes no turn count, while Fx and Devin expose no
-    /// turn-aware fork or truncation method. None of them can reproduce Waku's
+    /// turn-aware fork or truncation method. None of them can reproduce Goddard's
     /// "drop the last N turns" semantics without corrupting history.
     pub fn supports_conversation_rollback(self) -> bool {
         matches!(
@@ -626,7 +626,7 @@ pub struct Project {
 
 /// Filesystem context a task runs in.
 ///
-/// Drafts may carry [`Self::NewWorktree`] until their first prompt. Waku then
+/// Drafts may carry [`Self::NewWorktree`] until their first prompt. Goddard then
 /// creates the Git worktree and replaces it with [`Self::Worktree`] before any
 /// checkpoint or provider process can observe the task.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -732,7 +732,7 @@ impl SessionStatus {
 pub struct QueuedMessage {
     pub id: Uuid,
     pub content: String,
-    /// The text typed before Waku appended provider-facing attachment
+    /// The text typed before Goddard appended provider-facing attachment
     /// mentions. `None` is the legacy/plain-message representation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_content: Option<String>,
@@ -892,7 +892,7 @@ impl ProviderSessionSummary {
 }
 
 /// The displayable portion of a provider-native conversation imported into a
-/// Waku task. Provider history remains authoritative; unsupported native
+/// Goddard task. Provider history remains authoritative; unsupported native
 /// items such as private reasoning or provider-only control records are
 /// intentionally absent.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, TS)]
@@ -1880,7 +1880,7 @@ pub enum DriverEvent {
         provider_cursor: Option<ProviderResumeCursor>,
     },
     /// The provider-owned agent composition this session actually runs. A
-    /// fresh Harness session may resolve its deployment default when Waku did
+    /// fresh Harness session may resolve its deployment default when Goddard did
     /// not name one explicitly, so the driver reports the resolved value.
     AgentPresetSelected(Option<String>),
     /// A provider-owned, automatically generated session title. `None`
@@ -3707,8 +3707,8 @@ mod tests {
             ),
             (
                 ActivityKind::Search,
-                serde_json::json!({"action": {"queries": ["Waku GPUI"]}}),
-                "Waku GPUI",
+                serde_json::json!({"action": {"queries": ["Goddard GPUI"]}}),
+                "Goddard GPUI",
             ),
             (
                 ActivityKind::FileRead,

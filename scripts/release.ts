@@ -14,16 +14,16 @@ import { parseArgs } from "node:util";
 import { defaultDownloadUrlPrefix, generateAppcast } from "./appcast";
 import { extractReleaseNotes } from "./changelog";
 
-const appName = "Waku";
-const executableName = "Waku";
+const appName = "Goddard";
+const executableName = "Goddard";
 const jsReplExecutableName = "waku_js_repl";
 const daemonExecutableName = "waku-daemon";
-const computerUseHelperName = "Waku Computer Use";
+const computerUseHelperName = "Goddard Computer Use";
 const packageName = "waku";
 const defaultNotaryProfile = "NOTARY";
 const projectRoot = resolve(import.meta.dir, "..");
 
-const help = `Build, notarize, and publish a production release of Waku.
+const help = `Build, notarize, and publish a production release of Goddard.
 
 Usage:
   bun run release [options]
@@ -37,7 +37,7 @@ Options:
   --local                       Build, notarize, and write the DMG + zip
                                 without publishing to R2
   --force                       Publish even if this version is already in R2
-  --output <path>               DMG output path (default: dist/Waku-<version>.dmg)
+  --output <path>               DMG output path (default: dist/Goddard-<version>.dmg)
   --signing-identity <name>     Developer ID Application identity selector
                                 (or WAKU_SIGNING_IDENTITY; required unless --adhoc)
   --notary-profile <name>       notarytool keychain profile
@@ -45,7 +45,7 @@ Options:
   --build-number <number>       CFBundleVersion override (or WAKU_BUILD_NUMBER;
                                 default derives a monotonic number from the
                                 Cargo version)
-  --volume-name <name>          Mounted DMG name (default: Waku)
+  --volume-name <name>          Mounted DMG name (default: Goddard)
   --skip-build                  Reuse target/release/waku, waku_js_repl, and
                                 waku-daemon
   --skip-notarize               Unnotarized signed DMG (implies --local)
@@ -593,9 +593,11 @@ try {
         .quiet()
         .text(),
     ) as RemoteFile[];
-    const archivePattern = new RegExp(`^${appName}-.+\\.zip$`);
+    // Pre-rename releases were published as Waku-<version>.zip; keep matching
+    // them so the regenerated feed retains history and can build deltas.
+    const archivePattern = /^(?:Waku|Goddard)-(.+)\.zip$/;
     const archiveVersion = (name: string) =>
-      name.slice(appName.length + 1, -".zip".length);
+      archivePattern.exec(name)?.[1] ?? "";
     const versionOrder = new Intl.Collator("en", { numeric: true });
     const recentArchives = remoteFiles
       .filter(
@@ -630,7 +632,7 @@ try {
   await $`ditto ${zipPath} ${join(updatesDirectory, zipName)}`;
 
   // Release notes: this version's CHANGELOG.md section ships next to the
-  // archive as Waku-<version>.md; generate_appcast links it as the update's
+  // archive as Goddard-<version>.md; generate_appcast links it as the update's
   // release notes, which Sparkle renders in the prompt.
   const changelogFile = Bun.file(join(projectRoot, "CHANGELOG.md"));
   const notes = (await changelogFile.exists())
@@ -666,7 +668,7 @@ try {
     logStep("Uploading appcast.xml");
     await $`rclone copyto ${join(updatesDirectory, "appcast.xml")} ${`${r2Destination}/appcast.xml`} ${rcloneFlags} --header-upload ${"Cache-Control: public, max-age=300, must-revalidate"}`;
 
-    console.log(`\nWaku ${version} (build ${buildNumber}) is live:`);
+    console.log(`\nGoddard ${version} (build ${buildNumber}) is live:`);
     console.log(`  download : ${downloadUrlPrefix}${dmgName}`);
     console.log(`  update   : ${downloadUrlPrefix}${zipName}`);
     console.log(`  feed     : ${downloadUrlPrefix}appcast.xml`);

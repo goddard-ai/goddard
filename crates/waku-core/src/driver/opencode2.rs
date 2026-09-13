@@ -1,8 +1,8 @@
 //! OpenCode 2 sessions over the one adopted background service.
 //!
-//! Everything structural about this driver follows from a single fact: Waku
+//! Everything structural about this driver follows from a single fact: Goddard
 //! does not own an OpenCode 2 process. `opencode2_service` finds the daemon
-//! the user's own terminal already started, and every Waku task rides the one
+//! the user's own terminal already started, and every Goddard task rides the one
 //! `GET /api/event` stream it exposes. Dropping a driver unsubscribes and
 //! sends `Shutdown`; the worker releases its optional Computer Use attachment
 //! without terminating or reconfiguring the user's OpenCode service.
@@ -66,7 +66,7 @@ use crate::opencode2_api::{
 };
 use crate::opencode2_service::{self, HubFrame, Opencode2Service, Subscription};
 
-/// A one-shot user action posted onto the worker waits this long before Waku
+/// A one-shot user action posted onto the worker waits this long before Goddard
 /// gives up on it. Comfortably past the API layer's own fork budget, so a slow
 /// fork answers rather than being reported as a timeout twice.
 const ACTION_TIMEOUT: Duration = Duration::from_secs(150);
@@ -256,7 +256,7 @@ struct StreamState {
     /// dedupe is what absorbs the overlap between a snapshot and the live
     /// stream.
     permissions: OpenCodePermissionState,
-    /// The forms Waku has surfaced, with their fields: a reply must round-trip
+    /// The forms Goddard has surfaced, with their fields: a reply must round-trip
     /// each field's own `key`, which is a fidelity gain over v1's positional
     /// answers.
     forms: HashMap<String, Vec<FormField>>,
@@ -469,9 +469,9 @@ impl OpenCode2Driver {
         };
 
         // A resumed session keeps whatever the user's own client last chose,
-        // so an explicit Waku selection is re-applied and everything else is
+        // so an explicit Goddard selection is re-applied and everything else is
         // left alone. Neither is fatal: a session that will not switch is
-        // still a session Waku can drive.
+        // still a session Goddard can drive.
         let agent = if resuming {
             match requested_agent {
                 Some(_) if session.agent.as_deref() != Some(agent.as_str()) => {
@@ -504,7 +504,7 @@ impl OpenCode2Driver {
             }
         } else {
             // A resumed task may retain our instructions after an interrupted
-            // host shutdown. Remove only Waku's own entry when disabled.
+            // host shutdown. Remove only Goddard's own entry when disabled.
             let _ =
                 opencode2_api::remove_instruction_entry(&endpoint, &session_id, INSTRUCTION_KEY);
             None
@@ -715,7 +715,7 @@ fn model_key(model: &ModelRef) -> String {
     format!("{}/{}", model.provider_id, model.id)
 }
 
-/// Waku stores a model as `"provider/model"`; v2 wants the two apart, plus the
+/// Goddard stores a model as `"provider/model"`; v2 wants the two apart, plus the
 /// variant that carries reasoning effort (`low`/`high`).
 fn model_ref(model: Option<&str>, reasoning_effort: Option<&str>) -> Option<ModelRef> {
     let (provider_id, id) = model?.split_once('/')?;
@@ -730,7 +730,7 @@ fn model_ref(model: Option<&str>, reasoning_effort: Option<&str>) -> Option<Mode
 
 /// The agent this session runs.
 ///
-/// Waku's access modes do not name an agent — v2 has no read-only product mode
+/// Goddard's access modes do not name an agent — v2 has no read-only product mode
 /// in this tree — so the choice is the user's own preset when the service
 /// still lists it as a selectable primary, and `build` otherwise.
 fn resolve_agent(preset: Option<&str>, agents: &[opencode2_api::AgentInfo]) -> String {
@@ -856,11 +856,11 @@ fn stripped(value: Option<&Value>) -> Option<Value> {
     Some(value)
 }
 
-/// Waku's access mode, applied locally.
+/// Goddard's access mode, applied locally.
 ///
 /// v2 exposes no session-local permission ruleset — `/api/permission/saved` is
 /// a GLOBAL store shared with the user's own terminal — so unlike v1 the mode
-/// cannot be installed on the session. What reaches Waku is whatever the
+/// cannot be installed on the session. What reaches Goddard is whatever the
 /// resolved agent's own rules mark `ask`; the mode only decides who answers.
 fn auto_replies(mode: RuntimeMode, action: &str) -> bool {
     match mode {
@@ -958,7 +958,7 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                         steer: true,
                     });
                     // The inbox event is authoritative; this 2xx is only the
-                    // fallback for a response Waku never sees.
+                    // fallback for a response Goddard never sees.
                     let _ = events.send(DriverEvent::SteerAccepted { message: text });
                 }
                 Ok(None) => {
@@ -1077,7 +1077,7 @@ fn fork_session(
         .checked_sub(turns_to_remove)
         .ok_or_else(|| {
             anyhow!(
-                "OpenCode 2 has only {} native turns, but Waku needs to remove {turns_to_remove}",
+                "OpenCode 2 has only {} native turns, but Goddard needs to remove {turns_to_remove}",
                 user_messages.len()
             )
         })?;
@@ -2903,7 +2903,7 @@ mod tests {
         assert_eq!(resolve_agent(Some("plan"), &agents), "plan");
         assert_eq!(resolve_agent(Some("title"), &agents), "build");
         assert_eq!(resolve_agent(None, &agents), "build");
-        // A catalogue Waku could not read must not veto the user's choice.
+        // A catalogue Goddard could not read must not veto the user's choice.
         assert_eq!(resolve_agent(Some("plan"), &[]), "plan");
     }
 
@@ -3024,7 +3024,7 @@ mod tests {
     /// Nonvisual integration check: only reads Cua configuration and emits a
     /// synthetic image. Requires the signed app through WAKU_APP_EXECUTABLE.
     #[test]
-    #[ignore = "requires a configured OpenCode 2 model and a packaged Waku app"]
+    #[ignore = "requires a configured OpenCode 2 model and a packaged Goddard app"]
     fn opencode2_computer_use_against_the_adopted_service() {
         struct Cleanup {
             service: Arc<Opencode2Service>,
@@ -3089,7 +3089,7 @@ mod tests {
         assert_eq!(
             owned.len(),
             1,
-            "one connection should serve both Waku tasks"
+            "one connection should serve both Goddard tasks"
         );
         let server = owned[0]["name"].as_str().unwrap();
         let run = |driver: &OpenCode2Driver, events: &Receiver<DriverEvent>, code: &str| {

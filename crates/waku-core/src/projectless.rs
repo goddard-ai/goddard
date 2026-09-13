@@ -2,7 +2,7 @@
 //!
 //! Codex allocates ordinary projectless chats beneath a per-user root using
 //! `<root>/<local date>/<prompt slug>`, with numeric collision suffixes and a
-//! random fallback. Waku mirrors that layout beneath `~/.waku/projects` so
+//! random fallback. Goddard mirrors that layout beneath `~/.waku/projects` so
 //! generated workspaces do not sit beside configuration documents.
 
 use std::fs;
@@ -107,7 +107,7 @@ pub fn create_workspace(prompt: Option<&str>) -> io::Result<Workspace> {
 
 /// Move one old dated workspace from `~/.waku/<date>/<slug>` into
 /// `~/.waku/projects/<date>/<slug>` without copying its contents through the
-/// client. The oldest layout used `~/.waku` itself; that path contains Waku's
+/// client. The oldest layout used `~/.waku` itself; that path contains Goddard's
 /// configuration now, so it receives a fresh private workspace instead of
 /// moving the configuration directory.
 pub fn migrate_workspace(path: &Path) -> io::Result<Workspace> {

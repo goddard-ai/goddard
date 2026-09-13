@@ -231,7 +231,7 @@ pub(crate) fn start_local(
         // interactive permission requests.
         ProviderKind::OpenCode => Arc::new(opencode::OpenCodeDriver::start(options, events)?),
         // OpenCode 2 is not a per-workspace server: one adopted background
-        // service carries every workspace, and every Waku task rides its one
+        // service carries every workspace, and every Goddard task rides its one
         // event stream.
         ProviderKind::OpenCode2 => Arc::new(opencode2::OpenCode2Driver::start(options, events)?),
         // Claude serves a realtime stream of user messages on stdin — the same

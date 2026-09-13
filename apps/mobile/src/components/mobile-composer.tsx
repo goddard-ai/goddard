@@ -277,7 +277,7 @@ export function MobileComposer({
     const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
       const client = daemon.client;
       if (!client || daemon.phase !== 'connected') {
-        throw new Error('Waku daemon is disconnected');
+        throw new Error('Goddard daemon is disconnected');
       }
       for (const file of files) {
         const imported = await importLocalAttachment(client, file);

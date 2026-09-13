@@ -50,7 +50,7 @@ export function RemoteProjectPicker({
   const directory = useQuery({
     queryKey: daemonKeys.directory(profileId, path),
     queryFn: () => {
-      if (!daemon.client) throw new Error('Waku daemon is disconnected');
+      if (!daemon.client) throw new Error('Goddard daemon is disconnected');
       return browseDaemonDirectory(daemon.client, path);
     },
     enabled: visible && daemon.phase === 'connected' && Boolean(daemon.client),
@@ -78,7 +78,7 @@ export function RemoteProjectPicker({
   }
 
   async function saveProject(project: Project) {
-    if (!daemon.client) throw new Error('Waku daemon is disconnected');
+    if (!daemon.client) throw new Error('Goddard daemon is disconnected');
     const saved = await persistProject(daemon.client, project);
     queryClient.setQueryData<TaskState>(daemonKeys.taskState(profileId), saved.taskState);
     onSelect(saved.project);

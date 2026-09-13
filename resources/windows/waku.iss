@@ -1,4 +1,4 @@
-; Waku's Windows installer.
+; Goddard's Windows installer.
 ;
 ; Per-user by design: %LOCALAPPDATA%\Programs needs no elevation, which is
 ; what lets the in-app updater re-run this silently without a UAC prompt.
@@ -34,20 +34,20 @@
 ; Never change AppId: it is how Windows and every later installer recognize
 ; an existing install, and how the updater replaces rather than duplicates it.
 AppId={{8B6C6E4A-3E0F-4F0B-9C5F-2E0E9C4B7A11}
-AppName=Waku
+AppName=Goddard
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
-AppPublisher=Waku
+AppPublisher=Goddard
 AppPublisherURL=https://waku.sh
 AppSupportURL=https://github.com/egoist/waku/issues
 AppUpdatesURL=https://github.com/egoist/waku/releases
-DefaultDirName={autopf}\Waku
-DefaultGroupName=Waku
-UninstallDisplayName=Waku
+DefaultDirName={autopf}\Goddard
+DefaultGroupName=Goddard
+UninstallDisplayName=Goddard
 UninstallDisplayIcon={app}\waku.exe
 LicenseFile={#StageDir}\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=Waku-{#AppVersion}-{#Arch}-Setup
+OutputBaseFilename=Goddard-{#AppVersion}-{#Arch}-Setup
 SetupIconFile=AppIcon.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -67,7 +67,7 @@ DisableReadyPage=yes
 ; The updater passes /DIR, and a manual reinstall should land where the
 ; previous one did rather than asking again.
 UsePreviousAppDir=yes
-; Waku persists continuously to SQLite, so closing it is safe; a silent
+; Goddard persists continuously to SQLite, so closing it is safe; a silent
 ; update cannot stop to ask, and a locked waku.exe would fail the install.
 CloseApplications=force
 RestartApplications=no
@@ -86,12 +86,12 @@ Source: "{#StageDir}\resources\*"; DestDir: "{app}\resources"; Flags: ignorevers
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Waku"; Filename: "{app}\waku.exe"
-Name: "{userdesktop}\Waku"; Filename: "{app}\waku.exe"; Tasks: desktopicon
+Name: "{group}\Goddard"; Filename: "{app}\waku.exe"
+Name: "{userdesktop}\Goddard"; Filename: "{app}\waku.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Run]
-; No skipifsilent: this is also how the updater's silent run brings Waku back.
-Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Waku}"; Flags: nowait postinstall
+; No skipifsilent: this is also how the updater's silent run brings Goddard back.
+Filename: "{app}\waku.exe"; Description: "{cm:LaunchProgram,Goddard}"; Flags: nowait postinstall

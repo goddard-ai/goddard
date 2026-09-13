@@ -170,7 +170,7 @@ impl Waku {
             commit_push_focus: cx.focus_handle(),
             push_focus: cx.focus_handle(),
         });
-        // Like Waku's other deferred surfaces, the modal joins the dispatch
+        // Like Goddard's other deferred surfaces, the modal joins the dispatch
         // tree only after it has drawn. Focus it two frames later so typing
         // cannot fall through to the composer beneath it.
         window.on_next_frame(move |window, _| {

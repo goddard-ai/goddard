@@ -1,4 +1,8 @@
 const DAEMON_DISCONNECT_MESSAGES = new Set([
+  'Goddard daemon disconnected',
+  'Goddard daemon is disconnected',
+  'Goddard client disconnected',
+  // Pre-rename builds emitted these.
   'Waku daemon disconnected',
   'Waku daemon is disconnected',
   'Waku client disconnected',

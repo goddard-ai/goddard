@@ -25,7 +25,7 @@ describe('mobile session presentation', () => {
 
   test('groups started sessions by the desktop calendar periods, newest first', () => {
     const now = new Date(2026, 7, 31, 12);
-    const projects: Project[] = [{ id: 'project', name: 'Waku', path: '/waku', created_at: 1 }];
+    const projects: Project[] = [{ id: 'project', name: 'Goddard', path: '/waku', created_at: 1 }];
     const current = session({ id: 'new', last_reply_at: epoch(2026, 7, 31, 11) });
     const yesterday = session({ id: 'old', last_reply_at: epoch(2026, 7, 30, 20) });
     const earlier = session({ id: 'earlier', last_reply_at: epoch(2026, 7, 20, 20) });

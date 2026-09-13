@@ -1,7 +1,7 @@
 //! Historical token and cost usage for the settings Usage page, scanned from
 //! the provider CLIs' own on-disk session transcripts (Claude Code's
 //! `~/.claude/projects` and Codex's `~/.codex/sessions`) the way T3 Code and
-//! `ccusage` do it, so usage covers turns driven outside Waku too. Costs are
+//! `ccusage` do it, so usage covers turns driven outside Goddard too. Costs are
 //! priced against LiteLLM's model rate table, fetched at most daily and cached
 //! beside the app database.
 //!

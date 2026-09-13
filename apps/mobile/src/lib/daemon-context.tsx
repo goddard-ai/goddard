@@ -100,7 +100,7 @@ function createNativeDaemonSocket(url: string): WebSocketLike {
     ): WebSocketLike;
   };
   return new NativeWebSocket(url, null, {
-    headers: { "X-Waku-Client": "native" },
+    headers: { "X-Goddard-Client": "native" },
   });
 }
 

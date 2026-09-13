@@ -39,18 +39,18 @@ export function describeConnectionFailure(cause: unknown, fallback: string): Con
       case 'rejected':
         return {
           message:
-            'The daemon rejected this token. Edit the connection and paste the current token from Waku’s Daemon settings.',
+            'The daemon rejected this token. Edit the connection and paste the current token from Goddard’s Daemon settings.',
           retryable: false,
         };
       case 'protocol':
         return {
           message:
-            'This daemon runs a different Waku version than the app. Update Waku on the host, or update this app.',
+            'This daemon runs a different Goddard version than the app. Update Goddard on the host, or update this app.',
           retryable: false,
         };
       case 'handshake':
         return {
-          message: 'Something other than a Waku daemon answered at this address. Check the address and port.',
+          message: 'Something other than a Goddard daemon answered at this address. Check the address and port.',
           retryable: false,
         };
       case 'timeout':

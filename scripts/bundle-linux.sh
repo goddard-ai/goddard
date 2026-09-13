@@ -8,8 +8,11 @@ cd "$root"
 target_dir="${CARGO_TARGET_DIR:-target}"
 version="$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"name":"waku","version":"\([^"]*\)".*/\1/p')"
 target_triple="$(rustc -vV | sed -n 's/^host: //p')"
+# The top-level directory inside the tarball keeps the waku-<v>-<triple> name:
+# already-installed updaters validate that exact root before swapping. Only the
+# published archive filename carries the product name.
 package="waku-${version}-${target_triple}"
-archive="$target_dir/release/$package.tar.gz"
+archive="$target_dir/release/Goddard-${version}-${target_triple}.tar.gz"
 staging="$(mktemp -d)"
 trap 'rm -rf -- "$staging"' EXIT
 

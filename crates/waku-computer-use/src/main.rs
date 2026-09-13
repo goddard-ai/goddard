@@ -104,7 +104,7 @@ fn dispatch(driver: &sdk::Driver, request: &Value, cancelled: &impl Fn() -> bool
     match request.get("method").and_then(Value::as_str) {
         Some("initialize") => Ok(json!({
             "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-            "serverInfo": {"name": "Waku Cua Driver", "version": "0.28.0"}
+            "serverInfo": {"name": "Goddard Cua Driver", "version": "0.28.0"}
         })),
         Some("tools/list") => driver.list_tools(),
         Some("tools/call") => {

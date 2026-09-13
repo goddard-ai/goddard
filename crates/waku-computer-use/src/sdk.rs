@@ -72,7 +72,7 @@ impl Driver {
         // Load only an absolute, packaged path, never a library from PATH/cwd.
         let path = path
             .canonicalize()
-            .context("Cua Driver SDK is missing from this Waku build")?;
+            .context("Cua Driver SDK is missing from this Goddard build")?;
         unsafe {
             let library = Library::new(&path)
                 .with_context(|| format!("load Cua Driver SDK {}", path.display()))?;

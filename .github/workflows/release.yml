@@ -114,7 +114,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: rm -f target/release/waku-*.tar.gz
+        run: rm -f target/release/waku-*.tar.gz target/release/Goddard-*.tar.gz
 
       - name: Bundle
         env:
@@ -128,7 +128,7 @@ jobs:
           # Named exactly, not globbed: `if-no-files-found: error` is then a
           # real check that this version built, rather than something an older
           # bundle can satisfy.
-          path: target/release/waku-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+          path: target/release/Goddard-${{ needs.version.outputs.version }}-x86_64-unknown-linux-gnu.tar.gz
           if-no-files-found: error
 
   linux-arm64:
@@ -177,7 +177,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: rm -f target/release/waku-*.tar.gz
+        run: rm -f target/release/waku-*.tar.gz target/release/Goddard-*.tar.gz
 
       - name: Bundle
         env:
@@ -188,7 +188,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-arm64
-          path: target/release/waku-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
+          path: target/release/Goddard-${{ needs.version.outputs.version }}-aarch64-unknown-linux-gnu.tar.gz
           if-no-files-found: error
 
   windows-x86_64:
@@ -225,7 +225,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Goddard-*.zip, target/release/Waku-*-Setup.exe, target/release/Goddard-*-Setup.exe
 
       - name: Bundle
         env:
@@ -239,8 +239,8 @@ jobs:
         with:
           name: windows-x86_64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-x86_64-Setup.exe
+            target/release/Goddard-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
+            target/release/Goddard-${{ needs.version.outputs.version }}-x86_64-Setup.exe
           if-no-files-found: error
 
   windows-arm64:
@@ -277,7 +277,7 @@ jobs:
       # release's bundles are still sitting in `target/release` when this one
       # starts. Cargo does not own them, so nothing else clears them.
       - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Goddard-*.zip, target/release/Waku-*-Setup.exe, target/release/Goddard-*-Setup.exe
 
       - name: Bundle
         env:
@@ -291,8 +291,8 @@ jobs:
         with:
           name: windows-arm64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-aarch64-Setup.exe
+            target/release/Goddard-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
+            target/release/Goddard-${{ needs.version.outputs.version }}-aarch64-Setup.exe
           if-no-files-found: error
 
   macos:
@@ -363,9 +363,9 @@ jobs:
         with:
           name: macos
           path: |
-            dist/Waku-${{ needs.version.outputs.version }}.dmg
-            dist/Waku-${{ needs.version.outputs.version }}.md
-            dist/Waku-${{ needs.version.outputs.version }}.zip
+            dist/Goddard-${{ needs.version.outputs.version }}.dmg
+            dist/Goddard-${{ needs.version.outputs.version }}.md
+            dist/Goddard-${{ needs.version.outputs.version }}.zip
             dist/appcast.xml
           if-no-files-found: error
 

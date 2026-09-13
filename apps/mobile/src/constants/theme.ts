@@ -1,7 +1,7 @@
 import { Platform, PlatformColor, type ColorValue } from 'react-native';
 
 /**
- * Waku's graphite palette, mirrored from the desktop theme (src/theme.rs) so
+ * Goddard's graphite palette, mirrored from the desktop theme (src/theme.rs) so
  * every client reads as one product. Layer tokens follow the desktop naming:
  * background (canvas) → surface (raised cards) → surfaceMuted (fills on cards)
  * → inset (code / terminal wells), with hairline `border` strokes instead of

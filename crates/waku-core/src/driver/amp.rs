@@ -5,7 +5,7 @@
 //! stdin closes, so one process serves the whole conversation.
 //!
 //! Unlike every other long-lived transport here, Amp exposes no permission
-//! request over the stream — its rules live in `amp permissions`, so Waku still
+//! request over the stream — its rules live in `amp permissions`, so Goddard still
 //! decides the posture at launch. Turn completion is not a `result` message
 //! either: Amp signals it with `stop_reason: "end_turn"` on the assistant
 //! message. Both facts came from probing the real CLI.
