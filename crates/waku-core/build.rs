@@ -10,7 +10,11 @@ use std::path::Path;
 use std::{env, fs};
 
 fn main() {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // Read at run time, not via `env!`: a build-script binary compiled in a
+    // session worktree can be reused for this checkout when they share a
+    // target dir, and a baked-in path would point at the deleted worktree.
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let repository = Path::new(&manifest_dir).join("../..");
     let directory = repository.join("db/migrations");
     println!("cargo:rerun-if-changed={}", directory.display());
     println!(
