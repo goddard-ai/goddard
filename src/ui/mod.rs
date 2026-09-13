@@ -8,6 +8,7 @@ use gpui::{
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
+pub mod smooth_corner;
 pub mod text_field;
 pub mod tooltip;
 
