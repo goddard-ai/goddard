@@ -474,6 +474,27 @@ impl Waku {
                     status_color(&theme, session.status),
                 )))
             })
+            .when(session.status == SessionStatus::Background, |entry| {
+                entry.child(icon(
+                    "icons/hourglass.svg",
+                    12.0,
+                    status_color(&theme, session.status),
+                ))
+            })
+            .when(session.status == SessionStatus::Waiting, |entry| {
+                entry.child(icon(
+                    "icons/alert.svg",
+                    12.0,
+                    status_color(&theme, session.status),
+                ))
+            })
+            .when(session.status == SessionStatus::Failed, |entry| {
+                entry.child(icon(
+                    "icons/x.svg",
+                    12.0,
+                    status_color(&theme, session.status),
+                ))
+            })
             .when(
                 session.status == SessionStatus::Idle
                     && self.unseen_completions.contains_key(&session_id),
