@@ -562,8 +562,10 @@ impl OpenCodeDriver {
                                 prompt_body(&text, model.as_deref(), variant.as_deref(), agent);
                             match worker_server.request("POST", &path, Some(&body)) {
                                 Ok(_) => {
-                                    let _ = worker_events
-                                        .send(DriverEvent::SteerAccepted { message: text });
+                                    let _ = worker_events.send(DriverEvent::SteerAccepted {
+                                        message: text,
+                                        sent_by_task: None,
+                                    });
                                 }
                                 Err(error) => {
                                     let _ = worker_events.send(DriverEvent::SteerRejected {
@@ -584,7 +586,10 @@ impl OpenCodeDriver {
                         } => {
                             if let Some(message) = steer {
                                 let event = match result {
-                                    Ok(()) => DriverEvent::SteerAccepted { message },
+                                    Ok(()) => DriverEvent::SteerAccepted {
+                                        message,
+                                        sent_by_task: None,
+                                    },
                                     Err(reason) => DriverEvent::SteerRejected { message, reason },
                                 };
                                 let _ = worker_events.send(event);
@@ -1640,7 +1645,10 @@ mod tests {
                             .into(),
                     );
                 }
-                DriverEvent::SteerAccepted { message } => {
+                DriverEvent::SteerAccepted {
+                    message,
+                    sent_by_task: None,
+                } => {
                     assert!(message.contains("BANANA"));
                     steer_accepted = true;
                 }

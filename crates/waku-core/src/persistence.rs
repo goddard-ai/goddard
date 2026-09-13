@@ -287,6 +287,10 @@ pub struct PersistedState {
     /// detect from PATH.
     #[serde(default)]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
+    /// Whether agent harnesses may create and prompt other tasks through
+    /// their scoped credentials. Defaults off.
+    #[serde(default)]
+    pub agent_tools_enabled: bool,
     /// Unknown daemon settings survive edits made by this desktop version.
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
@@ -391,6 +395,7 @@ impl PersistedState {
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
+            agent_tools_enabled: false,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -488,6 +493,7 @@ impl PersistedState {
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
+            agent_tools_enabled: self.agent_tools_enabled,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -523,6 +529,7 @@ impl PersistedState {
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
+        self.agent_tools_enabled = settings.agent_tools_enabled;
         self.daemon_settings_extra = settings.extra;
     }
 
@@ -1273,7 +1280,7 @@ impl StateStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments,
-                        created_at, streaming
+                        created_at, streaming, sent_by_task
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1288,6 +1295,7 @@ impl StateStore {
                     row.get::<_, String>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1584,10 +1592,21 @@ type MessageColumns = (
     String,
     i64,
     i64,
+    Option<String>,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
-    let (id, turn_id, role, content, display_content, attachments, created_at, streaming) = row;
+    let (
+        id,
+        turn_id,
+        role,
+        content,
+        display_content,
+        attachments,
+        created_at,
+        streaming,
+        sent_by_task,
+    ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
         turn_id: turn_id.as_deref().and_then(|id| Uuid::parse_str(id).ok()),
@@ -1598,6 +1617,9 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
             .unwrap_or_default(),
         created_at: created_at as u64,
         streaming: streaming != 0,
+        sent_by_task: sent_by_task
+            .as_deref()
+            .and_then(|id| Uuid::parse_str(id).ok()),
     })
 }
 
@@ -1615,8 +1637,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         attachments, created_at, streaming, sent_by_task
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -1626,7 +1648,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          display_content = excluded.display_content,
          attachments = excluded.attachments,
          created_at = excluded.created_at,
-         streaming  = excluded.streaming";
+         streaming  = excluded.streaming,
+         sent_by_task = excluded.sent_by_task";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -1682,6 +1705,9 @@ fn write_messages(
                     Value::Text(attachments),
                     Value::Integer(message.created_at as i64),
                     Value::Integer(i64::from(message.streaming)),
+                    message
+                        .sent_by_task
+                        .map_or(Value::Null, |id| Value::Text(id.to_string())),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -1727,6 +1753,14 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
             fold(low);
         }
         // Distinct from a turn id that happens to be zero.
+        None => fold(u64::MAX),
+    }
+    match message.sent_by_task {
+        Some(sent_by_task) => {
+            let (high, low) = sent_by_task.as_u64_pair();
+            fold(high);
+            fold(low);
+        }
         None => fold(u64::MAX),
     }
 

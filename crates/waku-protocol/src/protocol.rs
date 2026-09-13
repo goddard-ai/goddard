@@ -19,11 +19,20 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "WAKU_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "WAKU_DAEMON_ADDRESS";
 pub const APP_EXECUTABLE_ENV: &str = "WAKU_APP_EXECUTABLE";
+/// Scoped bearer credential the daemon mints for one provider session's
+/// runtime and delivers through its launch environment. Unlike the master
+/// daemon token it is valid only for the two agent commands, only while the
+/// owning runtime is alive, and never leaves daemon memory.
+pub const AGENT_TOKEN_ENV: &str = "WAKU_AGENT_TOKEN";
+/// The Waku task that owns the running provider session. Agent harnesses
+/// report it so the daemon can mark the prompts they submit with the sending
+/// task's provenance.
+pub const AGENT_TASK_ENV: &str = "WAKU_TASK_ID";
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -263,6 +272,80 @@ pub enum Command {
     },
     CloseTerminal,
     CloseSession,
+    /// Scoped agent credential only: create a fully configured task and
+    /// immediately start its first prompt.
+    ///
+    /// Agents running inside a Waku session receive a daemon-minted token
+    /// restricted to `agentCreateSession` and `agentPrompt`, so a harness can
+    /// reach other tasks only when the human asked it to. There is no
+    /// per-call approval gate; instead the daemon marks every accepted prompt
+    /// with the sending task's id, which keeps agent-originated turns
+    /// visible in the target transcript.
+    AgentCreateSession {
+        /// Any provider Waku can drive.
+        provider: ProviderKind,
+        /// An explicit provider model id, or `"default"` to select the
+        /// provider's own default model.
+        model: String,
+        /// Absolute path of the project the task runs in. The daemon
+        /// resolves an existing project at that path, or registers a
+        /// primary Git checkout. Linked worktrees are never registered.
+        #[ts(type = "string")]
+        project: PathBuf,
+        workspace: AgentWorkspace,
+        /// The ref the new worktree starts from. Required when `workspace`
+        /// is `worktree`, ignored for `local`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_branch: Option<String>,
+        /// The task's first prompt, delivered as a normal turn the moment
+        /// its session is running. There is no idle task creation path.
+        prompt: String,
+    },
+    /// Scoped agent credential only: submit a prompt to an existing task,
+    /// addressed by Waku task id or provider-native Agent CLI thread id.
+    AgentPrompt {
+        /// Waku task id. Exactly one of `task_id` and `thread_id` is
+        /// required.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<Uuid>,
+        /// Provider-native Agent CLI thread id, resolved against
+        /// daemon-known tasks. `provider` disambiguates when more than one
+        /// task carries the id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<ProviderKind>,
+        prompt: String,
+        #[serde(default)]
+        delivery: AgentPromptDelivery,
+    },
+}
+
+/// Where an agent-created task runs. Mirrors the New Task flow's workspace
+/// choices; there is no attach-a-worktree path because a task created by an
+/// agent always starts fresh.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentWorkspace {
+    /// The project's own directory.
+    #[default]
+    Local,
+    /// A daemon-managed Git worktree branched from `base_branch`.
+    Worktree,
+}
+
+/// How an agent prompt reaches the target session.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentPromptDelivery {
+    /// Wait in a daemon-side per-session queue until the target is idle,
+    /// then start a fresh turn. Submission order is preserved.
+    #[default]
+    Queue,
+    /// Inject the prompt into the target's running turn through the
+    /// provider's steer path. An error when no turn is running or the
+    /// provider cannot steer.
+    Steer,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -457,6 +540,10 @@ pub enum ResponsePayload {
     Workspace {
         result: WorkspaceResult,
     },
+    /// The daemon persisted and started an agent-created task.
+    AgentSessionCreated {
+        session_id: Uuid,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -530,7 +617,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(PROTOCOL_VERSION, 8);
     }
 
     #[test]
@@ -539,7 +626,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 7);
+        assert_eq!(PROTOCOL_VERSION, 8);
     }
 
     #[test]

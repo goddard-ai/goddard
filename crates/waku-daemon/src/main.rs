@@ -5,16 +5,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow, bail};
-use waku_protocol::{DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION};
+use waku_protocol::{
+    AGENT_TASK_ENV, AGENT_TOKEN_ENV, DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION,
+};
 
 fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse(std::env::args().skip(1))?;
-    let token =
-        std::env::var(DAEMON_TOKEN_ENV).context("Goddard daemon authentication token is missing")?;
+    let token = std::env::var(DAEMON_TOKEN_ENV)
+        .context("Goddard daemon authentication token is missing")?;
     // The bearer capability belongs only to this server process. Remove it
     // before any provider or workspace subprocess can inherit the daemon's
-    // environment.
-    unsafe { std::env::remove_var(DAEMON_TOKEN_ENV) };
+    // environment — and drop any agent credential this process itself
+    // inherited, since scoped tokens are minted per provider session and
+    // never pass through unchanged.
+    unsafe {
+        std::env::remove_var(DAEMON_TOKEN_ENV);
+        std::env::remove_var(AGENT_TOKEN_ENV);
+        std::env::remove_var(AGENT_TASK_ENV);
+    }
     let listener = TcpListener::bind(&arguments.bind)
         .with_context(|| format!("could not bind Goddard daemon to {}", arguments.bind))?;
     let address = listener.local_addr()?;

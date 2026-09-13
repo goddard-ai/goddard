@@ -426,7 +426,10 @@ fn handle_command(
         }
         CommandMessage::Steer(text) => match prompt(server, session_id, &text, "steer") {
             Ok(_) => {
-                let _ = events.send(DriverEvent::SteerAccepted { message: text });
+                let _ = events.send(DriverEvent::SteerAccepted {
+                    message: text,
+                    sent_by_task: None,
+                });
             }
             Err(error) => {
                 let _ = events.send(DriverEvent::SteerRejected {

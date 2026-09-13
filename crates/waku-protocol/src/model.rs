@@ -1448,6 +1448,7 @@ impl AgentSession {
         message: &str,
         turn_id: Uuid,
         message_id: Uuid,
+        sent_by_task: Option<Uuid>,
     ) -> bool {
         let now = unix_time();
         if let Some(active) = self.active_turn_id() {
@@ -1459,6 +1460,7 @@ impl AgentSession {
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
+            prompt.sent_by_task = sent_by_task;
             self.messages.push(prompt);
             self.updated_at = now;
             return true;
@@ -1476,6 +1478,7 @@ impl AgentSession {
         });
         let mut prompt = Message::new_for_turn(MessageRole::User, message, turn_id);
         prompt.id = message_id;
+        prompt.sent_by_task = sent_by_task;
         self.messages.push(prompt);
         self.status = SessionStatus::Connecting;
         self.last_reply_at = Some(now);
@@ -1585,12 +1588,14 @@ impl AgentSession {
         content: impl Into<String>,
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
+        sent_by_task: Option<Uuid>,
     ) -> Uuid {
-        let message = match self.active_turn_id() {
+        let mut message = match self.active_turn_id() {
             Some(turn_id) => Message::new_for_turn(MessageRole::User, content, turn_id),
             None => Message::new(MessageRole::User, content),
         }
         .with_presentation(display_content, attachments);
+        message.sent_by_task = sent_by_task;
         let id = message.id;
         self.messages.push(message);
         id
@@ -1741,6 +1746,11 @@ pub struct Message {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    /// The task whose agent submitted this message through the daemon's
+    /// scoped agent commands. `None` for messages a human typed; every
+    /// client renders the marker so agent-originated prompts stay visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_by_task: Option<Uuid>,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -1754,6 +1764,7 @@ impl Message {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            sent_by_task: None,
             created_at: unix_time(),
             streaming: false,
         }
@@ -1922,6 +1933,9 @@ pub enum DriverEvent {
         message: String,
         turn_id: Uuid,
         message_id: Uuid,
+        /// The task whose agent submitted the prompt through the daemon's
+        /// scoped agent commands, or `None` for a human submission.
+        sent_by_task: Option<Uuid>,
     },
     TurnStarted,
     /// The provider's turn ended while detached work it will wake the
@@ -1957,8 +1971,12 @@ pub enum DriverEvent {
     },
     ComputerUseUpdated(crate::computer_use::ComputerUseState),
     /// The provider accepted a steering message into the running turn.
+    /// `sent_by_task` carries the same provenance as
+    /// [`DriverEvent::PromptSubmitted`] when the steer came through the
+    /// daemon's scoped agent commands.
     SteerAccepted {
         message: String,
+        sent_by_task: Option<Uuid>,
     },
     /// The provider could not steer the running turn (for example it ended
     /// before the request arrived). The app decides the fallback.
@@ -4812,7 +4830,7 @@ mod tests {
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
 
-        assert!(session.adopt_submitted_prompt("second", turn_id, message_id));
+        assert!(session.adopt_submitted_prompt("second", turn_id, message_id, None));
 
         assert_eq!(session.status, SessionStatus::Connecting);
         assert_eq!(session.active_turn_id(), Some(turn_id));
@@ -4833,7 +4851,7 @@ mod tests {
         session.status = SessionStatus::Connecting;
         let message_id = session.messages[0].id;
 
-        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id));
+        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id, None));
 
         assert_eq!(session.turns.len(), 1);
         assert_eq!(session.messages.len(), 1);
@@ -4848,7 +4866,7 @@ mod tests {
         session.status = SessionStatus::Working;
         let message_id = Uuid::new_v4();
 
-        assert!(session.adopt_submitted_prompt("continue", Uuid::new_v4(), message_id));
+        assert!(session.adopt_submitted_prompt("continue", Uuid::new_v4(), message_id, None));
 
         assert_eq!(session.turns.len(), 1);
         let prompt = session.messages.last().unwrap();

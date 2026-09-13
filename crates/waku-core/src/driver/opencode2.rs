@@ -959,10 +959,16 @@ fn handle_command(worker: &Worker, message: DriverCommand, state: &mut StreamSta
                     });
                     // The inbox event is authoritative; this 2xx is only the
                     // fallback for a response Goddard never sees.
-                    let _ = events.send(DriverEvent::SteerAccepted { message: text });
+                    let _ = events.send(DriverEvent::SteerAccepted {
+                        message: text,
+                        sent_by_task: None,
+                    });
                 }
                 Ok(None) => {
-                    let _ = events.send(DriverEvent::SteerAccepted { message: text });
+                    let _ = events.send(DriverEvent::SteerAccepted {
+                        message: text,
+                        sent_by_task: None,
+                    });
                 }
                 Err(error) => {
                     let _ = events.send(DriverEvent::SteerRejected {

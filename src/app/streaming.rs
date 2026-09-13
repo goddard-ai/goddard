@@ -288,6 +288,7 @@ impl Waku {
                 message,
                 turn_id,
                 message_id,
+                sent_by_task,
             } => {
                 // A prompt reached this runtime: another client's submission,
                 // or the echo of this one. The session decides whether that
@@ -295,7 +296,7 @@ impl Waku {
                 // projection this client persists carries the prompt whose
                 // reply it is about to stream.
                 if let Some(session) = self.state.session_mut(session_id)
-                    && session.adopt_submitted_prompt(&message, turn_id, message_id)
+                    && session.adopt_submitted_prompt(&message, turn_id, message_id, sent_by_task)
                 {
                     self.state.mark_session_dirty(session_id);
                 }
@@ -466,7 +467,10 @@ impl Waku {
                     Self::upsert_computer_use_preview(session_id, runtime, state, cx);
                 }
             }
-            DriverEvent::SteerAccepted { message } => {
+            DriverEvent::SteerAccepted {
+                message,
+                sent_by_task,
+            } => {
                 let submission = runtime
                     .pending_steers
                     .iter()
@@ -491,6 +495,7 @@ impl Waku {
                         message,
                         submission.display_content,
                         submission.attachments,
+                        sent_by_task,
                     );
                     session.updated_at = unix_time();
                 }

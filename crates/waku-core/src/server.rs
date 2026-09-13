@@ -70,7 +70,22 @@ impl Drop for ConnectionPermit {
 }
 
 pub trait Backend: Send + Sync + 'static {
-    fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload>;
+    /// Resolve a scoped agent credential to the Waku task that owns it. The
+    /// default answers for backends without an agent surface.
+    fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
+        let _ = token;
+        None
+    }
+
+    /// `agent` is `Some` when the connection authenticated with a scoped
+    /// agent credential; the id names the sending Waku task, which the
+    /// backend uses for provenance.
+    fn handle(
+        &self,
+        request: Request,
+        events: EventSink,
+        agent: Option<Uuid>,
+    ) -> anyhow::Result<ResponsePayload>;
 
     fn shutdown(&self) {}
 }
@@ -96,6 +111,30 @@ impl EventSink {
         self.hub
             .emit(self.session_id, self.runtime_id, event, false);
         Ok(())
+    }
+
+    /// Retarget this sink at another session/runtime pair. Agent commands
+    /// are addressed by the request's own ids, but the events they generate
+    /// belong to the target session's stream.
+    pub fn for_session(&self, session_id: Uuid, runtime_id: Uuid) -> EventSink {
+        EventSink {
+            session_id,
+            runtime_id,
+            hub: self.hub.clone(),
+        }
+    }
+
+    /// Register a runtime the request itself did not start — an agent
+    /// command cold-starting a stored task — and retarget this sink at it.
+    pub fn begin_session_runtime(&self, session_id: Uuid, runtime_id: Uuid) -> EventSink {
+        self.hub.begin_runtime(session_id, runtime_id);
+        self.for_session(session_id, runtime_id)
+    }
+
+    /// Retire the runtime this sink currently targets, e.g. when a runtime
+    /// it just started fails before its first event.
+    pub fn end_session_runtime(&self) {
+        self.hub.end_runtime(self.session_id, Some(self.runtime_id));
     }
 }
 
@@ -191,6 +230,9 @@ struct DispatchedRequest {
     request: Request,
     outgoing: Sender<ServerMessage>,
     source_subscriber_id: u64,
+    /// `Some` when the sending connection authenticated with a scoped agent
+    /// credential; the id names the Waku task that credential belongs to.
+    agent: Option<Uuid>,
 }
 
 struct RuntimeMailbox {
@@ -435,16 +477,21 @@ impl RequestDispatcher {
         }
     }
 
+    fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
+        self.backend.authenticate_agent(token)
+    }
+
     fn dispatch(
         &self,
         request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
+        agent: Option<Uuid>,
     ) {
         if command_targets_runtime(&request.command) {
-            self.dispatch_runtime(request, outgoing, source_subscriber_id);
+            self.dispatch_runtime(request, outgoing, source_subscriber_id, agent);
         } else {
-            self.dispatch_independent(request, outgoing, source_subscriber_id);
+            self.dispatch_independent(request, outgoing, source_subscriber_id, agent);
         }
     }
 
@@ -453,6 +500,7 @@ impl RequestDispatcher {
         request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
+        agent: Option<Uuid>,
     ) {
         let backend = self.backend.clone();
         let hub = self.hub.clone();
@@ -461,7 +509,7 @@ impl RequestDispatcher {
         if let Err(error) = std::thread::Builder::new()
             .name("waku-daemon-request".into())
             .spawn(move || {
-                handle_request(request, outgoing, source_subscriber_id, backend, hub);
+                handle_request(request, outgoing, source_subscriber_id, agent, backend, hub);
             })
         {
             send_dispatch_error(
@@ -478,6 +526,7 @@ impl RequestDispatcher {
         request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
+        agent: Option<Uuid>,
     ) {
         let session_id = request.session_id;
         let failed_request_id = request.request_id;
@@ -486,6 +535,7 @@ impl RequestDispatcher {
             request,
             outgoing,
             source_subscriber_id,
+            agent,
         };
         loop {
             let mut mailboxes = self.runtime_mailboxes.lock();
@@ -628,15 +678,7 @@ fn handle_connection(
     )
     .context("WebSocket handshake failed")?;
     let hello = read_client_message(&mut socket)?;
-    let resume_from = match hello {
-        ClientMessage::Hello {
-            protocol_version,
-            token,
-            resume_from,
-            ..
-        } if protocol_version == PROTOCOL_VERSION && token_matches(expected_token, &token) => {
-            resume_from
-        }
+    let (resume_from, agent) = match hello {
         ClientMessage::Hello {
             protocol_version, ..
         } if protocol_version != PROTOCOL_VERSION => {
@@ -650,15 +692,25 @@ fn handle_connection(
             )?;
             return Ok(());
         }
-        ClientMessage::Hello { .. } => {
-            write_json(
-                &mut socket,
-                &ServerMessage::Rejected {
-                    message: "authentication failed".into(),
-                },
-            )?;
-            return Ok(());
-        }
+        ClientMessage::Hello {
+            token, resume_from, ..
+        } if token_matches(expected_token, &token) => (resume_from, None),
+        ClientMessage::Hello { token, .. } => match dispatcher.authenticate_agent(&token) {
+            // A scoped agent credential names the Waku task it belongs to.
+            // The connection gets command responses but no event replay or
+            // broadcast — its token proves nothing about which sessions it
+            // may observe.
+            Some(agent_task) => (Vec::new(), Some(agent_task)),
+            None => {
+                write_json(
+                    &mut socket,
+                    &ServerMessage::Rejected {
+                        message: "authentication failed".into(),
+                    },
+                )?;
+                return Ok(());
+            }
+        },
         _ => bail!("first daemon message was not a hello"),
     };
     write_json(
@@ -683,7 +735,13 @@ fn handle_connection(
 
     let (outgoing, outgoing_rx) = bounded(MAX_QUEUED_MESSAGES_PER_SUBSCRIBER);
     let (subscriber, kicked) = Subscriber::new(outgoing.clone());
-    let subscriber_id = hub.subscribe(&resume_from, subscriber);
+    // Agent connections receive no event stream, so they never join the hub.
+    // The sentinel id can only ever be their own: real ids count up from 0.
+    let subscriber_id = if agent.is_some() {
+        u64::MAX
+    } else {
+        hub.subscribe(&resume_from, subscriber)
+    };
 
     'connection: while !shutdown.load(Ordering::Acquire) {
         if kicked.try_recv().is_ok() {
@@ -697,10 +755,24 @@ fn handle_connection(
         match socket.read() {
             Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
                 Ok(ClientMessage::Request(request)) => {
-                    dispatcher.dispatch(request, outgoing.clone(), subscriber_id);
+                    if agent.is_some() && !is_agent_command(&request.command) {
+                        let request_id = request.request_id;
+                        if !request_id.is_nil() {
+                            let _ = outgoing.send(ServerMessage::Response {
+                                request_id,
+                                outcome: ResponseOutcome::Error {
+                                    error: RpcError::from(anyhow::anyhow!(
+                                        "an agent credential may only run agent commands"
+                                    )),
+                                },
+                            });
+                        }
+                    } else {
+                        dispatcher.dispatch(request, outgoing.clone(), subscriber_id, agent);
+                    }
                 }
                 Ok(ClientMessage::Shutdown) => {
-                    if options.allow_shutdown {
+                    if agent.is_none() && options.allow_shutdown {
                         write_json(&mut socket, &ServerMessage::ShuttingDown)?;
                         shutdown.store(true, Ordering::Release);
                         break;
@@ -773,6 +845,16 @@ fn token_matches(expected: &str, candidate: &str) -> bool {
     expected.as_bytes().ct_eq(candidate.as_bytes()).into()
 }
 
+/// The whole command surface a scoped agent credential can reach. These are
+/// deliberately absent from `command_targets_runtime` so they dispatch on
+/// their own workers — the backend serializes target-session delivery itself.
+fn is_agent_command(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::AgentCreateSession { .. } | Command::AgentPrompt { .. }
+    )
+}
+
 fn command_targets_runtime(command: &Command) -> bool {
     matches!(
         command,
@@ -834,6 +916,7 @@ fn run_runtime_mailbox(
             dispatched.request,
             dispatched.outgoing,
             dispatched.source_subscriber_id,
+            dispatched.agent,
             backend.clone(),
             hub.clone(),
         );
@@ -929,6 +1012,7 @@ fn handle_request(
     request: Request,
     outgoing: Sender<ServerMessage>,
     source_subscriber_id: u64,
+    agent: Option<Uuid>,
     backend: Arc<dyn Backend>,
     hub: Arc<Hub>,
 ) -> HandledRequest {
@@ -941,14 +1025,24 @@ fn handle_request(
         &request.command,
         Command::Start { .. } | Command::OpenTerminal { .. }
     );
-    let (outcome, executed) = if !notification && let Some(cached) = hub.cached_response(request_id)
-    {
+    let (outcome, executed) = if agent.is_some() && !is_agent_command(&request.command) {
+        // A scoped credential is confined to the agent command surface no
+        // matter which dispatch path a request arrived on.
+        (
+            ResponseOutcome::Error {
+                error: RpcError::from(anyhow::anyhow!(
+                    "an agent credential may only run agent commands"
+                )),
+            },
+            false,
+        )
+    } else if !notification && let Some(cached) = hub.cached_response(request_id) {
         (cached, false)
     } else {
         if starts_runtime {
             hub.begin_runtime(session_id, runtime_id);
         }
-        let outcome = match backend.handle(request, hub.event_sink(session_id, runtime_id)) {
+        let outcome = match backend.handle(request, hub.event_sink(session_id, runtime_id), agent) {
             Ok(payload) => ResponseOutcome::Ok { payload },
             Err(error) => ResponseOutcome::Error {
                 error: RpcError::from(error),
@@ -1002,7 +1096,11 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         },
         Command::RemoveSession
         | Command::ForkSessionFromResponse { .. }
-        | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
+        | Command::RewindSessionToMessage { .. }
+        // Agent commands mutate daemon-owned task state directly; attached
+        // clients learn about the new task or prompt from the revision bump.
+        | Command::AgentCreateSession { .. }
+        | Command::AgentPrompt { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,
     }
 }
@@ -1095,7 +1193,12 @@ mod tests {
     }
 
     impl Backend for TestBackend {
-        fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            events: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
             let session_id = request.session_id;
             let runtime_id = request.runtime_id;
             match request.command {
@@ -1132,7 +1235,12 @@ mod tests {
     }
 
     impl Backend for TaskStateBackend {
-        fn handle(&self, request: Request, _events: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _events: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
             match request.command {
                 Command::SaveTaskState { sessions, .. } => {
                     let mut stored = self.sessions.lock();
@@ -1364,6 +1472,205 @@ mod tests {
         assert!(sessions.is_empty());
 
         stale_client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_scoped_agent_token_reaches_only_agent_commands() {
+        let root = std::env::temp_dir().join(format!("waku-agent-auth-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let settings = DaemonSettingsStore::open(root.join("settings.json")).unwrap();
+        settings
+            .replace(DaemonSettings {
+                agent_tools_enabled: true,
+                // A binary that cannot exist keeps the cold-start path from
+                // ever spawning a real provider in a test.
+                provider_binary_overrides: HashMap::from([(
+                    ProviderKind::Codex,
+                    "/nonexistent/waku-test-provider".into(),
+                )]),
+                ..DaemonSettings::default()
+            })
+            .unwrap();
+        let backend = WakuBackend::new(settings, StateStore::daemon(root.join("app.db"))).unwrap();
+        let sender_id = Uuid::new_v4();
+        let agent_token = backend.agent.mint(sender_id);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        // A token the daemon never minted is no credential.
+        let error = match DaemonClient::connect(&address.to_string(), "forged".into()) {
+            Ok(_) => panic!("a forged token must not authenticate"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("authentication failed"),
+            "{error}"
+        );
+
+        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
+        let human = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+
+        // A target task the daemon knows but has never run.
+        let project = Project::from_path(root.join("repo"));
+        let mut target = AgentSession::new(project.id, ProviderKind::Codex);
+        target.provider_cursor = Some(crate::model::ProviderResumeCursor::from_session_id(
+            ProviderKind::Codex,
+            "thread-42".into(),
+        ));
+        let target_id = target.id;
+        human
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: vec![project],
+                    live_session_ids: vec![],
+                    sessions: vec![target],
+                },
+            )
+            .unwrap();
+
+        // The credential is confined to the agent command surface.
+        let error = agent
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("may only run agent commands"),
+            "{error}"
+        );
+
+        // Unknown targets are refused rather than queued.
+        let error = agent
+            .request(
+                sender_id,
+                Uuid::nil(),
+                Command::AgentPrompt {
+                    task_id: Some(Uuid::new_v4()),
+                    thread_id: None,
+                    provider: None,
+                    prompt: "hi".into(),
+                    delivery: crate::AgentPromptDelivery::Queue,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("unknown to the daemon"),
+            "{error}"
+        );
+
+        // A provider-native thread id resolves to the same task; steer mode
+        // on a task with no running turn is a clean error, not a cold start.
+        let error = agent
+            .request(
+                sender_id,
+                Uuid::nil(),
+                Command::AgentPrompt {
+                    task_id: None,
+                    thread_id: Some("thread-42".into()),
+                    provider: None,
+                    prompt: "hi".into(),
+                    delivery: crate::AgentPromptDelivery::Steer,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("no running session to steer"),
+            "{error}"
+        );
+
+        // Queue mode on a known task attempts the cold start; the fake
+        // binary makes the launch itself the deterministic failure.
+        let error = agent
+            .request(
+                sender_id,
+                Uuid::nil(),
+                Command::AgentPrompt {
+                    task_id: Some(target_id),
+                    thread_id: None,
+                    provider: None,
+                    prompt: "hi".into(),
+                    delivery: crate::AgentPromptDelivery::Queue,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            !error.to_string().contains("unknown to the daemon"),
+            "{error}"
+        );
+
+        agent.shutdown();
+        human.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_commands_require_the_daemon_setting() {
+        let root = std::env::temp_dir().join(format!("waku-agent-gate-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let sender_id = Uuid::new_v4();
+        let agent_token = backend.agent.mint(sender_id);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        let agent = DaemonClient::connect(&address.to_string(), agent_token).unwrap();
+        let human = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+        let error = agent
+            .request(
+                sender_id,
+                Uuid::nil(),
+                Command::AgentPrompt {
+                    task_id: Some(Uuid::new_v4()),
+                    thread_id: None,
+                    provider: None,
+                    prompt: "hi".into(),
+                    delivery: crate::AgentPromptDelivery::Queue,
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("disabled"), "{error}");
+
+        human.shutdown();
+        agent.shutdown();
         server.join().unwrap();
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1824,6 +2131,7 @@ mod tests {
             },
             outgoing,
             0,
+            None,
             Arc::new(TestBackend::default()),
             hub.clone(),
         );
@@ -2013,7 +2321,12 @@ mod tests {
     }
 
     impl Backend for BlockingProbeBackend {
-        fn handle(&self, request: Request, _: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
             if matches!(request.command, Command::ProbeProvider { .. }) {
                 self.probe_started.send(()).unwrap();
                 self.release_probe.recv().unwrap();
@@ -2049,6 +2362,7 @@ mod tests {
             },
             outgoing.clone(),
             0,
+            None,
         );
         probe_started_rx
             .recv_timeout(Duration::from_secs(1))
@@ -2066,6 +2380,7 @@ mod tests {
             },
             outgoing,
             0,
+            None,
         );
         assert!(matches!(
             response_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -2086,7 +2401,12 @@ mod tests {
     }
 
     impl Backend for RuntimeOrderingBackend {
-        fn handle(&self, request: Request, _: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _: EventSink,
+            _agent: Option<Uuid>,
+        ) -> anyhow::Result<ResponsePayload> {
             let command = match request.command {
                 Command::Start { .. } => {
                     self.handled.send((request.session_id, "start")).unwrap();
@@ -2138,6 +2458,7 @@ mod tests {
             },
             start_outgoing,
             0,
+            None,
         );
         assert_eq!(
             handled_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -2158,6 +2479,7 @@ mod tests {
             },
             second_client_outgoing,
             0,
+            None,
         );
 
         let other_start_id = Uuid::new_v4();
@@ -2172,6 +2494,7 @@ mod tests {
             },
             other_outgoing.clone(),
             0,
+            None,
         );
         assert_eq!(
             handled_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
@@ -2213,6 +2536,7 @@ mod tests {
             },
             other_outgoing.clone(),
             0,
+            None,
         );
         let other_close_id = Uuid::new_v4();
         dispatcher.dispatch(
@@ -2224,6 +2548,7 @@ mod tests {
             },
             other_outgoing,
             0,
+            None,
         );
         let mut close_responses = [false; 2];
         for _ in 0..2 {

@@ -686,7 +686,10 @@ async fn run_sdk_connection(
                             stream_state.clone(),
                         ) {
                             Ok(()) => {
-                                let _ = events.send(DriverEvent::SteerAccepted { message: text });
+                                let _ = events.send(DriverEvent::SteerAccepted {
+                                    message: text,
+                                    sent_by_task: None,
+                                });
                             }
                             Err(error) => {
                                 let _ = events.send(DriverEvent::SteerRejected {

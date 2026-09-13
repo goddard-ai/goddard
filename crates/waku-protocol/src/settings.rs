@@ -13,6 +13,11 @@ use crate::model::ProviderKind;
 pub struct DaemonSettings {
     pub computer_use_enabled: bool,
     pub computer_use_allowed_apps: Vec<ComputerAppGrant>,
+    /// Whether agents running inside this daemon's provider sessions may
+    /// create and prompt other Waku tasks through the scoped agent
+    /// credential. Off by default: nothing is injected into provider
+    /// environments, and the daemon rejects the agent commands outright.
+    pub agent_tools_enabled: bool,
     pub disabled_providers: Vec<ProviderKind>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
@@ -25,6 +30,7 @@ impl Default for DaemonSettings {
         Self {
             computer_use_enabled: false,
             computer_use_allowed_apps: Vec::new(),
+            agent_tools_enabled: false,
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
             extra: BTreeMap::new(),

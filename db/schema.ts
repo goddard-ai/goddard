@@ -77,6 +77,8 @@ export const messages = sqliteTable(
     attachments: text("attachments").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
+    /** Waku task that submitted the message through an agent credential. */
+    sentByTask: text("sent_by_task"),
   },
   (table) => [index("messages_by_session").on(table.sessionId, table.position)],
 );

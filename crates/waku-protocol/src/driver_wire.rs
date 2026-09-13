@@ -94,11 +94,23 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message,
             turn_id,
             message_id,
+            sent_by_task,
         } => (
             "promptSubmitted",
-            json!({ "message": message, "turnId": turn_id, "messageId": message_id }),
+            json!({
+                "message": message,
+                "turnId": turn_id,
+                "messageId": message_id,
+                "sentByTask": sent_by_task,
+            }),
         ),
-        DriverEvent::SteerAccepted { message } => ("steerAccepted", json!({ "message": message })),
+        DriverEvent::SteerAccepted {
+            message,
+            sent_by_task,
+        } => (
+            "steerAccepted",
+            json!({ "message": message, "sentByTask": sent_by_task }),
+        ),
         DriverEvent::SteerRejected { message, reason } => (
             "steerRejected",
             json!({ "message": message, "reason": reason }),
@@ -181,12 +193,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: submitted.message,
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
+                sent_by_task: submitted.sent_by_task,
             }
         }
         "steerAccepted" => {
             let steer: AcceptedSteerWire = serde_json::from_value(payload)?;
             DriverEvent::SteerAccepted {
                 message: steer.message,
+                sent_by_task: steer.sent_by_task,
             }
         }
         "steerRejected" => {
@@ -224,6 +238,8 @@ struct SubmittedPromptWire {
     message: String,
     turn_id: Uuid,
     message_id: Uuid,
+    #[serde(default)]
+    sent_by_task: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -262,8 +278,11 @@ struct ComputerUseWire {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AcceptedSteerWire {
     message: String,
+    #[serde(default)]
+    sent_by_task: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

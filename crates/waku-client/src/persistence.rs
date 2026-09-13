@@ -551,6 +551,8 @@ pub struct PersistedState {
     pub disabled_providers: Vec<ProviderKind>,
     #[serde(default)]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
+    #[serde(default)]
+    pub agent_tools_enabled: bool,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -617,6 +619,7 @@ impl PersistedState {
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
+            agent_tools_enabled: false,
             daemon_settings_extra: BTreeMap::new(),
             dirty_sessions: HashSet::new(),
         }
@@ -748,6 +751,7 @@ impl PersistedState {
             computer_use_allowed_apps: self.computer_use_allowed_apps.clone(),
             disabled_providers: self.disabled_providers.clone(),
             provider_binary_overrides: self.provider_binary_overrides.clone(),
+            agent_tools_enabled: self.agent_tools_enabled,
             extra: self.daemon_settings_extra.clone(),
         }
     }
@@ -757,6 +761,7 @@ impl PersistedState {
         self.computer_use_allowed_apps = settings.computer_use_allowed_apps;
         self.disabled_providers = settings.disabled_providers;
         self.provider_binary_overrides = settings.provider_binary_overrides;
+        self.agent_tools_enabled = settings.agent_tools_enabled;
         self.daemon_settings_extra = settings.extra;
     }
 

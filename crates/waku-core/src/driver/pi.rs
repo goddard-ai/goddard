@@ -532,8 +532,10 @@ impl PiDriver {
                             );
                             match result {
                                 Ok(_) => {
-                                    let _ = writer_events
-                                        .send(DriverEvent::SteerAccepted { message: prompt });
+                                    let _ = writer_events.send(DriverEvent::SteerAccepted {
+                                        message: prompt,
+                                        sent_by_task: None,
+                                    });
                                 }
                                 Err(error) => {
                                     let _ = writer_events.send(DriverEvent::SteerRejected {

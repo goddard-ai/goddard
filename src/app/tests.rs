@@ -777,7 +777,7 @@ fn only_the_turn_opening_prompt_is_a_rewind_boundary() {
     session.begin_turn("first prompt");
     session.push_message(MessageRole::Assistant, "working on it");
     // A steer the provider folded into the live turn.
-    session.push_user_message_with_presentation("actually, also this", None, Vec::new());
+    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
     session.push_message(MessageRole::Assistant, "answer");
     session.finish_active_turn(TurnStatus::Interrupted);
     session.begin_turn("second prompt");
@@ -830,7 +830,7 @@ fn an_accepted_steer_settles_the_stream_segment_its_message_cuts_off() {
     // `SteerAccepted` settles the segment, then appends the folded-in
     // message to the running turn.
     settle_stream_segment(&mut session);
-    session.push_user_message_with_presentation("actually, also this", None, Vec::new());
+    session.push_user_message_with_presentation("actually, also this", None, Vec::new(), None);
 
     let block = &session.transcript_blocks[0];
     assert!(block.activities.iter().all(|activity| activity.complete));

@@ -17,6 +17,29 @@ const MAX_CANDIDATES: usize = 100;
 
 pub use waku_protocol::git::CreatedWorktree;
 
+/// Whether `path` sits inside a linked Git worktree rather than a primary
+/// checkout. A linked worktree's own `.git` lives under the main
+/// repository's `worktrees/` directory, which is what separates the two
+/// `--git-dir` and `--git-common-dir` answers. Non-Git paths report false.
+pub fn is_linked_worktree(path: &Path) -> bool {
+    let resolve = |dir: &str| {
+        let dir = Path::new(dir);
+        let dir = if dir.is_absolute() {
+            dir.to_path_buf()
+        } else {
+            path.join(dir)
+        };
+        fs::canonicalize(&dir).unwrap_or(dir)
+    };
+    let (Ok(Some(git_dir)), Ok(Some(common_dir))) = (
+        git_optional_stdout(path, &["rev-parse", "--git-dir"]),
+        git_optional_stdout(path, &["rev-parse", "--git-common-dir"]),
+    ) else {
+        return false;
+    };
+    resolve(&git_dir) != resolve(&common_dir)
+}
+
 /// Create a detached linked worktree named `name` — or named after `prompt`
 /// when `name` is `None` — based on `base_ref` or the repository's default
 /// branch. The returned path is project-relative, preserving a project that

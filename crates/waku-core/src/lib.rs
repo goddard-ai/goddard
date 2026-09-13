@@ -18,6 +18,7 @@ macro_rules! tr {
 }
 
 pub mod acp_session;
+pub mod agent;
 pub mod amp_session;
 pub mod attachments;
 pub mod blob_store;
@@ -67,10 +68,11 @@ mod protocol;
 mod server;
 
 pub use protocol::{
-    APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
-    PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError,
-    SequencedEvent, ServerMessage, WireComputerToolRequest, WireDriverEvent,
-    WireDriverStartOptions, WireSessionOptions,
+    AGENT_TASK_ENV, AGENT_TOKEN_ENV, APP_EXECUTABLE_ENV, AgentPromptDelivery, AgentWorkspace,
+    ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION,
+    ReplayCursor, Request, ResponseOutcome, ResponsePayload, RpcError, SequencedEvent,
+    ServerMessage, WireComputerToolRequest, WireDriverEvent, WireDriverStartOptions,
+    WireSessionOptions,
 };
 pub use server::{Backend, EventSink, ServerOptions, serve};
 pub use settings::{DaemonSettings, DaemonSettingsStore};

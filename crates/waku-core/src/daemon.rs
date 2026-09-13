@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use crate::{
-    Backend, Command, EventSink, Request, ResponsePayload, WireDriverEvent, WorkspaceOperation,
-    WorkspaceResult,
+    AgentPromptDelivery, AgentWorkspace, Backend, Command, EventSink, Request, ResponsePayload,
+    WireDriverEvent, WorkspaceOperation, WorkspaceResult,
 };
 use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
@@ -20,7 +20,7 @@ use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus,
+    Project, ProviderKind, ProviderResumeCursor, SessionStatus, SessionWorkspace,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -48,18 +48,26 @@ fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>)
 }
 
 pub struct WakuBackend {
-    sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
+    sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: DaemonSettingsStore,
-    task_store: StateStore,
-    task_state: Mutex<PersistedState>,
+    task_store: Arc<StateStore>,
+    task_state: Arc<Mutex<PersistedState>>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
     checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
+    /// Scoped agent credentials, per-session prompt queues, and the live
+    /// turn bookkeeping the runtime event forwarder maintains. `pub(crate)`
+    /// so server tests can mint a token and connect with it the way a
+    /// provider session's harness would.
+    pub(crate) agent: Arc<crate::agent::AgentState>,
+    /// Serializes cold-start of a stored task's runtime so two agent prompts
+    /// cannot race to spawn it.
+    runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
 }
@@ -84,18 +92,20 @@ impl WakuBackend {
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
         let backend = Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
             terminals: Mutex::new(HashMap::new()),
             #[cfg(all(test, unix))]
             terminal_shell: None,
             settings,
-            task_store,
-            task_state: Mutex::new(task_state),
+            task_store: Arc::new(task_store),
+            task_state: Arc::new(Mutex::new(task_state)),
             removed_session_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
             usage_scan_cache: Mutex::new(HashMap::new()),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
+            agent: Arc::new(crate::agent::AgentState::default()),
+            runtime_start_locks: Mutex::new(HashMap::new()),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         };
@@ -226,6 +236,7 @@ impl WakuBackend {
         }
         let removed = self.sessions.lock().remove(&session_id);
         drop(removed);
+        self.agent.clear_session(session_id);
         Ok(())
     }
 
@@ -312,7 +323,16 @@ fn migrate_projectless_state(
 }
 
 impl Backend for WakuBackend {
-    fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
+    fn authenticate_agent(&self, token: &str) -> Option<Uuid> {
+        self.agent.resolve(token)
+    }
+
+    fn handle(
+        &self,
+        request: Request,
+        events: EventSink,
+        agent: Option<Uuid>,
+    ) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         match request.command {
@@ -844,6 +864,9 @@ impl Backend for WakuBackend {
             Command::Start { options } => {
                 let previous = self.sessions.lock().remove(&session_id);
                 drop(previous);
+                // The replaced runtime's scoped credential dies with it; the
+                // new runtime mints its own inside `spawn_runtime`.
+                self.agent.revoke_session(session_id);
                 let provider = decode_enum(&options.provider)?;
                 let options = DriverStartOptions {
                     binary: options.binary,
@@ -861,28 +884,9 @@ impl Backend for WakuBackend {
                         .transpose()
                         .context("daemon received an invalid provider cursor")?,
                 };
-                let (wake, _wake_events) = smol::channel::bounded(1);
-                let (event_sender, event_receiver) = driver::event_channel(wake);
-                let handle = driver::start_local(provider, options, event_sender)?;
+                let handle =
+                    self.spawn_runtime(session_id, runtime_id, provider, options, events)?;
                 let supports_steer = handle.supports_steer();
-                std::thread::Builder::new()
-                    .name(format!("waku-daemon-events-{session_id}"))
-                    .spawn(move || {
-                        while let Ok(event) = event_receiver.recv() {
-                            let wire = event_to_wire(event).unwrap_or_else(|error| {
-                                WireDriverEvent::new(
-                                    "error",
-                                    Value::String(format!(
-                                        "could not encode daemon event: {error}"
-                                    )),
-                                )
-                            });
-                            if events.send(wire).is_err() {
-                                break;
-                            }
-                        }
-                    })
-                    .context("could not start daemon event forwarding thread")?;
                 self.sessions
                     .lock()
                     .insert(session_id, (runtime_id, handle));
@@ -898,7 +902,47 @@ impl Backend for WakuBackend {
                         .flatten()
                 };
                 drop(removed);
+                self.agent.revoke_session(session_id);
                 Ok(ResponsePayload::Ack)
+            }
+            Command::AgentCreateSession {
+                provider,
+                model,
+                project,
+                workspace,
+                base_branch,
+                prompt,
+            } => {
+                // A scoped credential names its owning session; a master-token
+                // request may attribute the prompt to `request.session_id`
+                // when it is a known task.
+                let sender = agent.or_else(|| {
+                    (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
+                });
+                self.agent_create_session(
+                    sender,
+                    provider,
+                    model,
+                    project,
+                    workspace,
+                    base_branch,
+                    prompt,
+                    events,
+                )
+            }
+            Command::AgentPrompt {
+                task_id,
+                thread_id,
+                provider,
+                prompt,
+                delivery,
+            } => {
+                let sender = agent.or_else(|| {
+                    (!session_id.is_nil() && self.known_session(session_id)).then_some(session_id)
+                });
+                self.agent_prompt(
+                    sender, task_id, thread_id, provider, prompt, delivery, events,
+                )
             }
             command => {
                 let driver = {
@@ -930,6 +974,7 @@ impl Backend for WakuBackend {
                         message: prompt.clone(),
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
                         message_id: message_id.unwrap_or_else(Uuid::new_v4),
+                        sent_by_task: None,
                     })?)?;
                 }
                 handle_driver_command(&driver, command)
@@ -940,6 +985,7 @@ impl Backend for WakuBackend {
     fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock());
         drop(sessions);
+        self.agent.clear();
         let terminals = std::mem::take(&mut *self.terminals.lock());
         drop(terminals);
     }
@@ -1647,6 +1693,388 @@ impl WakuBackend {
             .path
             .ok_or_else(|| anyhow!("{} is not installed on the daemon", provider.display_name()))
     }
+
+    /// Whether `session_id` names a task the daemon knows.
+    fn known_session(&self, session_id: Uuid) -> bool {
+        self.task_state
+            .lock()
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id)
+    }
+
+    /// The whole agent surface sits behind this daemon-level setting. While
+    /// it is off the commands are rejected for every caller — scoped
+    /// credentials included — and nothing is minted or injected.
+    fn require_agent_tools(&self) -> anyhow::Result<()> {
+        if !self.settings.get().agent_tools_enabled {
+            bail!("agent session commands are disabled on this daemon");
+        }
+        Ok(())
+    }
+
+    /// Start a provider runtime for `session_id` and forward its events into
+    /// `events`, which must already target the new `runtime_id`.
+    ///
+    /// Shared by client `Start` requests and the agent commands' cold start:
+    /// both mint the session's scoped credential (when the daemon's agent
+    /// tools are enabled) and both run the forwarder that tracks turns,
+    /// drains queued agent prompts, and attributes accepted steers.
+    fn spawn_runtime(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        provider: ProviderKind,
+        options: DriverStartOptions,
+        events: EventSink,
+    ) -> anyhow::Result<DriverHandle> {
+        let (wake, _wake_events) = smol::channel::bounded(1);
+        let (event_sender, event_receiver) = driver::event_channel(wake);
+        // The credential exists before the process does so it can travel
+        // with the runtime's launch environment.
+        if self.settings.get().agent_tools_enabled {
+            self.agent.mint(session_id);
+        }
+        let handle = driver::start_local(provider, options, event_sender)?;
+        let forwarder_handle = handle.clone();
+        let agent = self.agent.clone();
+        let task_state = self.task_state.clone();
+        let task_store = self.task_store.clone();
+        let sessions = self.sessions.clone();
+        std::thread::Builder::new()
+            .name(format!("waku-daemon-events-{session_id}"))
+            .spawn(move || {
+                forward_driver_events(
+                    session_id,
+                    runtime_id,
+                    event_receiver,
+                    events,
+                    forwarder_handle,
+                    agent,
+                    task_state,
+                    task_store,
+                    sessions,
+                );
+            })
+            .context("could not start daemon event forwarding thread")?;
+        Ok(handle)
+    }
+
+    /// Return the live driver for `session_id`, cold-starting it from the
+    /// stored task's provider cursor and saved options when no runtime is
+    /// running.
+    fn ensure_agent_runtime(
+        &self,
+        session_id: Uuid,
+        events: &EventSink,
+    ) -> anyhow::Result<(Uuid, DriverHandle)> {
+        if let Some((runtime_id, driver)) = self.sessions.lock().get(&session_id) {
+            return Ok((*runtime_id, driver.clone()));
+        }
+        // A per-session lock keeps two simultaneous agent prompts from
+        // cold-starting the same stored task twice.
+        let start_lock = self
+            .runtime_start_locks
+            .lock()
+            .entry(session_id)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _start_guard = start_lock.lock();
+        if let Some((runtime_id, driver)) = self.sessions.lock().get(&session_id) {
+            return Ok((*runtime_id, driver.clone()));
+        }
+        let (provider, options) = {
+            let mut state = self.task_state.lock();
+            let index = state
+                .sessions
+                .iter()
+                .position(|session| session.id == session_id)
+                .ok_or_else(|| anyhow!("task {session_id} is unknown to the daemon"))?;
+            self.task_store
+                .hydrate(&mut state.sessions[index])
+                .context("could not load the task's stored state")?;
+            let session = &state.sessions[index];
+            let cwd = session
+                .workspace
+                .path()
+                .map(Path::to_path_buf)
+                .or_else(|| {
+                    state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| project.path.clone())
+                })
+                .ok_or_else(|| anyhow!("task {session_id} has no project to run in"))?;
+            let provider = session.provider;
+            let options = DriverStartOptions {
+                binary: self.provider_binary(provider)?,
+                cwd,
+                mode: session.runtime_mode,
+                model: session.model.clone(),
+                reasoning_effort: session.reasoning_effort.clone(),
+                service_tier: session.service_tier.clone(),
+                context_window: session.context_window.clone(),
+                agent_preset: session.agent_preset.clone(),
+                computer_use_enabled: self.settings.get().computer_use_enabled,
+                provider_cursor: session.provider_cursor.clone(),
+            };
+            (provider, options)
+        };
+        let runtime_id = Uuid::new_v4();
+        let sink = events.begin_session_runtime(session_id, runtime_id);
+        let handle =
+            match self.spawn_runtime(session_id, runtime_id, provider, options, sink.clone()) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    sink.end_session_runtime();
+                    return Err(error);
+                }
+            };
+        let driver = handle.clone();
+        self.sessions
+            .lock()
+            .insert(session_id, (runtime_id, handle));
+        Ok((runtime_id, driver))
+    }
+
+    /// `agent create`: build a fully configured task and start its first
+    /// prompt. Mirrors the app's New Task defaults — the project must be an
+    /// absolute path; an existing project resolves by it, and an unknown
+    /// path registers only as a primary checkout.
+    fn agent_create_session(
+        &self,
+        sender: Option<Uuid>,
+        provider: ProviderKind,
+        model: String,
+        project: PathBuf,
+        workspace: AgentWorkspace,
+        base_branch: Option<String>,
+        prompt: String,
+        events: EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        if prompt.trim().is_empty() {
+            bail!("agent sessions require a prompt");
+        }
+        if !project.is_absolute() {
+            bail!("the project path must be absolute");
+        }
+        let model = match model.trim() {
+            "" | "default" => None,
+            model => Some(model.to_owned()),
+        };
+        if matches!(workspace, AgentWorkspace::Worktree)
+            && base_branch
+                .as_deref()
+                .is_none_or(|branch| branch.trim().is_empty())
+        {
+            bail!("worktree sessions require a base branch");
+        }
+        let project = std::fs::canonicalize(&project)
+            .with_context(|| format!("project path {} does not exist", project.display()))?;
+        let (project_id, project_path) = {
+            let mut state = self.task_state.lock();
+            match state
+                .projects
+                .iter()
+                .find(|existing| {
+                    std::fs::canonicalize(&existing.path).is_ok_and(|path| path == project)
+                })
+                .map(|existing| (existing.id, existing.path.clone()))
+            {
+                Some(found) => found,
+                None => {
+                    if crate::worktree::is_linked_worktree(&project) {
+                        bail!(
+                            "{} is a Git worktree; only primary checkouts can be registered as projects",
+                            project.display()
+                        );
+                    }
+                    let registered = Project::from_path(project.clone());
+                    let found = (registered.id, registered.path.clone());
+                    state.projects.push(registered);
+                    found
+                }
+            }
+        };
+        let mut session = AgentSession::new(project_id, provider);
+        session.model = model;
+        session.workspace = match workspace {
+            AgentWorkspace::Local => SessionWorkspace::Local,
+            AgentWorkspace::Worktree => {
+                let created = crate::worktree::create(
+                    &project_path,
+                    None,
+                    Some(&prompt),
+                    base_branch.as_deref(),
+                )?;
+                SessionWorkspace::Worktree {
+                    path: created.path,
+                    name: created.name,
+                    branch: None,
+                }
+            }
+        };
+        let session_id = session.id;
+        let turn_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender);
+        {
+            let mut state = self.task_state.lock();
+            state.push_session(session);
+            self.task_store.save(&mut state)?;
+        }
+        // The adopted prompt above already persisted, so a launch failure
+        // still leaves a normal task behind. Delivering it now starts the
+        // first turn immediately.
+        let (runtime_id, driver) = self.ensure_agent_runtime(session_id, &events)?;
+        let sink = events.for_session(session_id, runtime_id);
+        sink.send(event_to_wire(DriverEvent::PromptSubmitted {
+            message: prompt.clone(),
+            turn_id,
+            message_id,
+            sent_by_task: sender,
+        })?)?;
+        driver.prompt(prompt);
+        Ok(ResponsePayload::AgentSessionCreated { session_id })
+    }
+
+    /// `agent prompt`: deliver a message to an existing task, by Waku task
+    /// id or provider-native thread id. Queue mode holds the prompt in a
+    /// daemon-side per-session queue until the target is idle; steer mode
+    /// injects it into the running turn.
+    fn agent_prompt(
+        &self,
+        sender: Option<Uuid>,
+        task_id: Option<Uuid>,
+        thread_id: Option<String>,
+        provider: Option<ProviderKind>,
+        prompt: String,
+        delivery: AgentPromptDelivery,
+        events: EventSink,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.require_agent_tools()?;
+        if prompt.trim().is_empty() {
+            bail!("agent prompts require a prompt");
+        }
+        let target = self.resolve_agent_target(task_id, thread_id, provider)?;
+        match delivery {
+            AgentPromptDelivery::Steer => {
+                let driver = self
+                    .sessions
+                    .lock()
+                    .get(&target)
+                    .map(|(_, driver)| driver.clone())
+                    .ok_or_else(|| anyhow!("task {target} has no running session to steer"))?;
+                if !self.agent.has_open_turn(target) {
+                    bail!("task {target} has no running turn to steer");
+                }
+                if !driver.supports_steer() {
+                    bail!("the task's provider does not support steering");
+                }
+                self.agent.record_pending_steer(
+                    target,
+                    crate::agent::AgentPrompt {
+                        prompt: prompt.clone(),
+                        sender,
+                    },
+                );
+                driver.steer(prompt);
+                Ok(ResponsePayload::Ack)
+            }
+            AgentPromptDelivery::Queue => {
+                // Enqueue before checking turn state so a prompt can never
+                // slip between a finishing turn and its queue drain.
+                self.agent
+                    .enqueue(target, crate::agent::AgentPrompt { prompt, sender });
+                if self.agent.is_working(target) {
+                    // The runtime event forwarder delivers queued prompts in
+                    // order once the provider finishes the turn.
+                    return Ok(ResponsePayload::Ack);
+                }
+                let (runtime_id, driver) = self.ensure_agent_runtime(target, &events)?;
+                let sink = events.for_session(target, runtime_id);
+                self.drain_agent_queue(target, &driver, &sink)?;
+                Ok(ResponsePayload::Ack)
+            }
+        }
+    }
+
+    /// Pop every queued agent prompt for the session, in submission order.
+    /// A turn that starts working mid-drain holds the remainder for the
+    /// provider's finish event.
+    fn drain_agent_queue(
+        &self,
+        session_id: Uuid,
+        driver: &DriverHandle,
+        sink: &EventSink,
+    ) -> anyhow::Result<()> {
+        while let Some(entry) = self.agent.pop_queued(session_id) {
+            if self.agent.is_working(session_id) {
+                self.agent.requeue_front(session_id, entry);
+                break;
+            }
+            deliver_agent_prompt(
+                session_id,
+                driver,
+                entry,
+                sink,
+                &self.agent,
+                &self.task_state,
+                &self.task_store,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Resolve an agent prompt's target: an explicit Waku task id, or a
+    /// provider-native Agent CLI thread id matched against every
+    /// daemon-known task's stored resume cursor.
+    fn resolve_agent_target(
+        &self,
+        task_id: Option<Uuid>,
+        thread_id: Option<String>,
+        provider: Option<ProviderKind>,
+    ) -> anyhow::Result<Uuid> {
+        match (task_id, thread_id) {
+            (Some(task_id), None) => self
+                .known_session(task_id)
+                .then_some(task_id)
+                .ok_or_else(|| anyhow!("task {task_id} is unknown to the daemon")),
+            (None, Some(thread_id)) => {
+                let thread_id = thread_id.trim().to_owned();
+                if thread_id.is_empty() {
+                    bail!("the thread id must not be empty");
+                }
+                let mut state = self.task_state.lock();
+                let mut matches = Vec::new();
+                for index in 0..state.sessions.len() {
+                    // The resume cursor lives in the session detail blob, so
+                    // skeletons need hydrating before they can answer.
+                    self.task_store.hydrate(&mut state.sessions[index])?;
+                    let session = &state.sessions[index];
+                    let Some(cursor) = &session.provider_cursor else {
+                        continue;
+                    };
+                    if cursor.native_id() == thread_id
+                        && provider.is_none_or(|provider| cursor.provider() == provider)
+                    {
+                        matches.push(session.id);
+                    }
+                }
+                match matches.len() {
+                    0 => bail!("no daemon task uses agent thread {thread_id}"),
+                    1 => Ok(matches[0]),
+                    _ => bail!(
+                        "agent thread {thread_id} matches {} tasks; pass provider to disambiguate",
+                        matches.len()
+                    ),
+                }
+            }
+            _ => bail!("exactly one of task_id and thread_id is required"),
+        }
+    }
 }
 
 fn validate_message_rewind(source: &AgentSession, turn_count: usize) -> anyhow::Result<()> {
@@ -1929,7 +2357,9 @@ fn handle_driver_command(
         | Command::WriteTerminal { .. }
         | Command::ResizeTerminal { .. }
         | Command::CloseTerminal
-        | Command::CloseSession => {
+        | Command::CloseSession
+        | Command::AgentCreateSession { .. }
+        | Command::AgentPrompt { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
@@ -1941,6 +2371,231 @@ fn ensure_shell_environment() {
     REFRESHED.get_or_init(|| {
         crate::command_env::refresh_from_default_shell();
     });
+}
+
+/// Pump provider events for one runtime into the client's event stream.
+///
+/// Besides serialization this maintains the agent-surface bookkeeping: turn
+/// state decides where queue-mode prompts wait, a finished turn drains that
+/// queue in submission order, a `steerAccepted` echo is annotated with the
+/// sending task, and a dead runtime drops its credential and registry entry
+/// with it.
+fn forward_driver_events(
+    session_id: Uuid,
+    runtime_id: Uuid,
+    event_receiver: crossbeam_channel::Receiver<DriverEvent>,
+    events: EventSink,
+    driver: DriverHandle,
+    agent: Arc<crate::agent::AgentState>,
+    task_state: Arc<Mutex<PersistedState>>,
+    task_store: Arc<StateStore>,
+    sessions: Arc<Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>>,
+) {
+    while let Ok(event) = event_receiver.recv() {
+        agent.note_driver_event(session_id, &event);
+        let event = match event {
+            DriverEvent::Connected { provider_cursor } => {
+                // The daemon keeps its own copy of the resume cursor so
+                // thread-id resolution and cold starts work even when no
+                // client ever saves the task.
+                record_provider_cursor(&task_state, &task_store, session_id, &provider_cursor);
+                DriverEvent::Connected { provider_cursor }
+            }
+            DriverEvent::SteerAccepted { message, .. } => {
+                let sent_by_task = agent
+                    .take_pending_steer(session_id, &message)
+                    .and_then(|steer| steer.sender);
+                if let Some(sender) = sent_by_task {
+                    record_agent_steer(&task_state, &task_store, session_id, &message, sender);
+                }
+                DriverEvent::SteerAccepted {
+                    message,
+                    sent_by_task,
+                }
+            }
+            event => event,
+        };
+        // A finished turn frees the session for the next queued prompt; a
+        // `connected` greeting means a freshly (re)started runtime is idle,
+        // so prompts queued while it was down deliver now.
+        let drains_queue = matches!(
+            &event,
+            DriverEvent::TurnFinished { .. } | DriverEvent::Connected { .. }
+        );
+        let process_exited = matches!(&event, DriverEvent::ProcessExited);
+        let wire = event_to_wire(event).unwrap_or_else(|error| {
+            WireDriverEvent::new(
+                "error",
+                Value::String(format!("could not encode daemon event: {error}")),
+            )
+        });
+        if events.send(wire).is_err() {
+            break;
+        }
+        if drains_queue {
+            while let Some(entry) = agent.pop_queued(session_id) {
+                if agent.is_working(session_id) {
+                    // A turn started while the queue drained — a human
+                    // prompt, or a provider-side wake. Queue-mode messages
+                    // wait for the finish rather than steer mid-turn.
+                    agent.requeue_front(session_id, entry);
+                    break;
+                }
+                if let Err(error) = deliver_agent_prompt(
+                    session_id,
+                    &driver,
+                    entry,
+                    &events,
+                    &agent,
+                    &task_state,
+                    &task_store,
+                ) {
+                    eprintln!(
+                        "waku-daemon could not deliver a queued agent prompt for task {session_id}: {error:#}"
+                    );
+                    break;
+                }
+            }
+        }
+        if process_exited {
+            agent.clear_session(session_id);
+            let mut sessions = sessions.lock();
+            if sessions
+                .get(&session_id)
+                .is_some_and(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
+            {
+                sessions.remove(&session_id);
+            }
+            break;
+        }
+    }
+}
+
+/// Deliver one queued agent prompt to a live session. A session with an
+/// open but parked turn is messaged through the provider's steer path so
+/// the prompt folds into the waiting turn; anything else begins a normal
+/// new turn whose `promptSubmitted` broadcast carries the sender's
+/// provenance.
+fn deliver_agent_prompt(
+    session_id: Uuid,
+    driver: &DriverHandle,
+    entry: crate::agent::AgentPrompt,
+    sink: &EventSink,
+    agent: &crate::agent::AgentState,
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+) -> anyhow::Result<()> {
+    if agent.has_parked_turn(session_id) && driver.supports_steer() {
+        let prompt = entry.prompt.clone();
+        agent.record_pending_steer(session_id, entry);
+        driver.steer(prompt);
+        return Ok(());
+    }
+    let turn_id = Uuid::new_v4();
+    let message_id = Uuid::new_v4();
+    persist_agent_prompt(
+        task_state,
+        task_store,
+        session_id,
+        &entry.prompt,
+        turn_id,
+        message_id,
+        entry.sender,
+    )?;
+    sink.send(event_to_wire(DriverEvent::PromptSubmitted {
+        message: entry.prompt.clone(),
+        turn_id,
+        message_id,
+        sent_by_task: entry.sender,
+    })?)?;
+    driver.prompt(entry.prompt);
+    Ok(())
+}
+
+/// Mirror an accepted agent prompt into the daemon's stored copy of the
+/// task, so the message and its sender provenance persist even when no
+/// client is attached to adopt it.
+fn persist_agent_prompt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    message: &str,
+    turn_id: Uuid,
+    message_id: Uuid,
+    sent_by_task: Option<Uuid>,
+) -> anyhow::Result<()> {
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        bail!("task {session_id} is unknown to the daemon");
+    };
+    task_store.hydrate(session)?;
+    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task) {
+        state.mark_session_dirty(session_id);
+        task_store.save(&mut state)?;
+    }
+    Ok(())
+}
+
+/// Mirror a provider-accepted agent steer into the stored task the way
+/// [`persist_agent_prompt`] mirrors a queued prompt.
+fn record_agent_steer(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    message: &str,
+    sent_by_task: Uuid,
+) {
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        return;
+    };
+    if task_store.hydrate(session).is_err() {
+        return;
+    }
+    session.push_user_message_with_presentation(message, None, Vec::new(), Some(sent_by_task));
+    state.mark_session_dirty(session_id);
+    if let Err(error) = task_store.save(&mut state) {
+        eprintln!("waku-daemon could not persist an agent steer for task {session_id}: {error:#}");
+    }
+}
+
+/// Keep the daemon's stored copy of a task's provider cursor current so
+/// cold starts and thread-id resolution work without a client ever saving.
+fn record_provider_cursor(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    session_id: Uuid,
+    provider_cursor: &Option<ProviderResumeCursor>,
+) {
+    let Some(cursor) = provider_cursor else {
+        return;
+    };
+    let mut state = task_state.lock();
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        return;
+    };
+    if task_store.hydrate(session).is_err() || session.provider_cursor.as_ref() == Some(cursor) {
+        return;
+    }
+    session.provider_cursor = Some(cursor.clone());
+    state.mark_session_dirty(session_id);
+    if let Err(error) = task_store.save(&mut state) {
+        eprintln!(
+            "waku-daemon could not persist a provider cursor for task {session_id}: {error:#}"
+        );
+    }
 }
 
 fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
@@ -2029,11 +2684,23 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             message,
             turn_id,
             message_id,
+            sent_by_task,
         } => (
             "promptSubmitted",
-            json!({ "message": message, "turnId": turn_id, "messageId": message_id }),
+            json!({
+                "message": message,
+                "turnId": turn_id,
+                "messageId": message_id,
+                "sentByTask": sent_by_task,
+            }),
         ),
-        DriverEvent::SteerAccepted { message } => ("steerAccepted", json!({ "message": message })),
+        DriverEvent::SteerAccepted {
+            message,
+            sent_by_task,
+        } => (
+            "steerAccepted",
+            json!({ "message": message, "sentByTask": sent_by_task }),
+        ),
         DriverEvent::SteerRejected { message, reason } => (
             "steerRejected",
             json!({ "message": message, "reason": reason }),
@@ -2116,12 +2783,14 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 message: submitted.message,
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
+                sent_by_task: submitted.sent_by_task,
             }
         }
         "steerAccepted" => {
             let steer: AcceptedSteerWire = serde_json::from_value(payload)?;
             DriverEvent::SteerAccepted {
                 message: steer.message,
+                sent_by_task: steer.sent_by_task,
             }
         }
         "steerRejected" => {
@@ -2159,6 +2828,8 @@ struct SubmittedPromptWire {
     message: String,
     turn_id: Uuid,
     message_id: Uuid,
+    #[serde(default)]
+    sent_by_task: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -2197,8 +2868,11 @@ struct ComputerUseWire {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AcceptedSteerWire {
     message: String,
+    #[serde(default)]
+    sent_by_task: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -2401,6 +3075,7 @@ mod tests {
             message: "ship it".into(),
             turn_id,
             message_id,
+            sent_by_task: None,
         })
         .unwrap();
         assert_eq!(wire.kind, "promptSubmitted");
@@ -2409,8 +3084,50 @@ mod tests {
         assert_eq!(wire.payload["messageId"], message_id.to_string());
         assert!(matches!(
             event_from_wire(wire).unwrap(),
-            DriverEvent::PromptSubmitted { message, turn_id: decoded_turn, message_id: decoded_message }
+            DriverEvent::PromptSubmitted { message, turn_id: decoded_turn, message_id: decoded_message, .. }
                 if message == "ship it" && decoded_turn == turn_id && decoded_message == message_id
+        ));
+    }
+
+    #[test]
+    fn wire_event_round_trip_preserves_agent_provenance() {
+        let sender = Uuid::new_v4();
+        let wire = event_to_wire(DriverEvent::PromptSubmitted {
+            message: "from another task".into(),
+            turn_id: Uuid::new_v4(),
+            message_id: Uuid::new_v4(),
+            sent_by_task: Some(sender),
+        })
+        .unwrap();
+        assert_eq!(wire.payload["sentByTask"], sender.to_string());
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::PromptSubmitted { sent_by_task: Some(decoded), .. } if decoded == sender
+        ));
+
+        // An older daemon's payload lacks the field and still decodes.
+        let wire = WireDriverEvent::new(
+            "promptSubmitted",
+            json!({
+                "message": "old",
+                "turnId": Uuid::new_v4(),
+                "messageId": Uuid::new_v4(),
+            }),
+        );
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::PromptSubmitted {
+                sent_by_task: None,
+                ..
+            }
+        ));
+        let wire = WireDriverEvent::new("steerAccepted", json!({ "message": "old" }));
+        assert!(matches!(
+            event_from_wire(wire).unwrap(),
+            DriverEvent::SteerAccepted {
+                sent_by_task: None,
+                ..
+            }
         ));
     }
 }

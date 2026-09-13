@@ -7,4 +7,10 @@ export type Message = { id: string, turn_id: string | null, role: MessageRole, c
  * User-visible text before provider-facing attachment mentions were
  * appended. Plain and legacy messages omit it.
  */
-display_content?: string | null, attachments?: Array<MessageAttachment>, created_at: number, streaming: boolean, };
+display_content?: string | null, attachments?: Array<MessageAttachment>,
+/**
+ * The task whose agent submitted this message through the daemon's
+ * scoped agent commands. `None` for messages a human typed; every
+ * client renders the marker so agent-originated prompts stay visible.
+ */
+sent_by_task?: string | null, created_at: number, streaming: boolean, };
