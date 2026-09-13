@@ -74,9 +74,10 @@ use crate::{
     NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace, OpenResumePicker,
     OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject, SelectFirstTask,
     SelectLastProject, SelectLastTask, SwitchProjectBackward, SwitchProjectForward,
-    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
-    ToggleSessionPin, ToggleSidebar, ToggleUsagePanel, ToggleWorkspace,
+    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFileFinder,
+    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
+    ToggleModelPicker, ToggleRightPanel, ToggleSessionPin, ToggleSidebar, ToggleUsagePanel,
+    ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1097,6 +1098,7 @@ pub struct Waku {
     composer_draft_store: ComposerDraftStore,
     composer_draft_save_generation: u64,
     command_palette: command_palette::CommandPaletteUi,
+    file_finder: file_finder::FileFinderUi,
     task_switcher: task_switcher::TaskSwitcherUi,
     project_switcher: project_switcher::ProjectSwitcherUi,
     model_search: Entity<TextInput>,
@@ -1408,6 +1410,9 @@ pub struct Waku {
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
+    /// A file the `Cmd+P` finder just opened whose editor should take
+    /// keyboard focus on the first frame the entity exists.
+    right_panel_pending_file_focus: Option<String>,
     right_panel_pending_terminal_focus: Option<Uuid>,
     /// Terminal surface that most recently held focus. Swapped in and out with
     /// the rest of the per-session panel state.
@@ -1680,6 +1685,7 @@ mod commit_dialog;
 mod components;
 mod composer;
 mod drafts;
+mod file_finder;
 mod file_search;
 mod goal_dialog;
 mod image_preview;
@@ -1708,6 +1714,7 @@ use background_work::{
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
+pub use file_finder::init as init_file_finder;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
@@ -2048,6 +2055,11 @@ impl Waku {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .placeholder(tr!("command_palette.placeholder"))
+        });
+        let file_finder_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("file_finder.placeholder"))
         });
         let model_search = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2618,6 +2630,15 @@ impl Waku {
             )
             .detach();
             cx.subscribe(
+                &file_finder_search,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.file_finder_query_edited(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &branch_search,
                 |this: &mut Self, search, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited)
@@ -2830,6 +2851,7 @@ impl Waku {
                 composer_draft_store,
                 composer_draft_save_generation: 0,
                 command_palette: command_palette::CommandPaletteUi::new(command_palette_search),
+                file_finder: file_finder::FileFinderUi::new(file_finder_search),
                 task_switcher,
                 project_switcher,
                 model_search,
@@ -3000,6 +3022,7 @@ impl Waku {
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
                 right_panel_pending_tab_reveal: None,
+                right_panel_pending_file_focus: None,
                 right_panel_pending_terminal_focus: None,
                 right_panel_last_focused_terminal: None,
                 right_panel_expanded_paths: HashSet::new(),

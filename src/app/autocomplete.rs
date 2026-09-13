@@ -239,6 +239,12 @@ impl Waku {
                 .detach();
             }
         }
+
+        // The `Cmd+P` finder reads the same mirrored index; refresh its rows
+        // when the index lands or is swapped out from under an open modal.
+        if self.file_finder.is_open() {
+            self.refresh_file_finder_results(cx);
+        }
     }
 
     /// Invalidate and re-request both indexes for the selected workspace.
@@ -637,7 +643,7 @@ impl Waku {
 /// Text with the fuzzy-matched byte ranges lifted to the accent colour and a
 /// semibold weight, the runs tiling the string exactly. `ranges` are sorted
 /// and non-overlapping, as [`highlight_byte_ranges`] returns them.
-fn matched_text(
+pub(super) fn matched_text(
     text: String,
     ranges: Vec<std::ops::Range<usize>>,
     base_color: Hsla,

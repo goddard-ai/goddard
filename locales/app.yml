@@ -145,6 +145,15 @@ command_palette.loading_selected_session:
 command_palette.resume_failed:
   en: "Couldn’t resume session: %{error}"
 
+file_finder.placeholder:
+  en: Search files by name…
+file_finder.loading:
+  en: Loading files…
+file_finder.no_results:
+  en: No matching files
+file_finder.no_results_hint:
+  en: Try a different file name or path
+
 task_switcher.recently_viewed:
   en: Recently viewed
 

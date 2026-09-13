@@ -1800,8 +1800,10 @@ impl Waku {
         }
         // The find bar pointed into the editors that were just swapped out;
         // its match list means nothing here, and restored editors may carry
-        // washes stored mid-search.
+        // washes stored mid-search. A pending finder focus handoff names one
+        // of the outgoing editors too.
         self.reset_file_search_for_session(cx);
+        self.right_panel_pending_file_focus = None;
         self.reload_clean_right_panel_file_editors(cx);
         self.state.right_panel_visible = self.right_panel_visible;
         if self.active_right_panel_surface() == Some(&RightPanelSurface::Diff) {
@@ -2074,7 +2076,11 @@ impl Waku {
         self.open_right_panel_surface(RightPanelSurface::Diff, cx);
     }
 
-    fn open_right_panel_file(&mut self, relative_path: String, cx: &mut Context<Self>) {
+    pub(super) fn open_right_panel_file(
+        &mut self,
+        relative_path: String,
+        cx: &mut Context<Self>,
+    ) {
         self.ensure_initial_right_panel_file_editor_width();
         let Some(active) = self.right_panel_active_surface else {
             self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);
@@ -3114,7 +3120,18 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Entity<TextInput>, bool, bool) {
+        // A `Cmd+P` confirm asks for editor focus here, on the first frame the
+        // entity is known to exist; deferring once more lets this frame's
+        // paint put the element in the dispatch tree before focus moves.
+        let focus_pending = self.right_panel_pending_file_focus.as_deref() == Some(relative_path);
+        if focus_pending {
+            self.right_panel_pending_file_focus = None;
+        }
         if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
+            if focus_pending {
+                let focus = editor.state.read(cx).focus();
+                window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+            }
             return (editor.state.clone(), editor.writable, editor.dirty);
         }
 
@@ -3178,6 +3195,10 @@ impl Waku {
         .detach();
 
         self.read_right_panel_file_into_editor(relative_path.to_owned(), cx);
+        if focus_pending {
+            let focus = state.read(cx).focus();
+            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        }
         (state, false, false)
     }
 

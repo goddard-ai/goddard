@@ -222,7 +222,7 @@ struct ScoredPaletteItem {
     item: CommandPaletteItem,
 }
 
-fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
+pub(super) fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
     if len == 0 {
         return None;
     }
@@ -436,6 +436,11 @@ impl Waku {
     }
 
     fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // One picker at a time; closing first restores the finder's recorded
+        // focus so the palette captures the element that was really focused.
+        if self.file_finder.is_open() {
+            self.close_file_finder(window, cx);
+        }
         let open_menus = self
             .menus
             .borrow()
@@ -505,7 +510,7 @@ impl Waku {
         cx.notify();
     }
 
-    fn close_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.command_palette.open {
             return;
         }

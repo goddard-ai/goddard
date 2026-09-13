@@ -246,6 +246,7 @@ impl Render for Waku {
         let project_switcher = self.render_project_switcher(window, cx);
         if self.settings_page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
+            let file_finder = self.render_file_finder(window, cx);
             let commit_dialog = self.render_commit_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
             let toast = self.render_active_toast(cx);
@@ -253,6 +254,7 @@ impl Render for Waku {
                 .relative()
                 .size_full()
                 .on_action(cx.listener(Self::toggle_command_palette_action))
+                .on_action(cx.listener(Self::toggle_file_finder_action))
                 .on_action(cx.listener(Self::open_resume_picker_action))
                 .on_action(cx.listener(Self::switch_task_forward_action))
                 .on_action(cx.listener(Self::switch_task_backward_action))
@@ -271,6 +273,7 @@ impl Render for Waku {
                 .child(self.render_settings(window, cx))
                 .children(toast)
                 .children(command_palette)
+                .children(file_finder)
                 .children(commit_dialog)
                 .children(goal_dialog)
                 .children(image_preview)
@@ -288,6 +291,7 @@ impl Render for Waku {
         let permission = self.render_permission(cx);
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
+        let file_finder = self.render_file_finder(window, cx);
         let commit_dialog = self.render_commit_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let toast = self.render_active_toast(cx);
@@ -300,6 +304,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_sidebar_action))
             .on_action(cx.listener(Self::toggle_right_panel_action))
             .on_action(cx.listener(Self::toggle_command_palette_action))
+            .on_action(cx.listener(Self::toggle_file_finder_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
@@ -451,6 +456,7 @@ impl Render for Waku {
             })
             .children(computer_use)
             .children(command_palette)
+            .children(file_finder)
             .children(commit_dialog)
             .children(goal_dialog)
             .children(image_preview)

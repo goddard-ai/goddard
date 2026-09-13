@@ -3412,6 +3412,7 @@ impl Waku {
             input.set_placeholder(tr!("input.filter_projects"), cx)
         });
         self.refresh_command_palette_localized_text(cx);
+        self.refresh_file_finder_localized_text(cx);
         self.refresh_file_search_localized_text(cx);
         self.refresh_transcript_search_localized_text(cx);
         for browser in self.right_panel_browsers.values() {

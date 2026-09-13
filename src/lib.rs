@@ -71,6 +71,7 @@ actions!(
         ToggleSidebar,
         ToggleRightPanel,
         ToggleCommandPalette,
+        ToggleFileFinder,
         OpenResumePicker,
         ToggleFpsCounter,
         NavigateBack,
@@ -221,6 +222,7 @@ pub fn run() {
             crate::app::init_composer_autocomplete(cx);
             crate::app::init_settings_keys(cx);
             crate::app::init_command_palette(cx);
+            crate::app::init_file_finder(cx);
             crate::app::init_commit_dialog_keys(cx);
             crate::app::init_goal_dialog_keys(cx);
             crate::app::init_annotation_keys(cx);
@@ -253,6 +255,7 @@ pub fn run() {
                 KeyBinding::new("secondary-b", ToggleSidebar, None),
                 KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
                 KeyBinding::new("secondary-k", ToggleCommandPalette, None),
+                KeyBinding::new("secondary-p", ToggleFileFinder, None),
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
                 KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
