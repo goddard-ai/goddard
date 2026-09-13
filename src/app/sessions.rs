@@ -348,6 +348,12 @@ impl Waku {
             },
             workspace => workspace,
         };
+        let abandoned_worktree = match &session.workspace {
+            SessionWorkspace::Worktree { path, .. } if workspace != session.workspace => {
+                Some(path.clone())
+            }
+            _ => None,
+        };
         let changed = session.workspace != workspace;
         self.state.remember_workspace(project_id, &workspace);
         if changed && let Some(session) = self.selected_session_mut() {
@@ -355,6 +361,11 @@ impl Waku {
         }
         self.save();
         if changed {
+            // A materialized worktree the draft walked away from frees its
+            // checkout on disk; Git refuses to remove a dirty worktree.
+            if let Some(path) = abandoned_worktree {
+                self.remove_draft_worktree(path, cx);
+            }
             cx.notify();
         }
     }
@@ -420,6 +431,16 @@ impl Waku {
         let project_path = self
             .workspace_path_for_session(&self.state.sessions[index])
             .map(std::path::Path::to_path_buf);
+        // A draft's eagerly created worktree dies with it. Once a session has
+        // started the worktree may hold the agent's work and stays on disk.
+        let draft_worktree = match &self.state.sessions[index].workspace {
+            SessionWorkspace::Worktree { path, .. }
+                if !self.state.sessions[index].has_started() =>
+            {
+                Some(path.clone())
+            }
+            _ => None,
+        };
         let was_selected = self.state.selected_session == Some(session_id);
         self.submission_preparations.remove(&session_id);
         self.goal_runtime_starts.remove(&session_id);
@@ -470,6 +491,9 @@ impl Waku {
                     });
                 })
                 .detach();
+        }
+        if let Some(path) = draft_worktree {
+            self.remove_draft_worktree(path, cx);
         }
         self.invalidate_checkpoint_refs();
 

@@ -224,6 +224,7 @@ input.do_anything: 何でも依頼できます…
 input.search_models: モデルを検索…
 input.search_branches: ブランチを検索
 input.new_branch_name: 新しいブランチ名
+input.worktree_name: ワークツリー名
 input.detected_automatically: 自動検出
 input.filter_projects: プロジェクトを絞り込む
 input.search_or_enter_address: 検索またはアドレスを入力
@@ -693,6 +694,9 @@ branches.checked_out_elsewhere: 別のワークツリーでチェックアウト
 workspace.work_in: 作業場所
 workspace.local: ローカル
 workspace.new_worktree: 新しいワークツリー
+workspace.creating: 作成中…
+workspace.from_ref: "%{branch} から"
+workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 workspace.toggle_hint: 作業場所を切り替え (%{shortcut})

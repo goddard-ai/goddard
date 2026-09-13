@@ -972,18 +972,22 @@ impl Waku {
                     .get(&session.project_id)
                     .cloned()
                     .unwrap_or_else(|| (tr!("project.no_project_name"), String::new()));
-                let (workspace_path, branch) = match &session.workspace {
-                    SessionWorkspace::Local => (String::new(), None),
+                let (workspace_path, workspace_label, branch) = match &session.workspace {
+                    SessionWorkspace::Local => (String::new(), None, None),
                     SessionWorkspace::NewWorktree { base_branch } => {
-                        (String::new(), base_branch.as_deref())
+                        (String::new(), base_branch.as_deref(), None)
                     }
-                    SessionWorkspace::Worktree { path, branch } => {
-                        (path.to_string_lossy().into_owned(), Some(branch.as_str()))
-                    }
+                    SessionWorkspace::Worktree {
+                        path, name, branch,
+                    } => (
+                        path.to_string_lossy().into_owned(),
+                        Some(name.as_str()),
+                        branch.as_deref(),
+                    ),
                 };
                 let mut details = vec![project.clone()];
-                if let Some(branch) = branch {
-                    details.push(format!("#{branch}"));
+                if let Some(label) = workspace_label {
+                    details.push(format!("#{label}"));
                 }
                 if Some(session.id) == self.state.selected_session {
                     details.push(tr!("command_palette.current"));
@@ -998,7 +1002,8 @@ impl Waku {
                 CommandPaletteItem {
                     section: PaletteSection::Tasks,
                     search_text: format!(
-                        "{label} {project} {project_path} {workspace_path} {} {} {} {} task session chat conversation",
+                        "{label} {project} {project_path} {workspace_path} {} {} {} {} {} task session chat conversation",
+                        workspace_label.unwrap_or_default(),
                         branch.unwrap_or_default(),
                         session.provider.short_name(),
                         session.provider.display_name(),

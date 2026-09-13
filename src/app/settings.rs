@@ -3399,6 +3399,9 @@ impl Waku {
         self.branch_create_input.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.new_branch_name"), cx)
         });
+        self.worktree_name_input.update(cx, |input, cx| {
+            input.set_placeholder(tr!("input.worktree_name"), cx)
+        });
         self.settings_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("settings.search"), cx)
         });

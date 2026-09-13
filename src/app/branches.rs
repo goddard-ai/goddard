@@ -100,9 +100,9 @@ impl Waku {
                                         && let Some(session) = waku.selected_session_mut()
                                         && let SessionWorkspace::Worktree { branch, .. } =
                                             &mut session.workspace
-                                        && branch != current
+                                        && branch.as_deref() != Some(current)
                                     {
-                                        *branch = current.to_owned();
+                                        *branch = Some(current.to_owned());
                                         persisted_branch_changed = true;
                                     }
                                     waku.visible_branch_snapshot = Some((fetch_path, snapshot));
@@ -367,7 +367,7 @@ impl Waku {
                                 && let SessionWorkspace::Worktree { branch, .. } =
                                     &mut session.workspace
                             {
-                                *branch = current;
+                                *branch = Some(current);
                             }
                             waku.invalidate_workspace_queries(cx);
                             waku.reload_clean_right_panel_file_editors(cx);

@@ -3055,7 +3055,7 @@ impl Waku {
             SessionWorkspace::Worktree { branch, .. } => snapshot
                 .current
                 .clone()
-                .or_else(|| Some(branch.clone()))
+                .or_else(|| branch.clone())
                 .or_else(|| snapshot.detached_head.clone()),
         }
         .unwrap_or_else(|| tr!("branches.detached_head"));
@@ -3556,20 +3556,55 @@ impl Waku {
             SessionWorkspace::NewWorktree { .. } => {
                 SharedString::from(tr!("workspace.new_worktree"))
             }
-            SessionWorkspace::Worktree { branch, .. } => SharedString::from(branch.clone()),
+            SessionWorkspace::Worktree { name, .. } => SharedString::from(name.clone()),
         };
         let workspace_icon = if workspace.is_local() {
             "icons/laptop.svg"
         } else {
             "icons/fork.svg"
         };
-        let worktree_handle = self.menu_handle("workspace-worktree", cx);
+        let worktree_name_input = self.worktree_name_input.clone();
+        let worktree_handle = {
+            let toggle_weak = cx.entity().downgrade();
+            let name_input = worktree_name_input.clone();
+            let input_focus = worktree_name_input.read(cx).focus_handle(cx);
+            self.menu_handle_with("workspace-worktree", cx, move |open, window, cx| {
+                let _ = toggle_weak.update(cx, |this, cx| {
+                    if open {
+                        this.worktree_picker_highlight = None;
+                        name_input.update(cx, |input, cx| input.clear(cx));
+                        // Base entries describe the project checkout, which
+                        // may differ from the draft's materialized worktree.
+                        if let Some(path) =
+                            this.selected_project().map(|project| project.path.clone())
+                        {
+                            this.branch_snapshots.invalidate(&path);
+                        }
+                    } else {
+                        let focus = this.composer_focus(cx);
+                        window.focus(&focus, cx);
+                    }
+                    cx.notify();
+                });
+                if open {
+                    let input_focus = input_focus.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| window.focus(&input_focus, cx));
+                    });
+                }
+            })
+        };
+        let creating_worktree = self.worktree_creation_pending;
         let worktree_trigger = MenuChip::new("workspace-worktree")
             .icon(workspace_icon, theme.text_tertiary)
-            .label(workspace_label)
+            .label(if creating_worktree {
+                SharedString::from(tr!("workspace.creating"))
+            } else {
+                workspace_label
+            })
             .caret(false)
-            .disabled(!can_configure_workspace)
-            .selected(can_configure_workspace && worktree_handle.is_open())
+            .disabled(!can_configure_workspace || creating_worktree)
+            .selected(can_configure_workspace && !creating_worktree && worktree_handle.is_open())
             .max_w(px(180.0))
             .when(can_configure_workspace, |chip| {
                 chip.tooltip(tr!(
@@ -3578,38 +3613,277 @@ impl Waku {
                 ))
             });
         let worktree_selector = if can_configure_workspace {
-            let local_selected = workspace.is_local();
-            let worktree_selected = workspace.is_worktree();
+            // The base entries describe the project's ordinary checkout, so
+            // the snapshot is read for the project path even when the draft
+            // is already bound to a worktree.
+            let project_path = self
+                .selected_project()
+                .filter(|project| !project.is_projectless())
+                .map(|project| project.path.clone());
+            let project_snapshot = if worktree_handle.is_open() {
+                project_path.and_then(|path| self.branch_snapshot_for_workspace(&path, cx))
+            } else {
+                None
+            };
+            let mut actions = vec![];
+            if let SessionWorkspace::Worktree { name, .. } = &workspace {
+                actions.push(worktrees::WorktreePickerAction::Current { name: name.clone() });
+            }
+            actions.push(worktrees::WorktreePickerAction::Local);
+            if !projectless_selected {
+                let current_ref = project_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.current.clone())
+                    .or_else(|| {
+                        project_snapshot
+                            .as_ref()
+                            .and_then(|snapshot| snapshot.detached_head.clone())
+                    })
+                    .unwrap_or_else(|| "HEAD".to_owned());
+                let default_ref = project_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.default_branch.clone());
+                actions.push(worktrees::WorktreePickerAction::Create {
+                    base_ref: Some(current_ref),
+                });
+                actions.push(worktrees::WorktreePickerAction::Create {
+                    base_ref: default_ref.clone(),
+                });
+                // A base branch the draft remembered joins the create rows
+                // when it differs from both defaults.
+                if let SessionWorkspace::NewWorktree {
+                    base_branch: Some(base),
+                } = &workspace
+                    && Some(base) != default_ref.as_ref()
+                {
+                    actions.push(worktrees::WorktreePickerAction::Create {
+                        base_ref: Some(base.clone()),
+                    });
+                }
+            }
+            let actions = Rc::new(actions);
+            let highlight = self
+                .worktree_picker_highlight
+                .filter(|index| *index < actions.len());
             let weak = cx.entity().downgrade();
-            dropdown_menu(
+            popover(
                 worktree_trigger,
-                "workspace-worktree-menu",
                 &worktree_handle,
                 MenuAlign::AboveLeft,
-                move |_| {
-                    let local = weak.clone();
-                    let worktree = weak.clone();
-                    vec![
-                        MenuItem::Header(tr!("workspace.work_in").into()),
-                        MenuItem::new(tr!("workspace.local"), move |_, cx| {
-                            let _ = local.update(cx, |this, cx| {
-                                this.select_workspace(SessionWorkspace::Local, cx);
+                move |popover, _window, _cx| {
+                    let theme = Theme::current(_cx);
+                    let work_in_count = actions
+                        .iter()
+                        .take_while(|action| {
+                            matches!(
+                                action,
+                                worktrees::WorktreePickerAction::Current { .. }
+                                    | worktrees::WorktreePickerAction::Local
+                            )
+                        })
+                        .count();
+                    let rows = |range: std::ops::Range<usize>| {
+                        let start = range.start;
+                        actions[range]
+                            .iter()
+                            .enumerate()
+                            .map(move |(offset, action)| (start + offset, action))
+                            .collect::<Vec<_>>()
+                    };
+                    let render_row =
+                        |(index, action): (usize, &worktrees::WorktreePickerAction)| {
+                            let (icon_path, label, selected) = match action {
+                                worktrees::WorktreePickerAction::Current { name } => {
+                                    ("icons/fork.svg", name.clone(), true)
+                                }
+                                worktrees::WorktreePickerAction::Local => (
+                                    "icons/laptop.svg",
+                                    tr!("workspace.local"),
+                                    workspace.is_local(),
+                                ),
+                                worktrees::WorktreePickerAction::Create { base_ref } => {
+                                    let label = match base_ref.as_deref() {
+                                        Some(reference) => {
+                                            tr!("workspace.from_ref", branch = reference)
+                                        }
+                                        None => tr!("workspace.from_default"),
+                                    };
+                                    ("icons/fork.svg", label, false)
+                                }
+                            };
+                            let highlighted = highlight == Some(index);
+                            let row = div()
+                                .id(SharedString::from(format!("worktree-row-{index}")))
+                                .w_full()
+                                .h(px(BRANCH_PICKER_ROW_HEIGHT))
+                                .px(px(8.0))
+                                .rounded(px(6.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .cursor_default()
+                                .when(highlighted, |element| element.bg(theme.overlay_strong))
+                                .hover(|element| element.bg(theme.overlay))
+                                .active(|element| element.opacity(0.85))
+                                .child(icon(icon_path, 12.0, theme.text))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(15.0))
+                                        .text_color(theme.text)
+                                        .child(SharedString::from(label)),
+                                )
+                                .when(selected, |element| {
+                                    element.child(icon(
+                                        "icons/check.svg",
+                                        11.0,
+                                        theme.text_secondary,
+                                    ))
+                                });
+                            let action = action.clone();
+                            let select_weak = weak.clone();
+                            let select_popover = popover.clone();
+                            row.on_click(move |_, window, cx| {
+                                let should_close = select_weak
+                                    .update(cx, |this, cx| match &action {
+                                        worktrees::WorktreePickerAction::Current { .. } => true,
+                                        worktrees::WorktreePickerAction::Local => {
+                                            this.select_workspace(SessionWorkspace::Local, cx);
+                                            true
+                                        }
+                                        worktrees::WorktreePickerAction::Create { base_ref } => {
+                                            let name = this
+                                                .worktree_name_input
+                                                .read(cx)
+                                                .content()
+                                                .trim()
+                                                .to_owned();
+                                            this.create_workspace_worktree(
+                                                (!name.is_empty()).then_some(name),
+                                                base_ref.clone(),
+                                                cx,
+                                            );
+                                            true
+                                        }
+                                    })
+                                    .unwrap_or(true);
+                                if should_close {
+                                    select_popover.close(window, cx);
+                                    window.refresh();
+                                }
+                            })
+                            .into_any_element()
+                        };
+                    let work_in_rows = rows(0..work_in_count)
+                        .into_iter()
+                        .map(&render_row)
+                        .collect::<Vec<_>>();
+                    let create_rows = rows(work_in_count..actions.len())
+                        .into_iter()
+                        .map(&render_row)
+                        .collect::<Vec<_>>();
+                    let next_actions = actions.clone();
+                    let previous_actions = actions.clone();
+                    let confirm_actions = actions.clone();
+                    let next_weak = weak.clone();
+                    let previous_weak = weak.clone();
+                    let confirm_weak = weak.clone();
+                    let confirm_popover = popover.clone();
+                    div()
+                        .w(px(320.0))
+                        .rounded(px(13.0))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(theme.border_strong)
+                        .bg(theme.raised)
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        .on_action(move |_: &SelectNextEntry, _, cx| {
+                            let _ = next_weak.update(cx, |this, cx| {
+                                this.move_worktree_picker_highlight("down", &next_actions, cx);
                             });
                         })
-                        .icon("icons/laptop.svg")
-                        .selected(local_selected),
-                        MenuItem::new(tr!("workspace.new_worktree"), move |_, cx| {
-                            let _ = worktree.update(cx, |this, cx| {
-                                this.select_workspace(
-                                    SessionWorkspace::NewWorktree { base_branch: None },
-                                    cx,
-                                );
+                        .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                            let _ = previous_weak.update(cx, |this, cx| {
+                                this.move_worktree_picker_highlight("up", &previous_actions, cx);
                             });
                         })
-                        .icon("icons/fork.svg")
-                        .selected(worktree_selected)
-                        .disabled(projectless_selected),
-                    ]
+                        .on_action(move |_: &ConfirmEntry, window, cx| {
+                            let should_close = confirm_weak
+                                .update(cx, |this, cx| {
+                                    this.confirm_worktree_picker_action(&confirm_actions, cx)
+                                })
+                                .unwrap_or(false);
+                            if should_close {
+                                confirm_popover.close(window, cx);
+                                window.refresh();
+                            }
+                        })
+                        .child(
+                            div()
+                                .h(px(52.0))
+                                .px(px(12.0))
+                                .pt(px(10.0))
+                                .pb(px(8.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .h(px(34.0))
+                                        .px(px(10.0))
+                                        .rounded(px(9.0))
+                                        .bg(theme.surface)
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(8.0))
+                                        .child(icon("icons/fork.svg", 15.0, theme.text_secondary))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(worktree_name_input.clone()),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .px(px(14.0))
+                                .pt(px(3.0))
+                                .pb(px(7.0))
+                                .text_size(sp(12.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("workspace.work_in")),
+                        )
+                        .child(div().px(px(4.0)).flex().flex_col().children(work_in_rows))
+                        .when(!create_rows.is_empty(), |element| {
+                            element
+                                .child(
+                                    div()
+                                        .px(px(14.0))
+                                        .pt(px(6.0))
+                                        .pb(px(4.0))
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_tertiary)
+                                        .child(tr!("workspace.new_worktree")),
+                                )
+                                .child(
+                                    div()
+                                        .px(px(4.0))
+                                        .pb(px(4.0))
+                                        .flex()
+                                        .flex_col()
+                                        .children(create_rows),
+                                )
+                        })
+                        .into_any_element()
                 },
             )
         } else {

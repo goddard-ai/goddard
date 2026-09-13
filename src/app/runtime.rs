@@ -178,17 +178,17 @@ fn prepare_submission(
             let created =
                 match workspace_client.request(waku_client::WorkspaceOperation::CreateWorktree {
                     project_path: project.path.clone(),
-                    project_id: project.id,
-                    session_id,
-                    prompt: prompt.to_owned(),
-                    base_branch,
+                    name: None,
+                    prompt: Some(prompt.to_owned()),
+                    base_ref: base_branch,
                 })? {
                     waku_client::WorkspaceResult::WorktreeCreated { worktree } => worktree,
                     _ => anyhow::bail!("the daemon returned an invalid worktree response"),
                 };
             SessionWorkspace::Worktree {
                 path: created.path,
-                branch: created.branch,
+                name: created.name,
+                branch: None,
             }
         }
         workspace => workspace,

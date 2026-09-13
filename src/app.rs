@@ -1242,6 +1242,14 @@ pub struct Waku {
     branch_picker_highlight: Option<usize>,
     branch_picker_list_state: ListState,
     branch_picker_row_cache: RefCell<Vec<crate::git_branch::BranchEntry>>,
+    /// Name field in the composer worktree picker; empty means the daemon
+    /// derives a name from the prompt.
+    worktree_name_input: Entity<TextInput>,
+    /// Keyboard cursor over the worktree picker's actions. `None` means the
+    /// keyboard has not moved yet, so `enter` takes the first row.
+    worktree_picker_highlight: Option<usize>,
+    /// An eager worktree creation is in flight on the daemon.
+    worktree_creation_pending: bool,
     /// Git subprocess results per concrete workspace path. Render only reads
     /// this in-memory cache; misses are fulfilled on the background executor.
     branch_snapshots: QueryCache<PathBuf, Result<Option<BranchSnapshot>, String>>,
@@ -1705,6 +1713,7 @@ mod transcript_view;
 mod usage_meter;
 mod usage_page;
 mod window_chrome;
+mod worktrees;
 
 pub use annotations::init as init_annotation_keys;
 pub use autocomplete::init as init_composer_autocomplete;
@@ -2075,6 +2084,11 @@ impl Waku {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .placeholder(tr!("input.new_branch_name"))
+        });
+        let worktree_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("input.worktree_name"))
         });
         let settings_search = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2857,6 +2871,9 @@ impl Waku {
                 model_search,
                 branch_search,
                 branch_create_input,
+                worktree_name_input,
+                worktree_picker_highlight: None,
+                worktree_creation_pending: false,
                 settings_search,
                 daemon_port_input,
                 daemon_origins_input,

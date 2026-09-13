@@ -308,7 +308,7 @@ fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> 
     match workspace {
         SessionWorkspace::Local => None,
         SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
-        SessionWorkspace::Worktree { branch, .. } => Some(branch.as_str()),
+        SessionWorkspace::Worktree { name, .. } => Some(name.as_str()),
     }
     .filter(|branch| !branch.is_empty())
 }
@@ -1476,8 +1476,7 @@ impl Waku {
             .entry(group)
             .or_insert_with(|| cx.focus_handle())
             .clone();
-        let show_group_icon =
-            matches!(group, SidebarGroup::Project(_) | SidebarGroup::Projectless);
+        let show_group_icon = matches!(group, SidebarGroup::Project(_) | SidebarGroup::Projectless);
         let group_icon = match group {
             SidebarGroup::Projectless => "icons/chat.svg",
             _ if collapsed => "icons/folder.svg",
@@ -1495,14 +1494,17 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.chat"),
         };
-        let updated_chevron = matches!(group, SidebarGroup::Updated(_) | SidebarGroup::Pinned).then(|| {
-            icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
-                .when(collapsed, |icon| {
-                    icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(0.75)))
-                })
-                .invisible()
-                .group_hover(group_name.clone(), |icon| icon.visible())
-        });
+        let updated_chevron = matches!(group, SidebarGroup::Updated(_) | SidebarGroup::Pinned)
+            .then(|| {
+                icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
+                    .when(collapsed, |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            0.75,
+                        )))
+                    })
+                    .invisible()
+                    .group_hover(group_name.clone(), |icon| icon.visible())
+            });
         let compose = show_group_icon.then(|| {
             let compose_focus = self
                 .sidebar_group_compose_focuses
@@ -1883,8 +1885,7 @@ impl Waku {
         let pinned = session.pinned_at.is_some();
         // The Pinned group mixes projects, so its rows keep the flat layout
         // and project-name detail even while Project grouping is active.
-        let grouped_by_project =
-            self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
+        let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -2156,9 +2157,8 @@ impl Waku {
                                 tr!("session.pin")
                             },
                             move |_, cx| {
-                                let _ = pin_waku.update(cx, |waku, cx| {
-                                    waku.toggle_session_pin(session_id, cx)
-                                });
+                                let _ = pin_waku
+                                    .update(cx, |waku, cx| waku.toggle_session_pin(session_id, cx));
                             },
                         )
                         .icon(if pinned {
@@ -2180,9 +2180,8 @@ impl Waku {
                         .icon("icons/archive.svg"),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_waku.update(cx, |waku, cx| {
-                                waku.remove_session(session_id, window, cx)
-                            });
+                            let _ = remove_waku
+                                .update(cx, |waku, cx| waku.remove_session(session_id, window, cx));
                         })
                         .icon("icons/trash.svg"),
                     ]
@@ -2814,14 +2813,15 @@ mod tests {
         };
         let worktree = SessionWorkspace::Worktree {
             path: PathBuf::from("/tmp/worktree"),
-            branch: "feature/sidebar".to_owned(),
+            name: "my-worktree".to_owned(),
+            branch: Some("feature/sidebar".to_owned()),
         };
 
         assert_eq!(persisted_sidebar_branch_label(&local), None);
         assert_eq!(persisted_sidebar_branch_label(&planned), Some("develop"));
         assert_eq!(
             persisted_sidebar_branch_label(&worktree),
-            Some("feature/sidebar")
+            Some("my-worktree")
         );
     }
 

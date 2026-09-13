@@ -438,6 +438,8 @@ input.search_branches:
   en: Search branches
 input.new_branch_name:
   en: New branch name
+input.worktree_name:
+  en: Worktree name
 input.detected_automatically:
   en: Detected automatically
 input.filter_projects:
@@ -1364,6 +1366,12 @@ workspace.local:
   en: Local
 workspace.new_worktree:
   en: New worktree
+workspace.creating:
+  en: Creating…
+workspace.from_ref:
+  en: "From %{branch}"
+workspace.from_default:
+  en: From default branch
 workspace.workspace:
   en: workspace
 workspace.worktree:

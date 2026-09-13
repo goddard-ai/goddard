@@ -220,6 +220,7 @@ input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…
 input.search_branches: 搜索分支
 input.new_branch_name: 新分支名称
+input.worktree_name: 工作树名称
 input.detected_automatically: 自动检测
 input.filter_projects: 筛选项目
 input.search_or_enter_address: 搜索或输入网址
@@ -663,6 +664,9 @@ branches.checked_out_elsewhere: 已在另一个工作树中检出
 workspace.work_in: 工作位置
 workspace.local: 本地
 workspace.new_worktree: 新建工作树
+workspace.creating: 正在创建…
+workspace.from_ref: "从 %{branch}"
+workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
 workspace.toggle_hint: 切换工作位置 (%{shortcut})
