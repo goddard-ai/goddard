@@ -401,6 +401,10 @@ impl Waku {
         let theme = Theme::current(cx);
         let session_id = session.id;
         let highlighted = self.task_switcher.highlighted_session_id == Some(session_id);
+        let working = matches!(
+            session.status,
+            SessionStatus::Connecting | SessionStatus::Working
+        );
         let project_name = self
             .state
             .projects
@@ -463,6 +467,28 @@ impl Waku {
                         .child(project_name),
                 )
             })
+            .when(working, |entry| {
+                entry.child(motion::spin_slow(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    status_color(&theme, session.status),
+                )))
+            })
+            .when(
+                session.status == SessionStatus::Idle
+                    && self.unseen_completions.contains_key(&session_id),
+                |entry| {
+                    entry.child(
+                        div()
+                            .flex_none()
+                            .size(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(div().size(px(7.0)).rounded_full().bg(theme.info)),
+                    )
+                },
+            )
             .into_any_element()
     }
 
