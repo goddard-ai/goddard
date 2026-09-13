@@ -20,6 +20,8 @@ const ROW_RADIUS: f32 = 8.0;
 const PATH_MAX_WIDTH: f32 = 180.0;
 const MAX_PROJECTS: usize = 10;
 const WINDOW_MARGIN: f32 = 44.0;
+const VERTICAL_BIAS: f32 = 0.08;
+const VERTICAL_BIAS_MAX: f32 = 96.0;
 
 /// Runtime-only switcher state, like its task counterpart: recency lives in
 /// the task switcher's session history, so restoration seeds nothing here.
@@ -455,8 +457,13 @@ impl Waku {
             })
             .map(|project| self.render_project_switcher_entry(project, cx))
             .collect::<Vec<_>>();
-        let list_max_height = (f32::from(window.viewport_size().height)
+        let viewport_height = f32::from(window.viewport_size().height);
+        // Padding below the card pushes the centered layout up by half the
+        // padding, so the switcher sits slightly above center like Spotlight.
+        let vertical_bias = (viewport_height * VERTICAL_BIAS).min(VERTICAL_BIAS_MAX);
+        let list_max_height = (viewport_height
             - WINDOW_MARGIN * 2.0
+            - vertical_bias * 2.0
             - TITLE_HEIGHT
             - MODAL_INSET * 2.0)
             .max(ROW_HEIGHT);
@@ -504,6 +511,7 @@ impl Waku {
             .absolute()
             .inset_0()
             .occlude()
+            .pb(px(vertical_bias * 2.0))
             .flex()
             .items_center()
             .justify_center()
