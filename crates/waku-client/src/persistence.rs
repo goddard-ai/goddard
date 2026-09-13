@@ -1480,7 +1480,8 @@ mod tests {
             project_id,
             &SessionWorkspace::Worktree {
                 path: PathBuf::from("/tmp/worktree"),
-                branch: "feature".to_owned(),
+                name: "worktree".to_owned(),
+                branch: Some("feature".to_owned()),
             },
         );
         let session = state.new_session(project_id, ProviderKind::Codex);

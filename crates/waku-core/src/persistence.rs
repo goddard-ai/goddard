@@ -1254,7 +1254,10 @@ impl StateStore {
             session.detail_loaded = true;
             return Ok(());
         };
-        let stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+        let mut stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
+        // Detail rows predate worktree names; the list row's migration is
+        // overwritten when the stored workspace is copied over it.
+        stored.workspace.backfill_worktree_name();
         session.transcript_blocks = stored.transcript_blocks;
         session.turns = stored.turns;
         session.queued_messages = stored.queued_messages;
@@ -2197,7 +2200,8 @@ mod tests {
         state.sessions[0].auto_title = Some("Investigate".into());
         state.sessions[0].workspace = SessionWorkspace::Worktree {
             path: PathBuf::from("/tmp/worktrees/investigate"),
-            branch: "waku/investigate".into(),
+            name: "investigate".into(),
+            branch: Some("waku/investigate".into()),
         };
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
@@ -2230,7 +2234,8 @@ mod tests {
             session.workspace,
             SessionWorkspace::Worktree {
                 path: PathBuf::from("/tmp/worktrees/investigate"),
-                branch: "waku/investigate".into(),
+                name: "investigate".into(),
+                branch: Some("waku/investigate".into()),
             }
         );
         assert!(

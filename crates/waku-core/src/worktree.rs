@@ -1,14 +1,14 @@
 //! Daemon-owned isolated Git worktrees for tasks.
 //!
-//! A draft records only the user's choice. The first submission creates the
-//! worktree beneath `~/.waku/worktrees`, then every workspace consumer uses
-//! the returned project-relative path for the lifetime of the task.
+//! A worktree is named and detached: `git worktree add --detach` places it in
+//! `../worktrees/<repository>/<name>` beside the repository, visible to
+//! ordinary Git tooling, with no branch until the user assigns one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context as _, bail};
 use uuid::Uuid;
 
 const DEFAULT_SLUG: &str = "new-worktree";
@@ -17,47 +17,29 @@ const MAX_CANDIDATES: usize = 100;
 
 pub use waku_protocol::git::CreatedWorktree;
 
+/// Create a detached linked worktree named `name` — or named after `prompt`
+/// when `name` is `None` — based on `base_ref` or the repository's default
+/// branch. The returned path is project-relative, preserving a project that
+/// points at a subdirectory of its repository.
 pub fn create(
     project_path: &Path,
-    project_id: Uuid,
-    session_id: Uuid,
-    prompt: &str,
-    base_branch: Option<&str>,
-) -> anyhow::Result<CreatedWorktree> {
-    let root = dirs::home_dir()
-        .ok_or_else(|| anyhow!("could not locate the home directory for ~/.waku/worktrees"))?
-        .join(".waku/worktrees");
-    create_in(
-        project_path,
-        &root,
-        project_id,
-        session_id,
-        prompt,
-        base_branch,
-    )
-}
-
-fn create_in(
-    project_path: &Path,
-    worktree_root: &Path,
-    project_id: Uuid,
-    session_id: Uuid,
-    prompt: &str,
-    requested_base: Option<&str>,
+    name: Option<&str>,
+    prompt: Option<&str>,
+    base_ref: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
     let project_path = fs::canonicalize(project_path)
         .with_context(|| format!("could not open project {}", project_path.display()))?;
     let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
-        .context("new worktrees require a Git repository")?;
+        .context("worktrees require a Git repository")?;
     let repository = fs::canonicalize(PathBuf::from(repository.trim()))
         .context("could not resolve the Git repository root")?;
     let project_relative = project_path
         .strip_prefix(&repository)
         .context("the project is outside its Git repository root")?
         .to_owned();
-    let base_ref = requested_base
+    let base_ref = base_ref
         .map(str::trim)
-        .filter(|branch| !branch.is_empty())
+        .filter(|reference| !reference.is_empty())
         .map(str::to_owned)
         .map(Ok)
         .unwrap_or_else(|| default_base_ref(&repository))?;
@@ -65,72 +47,153 @@ fn create_in(
         &repository,
         &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
     )
-    .with_context(|| format!("base branch `{base_ref}` is unavailable"))?;
-    let project_worktrees = worktree_root.join(project_id.to_string());
-    fs::create_dir_all(&project_worktrees).with_context(|| {
+    .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
+    let worktree_root = worktree_root(&repository)?;
+    fs::create_dir_all(&worktree_root).with_context(|| {
         format!(
             "could not create the worktree directory {}",
-            project_worktrees.display()
+            worktree_root.display()
         )
     })?;
+    let registered = registered_worktree_paths(&repository)?;
 
-    let slug = worktree_slug(prompt);
-    for index in 0..MAX_CANDIDATES {
-        let name = candidate_name(&slug, index);
-        let branch = format!("waku/{name}");
-        let path = project_worktrees.join(&name);
-        if path.exists() || local_branch_exists(&repository, &branch)? {
-            continue;
+    match name.and_then(sanitize_name) {
+        Some(name) => {
+            let path = worktree_root.join(&name);
+            if path.exists() || registered.contains(&path) {
+                bail!("a worktree named `{name}` already exists");
+            }
+            add_detached(&repository, &path, &base_ref)?;
+            materialized(path, &project_relative, name)
         }
-
-        let output = crate::command_env::plain_command("git")
-            .args(["worktree", "add", "-b"])
-            .arg(&branch)
-            .arg(&path)
-            .arg(&base_ref)
-            .current_dir(&repository)
-            .output()
-            .context("failed to execute git worktree add")?;
-        if !output.status.success() {
-            bail!("{}", command_error(&output));
+        None => {
+            let slug = worktree_slug(prompt.unwrap_or_default());
+            for index in 0..MAX_CANDIDATES {
+                let name = candidate_name(&slug, index);
+                let path = worktree_root.join(&name);
+                if path.exists() || registered.contains(&path) {
+                    continue;
+                }
+                add_detached(&repository, &path, &base_ref)?;
+                return materialized(path, &project_relative, name);
+            }
+            // A UUID fallback keeps the last resort independent of
+            // human-readable name collisions.
+            let name = format!("{slug}-{}", &Uuid::new_v4().simple().to_string()[..8]);
+            let path = worktree_root.join(&name);
+            if path.exists() || registered.contains(&path) {
+                bail!("could not allocate a unique Git worktree name");
+            }
+            add_detached(&repository, &path, &base_ref)?;
+            materialized(path, &project_relative, name)
         }
-
-        let project_path = path.join(&project_relative);
-        if !project_path.is_dir() {
-            bail!(
-                "Git created the worktree, but its project directory is missing: {}",
-                project_path.display()
-            );
-        }
-        return Ok(CreatedWorktree {
-            path: project_path,
-            branch,
-        });
     }
+}
 
-    // A UUID fallback makes the final attempt independent of human-readable
-    // name collisions while keeping the common path and branch pleasant.
-    let fallback = format!("{slug}-{}", &session_id.simple().to_string()[..8]);
-    let branch = format!("waku/{fallback}");
-    let path = project_worktrees.join(&fallback);
-    if path.exists() || local_branch_exists(&repository, &branch)? {
-        bail!("could not allocate a unique Git worktree name");
+/// Remove a linked worktree. `path` may be a project subdirectory inside the
+/// worktree; the worktree root is what Git removes. `git worktree remove`
+/// refuses to delete a worktree with modifications or untracked files, so
+/// callers can invoke this on abandoned drafts without risking work.
+pub fn remove(path: &Path) -> anyhow::Result<()> {
+    let path = fs::canonicalize(path)
+        .with_context(|| format!("could not open worktree {}", path.display()))?;
+    let worktree_root = git_stdout(&path, &["rev-parse", "--show-toplevel"])
+        .context("the worktree is not a Git repository")?;
+    let worktree_root = fs::canonicalize(PathBuf::from(worktree_root.trim()))
+        .context("could not resolve the Git worktree root")?;
+    let common = git_stdout(
+        &worktree_root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .context("the worktree is not a Git repository")?;
+    let repository = PathBuf::from(common.trim())
+        .parent()
+        .map(Path::to_owned)
+        .context("could not resolve the Git repository root")?;
+    git_stdout(
+        &repository,
+        &["worktree", "remove", &worktree_root.to_string_lossy()],
+    )
+    .with_context(|| format!("could not remove worktree {}", worktree_root.display()))?;
+    Ok(())
+}
+
+/// `<repository>/../worktrees/<repository-name>` — beside the checkout so the
+/// worktrees are visible to ordinary Git tooling, namespaced by the
+/// repository's directory name so sibling repositories cannot collide.
+fn worktree_root(repository: &Path) -> anyhow::Result<PathBuf> {
+    let name = repository
+        .file_name()
+        .context("could not name worktrees after the repository directory")?;
+    Ok(repository
+        .parent()
+        .context("the Git repository root has no parent directory")?
+        .join("worktrees")
+        .join(name))
+}
+
+/// The worktree paths Git already knows about. A registered entry whose
+/// directory was deleted out from under it would otherwise collide only
+/// inside `git worktree add`, with a worse error.
+fn registered_worktree_paths(repository: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let list = git_stdout(repository, &["worktree", "list", "--porcelain"])?;
+    Ok(list
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(|line| {
+            let path = PathBuf::from(line.trim());
+            fs::canonicalize(&path).unwrap_or(path)
+        })
+        .collect())
+}
+
+/// Every candidate name is checked against registered worktrees by canonical
+/// path, so compare the creation target in canonical form too.
+fn materialized(
+    path: PathBuf,
+    project_relative: &Path,
+    name: String,
+) -> anyhow::Result<CreatedWorktree> {
+    let project_path = path.join(project_relative);
+    if !project_path.is_dir() {
+        bail!(
+            "Git created the worktree, but its project directory is missing: {}",
+            project_path.display()
+        );
     }
+    Ok(CreatedWorktree {
+        path: project_path,
+        name,
+    })
+}
+
+fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Result<()> {
     let output = crate::command_env::plain_command("git")
-        .args(["worktree", "add", "-b"])
-        .arg(&branch)
-        .arg(&path)
-        .arg(&base_ref)
-        .current_dir(&repository)
+        .args(["worktree", "add", "--detach"])
+        .arg(path)
+        .arg(base_ref)
+        .current_dir(repository)
         .output()
         .context("failed to execute git worktree add")?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
-    Ok(CreatedWorktree {
-        path: path.join(project_relative),
-        branch,
-    })
+    Ok(())
+}
+
+/// An explicit worktree name must become a single path segment — separators
+/// would escape the worktree root and dot-names are not directories.
+fn sanitize_name(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\'])
+        || name.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(name.to_owned())
 }
 
 /// Prefer the local branch named by `origin/HEAD`, so a worktree starts from
@@ -252,8 +315,7 @@ mod tests {
         assert!(output.status.success(), "{}", command_error(&output));
     }
 
-    #[test]
-    fn creates_isolated_worktrees_from_the_default_branch() {
+    fn repository() -> PathBuf {
         let root = std::env::temp_dir().join(format!("waku-worktree-test-{}", Uuid::new_v4()));
         let repository = root.join("repository");
         let project = repository.join("packages/app");
@@ -301,55 +363,78 @@ mod tests {
                 "feature",
             ],
         );
+        // `create` reports canonicalized paths; match them on macOS, where
+        // the temporary directory lives behind `/var` -> `/private/var`.
+        fs::canonicalize(&repository).unwrap()
+    }
 
-        let worktree_root = root.join("worktrees");
-        let project_id = Uuid::new_v4();
-        let first = create_in(
-            &project,
-            &worktree_root,
-            project_id,
-            Uuid::new_v4(),
-            "Build a project selector",
-            None,
-        )
-        .unwrap();
-        assert_eq!(first.branch, "waku/build-a-project-selector");
+    #[test]
+    fn creates_detached_worktrees_beside_the_repository() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+
+        let named = create(&project, Some("My Worktree"), None, None).unwrap();
+        assert_eq!(named.name, "My Worktree");
         assert_eq!(
-            fs::read_to_string(first.path.join("README.md")).unwrap(),
+            named.path,
+            repository
+                .parent()
+                .unwrap()
+                .join("worktrees/repository/My Worktree/packages/app")
+        );
+        // Created from the default branch even though `feature` is checked
+        // out, and detached: no branch owns the worktree.
+        assert_eq!(
+            fs::read_to_string(named.path.join("README.md")).unwrap(),
             "main\n"
         );
-        fs::write(first.path.join("README.md"), "worktree\n").unwrap();
+        let head = git_stdout(&named.path, &["branch", "--show-current"]).unwrap();
+        assert!(head.is_empty());
+        fs::write(named.path.join("README.md"), "worktree\n").unwrap();
         assert_eq!(
             fs::read_to_string(project.join("README.md")).unwrap(),
             "feature\n"
         );
 
-        let second = create_in(
-            &project,
-            &worktree_root,
-            project_id,
-            Uuid::new_v4(),
-            "Build a project selector",
-            None,
-        )
-        .unwrap();
-        assert_eq!(second.branch, "waku/build-a-project-selector-2");
+        // An explicit name collides with the directory it just made.
+        assert!(create(&project, Some("My Worktree"), None, None).is_err());
 
-        let from_feature = create_in(
+        // Generated names come from the prompt and suffix on collision.
+        let generated = create(
             &project,
-            &worktree_root,
-            project_id,
-            Uuid::new_v4(),
-            "Use selected base",
+            None,
+            Some("Build a project selector"),
             Some("feature"),
         )
         .unwrap();
+        assert_eq!(generated.name, "build-a-project-selector");
         assert_eq!(
-            fs::read_to_string(from_feature.path.join("README.md")).unwrap(),
+            fs::read_to_string(generated.path.join("README.md")).unwrap(),
             "feature\n"
         );
+        let second = create(&project, None, Some("Build a project selector"), None).unwrap();
+        assert_eq!(second.name, "build-a-project-selector-2");
 
-        fs::remove_dir_all(&root).ok();
+        // Removal runs in the repository and frees the name.
+        remove(&named.path).unwrap_err();
+        run_git(&named.path, &["add", "."]);
+        run_git(
+            &named.path,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "worktree",
+            ],
+        );
+        remove(&named.path).unwrap();
+        let recreated = create(&project, Some("My Worktree"), None, None).unwrap();
+        assert_eq!(recreated.name, "My Worktree");
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
     }
 
     #[test]

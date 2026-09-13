@@ -103,19 +103,21 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         },
         WorkspaceOperation::CreateWorktree {
             project_path,
-            project_id,
-            session_id,
+            name,
             prompt,
-            base_branch,
+            base_ref,
         } => WorkspaceResult::WorktreeCreated {
             worktree: crate::worktree::create(
                 &project_path,
-                project_id,
-                session_id,
-                &prompt,
-                base_branch.as_deref(),
+                name.as_deref(),
+                prompt.as_deref(),
+                base_ref.as_deref(),
             )?,
         },
+        WorkspaceOperation::RemoveWorktree { path } => {
+            crate::worktree::remove(&path)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },

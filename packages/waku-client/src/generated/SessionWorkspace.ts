@@ -7,4 +7,9 @@
  * creates the Git worktree and replaces it with [`Self::Worktree`] before any
  * checkpoint or provider process can observe the task.
  */
-export type SessionWorkspace = { "kind": "local" } | { "kind": "newWorktree", baseBranch?: string | null, } | { "kind": "worktree", path: string, branch: string, };
+export type SessionWorkspace = { "kind": "local" } | { "kind": "newWorktree", baseBranch?: string | null, } | { "kind": "worktree", path: string, name: string,
+/**
+ * Branch last seen checked out in the worktree. `None` while it
+ * remains in the detached HEAD state it was created with.
+ */
+branch?: string | null, };

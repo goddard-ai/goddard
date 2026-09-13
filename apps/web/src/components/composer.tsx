@@ -222,7 +222,7 @@ export function Composer({
   const workspaceLabel = workspace.kind === 'newWorktree'
     ? t('workspace.new_worktree')
     : workspace.kind === 'worktree'
-      ? workspace.branch
+      ? workspace.name || workspace.branch || t('workspace.worktree')
       : t('workspace.local')
   const availableCommands = mergeComposerCommands(
     composerCommands.data ?? [],

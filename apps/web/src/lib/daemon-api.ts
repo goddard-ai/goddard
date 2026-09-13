@@ -554,10 +554,9 @@ export async function materializeWorktree(
       operation: {
         type: 'createWorktree',
         project_path: project.path,
-        project_id: project.id,
-        session_id: session.id,
+        name: null,
         prompt,
-        base_branch: session.workspace.baseBranch ?? null,
+        base_ref: session.workspace.baseBranch ?? null,
       },
     }),
     'workspace',
@@ -570,7 +569,8 @@ export async function materializeWorktree(
     workspace: {
       kind: 'worktree',
       path: response.result.worktree.path,
-      branch: response.result.worktree.branch,
+      name: response.result.worktree.name,
+      branch: null,
     },
   }
 }

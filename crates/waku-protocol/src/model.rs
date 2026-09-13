@@ -648,7 +648,17 @@ pub enum SessionWorkspace {
     },
     /// A materialized worktree. `path` preserves a project that points at a
     /// subdirectory of its repository rather than the repository root itself.
-    Worktree { path: PathBuf, branch: String },
+    /// `name` is the worktree's directory name and the session's workspace
+    /// label; state persisted before names existed backfills it from `path`.
+    Worktree {
+        path: PathBuf,
+        #[serde(default)]
+        name: String,
+        /// Branch last seen checked out in the worktree. `None` while it
+        /// remains in the detached HEAD state it was created with.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+    },
 }
 
 impl SessionWorkspace {
@@ -664,6 +674,17 @@ impl SessionWorkspace {
         match self {
             Self::Worktree { path, .. } => Some(path),
             Self::Local | Self::NewWorktree { .. } => None,
+        }
+    }
+
+    /// State persisted before worktrees had names deserializes `name` as
+    /// empty; derive it from the worktree's directory.
+    pub fn backfill_worktree_name(&mut self) {
+        if let Self::Worktree { path, name, .. } = self
+            && name.is_empty()
+            && let Some(directory) = path.file_name()
+        {
+            *name = directory.to_string_lossy().into_owned();
         }
     }
 }
@@ -1242,6 +1263,7 @@ impl AgentSession {
     }
 
     pub fn migrate_legacy_state(&mut self) {
+        self.workspace.backfill_worktree_name();
         if self.provider_cursor.is_none()
             && let Some(id) = self.provider_session_id.take()
         {

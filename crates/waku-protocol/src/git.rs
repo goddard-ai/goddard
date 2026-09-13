@@ -54,5 +54,6 @@ pub struct AgentInvocation {
 pub struct CreatedWorktree {
     #[ts(type = "string")]
     pub path: PathBuf,
-    pub branch: String,
+    /// The linked worktree's directory name — its identity in clients.
+    pub name: String,
 }
