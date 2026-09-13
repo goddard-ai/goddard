@@ -458,9 +458,22 @@ impl Waku {
             .iter()
             .find(|project| project.id == project_id)
             .is_some_and(Project::is_projectless);
+        // Checkpoint refs live in the repository's shared namespace, so
+        // delete them from the project checkout — the task's worktree may
+        // already be gone, and a missing cwd would silently leave the
+        // refs behind.
         let project_path = self
-            .workspace_path_for_session(&self.state.sessions[index])
-            .map(std::path::Path::to_path_buf);
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+            .or_else(|| {
+                self.state.sessions[index]
+                    .workspace
+                    .path()
+                    .map(std::path::Path::to_path_buf)
+            });
         // A draft's eagerly created worktree dies with it. Once a session has
         // started the worktree may hold the agent's work and stays on disk.
         let draft_worktree = match &self.state.sessions[index].workspace {

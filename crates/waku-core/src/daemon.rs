@@ -239,11 +239,8 @@ impl WakuBackend {
     /// refs are deleted.
     fn purge_expired_archived_sessions(&self) {
         let cutoff = crate::model::unix_time().saturating_sub(ARCHIVED_SESSION_RETENTION_SECONDS);
-        // Hydrating learns the real workspace directory — the list projection
-        // leaves it `Local` — so each expired task's checkpoint refs can be
-        // deleted in its own repository the way a client's Remove does.
         let expired = {
-            let mut state = self.task_state.lock();
+            let state = self.task_state.lock();
             let mut expired = Vec::new();
             for index in 0..state.sessions.len() {
                 if state.sessions[index]
@@ -253,15 +250,21 @@ impl WakuBackend {
                     continue;
                 }
                 let session_id = state.sessions[index].id;
-                let _ = self.task_store.hydrate(&mut state.sessions[index]);
-                let session = &state.sessions[index];
-                let workspace = session.workspace.path().map(Path::to_path_buf).or_else(|| {
-                    state
-                        .projects
-                        .iter()
-                        .find(|project| project.id == session.project_id)
-                        .map(|project| project.path.clone())
-                });
+                // Checkpoint refs live in the repository's shared
+                // namespace, so delete them from the project checkout —
+                // the task's worktree may already be gone, and a missing
+                // cwd would silently leave the refs behind.
+                let workspace = state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == state.sessions[index].project_id)
+                    .map(|project| project.path.clone())
+                    .or_else(|| {
+                        state.sessions[index]
+                            .workspace
+                            .path()
+                            .map(Path::to_path_buf)
+                    });
                 expired.push((session_id, workspace));
             }
             expired
