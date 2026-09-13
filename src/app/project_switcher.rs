@@ -5,7 +5,8 @@
 //! platform modifier commits once — so the draft under the pointer never
 //! retargets mid-gesture. Recency is borrowed from the task switcher's
 //! session history: a project ranks by when one of its tasks was last
-//! activated. The snapshot is capped at ten projects.
+//! activated. The snapshot is capped at ten projects; when recency leaves
+//! slots open, the most recently added projects fill them.
 
 use super::*;
 
@@ -101,6 +102,13 @@ fn ordered_project_ids(current: Option<Uuid>, recent: &[Uuid], projects: &[Proje
     }
     for recent in recent {
         push(*recent);
+    }
+    // Recently used projects keep their rank; when they leave slots open, the
+    // most recently added projects fill them so the list still shows ten.
+    let mut recently_added = projects.iter().collect::<Vec<_>>();
+    recently_added.sort_by_key(|project| std::cmp::Reverse(project.created_at));
+    for project in recently_added {
+        push(project.id);
     }
     ordered
 }
@@ -530,15 +538,15 @@ mod tests {
 
     #[test]
     fn switcher_order_contains_only_the_ten_most_recently_used_projects() {
-        let project = |_: ()| Project {
+        let project = |created_at| Project {
             id: Uuid::new_v4(),
             name: String::new(),
             path: PathBuf::new(),
-            created_at: 0,
+            created_at,
         };
-        let current = project(());
-        let recent = (0..12).map(|_| project(())).collect::<Vec<_>>();
-        let removed = project(());
+        let current = project(0);
+        let recent = (0..12).map(|_| project(0)).collect::<Vec<_>>();
+        let removed = project(0);
         let mut projects = vec![current.clone()];
         projects.extend(recent.iter().cloned());
         let mut recorded_recency = vec![removed.id];
@@ -554,6 +562,41 @@ mod tests {
         assert_eq!(
             ordered_project_ids(Some(current.id), &recorded_recency, &projects),
             expected
+        );
+    }
+
+    #[test]
+    fn switcher_order_fills_remaining_slots_with_recently_added_projects() {
+        let project = |created_at| Project {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            path: PathBuf::new(),
+            created_at,
+        };
+        let current = project(10);
+        let recent = [project(20), project(30)];
+        // Recently added projects rank below any recently used one, and an
+        // already-listed project is not repeated.
+        let added_newest = project(90);
+        let added_oldest = project(5);
+        let projects = vec![
+            added_oldest.clone(),
+            recent[0].clone(),
+            added_newest.clone(),
+            current.clone(),
+            recent[1].clone(),
+        ];
+        let recorded_recency = recent.iter().map(|project| project.id).collect::<Vec<_>>();
+
+        assert_eq!(
+            ordered_project_ids(Some(current.id), &recorded_recency, &projects),
+            vec![
+                current.id,
+                recent[0].id,
+                recent[1].id,
+                added_newest.id,
+                added_oldest.id,
+            ]
         );
     }
 }
