@@ -1818,7 +1818,7 @@ mod tests {
         assert_eq!(value, "https://waku.gg");
         assert_eq!(
             bounds,
-            TerminalPoint::new(Line(0), Column(1))..=TerminalPoint::new(Line(0), Column(4))
+            TerminalPoint::new(Line(0), Column(1))..=TerminalPoint::new(Line(0), Column(7))
         );
     }
 
