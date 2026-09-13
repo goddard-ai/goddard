@@ -2251,6 +2251,7 @@ impl Waku {
             ComposerSubmission {
                 prompt: provider_prompt,
                 display_content,
+                human_content: None,
                 attachments: edit.attachments,
                 annotations: Vec::new(),
             },

@@ -1,4 +1,6 @@
-use super::annotations::{annotation_display_content, annotation_prompt_prefix};
+use super::annotations::{
+    annotation_bubble_content, annotation_display_content, annotation_prompt_prefix,
+};
 use super::*;
 
 use anyhow::Context as _;
@@ -2203,27 +2205,51 @@ impl Waku {
             .collect::<Vec<_>>();
         let annotations = self.drain_transcript_annotations();
         let submission = match merged_submission(prompt, &mentions) {
-            Some(body) => format!("{}{}", annotation_prompt_prefix(&annotations), body),
+            Some(body) => {
+                // Resolve command syntax while the body's leading `/` is
+                // still visible — the annotation header would hide it from
+                // the transport-boundary resolvers.
+                let body = match (annotations.is_empty(), self.selected_session()) {
+                    (false, Some(session)) => crate::composer_complete::resolved_submission(
+                        session.provider,
+                        &body,
+                        &self.slash_command_index,
+                    )
+                    .unwrap_or(body),
+                    _ => body,
+                };
+                format!("{}{}", annotation_prompt_prefix(&annotations), body)
+            }
             // Annotations alone still send: their header is the whole prompt.
             None if !annotations.is_empty() => {
                 annotation_prompt_prefix(&annotations).trim_end().to_owned()
             }
             None => return None,
         };
-        let display_content = (!attachments.is_empty() || !annotations.is_empty()).then(|| {
-            let typed = prompt.trim();
+        // Presentation splits two ways: the bubble shows each annotation's
+        // quote and comment above the typed text, while titles and a restored
+        // draft keep the user's own words — the comments when nothing was
+        // typed.
+        let typed = prompt.trim();
+        let human_content = (!annotations.is_empty()).then(|| {
             if typed.is_empty() {
-                // No typed text to echo; show the comments (or the quoted
-                // passages) so the user bubble is not a blank card.
                 annotation_display_content(&annotations)
             } else {
                 typed.to_owned()
+            }
+        });
+        let display_content = (!attachments.is_empty() || !annotations.is_empty()).then(|| {
+            if annotations.is_empty() {
+                typed.to_owned()
+            } else {
+                annotation_bubble_content(&annotations, typed)
             }
         });
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
+            human_content,
             attachments,
             annotations,
         })
@@ -2371,7 +2397,10 @@ impl Waku {
                 .items
                 .extend(submission.annotations);
         }
-        let content = submission.display_content.unwrap_or(submission.prompt);
+        let content = submission
+            .human_content
+            .or(submission.display_content)
+            .unwrap_or(submission.prompt);
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
         self.schedule_composer_draft_save(cx);

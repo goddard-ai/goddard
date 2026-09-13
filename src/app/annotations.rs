@@ -5,7 +5,8 @@
 //! comment editor. Confirmed annotations stay highlighted — hover previews the
 //! comment, a click reopens the editor — and the composer shows an
 //! "N annotations" chip until the next submission, which carries the comments
-//! to the provider as a quoted header above the typed prompt.
+//! to the provider as a quoted header above the typed prompt and echoes the
+//! quoted passages in the sent bubble.
 //!
 //! Annotations live in memory only, one set per session. The painted set sits
 //! on [`TranscriptSelection`] so the renderer can reach it from paint
@@ -98,9 +99,9 @@ pub(super) fn annotation_prompt_prefix(annotations: &[TranscriptAnnotation]) -> 
     out
 }
 
-/// What the user bubble shows for an annotation-only submission: the comments
-/// when any were written, else the quoted passages — never the transport
-/// wrapper itself.
+/// The user's own words in a drained set: the comments when any were written,
+/// else the quoted passages. Titles, generated names and a restored composer
+/// draft read this — never the transport wrapper itself.
 pub(super) fn annotation_display_content(annotations: &[TranscriptAnnotation]) -> String {
     let comments = annotations
         .iter()
@@ -116,6 +117,32 @@ pub(super) fn annotation_display_content(annotations: &[TranscriptAnnotation]) -
         .map(TranscriptAnnotation::quoted_text)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// What the sent user bubble shows: each annotated passage as a quote block
+/// with its comment, then the typed text — the transport's annotation
+/// context without the "Annotation N" labels.
+pub(super) fn annotation_bubble_content(
+    annotations: &[TranscriptAnnotation],
+    typed: &str,
+) -> String {
+    let mut out = String::new();
+    for annotation in annotations {
+        for line in annotation.quoted_text().lines() {
+            out.push_str("> ");
+            out.push_str(line);
+            out.push('\n');
+        }
+        let comment = annotation.comment.trim();
+        if !comment.is_empty() {
+            out.push('\n');
+            out.push_str(comment);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str(typed);
+    out
 }
 
 /// The session annotation store is parked in `transcript_annotations` keyed by
@@ -845,6 +872,33 @@ mod tests {
         assert_eq!(
             annotation_display_content(&[annotation(1, "the passage", "a comment")]),
             "a comment"
+        );
+    }
+
+    #[test]
+    fn bubble_content_quotes_each_passage_above_its_comment() {
+        assert_eq!(
+            annotation_bubble_content(&[annotation(1, "the passage", "a comment")], ""),
+            "> the passage\n\na comment\n\n"
+        );
+        // No comment still marks the attached passage.
+        assert_eq!(
+            annotation_bubble_content(&[annotation(1, "the passage", "")], ""),
+            "> the passage\n\n"
+        );
+    }
+
+    #[test]
+    fn bubble_content_appends_the_typed_text() {
+        assert_eq!(
+            annotation_bubble_content(
+                &[
+                    annotation(1, "first passage", "note"),
+                    annotation(2, "second\npassage", ""),
+                ],
+                "fix this",
+            ),
+            "> first passage\n\nnote\n\n> second\n> passage\n\nfix this"
         );
     }
 }

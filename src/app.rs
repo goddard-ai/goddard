@@ -334,6 +334,9 @@ enum RemoteImageState {
 struct ComposerSubmission {
     prompt: String,
     display_content: Option<String>,
+    /// The user's own words for titles and a restored draft, kept apart from
+    /// `display_content` when annotations put quote blocks in the bubble.
+    human_content: Option<String>,
     attachments: Vec<MessageAttachment>,
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
@@ -345,6 +348,7 @@ impl ComposerSubmission {
         Self {
             prompt,
             display_content: None,
+            human_content: None,
             attachments: Vec::new(),
             annotations: Vec::new(),
         }
@@ -358,6 +362,7 @@ impl ComposerSubmission {
         Self {
             prompt: message.content,
             display_content: message.display_content,
+            human_content: None,
             attachments: message.attachments,
             // The annotation header already lives inside `content`; queueing
             // counts as sent, so the highlights stay cleared.
@@ -370,8 +375,9 @@ impl ComposerSubmission {
     /// paths; providers still receive `prompt` unchanged.
     fn human_prompt(&self) -> String {
         let visible = self
-            .display_content
+            .human_content
             .as_deref()
+            .or(self.display_content.as_deref())
             .unwrap_or(&self.prompt)
             .trim();
         if !visible.is_empty() {
