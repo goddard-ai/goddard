@@ -710,9 +710,16 @@ impl Waku {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
                 }
                 // The selected session's finish is already on screen; only a
-                // turn settling out of view gets the sound.
+                // turn settling out of view gets the sound. A queued follow-up
+                // means the task keeps working, so that settle stays quiet.
                 if self.state.completion_sound_enabled
                     && self.state.selected_session != Some(session_id)
+                    && self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| session.queued_messages.is_empty())
                 {
                     crate::platform::play_completion_sound(self.state.completion_sound);
                 }
