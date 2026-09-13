@@ -3055,6 +3055,16 @@ impl ComposerInput {
             .update(cx, |input, cx| input.replace_range(range, text, cx));
     }
 
+    /// Splice `text` over the current selection, leaving the caret after it —
+    /// the manual equivalent of a committed `insertText` for a caller that
+    /// delivers text without going through the platform input handler.
+    pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| {
+            let range = input.selected_range();
+            input.replace_range(range, text, cx);
+        });
+    }
+
     pub fn preserve_visual_focus_for_context_menu(
         &mut self,
         window: &Window,

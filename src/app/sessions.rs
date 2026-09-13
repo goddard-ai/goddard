@@ -13,6 +13,26 @@ fn new_task_runtime_mode(current: Option<&AgentSession>, remembered: RuntimeMode
         .unwrap_or(remembered)
 }
 
+/// The text an unclaimed keystroke should send to the composer, if any:
+/// printable characters typed without command-level modifiers. `key_char`
+/// carries the layout-resolved character, so Option digraphs and shifted
+/// letters arrive as the text a field would have received. Keys whose
+/// character is a control character — Tab's `\t`, Enter's `\n` — keep their
+/// focus-navigation and activation meanings instead, which also keeps a
+/// stray Enter from submitting an unseen draft.
+pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
+    let modifiers = keystroke.modifiers;
+    // Ctrl+Alt passes because it is AltGr on Windows: text composition,
+    // not a shortcut chord. Bound chords never reach this listener anyway.
+    if (modifiers.control && !modifiers.alt) || modifiers.platform || modifiers.function {
+        return None;
+    }
+    keystroke
+        .key_char
+        .as_deref()
+        .filter(|text| text.chars().all(|character| !character.is_control()))
+}
+
 /// The newest off-screen turn finish still unseen, for
 /// GoToLatestUnseenCompletion. Entries are stamped when the turn settles and
 /// cleared on activation, so the map itself is the candidate set; the
@@ -996,6 +1016,71 @@ impl Waku {
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         cx.notify();
+    }
+
+    /// Type-to-focus: a printable keystroke no binding or focused element
+    /// claimed routes to the composer — typing with a session on screen
+    /// means "write a prompt". The character is spliced in manually rather
+    /// than left for the platform's `insertText`: the platform input handler
+    /// was bound to whatever element held focus when the frame was painted,
+    /// so after a mid-dispatch focus move it would land in a stale field (or
+    /// nowhere). Stopping propagation keeps that delivery from arriving at
+    /// all.
+    pub(super) fn type_to_focus_composer(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(text) = type_to_focus_text(&event.keystroke) else {
+            return;
+        };
+        // The composer only exists once a project is on screen; settings
+        // replaces the workspace root wholesale.
+        if self.selected_project().is_none() || self.settings_page.is_some() {
+            return;
+        }
+        // An overlay owns the keyboard while it is up — including one whose
+        // focus has not landed yet, which the context check cannot see.
+        if self.command_palette.is_open()
+            || self.task_switcher.is_open()
+            || self.project_switcher.is_open()
+            || self.commit_dialog.is_some()
+            || self.goal_dialog.is_some()
+            || self.image_preview.is_some()
+            || self.menus.borrow().values().any(|menu| menu.is_open())
+        {
+            return;
+        }
+        // A text surface — or a surface that consumes keystrokes itself —
+        // already holds focus, so the keystroke is spoken for. "TextInput"
+        // covers every field in the app; the rest are focused panes whose
+        // typing is not the composer's to take.
+        const TYPING_OWNED_CONTEXTS: &[&str] = &[
+            "TextInput",
+            "Terminal",
+            "Browser",
+            "BrowserAddress",
+            "WakuMenu",
+            "CommandPalette",
+            "TaskSwitcher",
+            "ProjectSwitcher",
+            "FindBar",
+            "FileEditorPane",
+        ];
+        if window.context_stack().iter().any(|context| {
+            TYPING_OWNED_CONTEXTS
+                .iter()
+                .any(|owned| context.contains(owned))
+        }) {
+            return;
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+        let text = text.to_owned();
+        self.composer
+            .update(cx, |composer, cx| composer.insert_text(&text, cx));
+        cx.stop_propagation();
     }
 
     /// The directory the session's agent runs in — its worktree once one is

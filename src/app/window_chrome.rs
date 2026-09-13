@@ -87,6 +87,12 @@ impl Waku {
             .relative()
             .size_full()
             .bg(transparent_black())
+            // The window frame is the outermost element, which makes it the
+            // dispatch tree's root node: with nothing focused, its key
+            // listener is the only one a keystroke reaches. Type-to-focus
+            // needs that seat; when focus is inside, the workspace root's
+            // own listener runs first and stops propagation on a claim.
+            .on_key_down(cx.listener(Self::type_to_focus_composer))
             .when(!tiling.top, |backdrop| backdrop.pt(inset))
             .when(!tiling.bottom, |backdrop| backdrop.pb(inset))
             .when(!tiling.left, |backdrop| backdrop.pl(inset))

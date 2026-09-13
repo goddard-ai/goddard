@@ -339,6 +339,11 @@ impl Render for Waku {
             .on_action(cx.listener(Self::replace_all_matches_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
+            // Type-to-focus: the last listener on every dispatch path through
+            // the workspace, so an unclaimed printable keystroke from a
+            // focused descendant — or from nothing, on platforms where this
+            // div is the dispatch root — lands in the composer.
+            .on_key_down(cx.listener(Self::type_to_focus_composer))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
             .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))

@@ -2236,3 +2236,79 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
         ProviderKind::Claude
     ));
 }
+
+#[test]
+fn type_to_focus_only_claims_printable_keystrokes() {
+    use super::sessions::type_to_focus_text;
+    use gpui::{Keystroke, Modifiers};
+
+    let keystroke = |key: &str, key_char: Option<&str>, modifiers: Modifiers| Keystroke {
+        key: key.into(),
+        key_char: key_char.map(|text| text.to_owned()),
+        modifiers,
+    };
+
+    // Plain and shifted or Option-composed characters carry their text.
+    assert_eq!(
+        type_to_focus_text(&keystroke("a", Some("a"), Modifiers::none())),
+        Some("a")
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("a", Some("A"), Modifiers::shift())),
+        Some("A")
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("3", Some("£"), Modifiers::alt())),
+        Some("£")
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke(
+            "e",
+            Some("€"),
+            Modifiers::control() | Modifiers::alt()
+        )),
+        Some("€")
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("space", Some(" "), Modifiers::none())),
+        Some(" ")
+    );
+
+    // Shortcut modifiers never reach the composer this way, even on
+    // platforms that still report a key_char for them.
+    for modifiers in [
+        Modifiers::command(),
+        Modifiers::control(),
+        Modifiers::function(),
+        Modifiers::command_shift(),
+    ] {
+        assert_eq!(
+            type_to_focus_text(&keystroke("c", Some("c"), modifiers)),
+            None,
+            "{modifiers:?}"
+        );
+    }
+
+    // Control characters and non-printing keys keep their widget meanings:
+    // Tab moves focus, Enter activates, and the rest produce no text.
+    assert_eq!(
+        type_to_focus_text(&keystroke("enter", Some("\n"), Modifiers::none())),
+        None
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("tab", Some("\t"), Modifiers::none())),
+        None
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("escape", None, Modifiers::none())),
+        None
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("backspace", None, Modifiers::none())),
+        None
+    );
+    assert_eq!(
+        type_to_focus_text(&keystroke("f5", None, Modifiers::none())),
+        None
+    );
+}
