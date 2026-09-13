@@ -170,6 +170,7 @@ fn prepare_submission(
     prompt: &str,
     turn_count: usize,
 ) -> anyhow::Result<PreparedSubmission> {
+    let mut worktree_restored = false;
     let workspace = match workspace {
         SessionWorkspace::NewWorktree { base_branch } => {
             if project.is_projectless() {
@@ -189,6 +190,38 @@ fn prepare_submission(
                 path: created.path,
                 name: created.name,
                 branch: None,
+            }
+        }
+        SessionWorkspace::Worktree { path, name, branch } => {
+            // The directory can vanish between visits — archived tasks
+            // outlive their worktrees once users clean up by hand. The
+            // daemon no-ops while it exists, so this doubles as the
+            // existence check on the daemon host. Restoration prefers the
+            // worktree's branch, then the latest checkpoint snapshot, so a
+            // continued turn lands on the state the transcript shows.
+            let ensured = match workspace_client.request(
+                waku_client::WorkspaceOperation::EnsureWorktree {
+                    project_path: project.path.clone(),
+                    path: path.clone(),
+                    branch: branch.clone(),
+                    base_ref: Some(checkpoint::checkpoint_ref(
+                        session_id,
+                        turn_count.saturating_sub(1),
+                    )),
+                },
+            )? {
+                waku_client::WorkspaceResult::WorktreeEnsured { created, branch } => {
+                    (created, branch)
+                }
+                _ => anyhow::bail!("the daemon returned an invalid worktree response"),
+            };
+            worktree_restored = ensured.0;
+            SessionWorkspace::Worktree {
+                path,
+                name,
+                // A branch that no longer exists comes back detached; the
+                // reported checkout replaces the stale persisted one.
+                branch: if ensured.0 { ensured.1 } else { branch },
             }
         }
         workspace => workspace,
@@ -220,6 +253,7 @@ fn prepare_submission(
     Ok(PreparedSubmission {
         workspace,
         checkpoint_warning,
+        worktree_restored,
         driver,
     })
 }
@@ -2947,6 +2981,7 @@ impl Waku {
         let PreparedSubmission {
             workspace,
             checkpoint_warning: _,
+            worktree_restored,
             driver,
         } = prepared;
         if !self
@@ -2967,10 +3002,14 @@ impl Waku {
             session.workspace = workspace;
             changed
         });
-        if workspace_changed && self.state.selected_session == Some(session_id) {
+        let selected = self.state.selected_session == Some(session_id);
+        if (workspace_changed || worktree_restored) && selected {
             self.invalidate_workspace_queries(cx);
             self.reload_clean_right_panel_file_editors(cx);
             self.ensure_right_panel_terminals(cx);
+        }
+        if worktree_restored && selected {
+            self.show_toast(tr!("session.worktree_recreated"));
         }
         match driver {
             Some(Ok(prepared)) => {
@@ -3490,6 +3529,7 @@ impl Waku {
         let PreparedSubmission {
             workspace,
             checkpoint_warning,
+            worktree_restored,
             driver: prepared_driver,
         } = prepared;
         // The turn began at accept time; it must still be the untouched one
@@ -3518,10 +3558,13 @@ impl Waku {
             session.workspace = workspace;
             changed
         });
-        if selected && workspace_changed {
+        if selected && (workspace_changed || worktree_restored) {
             self.invalidate_workspace_queries(cx);
             self.reload_clean_right_panel_file_editors(cx);
             self.ensure_right_panel_terminals(cx);
+        }
+        if selected && worktree_restored {
+            self.show_toast(tr!("session.worktree_recreated"));
         }
         let driver = match prepared_driver {
             None => self

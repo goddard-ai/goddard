@@ -1623,6 +1623,8 @@ session.unarchived:
   en: Task unarchived.
 session.view_now:
   en: View now
+session.worktree_recreated:
+  en: The worktree was missing, so it was recreated — uncommitted changes may be gone
 
 right_panel.browser:
   en: Browser

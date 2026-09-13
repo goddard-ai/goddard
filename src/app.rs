@@ -577,6 +577,10 @@ struct PendingCheckpointCapture {
 struct PreparedSubmission {
     workspace: SessionWorkspace,
     checkpoint_warning: Option<String>,
+    /// The session's worktree directory was missing and got recreated from
+    /// its branch or latest checkpoint — worth a toast, since uncommitted
+    /// work past that point is gone.
+    worktree_restored: bool,
     /// `None` reuses an already-live runtime. `Some` contains the result of a
     /// provider process start performed on the background executor.
     driver: Option<anyhow::Result<PreparedDriver>>,

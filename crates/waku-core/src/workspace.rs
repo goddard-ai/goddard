@@ -118,6 +118,26 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             crate::worktree::remove(&path)?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::EnsureWorktree {
+            project_path,
+            path,
+            branch,
+            base_ref,
+        } => match crate::worktree::ensure(
+            &project_path,
+            &path,
+            branch.as_deref(),
+            base_ref.as_deref(),
+        )? {
+            Some(branch) => WorkspaceResult::WorktreeEnsured {
+                created: true,
+                branch,
+            },
+            None => WorkspaceResult::WorktreeEnsured {
+                created: false,
+                branch: None,
+            },
+        },
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },

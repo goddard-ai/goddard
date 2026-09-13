@@ -120,6 +120,22 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         path: PathBuf,
     },
+    /// Recreate a worktree's directory when it was deleted outside the app.
+    /// `path` is the session's stored project path inside the worktree; the
+    /// call is a no-op while it still exists. A recreated worktree checks
+    /// out `branch` when it still exists and otherwise comes up detached at
+    /// `base_ref` — typically the session's latest checkpoint — falling back
+    /// to the repository's default branch.
+    EnsureWorktree {
+        #[ts(type = "string")]
+        project_path: PathBuf,
+        #[ts(type = "string")]
+        path: PathBuf,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_ref: Option<String>,
+    },
     InspectCommit {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -243,6 +259,13 @@ pub enum WorkspaceResult {
     },
     WorktreeCreated {
         worktree: CreatedWorktree,
+    },
+    /// `created` is true when the worktree directory had to be recreated.
+    /// `branch` reports the checkout it came up in — `None` for a detached
+    /// HEAD — and is only meaningful when `created`.
+    WorktreeEnsured {
+        created: bool,
+        branch: Option<String>,
     },
     CommitSnapshot {
         snapshot: CommitSnapshot,

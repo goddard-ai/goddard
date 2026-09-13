@@ -118,6 +118,90 @@ pub fn remove(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Recreate the worktree containing `path` when its directory was deleted
+/// outside the app.
+///
+/// `path` is the project directory stored on the session — possibly a
+/// subdirectory inside the worktree — so the worktree root is recovered by
+/// stripping the project's repository-relative suffix. `Ok(None)` means the
+/// directory is already there; a failed stat counts as present, since a
+/// transient filesystem error must never trigger a recreate over a healthy
+/// worktree. A recreated worktree checks out `branch` when it still exists
+/// and otherwise comes up detached at `base_ref` — typically the session's
+/// newest checkpoint — falling back to the repository's default branch. The
+/// `Some` return reports the checkout the worktree came up in.
+pub fn ensure(
+    project_path: &Path,
+    path: &Path,
+    branch: Option<&str>,
+    base_ref: Option<&str>,
+) -> anyhow::Result<Option<Option<String>>> {
+    if path.try_exists().unwrap_or(true) {
+        return Ok(None);
+    }
+    let project_path = fs::canonicalize(project_path)
+        .with_context(|| format!("could not open project {}", project_path.display()))?;
+    let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
+        .context("worktrees require a Git repository")?;
+    let repository = fs::canonicalize(PathBuf::from(repository.trim()))
+        .context("could not resolve the Git repository root")?;
+    let project_relative = project_path
+        .strip_prefix(&repository)
+        .context("the project is outside its Git repository root")?;
+    // `path` ends with the project-relative suffix; dropping those
+    // components recovers the worktree root `git worktree add` targets.
+    let mut worktree_path = path.to_path_buf();
+    if !project_relative.as_os_str().is_empty() {
+        if !worktree_path.ends_with(project_relative) {
+            bail!(
+                "{} is not inside a worktree of {}",
+                path.display(),
+                repository.display()
+            );
+        }
+        for _ in 0..project_relative.components().count() {
+            worktree_path.pop();
+        }
+    }
+    // A directory deleted by hand leaves a registration that would make
+    // `git worktree add` refuse the path.
+    git_stdout(&repository, &["worktree", "prune"])
+        .context("could not prune stale Git worktree registrations")?;
+    let branch = branch.map(str::trim).filter(|branch| !branch.is_empty());
+    let checked_out = match branch {
+        Some(branch) if local_branch_exists(&repository, branch)? => {
+            add_branch(&repository, &worktree_path, branch).with_context(|| {
+                format!("could not recreate worktree {}", worktree_path.display())
+            })?;
+            Some(branch.to_owned())
+        }
+        _ => {
+            // Detached restore: the session's checkpoint snapshot when it
+            // survives, else the same default base a fresh worktree gets.
+            let base = match base_ref
+                .map(str::trim)
+                .filter(|reference| !reference.is_empty())
+            {
+                Some(reference) if ref_is_commit(&repository, reference)? => {
+                    reference.to_owned()
+                }
+                _ => default_base_ref(&repository)?,
+            };
+            add_detached(&repository, &worktree_path, &base).with_context(|| {
+                format!("could not recreate worktree {}", worktree_path.display())
+            })?;
+            None
+        }
+    };
+    if !path.is_dir() {
+        bail!(
+            "Git recreated the worktree, but its project directory is missing: {}",
+            path.display()
+        );
+    }
+    Ok(Some(checked_out))
+}
+
 /// `<repository>/../worktrees/<repository-name>` — beside the checkout so the
 /// worktrees are visible to ordinary Git tooling, namespaced by the
 /// repository's directory name so sibling repositories cannot collide.
@@ -179,6 +263,35 @@ fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Resul
         bail!("{}", command_error(&output));
     }
     Ok(())
+}
+
+/// `git worktree add <path> <branch>` checks the branch out rather than
+/// detaching, restoring a worktree the user had placed on a branch. The
+/// branch must be verified first: a missing name would silently create one.
+fn add_branch(repository: &Path, path: &Path, branch: &str) -> anyhow::Result<()> {
+    let output = crate::command_env::plain_command("git")
+        .args(["worktree", "add"])
+        .arg(path)
+        .arg(branch)
+        .current_dir(repository)
+        .output()
+        .context("failed to execute git worktree add")?;
+    if !output.status.success() {
+        bail!("{}", command_error(&output));
+    }
+    Ok(())
+}
+
+/// Whether `reference` resolves to a commit — `rev-parse --verify` exits
+/// non-zero both for absent refs and for ambiguous ones, which both mean
+/// "cannot restore from this".
+fn ref_is_commit(repository: &Path, reference: &str) -> anyhow::Result<bool> {
+    let output = crate::command_env::plain_command("git")
+        .args(["rev-parse", "--verify", &format!("{reference}^{{commit}}")])
+        .current_dir(repository)
+        .output()
+        .context("failed to execute git")?;
+    Ok(output.status.success())
 }
 
 /// An explicit worktree name must become a single path segment — separators
@@ -433,6 +546,65 @@ mod tests {
         remove(&named.path).unwrap();
         let recreated = create(&project, Some("My Worktree"), None, None).unwrap();
         assert_eq!(recreated.name, "My Worktree");
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn ensure_recreates_a_deleted_worktree() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Restore Me"), None, Some("feature")).unwrap();
+        // The stored path is the project subdirectory; the worktree root is
+        // its grandparent.
+        let worktree_dir = created
+            .path
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .to_path_buf();
+
+        // A directory deleted by hand keeps its registration; `ensure`
+        // prunes it before re-adding or `git worktree add` would refuse.
+        fs::remove_dir_all(&worktree_dir).unwrap();
+        let ensured = ensure(&project, &created.path, None, Some("feature")).unwrap();
+        assert_eq!(ensured, Some(None));
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "feature\n"
+        );
+        assert!(
+            git_stdout(&created.path, &["branch", "--show-current"])
+                .unwrap()
+                .is_empty(),
+            "a ref-based restore stays detached"
+        );
+
+        // A present worktree is a no-op.
+        assert_eq!(ensure(&project, &created.path, None, None).unwrap(), None);
+
+        // A surviving branch is checked out rather than detached.
+        run_git(&repository, &["branch", "restore-branch"]);
+        fs::remove_dir_all(&worktree_dir).unwrap();
+        let ensured =
+            ensure(&project, &created.path, Some("restore-branch"), None).unwrap();
+        assert_eq!(ensured, Some(Some("restore-branch".to_owned())));
+        assert_eq!(
+            git_stdout(&created.path, &["branch", "--show-current"]).unwrap(),
+            "restore-branch"
+        );
+
+        // A deleted branch falls back to the detached base ref.
+        fs::remove_dir_all(&worktree_dir).unwrap();
+        run_git(&repository, &["worktree", "prune"]);
+        run_git(&repository, &["branch", "-D", "restore-branch"]);
+        let ensured =
+            ensure(&project, &created.path, Some("restore-branch"), Some("main")).unwrap();
+        assert_eq!(ensured, Some(None));
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "main\n"
+        );
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
     }
