@@ -156,6 +156,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "fork",
     "git-branch",
     "git-commit-horizontal",
+    "goddard-logo",
     "globe",
     "github",
     "hourglass",

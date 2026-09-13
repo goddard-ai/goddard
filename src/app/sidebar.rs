@@ -2541,7 +2541,12 @@ impl Waku {
             .justify_center()
             .px_8()
             .pb(px(52.0))
-            .child(icon("icons/sparkle.svg", 20.0, theme.accent))
+            .child(
+                img("icons/goddard-logo.svg")
+                    .w(px(54.0))
+                    .h(px(42.3))
+                    .flex_none(),
+            )
             .child(
                 div()
                     .mt(px(14.0))
