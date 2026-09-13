@@ -285,11 +285,14 @@ fn review_diff_tree_rows(
 /// How wide and tall a diff row is drawn. The Review panel is a reading
 /// surface; the copy embedded in a transcript activity is a summary and gives
 /// its space back to the code.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct DiffRowStyle {
     gutter_width: f32,
     row_height: f32,
     text_size: f32,
+    /// The code face rows shape against. Carried here rather than re-read per
+    /// row so a font change mid-frame cannot split one diff across two faces.
+    code_family: SharedString,
     /// What to put in the gutter of a row that has no line number. Git always
     /// reports positions, so this only comes up on a diff synthesized from a
     /// provider's before/after text: there the `+`/`-` marker stands in, which
@@ -301,21 +304,22 @@ impl DiffRowStyle {
     /// Review-tab rows at the user's code font size. The gutter holds a
     /// right-aligned line number: ~0.6em per mono digit, five digits, plus
     /// its padding and border.
-    pub(super) fn review(text_size: f32) -> Self {
+    pub(super) fn review(text_size: f32, code_family: SharedString) -> Self {
         Self {
             gutter_width: (text_size * 3.0 + 14.0).round(),
             row_height: (text_size * 1.5).round(),
             text_size,
+            code_family,
             marker_fallback: false,
         }
     }
 
     /// The same rows the Review tab draws, so an edit reads the same wherever
     /// it is opened.
-    pub(super) fn activity(text_size: f32) -> Self {
+    pub(super) fn activity(text_size: f32, code_family: SharedString) -> Self {
         Self {
             marker_fallback: true,
-            ..Self::review(text_size)
+            ..Self::review(text_size, code_family)
         }
     }
 
@@ -387,7 +391,7 @@ pub(super) fn render_diff_code_row(
         _ => (" ", None, None, None, theme.text_tertiary),
     };
     let shown_line = line.new_line.or(line.old_line);
-    let flat = review_diff_flat_text(line, theme);
+    let flat = review_diff_flat_text(line, theme, &style.code_family);
     let selectable = md::render::selectable_flat_text(
         &flat,
         crate::md::selection::TextKey::new(diff_row_selection_key(key_prefix, line, index), 0),
@@ -452,7 +456,7 @@ pub(super) fn render_diff_code_row(
         .flex_none()
         .flex()
         .items_stretch()
-        .font_family(md::render::MONO_FAMILY)
+        .font_family(style.code_family.clone())
         .text_size(px(style.text_size))
         .line_height(px(style.row_height))
         .when_some(edge, |row, edge| row.border_l_2().border_color(edge))
@@ -461,10 +465,14 @@ pub(super) fn render_diff_code_row(
         .into_any_element()
 }
 
-fn review_diff_flat_text(line: &crate::review_diff::Line, theme: &Theme) -> md::render::FlatText {
+fn review_diff_flat_text(
+    line: &crate::review_diff::Line,
+    theme: &Theme,
+    code_family: &SharedString,
+) -> md::render::FlatText {
     let text = line.content.clone();
     let palette = MarkdownPalette::from_theme(theme);
-    let code_font = font(md::render::MONO_FAMILY);
+    let code_font = font(code_family.clone());
     let mut runs = Vec::with_capacity(line.tokens.len() * 2 + 1);
     let mut offset = 0;
     let mut push = |len: usize, color: Hsla| {
@@ -3409,7 +3417,7 @@ impl Waku {
                         let text = SharedString::from(number.to_string());
                         let run = gpui::TextRun {
                             len: text.len(),
-                            font: gpui::font(md::render::MONO_FAMILY),
+                            font: gpui::font(crate::fonts::current(cx).code),
                             color: number_color,
                             ..Default::default()
                         };
@@ -3445,7 +3453,7 @@ impl Waku {
             .flex()
             .flex_col()
             .bg(theme.surface)
-            .font_family(md::render::MONO_FAMILY)
+            .font_family(crate::fonts::current(cx).code)
             .text_size(px(text_size))
             .line_height(px(line_height))
             .children(find_bar)
@@ -3564,6 +3572,7 @@ impl Waku {
             MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
             self.file_preview_selection.clone(),
         )
+        .with_families(crate::fonts::current(cx))
         .with_math_enabled(self.state.render_math)
         .with_math_context_menu(self.menu_handle("file-preview-math", cx))
         .with_link_handler(self.markdown_link_handler.clone());
@@ -4089,7 +4098,7 @@ impl Waku {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let style = DiffRowStyle::review(self.state.code_font_size);
+        let style = DiffRowStyle::review(self.state.code_font_size, crate::fonts::current(cx).code);
         // Chrome rows keep their gutters flush with the code rows'.
         let gutter_width = style.gutter_width();
 
@@ -4193,7 +4202,7 @@ impl Waku {
                 .min_w_0()
                 .flex()
                 .items_stretch()
-                .font_family(md::render::MONO_FAMILY)
+                .font_family(style.code_family.clone())
                 .text_size(px(12.5))
                 .line_height(px(16.0))
                 .text_color(theme.text_tertiary)
@@ -4228,7 +4237,7 @@ impl Waku {
                 .min_w_0()
                 .flex()
                 .items_stretch()
-                .font_family(md::render::MONO_FAMILY)
+                .font_family(style.code_family.clone())
                 .text_size(px(12.5))
                 .line_height(px(16.0))
                 .text_color(theme.text_tertiary)

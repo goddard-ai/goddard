@@ -1320,7 +1320,7 @@ impl Waku {
                     .child(
                         div()
                             .text_size(sp(12.5))
-                            .font_family(md::render::MONO_FAMILY)
+                            .font_family(crate::fonts::current(cx).code)
                             .text_color(theme.text_secondary)
                             .child(value),
                     ),
@@ -1329,7 +1329,7 @@ impl Waku {
         let output = output.unwrap_or_else(|| SharedString::from(tr!("background.no_output")));
         let output_flat = md::render::flatten_plain(
             output,
-            md::render::MONO_FAMILY,
+            crate::fonts::current(cx).code,
             FontWeight::NORMAL,
             theme.text_secondary,
         );
@@ -1392,7 +1392,7 @@ impl Waku {
                                 .p(px(8.0))
                                 .text_size(sp(12.5))
                                 .line_height(sp(15.0))
-                                .font_family(md::render::MONO_FAMILY)
+                                .font_family(crate::fonts::current(cx).code)
                                 .text_color(theme.text_secondary)
                                 .child(output_text),
                         )
@@ -1501,7 +1501,12 @@ fn render_background_summary_card(
         content = content.child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border));
     }
     if let Some(identifiers) = identifiers {
-        content = content.child(render_task_identifiers_section(identifiers, weak, &theme));
+        content = content.child(render_task_identifiers_section(
+            identifiers,
+            weak,
+            crate::fonts::current(cx).code,
+            &theme,
+        ));
     }
     div()
         .id("background-summary-card")
@@ -1520,6 +1525,7 @@ fn render_background_summary_card(
 fn render_task_identifiers_section(
     section: TaskIdentifierSection,
     weak: WeakEntity<Waku>,
+    code_family: SharedString,
     theme: &Theme,
 ) -> Div {
     let mut rows = vec![render_task_identifier_row(
@@ -1529,6 +1535,7 @@ fn render_task_identifiers_section(
         &section.task_id_copy_focus,
         section.task_id_copied,
         weak.clone(),
+        code_family.clone(),
         theme,
     )];
     if let Some(thread_id) = section.values.agent_cli_thread_id {
@@ -1539,6 +1546,7 @@ fn render_task_identifiers_section(
             &section.agent_cli_thread_id_copy_focus,
             section.agent_cli_thread_id_copied,
             weak,
+            code_family,
             theme,
         ));
     }
@@ -1561,6 +1569,7 @@ fn render_task_identifier_row(
     focus: &FocusHandle,
     copied: bool,
     weak: WeakEntity<Waku>,
+    code_family: SharedString,
     theme: &Theme,
 ) -> Div {
     let tooltip = Tooltip::text(if copied {
@@ -1647,7 +1656,7 @@ fn render_task_identifier_row(
                         .flex_1()
                         .truncate()
                         .text_size(sp(11.5))
-                        .font_family(md::render::MONO_FAMILY)
+                        .font_family(code_family)
                         .text_color(theme.text_secondary)
                         .child(value),
                 )

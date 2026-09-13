@@ -92,7 +92,7 @@ settings.daemon: 守护进程
 settings.computer_use: 电脑操作
 settings.commands: 命令
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex 声音 提示音 通知 完成 回合 sound audio notification
-settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器 侧边栏 透明
+settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
 settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享 fx devin
@@ -205,6 +205,13 @@ settings.dark_theme: 深色主题
 settings.dark_theme_description: 深色外观下使用的主题
 settings.sidebar_transparency: 侧边栏透明
 settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
+settings.ui_font: 界面字体
+settings.ui_font_description: 整个界面与消息使用的字体
+settings.code_font: 代码字体
+settings.code_font_description: 文件编辑器、差分视图、代码块、工具输出与终端使用的字体
+settings.system_font: 系统字体
+settings.default_font: 默认
+settings.no_fonts: 没有匹配的字体
 settings.ui_font_size: 界面字号
 settings.ui_font_size_description: 整个界面与消息的文字大小
 settings.code_font_size: 代码字号
@@ -221,6 +228,7 @@ settings.theme_dark: 深色
 input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…
 input.search_branches: 搜索分支
+input.search_fonts: 搜索字体…
 input.new_branch_name: 新分支名称
 input.worktree_name: 工作树名称
 input.detected_automatically: 自动检测

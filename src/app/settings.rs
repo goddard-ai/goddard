@@ -157,7 +157,7 @@ impl Waku {
             .flex()
             .bg(theme.canvas)
             .text_color(theme.text)
-            .font_family(".SystemUIFont")
+            .font_family(crate::fonts::current(cx).ui)
             .child(self.render_settings_sidebar(window, cx))
             .child(self.render_settings_content(window, cx))
             .into_any_element()
@@ -1060,7 +1060,7 @@ impl Waku {
                                 div()
                                     .mt(px(3.0))
                                     .truncate()
-                                    .font_family(".SystemUIFontMonospaced")
+                                    .font_family(crate::fonts::current(cx).code)
                                     .text_size(sp(11.5))
                                     .text_color(theme.text_tertiary)
                                     .child(script),
@@ -1722,7 +1722,7 @@ impl Waku {
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
-                                        .font_family(".SystemUIFontMonospaced")
+                                        .font_family(crate::fonts::current(cx).code)
                                         .text_size(sp(12.5))
                                         .text_color(theme.text)
                                         .child(SharedString::from(format!(
@@ -1753,7 +1753,7 @@ impl Waku {
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
-                                        .font_family(".SystemUIFontMonospaced")
+                                        .font_family(crate::fonts::current(cx).code)
                                         .text_size(sp(12.5))
                                         .text_color(theme.text)
                                         .child(SharedString::from(if token_revealed {
@@ -2213,6 +2213,9 @@ impl Waku {
             },
         );
 
+        let ui_font_selector = self.font_family_selector(FontTarget::Ui, cx);
+        let code_font_selector = self.font_family_selector(FontTarget::Code, cx);
+
         let selected_ui_font_size = self.state.ui_font_size;
         let weak = cx.entity().downgrade();
         let ui_font_size_handle = self.menu_handle("ui-font-size-selector", cx);
@@ -2439,6 +2442,20 @@ impl Waku {
                     .child(language_selector),
             )
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(settings_row(
+                tr!("settings.ui_font"),
+                tr!("settings.ui_font_description"),
+                ui_font_selector,
+                theme,
+            ))
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(settings_row(
+                tr!("settings.code_font"),
+                tr!("settings.code_font_description"),
+                code_font_selector,
+                theme,
+            ))
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
                     .w_full()
@@ -2503,6 +2520,423 @@ impl Waku {
                     .child(code_font_size_selector),
             )
             .into_any_element()
+    }
+
+    /// The Appearance page's family dropdown: a filter field pinned above a
+    /// virtualized list of installed families. The field holds real focus
+    /// while arrows move a drawn cursor — `up`/`down`/`enter` reach this card
+    /// as actions under the `WakuMenu > TextInput` bindings.
+    fn font_family_selector(&self, target: FontTarget, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let selector = self.font_selector(target);
+        let search = selector.search.clone();
+        let list_state = selector.list.clone();
+        let scrollbar_state = selector.scrollbar.clone();
+        let highlight = selector.highlight;
+        let selected = self.font_family_setting(target);
+        let weak = cx.entity().downgrade();
+
+        let search_focus = search.read(cx).focus_handle(cx);
+        let handle = self.menu_handle_with(target.menu_id(), cx, {
+            let weak = weak.clone();
+            move |open, window, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if open {
+                        this.open_font_selector(target, window, cx);
+                    } else {
+                        let focus = this.settings_focus.clone();
+                        window.focus(&focus, cx);
+                    }
+                });
+                if open {
+                    let search_focus = search_focus.clone();
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |window, cx| window.focus(&search_focus, cx));
+                    });
+                }
+            }
+        });
+
+        let families = Rc::new(if handle.is_open() {
+            let families = self.visible_font_families(target, cx);
+            self.sync_font_selector_rows(target, &families);
+            // `open_font_selector` asks the first frame — or the frame the
+            // background enumeration lands on — to park on the current face.
+            if crate::fonts::installed(cx).is_some()
+                && selector.pending_reveal.replace(false)
+                && let Some(index) = families.iter().position(|name| *name == selected)
+            {
+                selector.list.scroll_to_reveal_item(index);
+            }
+            families
+        } else {
+            Vec::new()
+        });
+        let highlight = highlight.filter(|index| *index < families.len());
+        let default_family = SharedString::from(target.default_family());
+
+        let trigger = MenuChip::new(target.menu_id())
+            .label(font_row_label(&selected))
+            .outlined()
+            .selected(handle.is_open())
+            .w(px(180.0))
+            .justify_between();
+
+        popover(
+            trigger,
+            &handle,
+            MenuAlign::BelowRight,
+            move |popover, _window, _cx| {
+                let popover = popover.clone();
+                let next_families = families.clone();
+                let previous_families = families.clone();
+                let confirm_families = families.clone();
+                let next_weak = weak.clone();
+                let previous_weak = weak.clone();
+                let confirm_weak = weak.clone();
+                let confirm_popover = popover.clone();
+
+                let rows = if families.is_empty() {
+                    div()
+                        .h(px(64.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_ghost)
+                        .child(tr!("settings.no_fonts"))
+                        .into_any_element()
+                } else {
+                    let row_families = families.clone();
+                    let row_default = default_family.clone();
+                    let row_selected = selected.clone();
+                    let row_weak = weak.clone();
+                    let row_popover = popover.clone();
+                    let height = (families.len() as f32 * FONT_PICKER_ROW_HEIGHT)
+                        .min(FONT_PICKER_LIST_MAX_HEIGHT);
+                    div()
+                        .w_full()
+                        .h(px(height))
+                        .flex_none()
+                        .relative()
+                        .px(px(4.0))
+                        .child(
+                            list(list_state.clone(), move |index, _window, _cx| {
+                                let Some(name) = row_families.get(index).cloned() else {
+                                    return div().into_any_element();
+                                };
+                                let is_selected = name == row_selected;
+                                let is_default = name == row_default;
+                                let highlighted = highlight == Some(index);
+                                div()
+                                    .id(SharedString::from(format!("font-row-{name}")))
+                                    .w_full()
+                                    .h(px(FONT_PICKER_ROW_HEIGHT))
+                                    .px(px(8.0))
+                                    .rounded(px(6.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .cursor_default()
+                                    .when(highlighted, |element| element.bg(theme.overlay_strong))
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .active(|element| element.opacity(0.85))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .truncate()
+                                            .font_family(name.clone())
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(15.0))
+                                            .text_color(if is_selected {
+                                                theme.text
+                                            } else {
+                                                theme.text_secondary
+                                            })
+                                            .child(font_row_label(&name)),
+                                    )
+                                    .when(is_default, |element| {
+                                        element.child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(sp(11.5))
+                                                .text_color(theme.text_ghost)
+                                                .child(tr!("settings.default_font")),
+                                        )
+                                    })
+                                    .when(is_selected, |element| {
+                                        element.child(icon(
+                                            "icons/check.svg",
+                                            11.0,
+                                            theme.text_secondary,
+                                        ))
+                                    })
+                                    .on_click({
+                                        let weak = row_weak.clone();
+                                        let popover = row_popover.clone();
+                                        move |_, window, cx| {
+                                            let _ = weak.update(cx, |this, cx| {
+                                                this.choose_font_family(
+                                                    target,
+                                                    name.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            });
+                                            popover.close(window, cx);
+                                            window.refresh();
+                                        }
+                                    })
+                                    .into_any_element()
+                            })
+                            .size_full(),
+                        )
+                        .child(scrollbar::vertical(&list_state, &scrollbar_state))
+                        .into_any_element()
+                };
+
+                div()
+                    .w(px(280.0))
+                    .rounded(px(13.0))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .bg(theme.raised)
+                    .shadow_lg()
+                    .flex()
+                    .flex_col()
+                    .on_action(move |_: &SelectNextEntry, _, cx| {
+                        let _ = next_weak.update(cx, |this, cx| {
+                            this.move_font_selector_highlight(target, "down", &next_families, cx);
+                        });
+                    })
+                    .on_action(move |_: &SelectPreviousEntry, _, cx| {
+                        let _ = previous_weak.update(cx, |this, cx| {
+                            this.move_font_selector_highlight(target, "up", &previous_families, cx);
+                        });
+                    })
+                    .on_action(move |_: &ConfirmEntry, window, cx| {
+                        let should_close = confirm_weak
+                            .update(cx, |this, cx| {
+                                this.confirm_font_selector(target, &confirm_families, window, cx)
+                            })
+                            .unwrap_or(false);
+                        if should_close {
+                            confirm_popover.close(window, cx);
+                            window.refresh();
+                        }
+                    })
+                    .child(
+                        div().flex_none().p(px(8.0)).child(
+                            TextField::new(
+                                SharedString::from(format!("{}-filter", target.menu_id())),
+                                search.clone(),
+                            )
+                            .icon("icons/search.svg", 13.0),
+                        ),
+                    )
+                    .child(div().mx(px(8.0)).h(px(1.0)).flex_none().bg(theme.border))
+                    .child(rows)
+                    .child(div().h(px(4.0)))
+                    .into_any_element()
+            },
+        )
+    }
+
+    fn font_selector(&self, target: FontTarget) -> &FontSelector {
+        match target {
+            FontTarget::Ui => &self.ui_font_selector,
+            FontTarget::Code => &self.code_font_selector,
+        }
+    }
+
+    fn font_selector_mut(&mut self, target: FontTarget) -> &mut FontSelector {
+        match target {
+            FontTarget::Ui => &mut self.ui_font_selector,
+            FontTarget::Code => &mut self.code_font_selector,
+        }
+    }
+
+    /// The name the picker checks: the stored choice, or the built-in default
+    /// a `None` resolves to.
+    fn font_family_setting(&self, target: FontTarget) -> SharedString {
+        let stored = match target {
+            FontTarget::Ui => &self.state.ui_font_family,
+            FontTarget::Code => &self.state.code_font_family,
+        };
+        stored
+            .as_deref()
+            .map(SharedString::from)
+            .unwrap_or_else(|| SharedString::from(target.default_family()))
+    }
+
+    /// The installed families filtered by the picker's query. Before the
+    /// background enumeration lands the list holds only the current face, so
+    /// the card still has a row to point at.
+    fn visible_font_families(&self, target: FontTarget, cx: &App) -> Vec<SharedString> {
+        let query = self
+            .font_selector(target)
+            .search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
+        crate::fonts::installed(cx)
+            .unwrap_or_else(|| vec![self.font_family_setting(target)])
+            .into_iter()
+            .filter(|name| query.is_empty() || name.to_lowercase().contains(query.as_str()))
+            .collect()
+    }
+
+    /// Keep the row list in sync with the filtered names — same discipline as
+    /// the branch picker so an unchanged frame never resets the scroll.
+    fn sync_font_selector_rows(&self, target: FontTarget, rows: &[SharedString]) {
+        let selector = self.font_selector(target);
+        let mut cached = selector.rows.borrow_mut();
+        if cached.as_slice() == rows {
+            return;
+        }
+        *cached = rows.to_vec();
+        drop(cached);
+        selector
+            .list
+            .reset_with_uniform_height(rows.len(), px(FONT_PICKER_ROW_HEIGHT));
+    }
+
+    /// Reset the picker for a fresh open: clear the filter, drop the cursor,
+    /// and flag the reveal so the current family is scrolled into view once
+    /// the deferred card has mounted. The family list is warmed at startup,
+    /// but a very early open waits on the background enumeration and asks
+    /// for a repaint when it lands.
+    fn open_font_selector(
+        &mut self,
+        target: FontTarget,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selector = self.font_selector_mut(target);
+        selector.pending_reveal.set(true);
+        selector.highlight = None;
+        let search = selector.search.clone();
+        search.update(cx, |input, cx| input.clear(cx));
+        if crate::fonts::installed(cx).is_none() {
+            crate::fonts::prefetch(cx);
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(30))
+                        .await;
+                    let loaded = this
+                        .update(cx, |_, cx| crate::fonts::installed(cx).is_some())
+                        .unwrap_or(true);
+                    if loaded {
+                        break;
+                    }
+                }
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+            .detach();
+        }
+        cx.notify();
+    }
+
+    pub(super) fn font_selector_query_edited(
+        &mut self,
+        target: FontTarget,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .font_selector(target)
+            .search
+            .read(cx)
+            .content()
+            .trim()
+            .is_empty()
+        {
+            self.font_selector_mut(target).highlight = None;
+            // Re-center on the applied family, same as the branch picker.
+            let families = self.visible_font_families(target, cx);
+            let selected = self.font_family_setting(target);
+            if let Some(index) = families.iter().position(|name| *name == selected) {
+                self.font_selector(target).list.scroll_to_reveal_item(index);
+            }
+        } else {
+            let selector = self.font_selector_mut(target);
+            selector.highlight = Some(0);
+            selector.list.scroll_to_reveal_item(0);
+        }
+        cx.notify();
+    }
+
+    fn move_font_selector_highlight(
+        &mut self,
+        target: FontTarget,
+        key: &str,
+        families: &[SharedString],
+        cx: &mut Context<Self>,
+    ) {
+        let selector = self.font_selector_mut(target);
+        let Some(next) = next_picker_highlight(selector.highlight, families.len(), key) else {
+            return;
+        };
+        selector.highlight = Some(next);
+        selector.list.scroll_to_reveal_item(next);
+        cx.notify();
+    }
+
+    /// Apply the keyboard-selected family, returning whether the picker
+    /// should dismiss afterward.
+    fn confirm_font_selector(
+        &mut self,
+        target: FontTarget,
+        families: &[SharedString],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(name) = families
+            .get(self.font_selector(target).highlight.unwrap_or(0))
+            .cloned()
+        else {
+            return false;
+        };
+        self.choose_font_family(target, name, window, cx);
+        true
+    }
+
+    /// Store `family` for `target` — `None` when it is the built-in default —
+    /// then repaint every surface that shapes with it.
+    fn choose_font_family(
+        &mut self,
+        target: FontTarget,
+        family: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = waku_client::persistence::sanitized_font_family(
+            (family.as_ref() != target.default_family()).then(|| family.to_string()),
+        );
+        let stored = match target {
+            FontTarget::Ui => &mut self.state.ui_font_family,
+            FontTarget::Code => &mut self.state.code_font_family,
+        };
+        if *stored == value {
+            return;
+        }
+        *stored = value;
+        crate::fonts::install(
+            self.state.ui_font_family.as_deref(),
+            self.state.code_font_family.as_deref(),
+            cx,
+        );
+        // Prose, code, and terminal cells all shape against these faces;
+        // markdown flats are dropped by `MarkdownView::sync_style`'s family
+        // key and the rest of the measured surfaces by this reset.
+        self.remeasure_font_sized_surfaces();
+        self.save();
+        window.refresh();
+        cx.notify();
     }
 
     fn set_render_math(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -2738,7 +3172,7 @@ impl Waku {
                                 .when_some(version, |element, version| {
                                     element.child(
                                         div()
-                                            .font_family(crate::md::render::MONO_FAMILY)
+                                            .font_family(crate::fonts::current(cx).code)
                                             .text_size(sp(12.5))
                                             .text_color(theme.text_tertiary)
                                             .child(SharedString::from(format!("v{version}"))),
@@ -3476,6 +3910,11 @@ impl Waku {
         self.settings_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("settings.search"), cx)
         });
+        for selector in [&self.ui_font_selector, &self.code_font_selector] {
+            selector.search.update(cx, |input, cx| {
+                input.set_placeholder(tr!("input.search_fonts"), cx)
+            });
+        }
         self.skills_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("skills.search"), cx)
         });
@@ -3522,6 +3961,74 @@ fn font_size_label(size: f32) -> String {
         format!("{size:.0} px")
     } else {
         format!("{size} px")
+    }
+}
+
+const FONT_PICKER_ROW_HEIGHT: f32 = 30.0;
+const FONT_PICKER_LIST_MAX_HEIGHT: f32 = 300.0;
+
+/// Which configurable face a font picker edits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FontTarget {
+    Ui,
+    Code,
+}
+
+impl FontTarget {
+    fn menu_id(self) -> &'static str {
+        match self {
+            Self::Ui => "ui-font-selector",
+            Self::Code => "code-font-selector",
+        }
+    }
+
+    /// The family a `None` setting resolves to — also the row that resets
+    /// the field to default when chosen.
+    fn default_family(self) -> &'static str {
+        match self {
+            Self::Ui => crate::fonts::DEFAULT_UI_FAMILY,
+            Self::Code => crate::fonts::DEFAULT_CODE_FAMILY,
+        }
+    }
+}
+
+/// One Appearance font picker's state: its filter field, the virtualized row
+/// list, and the keyboard cursor. `rows` mirrors the names the list was last
+/// built for so an unchanged frame never resets the scroll position;
+/// `pending_reveal` asks the next rendered frame to park on the selected row.
+pub(super) struct FontSelector {
+    pub search: Entity<TextInput>,
+    pub list: ListState,
+    pub scrollbar: Rc<ScrollbarState>,
+    pub highlight: Option<usize>,
+    pub pending_reveal: Cell<bool>,
+    pub rows: RefCell<Vec<SharedString>>,
+}
+
+impl FontSelector {
+    pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
+        Self {
+            search: cx.new(|cx| {
+                TextInput::new(window, cx)
+                    .clear_on_escape()
+                    .placeholder(tr!("input.search_fonts"))
+            }),
+            list: ListState::new(0, ListAlignment::Top, px(64.0)),
+            scrollbar: ScrollbarState::new(),
+            highlight: None,
+            pending_reveal: Cell::new(false),
+            rows: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+/// What a family row shows: the platform alias reads better as "System
+/// font" than ".SystemUIFont".
+fn font_row_label(family: &SharedString) -> SharedString {
+    if family.as_ref() == crate::fonts::DEFAULT_UI_FAMILY {
+        SharedString::from(tr!("settings.system_font"))
+    } else {
+        family.clone()
     }
 }
 

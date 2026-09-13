@@ -1102,7 +1102,13 @@ mod tests {
                 panic!()
             };
             let palette = Palette::from_theme(&Theme::dark());
-            let flat = flatten(runs, &palette, FontWeight::NORMAL, palette.text);
+            let flat = flatten(
+                runs,
+                &palette,
+                &crate::fonts::Fonts::default(),
+                FontWeight::NORMAL,
+                palette.text,
+            );
             let data = flat.math.as_ref().unwrap();
             let metrics = [Some(math::Metrics {
                 width: 30.0,

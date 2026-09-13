@@ -184,7 +184,7 @@ settings.commands:
 settings.general_keywords:
   en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open
 settings.appearance_keywords:
-  en: appearance theme system light dark language english chinese simplified font size text editor sidebar transparency vibrancy blur opaque solid
+  en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid
 settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills:
@@ -407,6 +407,20 @@ settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
   en: Blend the desktop behind the sidebar. Turn off for a solid background.
+settings.ui_font:
+  en: UI font
+settings.ui_font_description:
+  en: Font used across the interface and messages
+settings.code_font:
+  en: Code font
+settings.code_font_description:
+  en: Font in the file editor, diffs, code blocks, tool output, and terminal
+settings.system_font:
+  en: System font
+settings.default_font:
+  en: Default
+settings.no_fonts:
+  en: No matching fonts
 settings.ui_font_size:
   en: UI font size
 settings.ui_font_size_description:
@@ -440,6 +454,8 @@ input.search_models:
   en: Search models…
 input.search_branches:
   en: Search branches
+input.search_fonts:
+  en: Search fonts…
 input.new_branch_name:
   en: New branch name
 input.worktree_name:

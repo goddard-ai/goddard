@@ -78,8 +78,8 @@ static TERMINAL_FONT_FALLBACKS: LazyLock<FontFallbacks> = LazyLock::new(|| {
     FontFallbacks::from_fonts(vec![crate::assets::SYMBOLS_FONT_FAMILY.to_owned()])
 });
 
-fn terminal_font() -> gpui::Font {
-    let mut terminal_font = font("JetBrains Mono");
+fn terminal_font(family: &SharedString) -> gpui::Font {
+    let mut terminal_font = font(family.clone());
     terminal_font.fallbacks = Some(TERMINAL_FONT_FALLBACKS.clone());
     terminal_font
 }
@@ -679,7 +679,9 @@ pub struct TerminalView {
     panel_width: f32,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
-    measured_cell_width: Option<f32>,
+    /// Keyed by family so a code-font change re-measures instead of wrapping
+    /// the grid at the old face's advance.
+    measured_cell_width: Option<(SharedString, f32)>,
     scrollbar_state: Rc<ScrollbarState>,
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     selecting: bool,
@@ -869,7 +871,10 @@ impl TerminalView {
     }
 
     fn cell_width(&self) -> f32 {
-        self.measured_cell_width.unwrap_or(TERMINAL_CELL_WIDTH)
+        self.measured_cell_width
+            .as_ref()
+            .map(|(_, width)| *width)
+            .unwrap_or(TERMINAL_CELL_WIDTH)
     }
 
     fn grid_point_for_position(
@@ -1147,13 +1152,19 @@ impl Render for TerminalView {
         // The rows are laid out by `StyledText` at the font's own advance, so
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
-        let cell_width = *self.measured_cell_width.get_or_insert_with(|| {
-            let text_system = cx.text_system();
-            let font_id = text_system.resolve_font(&terminal_font());
-            text_system
-                .advance(font_id, px(TERMINAL_FONT_SIZE), 'm')
-                .map_or(TERMINAL_CELL_WIDTH, |advance| f32::from(advance.width))
-        });
+        let code_family = crate::fonts::current(cx).code;
+        let cell_width = match &self.measured_cell_width {
+            Some((family, width)) if *family == code_family => *width,
+            _ => {
+                let text_system = cx.text_system();
+                let font_id = text_system.resolve_font(&terminal_font(&code_family));
+                let width = text_system
+                    .advance(font_id, px(TERMINAL_FONT_SIZE), 'm')
+                    .map_or(TERMINAL_CELL_WIDTH, |advance| f32::from(advance.width));
+                self.measured_cell_width = Some((code_family.clone(), width));
+                width
+            }
+        };
         let columns = ((panel_width - TERMINAL_PADDING_X * 2.0) / cell_width)
             .floor()
             .max(TERMINAL_MIN_COLUMNS as f32) as usize;
@@ -1222,7 +1233,7 @@ impl Render for TerminalView {
                     .runs
                     .into_iter()
                     .map(|run| {
-                        let mut run_font = terminal_font();
+                        let mut run_font = terminal_font(&code_family);
                         if run.style.bold {
                             run_font.weight = FontWeight::BOLD;
                         }

@@ -331,6 +331,15 @@ pub struct AppSettings {
     /// and tool output — in pixels. Hand-edited values are clamped when
     /// applied.
     pub code_font_size: f32,
+    /// Family name for the interface face: chrome and markdown prose.
+    /// `None` keeps the platform's system UI font.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_font_family: Option<String>,
+    /// Family name for every monospace surface — the file editor, diffs,
+    /// code blocks, tool output, and the terminal. `None` keeps the bundled
+    /// JetBrains Mono.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_font_family: Option<String>,
     pub render_math: bool,
     /// Open a task that is not mid-turn scrolled to its last prompt instead
     /// of the end of the transcript.
@@ -361,6 +370,8 @@ impl Default for AppSettings {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            ui_font_family: None,
+            code_font_family: None,
             render_math: true,
             open_at_last_prompt: true,
             sidebar_transparency: true,
@@ -391,6 +402,16 @@ pub fn sanitized_ui_font_size(size: f32) -> f32 {
 
 pub fn sanitized_code_font_size(size: f32) -> f32 {
     sanitized_font_size(size, DEFAULT_CODE_FONT_SIZE)
+}
+
+/// A blank family name is no choice at all — treat it as unset so a
+/// whitespace-only `app.json` value still resolves to the default face.
+/// An unknown name is kept: font resolution falls back per glyph anyway.
+pub fn sanitized_font_family(family: Option<String>) -> Option<String> {
+    family.and_then(|family| {
+        let family = family.trim();
+        (!family.is_empty()).then(|| family.to_owned())
+    })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -479,6 +500,13 @@ pub struct PersistedState {
     pub ui_font_size: f32,
     #[serde(default = "default_code_font_size")]
     pub code_font_size: f32,
+    /// Family name for the interface face; `None` is the system UI font.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_font_family: Option<String>,
+    /// Family name for monospace surfaces; `None` is the bundled
+    /// JetBrains Mono.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_font_family: Option<String>,
     #[serde(default = "default_render_math")]
     pub render_math: bool,
     #[serde(default = "default_open_at_last_prompt")]
@@ -567,6 +595,8 @@ impl PersistedState {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            ui_font_family: None,
+            code_font_family: None,
             render_math: true,
             open_at_last_prompt: true,
             sidebar_transparency: true,
@@ -738,6 +768,8 @@ impl PersistedState {
             language: self.language,
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
+            ui_font_family: self.ui_font_family.clone(),
+            code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
             open_at_last_prompt: self.open_at_last_prompt,
             sidebar_transparency: self.sidebar_transparency,
@@ -781,6 +813,8 @@ impl PersistedState {
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
+        self.ui_font_family = sanitized_font_family(settings.ui_font_family);
+        self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sidebar_transparency = settings.sidebar_transparency;

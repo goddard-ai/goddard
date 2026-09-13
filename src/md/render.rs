@@ -41,6 +41,7 @@ use super::selection::{
     RegisteredText, SelectionRegistry, SelectionState, TextKey, line_range, word_range,
 };
 use super::veil::{RowVeil, apply_veil};
+use crate::fonts::Fonts;
 use crate::theme::Theme;
 use crate::ui::menu::{ContextMenuHandle, context_menu};
 use crate::ui::tooltip::Tooltip;
@@ -170,12 +171,6 @@ impl Metrics {
         }
     }
 }
-
-pub const SANS_FAMILY: &str = ".SystemUIFont";
-/// The bundled mono face. "SF Mono" only exists on machines that installed it
-/// with Xcode or Terminal, and silently falls back to the sans face when it
-/// does not — which reads as proportional code.
-pub const MONO_FAMILY: &str = "JetBrains Mono";
 
 /// Inline-code wash geometry. Paint-only: the box overhangs the glyphs
 /// horizontally and insets vertically inside the line box.
@@ -314,10 +309,12 @@ pub struct SearchHighlights {
     pub active: Option<TextSearchMatch>,
 }
 
-/// Flatten inline runs for shaping. Pure given the palette and base weight.
+/// Flatten inline runs for shaping. Pure given the palette, families, and
+/// base weight.
 pub fn flatten(
     runs: &[InlineRun],
     palette: &Palette,
+    families: &Fonts,
     base_weight: FontWeight,
     base_color: Hsla,
 ) -> FlatText {
@@ -343,9 +340,9 @@ pub fn flatten(
         }
 
         let mut run_font = font(if run.style.code {
-            MONO_FAMILY
+            families.code.clone()
         } else {
-            SANS_FAMILY
+            families.ui.clone()
         });
         run_font.weight = if run.style.bold && base_weight < FontWeight::SEMIBOLD {
             FontWeight::SEMIBOLD
@@ -411,7 +408,7 @@ pub fn flatten(
 /// A flat string with uniform styling, for non-markdown transcript text.
 pub fn flatten_plain(
     text: impl Into<SharedString>,
-    family: &'static str,
+    family: impl Into<SharedString>,
     weight: FontWeight,
     color: Hsla,
 ) -> FlatText {
@@ -455,10 +452,10 @@ pub struct MarkdownView {
     /// append can change. Recorded during render, because only the renderer
     /// knows how many text elements each block expands into.
     volatile_from: Cell<usize>,
-    /// Style the cached flats were built for. Colors live inside `TextRun`s, so
-    /// a theme switch has to drop them or the transcript keeps painting the old
-    /// palette.
-    style: Cell<Option<(Palette, Metrics)>>,
+    /// Style the cached flats were built for. Colors and families live inside
+    /// `TextRun`s, so a theme or font change has to drop them or the
+    /// transcript keeps painting the old faces.
+    style: RefCell<Option<(Palette, Metrics, Fonts)>>,
     /// Per-element opacity spans for the live response. Text is committed to
     /// layout immediately; only these paint colors animate.
     veil: RefCell<RowVeil>,
@@ -482,7 +479,7 @@ impl MarkdownView {
             tail: Vec::new(),
             flats: RefCell::new(HashMap::new()),
             volatile_from: Cell::new(0),
-            style: Cell::new(None),
+            style: RefCell::new(None),
             veil: RefCell::new(RowVeil::default()),
             copied_code_blocks: Rc::new(RefCell::new(HashMap::new())),
             streaming: Cell::new(false),
@@ -554,10 +551,11 @@ impl MarkdownView {
     }
 
     /// Drop cached flats if the style they were built for no longer applies.
-    fn sync_style(&self, palette: &Palette, metrics: &Metrics) {
-        let current = (*palette, *metrics);
-        if self.style.get() != Some(current) {
-            self.style.set(Some(current));
+    fn sync_style(&self, palette: &Palette, metrics: &Metrics, families: &Fonts) {
+        let current = (*palette, *metrics, families.clone());
+        let mut style = self.style.borrow_mut();
+        if style.as_ref() != Some(&current) {
+            *style = Some(current);
             self.flats.borrow_mut().clear();
         }
     }
@@ -596,6 +594,10 @@ pub struct Ctx<'a> {
     row: Rc<str>,
     palette: &'a Palette,
     metrics: Metrics,
+    /// The faces inline code and prose shape against. Captured per pass
+    /// because the cache keys on it — a font change must not leak into flats
+    /// built for the previous family.
+    families: Fonts,
     selection: TranscriptSelection,
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
@@ -622,6 +624,7 @@ impl<'a> Ctx<'a> {
             row: row.into(),
             palette,
             metrics,
+            families: Fonts::default(),
             selection,
             search: None,
             link_handler: None,
@@ -640,6 +643,10 @@ impl<'a> Ctx<'a> {
         &self.selection
     }
 
+    pub fn families(&self) -> &Fonts {
+        &self.families
+    }
+
     pub fn with_link_handler(mut self, handler: LinkHandler) -> Self {
         self.link_handler = Some(handler);
         self
@@ -652,6 +659,11 @@ impl<'a> Ctx<'a> {
 
     pub fn with_streaming_animation(mut self, animate: bool) -> Self {
         self.animate_streaming = animate;
+        self
+    }
+
+    pub fn with_families(mut self, families: Fonts) -> Self {
+        self.families = families;
         self
     }
 
@@ -679,6 +691,7 @@ impl<'a> Ctx<'a> {
             row: self.row.clone(),
             palette: self.palette,
             metrics: self.metrics,
+            families: self.families.clone(),
             selection: self.selection.clone(),
             search: self.search.clone(),
             link_handler: self.link_handler.clone(),
@@ -935,7 +948,7 @@ pub fn selectable_flat_text(
 /// is not markdown but still takes part in transcript-wide selection.
 pub fn plain_text(
     text: impl Into<SharedString>,
-    family: &'static str,
+    family: impl Into<SharedString>,
     weight: FontWeight,
     color: Hsla,
     ctx: &Ctx,
@@ -1328,7 +1341,7 @@ fn markdown_capped<'a>(
         return None;
     };
 
-    view.sync_style(ctx.palette, &ctx.metrics);
+    view.sync_style(ctx.palette, &ctx.metrics, &ctx.families);
     let ctx = ctx.with_cache(view);
     if ctx.animate_streaming && view.streaming.get() {
         view.veil.borrow_mut().begin_frame();
@@ -1386,7 +1399,13 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
         Block::Paragraph { runs } => {
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                flatten(runs, ctx.palette, FontWeight::NORMAL, ctx.palette.text)
+                flatten(
+                    runs,
+                    ctx.palette,
+                    &ctx.families,
+                    FontWeight::NORMAL,
+                    ctx.palette.text,
+                )
             });
             div()
                 .w_full()
@@ -1400,7 +1419,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
             let flat = ctx.flat(key.index, || {
-                flatten(runs, ctx.palette, weight, ctx.palette.text)
+                flatten(runs, ctx.palette, &ctx.families, weight, ctx.palette.text)
             });
             div()
                 .w_full()
@@ -1417,7 +1436,7 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
             let flat = ctx.flat(key.index, || {
                 let mut flat = flatten_plain(
                     latex.clone(),
-                    MONO_FAMILY,
+                    ctx.families.code.clone(),
                     FontWeight::NORMAL,
                     ctx.palette.text,
                 );
@@ -1677,7 +1696,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
     // code block is exactly the case the cache exists for.
     let flat = ctx.flat(key.index, || {
         let lang = language.and_then(highlight::lang_for_tag);
-        let mut code_font = font(MONO_FAMILY);
+        let mut code_font = font(ctx.families.code.clone());
         code_font.weight = FontWeight::NORMAL;
         FlatText {
             text: SharedString::from(code.to_owned()),
@@ -1917,7 +1936,7 @@ fn table_row(
     for (index, cell) in cells.iter().enumerate() {
         let key = ctx.next_key();
         let flat = ctx.flat(key.index, || {
-            flatten(cell, ctx.palette, weight, ctx.palette.text)
+            flatten(cell, ctx.palette, &ctx.families, weight, ctx.palette.text)
         });
         let alignment = align.get(index).copied().unwrap_or_default();
         row = row.child(
@@ -2060,6 +2079,7 @@ mod tests {
         let flat = flatten(
             &runs_of("plain **bold** `code` [link](https://example.com) ~~gone~~"),
             &palette(),
+            &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
         );
@@ -2083,6 +2103,7 @@ mod tests {
         let flat = flatten(
             &runs_of(&format!("see [docs]({PENDING_LINK_URL})")),
             &palette(),
+            &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
         );
@@ -2102,6 +2123,7 @@ mod tests {
         let flat = flatten(
             &runs_of("[**a** `b`](https://x) tail"),
             &palette(),
+            &Fonts::default(),
             FontWeight::NORMAL,
             palette().text,
         );
@@ -2112,11 +2134,21 @@ mod tests {
 
     #[test]
     fn plain_flatten_tiles_and_handles_empty_text() {
-        let flat = flatten_plain("hello", MONO_FAMILY, FontWeight::NORMAL, palette().text);
+        let flat = flatten_plain(
+            "hello",
+            crate::fonts::DEFAULT_CODE_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
         assert_runs_tile(&flat);
         assert_eq!(flat.runs.len(), 1);
 
-        let empty = flatten_plain("", SANS_FAMILY, FontWeight::NORMAL, palette().text);
+        let empty = flatten_plain(
+            "",
+            crate::fonts::DEFAULT_UI_FAMILY,
+            FontWeight::NORMAL,
+            palette().text,
+        );
         assert_runs_tile(&empty);
         assert!(empty.runs.is_empty());
     }
@@ -2124,7 +2156,7 @@ mod tests {
     #[test]
     fn code_runs_tile_the_block_including_newlines() {
         let code = "fn main() {\n    let x = 1; // c\n}";
-        let mut code_font = font(MONO_FAMILY);
+        let mut code_font = font(crate::fonts::DEFAULT_CODE_FAMILY);
         code_font.weight = FontWeight::NORMAL;
         let runs = code_runs(code, Some(Lang::Rust), &code_font, &palette());
         assert_eq!(
@@ -2219,7 +2251,7 @@ mod tests {
     #[test]
     fn highlighting_never_changes_run_lengths() {
         let code = "const a = `t ${b}`;\n// note\nlet n = 0x1F;";
-        let mut code_font = font(MONO_FAMILY);
+        let mut code_font = font(crate::fonts::DEFAULT_CODE_FAMILY);
         code_font.weight = FontWeight::NORMAL;
         let highlighted = code_runs(code, Some(Lang::Script), &code_font, &palette());
         let plain = code_runs(code, None, &code_font, &palette());
@@ -2235,7 +2267,7 @@ mod tests {
         fn stub(label: &str) -> FlatText {
             flatten_plain(
                 label.to_owned(),
-                SANS_FAMILY,
+                crate::fonts::DEFAULT_UI_FAMILY,
                 FontWeight::NORMAL,
                 palette().text,
             )
@@ -2268,12 +2300,17 @@ mod tests {
         let dark = Palette::from_theme(&Theme::dark());
         let light = Palette::from_theme(&Theme::light());
 
-        view.sync_style(&dark, &Metrics::BODY);
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default());
         let cached = view.flat(0, || {
-            flatten_plain("a", SANS_FAMILY, FontWeight::NORMAL, dark.text)
+            flatten_plain(
+                "a",
+                crate::fonts::DEFAULT_UI_FAMILY,
+                FontWeight::NORMAL,
+                dark.text,
+            )
         });
 
-        view.sync_style(&dark, &Metrics::BODY);
+        view.sync_style(&dark, &Metrics::BODY, &Fonts::default());
         assert!(
             Rc::ptr_eq(
                 &cached,
@@ -2282,9 +2319,14 @@ mod tests {
             "re-syncing the same style must not invalidate"
         );
 
-        view.sync_style(&light, &Metrics::BODY);
+        view.sync_style(&light, &Metrics::BODY, &Fonts::default());
         let relit = view.flat(0, || {
-            flatten_plain("a", SANS_FAMILY, FontWeight::NORMAL, light.text)
+            flatten_plain(
+                "a",
+                crate::fonts::DEFAULT_UI_FAMILY,
+                FontWeight::NORMAL,
+                light.text,
+            )
         });
         assert!(!Rc::ptr_eq(&cached, &relit));
         assert_eq!(relit.runs[0].color, light.text);

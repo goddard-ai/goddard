@@ -1124,6 +1124,9 @@ pub struct Waku {
     project_switcher: project_switcher::ProjectSwitcherUi,
     model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
+    /// The Appearance page's two font pickers — one per configurable face.
+    ui_font_selector: settings::FontSelector,
+    code_font_selector: settings::FontSelector,
     daemon_port_input: Entity<TextInput>,
     daemon_origins_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
@@ -2096,6 +2099,11 @@ impl Waku {
         window.set_rem_size(px(waku_client::persistence::sanitized_ui_font_size(
             state.ui_font_size,
         )));
+        crate::fonts::install(
+            state.ui_font_family.as_deref(),
+            state.code_font_family.as_deref(),
+            cx,
+        );
         let analytics = crate::analytics::Analytics::new(
             state.language.locale(),
             state.analytics_id,
@@ -2160,6 +2168,8 @@ impl Waku {
                 .clear_on_escape()
                 .placeholder(tr!("settings.search"))
         });
+        let ui_font_selector = settings::FontSelector::new(window, cx);
+        let code_font_selector = settings::FontSelector::new(window, cx);
         let daemon_port = state.daemon_exposure.port.to_string();
         let daemon_origins = state.daemon_exposure.allowed_origins_text();
         let daemon_port_input = cx.new(|cx| {
@@ -2752,6 +2762,23 @@ impl Waku {
                 },
             )
             .detach();
+            for (target, search) in [
+                (settings::FontTarget::Ui, ui_font_selector.search.clone()),
+                (
+                    settings::FontTarget::Code,
+                    code_font_selector.search.clone(),
+                ),
+            ] {
+                cx.subscribe(
+                    &search,
+                    move |this: &mut Self, _, event: &InputEvent, cx| {
+                        if matches!(event, InputEvent::Edited) {
+                            this.font_selector_query_edited(target, cx);
+                        }
+                    },
+                )
+                .detach();
+            }
             for input in [&daemon_port_input, &daemon_origins_input] {
                 cx.subscribe(
                     input,
@@ -2940,6 +2967,8 @@ impl Waku {
                 worktree_picker_highlight: None,
                 worktree_creation_pending: false,
                 settings_search,
+                ui_font_selector,
+                code_font_selector,
                 daemon_port_input,
                 daemon_origins_input,
                 daemon_reconfigure_pending: false,
