@@ -2,6 +2,7 @@ use super::composer::next_picker_highlight;
 use super::*;
 use crate::ui::ActivationExt;
 use crate::theme::{ThemeName, ThemeSettings};
+use gpui::{KeyBinding, actions};
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -18,6 +19,12 @@ const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 /// they arrive as actions, which consume the keystroke before the field sees
 /// it.
 const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
+
+/// The Commands page's editor claims Tab for focus traversal rather than
+/// letting a field take it as text.
+const CUSTOM_COMMAND_EDITOR_CONTEXT: &str = "CustomCommandEditor";
+
+actions!(waku_settings, [FocusNext, FocusPrevious]);
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
@@ -78,12 +85,17 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
     ),
 ];
 
-/// Bind the search field's list-navigation keys. Called once at startup.
+/// Bind the settings fields' navigation keys. Called once at startup.
 pub fn init(cx: &mut App) {
-    use gpui::KeyBinding;
     cx.bind_keys([
         KeyBinding::new("down", SelectNextEntry, Some(SETTINGS_SEARCH_CONTEXT)),
         KeyBinding::new("up", SelectPreviousEntry, Some(SETTINGS_SEARCH_CONTEXT)),
+        KeyBinding::new("tab", FocusNext, Some(CUSTOM_COMMAND_EDITOR_CONTEXT)),
+        KeyBinding::new(
+            "shift-tab",
+            FocusPrevious,
+            Some(CUSTOM_COMMAND_EDITOR_CONTEXT),
+        ),
     ]);
 }
 
@@ -770,16 +782,18 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         let name = cx.new(|cx| {
-            let mut input =
-                TextInput::new(window, cx).placeholder(tr!("commands.name_placeholder"));
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .placeholder(tr!("commands.name_placeholder"));
             if let Some(name) = command.and_then(|command| command.name.as_deref()) {
                 input.set_content(name, cx);
             }
             input
         });
         let shell = cx.new(|cx| {
-            let mut input =
-                TextInput::new(window, cx).placeholder(tr!("commands.shell_placeholder"));
+            let mut input = TextInput::new(window, cx)
+                .tab_index(0)
+                .placeholder(tr!("commands.shell_placeholder"));
             if let Some(shell) = command.and_then(|command| command.shell.as_deref()) {
                 input.set_content(shell, cx);
             }
@@ -787,6 +801,7 @@ impl Waku {
         });
         let script = cx.new(|cx| {
             let mut input = TextInput::new(window, cx)
+                .tab_index(0)
                 .multi_line()
                 .auto_height()
                 .max_lines(10)
@@ -1084,6 +1099,9 @@ impl Waku {
         };
 
         div()
+            .key_context(CUSTOM_COMMAND_EDITOR_CONTEXT)
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
             .w_full()
             .px(px(20.0))
             .py(px(15.0))
@@ -3591,8 +3609,81 @@ fn permission_status_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{SETTINGS_PAGES, abbreviate_home_path};
+    use super::{
+        CUSTOM_COMMAND_EDITOR_CONTEXT, FocusNext, FocusPrevious, SETTINGS_PAGES,
+        abbreviate_home_path,
+    };
+    use crate::input::TextInput;
+    use gpui::{Context, Entity, Render, TestAppContext, Window, div, prelude::*};
     use std::path::Path;
+
+    struct TabHarness {
+        name: Entity<TextInput>,
+        shell: Entity<TextInput>,
+        script: Entity<TextInput>,
+    }
+
+    impl Render for TabHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .key_context(CUSTOM_COMMAND_EDITOR_CONTEXT)
+                .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+                .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
+                .child(self.name.clone())
+                .child(self.shell.clone())
+                .child(self.script.clone())
+                .child(div().id("toggle").tab_index(0))
+                .child(div().id("cancel").tab_index(0))
+                .child(div().id("save").tab_index(0))
+        }
+    }
+
+    #[gpui::test]
+    fn tab_moves_through_custom_command_editor_controls(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::input::init(cx);
+            super::init(cx);
+        });
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let name = cx.new(|cx| TextInput::new(window, cx).tab_index(0));
+            let shell = cx.new(|cx| TextInput::new(window, cx).tab_index(0));
+            let script = cx.new(|cx| TextInput::new(window, cx).tab_index(0));
+            TabHarness {
+                name,
+                shell,
+                script,
+            }
+        });
+        let name = cx.read_entity(&harness, |harness, _| harness.name.clone());
+        let shell = cx.read_entity(&harness, |harness, _| harness.shell.clone());
+        let script = cx.read_entity(&harness, |harness, _| harness.script.clone());
+        let name_focus = cx.read_entity(&name, |input, _| input.focus());
+        let shell_focus = cx.read_entity(&shell, |input, _| input.focus());
+        let script_focus = cx.read_entity(&script, |input, _| input.focus());
+        cx.update(|window, cx| window.focus(&name_focus, cx));
+
+        let mut forward = Vec::new();
+        for _ in 0..6 {
+            cx.simulate_keystrokes("tab");
+            cx.update(|window, cx| {
+                forward.push(window.focused(cx).expect("a tab stop should be focused"));
+            });
+        }
+
+        assert_eq!(forward[0], shell_focus);
+        assert_eq!(forward[1], script_focus);
+        assert_eq!(forward[5], name_focus);
+        for (index, focus) in forward[..5].iter().enumerate() {
+            assert!(!forward[..index].contains(focus));
+        }
+
+        for expected in forward[..5].iter().rev() {
+            cx.simulate_keystrokes("shift-tab");
+            cx.update(|window, cx| {
+                assert_eq!(window.focused(cx).as_ref(), Some(expected));
+            });
+        }
+    }
 
     #[test]
     fn every_settings_page_icon_is_embedded() {

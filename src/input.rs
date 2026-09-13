@@ -838,6 +838,12 @@ impl TextInput {
         self
     }
 
+    /// Put the field in the surrounding surface's tab order.
+    pub fn tab_index(mut self, index: isize) -> Self {
+        self.focus_handle = self.focus_handle.clone().tab_index(index).tab_stop(true);
+        self
+    }
+
     /// Replace the placeholder after construction. Picker fields use this to
     /// name the workspace they are searching without recreating the focused
     /// input entity whenever the selected project changes.
