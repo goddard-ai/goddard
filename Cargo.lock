@@ -1228,7 +1228,7 @@ dependencies = [
 [[package]]
 name = "collections"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.0",
@@ -1790,7 +1790,7 @@ dependencies = [
 [[package]]
 name = "derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2878,7 +2878,7 @@ dependencies = [
 [[package]]
 name = "gpui"
 version = "0.2.2"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2964,7 +2964,7 @@ dependencies = [
 [[package]]
 name = "gpui_linux"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -3016,7 +3016,7 @@ dependencies = [
 [[package]]
 name = "gpui_macos"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -3065,7 +3065,7 @@ dependencies = [
 [[package]]
 name = "gpui_macros"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3076,7 +3076,7 @@ dependencies = [
 [[package]]
 name = "gpui_platform"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
@@ -3089,7 +3089,7 @@ dependencies = [
 [[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -3099,7 +3099,7 @@ dependencies = [
 [[package]]
 name = "gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "log",
@@ -3109,7 +3109,7 @@ dependencies = [
 [[package]]
 name = "gpui_web"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -3132,7 +3132,7 @@ dependencies = [
 [[package]]
 name = "gpui_wgpu"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3162,7 +3162,7 @@ dependencies = [
 [[package]]
 name = "gpui_windows"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -3196,12 +3196,6 @@ dependencies = [
  "arraydeque",
  "smallvec",
 ]
-
-[[package]]
-name = "grid"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "gtk"
@@ -3454,7 +3448,7 @@ dependencies = [
 [[package]]
 name = "http_client"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -4341,7 +4335,7 @@ dependencies = [
 [[package]]
 name = "media"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -5240,7 +5234,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "perf"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "collections",
  "serde",
@@ -5590,28 +5584,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "version_check",
-]
-
-[[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -6229,7 +6201,7 @@ dependencies = [
 [[package]]
 name = "refineable"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "derive_refineable",
 ]
@@ -6726,7 +6698,7 @@ dependencies = [
 [[package]]
 name = "scheduler"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "async-task",
  "backtrace",
@@ -7363,9 +7335,9 @@ dependencies = [
 
 [[package]]
 name = "stacksafe"
-version = "0.1.4"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9c1172965d317e87ddb6d364a040d958b40a1db82b6ef97da26253a8b3d090"
+checksum = "95f9c34983ac74195c710c473db6fdf1085f64a47dbaa0090d1bea03be70da66"
 dependencies = [
  "stacker",
  "stacksafe-macro",
@@ -7373,13 +7345,13 @@ dependencies = [
 
 [[package]]
 name = "stacksafe-macro"
-version = "0.1.4"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "172175341049678163e979d9107ca3508046d4d2a7c6682bee46ac541b17db69"
+checksum = "6feeae42a2d6b0dcb8aeb2f08d9e48cdac600239cf8a20fc59f9e252e86bdfe1"
 dependencies = [
- "proc-macro-error2",
+ "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -7484,7 +7456,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sum_tree"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "heapless",
  "log",
@@ -7700,14 +7672,14 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.12.2"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "340a09581f29809fc0df82a3955501dc7f2a21f887e5d1c13dbe288fe1c0bef4"
+checksum = "c034e05f6ee85a12daa63863c2245797715075c70649947aa0da54f3f2ab1d0f"
 dependencies = [
  "arrayvec",
- "grid",
  "serde",
  "slotmap",
+ "smallvec",
 ]
 
 [[package]]
@@ -8444,7 +8416,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 [[package]]
 name = "util_macros"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "perf",
  "quote",
@@ -10299,7 +10271,7 @@ dependencies = [
 [[package]]
 name = "zlog"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "anyhow",
  "chrono",
@@ -10316,7 +10288,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "ztracing"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 dependencies = [
  "tracing",
  "tracing-subscriber",
@@ -10327,7 +10299,7 @@ dependencies = [
 [[package]]
 name = "ztracing_macro"
 version = "0.1.0"
-source = "git+https://github.com/egoist/zed?branch=waku-webview#f9bad8941ea813982d6dfb10c0377ebf7716b3e7"
+source = "git+https://github.com/goddard-ai/zed?branch=waku-webview#e15bb441dc0a7798550e40bef5d4af36c80fd332"
 
 [[package]]
 name = "zune-core"

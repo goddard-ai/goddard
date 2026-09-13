@@ -24,12 +24,12 @@ base64 = "0.22"
 chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "6.0"
-# The egoist/zed fork is upstream main plus PR #61945 (layered scene
+# The goddard-ai/zed fork is upstream main plus PR #61945 (layered scene
 # rendering), which lets GPUI composite menus and tooltips above native child
-# views — the browser surface's WKWebView. Drop back to upstream once the PR
-# merges.
-gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview" }
-gpui_platform = { git = "https://github.com/egoist/zed", branch = "waku-webview", features = [
+# views — the browser surface's WKWebView — plus Figma-style smoothed corner
+# rendering in the quad shaders.
+gpui = { git = "https://github.com/goddard-ai/zed", branch = "waku-webview" }
+gpui_platform = { git = "https://github.com/goddard-ai/zed", branch = "waku-webview", features = [
   "font-kit",
   "wayland",
   "x11",
@@ -66,7 +66,7 @@ tokio = { version = "1", features = ["rt"] }
 # happens instead of coalescing into the display link's next one — a panel
 # resize drew once per mouse-move event rather than once per displayed frame.
 [dev-dependencies]
-gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview", features = [
+gpui = { git = "https://github.com/goddard-ai/zed", branch = "waku-webview", features = [
   "test-support",
 ] }
 
