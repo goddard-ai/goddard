@@ -144,6 +144,10 @@ fn default_render_math() -> bool {
     true
 }
 
+fn default_open_at_last_prompt() -> bool {
+    true
+}
+
 fn default_sidebar_transparency() -> bool {
     true
 }
@@ -328,6 +332,9 @@ pub struct AppSettings {
     /// applied.
     pub code_font_size: f32,
     pub render_math: bool,
+    /// Open a task that is not mid-turn scrolled to its last prompt instead
+    /// of the end of the transcript.
+    pub open_at_last_prompt: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
@@ -355,6 +362,7 @@ impl Default for AppSettings {
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
             render_math: true,
+            open_at_last_prompt: true,
             sidebar_transparency: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
@@ -473,6 +481,8 @@ pub struct PersistedState {
     pub code_font_size: f32,
     #[serde(default = "default_render_math")]
     pub render_math: bool,
+    #[serde(default = "default_open_at_last_prompt")]
+    pub open_at_last_prompt: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
@@ -558,6 +568,7 @@ impl PersistedState {
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
             render_math: true,
+            open_at_last_prompt: true,
             sidebar_transparency: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
@@ -728,6 +739,7 @@ impl PersistedState {
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
             render_math: self.render_math,
+            open_at_last_prompt: self.open_at_last_prompt,
             sidebar_transparency: self.sidebar_transparency,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
@@ -770,6 +782,7 @@ impl PersistedState {
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
         self.render_math = settings.render_math;
+        self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;

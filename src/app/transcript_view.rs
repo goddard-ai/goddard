@@ -833,7 +833,7 @@ impl ConversationNavigationRail {
 }
 
 impl Waku {
-    fn scroll_to_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn scroll_to_navigation_turn(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
         let row_index = self
             .navigation_turns()
             .iter()

@@ -1074,6 +1074,7 @@ impl Waku {
             self.remove_right_panel_session_state(*session_id);
             self.task_switcher.remove(*session_id);
             self.project_switcher.session_removed(*session_id);
+            self.transcript_scroll_positions.remove(session_id);
         }
         self.state.projects = snapshot.projects;
 
@@ -1181,6 +1182,7 @@ impl Waku {
                     if self.state.selected_session == Some(session_id) {
                         self.reset_visible_state();
                         self.reset_transcript_rows(self.transcript_row_count());
+                        self.reapply_transcript_landing(session_id, cx);
                     }
                     cx.notify();
                 }
@@ -1278,6 +1280,7 @@ impl Waku {
         if self.state.selected_session == Some(session_id) {
             self.reset_visible_state();
             self.reset_transcript_rows(self.transcript_row_count());
+            self.reapply_transcript_landing(session_id, cx);
         }
         self.save();
         cx.notify();

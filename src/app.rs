@@ -1042,6 +1042,17 @@ enum SessionActivationTransition {
     Forward { from: Uuid },
 }
 
+/// Where a session activation parks the transcript.
+#[derive(Clone, Copy)]
+enum TranscriptLanding {
+    /// The reading position the session held when the reader left it;
+    /// back/forward history restores it.
+    Position(ListOffset),
+    /// The top of the final turn — the same spot the navigation rail's last
+    /// button jumps to.
+    LastTurn,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PendingSessionActivation {
     session_id: Uuid,
@@ -1614,6 +1625,14 @@ pub struct Waku {
     /// swallow the re-engage.
     transcript_tail_recheck: Rc<Cell<bool>>,
     transcript_is_scrolled: Rc<Cell<bool>>,
+    /// The scroll position each session held when the reader left it, so
+    /// back/forward history can restore where the transcript was instead of
+    /// picking a fresh landing.
+    transcript_scroll_positions: HashMap<Uuid, ListOffset>,
+    /// The landing the current session's activation chose. A runtime attach
+    /// that lands after activation resets the rows again, so the same landing
+    /// is re-applied there rather than snapping the transcript to its tail.
+    transcript_landing: Option<(Uuid, TranscriptLanding)>,
     /// Last decided visibility of the scroll-to-tail affordance. The tail's
     /// position is unknowable on the frames a stream commit remeasures it, and
     /// those arrive at commit cadence — deciding "show" from that silence
@@ -3183,6 +3202,8 @@ impl Waku {
                 transcript_anchor_following,
                 transcript_tail_recheck,
                 transcript_is_scrolled,
+                transcript_scroll_positions: HashMap::new(),
+                transcript_landing: None,
                 transcript_scroll_to_bottom_visible: Cell::new(false),
                 transcript_scrollbar_dragging: Cell::new(false),
                 transcript_layout_width: Cell::new(Pixels::ZERO),

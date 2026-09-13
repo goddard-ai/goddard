@@ -140,7 +140,7 @@ impl Waku {
                 let _ = self.session_navigation.go_forward(from);
             }
         }
-        self.activate_session(session_id, cx);
+        self.activate_session(session_id, transition, cx);
     }
 
     /// Loads a session's transcript if startup only fetched its list columns.
@@ -196,6 +196,12 @@ impl Waku {
                         } else if waku.state.selected_session == Some(session_id) {
                             waku.reset_visible_state();
                             waku.reset_transcript_rows(waku.transcript_row_count());
+                            if !waku.transcript_is_scrolled.get() {
+                                waku.apply_transcript_landing(
+                                    SessionActivationTransition::Visit,
+                                    cx,
+                                );
+                            }
                             waku.refresh_composer_sources(cx);
                         }
                     }
@@ -215,11 +221,17 @@ impl Waku {
         .detach();
     }
 
-    fn activate_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    fn activate_session(
+        &mut self,
+        session_id: Uuid,
+        transition: SessionActivationTransition,
+        cx: &mut Context<Self>,
+    ) {
         let session_changed = self.state.selected_session != Some(session_id);
         if session_changed {
             self.capture_and_save_current_composer_draft(cx);
             self.store_selected_right_panel_state();
+            self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
         self.unseen_completions.remove(&session_id);
@@ -273,6 +285,7 @@ impl Waku {
         }
         self.refresh_composer_sources(cx);
         self.reset_transcript_rows(self.transcript_row_count());
+        self.apply_transcript_landing(transition, cx);
         self.save();
         if self
             .selected_session()
@@ -281,6 +294,23 @@ impl Waku {
             self.start_runtime_attachment(session_id, cx);
         }
         cx.notify();
+    }
+
+    /// Park the departing session's scroll position for back/forward history.
+    /// Runs while `selected_session` still points at the session being left.
+    fn store_transcript_scroll_position(&mut self) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        let rows = self.active_transcript_rows();
+        let offset = rows.logical_scroll_top();
+        // A bottom-aligned list reports a past-the-end index while parked on
+        // the tail; there is nothing to restore — the tail is the default.
+        if offset.item_ix < rows.item_count() {
+            self.transcript_scroll_positions.insert(session_id, offset);
+        } else {
+            self.transcript_scroll_positions.remove(&session_id);
+        }
     }
 
     /// Drops cached answers about the workspace on disk.
@@ -464,6 +494,13 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.transcript_scroll_positions.remove(&session_id);
+        if self
+            .transcript_landing
+            .is_some_and(|(landing_session, _)| landing_session == session_id)
+        {
+            self.transcript_landing = None;
+        }
         let project_still_used = self
             .state
             .sessions
@@ -583,6 +620,13 @@ impl Waku {
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
         self.project_switcher.session_removed(session_id);
+        self.transcript_scroll_positions.remove(&session_id);
+        if self
+            .transcript_landing
+            .is_some_and(|(landing_session, _)| landing_session == session_id)
+        {
+            self.transcript_landing = None;
+        }
         let now = unix_time();
         if let Some(session) = self.state.session_mut(session_id) {
             session.archived_at = Some(now);

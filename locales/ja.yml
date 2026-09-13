@@ -214,6 +214,8 @@ settings.code_font_size: コードのフォントサイズ
 settings.code_font_size_description: ファイルエディタ、差分表示、コードブロック、ツール出力の文字サイズ
 settings.render_math: 数式を描画
 settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
+settings.open_at_last_prompt: 終了したタスクを最後のプロンプトから開く
+settings.open_at_last_prompt_description: トランスクリプトの末尾ではなく、最後のメッセージから読み始めます
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド

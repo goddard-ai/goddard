@@ -589,6 +589,50 @@ impl Waku {
                         },
                     )),
             )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.open_at_last_prompt")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.open_at_last_prompt_description")),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "open-at-last-prompt-toggle",
+                        self.state.open_at_last_prompt,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.open_at_last_prompt;
+                            move |this, _, cx| this.set_open_at_last_prompt(!enabled, cx)
+                        },
+                    )),
+            )
             .child({
                 let enabled = self.state.completion_sound_enabled;
                 let selected_sound = self.state.completion_sound;
@@ -2467,6 +2511,15 @@ impl Waku {
         }
         self.state.render_math = enabled;
         self.remeasure_font_sized_surfaces();
+        self.save();
+        cx.notify();
+    }
+
+    fn set_open_at_last_prompt(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.open_at_last_prompt == enabled {
+            return;
+        }
+        self.state.open_at_last_prompt = enabled;
         self.save();
         cx.notify();
     }
