@@ -813,6 +813,8 @@ session.pre_turn_checkpoint_missing: メッセージのターン開始前の Git
 session.rewind_title: "%{title}（巻き戻し）"
 session.rewound: タスクをターン %{turn} の前まで巻き戻しました
 session.rewound_with_stale_refs: "タスクをターン %{turn} の前まで巻き戻しましたが、古い ref が残っています：%{error}"
+session.unarchived: タスクのアーカイブを解除しました
+session.view_now: 今すぐ表示
 
 right_panel.browser: ブラウザ
 right_panel.terminal: ターミナル

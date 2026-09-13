@@ -1599,6 +1599,10 @@ session.rewound:
   en: Rewound to before turn %{turn}
 session.rewound_with_stale_refs:
   en: "Rewound to before turn %{turn}; stale refs remain: %{error}"
+session.unarchived:
+  en: Task unarchived.
+session.view_now:
+  en: View now
 
 right_panel.browser:
   en: Browser

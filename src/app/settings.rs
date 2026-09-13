@@ -1941,13 +1941,13 @@ impl Waku {
                 .active(|element| element.bg(theme.overlay_strong))
                 .child(tr!("common.unarchive"))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.unarchive_session(session_id, cx);
+                    this.unarchive_session(session_id, true, cx);
                 }))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                     if !event.keystroke.modifiers.modified()
                         && matches!(event.keystroke.key.as_str(), "enter" | "space")
                     {
-                        this.unarchive_session(session_id, cx);
+                        this.unarchive_session(session_id, true, cx);
                         cx.stop_propagation();
                     }
                 }));

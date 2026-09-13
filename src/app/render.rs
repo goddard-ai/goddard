@@ -492,12 +492,16 @@ impl Waku {
     /// user navigates away.
     fn render_active_toast(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.start_toast_dismiss_timer(cx);
-        let toast = self
-            .toast
-            .as_ref()
-            .map(|toast| (toast.message.clone(), toast.tone, toast.id));
-        toast.map(|(message, tone, generation)| {
-            self.render_toast(message, tone, generation, cx)
+        let toast = self.toast.as_ref().map(|toast| {
+            (
+                toast.message.clone(),
+                toast.tone,
+                toast.action.clone(),
+                toast.id,
+            )
+        });
+        toast.map(|(message, tone, action, generation)| {
+            self.render_toast(message, tone, action, generation, cx)
                 .into_any_element()
         })
     }
@@ -506,6 +510,7 @@ impl Waku {
         &self,
         message: String,
         tone: ToastTone,
+        action: Option<ToastAction>,
         generation: u64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -556,6 +561,37 @@ impl Waku {
                 }
             }));
 
+        let action_button = action.map(|action| {
+            let session_id = action.session_id;
+            div()
+                .id(SharedString::from(format!("toast-action-{generation}")))
+                .tab_index(0)
+                .h(px(22.0))
+                .px(px(8.0))
+                .flex_none()
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .whitespace_nowrap()
+                .text_color(theme.accent)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .child(action.label.clone())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_toast_session(session_id, cx);
+                    cx.stop_propagation();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.open_toast_session(session_id, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
+
         div()
             .id(SharedString::from(format!("toast-layer-{generation}")))
             .absolute()
@@ -591,6 +627,7 @@ impl Waku {
                     .child(md::render::frame_reset(self.toast_selection.clone()))
                     .child(icon(status_icon, 14.0, status_color))
                     .child(div().flex_1().min_w_0().whitespace_normal().child(message))
+                    .children(action_button)
                     .child(dismiss)
                     .child(self.toast_selection_input()),
             )

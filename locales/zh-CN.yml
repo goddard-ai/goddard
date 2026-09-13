@@ -778,6 +778,8 @@ session.pre_turn_checkpoint_missing: 缺少该消息发送前的 Git 检查点
 session.rewind_title: "%{title}（回退）"
 session.rewound: 已回退到第 %{turn} 轮任务之前
 session.rewound_with_stale_refs: "已回退到第 %{turn} 轮任务之前，但仍有过期引用：%{error}"
+session.unarchived: 任务已取消归档
+session.view_now: 立即查看
 right_panel.browser: 浏览器
 right_panel.terminal: 终端
 right_panel.files: 文件

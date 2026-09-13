@@ -88,7 +88,7 @@ impl Waku {
             .iter()
             .any(|session| session.id == session_id && session.archived_at.is_some())
         {
-            self.unarchive_session(session_id, cx);
+            self.unarchive_session(session_id, false, cx);
         }
         self.reveal_sidebar_session(session_id);
         let needs_hydration = self
@@ -600,7 +600,16 @@ impl Waku {
     }
 
     /// Returns an archived task to the sidebar and search.
-    pub(super) fn unarchive_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    ///
+    /// `announce` raises the "Task unarchived" toast with a "View now" jump;
+    /// activation-driven unarchives skip it because the task is already
+    /// opening.
+    pub(super) fn unarchive_session(
+        &mut self,
+        session_id: Uuid,
+        announce: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self
             .state
             .sessions
@@ -618,6 +627,9 @@ impl Waku {
             session.updated_at = now;
         }
         self.save();
+        if announce {
+            self.show_unarchived_toast(session_id);
+        }
         cx.notify();
     }
 

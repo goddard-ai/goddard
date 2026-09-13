@@ -279,11 +279,20 @@ struct PanelResizeDrag {
 struct ToastState {
     message: String,
     tone: ToastTone,
+    action: Option<ToastAction>,
     id: u64,
     timer_generation: u64,
     duration_remaining: Duration,
     timer_started: Option<Instant>,
     hovered: bool,
+}
+
+/// A toast button that does more than dismiss. Today only the unarchive
+/// confirmation uses one — "View now" jumps straight to the restored task.
+#[derive(Clone, Debug)]
+struct ToastAction {
+    label: SharedString,
+    session_id: Uuid,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1882,20 +1891,46 @@ impl Waku {
     }
 
     pub(super) fn show_toast(&mut self, message: impl Into<String>) {
-        self.show_toast_with_tone(message, ToastTone::Alert);
+        self.show_toast_with_tone(message, ToastTone::Alert, None);
     }
 
     pub(super) fn show_success_toast(&mut self, message: impl Into<String>) {
-        self.show_toast_with_tone(message, ToastTone::Success);
+        self.show_toast_with_tone(message, ToastTone::Success, None);
     }
 
-    fn show_toast_with_tone(&mut self, message: impl Into<String>, tone: ToastTone) {
+    /// Confirms an unarchive with a "View now" jump to the restored task.
+    pub(super) fn show_unarchived_toast(&mut self, session_id: Uuid) {
+        self.show_toast_with_tone(
+            tr!("session.unarchived"),
+            ToastTone::Success,
+            Some(ToastAction {
+                label: tr!("session.view_now").into(),
+                session_id,
+            }),
+        );
+    }
+
+    /// A toast's session action: leave settings, open the task, and retire
+    /// the toast.
+    pub(super) fn open_toast_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.hide_toast();
+        self.settings_page = None;
+        self.select_session(session_id, cx);
+    }
+
+    fn show_toast_with_tone(
+        &mut self,
+        message: impl Into<String>,
+        tone: ToastTone,
+        action: Option<ToastAction>,
+    ) {
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();
         self.toast_generation = self.toast_generation.wrapping_add(1);
         self.toast = Some(ToastState {
             message: message.into(),
             tone,
+            action,
             id: self.toast_generation,
             timer_generation: self.toast_generation,
             duration_remaining: DEFAULT_TOAST_DURATION,
@@ -3087,6 +3122,7 @@ impl Waku {
                 toast: startup_toast.map(|message| ToastState {
                     message,
                     tone: ToastTone::Alert,
+                    action: None,
                     id: 0,
                     timer_generation: 0,
                     duration_remaining: DEFAULT_TOAST_DURATION,
