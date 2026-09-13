@@ -315,6 +315,7 @@ const OPEN_IN_CATALOG: &[(&str, &str, &[&str])] = &[
     ("vscode", "VS Code", &["com.microsoft.VSCode"]),
     ("cursor", "Cursor", &["com.todesktop.230313mzl4w4u92"]),
     ("zed", "Zed", &["dev.zed.Zed", "dev.zed.Zed-Preview"]),
+    ("devin", "Devin", &["com.exafunction.windsurf"]),
     ("finder", "Finder", &["com.apple.finder"]),
     ("terminal", "Terminal", &["com.apple.Terminal"]),
     ("termy", "Termy", &[TERMY_BUNDLE_ID]),
