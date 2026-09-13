@@ -254,7 +254,9 @@ pub fn run() {
                 KeyBinding::new("secondary-,", OpenSettings, None),
                 KeyBinding::new("secondary-b", ToggleSidebar, None),
                 KeyBinding::new("secondary-alt-b", ToggleRightPanel, None),
-                KeyBinding::new("secondary-k", ToggleCommandPalette, None),
+                // In the terminal ⌘K clears the scrollback instead, matching
+                // what a normal terminal does.
+                KeyBinding::new("secondary-k", ToggleCommandPalette, Some("!Terminal")),
                 KeyBinding::new("secondary-p", ToggleFileFinder, None),
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),

@@ -332,6 +332,11 @@ impl TerminalSession {
         self.dirty.store(true, Ordering::Release);
     }
 
+    fn clear_scrollback(&self) {
+        clear_scrollback(&mut self.term.lock());
+        self.dirty.store(true, Ordering::Release);
+    }
+
     fn take_dirty(&self) -> bool {
         self.dirty.swap(false, Ordering::AcqRel)
     }
@@ -822,6 +827,16 @@ impl TerminalView {
             && keystroke.key.eq_ignore_ascii_case("a")
         {
             self.select_all(cx);
+            window.prevent_default();
+            cx.stop_propagation();
+            return;
+        }
+        if terminal_clipboard_modifier_pressed(&keystroke.modifiers)
+            && keystroke.key.eq_ignore_ascii_case("k")
+        {
+            if let Some(session) = &self.session {
+                session.clear_scrollback();
+            }
             window.prevent_default();
             cx.stop_propagation();
             return;
@@ -1610,6 +1625,33 @@ fn existing_terminal_file_path(value: &str, working_directory: &Path) -> Option<
     }
 }
 
+/// ⌘K: drop the scrollback and every row above the cursor, moving the line
+/// being edited to the top of the screen — Terminal.app's "Clear Scrollback"
+/// and Zed's `terminal::Clear` behavior. The alt screen has no scrollback and
+/// its rows belong to the running app, so there only the history is dropped.
+fn clear_scrollback<T: EventListener>(term: &mut Term<T>) {
+    term.selection = None;
+    term.grid_mut().clear_history();
+    if term.mode().contains(TermMode::ALT_SCREEN) {
+        return;
+    }
+
+    let cursor = term.grid().cursor.point;
+    term.grid_mut().reset_region(..cursor.line);
+    let line = term.grid()[cursor.line][..Column(term.grid().columns())]
+        .iter()
+        .cloned()
+        .enumerate()
+        .collect::<Vec<_>>();
+    for (index, cell) in line {
+        term.grid_mut()[Line(0)][Column(index)] = cell;
+    }
+    term.grid_mut().cursor.point = TerminalPoint::new(Line(0), cursor.column);
+    if term.grid().screen_lines() > 1 {
+        term.grid_mut().reset_region(Line(1)..);
+    }
+}
+
 fn bracketed_paste(text: String, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
         format!("\x1b[200~{text}\x1b[201~").into_bytes()
@@ -1965,6 +2007,41 @@ mod tests {
         assert!(primary_modifier_pressed(&control));
         assert!(!terminal_clipboard_modifier_pressed(&control));
         assert!(terminal_clipboard_modifier_pressed(&control_shift));
+    }
+
+    #[test]
+    fn clear_scrollback_keeps_only_the_cursor_line() {
+        let mut term = parse_terminal(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nprompt$ ");
+        assert_eq!(term.grid().history_size(), 3);
+        assert_eq!(term.grid().cursor.point.line, Line(2));
+
+        clear_scrollback(&mut term);
+
+        assert_eq!(term.grid().history_size(), 0);
+        assert_eq!(term.grid().cursor.point.line, Line(0));
+        assert_eq!(term.grid().cursor.point.column, Column(8));
+        let top = term.bounds_to_string(
+            TerminalPoint::new(Line(0), Column(0)),
+            TerminalPoint::new(Line(0), term.last_column()),
+        );
+        assert_eq!(top.trim_end(), "prompt$");
+        let below = term.bounds_to_string(
+            TerminalPoint::new(Line(1), Column(0)),
+            TerminalPoint::new(Line(2), term.last_column()),
+        );
+        assert!(below.trim().is_empty());
+    }
+
+    #[test]
+    fn clear_scrollback_leaves_the_alt_screen_alone() {
+        let mut term = parse_terminal(b"main\r\n\x1b[?1049halt screen");
+        assert!(term.mode().contains(TermMode::ALT_SCREEN));
+        clear_scrollback(&mut term);
+        let active = term.bounds_to_string(
+            TerminalPoint::new(Line(1), Column(0)),
+            TerminalPoint::new(Line(1), term.last_column()),
+        );
+        assert_eq!(active.trim_end(), "alt screen");
     }
 
     #[test]
