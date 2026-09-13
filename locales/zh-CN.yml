@@ -41,6 +41,7 @@ command_palette.tasks: 任务
 command_palette.sessions: 终端会话
 command_palette.providers: 服务商
 command_palette.commands: 命令
+command_palette.custom_commands: 自定义命令
 command_palette.settings: 设置
 command_palette.new_task: 新建任务
 command_palette.resume: 恢复…
@@ -84,6 +85,7 @@ settings.providers: 服务商
 settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
+settings.commands: 命令
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex 声音 提示音 通知 完成 回合 sound audio notification
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器 侧边栏 透明
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
@@ -92,12 +94,38 @@ settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
 settings.daemon_keywords: 守护进程 服务 远程 网页 网络 暴露 来源 令牌 端口 websocket
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
+settings.commands_keywords: 命令 自定义命令 终端 shell 脚本 快捷键 命令面板 运行
 settings.archived: 已归档的聊天
 settings.archived_keywords: 已归档 聊天 对话 隐藏 历史 恢复 移除
 settings.archived_description: 已归档的聊天会从侧边栏和搜索中隐藏。归档超过 30 天的聊天将被永久移除。
 settings.archived_empty: 没有已归档的聊天。
 settings.back: 返回
 settings.search: 搜索设置
+
+commands.title: 自定义命令
+commands.description: 可从命令面板运行的命令。每条命令会在当前任务目录中打开一个终端，并像手动输入一样运行其脚本。
+commands.new_command: 新建命令
+commands.edit_command: 编辑命令
+commands.empty: 没有自定义命令
+commands.empty_description: 添加后便会显示在命令面板中。
+commands.name: 名称
+commands.name_description: 显示在命令面板中。留空则使用脚本本身。
+commands.name_placeholder: 例如：部署预发环境
+commands.shell: Shell
+commands.shell_description: 运行命令所用的 shell。留空则使用账户默认 shell（$SHELL）。
+commands.shell_placeholder: 例如：/bin/zsh
+commands.script: 脚本
+commands.script_description: 在交互式 shell 中运行，管道、别名和交互式程序均可正常使用。
+commands.script_placeholder: git status
+commands.script_required: 脚本不能为空。
+commands.close_on_success: 成功后关闭标签页
+commands.close_on_success_description: 脚本成功退出后自动关闭终端标签页；失败则保持打开。
+commands.save: 保存
+commands.cancel: 取消
+commands.edit: 编辑
+commands.delete: 删除
+commands.no_workspace: 请先选择一个任务——命令会在当前任务目录中运行。
+
 daemon.expose_title: 暴露由 Goddard 管理的守护进程
 daemon.expose_description: 允许本机之外的 Goddard 客户端连接。更改此项只会重启守护进程。
 daemon.status_local: 仅本机

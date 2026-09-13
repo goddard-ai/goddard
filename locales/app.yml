@@ -84,6 +84,8 @@ command_palette.providers:
   en: Providers
 command_palette.commands:
   en: Commands
+command_palette.custom_commands:
+  en: Custom commands
 command_palette.settings:
   en: Settings
 command_palette.new_task:
@@ -168,6 +170,8 @@ settings.daemon:
   en: Daemon
 settings.computer_use:
   en: Computer Use
+settings.commands:
+  en: Commands
 settings.general_keywords:
   en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression sound audio notification alert chime bleep bubble gentle completed turn
 settings.appearance_keywords:
@@ -184,6 +188,8 @@ settings.daemon_keywords:
   en: daemon server remote web network expose origin token port websocket
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
+settings.commands_keywords:
+  en: commands custom command terminal shell script shortcut palette run
 settings.archived:
   en: Archived chats
 settings.archived_keywords:
@@ -196,6 +202,54 @@ settings.back:
   en: Back
 settings.search:
   en: Search Settings
+
+commands.title:
+  en: Custom commands
+commands.description:
+  en: Commands you can run from the command palette. Each opens a terminal in the current task’s directory and runs its script as if you typed it.
+commands.new_command:
+  en: New command
+commands.edit_command:
+  en: Edit command
+commands.empty:
+  en: No custom commands
+commands.empty_description:
+  en: Add one and it shows up in the command palette.
+commands.name:
+  en: Name
+commands.name_description:
+  en: Shown in the command palette. Leave blank to use the script itself.
+commands.name_placeholder:
+  en: e.g. Deploy staging
+commands.shell:
+  en: Shell
+commands.shell_description:
+  en: The shell the command runs in. Leave blank for your account’s default ($SHELL).
+commands.shell_placeholder:
+  en: e.g. /bin/zsh
+commands.script:
+  en: Script
+commands.script_description:
+  en: Runs inside an interactive shell, so pipes, aliases, and interactive programs all work.
+commands.script_placeholder:
+  en: git status
+commands.script_required:
+  en: A script is required.
+commands.close_on_success:
+  en: Close tab on success
+commands.close_on_success_description:
+  en: Automatically close the terminal tab once the script exits successfully. A failure keeps it open.
+commands.save:
+  en: Save
+commands.cancel:
+  en: Cancel
+commands.edit:
+  en: Edit
+commands.delete:
+  en: Delete
+commands.no_workspace:
+  en: Select a task first — commands run in the current task’s directory.
+
 daemon.expose_title:
   en: Expose managed daemon
 daemon.expose_description:

@@ -21,12 +21,12 @@ use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    App, AppContext, Bounds, ClipboardItem, Context, FocusHandle, Focusable, FontFallbacks,
-    FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
-    Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
-    SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun,
-    UnderlineStyle, Window, canvas, div, font, px, rgb,
+    App, AppContext, Bounds, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable,
+    FontFallbacks, FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent,
+    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta,
+    ScrollWheelEvent, SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task,
+    TextRun, UnderlineStyle, Window, canvas, div, font, px, rgb,
 };
 use parking_lot::Mutex;
 
@@ -90,6 +90,21 @@ enum TerminalUiEvent {
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Send + Sync>),
     Exited,
+}
+
+/// Emitted on the view when the PTY child exits — the shell itself is gone,
+/// not just the foreground job.
+pub enum TerminalViewEvent {
+    Exited,
+}
+
+/// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
+/// `CustomCommand` sources the command's materialized script inside an
+/// interactive shell of the command's choosing.
+#[derive(Clone)]
+pub enum TerminalLaunch {
+    Shell,
+    CustomCommand(crate::persistence::CustomCommand),
 }
 
 #[derive(Clone)]
@@ -179,7 +194,12 @@ struct TerminalSession {
 }
 
 impl TerminalSession {
-    fn new(working_directory: &Path, columns: usize, rows: usize) -> Result<Self> {
+    fn new(
+        working_directory: &Path,
+        launch: &TerminalLaunch,
+        columns: usize,
+        rows: usize,
+    ) -> Result<Self> {
         let columns = columns.max(TERMINAL_MIN_COLUMNS);
         let rows = rows.max(TERMINAL_MIN_ROWS);
         let window_size = WindowSize {
@@ -214,7 +234,20 @@ impl TerminalSession {
             proxy.clone(),
         )));
 
-        let shell = crate::command_env::default_terminal_shell();
+        let (shell, startup_line) = match launch {
+            TerminalLaunch::Shell => (crate::command_env::default_terminal_shell(), None),
+            TerminalLaunch::CustomCommand(command) => {
+                let shell = crate::custom_commands::command_shell(command);
+                let script_path = crate::custom_commands::ensure_script(&command.script)
+                    .context("materialize custom command script")?;
+                let line = crate::custom_commands::source_line(
+                    &shell,
+                    &script_path,
+                    command.close_on_success,
+                );
+                (shell, Some(line))
+            }
+        };
         let shell_args = crate::command_env::default_terminal_shell_args(&shell);
         let mut options = tty::Options {
             shell: Some(Shell::new(shell.to_string_lossy().into_owned(), shell_args)),
@@ -239,6 +272,13 @@ impl TerminalSession {
             .set(sender.clone())
             .map_err(|_| anyhow::anyhow!("initialize Alacritty PTY sender"))?;
         event_loop.spawn();
+
+        // The command line lands in the PTY's input queue ahead of whatever
+        // the shell prints while starting up, so it runs as the first input
+        // the interactive shell reads — the same effect as typing it.
+        if let Some(startup_line) = startup_line {
+            let _ = sender.send(Msg::Input(format!("{startup_line}\n").into_bytes().into()));
+        }
 
         Ok(Self {
             term,
@@ -626,6 +666,9 @@ pub struct TerminalView {
     focus_handle: FocusHandle,
     working_directory: PathBuf,
     title: String,
+    /// What `ResetTitle` restores — the localized "Terminal" for a plain
+    /// shell, the command's display name for a custom command.
+    default_title: String,
     exited: bool,
     scroll_accumulator: f32,
     panel_width: f32,
@@ -643,12 +686,20 @@ pub struct TerminalView {
 }
 
 impl TerminalView {
-    pub fn new(working_directory: PathBuf, cx: &mut Context<Self>) -> Self {
+    pub fn with_launch(
+        working_directory: PathBuf,
+        launch: TerminalLaunch,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let default_title = match &launch {
+            TerminalLaunch::Shell => tr!("right_panel.terminal"),
+            TerminalLaunch::CustomCommand(command) => command.display_name().to_owned(),
+        };
         let terminal_cwd = working_directory.clone();
         cx.spawn(async move |this, cx| {
             let started = cx
                 .background_executor()
-                .spawn(async move { TerminalSession::new(&terminal_cwd, 52, 36) })
+                .spawn(async move { TerminalSession::new(&terminal_cwd, &launch, 52, 36) })
                 .await;
             if this
                 .update(cx, |this, cx| {
@@ -688,7 +739,8 @@ impl TerminalView {
             session: None,
             error: None,
             focus_handle: cx.focus_handle(),
-            title: tr!("right_panel.terminal"),
+            title: default_title.clone(),
+            default_title,
             working_directory,
             exited: false,
             scroll_accumulator: 0.0,
@@ -714,7 +766,13 @@ impl TerminalView {
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.title.as_str(), "Terminal" | "终端") {
+        if matches!(
+            self.default_title.as_str(),
+            "Terminal" | "终端" | "ターミナル"
+        ) {
+            self.default_title = tr!("right_panel.terminal");
+        }
+        if matches!(self.title.as_str(), "Terminal" | "终端" | "ターミナル") {
             self.title = tr!("right_panel.terminal");
             cx.notify();
         }
@@ -729,7 +787,7 @@ impl TerminalView {
             changed = true;
             match event {
                 TerminalUiEvent::Title(title) => self.title = title,
-                TerminalUiEvent::ResetTitle => self.title = tr!("right_panel.terminal"),
+                TerminalUiEvent::ResetTitle => self.title = self.default_title.clone(),
                 TerminalUiEvent::ClipboardStore(text) => {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
                 }
@@ -740,7 +798,10 @@ impl TerminalView {
                         .unwrap_or_default();
                     session.write(formatter(&text).into_bytes());
                 }
-                TerminalUiEvent::Exited => self.exited = true,
+                TerminalUiEvent::Exited => {
+                    self.exited = true;
+                    cx.emit(TerminalViewEvent::Exited);
+                }
             }
         }
         changed
@@ -1051,6 +1112,8 @@ impl TerminalView {
         self.cursor_blink.update(cx, |cursor, cx| cursor.pause(cx));
     }
 }
+
+impl EventEmitter<TerminalViewEvent> for TerminalView {}
 
 impl Focusable for TerminalView {
     fn focus_handle(&self, _: &App) -> FocusHandle {

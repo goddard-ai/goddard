@@ -73,6 +73,7 @@ enum PaletteSection {
     Sessions,
     Providers,
     Commands,
+    CustomCommands,
     Settings,
 }
 
@@ -84,6 +85,7 @@ impl PaletteSection {
             Self::Sessions => "command_palette.sessions",
             Self::Providers => "command_palette.providers",
             Self::Commands => "command_palette.commands",
+            Self::CustomCommands => "command_palette.custom_commands",
             Self::Settings => "command_palette.settings",
         })
     }
@@ -91,8 +93,9 @@ impl PaletteSection {
     fn query_rank(self) -> usize {
         match self {
             Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
-            Self::Tasks => 1,
-            Self::Settings => 2,
+            Self::CustomCommands => 1,
+            Self::Tasks => 2,
+            Self::Settings => 3,
         }
     }
 }
@@ -163,6 +166,7 @@ enum PaletteAction {
     ToggleRightPanel,
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
+    RunCustomCommand(Uuid),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -841,6 +845,36 @@ impl Waku {
             ),
         ]);
 
+        for command in &self.state.custom_commands {
+            let label = command.display_name().to_owned();
+            let mut detail = command
+                .script
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            if command.script.lines().nth(1).is_some() {
+                detail.push('…');
+            }
+            commands.push(CommandPaletteItem {
+                section: PaletteSection::CustomCommands,
+                search_text: format!(
+                    "{label} {} {} custom command terminal shell run script",
+                    command.script,
+                    command.shell.as_deref().unwrap_or_default(),
+                ),
+                label,
+                detail: Some(detail),
+                icon: PaletteIcon::Asset("icons/terminal.svg"),
+                shortcut: None,
+                action: PaletteAction::RunCustomCommand(command.id),
+                content_match: None,
+                order: next(),
+                recency: 0,
+            });
+        }
+
         for (page, label_key, icon, keywords) in [
             (
                 SettingsPage::General,
@@ -865,6 +899,12 @@ impl Waku {
                 "settings.skills",
                 "icons/package.svg",
                 "settings preferences skills library create disable agent skill",
+            ),
+            (
+                SettingsPage::Commands,
+                "settings.commands",
+                "icons/terminal.svg",
+                "settings preferences custom commands terminal shell run script palette",
             ),
             (
                 SettingsPage::Usage,
@@ -1637,6 +1677,19 @@ impl Waku {
                 // is visible, then run the same path the keystroke takes.
                 self.settings_page = None;
                 self.toggle_workspace_action(&ToggleWorkspace, window, cx);
+            }
+            PaletteAction::RunCustomCommand(command_id) => {
+                if let Some(command) = self
+                    .state
+                    .custom_commands
+                    .iter()
+                    .find(|command| command.id == command_id)
+                    .cloned()
+                {
+                    self.settings_page = None;
+                    self.custom_command_editor = None;
+                    self.run_custom_command(command, cx);
+                }
             }
             PaletteAction::ChooseModel | PaletteAction::ToggleUsage => {
                 // These popovers are rendered by the composer. If the command

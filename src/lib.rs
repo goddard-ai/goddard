@@ -33,6 +33,7 @@ mod app;
 mod assets;
 mod browser;
 mod computer_use;
+mod custom_commands;
 pub mod daemon;
 mod driver;
 mod input;

@@ -1833,6 +1833,7 @@ impl Waku {
             for surface in &state.surfaces {
                 if let Some(terminal_id) = surface.terminal_id() {
                     self.right_panel_terminals.remove(&terminal_id);
+                    self.right_panel_terminal_commands.remove(&terminal_id);
                 }
                 if let Some(browser_id) = surface.browser_id() {
                     self.right_panel_browsers.remove(&browser_id);
@@ -1939,9 +1940,7 @@ impl Waku {
                 .active_right_panel_surface()
                 .and_then(RightPanelSurface::terminal_id)
                 .and_then(|terminal_id| self.right_panel_terminals.get(&terminal_id))
-                .is_some_and(|terminal| {
-                    terminal.read(cx).focus_handle(cx).is_focused(window)
-                });
+                .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window));
         if terminal_focused {
             self.set_right_panel_visible(false, cx);
             let focus_handle = self.composer_focus(cx);
@@ -2137,6 +2136,7 @@ impl Waku {
         }
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
             self.right_panel_terminals.remove(&terminal_id);
+            self.right_panel_terminal_commands.remove(&terminal_id);
         }
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);
@@ -2391,6 +2391,65 @@ impl Waku {
         }
     }
 
+    /// Run a user-defined custom command: a fresh terminal tab whose shell
+    /// sources the command's materialized script. The command rides along in
+    /// `right_panel_terminal_commands` so the tab keeps its launch settings
+    /// if the PTY is ever respawned for a changed workspace.
+    pub(super) fn run_custom_command(&mut self, command: CustomCommand, cx: &mut Context<Self>) {
+        if self.selected_workspace_path().is_none() {
+            self.show_toast(tr!("commands.no_workspace"));
+            cx.notify();
+            return;
+        }
+        let surface = RightPanelSurface::new_terminal();
+        if let Some(terminal_id) = surface.terminal_id() {
+            self.right_panel_terminal_commands
+                .insert(terminal_id, command);
+        }
+        self.open_right_panel_surface(surface, cx);
+    }
+
+    /// Close the tab a finished terminal belongs to, wherever it sits — the
+    /// active session's tab strip or a background session's saved surfaces.
+    fn close_terminal_view_surface(&mut self, view: &Entity<TerminalView>, cx: &mut Context<Self>) {
+        let Some(terminal_id) = self
+            .right_panel_terminals
+            .iter()
+            .find_map(|(id, terminal)| (terminal == view).then_some(*id))
+        else {
+            return;
+        };
+        if let Some(index) = self
+            .right_panel_surfaces
+            .iter()
+            .position(|surface| surface.terminal_id() == Some(terminal_id))
+        {
+            self.close_right_panel_surface(index, cx);
+            return;
+        }
+        for state in self.right_panel_session_states.values_mut() {
+            let Some(index) = state
+                .surfaces
+                .iter()
+                .position(|surface| surface.terminal_id() == Some(terminal_id))
+            else {
+                continue;
+            };
+            state.surfaces.remove(index);
+            state.active_surface = state.active_surface.and_then(|active| {
+                (!state.surfaces.is_empty()).then(|| match active.cmp(&index) {
+                    std::cmp::Ordering::Greater => active - 1,
+                    std::cmp::Ordering::Equal => index.saturating_sub(1),
+                    std::cmp::Ordering::Less => active.min(state.surfaces.len() - 1),
+                })
+            });
+            break;
+        }
+        self.right_panel_terminals.remove(&terminal_id);
+        self.right_panel_terminal_commands.remove(&terminal_id);
+        cx.notify();
+    }
+
     fn ensure_right_panel_terminal(&mut self, terminal_id: Uuid, cx: &mut Context<Self>) {
         if self.daemon.is_remote() {
             // A desktop PTY would interpret the daemon's cwd on the wrong
@@ -2411,10 +2470,24 @@ impl Waku {
             .get(&terminal_id)
             .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
         if !matches_project {
-            self.right_panel_terminals.insert(
-                terminal_id,
-                cx.new(|cx| TerminalView::new(working_directory.clone(), cx)),
-            );
+            let command = self.right_panel_terminal_commands.get(&terminal_id);
+            let launch = command
+                .cloned()
+                .map(TerminalLaunch::CustomCommand)
+                .unwrap_or(TerminalLaunch::Shell);
+            let close_on_exit = command.is_some_and(|command| command.close_on_success);
+            let view =
+                cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
+            if close_on_exit {
+                // The command's startup line ends in `&& exit`, so the shell
+                // only goes away on its own when the script succeeded — the
+                // exit event is the close signal.
+                cx.subscribe(&view, |this, view, _: &TerminalViewEvent, cx| {
+                    this.close_terminal_view_surface(&view, cx);
+                })
+                .detach();
+            }
+            self.right_panel_terminals.insert(terminal_id, view);
         }
     }
 
@@ -2435,6 +2508,8 @@ impl Waku {
             }))
             .collect::<HashSet<_>>();
         self.right_panel_terminals
+            .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
+        self.right_panel_terminal_commands
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         for terminal_id in active_terminal_ids {
             self.ensure_right_panel_terminal(terminal_id, cx);

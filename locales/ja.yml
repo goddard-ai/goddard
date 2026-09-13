@@ -43,6 +43,7 @@ command_palette.tasks: タスク
 command_palette.sessions: ターミナルセッション
 command_palette.providers: プロバイダー
 command_palette.commands: コマンド
+command_palette.custom_commands: カスタムコマンド
 command_palette.settings: 設定
 command_palette.new_task: 新規タスク
 command_palette.resume: 再開…
@@ -87,6 +88,7 @@ settings.providers: プロバイダー
 settings.usage: 使用状況
 settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
+settings.commands: コマンド
 settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン 数学 数式 math latex サウンド 音 通知 完了 ターン sound audio notification
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント サイズ 文字 エディタ サイドバー 透明
 settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
@@ -95,12 +97,38 @@ settings.skills_keywords: スキル ライブラリ エージェント 無効 �
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
 settings.daemon_keywords: デーモン サーバー リモート ウェブ ネットワーク 公開 オリジン トークン ポート websocket
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
+settings.commands_keywords: コマンド カスタムコマンド ターミナル シェル スクリプト ショートカット パレット 実行
 settings.archived: アーカイブ済みチャット
 settings.archived_keywords: アーカイブ チャット 会話 非表示 履歴 復元 削除
 settings.archived_description: アーカイブされたチャットはサイドバーと検索から非表示になります。アーカイブから30日以上経過したチャットは完全に削除されます。
 settings.archived_empty: アーカイブ済みのチャットはありません。
 settings.back: 戻る
 settings.search: 設定を検索
+
+commands.title: カスタムコマンド
+commands.description: コマンドパレットから実行できるコマンドです。現在のタスクのディレクトリでターミナルを開き、入力したのと同じようにスクリプトを実行します。
+commands.new_command: 新規コマンド
+commands.edit_command: コマンドを編集
+commands.empty: カスタムコマンドはありません
+commands.empty_description: 追加するとコマンドパレットに表示されます。
+commands.name: 名前
+commands.name_description: コマンドパレットに表示されます。空欄の場合はスクリプトが使われます。
+commands.name_placeholder: 例：ステージングへデプロイ
+commands.shell: シェル
+commands.shell_description: コマンドを実行するシェルです。空欄の場合はアカウントのデフォルト（$SHELL）を使います。
+commands.shell_placeholder: 例：/bin/zsh
+commands.script: スクリプト
+commands.script_description: インタラクティブシェル内で実行されるため、パイプ、エイリアス、対話型プログラムがすべて使えます。
+commands.script_placeholder: git status
+commands.script_required: スクリプトは必須です。
+commands.close_on_success: 成功時にタブを閉じる
+commands.close_on_success_description: スクリプトが正常に終了したらターミナルタブを自動で閉じます。失敗時は開いたままにします。
+commands.save: 保存
+commands.cancel: キャンセル
+commands.edit: 編集
+commands.delete: 削除
+commands.no_workspace: 先にタスクを選択してください。コマンドは現在のタスクのディレクトリで実行されます。
+
 daemon.expose_title: 管理対象デーモンを公開
 daemon.expose_description: このマシン以外の Goddard クライアントから接続できるようにします。変更時はデーモンだけが再起動します。
 daemon.status_local: このマシンのみ

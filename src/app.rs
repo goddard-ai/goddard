@@ -54,13 +54,13 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
 use crate::persistence::{
-    ComposerDraftStore, ComposerDrafts, CompletionSound, DEFAULT_RIGHT_PANEL_WIDTH,
+    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, DEFAULT_RIGHT_PANEL_WIDTH,
     DEFAULT_SIDEBAR_WIDTH, PersistedState, PersistedWindowState, SidebarGrouping, SidebarOrdering,
     StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
-use crate::terminal::TerminalView;
+use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
 use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
@@ -224,6 +224,7 @@ enum SettingsPage {
     Usage,
     Daemon,
     ComputerUse,
+    Commands,
     Appearance,
 }
 
@@ -1438,6 +1439,11 @@ pub struct Waku {
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
+    /// The custom command a terminal surface was opened for, keyed by the
+    /// surface's terminal id. Absent for plain shell terminals; the entry
+    /// tells `ensure_right_panel_terminal` how to spawn the PTY and carries
+    /// the command's close-on-success choice.
+    right_panel_terminal_commands: HashMap<Uuid, CustomCommand>,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
@@ -1448,6 +1454,8 @@ pub struct Waku {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    /// The Commands settings page's open editor; `None` shows the list.
+    custom_command_editor: Option<settings::CustomCommandEditor>,
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -3012,10 +3020,12 @@ impl Waku {
                 working_trees: QueryCache::new(MAX_CACHED_WORKSPACES),
                 workspace_queries_stale: false,
                 right_panel_terminals: HashMap::new(),
+                right_panel_terminal_commands: HashMap::new(),
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
+                custom_command_editor: None,
                 skills_catalog: None,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,

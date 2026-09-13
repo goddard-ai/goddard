@@ -65,6 +65,47 @@ pub enum CompletionSound {
     Chime,
 }
 
+/// A user-owned shell command listed in the command palette. Running one
+/// opens an interactive terminal tab that sources a materialized copy of
+/// `script` — identical in effect to pasting the text into that shell.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CustomCommand {
+    pub id: Uuid,
+    /// Palette label; `None` (or blank) falls back to the script itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Shell the terminal runs; `None` (or blank) uses the platform default
+    /// (`$SHELL` on Unix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell: Option<String>,
+    pub script: String,
+    /// Close the terminal tab automatically once the script exits
+    /// successfully; a failure leaves it open for inspection.
+    #[serde(default)]
+    pub close_on_success: bool,
+}
+
+impl CustomCommand {
+    pub fn new(script: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: None,
+            shell: None,
+            script,
+            close_on_success: false,
+        }
+    }
+
+    /// What the palette row and terminal tab call this command.
+    pub fn display_name(&self) -> &str {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&self.script)
+    }
+}
+
 impl CompletionSound {
     pub const ALL: [Self; 4] = [Self::Bleep, Self::Gentle, Self::Bubble, Self::Chime];
 
@@ -299,6 +340,9 @@ pub struct AppSettings {
     /// its turn.
     pub completion_sound_enabled: bool,
     pub completion_sound: CompletionSound,
+    /// User-owned terminal commands surfaced in the command palette.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_commands: Vec<CustomCommand>,
 }
 
 impl Default for AppSettings {
@@ -316,6 +360,7 @@ impl Default for AppSettings {
             open_in_app: None,
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
+            custom_commands: Vec::new(),
         }
     }
 }
@@ -440,6 +485,8 @@ pub struct PersistedState {
     pub completion_sound_enabled: bool,
     #[serde(default)]
     pub completion_sound: CompletionSound,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_commands: Vec<CustomCommand>,
     #[serde(default = "default_sidebar_visibility")]
     pub sidebar_visible: bool,
     #[serde(default = "default_right_panel_visibility")]
@@ -516,6 +563,7 @@ impl PersistedState {
             open_in_app: None,
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
+            custom_commands: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -685,6 +733,7 @@ impl PersistedState {
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
             completion_sound: self.completion_sound,
+            custom_commands: self.custom_commands.clone(),
         }
     }
 
@@ -726,6 +775,7 @@ impl PersistedState {
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
         self.completion_sound = settings.completion_sound;
+        self.custom_commands = settings.custom_commands;
     }
 
     fn apply_app_state(&mut self, app_state: AppState) {
@@ -846,6 +896,17 @@ fn default_app_settings_path() -> PathBuf {
 
 fn default_app_state_path() -> PathBuf {
     StateStore::default_path().with_file_name("state.json")
+}
+
+/// Where the materialized shell scripts for [`CustomCommand`]s live. The
+/// file name is a hash of the script text, so identical scripts share one
+/// file no matter how many commands or invocations reference it.
+pub fn custom_command_scripts_directory() -> PathBuf {
+    if cfg!(debug_assertions) {
+        StateStore::default_path().with_file_name("commands")
+    } else {
+        configuration_directory().join("commands")
+    }
 }
 
 fn read_app_state_file(path: &Path) -> Option<AppState> {
@@ -1281,6 +1342,35 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.render_math);
+    }
+
+    #[test]
+    fn custom_commands_round_trip_through_app_settings() {
+        let mut state = PersistedState::empty();
+        let mut command = CustomCommand::new("git status".to_owned());
+        command.name = Some("Status".to_owned());
+        command.shell = Some("/bin/zsh".to_owned());
+        command.close_on_success = true;
+        state.custom_commands = vec![command.clone()];
+
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert_eq!(restored.custom_commands, vec![command]);
+
+        // Settings files written before commands existed carry no list.
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(legacy.custom_commands.is_empty());
+    }
+
+    #[test]
+    fn custom_command_display_name_falls_back_to_the_script() {
+        let mut command = CustomCommand::new("make test".to_owned());
+        assert_eq!(command.display_name(), "make test");
+        command.name = Some("   ".to_owned());
+        assert_eq!(command.display_name(), "make test");
+        command.name = Some("Tests".to_owned());
+        assert_eq!(command.display_name(), "Tests");
     }
 
     #[test]

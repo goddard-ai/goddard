@@ -1,5 +1,6 @@
 use super::composer::next_picker_highlight;
 use super::*;
+use crate::ui::ActivationExt;
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -19,7 +20,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 8] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 9] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -51,6 +52,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 8] = [
         "settings.archived_keywords",
     ),
     (
+        SettingsPage::Commands,
+        "settings.commands",
+        "icons/terminal.svg",
+        "settings.commands_keywords",
+    ),
+    (
         SettingsPage::Usage,
         "settings.usage",
         "icons/chart-column.svg",
@@ -77,6 +84,23 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("down", SelectNextEntry, Some(SETTINGS_SEARCH_CONTEXT)),
         KeyBinding::new("up", SelectPreviousEntry, Some(SETTINGS_SEARCH_CONTEXT)),
     ]);
+}
+
+/// The Commands settings page's open form. Input entities live for the
+/// editor's lifetime rather than being pre-created with the other settings
+/// fields.
+pub(super) struct CustomCommandEditor {
+    /// `None` while the form is creating a new command.
+    id: Option<Uuid>,
+    name: Entity<TextInput>,
+    shell: Entity<TextInput>,
+    script: Entity<TextInput>,
+    close_on_success: bool,
+    /// The script text the command had when the editor opened — its hashed
+    /// file is dropped on save once no other command still uses it.
+    previous_script: Option<String>,
+    /// Set when Save was pressed with an empty script.
+    script_required: bool,
 }
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
@@ -370,6 +394,7 @@ impl Waku {
                         SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
+                        SettingsPage::Commands => tr!("settings.commands"),
                         SettingsPage::Appearance => tr!("settings.appearance"),
                     }),
             )
@@ -381,6 +406,7 @@ impl Waku {
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
+                SettingsPage::Commands => self.render_commands_settings(cx),
                 SettingsPage::Appearance => self.render_appearance_settings(cx),
             });
 
@@ -622,9 +648,7 @@ impl Waku {
                                 false,
                                 theme,
                                 cx,
-                                move |this, _, cx| {
-                                    this.set_completion_sound_enabled(!enabled, cx)
-                                },
+                                move |this, _, cx| this.set_completion_sound_enabled(!enabled, cx),
                             )),
                     )
                     .when(enabled, |card| {
@@ -734,6 +758,441 @@ impl Waku {
             updater.set_automatically_checks_for_updates(enabled);
         }
         cx.notify();
+    }
+
+    /// The Commands page's open editor form. Input entities live here rather
+    /// than in `Waku::new` because they only exist while the form is open.
+    fn open_custom_command_editor(
+        &mut self,
+        command: Option<&CustomCommand>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("commands.name_placeholder"));
+            if let Some(name) = command.and_then(|command| command.name.as_deref()) {
+                input.set_content(name, cx);
+            }
+            input
+        });
+        let shell = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("commands.shell_placeholder"));
+            if let Some(shell) = command.and_then(|command| command.shell.as_deref()) {
+                input.set_content(shell, cx);
+            }
+            input
+        });
+        let script = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx)
+                .multi_line()
+                .auto_height()
+                .max_lines(10)
+                .syntax(Some("shell"))
+                .placeholder(tr!("commands.script_placeholder"));
+            if let Some(command) = command {
+                input.set_content(command.script.clone(), cx);
+            }
+            input
+        });
+        self.custom_command_editor = Some(CustomCommandEditor {
+            id: command.map(|command| command.id),
+            name: name.clone(),
+            shell,
+            script,
+            close_on_success: command.is_some_and(|command| command.close_on_success),
+            previous_script: command.map(|command| command.script.clone()),
+            script_required: false,
+        });
+        let focus = name.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn save_custom_command_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = &self.custom_command_editor else {
+            return;
+        };
+        let script = editor.script.read(cx).content().trim_end().to_owned();
+        if script.trim().is_empty() {
+            self.custom_command_editor.as_mut().unwrap().script_required = true;
+            cx.notify();
+            return;
+        }
+        let name = editor.name.read(cx).content().trim().to_owned();
+        let shell = editor.shell.read(cx).content().trim().to_owned();
+        let previous_script = editor.previous_script.clone();
+        let command = CustomCommand {
+            id: editor.id.unwrap_or_else(Uuid::new_v4),
+            name: (!name.is_empty()).then_some(name),
+            shell: (!shell.is_empty()).then_some(shell),
+            script,
+            close_on_success: editor.close_on_success,
+        };
+        if let Some(index) = self
+            .state
+            .custom_commands
+            .iter()
+            .position(|existing| existing.id == command.id)
+        {
+            self.state.custom_commands[index] = command;
+        } else {
+            self.state.custom_commands.push(command);
+        }
+        self.custom_command_editor = None;
+        // The old text's hashed script file is only safe to drop once the
+        // list no longer carries it.
+        if let Some(previous_script) = previous_script {
+            crate::custom_commands::remove_script_if_unreferenced(
+                &previous_script,
+                &self.state.custom_commands,
+            );
+        }
+        self.save();
+        cx.notify();
+    }
+
+    fn delete_custom_command(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        let Some(index) = self
+            .state
+            .custom_commands
+            .iter()
+            .position(|command| command.id == id)
+        else {
+            return;
+        };
+        let removed = self.state.custom_commands.remove(index);
+        if self
+            .custom_command_editor
+            .as_ref()
+            .is_some_and(|editor| editor.id == Some(id))
+        {
+            self.custom_command_editor = None;
+        }
+        crate::custom_commands::remove_script_if_unreferenced(
+            &removed.script,
+            &self.state.custom_commands,
+        );
+        self.save();
+        cx.notify();
+    }
+
+    fn render_commands_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let mut column = div()
+            .mt(px(15.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(14.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("commands.title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("commands.description")),
+                    ),
+            );
+
+        if let Some(editor) = &self.custom_command_editor {
+            return column
+                .child(self.render_custom_command_editor(editor, theme, cx))
+                .into_any_element();
+        }
+
+        column = column.child(
+            div()
+                .id("new-custom-command")
+                .tab_index(0)
+                .w_full()
+                .px(px(20.0))
+                .py(px(12.0))
+                .rounded(px(13.0))
+                .bg(theme.raised)
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .cursor_default()
+                .text_size(sp(13.0))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(icon("icons/plus.svg", 14.0, theme.text_tertiary))
+                .child(tr!("commands.new_command"))
+                .on_activation(cx, |this, window, cx| {
+                    this.open_custom_command_editor(None, window, cx);
+                }),
+        );
+
+        if self.state.custom_commands.is_empty() {
+            column = column.child(
+                div()
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(24.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("commands.empty")),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr!("commands.empty_description")),
+                    ),
+            );
+        }
+
+        for command in &self.state.custom_commands {
+            let id = command.id;
+            let label = command.display_name().to_owned();
+            let script = command.script.clone();
+            let edit_command = command.clone();
+            column = column.child(
+                div()
+                    .w_full()
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(icon("icons/terminal.svg", 15.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(sp(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(label),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(3.0))
+                                    .truncate()
+                                    .font_family(".SystemUIFontMonospaced")
+                                    .text_size(sp(11.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(script),
+                            ),
+                    )
+                    .child(
+                        icon_button(
+                            SharedString::from(format!("edit-custom-command-{id}")),
+                            "icons/pencil.svg",
+                            theme,
+                        )
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .tooltip(|window, cx| Tooltip::new(tr!("commands.edit")).build(window, cx))
+                        .on_activation(cx, move |this, window, cx| {
+                            this.open_custom_command_editor(Some(&edit_command), window, cx);
+                        }),
+                    )
+                    .child(
+                        icon_button(
+                            SharedString::from(format!("delete-custom-command-{id}")),
+                            "icons/trash.svg",
+                            theme,
+                        )
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .tooltip(|window, cx| {
+                            Tooltip::new(tr!("commands.delete")).build(window, cx)
+                        })
+                        .on_activation(cx, move |this, _, cx| {
+                            this.delete_custom_command(id, cx);
+                        }),
+                    ),
+            );
+        }
+
+        column.into_any_element()
+    }
+
+    fn render_custom_command_editor(
+        &self,
+        editor: &CustomCommandEditor,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let editing = editor.id.is_some();
+        let close_on_success = editor.close_on_success;
+        let field_label = |text: String| {
+            div()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(text)
+        };
+        let field_hint = |text: String| {
+            div()
+                .mt(px(3.0))
+                .text_size(sp(12.0))
+                .line_height(sp(15.0))
+                .text_color(theme.text_tertiary)
+                .child(text)
+        };
+        let ghost_button = |id: &'static str, label: String| {
+            div()
+                .id(id)
+                .tab_index(0)
+                .h(px(27.0))
+                .px(px(10.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .focus_visible(|style| style.border_color(theme.accent))
+                .child(label)
+        };
+
+        div()
+            .w_full()
+            .px(px(20.0))
+            .py(px(15.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(if editing {
+                        tr!("commands.edit_command")
+                    } else {
+                        tr!("commands.new_command")
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .child(field_label(tr!("commands.name")))
+                    .child(field_hint(tr!("commands.name_description")))
+                    .child(div().mt(px(6.0)).child(
+                        TextField::new("custom-command-name", editor.name.clone()).w_full(),
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .child(field_label(tr!("commands.shell")))
+                    .child(field_hint(tr!("commands.shell_description")))
+                    .child(div().mt(px(6.0)).child(
+                        TextField::new("custom-command-shell", editor.shell.clone()).w_full(),
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .child(field_label(tr!("commands.script")))
+                    .child(field_hint(tr!("commands.script_description")))
+                    .child(
+                        div()
+                            .mt(px(6.0))
+                            .w_full()
+                            .px(px(8.0))
+                            .py(px(6.0))
+                            .rounded(px(6.0))
+                            .border_1()
+                            .border_color(theme.border_strong)
+                            .bg(theme.inset)
+                            .text_size(sp(12.5))
+                            .line_height(sp(17.0))
+                            .child(editor.script.clone()),
+                    )
+                    .when(editor.script_required, |element| {
+                        element.child(
+                            div()
+                                .mt(px(4.0))
+                                .text_size(sp(12.0))
+                                .text_color(theme.danger)
+                                .child(tr!("commands.script_required")),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .mt(px(14.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(field_label(tr!("commands.close_on_success")))
+                            .child(field_hint(tr!("commands.close_on_success_description"))),
+                    )
+                    .child(toggle_switch(
+                        "custom-command-close-on-success",
+                        close_on_success,
+                        false,
+                        theme,
+                        cx,
+                        move |this, _, cx| {
+                            if let Some(editor) = this.custom_command_editor.as_mut() {
+                                editor.close_on_success = !editor.close_on_success;
+                            }
+                            cx.notify();
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(14.0))
+                    .flex()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .child(
+                        ghost_button("custom-command-cancel", tr!("commands.cancel"))
+                            .on_activation(cx, |this, _, cx| {
+                                this.custom_command_editor = None;
+                                cx.notify();
+                            }),
+                    )
+                    .child(
+                        ghost_button("custom-command-save", tr!("commands.save"))
+                            .on_activation(cx, |this, _, cx| this.save_custom_command_editor(cx)),
+                    ),
+            )
     }
 
     fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
