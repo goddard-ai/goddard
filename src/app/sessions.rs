@@ -339,6 +339,36 @@ impl Waku {
         }
     }
 
+    /// Primary modifier + Shift + T: flip the draft between the local checkout
+    /// and a new worktree — the same two rows the "Work in" menu offers. The
+    /// guards mirror its disabled states; `select_workspace` restores the
+    /// remembered base branch.
+    pub(super) fn toggle_workspace_action(
+        &mut self,
+        _: &ToggleWorkspace,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        if session.has_started() || session.is_busy() {
+            return;
+        }
+        if self.selected_project().is_some_and(Project::is_projectless) {
+            return;
+        }
+        let next = if session.workspace.is_local() {
+            SessionWorkspace::NewWorktree { base_branch: None }
+        } else {
+            SessionWorkspace::Local
+        };
+        self.select_workspace(next, cx);
+    }
+
     pub(super) fn remove_session(
         &mut self,
         session_id: Uuid,

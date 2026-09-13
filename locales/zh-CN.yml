@@ -21,6 +21,7 @@ menu.toggle_right_panel: 显示或隐藏右侧面板
 menu.focus_composer: 将焦点移到输入框
 menu.focus_terminal: 将焦点移到终端
 menu.toggle_model_picker: 打开或关闭模型选择器
+menu.toggle_workspace: 切换工作位置
 menu.toggle_usage_panel: 打开或关闭用量面板
 menu.window: 窗口
 menu.toggle_fps_counter: 显示或隐藏帧率
@@ -627,6 +628,7 @@ workspace.local: 本地
 workspace.new_worktree: 新建工作树
 workspace.workspace: 工作区
 workspace.worktree: 工作树
+workspace.toggle_hint: 切换工作位置 (%{shortcut})
 terminal.starting: 正在启动终端…
 project.add_project: 添加项目
 errors.remote_project_picker: 添加守护进程主机上的项目需要远程路径选择器，但该功能尚不可用

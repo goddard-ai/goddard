@@ -155,6 +155,7 @@ enum PaletteAction {
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
+    ToggleWorkspace,
     ToggleUsage,
     CollapseSidebarGroups,
     GoToLatestUnseenCompletion,
@@ -734,6 +735,26 @@ impl Waku {
                 Some(crate::platform::primary_shortcut("⌘/", "Ctrl+/")),
                 PaletteAction::ChooseModel,
                 "choose change select model provider agent",
+                next(),
+            ));
+        }
+
+        // Same gate as the "Work in" chip: an unstarted draft in a real
+        // project is the only session whose workspace can still flip.
+        let can_toggle_workspace = self
+            .selected_session()
+            .is_some_and(|session| !session.has_started() && !session.is_busy())
+            && self
+                .selected_project()
+                .is_some_and(|project| !project.is_projectless());
+        if can_toggle_workspace {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("menu.toggle_workspace"),
+                "icons/fork.svg",
+                Some(crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")),
+                PaletteAction::ToggleWorkspace,
+                "toggle switch workspace worktree local checkout draft",
                 next(),
             ));
         }
@@ -1610,6 +1631,12 @@ impl Waku {
                 self.select_session(session_id, cx);
                 let focus = self.composer_focus(cx);
                 window.focus(&focus, cx);
+            }
+            PaletteAction::ToggleWorkspace => {
+                // Reachable over Settings; reveal the app so the chip change
+                // is visible, then run the same path the keystroke takes.
+                self.settings_page = None;
+                self.toggle_workspace_action(&ToggleWorkspace, window, cx);
             }
             PaletteAction::ChooseModel | PaletteAction::ToggleUsage => {
                 // These popovers are rendered by the composer. If the command

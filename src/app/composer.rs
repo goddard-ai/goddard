@@ -3541,7 +3541,13 @@ impl Waku {
             .caret(false)
             .disabled(!can_configure_workspace)
             .selected(can_configure_workspace && worktree_handle.is_open())
-            .max_w(px(180.0));
+            .max_w(px(180.0))
+            .when(can_configure_workspace, |chip| {
+                chip.tooltip(tr!(
+                    "workspace.toggle_hint",
+                    shortcut = crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")
+                ))
+            });
         let worktree_selector = if can_configure_workspace {
             let local_selected = workspace.is_local();
             let worktree_selected = workspace.is_worktree();

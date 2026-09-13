@@ -283,6 +283,7 @@ pub struct MenuChip {
     /// A second, separately coloured icon layer — see [`provider_mark`].
     badge: Option<(&'static str, Hsla)>,
     label: SharedString,
+    tooltip: Option<SharedString>,
     caret: bool,
     outlined: bool,
     selected: bool,
@@ -298,6 +299,7 @@ impl MenuChip {
             icon: None,
             badge: None,
             label: SharedString::default(),
+            tooltip: None,
             caret: true,
             outlined: false,
             selected: false,
@@ -360,6 +362,13 @@ impl MenuChip {
         self.selected = selected;
         self
     }
+
+    /// Hover hint rendered on the chip's base — `MenuChip` is only
+    /// `InteractiveElement`, so the tooltip attaches in `render`.
+    pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
 }
 
 impl Styled for MenuChip {
@@ -384,10 +393,13 @@ impl RenderOnce for MenuChip {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
         let badge = self.badge;
-        self.base
-            .h(self
-                .height
-                .unwrap_or(if self.outlined { px(30.0) } else { px(26.0) }))
+        let base = match self.tooltip {
+            Some(label) => self.base.tooltip(tooltip::Tooltip::text(label)),
+            None => self.base,
+        };
+        base.h(self
+            .height
+            .unwrap_or(if self.outlined { px(30.0) } else { px(26.0) }))
             .px(if self.outlined { px(10.0) } else { px(7.0) })
             .rounded(if self.outlined { px(7.0) } else { px(6.0) })
             .flex()

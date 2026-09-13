@@ -21,6 +21,7 @@ menu.toggle_right_panel: 右パネルの表示を切り替える
 menu.focus_composer: 入力欄にフォーカスを移動
 menu.focus_terminal: ターミナルにフォーカスを移動
 menu.toggle_model_picker: モデル選択の表示を切り替える
+menu.toggle_workspace: 作業場所を切り替える
 menu.toggle_usage_panel: 使用状況パネルの表示を切り替える
 menu.window: ウインドウ
 menu.toggle_fps_counter: FPS カウンターの表示を切り替える
@@ -657,6 +658,7 @@ workspace.local: ローカル
 workspace.new_worktree: 新しいワークツリー
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
+workspace.toggle_hint: 作業場所を切り替え (%{shortcut})
 
 terminal.starting: ターミナルを起動中…
 

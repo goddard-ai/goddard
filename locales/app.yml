@@ -42,6 +42,8 @@ menu.focus_terminal:
   en: Focus Terminal
 menu.toggle_model_picker:
   en: Toggle Model Picker
+menu.toggle_workspace:
+  en: Toggle Workspace
 menu.toggle_usage_panel:
   en: Toggle Usage Panel
 menu.window:
@@ -1295,6 +1297,8 @@ workspace.workspace:
   en: workspace
 workspace.worktree:
   en: Worktree
+workspace.toggle_hint:
+  en: Toggle workspace (%{shortcut})
 
 terminal.starting:
   en: Starting terminal…
