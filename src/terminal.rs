@@ -115,7 +115,7 @@ struct TerminalEventProxy {
     window_size: Arc<Mutex<WindowSize>>,
     /// Palette OSC replies run on the PTY thread; `snapshot` refreshes this
     /// so they track the active theme.
-    dark_theme: Arc<AtomicBool>,
+    palette: Arc<Mutex<Theme>>,
 }
 
 impl TerminalEventProxy {
@@ -148,8 +148,8 @@ impl EventListener for TerminalEventProxy {
             }
             Event::PtyWrite(text) => self.write_pty(text.into_bytes()),
             Event::ColorRequest(index, formatter) => {
-                let is_dark = self.dark_theme.load(Ordering::Acquire);
-                self.write_pty(formatter(terminal_rgb(index, is_dark)).into_bytes());
+                let theme = *self.palette.lock();
+                self.write_pty(formatter(terminal_rgb(index, theme)).into_bytes());
             }
             Event::TextAreaSizeRequest(formatter) => {
                 self.write_pty(formatter(*self.window_size.lock()).into_bytes());
@@ -189,7 +189,7 @@ struct TerminalSession {
     ui_events: Receiver<TerminalUiEvent>,
     window_size: Arc<Mutex<WindowSize>>,
     grid_size: (usize, usize),
-    dark_theme: Arc<AtomicBool>,
+    palette: Arc<Mutex<Theme>>,
     url_regex: RegexSearch,
 }
 
@@ -211,7 +211,7 @@ impl TerminalSession {
         let shared_window_size = Arc::new(Mutex::new(window_size));
         let dirty = Arc::new(AtomicBool::new(true));
         let sender_slot = Arc::new(OnceLock::new());
-        let dark_theme = Arc::new(AtomicBool::new(true));
+        let palette = Arc::new(Mutex::new(Theme::dark()));
         let (ui_event_tx, ui_events) = unbounded();
         let url_regex = RegexSearch::new(TERMINAL_LINK_REGEX)
             .map_err(|error| anyhow::anyhow!("compile terminal link regex: {error}"))?;
@@ -220,7 +220,7 @@ impl TerminalSession {
             sender: sender_slot.clone(),
             ui_events: ui_event_tx,
             window_size: shared_window_size.clone(),
-            dark_theme: dark_theme.clone(),
+            palette: palette.clone(),
         };
 
         let config = Config {
@@ -287,7 +287,7 @@ impl TerminalSession {
             ui_events,
             window_size: shared_window_size,
             grid_size: (columns, rows),
-            dark_theme,
+            palette,
             url_regex,
         })
     }
@@ -353,7 +353,7 @@ impl TerminalSession {
         cursor_style: TerminalCursorStyle,
         hovered_link: Option<&Match>,
     ) -> TerminalSnapshot {
-        self.dark_theme.store(theme.is_dark, Ordering::Release);
+        *self.palette.lock() = theme;
         let term = self.term.lock();
         let content = term.renderable_content();
         let columns = self.grid_size.0;
@@ -1746,13 +1746,13 @@ fn resolve_color(
     let rgb = match color {
         Color::Spec(color) => Some(color),
         Color::Indexed(index) => {
-            colors[index as usize].or_else(|| Some(terminal_rgb(index as usize, theme.is_dark)))
+            colors[index as usize].or_else(|| Some(terminal_rgb(index as usize, theme)))
         }
         Color::Named(NamedColor::Foreground | NamedColor::BrightForeground) => None,
         Color::Named(NamedColor::Background) => return theme.terminal,
         Color::Named(NamedColor::Cursor) => return theme.text,
         Color::Named(named) => {
-            colors[named as usize].or_else(|| Some(terminal_rgb(named as usize, theme.is_dark)))
+            colors[named as usize].or_else(|| Some(terminal_rgb(named as usize, theme)))
         }
     };
     rgb.map(rgb_to_hsla).unwrap_or(if foreground {
@@ -1766,18 +1766,11 @@ fn rgb_to_hsla(color: Rgb) -> Hsla {
     rgb((u32::from(color.r) << 16) | (u32::from(color.g) << 8) | u32::from(color.b)).into()
 }
 
-fn terminal_rgb(index: usize, is_dark: bool) -> Rgb {
-    // Tomorrow Night on dark surfaces, Tomorrow on light — same hues tuned
-    // for the opposite background so ANSI text stays legible on white.
-    const ANSI_DARK: [u32; 16] = [
-        0x1d1f21, 0xcc6666, 0xb5bd68, 0xf0c674, 0x81a2be, 0xb294bb, 0x8abeb7, 0xc5c8c6, 0x666666,
-        0xd54e53, 0xb9ca4a, 0xe7c547, 0x7aa6da, 0xc397d8, 0x70c0b1, 0xeaeaea,
-    ];
-    const ANSI_LIGHT: [u32; 16] = [
-        0x000000, 0xc82829, 0x718c00, 0xeab700, 0x4271ae, 0x8959a8, 0x3e999f, 0xc7c7c7, 0x8e908c,
-        0xc82829, 0x718c00, 0xeab700, 0x4271ae, 0x8959a8, 0x3e999f, 0xffffff,
-    ];
-    let ansi = if is_dark { &ANSI_DARK } else { &ANSI_LIGHT };
+fn terminal_rgb(index: usize, theme: Theme) -> Rgb {
+    // The active palette's own 16-color table; the 6×6×6 cube and grayscale
+    // ramp above index 15 are standard.
+    let is_dark = theme.is_dark;
+    let ansi = &theme.ansi;
     let value = match index {
         0..=15 => ansi[index],
         16..=231 => {
@@ -1813,11 +1806,12 @@ fn terminal_rgb(index: usize, is_dark: bool) -> Rgb {
             (dim((base >> 16) & 0xff) << 16) | (dim((base >> 8) & 0xff) << 8) | dim(base & 0xff)
         }
         _ => {
-            if is_dark {
-                0xe5e5e5
-            } else {
-                0x242424
-            }
+            let rgba: gpui::Rgba = theme.text.into();
+            return Rgb {
+                r: (rgba.r.clamp(0.0, 1.0) * 255.0) as u8,
+                g: (rgba.g.clamp(0.0, 1.0) * 255.0) as u8,
+                b: (rgba.b.clamp(0.0, 1.0) * 255.0) as u8,
+            };
         }
     };
     Rgb {

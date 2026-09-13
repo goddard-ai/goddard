@@ -438,9 +438,11 @@ pub fn run() {
 
             window
                 .update(cx, |waku, window, cx| {
+                    let theme = crate::theme::Theme::current(cx);
                     crate::platform::configure_sidebar_material(
                         window,
-                        crate::theme::Theme::current(cx).is_dark,
+                        theme.sidebar_drag_background,
+                        theme.is_dark,
                         waku.sidebar_transparency(),
                     );
                     cx.activate(true);

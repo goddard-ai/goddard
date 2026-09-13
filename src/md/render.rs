@@ -218,6 +218,7 @@ pub struct Palette {
     pub accent: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
+    syntax: crate::theme::SyntaxColors,
     is_dark: bool,
 }
 
@@ -256,32 +257,28 @@ impl Palette {
             accent: theme.accent,
             added: theme.success,
             removed: theme.danger,
+            syntax: theme.syntax,
             is_dark: theme.is_dark,
         }
     }
 
-    /// Token colors. Deliberately restrained: three hues plus muted comments,
-    /// so a code block still reads as part of a graphite transcript. Shared with
-    /// the code editor, so both surfaces colour code identically.
+    /// Token colors come from the active palette — the default themes carry
+    /// Goddard's restrained set, named schemes carry their own syntax hues.
+    /// Shared with the code editor, so both surfaces colour code identically.
     pub fn token(&self, class: TokenClass) -> Hsla {
-        let dark = self.is_dark;
         match class {
-            TokenClass::Keyword => hue(dark, 0xC98BC0, 0x9A4B92),
-            TokenClass::Literal => hue(dark, 0xD9A05B, 0x9A6019),
-            TokenClass::String => hue(dark, 0x94C08A, 0x3F7A36),
-            TokenClass::Comment => self.ghost,
-            TokenClass::Number => hue(dark, 0xD9A05B, 0x9A6019),
-            TokenClass::Type => hue(dark, 0x8FB8D9, 0x2F6690),
-            TokenClass::Function => hue(dark, 0x8FB8D9, 0x2F6690),
-            TokenClass::Meta => self.tertiary,
+            TokenClass::Keyword => self.syntax.keyword,
+            TokenClass::Literal => self.syntax.literal,
+            TokenClass::String => self.syntax.string,
+            TokenClass::Comment => self.syntax.comment,
+            TokenClass::Number => self.syntax.number,
+            TokenClass::Type => self.syntax.ty,
+            TokenClass::Function => self.syntax.function,
+            TokenClass::Meta => self.syntax.meta,
             TokenClass::Added => self.added,
             TokenClass::Removed => self.removed,
         }
     }
-}
-
-fn hue(is_dark: bool, dark: u32, light: u32) -> Hsla {
-    gpui::rgb(if is_dark { dark } else { light }).into()
 }
 
 // ── Flattened inline text ──────────────────────────────────────────────────

@@ -515,12 +515,18 @@ pub fn titlebar_double_click(window: &Window) {
 
 /// Match Cursor's macOS glass window stack without asking GPUI's transparent
 /// Metal target to blend two translucent quads. The semantic tint is a native
-/// view above active Sidebar vibrancy; GPUI paints clear sidebar chrome and one
-/// translucent interaction layer above it. With `transparent` off the effect
-/// view stops rendering and the tint view hides; GPUI's sidebar fill is opaque
-/// by then and covers the strip itself.
+/// view above active Sidebar vibrancy, painted with the active theme's solid
+/// sidebar color; GPUI paints clear sidebar chrome and one translucent
+/// interaction layer above it. With `transparent` off the effect view stops
+/// rendering and the tint view hides; GPUI's sidebar fill is opaque by then
+/// and covers the strip itself.
 #[cfg(target_os = "macos")]
-pub fn configure_sidebar_material(window: &Window, dark: bool, transparent: bool) {
+pub fn configure_sidebar_material(
+    window: &Window,
+    sidebar: gpui::Hsla,
+    dark: bool,
+    transparent: bool,
+) {
     use objc2::{MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
         NSAutoresizingMaskOptions, NSColor, NSView, NSVisualEffectBlendingMode,
@@ -545,7 +551,12 @@ pub fn configure_sidebar_material(window: &Window, dark: bool, transparent: bool
         let Some(native_window) = view.window() else {
             return;
         };
-        let channel = if dark { 0x18 } else { 0xF3 } as f64 / 255.0;
+        let sidebar_rgb: gpui::Rgba = sidebar.into();
+        let (r, g, b) = (
+            f64::from(sidebar_rgb.r),
+            f64::from(sidebar_rgb.g),
+            f64::from(sidebar_rgb.b),
+        );
         let background = if transparent {
             if dark {
                 NSColor::colorWithSRGBRed_green_blue_alpha(0.0, 0.0, 0.0, 0.25)
@@ -556,7 +567,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool, transparent: bool
             // The window stays non-opaque, so a clear pixel would otherwise
             // show the desktop; an opaque backdrop keeps any uncovered gap
             // the same color GPUI paints the sidebar.
-            NSColor::colorWithSRGBRed_green_blue_alpha(channel, channel, channel, 1.0)
+            NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0)
         };
         native_window.setBackgroundColor(Some(&background));
 
@@ -582,7 +593,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool, transparent: bool
             return;
         }
 
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(channel, channel, channel, 0.92);
+        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 0.92);
 
         SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
@@ -616,7 +627,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool, transparent: bool
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn configure_sidebar_material(_: &Window, _: bool, _: bool) {}
+pub fn configure_sidebar_material(_: &Window, _: gpui::Hsla, _: bool, _: bool) {}
 
 #[cfg(target_os = "macos")]
 pub fn set_sidebar_material_width(window: &Window, width: f32) {
