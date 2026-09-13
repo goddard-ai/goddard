@@ -380,10 +380,20 @@ web.error_secure_websocket_required:
   en: A secure Goddard Web page can only connect through wss://
 web.error_daemon_token_required:
   en: Enter the daemon token
-settings.theme:
-  en: Theme
-settings.theme_description:
-  en: Choose between system, light, or dark themes
+settings.match_system:
+  en: Match system appearance
+settings.match_system_description:
+  en: Switch between your light and dark themes with the OS
+settings.appearance_mode_description:
+  en: Appearance to use while not matching the system
+settings.light_theme:
+  en: Light theme
+settings.light_theme_description:
+  en: Palette used while in light appearance
+settings.dark_theme:
+  en: Dark theme
+settings.dark_theme_description:
+  en: Palette used while in dark appearance
 settings.sidebar_transparency:
   en: Sidebar transparency
 settings.sidebar_transparency_description:
@@ -406,8 +416,6 @@ settings.completion_sound_description:
   en: Play a sound when a task you're not viewing finishes its turn
 settings.completion_sound_name:
   en: Sound
-settings.theme_system:
-  en: System
 settings.theme_light:
   en: Light
 settings.theme_dark:

@@ -33,7 +33,7 @@ use crate::model::{
     AgentSession, FavoriteModel, Message, MessageAttachment, MessageRole, Project, ProviderKind,
     RuntimeMode, SessionWorkspace,
 };
-use crate::theme::ThemePreference;
+use crate::theme::ThemeSettings;
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
     ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
@@ -189,7 +189,7 @@ impl ComposerDraftStore {
 pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
-    pub theme: ThemePreference,
+    pub theme: ThemeSettings,
     pub language: AppLanguage,
 }
 
@@ -198,7 +198,7 @@ impl Default for AppSettings {
         Self {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
-            theme: ThemePreference::System,
+            theme: ThemeSettings::default(),
             language: AppLanguage::default(),
         }
     }
@@ -265,7 +265,7 @@ pub struct PersistedState {
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
-    pub theme: ThemePreference,
+    pub theme: ThemeSettings,
     #[serde(default)]
     pub language: AppLanguage,
     #[serde(default = "default_sidebar_visibility")]
@@ -381,7 +381,7 @@ impl PersistedState {
             last_context_window: None,
             remembered_model_traits: Vec::new(),
             favorite_models: Vec::new(),
-            theme: ThemePreference::System,
+            theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -1943,12 +1943,21 @@ mod tests {
         fs::write(&legacy_path, legacy).unwrap();
 
         let restored = store_in(&directory).load().unwrap();
-        assert_eq!(restored.theme, ThemePreference::Dark);
+        assert_eq!(
+            restored.theme,
+            ThemeSettings {
+                mode: crate::theme::ThemeMode::Dark,
+                ..ThemeSettings::default()
+            }
+        );
         assert!(!restored.analytics_enabled);
 
         let app: serde_json::Value =
             serde_json::from_slice(&fs::read(directory.join("app.json")).unwrap()).unwrap();
-        assert_eq!(app["theme"], "dark");
+        assert_eq!(
+            app["theme"],
+            serde_json::json!({"mode": "dark", "light": "light", "dark": "dark"})
+        );
         assert!(app.get("computer_use_enabled").is_none());
         assert!(app.get("disabled_providers").is_none());
         assert_eq!(fs::read_to_string(legacy_path).unwrap(), legacy);
@@ -1975,7 +1984,13 @@ mod tests {
     fn settings_accept_a_partial_user_authored_document() {
         let settings: AppSettings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
 
-        assert_eq!(settings.theme, ThemePreference::Dark);
+        assert_eq!(
+            settings.theme,
+            ThemeSettings {
+                mode: crate::theme::ThemeMode::Dark,
+                ..ThemeSettings::default()
+            }
+        );
         assert_eq!(settings.language, AppLanguage::System);
         assert!(settings.analytics_enabled);
     }
@@ -2613,7 +2628,10 @@ mod tests {
             provider: ProviderKind::Codex,
             model: "gpt-5.6-luna".into(),
         });
-        state.theme = ThemePreference::Light;
+        state.theme = ThemeSettings {
+            mode: crate::theme::ThemeMode::Light,
+            ..ThemeSettings::default()
+        };
         state.language = AppLanguage::SimplifiedChinese;
         state.sidebar_visible = false;
         state.right_panel_visible = false;
@@ -2674,7 +2692,7 @@ mod tests {
             crate::model::RuntimeMode::Auto
         );
         assert_eq!(restored.favorite_models, state.favorite_models);
-        assert_eq!(restored.theme, ThemePreference::Light);
+        assert_eq!(restored.theme, state.theme);
         assert_eq!(restored.language, AppLanguage::SimplifiedChinese);
         assert!(!restored.sidebar_visible);
         assert!(!restored.right_panel_visible);
@@ -2832,7 +2850,10 @@ mod tests {
         let directory = temporary_directory();
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
-        state.theme = ThemePreference::Light;
+        state.theme = ThemeSettings {
+            mode: crate::theme::ThemeMode::Light,
+            ..ThemeSettings::default()
+        };
         state.language = AppLanguage::SimplifiedChinese;
         state.sidebar_width = 301.0;
         store.save(&mut state).unwrap();
@@ -2844,7 +2865,10 @@ mod tests {
             "settings are pretty-printed for editing"
         );
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(value["theme"], "light");
+        assert_eq!(
+            value["theme"],
+            serde_json::json!({"mode": "light", "light": "light", "dark": "dark"})
+        );
         assert_eq!(value["language"], "simplified-chinese");
         for daemon_key in [
             "computer_use_enabled",

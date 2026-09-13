@@ -191,8 +191,13 @@ web.error_daemon_url_scheme: 守护进程 URL 必须使用 ws:// 或 wss://
 web.error_daemon_url_host: 守护进程 URL 必须包含主机，且不能包含凭据
 web.error_secure_websocket_required: 安全的 Goddard Web 页面只能通过 wss:// 连接
 web.error_daemon_token_required: 请输入守护进程令牌
-settings.theme: 主题
-settings.theme_description: 选择跟随系统、浅色或深色主题
+settings.match_system: 跟随系统外观
+settings.match_system_description: 根据系统设置自动切换浅色和深色主题
+settings.appearance_mode_description: 不跟随系统时使用的外观
+settings.light_theme: 浅色主题
+settings.light_theme_description: 浅色外观下使用的主题
+settings.dark_theme: 深色主题
+settings.dark_theme_description: 深色外观下使用的主题
 settings.sidebar_transparency: 侧边栏透明
 settings.sidebar_transparency_description: 在侧边栏后方透出桌面。关闭后使用纯色背景。
 settings.ui_font_size: 界面字号
@@ -204,7 +209,6 @@ settings.render_math_description: 在 Markdown 中显示排版后的公式。关
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音
-settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
 input.do_anything: 做什么都可以…

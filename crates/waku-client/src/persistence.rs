@@ -22,7 +22,7 @@ use waku_protocol::model::{
     AgentSession, FavoriteModel, Project, ProviderKind, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, RuntimeMode, SessionWorkspace,
 };
-use waku_protocol::theme::ThemePreference;
+use waku_protocol::theme::ThemeSettings;
 
 pub use waku_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
@@ -317,7 +317,7 @@ pub struct PersistedWindowState {
 pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
-    pub theme: ThemePreference,
+    pub theme: ThemeSettings,
     pub language: AppLanguage,
     /// Base text size for the interface, in pixels: chrome and prose are
     /// authored against the 14px default and scale from it. Hand-edited
@@ -350,7 +350,7 @@ impl Default for AppSettings {
         Self {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
-            theme: ThemePreference::System,
+            theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
@@ -464,7 +464,7 @@ pub struct PersistedState {
     #[serde(default)]
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
-    pub theme: ThemePreference,
+    pub theme: ThemeSettings,
     #[serde(default)]
     pub language: AppLanguage,
     #[serde(default = "default_ui_font_size")]
@@ -553,7 +553,7 @@ impl PersistedState {
             remembered_model_traits: Vec::new(),
             project_workspaces: HashMap::new(),
             favorite_models: Vec::new(),
-            theme: ThemePreference::System,
+            theme: ThemeSettings::default(),
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,

@@ -61,7 +61,7 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
-use crate::theme::{Theme, ThemePreference, sp};
+use crate::theme::{Theme, ThemeMode, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
@@ -2412,7 +2412,7 @@ impl Waku {
             }
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
-                if this.state.theme == ThemePreference::System {
+                if this.state.theme.mode == ThemeMode::System {
                     crate::theme::apply_theme_preference(
                         this.state.theme,
                         this.state.sidebar_transparency,

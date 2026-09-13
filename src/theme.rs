@@ -1,6 +1,6 @@
 use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
 
-pub use waku_client::theme::ThemePreference;
+pub use waku_client::theme::{ThemeMode, ThemeName, ThemeSettings};
 
 /// Scaled pixels: a dimension authored at the default 14px UI font size,
 /// expressed in rems so the UI font size setting scales it. The window's rem
@@ -22,18 +22,10 @@ fn wash(color: u32, alpha: f32) -> Hsla {
     color.opacity(alpha)
 }
 
-fn resolves_to_dark(preference: ThemePreference, system_appearance: WindowAppearance) -> bool {
-    let system_dark = matches!(
-        system_appearance,
-        WindowAppearance::Dark | WindowAppearance::VibrantDark
-    );
-    theme_for(preference, system_dark).is_dark
-}
-
-fn native_override(preference: ThemePreference) -> Option<bool> {
-    match preference {
-        ThemePreference::System | ThemePreference::Unknown => None,
-        other => Some(theme_for(other, false).is_dark),
+fn native_override(settings: ThemeSettings) -> Option<bool> {
+    match settings.mode {
+        ThemeMode::System => None,
+        _ => Some(theme_for(settings, false).is_dark),
     }
 }
 
@@ -653,21 +645,27 @@ impl Theme {
     }
 }
 
-/// Resolve a preference to a palette. `System` — and any value a future build
-/// wrote that this one doesn't know — picks the default pair by appearance.
-fn theme_for(preference: ThemePreference, system_dark: bool) -> Theme {
-    match preference {
-        ThemePreference::System | ThemePreference::Unknown => {
-            if system_dark { Theme::dark() } else { Theme::light() }
-        }
-        ThemePreference::Light => Theme::light(),
-        ThemePreference::Dark => Theme::dark(),
-        ThemePreference::GruvboxLightHard => Theme::gruvbox_light_hard(),
-        ThemePreference::GruvboxDark => Theme::gruvbox_dark(),
-        ThemePreference::EverforestDark => Theme::everforest_dark(),
-        ThemePreference::EverforestLight => Theme::everforest_light(),
-        ThemePreference::KanagawaLight => Theme::kanagawa_light(),
-        ThemePreference::ZenburnDark => Theme::zenburn(),
+/// Resolve settings to a palette. `System` picks the slot matching the OS
+/// appearance; `Light`/`Dark` pin their slot regardless of it.
+fn theme_for(settings: ThemeSettings, system_dark: bool) -> Theme {
+    let name = match settings.mode {
+        ThemeMode::System if system_dark => settings.dark,
+        ThemeMode::System | ThemeMode::Light => settings.light,
+        ThemeMode::Dark => settings.dark,
+    };
+    theme_named(name)
+}
+
+fn theme_named(name: ThemeName) -> Theme {
+    match name {
+        ThemeName::DefaultLight => Theme::light(),
+        ThemeName::DefaultDark => Theme::dark(),
+        ThemeName::GruvboxLightHard => Theme::gruvbox_light_hard(),
+        ThemeName::GruvboxDark => Theme::gruvbox_dark(),
+        ThemeName::EverforestDark => Theme::everforest_dark(),
+        ThemeName::EverforestLight => Theme::everforest_light(),
+        ThemeName::KanagawaLight => Theme::kanagawa_light(),
+        ThemeName::ZenburnDark => Theme::zenburn(),
     }
 }
 
@@ -683,28 +681,28 @@ fn set_active_theme(theme: Theme, cx: &mut App) {
 }
 
 /// Resolve and publish the startup palette, before any window exists.
+/// Persisted settings are loaded later; the default pair is close enough
+/// for the first frame.
 pub fn init(cx: &mut App) {
-    let system_appearance = cx.window_appearance();
-    let theme = if resolves_to_dark(ThemePreference::System, system_appearance) {
-        Theme::dark()
-    } else {
-        Theme::light()
-    };
-    set_active_theme(theme, cx);
-}
-
-pub fn apply_theme_preference(
-    preference: ThemePreference,
-    sidebar_transparent: bool,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    crate::platform::set_window_appearance(window, native_override(preference));
     let system_dark = matches!(
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
     );
-    let mut theme = theme_for(preference, system_dark);
+    set_active_theme(if system_dark { Theme::dark() } else { Theme::light() }, cx);
+}
+
+pub fn apply_theme_preference(
+    settings: ThemeSettings,
+    sidebar_transparent: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    crate::platform::set_window_appearance(window, native_override(settings));
+    let system_dark = matches!(
+        cx.window_appearance(),
+        WindowAppearance::Dark | WindowAppearance::VibrantDark
+    );
+    let mut theme = theme_for(settings, system_dark);
     let is_dark = theme.is_dark;
     if !sidebar_transparent {
         // The vibrancy stack is switched off natively, so the sidebar needs

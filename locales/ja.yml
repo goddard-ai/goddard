@@ -194,8 +194,13 @@ web.error_daemon_url_scheme: デーモン URL には ws:// または wss:// を�
 web.error_daemon_url_host: デーモン URL にはホストが必要で、認証情報は含められません
 web.error_secure_websocket_required: 安全な Goddard Web ページからは wss:// でのみ接続できます
 web.error_daemon_token_required: デーモントークンを入力してください
-settings.theme: テーマ
-settings.theme_description: システム、ライト、ダークのいずれかのテーマを選択します
+settings.match_system: システムの外観に合わせる
+settings.match_system_description: システムに合わせてライトとダークのテーマを自動で切り替えます
+settings.appearance_mode_description: システムに合わせないときに使う外観
+settings.light_theme: ライトテーマ
+settings.light_theme_description: ライトの外観で使うテーマ
+settings.dark_theme: ダークテーマ
+settings.dark_theme_description: ダークの外観で使うテーマ
 settings.sidebar_transparency: サイドバーの透明化
 settings.sidebar_transparency_description: サイドバーの背後にデスクトップを透かして表示します。オフにすると単色の背景になります。
 settings.ui_font_size: UI のフォントサイズ
@@ -207,7 +212,6 @@ settings.render_math_description: Markdown の数式を整形して表示しま�
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
-settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
 

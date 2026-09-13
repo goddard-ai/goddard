@@ -1,6 +1,7 @@
 use super::composer::next_picker_highlight;
 use super::*;
 use crate::ui::ActivationExt;
+use crate::theme::{ThemeName, ThemeSettings};
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 
@@ -2041,31 +2042,110 @@ impl Waku {
 
     fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let selected_theme = self.state.theme;
+        let theme_settings = self.state.theme;
+        let match_system = theme_settings.mode == ThemeMode::System;
         let selected_language = self.state.language;
+
         let weak = cx.entity().downgrade();
-        let theme_handle = self.menu_handle("theme-selector", cx);
-        let theme_selector = dropdown_menu(
-            MenuChip::new("theme-selector")
-                .label(selected_theme.label())
+        let mode_handle = self.menu_handle("appearance-mode-selector", cx);
+        let mode_selector = dropdown_menu(
+            MenuChip::new("appearance-mode-selector")
+                .label(match theme_settings.mode {
+                    ThemeMode::Dark => tr!("settings.theme_dark"),
+                    _ => tr!("settings.theme_light"),
+                })
                 .outlined()
-                .selected(theme_handle.is_open())
+                .selected(mode_handle.is_open())
                 .w(px(116.0))
                 .justify_between(),
-            "theme-selector-menu",
-            &theme_handle,
+            "appearance-mode-selector-menu",
+            &mode_handle,
             MenuAlign::BelowRight,
             move |_| {
-                ThemePreference::ALL
+                [ThemeMode::Light, ThemeMode::Dark]
                     .into_iter()
-                    .map(|preference| {
+                    .map(|mode| {
                         let weak = weak.clone();
-                        MenuItem::new(preference.label(), move |window, cx| {
+                        MenuItem::new(
+                            match mode {
+                                ThemeMode::Dark => tr!("settings.theme_dark"),
+                                _ => tr!("settings.theme_light"),
+                            },
+                            move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.update_theme_settings(
+                                        |settings| settings.mode = mode,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            },
+                        )
+                        .selected(mode == theme_settings.mode)
+                    })
+                    .collect()
+            },
+        );
+
+        let weak = cx.entity().downgrade();
+        let light_handle = self.menu_handle("light-theme-selector", cx);
+        let light_theme_selector = dropdown_menu(
+            MenuChip::new("light-theme-selector")
+                .label(theme_settings.light.label())
+                .outlined()
+                .selected(light_handle.is_open())
+                .w(px(160.0))
+                .justify_between(),
+            "light-theme-selector-menu",
+            &light_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                ThemeName::LIGHT
+                    .into_iter()
+                    .map(|name| {
+                        let weak = weak.clone();
+                        MenuItem::new(name.label(), move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.set_theme_preference(preference, window, cx);
+                                this.update_theme_settings(
+                                    |settings| settings.light = name,
+                                    window,
+                                    cx,
+                                );
                             });
                         })
-                        .selected(preference == selected_theme)
+                        .selected(name == theme_settings.light)
+                    })
+                    .collect()
+            },
+        );
+
+        let weak = cx.entity().downgrade();
+        let dark_handle = self.menu_handle("dark-theme-selector", cx);
+        let dark_theme_selector = dropdown_menu(
+            MenuChip::new("dark-theme-selector")
+                .label(theme_settings.dark.label())
+                .outlined()
+                .selected(dark_handle.is_open())
+                .w(px(160.0))
+                .justify_between(),
+            "dark-theme-selector-menu",
+            &dark_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                ThemeName::DARK
+                    .into_iter()
+                    .map(|name| {
+                        let weak = weak.clone();
+                        MenuItem::new(name.label(), move |window, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.update_theme_settings(
+                                    |settings| settings.dark = name,
+                                    window,
+                                    cx,
+                                );
+                            });
+                        })
+                        .selected(name == theme_settings.dark)
                     })
                     .collect()
             },
@@ -2165,37 +2245,55 @@ impl Waku {
             .rounded(px(13.0))
             .overflow_hidden()
             .bg(theme.raised)
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.theme")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.theme_description")),
-                            ),
-                    )
-                    .child(theme_selector),
-            )
+            .child(settings_row(
+                tr!("settings.match_system"),
+                tr!("settings.match_system_description"),
+                toggle_switch(
+                    "match-system-appearance",
+                    match_system,
+                    false,
+                    theme,
+                    cx,
+                    move |this, window, cx| {
+                        // Unchecking freezes the appearance on screen right now.
+                        let mode = if match_system {
+                            match window.appearance() {
+                                gpui::WindowAppearance::Dark
+                                | gpui::WindowAppearance::VibrantDark => ThemeMode::Dark,
+                                _ => ThemeMode::Light,
+                            }
+                        } else {
+                            ThemeMode::System
+                        };
+                        this.update_theme_settings(|s| s.mode = mode, window, cx);
+                    },
+                ),
+                theme,
+            ))
+            .when(!match_system, |element| {
+                element
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                    .child(settings_row(
+                        tr!("settings.appearance"),
+                        tr!("settings.appearance_mode_description"),
+                        mode_selector,
+                        theme,
+                    ))
+            })
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(settings_row(
+                tr!("settings.light_theme"),
+                tr!("settings.light_theme_description"),
+                light_theme_selector,
+                theme,
+            ))
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(settings_row(
+                tr!("settings.dark_theme"),
+                tr!("settings.dark_theme_description"),
+                dark_theme_selector,
+                theme,
+            ))
             .when(cfg!(target_os = "macos"), |element| {
                 // Vibrancy is a macOS-only effect; on other platforms the
                 // sidebar is already a solid fill and there is nothing to
@@ -3235,18 +3333,20 @@ impl Waku {
             }))
     }
 
-    fn set_theme_preference(
+    fn update_theme_settings(
         &mut self,
-        preference: ThemePreference,
+        update: impl FnOnce(&mut ThemeSettings),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.state.theme == preference {
+        let mut settings = self.state.theme;
+        update(&mut settings);
+        if self.state.theme == settings {
             return;
         }
-        self.state.theme = preference;
+        self.state.theme = settings;
         crate::theme::apply_theme_preference(
-            preference,
+            settings,
             self.state.sidebar_transparency,
             window,
             cx,
@@ -3348,6 +3448,47 @@ fn font_size_label(size: f32) -> String {
     } else {
         format!("{size} px")
     }
+}
+
+/// A settings card row: title and description on the left, control on the
+/// right — the card's divider lines are drawn by the caller.
+fn settings_row(
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    control: impl IntoElement,
+    theme: Theme,
+) -> Div {
+    let title = title.into();
+    let description = description.into();
+    div()
+        .w_full()
+        .min_h(px(60.0))
+        .px(px(20.0))
+        .py(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(24.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(description),
+                ),
+        )
+        .child(control)
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
