@@ -537,21 +537,25 @@ fn finish_promise_with_timers<'js>(
             return result;
         }
 
+        // Check the deadline before dispatching timers: a sleep that wakes
+        // late must not fire a timer that only became due past the deadline.
+        let now = Instant::now();
+        if now >= deadline {
+            timed_out.store(true, Ordering::Release);
+            return Err(rquickjs::Error::WouldBlock);
+        }
+
         run_due_timers(ctx, timer_dispatch, timers)?;
         while ctx.execute_pending_job() {}
         if let Some(result) = promise.result::<Value<'js>>() {
             return result;
         }
 
-        let now = Instant::now();
-        if now >= deadline {
-            timed_out.store(true, Ordering::Release);
-            return Err(rquickjs::Error::WouldBlock);
-        }
         let Some(timer_deadline) = timers.lock().next_deadline() else {
             return Err(rquickjs::Error::WouldBlock);
         };
         let wake_at = timer_deadline.min(deadline);
+        let now = Instant::now();
         if wake_at > now {
             thread::sleep(wake_at - now);
         }
