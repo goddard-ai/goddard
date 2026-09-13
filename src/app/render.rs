@@ -83,6 +83,11 @@ struct PanelFrame {
     right_panel_sliding: bool,
     /// An edge is still moving, so the frame loop has to keep going.
     sliding: bool,
+    /// The fullscreen file layer is on screen: the mode is active or an exit
+    /// slide is still traveling. While it is, the docked slot stays an empty
+    /// spacer so the pane is only ever mounted in one place.
+    file_fullscreen: bool,
+    file_fullscreen_width: f32,
 }
 
 /// Advance one panel's slide: the eased width while it runs, the settled
@@ -105,7 +110,9 @@ impl Waku {
     /// [`WakuPane::bind`]) and lets the cached-view geometry checks decide
     /// which islands a slide tick actually rebuilds.
     pub(super) fn panels_sliding(&self) -> bool {
-        self.sidebar_slide.is_some() || self.right_panel_slide.is_some()
+        self.sidebar_slide.is_some()
+            || self.right_panel_slide.is_some()
+            || self.file_fullscreen_slide.is_some()
     }
 
     /// Settle both panel slides for this frame and publish the widths the
@@ -118,6 +125,21 @@ impl Waku {
             // see; reopening the workspace finds the panels where they belong.
             self.sidebar_slide = None;
             self.right_panel_slide = None;
+            self.file_fullscreen_slide = None;
+        }
+        // Fullscreen belongs to the markdown file surface it was opened on:
+        // the tab closing, another surface or file taking its place, the
+        // panel hiding, or a session swap all end it. Each of those notifies
+        // the root, so reconciling once per frame covers them without every
+        // caller remembering to clear the flag — and ends without a slide,
+        // since the surface it animated to is already gone.
+        if let Some((surface, path)) = &self.fullscreen_surface
+            && (!self.right_panel_visible
+                || self.active_right_panel_surface() != Some(surface)
+                || self.visible_right_panel_file_path().as_deref() != Some(path))
+        {
+            self.fullscreen_surface = None;
+            self.file_fullscreen_slide = None;
         }
         let (sidebar_content, right_panel_content) = self.effective_panel_widths(window);
         let sidebar = slide_width(
@@ -136,8 +158,17 @@ impl Waku {
                 0.0
             },
         );
+        let file_fullscreen = slide_width(
+            &mut self.file_fullscreen_slide,
+            if self.fullscreen_surface.is_some() {
+                f32::from(window.viewport_size().width)
+            } else {
+                right_panel_content
+            },
+        );
         self.sidebar_rendered_width = sidebar;
         self.right_panel_rendered_width = right_panel;
+        self.file_fullscreen_rendered_width = file_fullscreen;
         let sliding = self.panels_sliding();
         if was_sliding && !sliding {
             // The observer gate held root-state fan-out away from any island
@@ -155,6 +186,8 @@ impl Waku {
             sidebar_sliding: self.sidebar_slide.is_some(),
             right_panel_sliding: self.right_panel_slide.is_some(),
             sliding,
+            file_fullscreen: self.file_fullscreen_active(),
+            file_fullscreen_width: file_fullscreen,
         }
     }
 
@@ -204,8 +237,14 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (_, right_panel_width) = self.effective_panel_widths(window);
-        self.render_right_panel(right_panel_width, window, cx)
+        // Inside the fullscreen layer the panel lays out at the layer's own
+        // (possibly still sliding) width; docked, at its fitted width.
+        let width = if self.file_fullscreen_active() {
+            self.file_fullscreen_rendered_width
+        } else {
+            self.effective_panel_widths(window).1
+        };
+        self.render_right_panel(width, window, cx)
             .into_any_element()
     }
 
@@ -441,16 +480,43 @@ impl Render for Waku {
                         })
                         // Pinned to the window's right edge, so the panel is
                         // uncovered from that edge inward rather than dragged
-                        // across the screen.
-                        .child(
-                            self.right_panel_pane.clone().cached(
+                        // across the screen. While the fullscreen layer owns
+                        // the pane this slot is only a spacer: the docked
+                        // layout underneath never disturbs, and the pane is
+                        // never mounted in two places at once.
+                        .when(!panels.file_fullscreen, |element| {
+                            element.child(self.right_panel_pane.clone().cached(
                                 StyleRefinement::default()
                                     .absolute()
                                     .top_0()
                                     .right_0()
                                     .w(px(panels.right_panel_content))
                                     .h_full(),
-                            ),
+                            ))
+                        }),
+                )
+            })
+            // The fullscreen file surface: the right panel's own island
+            // remounted as a right-pinned layer over the whole window.
+            // Escape is bound on the FileFullscreen context, which sits
+            // between FileEditorPane (close-find) and Waku (cancel-turn), so
+            // an open find bar still eats the first escape and a turn is
+            // never cancelled from here.
+            .when(panels.file_fullscreen, |root| {
+                root.child(
+                    div()
+                        .key_context("FileFullscreen")
+                        .occlude()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .h_full()
+                        .w(px(panels.file_fullscreen_width))
+                        .on_action(cx.listener(Self::exit_file_fullscreen_action))
+                        .child(
+                            self.right_panel_pane
+                                .clone()
+                                .cached(StyleRefinement::default().size_full()),
                         ),
                 )
             })

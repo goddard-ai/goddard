@@ -1867,6 +1867,10 @@ impl Waku {
     }
 
     fn replace_active_right_panel_state(&mut self, state: RightPanelSessionState) {
+        // Fullscreen belonged to the session's surfaces being swapped out;
+        // even a restored session showing the same path starts docked.
+        self.fullscreen_surface = None;
+        self.file_fullscreen_slide = None;
         self.right_panel_visible = state.visible;
         self.right_panel_surfaces = state.surfaces;
         self.right_panel_active_surface = state.active_surface;
@@ -1900,7 +1904,7 @@ impl Waku {
         self.right_panel_tabs_scroll_handle.scroll_to_item(index);
     }
 
-    fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
+    pub(super) fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
         self.right_panel_active_surface
             .and_then(|index| self.right_panel_surfaces.get(index))
     }
@@ -2298,11 +2302,15 @@ impl Waku {
             .relative()
             .child(self.render_right_panel_header(window, cx))
             .child(body)
-            .child(self.render_panel_resize_handle(
-                "right-panel-resize-handle",
-                PanelResizeTarget::RightPanel,
-                cx,
-            ))
+            // The fullscreen layer owns the window's width; dragging the
+            // panel edge would fight it until the mode exits.
+            .when(!self.file_fullscreen_active(), |element| {
+                element.child(self.render_panel_resize_handle(
+                    "right-panel-resize-handle",
+                    PanelResizeTarget::RightPanel,
+                    cx,
+                ))
+            })
     }
 
     fn ensure_right_panel_browser(
@@ -3007,7 +3015,12 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
-        let file_tree_width = fitted_file_tree_width(panel_width, self.right_panel_file_tree_width);
+        let fullscreen = self.file_fullscreen_active();
+        let file_tree_width = if fullscreen {
+            0.0
+        } else {
+            fitted_file_tree_width(panel_width, self.right_panel_file_tree_width)
+        };
         let (editor_state, writable, _) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
@@ -3057,6 +3070,36 @@ impl Waku {
                     }
                 }))
         });
+        let fullscreen_toggle = is_markdown.then(|| {
+            let focus = self.transcript_control_focus("file-fullscreen-toggle", cx);
+            let (icon_path, label) = if fullscreen {
+                ("icons/window-restore.svg", tr!("files.exit_fullscreen"))
+            } else {
+                ("icons/window-maximize.svg", tr!("files.enter_fullscreen"))
+            };
+            div()
+                .id("file-fullscreen-toggle")
+                .track_focus(&focus)
+                .tab_index(0)
+                .size(px(26.0))
+                .rounded(px(7.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|style| style.bg(theme.overlay))
+                .child(icon(icon_path, 12.0, theme.text_tertiary))
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_file_fullscreen(cx)))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.toggle_file_fullscreen(cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
 
         let editor = div()
             .flex_1()
@@ -3084,7 +3127,8 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(relative_path.clone()),
                     )
-                    .children(preview_toggle),
+                    .children(preview_toggle)
+                    .children(fullscreen_toggle),
             )
             .child(body);
 
@@ -3094,24 +3138,28 @@ impl Waku {
             .min_w_0()
             .flex()
             .child(editor)
-            .child(
-                div()
-                    .w(px(file_tree_width))
-                    .min_w(px(FILE_TREE_MIN_WIDTH))
-                    .h_full()
-                    .flex_none()
-                    .flex()
-                    .flex_col()
-                    .relative()
-                    .border_l_1()
-                    .border_color(theme.border_strong)
-                    .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
-                    .child(self.render_panel_resize_handle(
-                        "right-panel-file-tree-resize-handle",
-                        PanelResizeTarget::FileTree,
-                        cx,
-                    )),
-            )
+            // Fullscreen drops the file tree entirely; its resize handle
+            // would fight a surface that owns the window's width.
+            .when(!fullscreen, |element| {
+                element.child(
+                    div()
+                        .w(px(file_tree_width))
+                        .min_w(px(FILE_TREE_MIN_WIDTH))
+                        .h_full()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .relative()
+                        .border_l_1()
+                        .border_color(theme.border_strong)
+                        .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
+                        .child(self.render_panel_resize_handle(
+                            "right-panel-file-tree-resize-handle",
+                            PanelResizeTarget::FileTree,
+                            cx,
+                        )),
+                )
+            })
     }
 
     fn ensure_right_panel_file_editor(
@@ -3443,6 +3491,51 @@ impl Waku {
         self.state.markdown_preview = !self.state.markdown_preview;
         self.save();
         cx.notify();
+    }
+
+    /// The fullscreen file layer is on screen this frame — the mode is
+    /// active or its exit slide is still traveling.
+    pub(super) fn file_fullscreen_active(&self) -> bool {
+        self.fullscreen_surface.is_some() || self.file_fullscreen_slide.is_some()
+    }
+
+    /// Cover the window with the active file surface, or dock it back.
+    /// Runtime-only: nothing persists, and every other way the surface goes
+    /// away (tab close, surface switch, panel hide, session swap) is
+    /// reconciled per frame in `settle_panel_slides`.
+    fn toggle_file_fullscreen(&mut self, cx: &mut Context<Self>) {
+        let entering = self.fullscreen_surface.is_none();
+        self.fullscreen_surface = if entering {
+            self.active_right_panel_surface()
+                .cloned()
+                .zip(self.visible_right_panel_file_path())
+        } else {
+            None
+        };
+        let from = if entering && self.file_fullscreen_slide.is_none() {
+            self.right_panel_rendered_width
+        } else {
+            // Leaving, or reversing a slide still in flight: start where the
+            // layer's edge actually is.
+            self.file_fullscreen_rendered_width
+        };
+        self.file_fullscreen_slide = self.begin_panel_slide(from, cx);
+        cx.notify();
+    }
+
+    /// Escape inside the fullscreen layer. The binding's FileFullscreen
+    /// context sits deeper than Waku's CancelTurn and shallower than
+    /// FileEditorPane's close-find, so it only fires once no find bar has
+    /// claimed the keystroke.
+    pub(super) fn exit_file_fullscreen_action(
+        &mut self,
+        _: &ExitFileFullscreen,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.fullscreen_surface.is_some() {
+            self.toggle_file_fullscreen(cx);
+        }
     }
 
     /// The rendered-markdown alternative to the editor body, shown while the

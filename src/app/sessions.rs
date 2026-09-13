@@ -780,7 +780,7 @@ impl Waku {
     /// so an interrupted one reverses from where its edge actually is.
     /// Reduce-motion gets `None`: the panel simply appears at its new width,
     /// and no frames are scheduled for it.
-    fn begin_panel_slide(&self, from: f32, cx: &App) -> Option<motion::WidthTween> {
+    pub(super) fn begin_panel_slide(&self, from: f32, cx: &App) -> Option<motion::WidthTween> {
         (!cx.reduce_motion()).then(|| motion::WidthTween::new(from))
     }
 

@@ -871,6 +871,8 @@ files.could_not_save_read_only: "无法保存 %{path}：文件不可编辑"
 files.could_not_save: "无法保存 %{path}：%{error}"
 files.preview_markdown: 预览 Markdown
 files.edit_markdown_source: 编辑源码
+files.enter_fullscreen: 进入全屏
+files.exit_fullscreen: 退出全屏
 files.resize_tree: 调整文件树宽度
 files.refresh: 刷新文件
 files.loading: 正在加载文件…

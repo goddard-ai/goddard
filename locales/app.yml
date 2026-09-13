@@ -1791,6 +1791,10 @@ files.preview_markdown:
   en: Preview markdown
 files.edit_markdown_source:
   en: Edit source
+files.enter_fullscreen:
+  en: Enter full screen
+files.exit_fullscreen:
+  en: Exit full screen
 files.resize_tree:
   en: Resize file tree
 files.refresh:
