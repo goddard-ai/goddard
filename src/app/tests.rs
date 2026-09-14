@@ -3,7 +3,7 @@ use super::composer::{
     next_picker_highlight, visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
-use super::sessions::latest_unseen_completion;
+use super::sessions::next_unread_session;
 use super::settings::visible_settings_pages;
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
@@ -439,7 +439,7 @@ fn session_navigation_prunes_deleted_tasks() {
 }
 
 #[test]
-fn latest_unseen_completion_picks_the_newest_unvisited_finish() {
+fn next_unread_session_prefers_blocked_tasks_then_the_newest_finish() {
     let older = Uuid::new_v4();
     let newer = Uuid::new_v4();
     let on_screen = Uuid::new_v4();
@@ -447,20 +447,53 @@ fn latest_unseen_completion_picks_the_newest_unvisited_finish() {
 
     // The newest finish wins while every candidate is off-screen.
     assert_eq!(
-        latest_unseen_completion(&unseen, None, None),
+        next_unread_session(&[], &unseen, None, None),
         Some(on_screen)
     );
     // A task that is selected or pending activation was seen by definition.
     assert_eq!(
-        latest_unseen_completion(&unseen, Some(on_screen), None),
+        next_unread_session(&[], &unseen, Some(on_screen), None),
         Some(newer)
     );
     assert_eq!(
-        latest_unseen_completion(&unseen, None, Some(on_screen)),
+        next_unread_session(&[], &unseen, None, Some(on_screen)),
         Some(newer)
     );
     // No candidates: the command is a no-op.
-    assert_eq!(latest_unseen_completion(&HashMap::new(), None, None), None);
+    assert_eq!(next_unread_session(&[], &HashMap::new(), None, None), None);
+
+    // A task waiting on its user outranks even the newest finish — stamped or
+    // not, it cannot make progress until someone answers.
+    let mut blocked = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    blocked.status = SessionStatus::Waiting;
+    blocked.updated_at = 1;
+    let mut blocked_later = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    blocked_later.status = SessionStatus::Waiting;
+    blocked_later.updated_at = 2;
+    let blocked_id = blocked.id;
+    let blocked_later_id = blocked_later.id;
+    let sessions = vec![blocked, blocked_later];
+
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, None, None),
+        Some(blocked_later_id)
+    );
+    // On-screen blocked tasks are skipped like any other candidate.
+    assert_eq!(
+        next_unread_session(&sessions, &unseen, Some(blocked_later_id), None),
+        Some(blocked_id)
+    );
+    // A pending activation supersedes the selection as the on-screen task, so
+    // the departing blocked session is a valid target again.
+    assert_eq!(
+        next_unread_session(
+            &sessions,
+            &unseen,
+            Some(blocked_id),
+            Some(blocked_later_id)
+        ),
+        Some(blocked_id)
+    );
 }
 
 #[test]

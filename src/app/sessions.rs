@@ -33,23 +33,34 @@ pub(super) fn type_to_focus_text(keystroke: &gpui::Keystroke) -> Option<&str> {
         .filter(|text| text.chars().all(|character| !character.is_control()))
 }
 
-/// The newest off-screen turn finish still unseen, for
-/// GoToLatestUnseenCompletion. Entries are stamped when the turn settles and
-/// cleared on activation, so the map itself is the candidate set; the
-/// on-screen filter only guards the window where a pending activation has not
-/// committed yet.
-pub(super) fn latest_unseen_completion(
+/// The next unread session for GoToLatestUnseenCompletion. A task blocked on
+/// its user — a pending permission or question — cannot make progress until
+/// someone answers, so it outranks every settled turn even without an unseen
+/// stamp; among blocked tasks the most recently updated wins. Unseen entries
+/// are stamped when a turn finishes and cleared on activation, so the map
+/// itself is the settled candidate set; the on-screen filter only guards the
+/// window where a pending activation has not committed yet.
+pub(super) fn next_unread_session(
+    sessions: &[AgentSession],
     unseen_completions: &HashMap<Uuid, u64>,
     selected_session: Option<Uuid>,
     pending_activation: Option<Uuid>,
 ) -> Option<Uuid> {
-    unseen_completions
+    let off_screen = |session_id: Uuid| {
+        !sidebar::sidebar_session_selected(selected_session, pending_activation, session_id)
+    };
+    sessions
         .iter()
-        .filter(|(session_id, _)| {
-            !sidebar::sidebar_session_selected(selected_session, pending_activation, **session_id)
+        .filter(|session| session.status == SessionStatus::Waiting && off_screen(session.id))
+        .max_by_key(|session| session.updated_at)
+        .map(|session| session.id)
+        .or_else(|| {
+            unseen_completions
+                .iter()
+                .filter(|(session_id, _)| off_screen(**session_id))
+                .max_by_key(|(_, completed_at)| *completed_at)
+                .map(|(session_id, _)| *session_id)
         })
-        .max_by_key(|(_, completed_at)| *completed_at)
-        .map(|(session_id, _)| *session_id)
 }
 
 impl Waku {
@@ -566,9 +577,9 @@ impl Waku {
             .detach();
     }
 
-    /// Moves selection after the viewed task departs: the newest unseen turn
-    /// finish, like GoToLatestUnseenCompletion, or the project's New task
-    /// composer when nothing is waiting.
+    /// Moves selection after the viewed task departs: the next unread session,
+    /// like GoToLatestUnseenCompletion, or the project's New task composer
+    /// when nothing is waiting.
     fn select_session_fallback(
         &mut self,
         project_id: Uuid,
@@ -578,7 +589,8 @@ impl Waku {
     ) {
         self.state.selected_session = None;
         self.settings_page = None;
-        if let Some(session_id) = latest_unseen_completion(
+        if let Some(session_id) = next_unread_session(
+            &self.state.sessions,
             &self.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
@@ -1071,7 +1083,8 @@ impl Waku {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = latest_unseen_completion(
+        let Some(target) = next_unread_session(
+            &self.state.sessions,
             &self.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation

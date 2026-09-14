@@ -499,18 +499,28 @@ impl Waku {
             }))
     }
 
-    /// Mouse twin of GoToLatestUnseenCompletion (⌘D / ctrl-backtick): live only
-    /// while an off-screen task has an unseen finished turn, then carries the
-    /// same informational-blue dot the sidebar draws in that row's status slot.
+    /// Mouse twin of GoToLatestUnseenCompletion (⌘D / ctrl-backtick): live
+    /// while an off-screen task is unread — blocked on its user, or holding an
+    /// unseen finished turn. A blocked target earns a red X; anything else
+    /// carries the same informational-blue dot the sidebar draws in that
+    /// row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let enabled = sessions::latest_unseen_completion(
+        let target = sessions::next_unread_session(
+            &self.state.sessions,
             &self.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
-        )
-        .is_some();
+        );
+        let enabled = target.is_some();
+        // A blocked task outranks plain completions, so the target being one
+        // is what the badge warns about.
+        let blocked = target.is_some_and(|session_id| {
+            self.state.sessions.iter().any(|session| {
+                session.id == session_id && session.status == SessionStatus::Waiting
+            })
+        });
         div()
             .id("unseen-completion-bell")
             .w(px(26.0))
@@ -545,15 +555,21 @@ impl Waku {
             })
             .child(icon("icons/bell.svg", 14.0, theme.text_tertiary))
             .when(enabled, |element| {
-                element.child(
+                element.child(if blocked {
+                    div()
+                        .absolute()
+                        .top(px(2.0))
+                        .right(px(2.0))
+                        .child(icon("icons/x.svg", 8.0, theme.danger))
+                } else {
                     div()
                         .absolute()
                         .top(px(3.0))
                         .right(px(3.0))
                         .size(px(6.0))
                         .rounded_full()
-                        .bg(theme.info),
-                )
+                        .bg(theme.info)
+                })
             })
     }
 

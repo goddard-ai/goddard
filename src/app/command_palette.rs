@@ -860,14 +860,22 @@ impl Waku {
             "collapse close fold all sidebar groups projects dates history",
             next(),
         ));
-        if !self.unseen_completions.is_empty() {
+        if sessions::next_unread_session(
+            &self.state.sessions,
+            &self.unseen_completions,
+            self.state.selected_session,
+            self.pending_session_activation
+                .map(|pending| pending.session_id),
+        )
+        .is_some()
+        {
             commands.push(CommandPaletteItem::command(
                 PaletteSection::Commands,
                 tr!("command_palette.go_to_latest_unseen_completion"),
                 "icons/corner-down-right.svg",
                 Some(ShortcutHint::action(&GoToLatestUnseenCompletion)),
                 PaletteAction::GoToLatestUnseenCompletion,
-                "go to latest most recent unseen unread completed finished failed turn task session jump navigate",
+                "go to latest most recent unseen unread blocked waiting completed finished failed turn task session jump navigate",
                 next(),
             ));
         }
