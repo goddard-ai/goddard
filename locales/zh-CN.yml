@@ -800,6 +800,7 @@ session.rewound: 已回退到第 %{turn} 轮任务之前
 session.rewound_with_stale_refs: "已回退到第 %{turn} 轮任务之前，但仍有过期引用：%{error}"
 session.unarchived: 任务已取消归档
 session.view_now: 立即查看
+session.worktree_recreated: 工作树缺失，已重新创建——未提交的更改可能已丢失
 right_panel.browser: 浏览器
 right_panel.terminal: 终端
 right_panel.files: 文件

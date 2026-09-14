@@ -835,6 +835,7 @@ session.rewound: タスクをターン %{turn} の前まで巻き戻しました
 session.rewound_with_stale_refs: "タスクをターン %{turn} の前まで巻き戻しましたが、古い ref が残っています：%{error}"
 session.unarchived: タスクのアーカイブを解除しました
 session.view_now: 今すぐ表示
+session.worktree_recreated: ワークツリーが見つからなかったため再作成しました — コミットされていない変更は失われている可能性があります
 
 right_panel.browser: ブラウザ
 right_panel.terminal: ターミナル
