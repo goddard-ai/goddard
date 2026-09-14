@@ -1615,6 +1615,9 @@ pub struct Waku {
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
+    /// Set while a settings menu is previewing a theme it has not committed;
+    /// the persisted settings go back on screen when the menu dismisses.
+    theme_preview_active: bool,
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
@@ -3294,6 +3297,7 @@ impl Waku {
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
                 completion_volume_slider: SliderState::new(),
+                theme_preview_active: false,
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
                     message,

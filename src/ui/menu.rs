@@ -100,6 +100,11 @@ pub enum MenuItem {
         shortcut: Option<ShortcutHint>,
         #[allow(clippy::type_complexity)]
         on_click: Rc<dyn Fn(&mut Window, &mut App)>,
+        /// Runs when the row becomes the highlighted choice — hovered onto or
+        /// reached by arrow key — so a value can preview itself before it is
+        /// picked, like a theme or a sound.
+        #[allow(clippy::type_complexity)]
+        on_highlight: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
     },
     /// Opens a one-level flyout beside the parent card. `value` keeps the
     /// current choice visible in the parent row, matching native inspector
@@ -136,6 +141,7 @@ impl MenuItem {
             disabled: false,
             shortcut: None,
             on_click: Rc::new(on_click),
+            on_highlight: None,
         }
     }
 
@@ -162,6 +168,16 @@ impl MenuItem {
     pub fn on_click(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         if let Self::Custom { on_click, .. } = &mut self {
             *on_click = Some(Rc::new(handler));
+        }
+        self
+    }
+
+    /// Preview while the row is the highlighted choice, for values the user
+    /// can audition before committing. Pointer hover and arrow-key
+    /// navigation both fire it.
+    pub fn on_highlight(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        if let Self::Entry { on_highlight, .. } = &mut self {
+            *on_highlight = Some(Rc::new(handler));
         }
         self
     }
@@ -238,6 +254,14 @@ impl MenuItem {
             Self::Entry { disabled: true, .. } => None,
             Self::Custom { on_click, .. } => on_click,
             Self::Submenu { .. } | Self::Header(_) | Self::Separator => None,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn highlight_handler(&self) -> Option<Rc<dyn Fn(&mut Window, &mut App)>> {
+        match self {
+            Self::Entry { on_highlight, .. } => on_highlight.clone(),
+            _ => None,
         }
     }
 }
@@ -1175,6 +1199,7 @@ fn render_menu_item(
             disabled,
             shortcut,
             on_click,
+            on_highlight,
         } => {
             let color = match (disabled, selected) {
                 (true, _) => theme.text_ghost,
@@ -1209,7 +1234,8 @@ fn render_menu_item(
             .when(selected, |element| {
                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
             });
-            track_pointer_highlight(entry, index, in_submenu, disabled, handle).into_any_element()
+            track_pointer_highlight(entry, index, in_submenu, disabled, handle, on_highlight)
+                .into_any_element()
         }
         MenuItem::Submenu {
             label,
@@ -1262,7 +1288,7 @@ fn render_menu_item(
                 Some(on_click) => {
                     let entry =
                         row(index, highlighted, theme, handle.clone(), Some(on_click)).child(body);
-                    track_pointer_highlight(entry, index, in_submenu, false, handle)
+                    track_pointer_highlight(entry, index, in_submenu, false, handle, None)
                         .into_any_element()
                 }
                 // Non-interactive rows still need the row's insets so they
@@ -1283,26 +1309,35 @@ fn open_submenu(handle: &ContextMenuHandle, index: usize, keyboard: bool) {
     state.submenu_focused = keyboard;
 }
 
+#[allow(clippy::type_complexity)]
 fn track_pointer_highlight(
     row: gpui::Stateful<gpui::Div>,
     index: usize,
     in_submenu: bool,
     disabled: bool,
     handle: ContextMenuHandle,
+    on_highlight: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 ) -> gpui::Stateful<gpui::Div> {
     row.when(!disabled, |row| {
-        row.on_hover(move |hovered, window, _| {
+        row.on_hover(move |hovered, window, cx| {
             if !*hovered {
                 return;
             }
-            let mut state = handle.state.borrow_mut();
-            if in_submenu {
-                state.submenu_highlighted = Some(index);
-            } else {
-                state.highlighted = Some(index);
-                state.active_submenu = None;
-                state.submenu_highlighted = None;
-                state.submenu_focused = false;
+            {
+                let mut state = handle.state.borrow_mut();
+                if in_submenu {
+                    state.submenu_highlighted = Some(index);
+                } else {
+                    state.highlighted = Some(index);
+                    state.active_submenu = None;
+                    state.submenu_highlighted = None;
+                    state.submenu_focused = false;
+                }
+            }
+            // The handler can reach back into menu state, so it runs only
+            // after the highlight borrow is released.
+            if let Some(on_highlight) = &on_highlight {
+                on_highlight(window, cx);
             }
             window.refresh();
         })
@@ -1429,6 +1464,12 @@ fn on_menu_key(
         let submenu_focusable = focusable_indexes(&submenu_items);
         if let Some(next) = next_highlight(&submenu_focusable, submenu_current, key) {
             handle.state.borrow_mut().submenu_highlighted = Some(next);
+            let on_highlight = submenu_items
+                .get(next)
+                .and_then(MenuItem::highlight_handler);
+            if let Some(on_highlight) = on_highlight {
+                on_highlight(window, cx);
+            }
             window.refresh();
             cx.stop_propagation();
             return;
@@ -1467,11 +1508,19 @@ fn on_menu_key(
 
     let current = handle.state.borrow().highlighted;
     if let Some(next) = next_highlight(focusable, current, key) {
-        let mut state = handle.state.borrow_mut();
-        state.highlighted = Some(next);
-        state.active_submenu = None;
-        state.submenu_highlighted = None;
-        state.submenu_focused = false;
+        {
+            let mut state = handle.state.borrow_mut();
+            state.highlighted = Some(next);
+            state.active_submenu = None;
+            state.submenu_highlighted = None;
+            state.submenu_focused = false;
+        }
+        // Rebuild to reach the entry's preview, the same way the activation
+        // path below reaches its click handler.
+        let on_highlight = items(cx).get(next).and_then(MenuItem::highlight_handler);
+        if let Some(on_highlight) = on_highlight {
+            on_highlight(window, cx);
+        }
         window.refresh();
         cx.stop_propagation();
         return;
@@ -1539,6 +1588,11 @@ mod tests {
     struct SubmenuHarness {
         handle: ContextMenuHandle,
         activated: Rc<Cell<bool>>,
+    }
+
+    struct HighlightHarness {
+        handle: ContextMenuHandle,
+        highlighted: Rc<Cell<usize>>,
     }
 
     #[test]
@@ -1673,6 +1727,28 @@ mod tests {
         }
     }
 
+    impl Render for HighlightHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let highlighted = self.highlighted.clone();
+            dropdown_menu(
+                div().w(px(120.0)).h(px(32.0)),
+                "highlight-dropdown",
+                &self.handle,
+                MenuAlign::BelowLeft,
+                move |_| {
+                    let second = highlighted.clone();
+                    vec![
+                        MenuItem::new("First", |_, _| {}).on_highlight({
+                            let highlighted = highlighted.clone();
+                            move |_, _| highlighted.set(1)
+                        }),
+                        MenuItem::new("Second", |_, _| {}).on_highlight(move |_, _| second.set(2)),
+                    ]
+                },
+            )
+        }
+    }
+
     /// The trigger sits at the window origin, 120×32; the card hangs below it,
     /// so a point inside the trigger is outside the card and vice versa.
     fn assert_trigger_toggles(surface: Surface, cx: &mut TestAppContext) {
@@ -1801,6 +1877,30 @@ mod tests {
 
         assert!(activated.get());
         assert!(!handle.is_open());
+    }
+
+    #[gpui::test]
+    fn highlighted_entries_preview_on_arrow_keys(cx: &mut TestAppContext) {
+        let handle = cx.update(ContextMenuHandle::new);
+        let highlighted = Rc::new(Cell::new(0usize));
+        let harness = HighlightHarness {
+            handle: handle.clone(),
+            highlighted: highlighted.clone(),
+        };
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+
+        cx.simulate_mouse_down(
+            point(px(10.0), px(10.0)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| window.focus(&handle.focus, cx));
+
+        cx.simulate_keystrokes("down");
+        assert_eq!(highlighted.get(), 1);
+        cx.simulate_keystrokes("down");
+        assert_eq!(highlighted.get(), 2);
     }
 
     fn items() -> Vec<MenuItem> {

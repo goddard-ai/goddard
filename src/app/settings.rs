@@ -2288,7 +2288,8 @@ impl Waku {
         let selected_language = self.state.language;
 
         let weak = cx.entity().downgrade();
-        let mode_handle = self.menu_handle("appearance-mode-selector", cx);
+        let restore_preview = Self::theme_preview_restore(cx);
+        let mode_handle = self.menu_handle_with("appearance-mode-selector", cx, restore_preview);
         let mode_selector = dropdown_menu(
             MenuChip::new("appearance-mode-selector")
                 .label(match theme_settings.mode {
@@ -2312,24 +2313,37 @@ impl Waku {
                                 ThemeMode::Dark => tr!("settings.theme_dark"),
                                 _ => tr!("settings.theme_light"),
                             },
-                            move |window, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.update_theme_settings(
-                                        |settings| settings.mode = mode,
-                                        window,
-                                        cx,
-                                    );
-                                });
+                            {
+                                let weak = weak.clone();
+                                move |window, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.update_theme_settings(
+                                            |settings| settings.mode = mode,
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                }
                             },
                         )
                         .selected(mode == theme_settings.mode)
+                        .on_highlight(move |window, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.preview_theme_settings(
+                                    |settings| settings.mode = mode,
+                                    window,
+                                    cx,
+                                );
+                            });
+                        })
                     })
                     .collect()
             },
         );
 
         let weak = cx.entity().downgrade();
-        let light_handle = self.menu_handle("light-theme-selector", cx);
+        let restore_preview = Self::theme_preview_restore(cx);
+        let light_handle = self.menu_handle_with("light-theme-selector", cx, restore_preview);
         let light_theme_selector = dropdown_menu(
             MenuChip::new("light-theme-selector")
                 .label(theme_settings.light.label())
@@ -2345,23 +2359,43 @@ impl Waku {
                     .into_iter()
                     .map(|name| {
                         let weak = weak.clone();
-                        MenuItem::new(name.label(), move |window, cx| {
+                        MenuItem::new(name.label(), {
+                            let weak = weak.clone();
+                            move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.update_theme_settings(
+                                        |settings| settings.light = name,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            }
+                        })
+                        .selected(name == theme_settings.light)
+                        .on_highlight(move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.update_theme_settings(
-                                    |settings| settings.light = name,
+                                this.preview_theme_settings(
+                                    |settings| {
+                                        // A palette only shows while its slot
+                                        // is live, so the preview claims the
+                                        // slot too — otherwise light options
+                                        // would stay invisible in dark mode.
+                                        settings.light = name;
+                                        settings.mode = ThemeMode::Light;
+                                    },
                                     window,
                                     cx,
                                 );
                             });
                         })
-                        .selected(name == theme_settings.light)
                     })
                     .collect()
             },
         );
 
         let weak = cx.entity().downgrade();
-        let dark_handle = self.menu_handle("dark-theme-selector", cx);
+        let restore_preview = Self::theme_preview_restore(cx);
+        let dark_handle = self.menu_handle_with("dark-theme-selector", cx, restore_preview);
         let dark_theme_selector = dropdown_menu(
             MenuChip::new("dark-theme-selector")
                 .label(theme_settings.dark.label())
@@ -2377,16 +2411,35 @@ impl Waku {
                     .into_iter()
                     .map(|name| {
                         let weak = weak.clone();
-                        MenuItem::new(name.label(), move |window, cx| {
+                        MenuItem::new(name.label(), {
+                            let weak = weak.clone();
+                            move |window, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.update_theme_settings(
+                                        |settings| settings.dark = name,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            }
+                        })
+                        .selected(name == theme_settings.dark)
+                        .on_highlight(move |window, cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.update_theme_settings(
-                                    |settings| settings.dark = name,
+                                this.preview_theme_settings(
+                                    |settings| {
+                                        // A palette only shows while its slot
+                                        // is live, so the preview claims the
+                                        // slot too — otherwise dark options
+                                        // would stay invisible in light mode.
+                                        settings.dark = name;
+                                        settings.mode = ThemeMode::Dark;
+                                    },
                                     window,
                                     cx,
                                 );
                             });
                         })
-                        .selected(name == theme_settings.dark)
                     })
                     .collect()
             },
@@ -4032,6 +4085,57 @@ impl Waku {
         crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
         self.save();
         cx.notify();
+    }
+
+    /// Apply a would-be theme choice on screen without persisting it, so a
+    /// hovered menu option shows itself. [`Self::restore_theme_preview`] puts
+    /// the persisted theme back when the menu dismisses.
+    fn preview_theme_settings(
+        &mut self,
+        update: impl FnOnce(&mut ThemeSettings),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut settings = self.state.theme;
+        update(&mut settings);
+        if self.state.theme == settings {
+            return;
+        }
+        self.theme_preview_active = true;
+        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
+    }
+
+    /// Re-apply the persisted theme after a previewed choice is dismissed
+    /// without being picked. A pick commits through
+    /// [`Self::update_theme_settings`] right after close, so this stays a
+    /// no-op then — the persisted theme is the picked one.
+    fn restore_theme_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.theme_preview_active {
+            return;
+        }
+        self.theme_preview_active = false;
+        crate::theme::apply_theme_preference(
+            self.state.theme,
+            self.state.sidebar_transparency,
+            window,
+            cx,
+        );
+    }
+
+    /// The menu toggle observer that calls [`Self::restore_theme_preview`] on
+    /// close. Pass to [`Self::menu_handle_with`] for selectors whose options
+    /// preview through [`Self::preview_theme_settings`].
+    fn theme_preview_restore(
+        cx: &mut Context<Self>,
+    ) -> impl Fn(bool, &mut Window, &mut App) + 'static {
+        let weak = cx.entity().downgrade();
+        move |open, window, cx| {
+            if !open {
+                let _ = weak.update(cx, |this, cx| {
+                    this.restore_theme_preview(window, cx);
+                });
+            }
+        }
     }
 
     pub(crate) fn sidebar_transparency(&self) -> bool {
