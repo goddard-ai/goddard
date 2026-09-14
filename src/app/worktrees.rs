@@ -127,6 +127,12 @@ impl Waku {
                                 waku.remove_draft_worktree(path, cx);
                             }
                             waku.invalidate_workspace_queries(cx);
+                            // A terminal opened while creation was in flight
+                            // still points at the local checkout; the bound
+                            // worktree is its cwd now.
+                            if waku.state.selected_session == Some(session_id) {
+                                waku.ensure_right_panel_terminals(cx);
+                            }
                             waku.save();
                         }
                     }

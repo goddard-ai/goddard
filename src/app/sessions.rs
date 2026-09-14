@@ -396,6 +396,9 @@ impl Waku {
             if let Some(path) = abandoned_worktree {
                 self.remove_draft_worktree(path, cx);
             }
+            // An open terminal keeps the old workspace's cwd; respawn it
+            // where the draft now points.
+            self.ensure_right_panel_terminals(cx);
             cx.notify();
         }
     }
