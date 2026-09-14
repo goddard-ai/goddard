@@ -630,6 +630,36 @@ pub(super) fn active_navigation_turn_index(
     )
 }
 
+/// GoToPreviousTurn's target: the turn boundary above the scroll top. A
+/// scroll top parked exactly on a prompt steps past it to the previous
+/// turn; anywhere inside a turn, the press lands on that turn's own
+/// prompt first.
+pub(super) fn previous_navigation_turn_index(
+    turn_rows: &[usize],
+    scroll_top_row: usize,
+    on_turn_boundary: bool,
+) -> Option<usize> {
+    if turn_rows.is_empty() {
+        return None;
+    }
+    Some(
+        turn_rows
+            .partition_point(|row| *row < scroll_top_row + usize::from(!on_turn_boundary))
+            .saturating_sub(1),
+    )
+}
+
+/// GoToNextTurn's target: the first turn boundary strictly below the
+/// scroll top, or `None` past the last prompt — where the action re-pins
+/// the tail instead of landing on a row.
+pub(super) fn next_navigation_turn_index(
+    turn_rows: &[usize],
+    scroll_top_row: usize,
+) -> Option<usize> {
+    let target = turn_rows.partition_point(|row| *row <= scroll_top_row);
+    (target < turn_rows.len()).then_some(target)
+}
+
 pub(super) fn navigation_rail_scale(
     turn_index: usize,
     emphasized_turn_index: Option<usize>,

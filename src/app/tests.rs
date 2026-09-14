@@ -16,7 +16,8 @@ use super::{
     folded_transcript_row_kinds, format_worked_duration, format_working_elapsed,
     maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
-    navigation_rail_scale, paused_toast_duration, pop_stream_batch, push_transcript_activity,
+    navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
+    previous_navigation_turn_index, push_transcript_activity,
     response_footer_message_index, response_row_turn_id, session_accepts_turn_output,
     session_is_reapable, session_opens_at_last_prompt, settle_stream_segment,
     should_refresh_branch_after_activity,
@@ -474,6 +475,34 @@ fn conversation_navigation_active_turn_follows_the_scroll_top_and_tail() {
     assert_eq!(active_navigation_turn_index(&turn_rows, 8, false), Some(1));
     assert_eq!(active_navigation_turn_index(&turn_rows, 4, true), Some(2));
     assert_eq!(active_navigation_turn_index(&[], 0, false), None);
+}
+
+#[test]
+fn conversation_navigation_turn_stepping_walks_boundaries() {
+    let turn_rows = [2, 5, 9];
+    // Parked exactly on a prompt, previous steps past it.
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 5, true), Some(0));
+    // Inside a turn, previous lands on that turn's own prompt first —
+    // whether the scroll top sits mid-turn or a few pixels into the row
+    // that opens it.
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 7, true), Some(1));
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 5, false), Some(1));
+    // Above the first prompt or on it, previous clamps to the first turn.
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 0, true), Some(0));
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 2, true), Some(0));
+    // From the tail, previous lands on the last prompt.
+    assert_eq!(previous_navigation_turn_index(&turn_rows, 12, true), Some(2));
+    assert_eq!(previous_navigation_turn_index(&[], 0, true), None);
+
+    // Next always moves strictly forward, even parked on a boundary.
+    assert_eq!(next_navigation_turn_index(&turn_rows, 0), Some(0));
+    assert_eq!(next_navigation_turn_index(&turn_rows, 2), Some(1));
+    assert_eq!(next_navigation_turn_index(&turn_rows, 7), Some(2));
+    // On or past the last prompt there is no next turn; the action
+    // re-pins the tail instead.
+    assert_eq!(next_navigation_turn_index(&turn_rows, 9), None);
+    assert_eq!(next_navigation_turn_index(&turn_rows, 30), None);
+    assert_eq!(next_navigation_turn_index(&[], 0), None);
 }
 
 #[test]

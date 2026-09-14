@@ -869,6 +869,64 @@ impl Waku {
         cx.notify();
     }
 
+    /// ⌘⌥↑: land on the turn boundary above the scroll top.
+    pub(super) fn go_to_previous_turn_action(
+        &mut self,
+        _: &GoToPreviousTurn,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        self.sync_transcript_rows();
+        let turns = self.navigation_turns();
+        let turn_rows = turns
+            .iter()
+            .map(|turn| turn.row_index)
+            .collect::<Vec<_>>();
+        let scroll_top = self.active_transcript_rows().logical_scroll_top();
+        let Some(target) = previous_navigation_turn_index(
+            &turn_rows,
+            scroll_top.item_ix,
+            scroll_top.offset_in_item == Pixels::ZERO,
+        ) else {
+            return;
+        };
+        let message_id = turns[target].message_id;
+        self.scroll_to_navigation_turn(message_id, cx);
+    }
+
+    /// ⌘⌥↓: the first turn boundary below the scroll top, or the pinned
+    /// tail once no turn remains — the press doubles as "back to live".
+    pub(super) fn go_to_next_turn_action(
+        &mut self,
+        _: &GoToNextTurn,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        self.sync_transcript_rows();
+        let turns = self.navigation_turns();
+        let scroll_top_row = self.active_transcript_rows().logical_scroll_top().item_ix;
+        let target = next_navigation_turn_index(
+            &turns
+                .iter()
+                .map(|turn| turn.row_index)
+                .collect::<Vec<_>>(),
+            scroll_top_row,
+        );
+        match target {
+            Some(index) => {
+                let message_id = turns[index].message_id;
+                self.scroll_to_navigation_turn(message_id, cx);
+            }
+            None => self.scroll_transcript_to_bottom(cx),
+        }
+    }
+
     /// Open or close one turn-block disclosure, holding the reader's place.
     ///
     /// Re-measuring the row changes its height, and a bottom-aligned list keeps

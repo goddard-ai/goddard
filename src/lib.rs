@@ -81,6 +81,8 @@ actions!(
         NavigateBack,
         NavigateForward,
         GoToLatestUnseenCompletion,
+        GoToPreviousTurn,
+        GoToNextTurn,
         SwitchTaskForward,
         SwitchTaskBackward,
         SelectFirstTask,
@@ -274,6 +276,20 @@ pub fn run() {
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
                 KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
+                // Step between turn prompts — the navigation rail's
+                // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
+                // pair works with the composer focused; in the terminal the
+                // keys pass through to the shell.
+                KeyBinding::new(
+                    "secondary-alt-up",
+                    GoToPreviousTurn,
+                    Some("Waku && !Terminal"),
+                ),
+                KeyBinding::new(
+                    "secondary-alt-down",
+                    GoToNextTurn,
+                    Some("Waku && !Terminal"),
+                ),
                 // Same spelling VS Code gives its terminal toggle; unclaimed
                 // in text fields, so it fires with the composer focused too.
                 KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
