@@ -292,7 +292,9 @@ pub fn run() {
                 ),
                 // Same spelling VS Code gives its terminal toggle; unclaimed
                 // in text fields, so it fires with the composer focused too.
+                // ⌘D reads as "done" and is the left-hand-only alternative.
                 KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
+                KeyBinding::new("secondary-d", GoToLatestUnseenCompletion, Some("Waku")),
                 KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
                 KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
                 KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),

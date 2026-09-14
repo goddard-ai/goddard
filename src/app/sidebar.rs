@@ -499,7 +499,7 @@ impl Waku {
             }))
     }
 
-    /// Mouse twin of GoToLatestUnseenCompletion (ctrl-backtick): live only
+    /// Mouse twin of GoToLatestUnseenCompletion (⌘D / ctrl-backtick): live only
     /// while an off-screen task has an unseen finished turn, then carries the
     /// same informational-blue dot the sidebar draws in that row's status slot.
     fn render_unseen_completion_bell(&self, cx: &mut Context<Self>) -> Stateful<Div> {
