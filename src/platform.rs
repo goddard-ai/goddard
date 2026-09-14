@@ -220,6 +220,7 @@ fn completion_sound_data(sound: waku_client::persistence::CompletionSound) -> &'
         CompletionSound::Gentle => include_bytes!("../assets/sounds/gentle.mp3").as_slice(),
         CompletionSound::Bubble => include_bytes!("../assets/sounds/bubble.mp3").as_slice(),
         CompletionSound::Chime => include_bytes!("../assets/sounds/chime.mp3").as_slice(),
+        CompletionSound::Retro => include_bytes!("../assets/sounds/retro.mp3").as_slice(),
     }
 }
 

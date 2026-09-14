@@ -63,6 +63,7 @@ pub enum CompletionSound {
     Gentle,
     Bubble,
     Chime,
+    Retro,
 }
 
 /// The icon a custom command shows in the command palette, on its settings
@@ -202,7 +203,13 @@ impl CustomCommandIcon {
 }
 
 impl CompletionSound {
-    pub const ALL: [Self; 4] = [Self::Bleep, Self::Gentle, Self::Bubble, Self::Chime];
+    pub const ALL: [Self; 5] = [
+        Self::Bleep,
+        Self::Gentle,
+        Self::Bubble,
+        Self::Chime,
+        Self::Retro,
+    ];
 
     /// Sound names are product names and stay untranslated.
     pub fn label(self) -> &'static str {
@@ -211,6 +218,7 @@ impl CompletionSound {
             Self::Gentle => "Gentle",
             Self::Bubble => "Bubble",
             Self::Chime => "Chime",
+            Self::Retro => "Retro",
         }
     }
 }
