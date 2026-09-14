@@ -1844,6 +1844,7 @@ impl Waku {
                 if let Some(terminal_id) = surface.terminal_id() {
                     self.right_panel_terminals.remove(&terminal_id);
                     self.right_panel_terminal_commands.remove(&terminal_id);
+                    self.custom_command_runs.remove(&terminal_id);
                 }
                 if let Some(browser_id) = surface.browser_id() {
                     self.right_panel_browsers.remove(&browser_id);
@@ -2475,8 +2476,20 @@ impl Waku {
     /// settle the run's toast — in place under its spinner while that is
     /// still the visible toast, as a fresh toast once it is not — and on
     /// failure reveal the terminal, which stayed open at the error.
+    ///
+    /// A run whose terminal left the active tab strip belongs to a session
+    /// that is no longer on screen; its result stays silent rather than
+    /// toasting into another session's context. Switching back before the
+    /// finish restores the surface and the report.
     fn custom_command_finished(&mut self, terminal_id: Uuid, exit_code: i32, cx: &mut Context<Self>) {
         let Some(run) = self.custom_command_runs.remove(&terminal_id) else {
+            return;
+        };
+        let Some(index) = self
+            .right_panel_surfaces
+            .iter()
+            .position(|surface| surface.terminal_id() == Some(terminal_id))
+        else {
             return;
         };
         let (message, tone) = if exit_code == 0 {
@@ -2499,12 +2512,7 @@ impl Waku {
         } else {
             self.show_toast_with_tone(message, tone, None);
         }
-        if exit_code != 0
-            && let Some(index) = self
-                .right_panel_surfaces
-                .iter()
-                .position(|surface| surface.terminal_id() == Some(terminal_id))
-        {
+        if exit_code != 0 {
             self.right_panel_active_surface = Some(index);
             self.reveal_right_panel_tab(index);
             self.request_active_terminal_focus();
