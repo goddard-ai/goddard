@@ -170,6 +170,7 @@ enum PaletteAction {
     OpenSettings(SettingsPage),
     SelectTask(Uuid),
     RunCustomCommand(Uuid),
+    NewCustomCommand,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -898,6 +899,18 @@ impl Waku {
                 next(),
             ),
         ]);
+
+        // Same spot the Commands settings page puts its "New command" row:
+        // first under the section, above the commands themselves.
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::CustomCommands,
+            tr!("command_palette.new_custom_command"),
+            "icons/plus.svg",
+            None,
+            PaletteAction::NewCustomCommand,
+            "new create add custom command terminal shell run script settings",
+            next(),
+        ));
 
         for command in &self.state.custom_commands {
             let label = command.display_name().to_owned();
@@ -1715,6 +1728,11 @@ impl Waku {
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, cx);
+            }
+            PaletteAction::NewCustomCommand => {
+                self.open_settings_action(&OpenSettings, window, cx);
+                self.open_settings_page(SettingsPage::Commands, cx);
+                self.open_custom_command_editor(None, window, cx);
             }
             PaletteAction::SelectTask(session_id) => {
                 self.settings_page = None;

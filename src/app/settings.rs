@@ -878,7 +878,7 @@ impl Waku {
 
     /// The Commands page's open editor form. Input entities live here rather
     /// than in `Waku::new` because they only exist while the form is open.
-    fn open_custom_command_editor(
+    pub(super) fn open_custom_command_editor(
         &mut self,
         command: Option<&CustomCommand>,
         window: &mut Window,
