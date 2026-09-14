@@ -1668,8 +1668,9 @@ impl Waku {
     }
 
     /// Arm or clear the ⌘-hold row chips as the primary modifier changes.
-    /// Pressing a second modifier mid-hold re-arms the same delay rather than
-    /// restarting it.
+    /// The chips advertise a bare ⌘1–⌘9 chord, so any second modifier —
+    /// held first or added mid-hold — keeps them hidden; releasing back to
+    /// the bare modifier re-arms the delay.
     pub(super) fn sidebar_shortcuts_modifiers_changed(
         &mut self,
         event: &gpui::ModifiersChangedEvent,
@@ -1678,7 +1679,7 @@ impl Waku {
     ) {
         self.sidebar_shortcut_hint_generation =
             self.sidebar_shortcut_hint_generation.wrapping_add(1);
-        if !event.modifiers.secondary() {
+        if event.modifiers != gpui::Modifiers::secondary_key() {
             if self.sidebar_shortcut_hints {
                 self.sidebar_shortcut_hints = false;
                 cx.notify();
