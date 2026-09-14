@@ -1880,11 +1880,17 @@ impl Waku {
             // does not clip to a parent's corner radius.
             let last_row = index + 1 == visible_count && !can_expand;
             let hovered_path = file.path.clone();
+            let click_path = file.path.clone();
+            let key_path = file.path.clone();
+            let row_focus = self
+                .transcript_control_focus(format!("changed-file-row-{turn_id}-{}", file.path), cx);
             let mut row = div()
                 .id(SharedString::from(format!(
                     "changed-file-row-{turn_id}-{}",
                     file.path
                 )))
+                .track_focus(&row_focus)
+                .tab_index(0)
                 .relative()
                 .h(px(31.0))
                 .px(px(12.0))
@@ -1893,6 +1899,7 @@ impl Waku {
                 .gap(px(8.0))
                 .when(last_row, |row| row.rounded_b(px(11.0)))
                 .hover(|style| style.bg(theme.overlay_strong))
+                .focus_visible(|style| style.bg(theme.overlay_strong))
                 .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                     this.changed_files_diff_row_hovered(
                         turn_id,
@@ -1900,6 +1907,15 @@ impl Waku {
                         *hovering,
                         cx,
                     );
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_activity_file(&click_path, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.open_activity_file(&key_path, cx);
+                        cx.stop_propagation();
+                    }
                 }))
                 .child(
                     div()
