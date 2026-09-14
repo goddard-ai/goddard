@@ -622,6 +622,8 @@ session.new_task:
   en: New task
 session.copy_working_directory:
   en: Copy Working Directory
+session.move_to_worktree:
+  en: Move to Worktree
 session.archive:
   en: Archive
 session.pin:
@@ -1418,6 +1420,10 @@ workspace.new_worktree:
   en: New worktree
 workspace.creating:
   en: Creating…
+workspace.moving:
+  en: Moving…
+workspace.move_to_worktree:
+  en: Move to worktree
 workspace.from_ref:
   en: "From %{branch}"
 workspace.from_default:
@@ -1550,6 +1556,8 @@ errors.store_pasted_image:
   en: "Could not attach the pasted image: %{error}"
 errors.create_worktree:
   en: "Could not create the worktree: %{error}"
+errors.move_to_worktree:
+  en: "Could not move the task to a worktree: %{error}"
 errors.prepared_runtime_unavailable:
   en: The prepared agent runtime is unavailable
 errors.start_agent:
@@ -1655,6 +1663,8 @@ session.view_now:
   en: View now
 session.worktree_recreated:
   en: The worktree was missing, so it was recreated — uncommitted changes may be gone
+session.moved_to_worktree:
+  en: "Moved to worktree %{name}"
 
 right_panel.browser:
   en: Browser

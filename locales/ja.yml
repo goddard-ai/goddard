@@ -319,6 +319,7 @@ common.rename: 名前を変更
 
 session.new_task: 新規タスク
 session.copy_working_directory: 作業ディレクトリをコピー
+session.move_to_worktree: ワークツリーへ移動
 session.archive: アーカイブ
 session.pin: ピン留め
 session.unpin: ピン留めを解除
@@ -728,6 +729,8 @@ workspace.work_in: 作業場所
 workspace.local: ローカル
 workspace.new_worktree: 新しいワークツリー
 workspace.creating: 作成中…
+workspace.moving: 移動中…
+workspace.move_to_worktree: ワークツリーへ移動
 workspace.from_ref: "%{branch} から"
 workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
@@ -796,6 +799,7 @@ errors.project_not_found: プロジェクトが見つかりません
 errors.prepare_task_project_not_found: タスクを準備できませんでした：プロジェクトが見つかりません
 errors.store_pasted_image: "ペーストした画像を添付できませんでした：%{error}"
 errors.create_worktree: "ワークツリーを作成できませんでした：%{error}"
+errors.move_to_worktree: "タスクをワークツリーへ移動できませんでした：%{error}"
 errors.prepared_runtime_unavailable: 準備したエージェントランタイムは利用できません
 errors.start_agent: "エージェントを起動できませんでした：%{error}"
 errors.provider_no_active_turn: "%{provider} には指示を追加できる実行中のターンがありません"
@@ -849,6 +853,7 @@ session.rewound_with_stale_refs: "タスクをターン %{turn} の前まで巻�
 session.unarchived: タスクのアーカイブを解除しました
 session.view_now: 今すぐ表示
 session.worktree_recreated: ワークツリーが見つからなかったため再作成しました — コミットされていない変更は失われている可能性があります
+session.moved_to_worktree: "ワークツリー %{name} へ移動しました"
 
 right_panel.browser: ブラウザ
 right_panel.terminal: ターミナル

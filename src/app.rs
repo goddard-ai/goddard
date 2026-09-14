@@ -1332,6 +1332,8 @@ pub struct Waku {
     worktree_picker_highlight: Option<usize>,
     /// An eager worktree creation is in flight on the daemon.
     worktree_creation_pending: bool,
+    /// Tasks with an in-flight move into a newly created worktree.
+    worktree_move_pending: HashSet<Uuid>,
     /// Git subprocess results per concrete workspace path. Render only reads
     /// this in-memory cache; misses are fulfilled on the background executor.
     branch_snapshots: QueryCache<PathBuf, Result<Option<BranchSnapshot>, String>>,
@@ -3069,6 +3071,7 @@ impl Waku {
                 worktree_name_input,
                 worktree_picker_highlight: None,
                 worktree_creation_pending: false,
+                worktree_move_pending: HashSet::new(),
                 settings_search,
                 ui_font_selector,
                 code_font_selector,

@@ -3282,7 +3282,7 @@ impl Waku {
 
     /// Start the next queued follow-up as a fresh turn. Only called once a
     /// settled turn has been fully closed, so the session is Idle.
-    fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
@@ -3300,6 +3300,9 @@ impl Waku {
             // Messages parked behind a goal-initiated provider start stay
             // queued until that runtime installs.
             || self.goal_runtime_starts.contains(&session_id)
+            // Messages submitted while the session moved into a worktree
+            // wait for the rebind, then start in the new directory.
+            || self.worktree_move_pending.contains(&session_id)
         {
             return;
         }
@@ -3344,6 +3347,14 @@ impl Waku {
         // Queue the message so it lands on that thread — after the goal —
         // instead of racing a second provider process into existence.
         if self.goal_runtime_starts.contains(&session_id) {
+            self.enqueue_follow_up_submission(session_id, submission, cx);
+            self.defer_queue_drain(session_id);
+            return;
+        }
+        // A worktree move is swapping the session's working directory. Queue
+        // the message so the turn starts in the worktree rather than racing
+        // the rebind — the finish path drains once the workspace settles.
+        if self.worktree_move_pending.contains(&session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
             self.defer_queue_drain(session_id);
             return;

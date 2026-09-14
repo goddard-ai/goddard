@@ -309,6 +309,7 @@ common.unarchive: 取消归档
 common.rename: 重命名
 session.new_task: 新任务
 session.copy_working_directory: 复制工作目录
+session.move_to_worktree: 移动到工作树
 session.archive: 归档
 session.pin: 置顶
 session.unpin: 取消置顶
@@ -698,6 +699,8 @@ workspace.work_in: 工作位置
 workspace.local: 本地
 workspace.new_worktree: 新建工作树
 workspace.creating: 正在创建…
+workspace.moving: 正在移动…
+workspace.move_to_worktree: 移动到工作树
 workspace.from_ref: "从 %{branch}"
 workspace.from_default: 从默认分支
 workspace.workspace: 工作区
@@ -762,6 +765,7 @@ errors.project_not_found: 找不到项目
 errors.prepare_task_project_not_found: 无法准备任务：找不到项目
 errors.store_pasted_image: "无法添加粘贴的图片：%{error}"
 errors.create_worktree: "无法创建工作树：%{error}"
+errors.move_to_worktree: "无法将任务移动到工作树：%{error}"
 errors.prepared_runtime_unavailable: 已准备的智能体运行环境不可用
 errors.start_agent: "无法启动智能体：%{error}"
 errors.provider_no_active_turn: "%{provider} 当前没有可补充指示的任务"
@@ -814,6 +818,7 @@ session.rewound_with_stale_refs: "已回退到第 %{turn} 轮任务之前，但�
 session.unarchived: 任务已取消归档
 session.view_now: 立即查看
 session.worktree_recreated: 工作树缺失，已重新创建——未提交的更改可能已丢失
+session.moved_to_worktree: "已移动到工作树 %{name}"
 right_panel.browser: 浏览器
 right_panel.terminal: 终端
 right_panel.files: 文件

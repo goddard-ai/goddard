@@ -3555,6 +3555,15 @@ impl Waku {
         let can_configure_workspace = self
             .selected_session()
             .is_some_and(|session| !session.has_started() && !session.is_busy());
+        // A started task can't reconfigure its workspace, but a local one
+        // can still move into a worktree carrying its state.
+        let can_move_to_worktree = self
+            .selected_session()
+            .is_some_and(|session| self.can_move_session_to_worktree(session.id));
+        let can_pick_worktree = can_configure_workspace || can_move_to_worktree;
+        let moving_to_worktree = self
+            .selected_session()
+            .is_some_and(|session| self.worktree_move_pending.contains(&session.id));
 
         let project_handle = self.menu_handle("workspace-project", cx);
         let project_trigger = MenuChip::new("workspace-project")
@@ -3683,28 +3692,32 @@ impl Waku {
             .icon(workspace_icon, theme.text_tertiary)
             .label(if creating_worktree {
                 SharedString::from(tr!("workspace.creating"))
+            } else if moving_to_worktree {
+                SharedString::from(tr!("workspace.moving"))
             } else {
                 workspace_label
             })
             .caret(false)
-            .disabled(!can_configure_workspace || creating_worktree)
-            .selected(can_configure_workspace && !creating_worktree && worktree_handle.is_open())
+            .disabled(!can_pick_worktree || creating_worktree || moving_to_worktree)
+            .selected(can_pick_worktree && !creating_worktree && worktree_handle.is_open())
             .max_w(px(180.0))
-            .when(can_configure_workspace, |chip| {
+            .when(can_pick_worktree, |chip| {
                 chip.tooltip(tr!(
                     "workspace.toggle_hint",
                     shortcut = crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")
                 ))
             });
-        let worktree_selector = if can_configure_workspace {
+        let worktree_selector = if can_pick_worktree {
             // The base entries describe the project's ordinary checkout, so
             // the snapshot is read for the project path even when the draft
-            // is already bound to a worktree.
+            // is already bound to a worktree. Only the create rows consume
+            // it, so a started session — which can only move — skips the
+            // fetch.
             let project_path = self
                 .selected_project()
                 .filter(|project| !project.is_projectless())
                 .map(|project| project.path.clone());
-            let project_snapshot = if worktree_handle.is_open() {
+            let project_snapshot = if worktree_handle.is_open() && can_configure_workspace {
                 project_path.and_then(|path| self.branch_snapshot_for_workspace(&path, cx))
             } else {
                 None
@@ -3714,7 +3727,10 @@ impl Waku {
                 actions.push(worktrees::WorktreePickerAction::Current { name: name.clone() });
             }
             actions.push(worktrees::WorktreePickerAction::Local);
-            if !projectless_selected {
+            if can_move_to_worktree {
+                actions.push(worktrees::WorktreePickerAction::Move);
+            }
+            if !projectless_selected && can_configure_workspace {
                 let current_ref = project_snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.current.clone())
@@ -3773,6 +3789,9 @@ impl Waku {
                                     tr!("workspace.local"),
                                     workspace.is_local(),
                                 ),
+                                worktrees::WorktreePickerAction::Move => {
+                                    ("icons/fork.svg", tr!("workspace.move_to_worktree"), false)
+                                }
                                 worktrees::WorktreePickerAction::Create { base_ref } => {
                                     let label = match base_ref.as_deref() {
                                         Some(reference) => {
@@ -3824,6 +3843,22 @@ impl Waku {
                                         worktrees::WorktreePickerAction::Current { .. } => true,
                                         worktrees::WorktreePickerAction::Local => {
                                             this.select_workspace(SessionWorkspace::Local, cx);
+                                            true
+                                        }
+                                        worktrees::WorktreePickerAction::Move => {
+                                            let name = this
+                                                .worktree_name_input
+                                                .read(cx)
+                                                .content()
+                                                .trim()
+                                                .to_owned();
+                                            if let Some(session_id) = this.state.selected_session {
+                                                this.move_session_to_worktree(
+                                                    session_id,
+                                                    (!name.is_empty()).then_some(name),
+                                                    cx,
+                                                );
+                                            }
                                             true
                                         }
                                         worktrees::WorktreePickerAction::Create { base_ref } => {

@@ -55,16 +55,7 @@ pub fn create(
     prompt: Option<&str>,
     base_ref: Option<&str>,
 ) -> anyhow::Result<CreatedWorktree> {
-    let project_path = fs::canonicalize(project_path)
-        .with_context(|| format!("could not open project {}", project_path.display()))?;
-    let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
-        .context("worktrees require a Git repository")?;
-    let repository = fs::canonicalize(PathBuf::from(repository.trim()))
-        .context("could not resolve the Git repository root")?;
-    let project_relative = project_path
-        .strip_prefix(&repository)
-        .context("the project is outside its Git repository root")?
-        .to_owned();
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
     let base_ref = base_ref
         .map(str::trim)
         .filter(|reference| !reference.is_empty())
@@ -76,7 +67,83 @@ pub fn create(
         &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
     )
     .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
-    let (worktree_root, repository_name) = worktree_root(&repository)?;
+    add_named(
+        &repository,
+        &project_relative,
+        name,
+        prompt,
+        &base_ref,
+        None,
+    )
+}
+
+/// Create a detached linked worktree that adopts the checkout's current
+/// state: based on its HEAD commit with uncommitted — including untracked —
+/// files carried over, so a session moving out of the ordinary checkout keeps
+/// its work in progress. The source checkout keeps its own copy; the move
+/// destroys nothing. Carried files arrive unstaged, matching how the session's
+/// edits look between checkpoints.
+pub fn create_from_checkout(
+    project_path: &Path,
+    name: Option<&str>,
+    prompt: Option<&str>,
+) -> anyhow::Result<CreatedWorktree> {
+    let (_, repository, project_relative) = resolve_repository(project_path)?;
+    let head = git_optional_stdout(&repository, &["rev-parse", "--verify", "HEAD^{commit}"])?;
+    // A dangling commit of the whole working state — ignored files stay out,
+    // same as a turn checkpoint.
+    let snapshot = crate::checkpoint::capture_worktree_commit(&repository)?;
+    let (base, carried) = match head {
+        Some(head) => {
+            // `git diff --quiet` exits 1 on differences; a snapshot that
+            // reproduces HEAD exactly needs no application.
+            let dirty =
+                git_optional_stdout(&repository, &["diff", "--quiet", &head, &snapshot, "--"])?
+                    .is_none();
+            (head, dirty.then_some(snapshot))
+        }
+        // An unborn branch has no commit to detach at; the snapshot, a root
+        // commit of the full working state, is the base.
+        None => (snapshot, None),
+    };
+    add_named(
+        &repository,
+        &project_relative,
+        name,
+        prompt,
+        &base,
+        carried.as_deref(),
+    )
+}
+
+/// Resolve `project_path` to its canonical form, its repository root, and the
+/// project's path relative to that root.
+fn resolve_repository(project_path: &Path) -> anyhow::Result<(PathBuf, PathBuf, PathBuf)> {
+    let project_path = fs::canonicalize(project_path)
+        .with_context(|| format!("could not open project {}", project_path.display()))?;
+    let repository = git_stdout(&project_path, &["rev-parse", "--show-toplevel"])
+        .context("worktrees require a Git repository")?;
+    let repository = fs::canonicalize(PathBuf::from(repository.trim()))
+        .context("could not resolve the Git repository root")?;
+    let project_relative = project_path
+        .strip_prefix(&repository)
+        .context("the project is outside its Git repository root")?
+        .to_owned();
+    Ok((project_path, repository, project_relative))
+}
+
+/// The name-allocation and checkout loop both creation entry points share.
+/// `carried_state`, when set, is a commit whose difference from `base_ref` is
+/// replayed into the new checkout as unstaged work.
+fn add_named(
+    repository: &Path,
+    project_relative: &Path,
+    name: Option<&str>,
+    prompt: Option<&str>,
+    base_ref: &str,
+    carried_state: Option<&str>,
+) -> anyhow::Result<CreatedWorktree> {
+    let (worktree_root, repository_name) = worktree_root(repository)?;
     fs::create_dir_all(&worktree_root).with_context(|| {
         format!(
             "could not create the worktree directory {}",
@@ -95,6 +162,13 @@ pub fn create(
             || registered.contains(&dir.join(&repository_name))
     };
     let checkout = |name: &str| worktree_root.join(name).join(&repository_name);
+    let add = |path: &Path| -> anyhow::Result<()> {
+        add_detached(repository, path, base_ref)?;
+        if let Some(state) = carried_state {
+            carry_state(path, state)?;
+        }
+        Ok(())
+    };
 
     match name.and_then(sanitize_name) {
         Some(name) => {
@@ -102,8 +176,8 @@ pub fn create(
                 bail!("a worktree named `{name}` already exists");
             }
             let path = checkout(&name);
-            add_detached(&repository, &path, &base_ref)?;
-            materialized(path, &project_relative, name)
+            add(&path)?;
+            materialized(path, project_relative, name)
         }
         None => {
             let slug = worktree_slug(prompt.unwrap_or_default());
@@ -113,8 +187,8 @@ pub fn create(
                     continue;
                 }
                 let path = checkout(&name);
-                add_detached(&repository, &path, &base_ref)?;
-                return materialized(path, &project_relative, name);
+                add(&path)?;
+                return materialized(path, project_relative, name);
             }
             // A UUID fallback keeps the last resort independent of
             // human-readable name collisions.
@@ -123,8 +197,8 @@ pub fn create(
                 bail!("could not allocate a unique Git worktree name");
             }
             let path = checkout(&name);
-            add_detached(&repository, &path, &base_ref)?;
-            materialized(path, &project_relative, name)
+            add(&path)?;
+            materialized(path, project_relative, name)
         }
     }
 }
@@ -132,8 +206,10 @@ pub fn create(
 /// Remove a linked worktree. `path` may be a project subdirectory inside the
 /// worktree; the worktree root is what Git removes. `git worktree remove`
 /// refuses to delete a worktree with modifications or untracked files, so
-/// callers can invoke this on abandoned drafts without risking work.
-pub fn remove(path: &Path) -> anyhow::Result<()> {
+/// callers can invoke this on abandoned drafts without risking work. `force`
+/// overrides that refusal — only for worktrees whose content is known to be a
+/// discardable copy, never a session's own checkout.
+pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
     let path = fs::canonicalize(path)
         .with_context(|| format!("could not open worktree {}", path.display()))?;
     let worktree_root = git_stdout(&path, &["rev-parse", "--show-toplevel"])
@@ -149,11 +225,14 @@ pub fn remove(path: &Path) -> anyhow::Result<()> {
         .parent()
         .map(Path::to_owned)
         .context("could not resolve the Git repository root")?;
-    git_stdout(
-        &repository,
-        &["worktree", "remove", &worktree_root.to_string_lossy()],
-    )
-    .with_context(|| format!("could not remove worktree {}", worktree_root.display()))?;
+    let worktree_root_arg = worktree_root.to_string_lossy().into_owned();
+    let mut arguments = vec!["worktree", "remove"];
+    if force {
+        arguments.push("--force");
+    }
+    arguments.push(&worktree_root_arg);
+    git_stdout(&repository, &arguments)
+        .with_context(|| format!("could not remove worktree {}", worktree_root.display()))?;
     // A nested checkout leaves its name directory empty once Git removes it;
     // drop it so the name frees up, but never remove the repository's
     // `worktrees/<repository-name>` namespace itself — a former flat-layout
@@ -303,6 +382,17 @@ fn materialized(
         path: project_path,
         name,
     })
+}
+
+/// Replay `snapshot`'s difference from HEAD into a fresh worktree, leaving
+/// every carried change unstaged. A two-tree `read-tree` merge advances the
+/// index and files together — deletions included — then a mixed reset drops
+/// the index back to HEAD so nothing arrives committed or staged.
+fn carry_state(worktree: &Path, snapshot: &str) -> anyhow::Result<()> {
+    git_stdout(worktree, &["read-tree", "-m", "-u", "HEAD", snapshot])
+        .context("could not carry the checkout's changes into the worktree")?;
+    git_stdout(worktree, &["reset", "--quiet"]).context("could not unstage the carried changes")?;
+    Ok(())
 }
 
 fn add_detached(repository: &Path, path: &Path, base_ref: &str) -> anyhow::Result<()> {
@@ -583,7 +673,7 @@ mod tests {
         assert_eq!(second.name, "build-a-project-selector-2");
 
         // Removal runs in the repository and frees the name.
-        remove(&named.path).unwrap_err();
+        remove(&named.path, false).unwrap_err();
         run_git(&named.path, &["add", "."]);
         run_git(
             &named.path,
@@ -597,9 +687,87 @@ mod tests {
                 "worktree",
             ],
         );
-        remove(&named.path).unwrap();
+        remove(&named.path, false).unwrap();
         let recreated = create(&project, Some("My Worktree"), None, None).unwrap();
         assert_eq!(recreated.name, "My Worktree");
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn creates_a_worktree_from_the_checkout_state() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+
+        // A clean checkout moves with nothing to carry.
+        let clean = create_from_checkout(&project, Some("Clean Task"), None).unwrap();
+        assert_eq!(
+            git_stdout(&clean.path, &["rev-parse", "HEAD"]).unwrap(),
+            git_stdout(&repository, &["rev-parse", "HEAD"]).unwrap(),
+            "the worktree is based on the checkout's HEAD, not the default branch"
+        );
+        assert!(
+            git_stdout(&clean.path, &["status", "--porcelain"])
+                .unwrap()
+                .is_empty(),
+            "a clean checkout produces a clean worktree"
+        );
+        assert!(
+            git_stdout(&clean.path, &["branch", "--show-current"])
+                .unwrap()
+                .is_empty(),
+            "and stays detached"
+        );
+
+        // Uncommitted work of every kind: modified, staged, untracked.
+        fs::write(project.join("README.md"), "edits\n").unwrap();
+        fs::write(project.join("staged.txt"), "staged\n").unwrap();
+        run_git(&repository, &["add", "packages/app/staged.txt"]);
+        fs::write(project.join("scratch.txt"), "scratch\n").unwrap();
+
+        let moved = create_from_checkout(&project, Some("Moved Task"), None).unwrap();
+        assert_eq!(moved.name, "Moved Task");
+        assert_eq!(
+            fs::read_to_string(moved.path.join("README.md")).unwrap(),
+            "edits\n"
+        );
+        assert_eq!(
+            fs::read_to_string(moved.path.join("staged.txt")).unwrap(),
+            "staged\n"
+        );
+        assert_eq!(
+            fs::read_to_string(moved.path.join("scratch.txt")).unwrap(),
+            "scratch\n"
+        );
+        // Carried work reads as ordinary unstaged/untracked changes —
+        // nothing arrives committed or staged.
+        let unstaged = git_stdout(&moved.path, &["diff", "--name-only"]).unwrap();
+        assert_eq!(unstaged, "packages/app/README.md");
+        let staged = git_stdout(&moved.path, &["diff", "--cached", "--name-only"]).unwrap();
+        assert!(staged.is_empty(), "nothing arrives staged: {staged}");
+        let untracked = git_stdout(
+            &moved.path,
+            &["ls-files", "--others", "--exclude-standard"],
+        )
+        .unwrap();
+        assert!(untracked.contains("staged.txt"), "{untracked}");
+        assert!(untracked.contains("scratch.txt"), "{untracked}");
+
+        // The source checkout keeps its own copy — nothing was destroyed.
+        assert_eq!(
+            fs::read_to_string(project.join("README.md")).unwrap(),
+            "edits\n"
+        );
+        assert_eq!(
+            fs::read_to_string(project.join("staged.txt")).unwrap(),
+            "staged\n"
+        );
+
+        // The carried worktree is dirty by design, so only a forced removal
+        // takes it away.
+        remove(&moved.path, false).unwrap_err();
+        remove(&moved.path, true).unwrap();
+        assert!(!moved.path.exists());
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();
     }

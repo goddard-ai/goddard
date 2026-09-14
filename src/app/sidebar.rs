@@ -2269,14 +2269,30 @@ impl Waku {
                 div().w_full().child(row),
                 SharedString::from(format!("session-menu-{session_id}")),
                 &menu,
-                move |_| {
+                move |cx| {
                     let rename_waku = waku.clone();
                     let pin_waku = waku.clone();
                     let unread_waku = waku.clone();
                     let copy_waku = waku.clone();
+                    let move_waku = waku.clone();
                     let archive_waku = waku.clone();
                     let remove_waku = waku.clone();
-                    vec![
+                    // A worktree task has nowhere to move to, so the row
+                    // disappears; a local-but-busy task keeps it disabled as
+                    // an explanation that the action exists.
+                    let (local_workspace, can_move) = waku
+                        .update(cx, |waku, _| {
+                            (
+                                waku.state
+                                    .sessions
+                                    .iter()
+                                    .find(|session| session.id == session_id)
+                                    .is_some_and(|session| session.workspace.is_local()),
+                                waku.can_move_session_to_worktree(session_id),
+                            )
+                        })
+                        .unwrap_or((false, false));
+                    let mut items = vec![
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_waku.update(cx, |waku, cx| {
                                 waku.begin_session_rename(session_id, window, cx);
@@ -2313,6 +2329,19 @@ impl Waku {
                         })
                         .shortcut_action(&CopyWorkingDirectory)
                         .icon("icons/copy.svg"),
+                    ];
+                    if local_workspace {
+                        items.push(
+                            MenuItem::new(tr!("session.move_to_worktree"), move |_, cx| {
+                                let _ = move_waku.update(cx, |waku, cx| {
+                                    waku.move_session_to_worktree(session_id, None, cx);
+                                });
+                            })
+                            .icon("icons/fork.svg")
+                            .disabled(!can_move),
+                        );
+                    }
+                    items.extend([
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
                                 waku.archive_session(session_id, window, cx)
@@ -2326,7 +2355,8 @@ impl Waku {
                                 .update(cx, |waku, cx| waku.remove_session(session_id, window, cx));
                         })
                         .icon("icons/trash.svg"),
-                    ]
+                    ]);
+                    items
                 },
             )
         };

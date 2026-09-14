@@ -116,11 +116,33 @@ pub enum WorkspaceOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_ref: Option<String>,
     },
+    /// Create a linked worktree that adopts `project_path`'s checkout state:
+    /// based on its HEAD commit with uncommitted — including untracked —
+    /// files carried over unstaged. Used to move a session that started in
+    /// the ordinary checkout into a worktree without losing its work in
+    /// progress; the source checkout keeps its own copy. Returns
+    /// `WorktreeCreated`.
+    CreateWorktreeFromCheckout {
+        #[ts(type = "string")]
+        project_path: PathBuf,
+        /// User-chosen worktree name. When `None`, the daemon derives one
+        /// from `prompt`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Text used to derive a name when `name` is `None` — the session's
+        /// title or first prompt.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
+    },
     /// Remove a linked worktree created by `CreateWorktree`. Git refuses to
     /// remove a dirty worktree, making this safe to call on abandonment.
+    /// `force` overrides that refusal — only for worktrees whose content is
+    /// known to be a discardable copy.
     RemoveWorktree {
         #[ts(type = "string")]
         path: PathBuf,
+        #[serde(default)]
+        force: bool,
     },
     /// Recreate a worktree's directory when it was deleted outside the app.
     /// `path` is the session's stored project path inside the worktree; the

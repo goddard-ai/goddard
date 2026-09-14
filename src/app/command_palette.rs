@@ -162,6 +162,7 @@ enum PaletteAction {
     ChooseModel,
     ToggleWorkspace,
     OpenOnGitHub,
+    MoveToWorktree,
     ToggleUsage,
     CollapseSidebarGroups,
     GoToLatestUnseenCompletion,
@@ -798,6 +799,20 @@ impl Waku {
                 Some(ShortcutHint::action(&ToggleWorkspace)),
                 PaletteAction::ToggleWorkspace,
                 "toggle switch workspace worktree local checkout draft",
+                next(),
+            ));
+        }
+        if self
+            .selected_session()
+            .is_some_and(|session| self.can_move_session_to_worktree(session.id))
+        {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("session.move_to_worktree"),
+                "icons/fork.svg",
+                None,
+                PaletteAction::MoveToWorktree,
+                "move transfer worktree workspace checkout task",
                 next(),
             ));
         }
@@ -1760,6 +1775,12 @@ impl Waku {
                     .and_then(|snapshot| branches::github_branch_url(snapshot))
                 {
                     cx.open_url(&url);
+                }
+            }
+            PaletteAction::MoveToWorktree => {
+                self.settings_page = None;
+                if let Some(session_id) = self.state.selected_session {
+                    self.move_session_to_worktree(session_id, None, cx);
                 }
             }
             PaletteAction::RunCustomCommand(command_id) => {

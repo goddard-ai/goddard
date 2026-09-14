@@ -8,6 +8,9 @@ pub(super) enum WorktreePickerAction {
     Current { name: String },
     /// Bind the draft to the project's ordinary checkout.
     Local,
+    /// Move a task already bound to the ordinary checkout into a new
+    /// worktree carrying the checkout's state.
+    Move,
     /// Create a detached worktree at the given base ref — `None` resolves
     /// the repository's default branch on the daemon.
     Create { base_ref: Option<String> },
@@ -154,7 +157,175 @@ impl Waku {
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.background_executor()
             .spawn(async move {
-                let _ = workspace.request(waku_client::WorkspaceOperation::RemoveWorktree { path });
+                let _ = workspace.request(waku_client::WorkspaceOperation::RemoveWorktree {
+                    path,
+                    force: false,
+                });
+            })
+            .detach();
+    }
+
+    /// Whether a task can move into a worktree right now: bound to the
+    /// project's ordinary checkout, idle, backed by a real project, and not
+    /// already moving. A move during a turn could split one turn's files
+    /// across two directories, so busy tasks wait.
+    pub(super) fn can_move_session_to_worktree(&self, session_id: Uuid) -> bool {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        session.workspace.is_local()
+            && !session.is_busy()
+            && !self.worktree_move_pending.contains(&session_id)
+            && self
+                .state
+                .projects
+                .iter()
+                .any(|project| project.id == session.project_id && !project.is_projectless())
+    }
+
+    /// Move a local task into a newly created worktree that adopts the
+    /// checkout's current state — its HEAD commit plus uncommitted, including
+    /// untracked, files. `name` is the picker's optional override; otherwise
+    /// the daemon derives a name from the task. The daemon call runs on the
+    /// background executor; [`Self::finish_move_to_worktree`] rebinds the
+    /// task when it lands.
+    pub(super) fn move_session_to_worktree(
+        &mut self,
+        session_id: Uuid,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.can_move_session_to_worktree(session_id) {
+            return;
+        }
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        // Name the worktree after the task — an explicit title first, then
+        // the provider's, then the first prompt, before the daemon's
+        // fallback slug.
+        let naming_prompt = (session.title != AgentSession::DEFAULT_TITLE
+            && !session.title.trim().is_empty())
+        .then(|| session.title.clone())
+        .or_else(|| session.auto_title.clone())
+        .or_else(|| {
+            session
+                .messages
+                .iter()
+                .find(|message| message.role == MessageRole::User)
+                .map(|message| message.visible_content().to_owned())
+        });
+        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        let Some(project_path) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        self.worktree_move_pending.insert(session_id);
+        cx.notify();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace_client.request(
+                        waku_client::WorkspaceOperation::CreateWorktreeFromCheckout {
+                            project_path,
+                            name,
+                            prompt: naming_prompt,
+                        },
+                    )? {
+                        waku_client::WorkspaceResult::WorktreeCreated { worktree } => Ok(worktree),
+                        _ => Err(anyhow::anyhow!(
+                            "the daemon returned an invalid worktree response"
+                        )),
+                    }
+                })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.finish_move_to_worktree(session_id, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Rebind the task to the worktree the daemon created, or abandon that
+    /// worktree when the move no longer applies — the task may have been
+    /// removed, started a turn, or changed workspace while the request was
+    /// in flight.
+    fn finish_move_to_worktree(
+        &mut self,
+        session_id: Uuid,
+        result: anyhow::Result<waku_client::worktree::CreatedWorktree>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.worktree_move_pending.remove(&session_id) {
+            return;
+        }
+        let created = match result {
+            Ok(created) => created,
+            Err(error) => {
+                self.show_toast(tr!("errors.move_to_worktree", error = error.to_string()));
+                self.drain_queued_message(session_id, cx);
+                cx.notify();
+                return;
+            }
+        };
+        let rebound = self.state.session_mut(session_id).is_some_and(|session| {
+            if !session.workspace.is_local() || session.is_busy() {
+                return false;
+            }
+            session.workspace = SessionWorkspace::Worktree {
+                path: created.path.clone(),
+                name: created.name.clone(),
+                branch: None,
+            };
+            true
+        });
+        if !rebound {
+            // The created worktree only ever holds a copy of the source
+            // checkout's state, so force-removing it loses nothing.
+            self.discard_worktree_copy(created.path, cx);
+            self.drain_queued_message(session_id, cx);
+            cx.notify();
+            return;
+        }
+        // A retained runtime still runs in the old checkout; drop it so the
+        // next turn starts in the worktree.
+        self.reset_session_runtime(session_id);
+        self.save();
+        if self.state.selected_session == Some(session_id) {
+            self.invalidate_workspace_queries(cx);
+            self.reload_clean_right_panel_file_editors(cx);
+            self.ensure_right_panel_terminals(cx);
+        }
+        self.show_toast(tr!("session.moved_to_worktree", name = created.name));
+        self.drain_queued_message(session_id, cx);
+        cx.notify();
+    }
+
+    /// Force-remove a worktree created for a move the task can no longer
+    /// take. Its content is only a copy of the source checkout's state, so
+    /// nothing unique is lost.
+    fn discard_worktree_copy(&self, path: PathBuf, cx: &mut Context<Self>) {
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.background_executor()
+            .spawn(async move {
+                let _ = workspace
+                    .request(waku_client::WorkspaceOperation::RemoveWorktree { path, force: true });
             })
             .detach();
     }
@@ -198,6 +369,22 @@ impl Waku {
             Some(WorktreePickerAction::Current { .. }) => true,
             Some(WorktreePickerAction::Local) => {
                 self.select_workspace(SessionWorkspace::Local, cx);
+                true
+            }
+            Some(WorktreePickerAction::Move) => {
+                let name = self
+                    .worktree_name_input
+                    .read(cx)
+                    .content()
+                    .trim()
+                    .to_owned();
+                if let Some(session_id) = self.state.selected_session {
+                    self.move_session_to_worktree(
+                        session_id,
+                        (!name.is_empty()).then_some(name),
+                        cx,
+                    );
+                }
                 true
             }
             Some(WorktreePickerAction::Create { base_ref }) => {
