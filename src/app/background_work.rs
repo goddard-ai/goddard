@@ -1409,11 +1409,14 @@ impl Waku {
 fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoElement {
     canvas(
         |_, _, _| (),
-        move |_, _, window, _| md::render::install_selection_input(window, &selection),
+        move |bounds, _, window, _| {
+            md::render::install_selection_input(bounds, window, &selection)
+        },
     )
     .absolute()
-    .w(px(0.0))
-    .h(px(0.0))
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 fn background_work_count_summary(processes: usize, agents: usize) -> String {

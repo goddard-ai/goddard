@@ -1145,11 +1145,14 @@ impl Waku {
             let selection = self.skills_selection.clone();
             canvas(
                 |_, _, _| (),
-                move |_, _, window, _| md::render::install_selection_input(window, &selection),
+                move |bounds, _, window, _| {
+                    md::render::install_selection_input(bounds, window, &selection)
+                },
             )
             .absolute()
-            .w(px(0.0))
-            .h(px(0.0))
+            .top_0()
+            .left_0()
+            .size_full()
         };
 
         let content = div()
@@ -1272,8 +1275,7 @@ impl Waku {
                     .child(div().flex_1())
                     .child(delete_button),
             )
-            .children(document)
-            .child(selection_input);
+            .children(document);
 
         div()
             .flex_1()
@@ -1284,6 +1286,10 @@ impl Waku {
                 &self.skills_detail_scroll,
                 &self.skills_detail_scrollbar,
             ))
+            // Outside the scroll container: its bounds mark the viewport,
+            // not the scrolled content — see
+            // [`md::render::install_selection_input`].
+            .child(selection_input)
     }
 }
 

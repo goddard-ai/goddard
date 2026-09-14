@@ -3634,11 +3634,14 @@ impl Waku {
             let selection = self.file_preview_selection.clone();
             canvas(
                 |_, _, _| (),
-                move |_, _, window, _| md::render::install_selection_input(window, &selection),
+                move |bounds, _, window, _| {
+                    md::render::install_selection_input(bounds, window, &selection)
+                },
             )
             .absolute()
-            .w(px(0.0))
-            .h(px(0.0))
+            .top_0()
+            .left_0()
+            .size_full()
         };
 
         div()
@@ -4417,11 +4420,14 @@ impl Waku {
         let selection = self.right_panel_diff_selection.clone();
         canvas(
             |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
+            move |bounds, _, window, _| {
+                md::render::install_selection_input(bounds, window, &selection)
+            },
         )
         .absolute()
-        .w(px(0.0))
-        .h(px(0.0))
+        .top_0()
+        .left_0()
+        .size_full()
     }
 
     fn render_right_panel_diff_tree(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {

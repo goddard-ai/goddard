@@ -480,29 +480,37 @@ impl Waku {
         }
     }
 
-    /// A zero-size canvas that installs the frame's selection mouse listeners.
+    /// A full-size canvas that installs the frame's selection mouse listeners.
     /// One set for the whole transcript: the registry already knows every
-    /// painted element's geometry, so per-element listeners would be redundant.
+    /// painted element's geometry, so per-element listeners would be
+    /// redundant. Its bounds mark the selectable region — see
+    /// [`md::render::install_selection_input`].
     fn transcript_selection_input(&self) -> impl IntoElement {
         let selection = self.transcript_selection.clone();
         canvas(
             |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
+            move |bounds, _, window, _| {
+                md::render::install_selection_input(bounds, window, &selection)
+            },
         )
         .absolute()
-        .w(px(0.0))
-        .h(px(0.0))
+        .top_0()
+        .left_0()
+        .size_full()
     }
 
     pub(super) fn toast_selection_input(&self) -> impl IntoElement {
         let selection = self.toast_selection.clone();
         canvas(
             |_, _, _| (),
-            move |_, _, window, _| md::render::install_selection_input(window, &selection),
+            move |bounds, _, window, _| {
+                md::render::install_selection_input(bounds, window, &selection)
+            },
         )
         .absolute()
-        .w(px(0.0))
-        .h(px(0.0))
+        .top_0()
+        .left_0()
+        .size_full()
     }
 }
 

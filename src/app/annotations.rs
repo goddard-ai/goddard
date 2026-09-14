@@ -16,8 +16,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Bounds, DispatchPhase, KeyBinding, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, canvas, deferred, div, px,
+    AnyElement, App, Bounds, DispatchPhase, HitboxBehavior, KeyBinding, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, canvas, deferred, div, px,
 };
 
 use crate::input::Clear;
@@ -678,17 +678,26 @@ impl Waku {
     /// Bubble-phase listeners run in reverse paint order, so these fire ahead
     /// of the selection's — the click-vs-drag check below reads `spans`, which
     /// a real drag has already populated by mouse-up.
+    ///
+    /// Like the selection listeners these bypass hitbox dispatch; a region
+    /// hitbox gates them so a floating surface covering `bounds` doesn't
+    /// trigger hovers or presses on the highlights beneath it.
     fn install_annotation_input(
+        bounds: Bounds<Pixels>,
         window: &mut Window,
         _cx: &mut App,
         selection: &TranscriptSelection,
         waku: &WeakEntity<Waku>,
     ) {
+        let region = window.insert_hitbox(bounds, HitboxBehavior::Normal).id;
         window.on_mouse_event({
             let selection = selection.clone();
             let waku = waku.clone();
-            move |event: &MouseDownEvent, phase, _, cx| {
-                if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble
+                    || event.button != MouseButton::Left
+                    || !region.is_hovered(window)
+                {
                     return;
                 }
                 if let Some(id) = annotation_hit_at(&selection, event.position) {
@@ -706,7 +715,10 @@ impl Waku {
             let selection = selection.clone();
             let waku = waku.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
-                if phase != DispatchPhase::Bubble || event.dragging() {
+                if phase != DispatchPhase::Bubble
+                    || event.dragging()
+                    || !region.is_hovered(window)
+                {
                     return;
                 }
                 let hit = annotation_hit_at(&selection, event.position);
@@ -779,18 +791,22 @@ impl Waku {
         cx.notify();
     }
 
-    /// A zero-size canvas painting the frame's annotation listeners — see
-    /// [`Self::install_annotation_input`].
+    /// A full-size canvas painting the frame's annotation listeners — see
+    /// [`Self::install_annotation_input`]. Its bounds mark the region the
+    /// window-level listeners may act on.
     pub(super) fn transcript_annotation_input(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let selection = self.transcript_selection.clone();
         let waku = cx.entity().downgrade();
         canvas(
             |_, _, _| (),
-            move |_, _, window, cx| Self::install_annotation_input(window, cx, &selection, &waku),
+            move |bounds, _, window, cx| {
+                Self::install_annotation_input(bounds, window, cx, &selection, &waku)
+            },
         )
         .absolute()
-        .w(px(0.0))
-        .h(px(0.0))
+        .top_0()
+        .left_0()
+        .size_full()
     }
 }
 
