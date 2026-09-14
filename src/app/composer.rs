@@ -3001,6 +3001,7 @@ impl Waku {
                             ComposerSubmitAction::Stop => div()
                                 .id("working-actions")
                                 .flex()
+                                .flex_none()
                                 .items_center()
                                 .gap(px(6.0))
                                 .child(
@@ -3008,6 +3009,7 @@ impl Waku {
                                         .id("send-or-stop")
                                         .w(px(26.0))
                                         .h(px(26.0))
+                                        .flex_none()
                                         .rounded_full()
                                         .flex()
                                         .items_center()
@@ -3038,6 +3040,7 @@ impl Waku {
                                             .id("queue-follow-up")
                                             .w(px(26.0))
                                             .h(px(26.0))
+                                            .flex_none()
                                             .rounded_full()
                                             .flex()
                                             .items_center()
