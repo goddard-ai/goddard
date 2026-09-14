@@ -2370,12 +2370,7 @@ impl Waku {
                 .justify_center()
                 .px_8()
                 .pb(px(46.0))
-                .child(
-                    img("icons/goddard-logo.svg")
-                        .w(px(54.0))
-                        .h(px(42.3))
-                        .flex_none(),
-                )
+                .child(goddard_logo(&theme))
                 .child(
                     div()
                         .mt(px(16.0))
@@ -2545,12 +2540,7 @@ impl Waku {
             .justify_center()
             .px_8()
             .pb(px(52.0))
-            .child(
-                img("icons/goddard-logo.svg")
-                    .w(px(54.0))
-                    .h(px(42.3))
-                    .flex_none(),
-            )
+            .child(goddard_logo(&theme))
             .child(
                 div()
                     .mt(px(14.0))

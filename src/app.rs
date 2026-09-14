@@ -65,8 +65,9 @@ use crate::terminal::{TerminalLaunch, TerminalView, TerminalViewEvent};
 use crate::theme::{Theme, ThemeMode, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
-    icon_button, motion, provider_color, provider_mark, status_color, toggle_switch,
+    MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon,
+    goddard_logo, icon, icon_button, motion, provider_color, provider_mark, status_color,
+    toggle_switch,
 };
 use crate::{
     ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow,

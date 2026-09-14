@@ -33,6 +33,18 @@ pub fn file_icon(path: &'static str, size: f32) -> Img {
     img(path).w(sp(size)).h(sp(size)).flex_none()
 }
 
+/// The brand mark, tinted with the theme accent so it tracks the active
+/// palette. `img()` would keep the SVG's baked coral fill — the default
+/// accent — frozen in every scheme.
+pub fn goddard_logo(theme: &Theme) -> Svg {
+    svg()
+        .path("icons/goddard-logo.svg")
+        .w(sp(54.0))
+        .h(sp(42.3))
+        .flex_none()
+        .text_color(theme.accent)
+}
+
 /// A compact ghost icon button: the only button shape outside the composer's
 /// bespoke send control.
 pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -> Stateful<Div> {
