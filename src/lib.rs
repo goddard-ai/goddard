@@ -133,6 +133,14 @@ actions!(
     ]
 );
 
+/// Jump to the nth task currently listed in the sidebar (⌘1–⌘9). Carries the
+/// target index so nine bindings share one action.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct SelectSidebarSession {
+    pub index: usize,
+}
+
 const DEFAULT_WINDOW_WIDTH: f32 = 1380.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 880.0;
 const MIN_WINDOW_WIDTH: f32 = 980.0;
@@ -278,6 +286,17 @@ pub fn run() {
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Waku")),
                 KeyBinding::new("secondary-]", NavigateForward, Some("Waku")),
+                // ⌘1–⌘9 jump to the nth visible task in the sidebar; holding
+                // ⌘ shows the same numbers as chips on the rows.
+                KeyBinding::new("secondary-1", SelectSidebarSession { index: 0 }, None),
+                KeyBinding::new("secondary-2", SelectSidebarSession { index: 1 }, None),
+                KeyBinding::new("secondary-3", SelectSidebarSession { index: 2 }, None),
+                KeyBinding::new("secondary-4", SelectSidebarSession { index: 3 }, None),
+                KeyBinding::new("secondary-5", SelectSidebarSession { index: 4 }, None),
+                KeyBinding::new("secondary-6", SelectSidebarSession { index: 5 }, None),
+                KeyBinding::new("secondary-7", SelectSidebarSession { index: 6 }, None),
+                KeyBinding::new("secondary-8", SelectSidebarSession { index: 7 }, None),
+                KeyBinding::new("secondary-9", SelectSidebarSession { index: 8 }, None),
                 // Step between turn prompts — the navigation rail's
                 // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
                 // pair works with the composer focused; in the terminal the

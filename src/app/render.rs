@@ -307,8 +307,10 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::select_last_project_action))
                 .on_action(cx.listener(Self::confirm_project_switch_action))
                 .on_action(cx.listener(Self::cancel_project_switch_action))
+                .on_action(cx.listener(Self::select_sidebar_session_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
+                .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
                 .child(self.render_settings(window, cx))
                 .children(toast)
                 .children(command_palette)
@@ -385,8 +387,10 @@ impl Render for Waku {
             .on_action(cx.listener(Self::toggle_find_whole_word_action))
             .on_action(cx.listener(Self::toggle_find_regex_action))
             .on_action(cx.listener(Self::replace_all_matches_action))
+            .on_action(cx.listener(Self::select_sidebar_session_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
+            .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
             // Type-to-focus: the last listener on every dispatch path through
             // the workspace, so an unclaimed printable keystroke from a
             // focused descendant — or from nothing, on platforms where this

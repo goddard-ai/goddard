@@ -222,6 +222,11 @@ const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
+/// How long the primary modifier must stay down before the sidebar reveals
+/// its ⌘1–⌘9 chips — long enough that quicker chords never flash them.
+pub(super) const SIDEBAR_SHORTCUT_HOLD_DELAY: Duration = Duration::from_millis(400);
+/// Number of sidebar tasks reachable by the ⌘1–⌘9 row shortcuts.
+const SIDEBAR_SHORTCUT_TARGET_COUNT: usize = 9;
 /// Git status drifts without any session-set change, so checkout-status scans
 /// rerun on this cadence in addition to path-set fingerprint changes.
 const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(10);
@@ -346,6 +351,25 @@ pub(super) enum SidebarRow {
 fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
     rows.iter()
         .position(|row| *row == SidebarRow::Session(session_id))
+}
+
+/// Sessions reachable by ⌘1–⌘9, in displayed order. Reading the row snapshot
+/// — rather than re-walking sessions — means folded groups, project "show
+/// more" overflow, and the pinned-first layout all apply for free.
+fn sidebar_shortcut_target_ids(rows: &[SidebarRow]) -> impl Iterator<Item = Uuid> + '_ {
+    rows.iter().filter_map(|row| match row {
+        SidebarRow::Session(session_id) => Some(*session_id),
+        _ => None,
+    })
+}
+
+/// The label a row chip advertises — "⌘3" on macOS, "Ctrl+3" elsewhere.
+fn sidebar_shortcut_chip_label(index: usize) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⌘{}", index + 1)
+    } else {
+        format!("Ctrl+{}", index + 1)
+    }
 }
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
@@ -1296,6 +1320,63 @@ impl Waku {
         }
     }
 
+    /// ⌘n — activate the nth task currently listed in the sidebar.
+    pub(super) fn select_sidebar_session_action(
+        &mut self,
+        action: &SelectSidebarSession,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let Some(session_id) = sidebar_shortcut_target_ids(&rows).nth(action.index) else {
+            return;
+        };
+        // Mirror the click path: a pending inline rename commits before the
+        // selection moves.
+        if self.session_rename.is_some() {
+            self.commit_session_rename(cx);
+        }
+        self.settings_page = None;
+        self.select_session(session_id, cx);
+    }
+
+    /// Arm or clear the ⌘-hold row chips as the primary modifier changes.
+    /// Pressing a second modifier mid-hold re-arms the same delay rather than
+    /// restarting it.
+    pub(super) fn sidebar_shortcuts_modifiers_changed(
+        &mut self,
+        event: &gpui::ModifiersChangedEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_shortcut_hint_generation =
+            self.sidebar_shortcut_hint_generation.wrapping_add(1);
+        if !event.modifiers.secondary() {
+            if self.sidebar_shortcut_hints {
+                self.sidebar_shortcut_hints = false;
+                cx.notify();
+            }
+            return;
+        }
+        if self.sidebar_shortcut_hints {
+            return;
+        }
+        let generation = self.sidebar_shortcut_hint_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(SIDEBAR_SHORTCUT_HOLD_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.sidebar_shortcut_hint_generation != generation {
+                    return;
+                }
+                this.sidebar_shortcut_hints = true;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// The sidebar row snapshot, rebuilt only when its inputs move.
     ///
     /// The sidebar re-renders at pulse cadence whenever one of its session
@@ -1544,9 +1625,18 @@ impl Waku {
                 self.render_sidebar_group_header(group, index == 1, has_expanded_children, cx)
                     .into_any_element()
             }
-            SidebarRow::Session(session_id) => self
-                .render_sidebar_session_item(session_id, cx)
-                .into_any_element(),
+            SidebarRow::Session(session_id) => {
+                let shortcut_index = self
+                    .sidebar_shortcut_hints
+                    .then(|| {
+                        sidebar_shortcut_target_ids(rows)
+                            .take(SIDEBAR_SHORTCUT_TARGET_COUNT)
+                            .position(|candidate| candidate == session_id)
+                    })
+                    .flatten();
+                self.render_sidebar_session_item(session_id, shortcut_index, cx)
+                    .into_any_element()
+            }
             SidebarRow::ShowMore(group) => {
                 self.render_sidebar_show_more(group, cx).into_any_element()
             }
@@ -1955,7 +2045,12 @@ impl Waku {
         cx.notify();
     }
 
-    fn render_sidebar_session_item(&self, session_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sidebar_session_item(
+        &self,
+        session_id: Uuid,
+        shortcut_index: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(session) = self
             .state
@@ -2375,6 +2470,32 @@ impl Waku {
                         .bottom_0()
                         .w(px(1.0))
                         .bg(theme.border),
+                )
+            })
+            .when_some(shortcut_index, |element, index| {
+                element.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom(px(SIDEBAR_SESSION_ROW_GAP))
+                        .right(px(10.0))
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .h(px(18.0))
+                                .px(px(5.0))
+                                .rounded(px(4.0))
+                                .border_1()
+                                .border_color(theme.border)
+                                .bg(theme.raised)
+                                .flex()
+                                .items_center()
+                                .text_size(sp(11.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_secondary)
+                                .child(SharedString::from(sidebar_shortcut_chip_label(index))),
+                        ),
                 )
             })
             .into_any_element()
@@ -2807,6 +2928,30 @@ mod tests {
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
         );
+    }
+
+    #[test]
+    fn shortcut_targets_follow_visible_row_order() {
+        let sessions = (0..12u128).map(Uuid::from_u128).collect::<Vec<_>>();
+        let rows = [
+            vec![SidebarRow::Search, SidebarRow::Header(SidebarGroup::Pinned)],
+            sessions.iter().copied().map(SidebarRow::Session).collect(),
+            vec![SidebarRow::GroupSpacer],
+        ]
+        .concat();
+
+        let targets = sidebar_shortcut_target_ids(&rows)
+            .take(SIDEBAR_SHORTCUT_TARGET_COUNT)
+            .collect::<Vec<_>>();
+        assert_eq!(targets, sessions[..SIDEBAR_SHORTCUT_TARGET_COUNT]);
+    }
+
+    #[test]
+    fn collapsed_groups_contribute_no_shortcut_targets() {
+        let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
+        let mut rows = Vec::new();
+        append_sidebar_group_rows(&mut rows, SidebarGroup::Pinned, &sessions, true, false);
+        assert_eq!(sidebar_shortcut_target_ids(&rows).count(), 0);
     }
 
     #[test]
