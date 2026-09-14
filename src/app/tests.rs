@@ -1,6 +1,6 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, visible_branch_entries,
+    next_picker_highlight, supports_reasoning_default_reset, visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::next_unread_session;
@@ -2155,6 +2155,22 @@ fn model_picker_highlight_wraps_at_both_ends() {
 
     // An empty result list has nothing to land on.
     assert_eq!(next_picker_highlight(None, 0, "down"), None);
+}
+
+#[test]
+fn only_opencode_providers_offer_an_explicit_reasoning_default_reset() {
+    for provider in ProviderKind::ALL {
+        assert_eq!(
+            supports_reasoning_default_reset(provider),
+            matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2),
+            "{provider:?} should{} offer the Default row",
+            if matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2) {
+                ""
+            } else {
+                " not"
+            }
+        );
+    }
 }
 
 #[test]

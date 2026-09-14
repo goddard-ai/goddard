@@ -1545,7 +1545,8 @@ impl Waku {
             &model.service_tiers,
         );
 
-        let selected_effort = session
+        let supports_default_reset = supports_reasoning_default_reset(session.provider);
+        let mut selected_effort = session
             .reasoning_effort
             .as_deref()
             .filter(|selected| {
@@ -1555,21 +1556,28 @@ impl Waku {
                     .any(|option| option.id == *selected)
             })
             .or(suffix_effort.as_deref())
-            .or(model.default_reasoning_effort.as_deref())
-            .or_else(|| {
+            .map(str::to_owned);
+        if selected_effort.is_none() && !supports_default_reset {
+            selected_effort = model.default_reasoning_effort.clone().or_else(|| {
                 model
                     .reasoning_efforts
                     .first()
-                    .map(|option| option.id.as_str())
+                    .map(|option| option.id.clone())
+            });
+        }
+        let effort_label = if model.reasoning_efforts.is_empty() {
+            None
+        } else if selected_effort.is_none() {
+            Some(tr!("common.default"))
+        } else {
+            selected_effort.as_deref().and_then(|selected| {
+                model
+                    .reasoning_efforts
+                    .iter()
+                    .find(|option| option.id == selected)
+                    .map(|option| option.label.clone())
             })
-            .map(str::to_owned);
-        let effort_label = selected_effort.as_deref().and_then(|selected| {
-            model
-                .reasoning_efforts
-                .iter()
-                .find(|option| option.id == selected)
-                .map(|option| option.label.clone())
-        });
+        };
 
         let selected_tier = session
             .service_tier
@@ -1659,10 +1667,27 @@ impl Waku {
                 let mut items = Vec::new();
                 if !reasoning_efforts.is_empty() {
                     items.push(MenuItem::Header(tr!("models.reasoning").into()));
+                    if supports_default_reset {
+                        let weak_default = weak.clone();
+                        items.push(
+                            traits_choice(
+                                theme,
+                                tr!("common.default"),
+                                true,
+                                selected_effort.is_none(),
+                            )
+                            .on_click(move |_, cx| {
+                                let _ = weak_default.update(cx, |this, cx| {
+                                    this.clear_reasoning_effort(cx);
+                                });
+                            }),
+                        );
+                    }
                     for option in reasoning_efforts.clone() {
                         let weak = weak.clone();
                         let effort = option.id;
-                        let is_default = default_effort.as_deref() == Some(effort.as_str());
+                        let is_default = !supports_default_reset
+                            && default_effort.as_deref() == Some(effort.as_str());
                         let selected = selected_effort.as_deref() == Some(effort.as_str());
                         items.push(
                             traits_choice(theme, option.label, is_default, selected).on_click(
@@ -4528,6 +4553,14 @@ pub(super) fn model_picker_subtitle(provider: ProviderKind, sub_provider: Option
         Some(name) => format!("{name} · {provider_name}"),
         None => provider_name.to_owned(),
     }
+}
+
+/// Whether the provider can return a live session to the base model after a
+/// reasoning-effort pick. Both OpenCode majors express effort as a per-model
+/// `variant` whose base selection is `default`, so the picker gets an explicit
+/// Default row; other providers keep auto-selecting a catalog effort instead.
+pub(super) fn supports_reasoning_default_reset(provider: ProviderKind) -> bool {
+    matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCode2)
 }
 
 /// Whether the picker has nothing left to offer, so the composer's trigger

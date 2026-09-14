@@ -1590,6 +1590,64 @@ mod tests {
         .unwrap();
     }
 
+    /// The model switch posts the reference as the server reports it back —
+    /// `variant` included — so `default` reaches the wire as the explicit
+    /// base-model selection rather than an omitted field.
+    #[test]
+    fn switch_model_posts_the_reference_with_its_variant() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let endpoint = Endpoint::local(listener.local_addr().unwrap().port());
+        let (sent, received) = std::sync::mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut input = std::io::BufReader::new(&mut socket);
+            let mut request = String::new();
+            input.read_line(&mut request).unwrap();
+            let mut length = 0;
+            loop {
+                let mut header = String::new();
+                input.read_line(&mut header).unwrap();
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some((key, value)) = header.split_once(':')
+                    && key.eq_ignore_ascii_case("content-length")
+                {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+            let mut body = vec![0; length];
+            input.read_exact(&mut body).unwrap();
+            sent.send((request, serde_json::from_slice::<Value>(&body).unwrap()))
+                .unwrap();
+            socket
+                .write_all(b"HTTP/1.1 204 No Content\r\n\r\n")
+                .unwrap();
+        });
+
+        switch_model(
+            &endpoint,
+            "ses_1",
+            &ModelRef {
+                id: "gpt-5".into(),
+                provider_id: "openai".into(),
+                variant: Some("default".into()),
+            },
+        )
+        .unwrap();
+
+        let (request, body) = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(request.trim(), "POST /api/session/ses_1/model HTTP/1.1");
+        assert_eq!(
+            body,
+            json!({"model": {"id": "gpt-5", "providerID": "openai", "variant": "default"}})
+        );
+        server.join().unwrap();
+    }
+
     #[test]
     fn computer_use_runtime_configuration_is_location_and_session_scoped() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();

@@ -40,6 +40,7 @@ use crate::opencode_session::{
 enum CommandMessage {
     Prompt(String),
     Steer(String),
+    Options(SessionOptions),
     NativeCommandFinished {
         generation: u64,
         steer: Option<String>,
@@ -62,7 +63,10 @@ enum CommandMessage {
 ///
 /// `variant` is how OpenCode expresses reasoning effort — the same ids the
 /// model catalogue advertises from each model's `variants` map — and it is a
-/// sibling of `model`, not a field inside it.
+/// sibling of `model`, not a field inside it. It is always sent: `default`
+/// is OpenCode's explicit base-model selection, and sending it is what lets
+/// the picker reset a live session after a variant was chosen. An absent
+/// field would let a configured agent variant take over instead.
 fn prompt_body(text: &str, model: Option<&str>, variant: Option<&str>, agent: &str) -> Value {
     let mut body = json!({
         "agent": agent,
@@ -71,9 +75,12 @@ fn prompt_body(text: &str, model: Option<&str>, variant: Option<&str>, agent: &s
     if let Some((provider_id, model_id)) = model.and_then(|model| model.split_once('/')) {
         body["model"] = json!({"providerID": provider_id, "modelID": model_id});
     }
-    if let Some(variant) = variant.map(str::trim).filter(|variant| !variant.is_empty()) {
-        body["variant"] = json!(variant);
-    }
+    body["variant"] = json!(
+        variant
+            .map(str::trim)
+            .filter(|variant| !variant.is_empty())
+            .unwrap_or("default")
+    );
     body
 }
 
@@ -96,9 +103,12 @@ fn native_command_body(
     if let Some(model) = model {
         body["model"] = json!(model);
     }
-    if let Some(variant) = variant.map(str::trim).filter(|variant| !variant.is_empty()) {
-        body["variant"] = json!(variant);
-    }
+    body["variant"] = json!(
+        variant
+            .map(str::trim)
+            .filter(|variant| !variant.is_empty())
+            .unwrap_or("default")
+    );
     Some(body)
 }
 
@@ -477,6 +487,11 @@ impl OpenCodeDriver {
             .name("waku-opencode-driver".into())
             .spawn(move || {
                 let mut generation = 0_u64;
+                // The model and variant ride on every prompt, so the latest
+                // options apply to the next turn without restarting the
+                // resident server.
+                let mut current_model = model;
+                let mut current_variant = variant;
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(text) => {
@@ -486,8 +501,8 @@ impl OpenCodeDriver {
                             if let Some(body) = native_command_body(
                                 &text,
                                 &command_names,
-                                model.as_deref(),
-                                variant.as_deref(),
+                                current_model.as_deref(),
+                                current_variant.as_deref(),
                                 agent,
                             ) {
                                 if let Err(error) = start_native_command(
@@ -512,8 +527,12 @@ impl OpenCodeDriver {
                                 "/session/{}/prompt_async",
                                 encode_path_segment(&worker_session)
                             );
-                            let body =
-                                prompt_body(&text, model.as_deref(), variant.as_deref(), agent);
+                            let body = prompt_body(
+                                &text,
+                                current_model.as_deref(),
+                                current_variant.as_deref(),
+                                agent,
+                            );
                             if let Err(error) = worker_server.request("POST", &path, Some(&body)) {
                                 reject_prompt(error, &worker_events, &worker_turn);
                             }
@@ -541,8 +560,8 @@ impl OpenCodeDriver {
                             if let Some(body) = native_command_body(
                                 &text,
                                 &command_names,
-                                model.as_deref(),
-                                variant.as_deref(),
+                                current_model.as_deref(),
+                                current_variant.as_deref(),
                                 agent,
                             ) {
                                 if let Err(error) = start_native_command(
@@ -564,8 +583,12 @@ impl OpenCodeDriver {
                                 "/session/{}/prompt_async",
                                 encode_path_segment(&worker_session)
                             );
-                            let body =
-                                prompt_body(&text, model.as_deref(), variant.as_deref(), agent);
+                            let body = prompt_body(
+                                &text,
+                                current_model.as_deref(),
+                                current_variant.as_deref(),
+                                agent,
+                            );
                             match worker_server.request("POST", &path, Some(&body)) {
                                 Ok(_) => {
                                     let _ = worker_events.send(DriverEvent::SteerAccepted {
@@ -584,6 +607,10 @@ impl OpenCodeDriver {
                                     });
                                 }
                             }
+                        }
+                        CommandMessage::Options(options) => {
+                            current_model = options.model;
+                            current_variant = options.reasoning_effort;
                         }
                         CommandMessage::NativeCommandFinished {
                             generation: completed,
@@ -721,9 +748,13 @@ impl DriverControl for OpenCodeDriver {
     }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
-        // The model rides on each prompt, but access is installed when the
-        // driver starts, so changing it restarts the driver.
-        options.mode == self.mode
+        // The model and variant ride on each prompt, so they apply to the
+        // live session. Access is installed when the driver starts, so a
+        // mode change still restarts the driver.
+        if options.mode != self.mode {
+            return false;
+        }
+        self.commands.send(CommandMessage::Options(options)).is_ok()
     }
 
     fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
@@ -1314,7 +1345,7 @@ mod tests {
         assert_eq!(
             native_command_body("/init", &commands, None, Some(" "), "build"),
             Some(json!({
-                "command": "init", "arguments": "", "agent": "build"
+                "command": "init", "arguments": "", "variant": "default", "agent": "build"
             }))
         );
         for text in [
@@ -1423,6 +1454,7 @@ mod tests {
                     "providerID": "opencode-go",
                     "modelID": "deepseek-v4-flash",
                 },
+                "variant": "default",
                 "parts": [{"type": "text", "text": "Inspect the failure"}],
             })
         );
@@ -1443,12 +1475,207 @@ mod tests {
         assert_eq!(body["model"]["modelID"], json!("deepseek-v4-flash"));
     }
 
-    /// A model with no effort ladder must not send an empty variant, which the
-    /// server would reject as an unknown one.
+    /// `default` is OpenCode's explicit base-model selection: an unset effort
+    /// still sends it, both so the server never falls back to an
+    /// agent-configured variant and so the picker can reset a session that
+    /// previously chose one. The server resolves it without consulting the
+    /// model's variants map, so a variant-less model accepts it too.
     #[test]
-    fn prompts_omit_a_blank_variant() {
-        let body = prompt_body("hi", Some("opencode/big-pickle"), Some("   "), "build");
-        assert!(body.get("variant").is_none(), "{body}");
+    fn prompts_default_an_absent_variant_to_the_base_model() {
+        for variant in [None, Some(""), Some("   ")] {
+            let body = prompt_body("hi", Some("opencode/big-pickle"), variant, "build");
+            assert_eq!(body["variant"], json!("default"), "{body}");
+        }
+    }
+
+    /// A minimal `opencode serve` stand-in: answers every route the driver
+    /// touches and appends each request as one JSON line to requests.jsonl
+    /// beside itself, so the test can read what the worker actually posted.
+    const FAKE_OPENCODE_SERVER: &str = r#"
+import json
+import sys
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+LOG = Path(__file__).with_name("requests.jsonl")
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def record(self, body):
+        with LOG.open("a") as log:
+            entry = {"method": self.command, "path": self.path, "body": body}
+            log.write(json.dumps(entry) + "\n")
+
+    def reply(self, payload):
+        data = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def request_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return None
+        try:
+            return json.loads(self.rfile.read(length))
+        except ValueError:
+            return None
+
+    def do_GET(self):
+        self.record(None)
+        if self.path.startswith("/event"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.flush()
+            try:
+                while True:
+                    time.sleep(3600)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        if self.path.startswith("/global/health"):
+            self.reply({"healthy": True})
+            return
+        if self.path.startswith("/api/model"):
+            self.reply({"data": [{"id": "m", "providerID": "p"}]})
+            return
+        self.reply([])
+
+    def do_POST(self):
+        self.record(self.request_body())
+        self.reply({"id": "ses_fake"} if self.path == "/session" else {})
+
+    def do_PATCH(self):
+        self.record(self.request_body())
+        self.reply({})
+
+
+server = ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+server.daemon_threads = True
+server.serve_forever()
+"#;
+
+    /// `apply_options` must retune the model and variant the resident worker
+    /// posts on the next turn — the transport carries them per prompt, so a
+    /// restart would only cost the session. A fake `opencode serve` records
+    /// every request body, so the assertions read the wire, not the plumbing.
+    #[cfg(unix)]
+    #[test]
+    fn apply_options_retunes_the_live_session_without_a_restart() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let Some(python) = crate::command_env::find_executable("python3") else {
+            eprintln!("python3 is not installed; skipping the fake-server test");
+            return;
+        };
+        let root = std::env::temp_dir().join(format!(
+            "waku-fake-opencode-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let log = root.join("requests.jsonl");
+        let server_py = root.join("fake_serve.py");
+        std::fs::write(&server_py, FAKE_OPENCODE_SERVER).unwrap();
+        let binary = root.join("opencode");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nport=\nwhile [ $# -gt 0 ]; do\n  if [ \"$1\" = \"--port\" ]; then port=\"$2\"; break; fi\n  shift\ndone\nexec \"{}\" \"{}\" \"$port\"\n",
+                python.display(),
+                server_py.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let prompt_bodies = |count: usize| -> Vec<Value> {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            loop {
+                let bodies: Vec<Value> = std::fs::read_to_string(&log)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .filter(|entry| {
+                        entry["path"]
+                            .as_str()
+                            .is_some_and(|path| path.ends_with("/prompt_async"))
+                    })
+                    .filter_map(|entry| entry.get("body").cloned())
+                    .collect();
+                if bodies.len() >= count || std::time::Instant::now() >= deadline {
+                    return bodies;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        };
+
+        let (events, _event_rx) = crate::driver::test_event_channel();
+        let driver = OpenCodeDriver::start(
+            DriverStartOptions {
+                binary,
+                cwd: root.clone(),
+                mode: RuntimeMode::Auto,
+                model: Some("openai/gpt-5".into()),
+                reasoning_effort: Some("high".into()),
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                agent: None,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("the driver should start against the fake server");
+
+        driver.prompt("first turn".to_owned());
+        let bodies = prompt_bodies(1);
+        assert_eq!(bodies.len(), 1, "the first prompt should be posted");
+        assert_eq!(bodies[0]["model"]["providerID"], json!("openai"));
+        assert_eq!(bodies[0]["model"]["modelID"], json!("gpt-5"));
+        assert_eq!(bodies[0]["variant"], json!("high"));
+
+        // A same-mode change is absorbed by the live worker; the next prompt
+        // posts the new model and the explicit base variant.
+        assert!(driver.apply_options(SessionOptions {
+            mode: RuntimeMode::Auto,
+            model: Some("anthropic/claude-sonnet-4-5".into()),
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        }));
+        driver.prompt("second turn".to_owned());
+        let bodies = prompt_bodies(2);
+        assert_eq!(bodies.len(), 2, "the second prompt should be posted");
+        assert_eq!(bodies[1]["model"]["providerID"], json!("anthropic"));
+        assert_eq!(bodies[1]["model"]["modelID"], json!("claude-sonnet-4-5"));
+        assert_eq!(bodies[1]["variant"], json!("default"));
+
+        // Access is installed at driver start, so a mode change still
+        // cannot be absorbed in place.
+        assert!(!driver.apply_options(SessionOptions {
+            mode: RuntimeMode::Ask,
+            model: None,
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+        }));
+
+        drop(driver);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

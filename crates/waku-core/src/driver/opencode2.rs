@@ -796,15 +796,23 @@ fn model_key(model: &ModelRef) -> String {
 }
 
 /// Goddard stores a model as `"provider/model"`; v2 wants the two apart, plus the
-/// variant that carries reasoning effort (`low`/`high`).
+/// variant that carries reasoning effort (`low`/`high`). The variant is always
+/// populated: `default` is the server's own id for the base model — it is what
+/// `session.model` reports for a session that never chose a variant — so
+/// sending it both resets a session after an effort pick and keeps the ref
+/// comparable to what the event stream echoes back.
 fn model_ref(model: Option<&str>, reasoning_effort: Option<&str>) -> Option<ModelRef> {
     let (provider_id, id) = model?.split_once('/')?;
     (!provider_id.is_empty() && !id.is_empty()).then(|| ModelRef {
         id: id.to_owned(),
         provider_id: provider_id.to_owned(),
-        variant: reasoning_effort
-            .map(str::to_owned)
-            .filter(|variant| !variant.is_empty()),
+        variant: Some(
+            reasoning_effort
+                .map(str::trim)
+                .filter(|variant| !variant.is_empty())
+                .unwrap_or("default")
+                .to_owned(),
+        ),
     })
 }
 
@@ -2962,6 +2970,18 @@ mod tests {
                 variant: Some("high".into()),
             })
         );
+        // `default` is the server's own base-variant id; an unset effort is
+        // sent explicitly so a session that picked a variant can reset to it.
+        for effort in [None, Some(""), Some("  ")] {
+            assert_eq!(
+                model_ref(Some("openai/gpt-5"), effort),
+                Some(ModelRef {
+                    id: "gpt-5".into(),
+                    provider_id: "openai".into(),
+                    variant: Some("default".into()),
+                })
+            );
+        }
         assert_eq!(model_ref(Some("bare-model"), None), None);
         assert_eq!(model_ref(None, Some("high")), None);
     }
