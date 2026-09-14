@@ -2650,6 +2650,8 @@ impl Waku {
                     if this.settings_page == Some(SettingsPage::Skills) {
                         this.ensure_skills_catalog(true, cx);
                     }
+                } else {
+                    this.sidebar_shortcuts_window_deactivated(cx);
                 }
             })
             .detach();

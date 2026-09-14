@@ -1702,6 +1702,16 @@ impl Waku {
         .detach();
     }
 
+    /// Window deactivation delivers no modifiers-changed event, so ⌘-hold
+    /// chips would stay painted while the app sits in the background.
+    pub(super) fn sidebar_shortcuts_window_deactivated(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_shortcut_hint_generation =
+            self.sidebar_shortcut_hint_generation.wrapping_add(1);
+        if self.sidebar_shortcut_hints {
+            self.sidebar_shortcut_hints = false;
+            cx.notify();
+        }
+    }
     /// The sidebar row snapshot, rebuilt only when its inputs move.
     ///
     /// The sidebar re-renders at pulse cadence whenever one of its session
