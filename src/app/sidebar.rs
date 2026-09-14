@@ -228,6 +228,8 @@ const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
 pub(super) const SIDEBAR_SHORTCUT_HOLD_DELAY: Duration = Duration::from_millis(400);
 /// Number of sidebar tasks reachable by the ⌘1–⌘9 row shortcuts.
 const SIDEBAR_SHORTCUT_TARGET_COUNT: usize = 9;
+/// Width of the gradient that dissolves row content ahead of a ⌘n chip.
+const SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH: f32 = 28.0;
 /// Git status drifts without any session-set change, so checkout-status scans
 /// rerun on this cadence in addition to path-set fingerprint changes.
 const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(10);
@@ -1712,6 +1714,7 @@ impl Waku {
             cx.notify();
         }
     }
+
     /// The sidebar row snapshot, rebuilt only when its inputs move.
     ///
     /// The sidebar re-renders at pulse cadence whenever one of its session
@@ -2417,6 +2420,9 @@ impl Waku {
             .iter()
             .find(|project| project.id == session.project_id);
         let pinned = session.pinned_at.is_some();
+        // While a ⌘n chip overlays the row, its trailing elements hide so
+        // nothing competes with the chip; the gradient fades the rest.
+        let shortcut_hint = shortcut_index.is_some();
         // The Pinned group mixes projects, so its rows keep the flat layout
         // and project-name detail even while Project grouping is active.
         let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project && !pinned;
@@ -2548,37 +2554,47 @@ impl Waku {
                     .overflow_hidden()
                     .line_height(sp(18.0))
                     .child(title)
-                    .when(working, |element| {
+                    .when(working && !shortcut_hint, |element| {
                         element.child(motion::spin_slow(icon(
                             "icons/loader-circle.svg",
                             12.0,
                             status_color(&theme, session.status),
                         )))
                     })
-                    .when(session.status == SessionStatus::Background, |element| {
-                        element.child(icon(
-                            "icons/hourglass.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    })
-                    .when(session.status == SessionStatus::Waiting, |element| {
-                        element.child(icon(
-                            "icons/alert.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    })
-                    .when(session.status == SessionStatus::Failed, |element| {
-                        element.child(icon(
-                            "icons/x.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        ))
-                    })
+                    .when(
+                        session.status == SessionStatus::Background && !shortcut_hint,
+                        |element| {
+                            element.child(icon(
+                                "icons/hourglass.svg",
+                                12.0,
+                                status_color(&theme, session.status),
+                            ))
+                        },
+                    )
+                    .when(
+                        session.status == SessionStatus::Waiting && !shortcut_hint,
+                        |element| {
+                            element.child(icon(
+                                "icons/alert.svg",
+                                12.0,
+                                status_color(&theme, session.status),
+                            ))
+                        },
+                    )
+                    .when(
+                        session.status == SessionStatus::Failed && !shortcut_hint,
+                        |element| {
+                            element.child(icon(
+                                "icons/x.svg",
+                                12.0,
+                                status_color(&theme, session.status),
+                            ))
+                        },
+                    )
                     .when(
                         session.status == SessionStatus::Idle
-                            && self.unseen_completions.contains_key(&session_id),
+                            && self.unseen_completions.contains_key(&session_id)
+                            && !shortcut_hint,
                         |element| {
                             element.child(
                                 div()
@@ -2651,10 +2667,13 @@ impl Waku {
                             .child(div().flex_1())
                     })
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when(session.workspace.is_worktree(), |element| {
-                        element.child(icon("icons/fork.svg", 12.5, theme.text_secondary))
-                    })
-                    .when_some(pull_request_badge, |element, badge| {
+                    .when(
+                        session.workspace.is_worktree() && !shortcut_hint,
+                        |element| {
+                            element.child(icon("icons/fork.svg", 12.5, theme.text_secondary))
+                        },
+                    )
+                    .when_some(pull_request_badge.filter(|_| !shortcut_hint), |element, badge| {
                         let color = sidebar_pull_request_color(&theme, badge.state);
                         let url = badge.url.clone();
                         element.child(
@@ -2682,7 +2701,7 @@ impl Waku {
                                 }),
                         )
                     })
-                    .when(pinned, |element| {
+                    .when(pinned && !shortcut_hint, |element| {
                         element.child(icon(
                             "icons/pin-filled.svg",
                             12.0,
@@ -2694,7 +2713,8 @@ impl Waku {
                         ))
                     })
                     .when_some(
-                        session_time_label(session, unix_time()),
+                        session_time_label(session, unix_time())
+                            .filter(|_| !shortcut_hint),
                         |element, label| {
                             element.child(
                                 div()
@@ -2849,28 +2869,57 @@ impl Waku {
                 )
             })
             .when_some(shortcut_index, |element, index| {
+                // `theme.sidebar` stays clear while vibrancy draws the real
+                // surface, so the fade borrows the solid tint at reduced alpha
+                // rather than covering the blur with an opaque patch.
+                let fade = if theme.sidebar.a == 0.0 {
+                    theme.sidebar_drag_background.opacity(0.85)
+                } else {
+                    theme.sidebar
+                };
                 element.child(
                     div()
                         .absolute()
                         .top_0()
                         .bottom(px(SIDEBAR_SESSION_ROW_GAP))
-                        .right(px(10.0))
+                        .right_0()
                         .flex()
-                        .items_center()
                         .child(
                             div()
-                                .h(px(18.0))
-                                .px(px(5.0))
-                                .rounded(px(4.0))
-                                .border_1()
-                                .border_color(theme.border)
-                                .bg(theme.raised)
+                                .h_full()
+                                .w(px(SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH))
+                                .bg(linear_gradient(
+                                    90.0,
+                                    linear_color_stop(fade.opacity(0.0), 0.0),
+                                    linear_color_stop(fade, 1.0),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .h_full()
+                                .pr(px(10.0))
+                                .rounded_tr(px(9.0))
+                                .rounded_br(px(9.0))
+                                .bg(fade)
                                 .flex()
                                 .items_center()
-                                .text_size(sp(11.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_secondary)
-                                .child(SharedString::from(sidebar_shortcut_chip_label(index))),
+                                .child(
+                                    div()
+                                        .h(px(18.0))
+                                        .px(px(5.0))
+                                        .rounded(px(4.0))
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .bg(theme.raised)
+                                        .flex()
+                                        .items_center()
+                                        .text_size(sp(11.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .child(SharedString::from(sidebar_shortcut_chip_label(
+                                            index,
+                                        ))),
+                                ),
                         ),
                 )
             })
