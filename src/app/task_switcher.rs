@@ -513,7 +513,7 @@ impl Waku {
             })
             .when(
                 session.status == SessionStatus::Idle
-                    && self.unseen_completions.contains_key(&session_id),
+                    && self.state.unseen_completions.contains_key(&session_id),
                 |entry| {
                     entry.child(
                         div()

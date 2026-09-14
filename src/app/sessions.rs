@@ -245,7 +245,7 @@ impl Waku {
             self.store_transcript_scroll_position();
         }
         self.state.selected_session = Some(session_id);
-        self.unseen_completions.remove(&session_id);
+        self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         if let Some((
             project_id,
@@ -503,7 +503,7 @@ impl Waku {
         self.goal_runtime_starts.remove(&session_id);
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
-        self.unseen_completions.remove(&session_id);
+        self.state.unseen_completions.remove(&session_id);
         self.pending_worktree_cleanups.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
@@ -592,7 +592,7 @@ impl Waku {
         self.settings_page = None;
         if let Some(session_id) = next_unread_session(
             &self.state.sessions,
-            &self.unseen_completions,
+            &self.state.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
@@ -1092,7 +1092,7 @@ impl Waku {
     ) {
         let Some(target) = next_unread_session(
             &self.state.sessions,
-            &self.unseen_completions,
+            &self.state.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
@@ -1116,7 +1116,10 @@ impl Waku {
         {
             return;
         }
-        self.unseen_completions.insert(session_id, unix_time());
+        self.state
+            .unseen_completions
+            .insert(session_id, unix_time());
+        self.save();
         cx.notify();
     }
 

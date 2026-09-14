@@ -878,7 +878,7 @@ impl Waku {
         ));
         if sessions::next_unread_session(
             &self.state.sessions,
-            &self.unseen_completions,
+            &self.state.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),

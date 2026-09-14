@@ -1181,11 +1181,6 @@ pub struct Waku {
     /// Selection is committed only after this target's transcript arrives, so
     /// the currently visible task stays intact during daemon latency.
     pending_session_activation: Option<PendingSessionActivation>,
-    /// Tasks whose turn settled while another task was on screen, stamped with
-    /// the finish time. The sidebar draws an unread dot in the row's status
-    /// slot until the task is activated; GoToLatestUnseenCompletion jumps to
-    /// the newest entry.
-    unseen_completions: HashMap<Uuid, u64>,
     analytics: crate::analytics::Analytics,
     state: PersistedState,
     store: StateStore,
@@ -3141,7 +3136,6 @@ impl Waku {
                 daemon_hostname,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
-                unseen_completions: HashMap::new(),
                 analytics,
                 state,
                 store,

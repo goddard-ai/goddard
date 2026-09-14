@@ -549,6 +549,8 @@ struct AppState {
     selected_project: Option<Uuid>,
     #[serde(default)]
     selected_session: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    unseen_completions: HashMap<Uuid, u64>,
     #[serde(default = "default_provider")]
     last_provider: ProviderKind,
     #[serde(default)]
@@ -598,6 +600,11 @@ pub struct PersistedState {
     pub sessions: Vec<AgentSession>,
     pub selected_project: Option<Uuid>,
     pub selected_session: Option<Uuid>,
+    /// Tasks whose turn settled while another task was on screen, stamped
+    /// with the finish time; the sidebar draws an unread dot until the task
+    /// is activated. App-local like the selection, not task state.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub unseen_completions: HashMap<Uuid, u64>,
     pub last_provider: ProviderKind,
     #[serde(default)]
     pub last_runtime_mode: RuntimeMode,
@@ -717,6 +724,7 @@ impl PersistedState {
             sessions: Vec::new(),
             selected_project: None,
             selected_session: None,
+            unseen_completions: HashMap::new(),
             last_provider: ProviderKind::Codex,
             last_runtime_mode: RuntimeMode::default(),
             last_model: None,
@@ -929,6 +937,7 @@ impl PersistedState {
             analytics_id: self.analytics_id,
             selected_project: self.selected_project,
             selected_session: self.persistable_selected_session(),
+            unseen_completions: self.unseen_completions.clone(),
             last_provider: self.last_provider,
             last_runtime_mode: self.last_runtime_mode,
             last_model: self.last_model.clone(),
@@ -974,6 +983,7 @@ impl PersistedState {
         self.analytics_id = app_state.analytics_id;
         self.selected_project = app_state.selected_project;
         self.selected_session = app_state.selected_session;
+        self.unseen_completions = app_state.unseen_completions;
         self.last_provider = app_state.last_provider;
         self.last_runtime_mode = app_state.last_runtime_mode;
         self.last_model = app_state.last_model;
@@ -1044,6 +1054,11 @@ impl PersistedState {
                 self.dirty_sessions.insert(session.id);
             }
         }
+        // Unread stamps for tasks deleted while the app was away would leave
+        // the bell pointing at nothing; only live tasks can be unseen.
+        let live: HashSet<Uuid> = self.sessions.iter().map(|session| session.id).collect();
+        self.unseen_completions
+            .retain(|session_id, _| live.contains(session_id));
         self.version = STATE_VERSION;
         normalize_computer_app_grants(&mut self.computer_use_allowed_apps);
         self.backfill_remembered_selection();
@@ -1721,6 +1736,25 @@ mod tests {
         );
         let session = state.new_session(projectless_id, ProviderKind::Codex);
         assert_eq!(session.workspace, SessionWorkspace::Local);
+    }
+
+    #[test]
+    fn unseen_completions_survive_an_app_state_round_trip() {
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        let session_id = state.sessions[0].id;
+        state.unseen_completions.insert(session_id, 42);
+        state.unseen_completions.insert(Uuid::new_v4(), 7);
+
+        let app_state = serde_json::to_value(state.app_state()).unwrap();
+        let mut restored = PersistedState::empty();
+        restored.sessions.clone_from(&state.sessions);
+        restored.apply_app_state(serde_json::from_value(app_state).unwrap());
+        restored.migrate_loaded();
+
+        // The live task keeps its stamp; the stamp for a task deleted while
+        // the app was away is pruned on load.
+        assert_eq!(restored.unseen_completions.len(), 1);
+        assert_eq!(restored.unseen_completions[&session_id], 42);
     }
 
     #[test]

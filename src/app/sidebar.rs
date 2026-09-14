@@ -704,7 +704,7 @@ impl Waku {
         let theme = Theme::current(cx);
         let target = sessions::next_unread_session(
             &self.state.sessions,
-            &self.unseen_completions,
+            &self.state.unseen_completions,
             self.state.selected_session,
             self.pending_session_activation
                 .map(|pending| pending.session_id),
@@ -2593,7 +2593,7 @@ impl Waku {
                     )
                     .when(
                         session.status == SessionStatus::Idle
-                            && self.unseen_completions.contains_key(&session_id)
+                            && self.state.unseen_completions.contains_key(&session_id)
                             && !shortcut_hint,
                         |element| {
                             element.child(

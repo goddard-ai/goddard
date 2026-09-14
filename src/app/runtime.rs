@@ -1416,7 +1416,9 @@ impl Waku {
         ) {
             return;
         }
-        self.unseen_completions.insert(session_id, unix_time());
+        self.state
+            .unseen_completions
+            .insert(session_id, unix_time());
     }
 
     /// Records a failed submission that is about to be unwound and therefore
