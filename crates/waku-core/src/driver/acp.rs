@@ -2942,7 +2942,7 @@ mod tests {
         assert!(matches!(&seen[2], DriverEvent::RichActivity(item)
                 if item.complete
                     && item.title == "fixture.txt"
-                    && item.output.as_deref().is_some_and(|output| output.contains("waku probe fixture"))));
+                    && item.output.as_deref() == Some("waku probe fixture")));
         assert!(matches!(&seen[3], DriverEvent::TextDelta(text) if text == "OK"));
         assert!(matches!(
             &seen[4],

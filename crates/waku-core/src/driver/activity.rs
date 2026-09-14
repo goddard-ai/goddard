@@ -69,6 +69,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn output_unwraps_acp_content_blocks() {
+        // ACP tool calls report output as ToolCallContent blocks; the command's
+        // real text is inside, not the transport object itself.
+        assert_eq!(
+            format_output(&serde_json::json!([
+                {"type": "content", "content": {"type": "text", "text": "first line\n{\"actual\":\"command json\"}"}}
+            ]))
+            .as_deref(),
+            Some("first line\n{\"actual\":\"command json\"}")
+        );
+        assert_eq!(
+            format_output(&serde_json::json!({"type": "content", "content": {"type": "text", "text": "hi"}}))
+                .as_deref(),
+            Some("hi")
+        );
+        assert_eq!(
+            format_output(&serde_json::json!({"type": "text", "text": "hi"})).as_deref(),
+            Some("hi")
+        );
+    }
+
+    #[test]
+    fn output_joins_mixed_text_content_and_bare_items() {
+        assert_eq!(
+            format_output(&serde_json::json!([
+                {"type": "text", "text": "plain"},
+                {"type": "content", "content": {"type": "text", "text": "wrapped"}},
+                "bare",
+            ]))
+            .as_deref(),
+            Some("plain\n\nwrapped\n\nbare")
+        );
+    }
+
+    #[test]
     fn title_supports_direct_and_provider_wrapped_arguments() {
         assert_eq!(
             input_title(Some(&serde_json::json!({"title": "Inspect app"}))).as_deref(),
@@ -103,12 +138,19 @@ fn format_output(value: &Value) -> Option<String> {
     if let Some(text) = value.as_str() {
         return non_empty_text(text.to_owned());
     }
+    if value.get("type").and_then(Value::as_str) == Some("text")
+        && let Some(text) = value.get("text").and_then(Value::as_str)
+    {
+        return non_empty_text(text.to_owned());
+    }
     if let Some(structured) = value
         .get("structuredContent")
         .filter(|value| !value.is_null())
     {
         return format_json(structured);
     }
+    // ACP wraps every tool-call output block in {"type": "content", "content": ...};
+    // the generic content recursion unwraps it here and inside array items.
     if let Some(content) = value.get("content").filter(|value| !value.is_null()) {
         return format_output(content);
     }
@@ -116,14 +158,7 @@ fn format_output(value: &Value) -> Option<String> {
         let text = items
             .iter()
             .filter(|item| !is_image_item(item))
-            .filter_map(|item| {
-                item.as_str().map(str::to_owned).or_else(|| {
-                    (item.get("type").and_then(Value::as_str) == Some("text"))
-                        .then(|| item.get("text").and_then(Value::as_str).map(str::to_owned))
-                        .flatten()
-                        .or_else(|| format_json(item))
-                })
-            })
+            .filter_map(format_output)
             .collect::<Vec<_>>()
             .join("\n\n");
         return non_empty_text(text);
