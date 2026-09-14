@@ -960,6 +960,113 @@ impl Theme {
             ],
         })
     }
+
+    /// Kansō Zen — webhooked/kanso.nvim `colors.lua` + `themes.lua`. A
+    /// near-black `#090e13` canvas and a deliberately desaturated ramp:
+    /// keywords violet-gray, functions slate blue, strings sage, constants
+    /// clay, types aqua. ANSI is the theme's own `term` list.
+    pub fn kanso_zen() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x090E13,
+            // The scheme's own bg_dim is a step *lighter* than its canvas.
+            sidebar_solid: 0x1C1E25,
+            surface: 0x090E13,
+            raised: 0x22262D,
+            composer: 0x1C1E25,
+            inset: 0x070B0F,
+            terminal: 0x090E13,
+            sidebar_border: rgb(0x22262D).into(),
+
+            neutral: rgb(0x75797F).into(),
+
+            text: 0xC5C9C7,
+            text_secondary: 0xA4A7A4,
+            text_tertiary: 0x909398,
+            text_ghost: 0x5C6066,
+
+            accent: 0x7FB4CA,
+            selection: wash(0x393B44, 0.80),
+            code_text: 0x7FB4CA,
+
+            inverse: 0xC5C9C7,
+            on_inverse: 0x090E13,
+
+            info: 0x658594,
+            warning: 0xDCA561,
+            success: 0x98BB6C,
+            favorite: 0xE6C384,
+            danger: 0xC34043,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x8992A7).into(),   // violet2 — keyword/statement
+                literal: rgb(0xB6927B).into(),   // orange — constant
+                string: rgb(0x8A9A7B).into(),    // green3
+                comment: rgb(0x75797F).into(),   // gray4
+                number: rgb(0xA292A3).into(),    // pink
+                ty: rgb(0x8EA4A2).into(),        // aqua
+                function: rgb(0x8BA4B0).into(),  // blue3
+                meta: rgb(0x909398).into(),      // gray3 — preproc/parameters
+            },
+            ansi: [
+                0x090e13, 0xc4746e, 0x8a9a7b, 0xc4b28a, 0x8ba4b0, 0xa292a3, 0xc5c9c7, 0xa4a7a4,
+                0x909398, 0xe46876, 0x87a987, 0xe6c384, 0x7fb4ca, 0x938aa9, 0x7aa89f, 0xc5c9c7,
+            ],
+        })
+    }
+
+    /// Kansō Pearl — the light side of kanso.nvim, on `#f2f1ef` paper.
+    /// Same hue roles as Zen; the palette is the repo's `pearl*` ramp.
+    pub fn kanso_pearl() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: false,
+            canvas: 0xF2F1EF,
+            sidebar_solid: 0xE2E1DF,
+            surface: 0xF2F1EF,
+            raised: 0xE2E1DF,
+            // Pearl has nothing lighter than its bg; the composer is a small
+            // derivation toward white.
+            composer: 0xF8F7F5,
+            inset: 0xE2E1DF,
+            terminal: 0xF2F1EF,
+            sidebar_border: rgb(0xDDDDDB).into(),
+
+            neutral: rgb(0x6D6D69).into(),
+
+            text: 0x22262D,
+            text_secondary: 0x545464,
+            text_tertiary: 0x6D6D69,
+            text_ghost: 0x9F9F99,
+
+            accent: 0x4D699B,
+            selection: wash(0xB5CBD2, 0.60),
+            code_text: 0xCC6D00,
+
+            inverse: 0x22262D,
+            on_inverse: 0xF2F1EF,
+
+            info: 0x5A7785,
+            warning: 0xE98A00,
+            success: 0x6E915F,
+            favorite: 0xDE9800,
+            danger: 0xD7474B,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x624C83).into(),   // pearlViolet4 — keyword/statement
+                literal: rgb(0xCC6D00).into(),   // pearlOrange — constant
+                string: rgb(0x6F894E).into(),    // pearlGreen
+                comment: rgb(0x6D6D69).into(),   // pearlGray3
+                number: rgb(0xB35B79).into(),    // pearlPink
+                ty: rgb(0x597B75).into(),        // pearlAqua
+                function: rgb(0x4D699B).into(),  // pearlBlue4
+                meta: rgb(0x5C6068).into(),      // pearlGray2 — preproc
+            },
+            ansi: [
+                0x22262d, 0xc84053, 0x6f894e, 0x77713f, 0x4d699b, 0xb35b79, 0x597b75, 0x22262d,
+                0x6d6d69, 0xd7474b, 0x6e915f, 0x836f4a, 0x6693bf, 0x624c83, 0x5e857a, 0x43436c,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -989,6 +1096,8 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::DraculaDark => Theme::dracula(),
         ThemeName::RosePineDawn => Theme::rose_pine_dawn(),
         ThemeName::RosePineMoon => Theme::rose_pine_moon(),
+        ThemeName::KansoZen => Theme::kanso_zen(),
+        ThemeName::KansoPearl => Theme::kanso_pearl(),
     }
 }
 
