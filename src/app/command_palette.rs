@@ -901,7 +901,7 @@ impl Waku {
                 ),
                 label,
                 detail: Some(detail),
-                icon: PaletteIcon::Asset("icons/terminal.svg"),
+                icon: PaletteIcon::Asset(crate::custom_commands::icon_path(command.icon)),
                 shortcut: None,
                 action: PaletteAction::RunCustomCommand(command.id),
                 content_match: None,

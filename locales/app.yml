@@ -236,6 +236,10 @@ commands.name_description:
   en: Shown in the command palette. Leave blank to use the script itself.
 commands.name_placeholder:
   en: e.g. Deploy staging
+commands.icon:
+  en: Icon
+commands.icon_description:
+  en: Shown in the command palette and on the command’s terminal tab.
 commands.shell:
   en: Shell
 commands.shell_description:

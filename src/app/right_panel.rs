@@ -2562,8 +2562,23 @@ impl Waku {
                     right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())
                 }
             });
-            let icon_path =
-                right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref());
+            let icon_path = match &surface {
+                // A command's terminal tab wears the icon it was configured
+                // with; every other surface resolves its own.
+                RightPanelSurface::Terminal(terminal_id) => self
+                    .right_panel_terminal_commands
+                    .get(terminal_id)
+                    .map(|command| crate::custom_commands::icon_path(command.icon))
+                    .unwrap_or_else(|| {
+                        right_panel_tab_icon(
+                            &surface,
+                            self.right_panel_files_selected_path.as_deref(),
+                        )
+                    }),
+                _ => {
+                    right_panel_tab_icon(&surface, self.right_panel_files_selected_path.as_deref())
+                }
+            };
             let uses_file_icon = matches!(&surface, RightPanelSurface::File(_))
                 || matches!(&surface, RightPanelSurface::Files)
                     && self.right_panel_files_selected_path.is_some();

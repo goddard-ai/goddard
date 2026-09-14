@@ -106,6 +106,7 @@ pub(super) struct CustomCommandEditor {
     /// `None` while the form is creating a new command.
     id: Option<Uuid>,
     name: Entity<TextInput>,
+    icon: CustomCommandIcon,
     shell: Entity<TextInput>,
     script: Entity<TextInput>,
     close_on_success: bool,
@@ -859,6 +860,7 @@ impl Waku {
         self.custom_command_editor = Some(CustomCommandEditor {
             id: command.map(|command| command.id),
             name: name.clone(),
+            icon: command.map(|command| command.icon).unwrap_or_default(),
             shell,
             script,
             close_on_success: command.is_some_and(|command| command.close_on_success),
@@ -886,6 +888,7 @@ impl Waku {
         let command = CustomCommand {
             id: editor.id.unwrap_or_else(Uuid::new_v4),
             name: (!name.is_empty()).then_some(name),
+            icon: editor.icon,
             shell: (!shell.is_empty()).then_some(shell),
             script,
             close_on_success: editor.close_on_success,
@@ -1043,7 +1046,11 @@ impl Waku {
                     .flex()
                     .items_center()
                     .gap(px(12.0))
-                    .child(icon("icons/terminal.svg", 15.0, theme.text_tertiary))
+                    .child(icon(
+                        crate::custom_commands::icon_path(command.icon),
+                        15.0,
+                        theme.text_tertiary,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -1141,6 +1148,42 @@ impl Waku {
                 .focus_visible(|style| style.border_color(theme.accent))
                 .child(label)
         };
+        let selected_icon = editor.icon;
+        let weak = cx.entity().downgrade();
+        let icon_handle = self.menu_handle("custom-command-icon-selector", cx);
+        let icon_selector = dropdown_menu(
+            MenuChip::new("custom-command-icon-selector")
+                .label(selected_icon.label())
+                .icon(
+                    crate::custom_commands::icon_path(selected_icon),
+                    theme.text_secondary,
+                )
+                .outlined()
+                .selected(icon_handle.is_open())
+                .w(px(150.0))
+                .justify_between(),
+            "custom-command-icon-selector-menu",
+            &icon_handle,
+            MenuAlign::BelowRight,
+            move |_| {
+                CustomCommandIcon::ALL
+                    .into_iter()
+                    .map(|icon| {
+                        let weak = weak.clone();
+                        MenuItem::new(icon.label(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                if let Some(editor) = this.custom_command_editor.as_mut() {
+                                    editor.icon = icon;
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .icon(crate::custom_commands::icon_path(icon))
+                        .selected(icon == selected_icon)
+                    })
+                    .collect()
+            },
+        );
 
         div()
             .key_context(CUSTOM_COMMAND_EDITOR_CONTEXT)
@@ -1172,6 +1215,21 @@ impl Waku {
                     .child(div().mt(px(6.0)).child(
                         TextField::new("custom-command-name", editor.name.clone()).w_full(),
                     )),
+            )
+            .child(
+                div()
+                    .mt(px(12.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(field_label(tr!("commands.icon")))
+                            .child(field_hint(tr!("commands.icon_description"))),
+                    )
+                    .child(icon_selector),
             )
             .child(
                 div()
@@ -4248,6 +4306,7 @@ mod tests {
                 .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
                 .child(self.name.clone())
+                .child(div().id("icon-selector").tab_index(0))
                 .child(self.shell.clone())
                 .child(self.script.clone())
                 .child(div().id("toggle").tab_index(0))
@@ -4281,21 +4340,21 @@ mod tests {
         cx.update(|window, cx| window.focus(&name_focus, cx));
 
         let mut forward = Vec::new();
-        for _ in 0..6 {
+        for _ in 0..7 {
             cx.simulate_keystrokes("tab");
             cx.update(|window, cx| {
                 forward.push(window.focused(cx).expect("a tab stop should be focused"));
             });
         }
 
-        assert_eq!(forward[0], shell_focus);
-        assert_eq!(forward[1], script_focus);
-        assert_eq!(forward[5], name_focus);
-        for (index, focus) in forward[..5].iter().enumerate() {
+        assert_eq!(forward[1], shell_focus);
+        assert_eq!(forward[2], script_focus);
+        assert_eq!(forward[6], name_focus);
+        for (index, focus) in forward[..6].iter().enumerate() {
             assert!(!forward[..index].contains(focus));
         }
 
-        for expected in forward[..5].iter().rev() {
+        for expected in forward[..6].iter().rev() {
             cx.simulate_keystrokes("shift-tab");
             cx.update(|window, cx| {
                 assert_eq!(window.focused(cx).as_ref(), Some(expected));

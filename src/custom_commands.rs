@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
-use crate::persistence::CustomCommand;
+use crate::persistence::{CustomCommand, CustomCommandIcon};
 
 /// FNV-1a over the script bytes. Only the file name depends on it — a
 /// collision between two different scripts degrades to a rewrite per run,
@@ -132,6 +132,37 @@ pub fn command_shell(command: &CustomCommand) -> PathBuf {
         .unwrap_or_else(crate::command_env::default_terminal_shell)
 }
 
+/// The bundled asset a command's icon choice renders from — the command
+/// palette row, the settings list, and its terminal tab all share it.
+pub fn icon_path(icon: CustomCommandIcon) -> &'static str {
+    match icon {
+        CustomCommandIcon::Terminal => "icons/terminal.svg",
+        CustomCommandIcon::Command => "icons/command.svg",
+        CustomCommandIcon::Zap => "icons/zap.svg",
+        CustomCommandIcon::Wrench => "icons/wrench.svg",
+        CustomCommandIcon::Gauge => "icons/gauge.svg",
+        CustomCommandIcon::Package => "icons/package.svg",
+        CustomCommandIcon::GitBranch => "icons/git-branch.svg",
+        CustomCommandIcon::GitHub => "icons/github.svg",
+        CustomCommandIcon::Folder => "icons/folder.svg",
+        CustomCommandIcon::File => "icons/file.svg",
+        CustomCommandIcon::Search => "icons/search.svg",
+        CustomCommandIcon::Globe => "icons/globe.svg",
+        CustomCommandIcon::Server => "icons/server.svg",
+        CustomCommandIcon::CloudUpload => "icons/cloud-upload.svg",
+        CustomCommandIcon::Download => "icons/download.svg",
+        CustomCommandIcon::Bot => "icons/bot.svg",
+        CustomCommandIcon::Sparkle => "icons/sparkle.svg",
+        CustomCommandIcon::Star => "icons/star.svg",
+        CustomCommandIcon::Target => "icons/target.svg",
+        CustomCommandIcon::Queue => "icons/queue.svg",
+        CustomCommandIcon::Compose => "icons/compose.svg",
+        CustomCommandIcon::Chart => "icons/chart-column.svg",
+        CustomCommandIcon::Refresh => "icons/rotate-cw.svg",
+        CustomCommandIcon::Archive => "icons/archive.svg",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +230,20 @@ mod tests {
             source_line(Path::new("C:/Windows/System32/cmd.exe"), path, true),
             "call \"/tmp/command-abc\" && exit"
         );
+    }
+
+    #[test]
+    fn every_command_icon_is_embedded() {
+        use crate::assets::Assets;
+        use gpui::AssetSource;
+
+        for icon in CustomCommandIcon::ALL {
+            assert!(
+                Assets.load(icon_path(icon)).unwrap().is_some(),
+                "missing embedded icon: {}",
+                icon_path(icon)
+            );
+        }
     }
 
     #[test]

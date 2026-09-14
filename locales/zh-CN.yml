@@ -119,6 +119,8 @@ commands.empty_description: 添加后便会显示在命令面板中。
 commands.name: 名称
 commands.name_description: 显示在命令面板中。留空则使用脚本本身。
 commands.name_placeholder: 例如：部署预发环境
+commands.icon: 图标
+commands.icon_description: 显示在命令面板和命令的终端标签页上。
 commands.shell: Shell
 commands.shell_description: 运行命令所用的 shell。留空则使用账户默认 shell（$SHELL）。
 commands.shell_placeholder: 例如：/bin/zsh

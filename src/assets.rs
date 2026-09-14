@@ -154,6 +154,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-types/zig",
     "file-types/zip",
     "fork",
+    "gauge",
     "git-branch",
     "git-commit-horizontal",
     "goddard-logo",

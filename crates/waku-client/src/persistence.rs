@@ -65,6 +65,38 @@ pub enum CompletionSound {
     Chime,
 }
 
+/// The icon a custom command shows in the command palette, on its settings
+/// row, and on its terminal tab.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomCommandIcon {
+    #[default]
+    Terminal,
+    Command,
+    Zap,
+    Wrench,
+    Gauge,
+    Package,
+    GitBranch,
+    GitHub,
+    Folder,
+    File,
+    Search,
+    Globe,
+    Server,
+    CloudUpload,
+    Download,
+    Bot,
+    Sparkle,
+    Star,
+    Target,
+    Queue,
+    Compose,
+    Chart,
+    Refresh,
+    Archive,
+}
+
 /// A user-owned shell command listed in the command palette. Running one
 /// opens an interactive terminal tab that sources a materialized copy of
 /// `script` — identical in effect to pasting the text into that shell.
@@ -74,6 +106,9 @@ pub struct CustomCommand {
     /// Palette label; `None` (or blank) falls back to the script itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Icon the command shows in the palette, settings list, and tab.
+    #[serde(default)]
+    pub icon: CustomCommandIcon,
     /// Shell the terminal runs; `None` (or blank) uses the platform default
     /// (`$SHELL` on Unix).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -90,6 +125,7 @@ impl CustomCommand {
         Self {
             id: Uuid::new_v4(),
             name: None,
+            icon: CustomCommandIcon::default(),
             shell: None,
             script,
             close_on_success: false,
@@ -103,6 +139,65 @@ impl CustomCommand {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or(&self.script)
+    }
+}
+
+impl CustomCommandIcon {
+    pub const ALL: [Self; 24] = [
+        Self::Terminal,
+        Self::Command,
+        Self::Zap,
+        Self::Wrench,
+        Self::Gauge,
+        Self::Package,
+        Self::GitBranch,
+        Self::GitHub,
+        Self::Folder,
+        Self::File,
+        Self::Search,
+        Self::Globe,
+        Self::Server,
+        Self::CloudUpload,
+        Self::Download,
+        Self::Bot,
+        Self::Sparkle,
+        Self::Star,
+        Self::Target,
+        Self::Queue,
+        Self::Compose,
+        Self::Chart,
+        Self::Refresh,
+        Self::Archive,
+    ];
+
+    /// Icon names are product names and stay untranslated.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Terminal => "Terminal",
+            Self::Command => "Command",
+            Self::Zap => "Zap",
+            Self::Wrench => "Wrench",
+            Self::Gauge => "Gauge",
+            Self::Package => "Package",
+            Self::GitBranch => "Git branch",
+            Self::GitHub => "GitHub",
+            Self::Folder => "Folder",
+            Self::File => "File",
+            Self::Search => "Search",
+            Self::Globe => "Globe",
+            Self::Server => "Server",
+            Self::CloudUpload => "Upload",
+            Self::Download => "Download",
+            Self::Bot => "Bot",
+            Self::Sparkle => "Sparkle",
+            Self::Star => "Star",
+            Self::Target => "Target",
+            Self::Queue => "Queue",
+            Self::Compose => "Compose",
+            Self::Chart => "Chart",
+            Self::Refresh => "Refresh",
+            Self::Archive => "Archive",
+        }
     }
 }
 
@@ -1401,6 +1496,7 @@ mod tests {
         let mut state = PersistedState::empty();
         let mut command = CustomCommand::new("git status".to_owned());
         command.name = Some("Status".to_owned());
+        command.icon = CustomCommandIcon::Zap;
         command.shell = Some("/bin/zsh".to_owned());
         command.close_on_success = true;
         state.custom_commands = vec![command.clone()];
@@ -1413,6 +1509,14 @@ mod tests {
         // Settings files written before commands existed carry no list.
         let legacy: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(legacy.custom_commands.is_empty());
+
+        // Commands written before icons existed default to the terminal.
+        let legacy: CustomCommand = serde_json::from_value(serde_json::json!({
+            "id": Uuid::new_v4(),
+            "script": "echo hi"
+        }))
+        .unwrap();
+        assert_eq!(legacy.icon, CustomCommandIcon::Terminal);
     }
 
     #[test]

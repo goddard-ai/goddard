@@ -122,6 +122,8 @@ commands.empty_description: 追加するとコマンドパレットに表示さ�
 commands.name: 名前
 commands.name_description: コマンドパレットに表示されます。空欄の場合はスクリプトが使われます。
 commands.name_placeholder: 例：ステージングへデプロイ
+commands.icon: アイコン
+commands.icon_description: コマンドパレットとコマンドのターミナルタブに表示されます。
 commands.shell: シェル
 commands.shell_description: コマンドを実行するシェルです。空欄の場合はアカウントのデフォルト（$SHELL）を使います。
 commands.shell_placeholder: 例：/bin/zsh

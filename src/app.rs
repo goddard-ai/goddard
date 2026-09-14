@@ -55,9 +55,9 @@ use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
 use crate::persistence::{
-    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, DEFAULT_RIGHT_PANEL_WIDTH,
-    DEFAULT_SIDEBAR_WIDTH, PersistedState, PersistedWindowState, SidebarGrouping, SidebarOrdering,
-    StateStore,
+    CompletionSound, ComposerDraftStore, ComposerDrafts, CustomCommand, CustomCommandIcon,
+    DEFAULT_RIGHT_PANEL_WIDTH, DEFAULT_SIDEBAR_WIDTH, PersistedState, PersistedWindowState,
+    SidebarGrouping, SidebarOrdering, StateStore,
 };
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
