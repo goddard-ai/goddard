@@ -36,6 +36,7 @@ pub enum ThemeName {
     /// Kanagawa's light variant is officially named Lotus.
     KanagawaLight,
     ZenburnDark,
+    PoimandresDark,
 }
 
 impl ThemeName {
@@ -47,11 +48,12 @@ impl ThemeName {
         Self::KanagawaLight,
     ];
     /// Dark-slot choices, in picker order.
-    pub const DARK: [Self; 4] = [
+    pub const DARK: [Self; 5] = [
         Self::DefaultDark,
         Self::GruvboxDark,
         Self::EverforestDark,
         Self::ZenburnDark,
+        Self::PoimandresDark,
     ];
 
     pub fn is_dark(self) -> bool {
@@ -69,6 +71,7 @@ impl ThemeName {
             Self::EverforestLight => "Everforest Light".to_owned(),
             Self::KanagawaLight => "Kanagawa Light".to_owned(),
             Self::ZenburnDark => "Zenburn".to_owned(),
+            Self::PoimandresDark => "Poimandres".to_owned(),
         }
     }
 }

@@ -643,6 +643,61 @@ impl Theme {
             ],
         })
     }
+
+    /// Poimandres — drcmda/poimandres-theme `src/theme.js`. A deep blue-gray
+    /// canvas where almost everything cool-toned is the signature mint:
+    /// strings, numbers, and control flow share it, while functions and
+    /// types are light blue. ANSI is the theme's own terminal table.
+    pub fn poimandres() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x1B1E28,
+            // Derived one step darker than the canvas; the scheme has no
+            // darker surface of its own.
+            sidebar_solid: 0x171A24,
+            surface: 0x1B1E28,
+            raised: 0x303340,
+            composer: 0x232733,
+            inset: 0x15171F,
+            terminal: 0x1B1E28,
+            sidebar_border: rgb(0x303340).into(),
+
+            neutral: rgb(0x7390AA).into(),
+
+            text: 0xE4F0FB,
+            text_secondary: 0xA6ACCD,
+            text_tertiary: 0x767C9D,
+            text_ghost: 0x506477,
+
+            accent: 0x5DE4C7,
+            selection: wash(0x717CB4, 0.25),
+            code_text: 0xADD7FF,
+
+            inverse: 0xE4F0FB,
+            on_inverse: 0x1B1E28,
+
+            info: 0xADD7FF,
+            warning: 0xFFFAC2,
+            success: 0x5DE4C7,
+            favorite: 0xFFFAC2,
+            danger: 0xD0679D,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x5DE4C7).into(),   // brightMint — control flow
+                literal: rgb(0x5DE4C7).into(),   // constant.language — same mint
+                string: rgb(0x5DE4C7).into(),    // strings are mint upstream
+                comment: rgb(0x767C9D).into(),   // darkerGray
+                number: rgb(0x5DE4C7).into(),    // constant.numeric — same mint
+                ty: rgb(0xADD7FF).into(),        // lightBlue — types and classes
+                function: rgb(0xADD7FF).into(),  // lightBlue — function decls
+                meta: rgb(0x91B4D5).into(),      // desaturatedBlue — attributes
+            },
+            ansi: [
+                0x1B1E28, 0xD0679D, 0x5DE4C7, 0xFFFAC2, 0x89DDFF, 0xF087BD, 0x89DDFF, 0xFFFFFF,
+                0xA6ACCD, 0xD0679D, 0x5DE4C7, 0xFFFAC2, 0xADD7FF, 0xF087BD, 0xADD7FF, 0xFFFFFF,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -666,6 +721,7 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::EverforestLight => Theme::everforest_light(),
         ThemeName::KanagawaLight => Theme::kanagawa_light(),
         ThemeName::ZenburnDark => Theme::zenburn(),
+        ThemeName::PoimandresDark => Theme::poimandres(),
     }
 }
 
