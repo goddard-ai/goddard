@@ -9,13 +9,13 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Local, Utc};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
-    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement,
-    KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels,
-    Render, ScrollHandle, SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window,
-    WindowBounds, canvas, deferred, div, ease_out_quint, fill, font, img, linear_color_stop,
-    linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
+    Animation, AnimationExt, AnyElement, App, Bounds, ClickEvent, ClipboardEntry, ClipboardItem,
+    Context, Div, Entity, EntityId, ExternalPaths, FocusHandle, Focusable, FontWeight,
+    HitboxBehavior, Hsla, IntoElement, KeyDownEvent, ListAlignment, ListOffset, ListState,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit,
+    PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, Stateful, StyleRefinement,
+    TextRun, WeakEntity, Window, WindowBounds, canvas, deferred, div, ease_out_quint, fill, font,
+    img, linear_color_stop, linear_gradient, list, point, prelude::*, pulsating_between, px, rgb,
 };
 use uuid::Uuid;
 
@@ -303,14 +303,43 @@ struct ToastState {
     duration_remaining: Duration,
     timer_started: Option<Instant>,
     hovered: bool,
+    /// Set for the persistent "a port is live" toast: the terminal the URL
+    /// came from and the URL itself, for one-toast-per-terminal bookkeeping
+    /// and the open actions. `None` toasts are transient.
+    localhost: Option<LocalhostToast>,
 }
 
-/// A toast button that does more than dismiss. Today only the unarchive
-/// confirmation uses one — "View now" jumps straight to the restored task.
+/// What a localhost toast is offering to open. The terminal entity id keeps
+/// the toast accountable to its source: one pending toast per terminal.
+#[derive(Clone, Debug)]
+struct LocalhostToast {
+    terminal: EntityId,
+    url: SharedString,
+}
+
+/// A localhost URL a terminal printed while the toast slot was busy, queued
+/// behind whatever is showing. At most one entry per terminal — a fresher
+/// detection rewrites the pending one.
+#[derive(Debug)]
+struct PendingLocalhostUrl {
+    terminal: EntityId,
+    url: SharedString,
+}
+
+/// A toast button that does more than dismiss.
 #[derive(Clone, Debug)]
 struct ToastAction {
     label: SharedString,
-    session_id: Uuid,
+    kind: ToastActionKind,
+}
+
+#[derive(Clone, Debug)]
+enum ToastActionKind {
+    /// The unarchive confirmation's "View now" jump to the restored task.
+    Session(Uuid),
+    /// Open the detected localhost URL — externally, or in a browser tab
+    /// when shift is held.
+    LocalhostUrl,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -323,6 +352,7 @@ pub(super) enum ToastTone {
     /// A custom command that reported a nonzero exit — a red x, distinct
     /// from the warning triangle `Alert` uses.
     Failure,
+    Notice,
 }
 
 /// A custom command launched without revealing the right panel. Its
@@ -1693,6 +1723,9 @@ pub struct Waku {
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
+    /// Localhost URLs detected in terminal output while another toast owns
+    /// the slot. Promoted in order as the slot frees.
+    pending_localhost_toasts: VecDeque<PendingLocalhostUrl>,
     copied_control_feedback: HashMap<String, u64>,
     copied_control_generation: u64,
     copied_message_feedback: HashMap<Uuid, u64>,
@@ -2119,7 +2152,7 @@ impl Waku {
             ToastTone::Success,
             Some(ToastAction {
                 label: tr!("session.view_now").into(),
-                session_id,
+                kind: ToastActionKind::Session(session_id),
             }),
         );
     }
@@ -2159,19 +2192,26 @@ impl Waku {
         action: Option<ToastAction>,
         duration: Duration,
     ) {
-        self.toast_selection.selection.borrow_mut().clear();
-        self.toast_selection.registry.borrow_mut().clear();
-        self.toast_generation = self.toast_generation.wrapping_add(1);
-        self.toast = Some(ToastState {
+        // A displaced localhost toast re-queues ahead of other pending
+        // detections: it was first in line when something else took the slot.
+        if let Some(localhost) = self.toast.take().and_then(|toast| toast.localhost) {
+            self.pending_localhost_toasts
+                .push_front(PendingLocalhostUrl {
+                    terminal: localhost.terminal,
+                    url: localhost.url,
+                });
+        }
+        self.set_toast(ToastState {
             message: message.into(),
             detail: None,
             tone,
             action,
-            id: self.toast_generation,
-            timer_generation: self.toast_generation,
+            id: 0,
+            timer_generation: 0,
             duration_remaining: duration,
             timer_started: None,
             hovered: false,
+            localhost: None,
         });
     }
 
@@ -2190,6 +2230,154 @@ impl Waku {
         toast.timer_started = None;
         self.toast_generation = self.toast_generation.wrapping_add(1);
         toast.timer_generation = self.toast_generation;
+    }
+
+    /// A terminal printed a localhost URL. While its toast is up a better
+    /// URL for the same terminal replaces it; anything else queues behind
+    /// the current toast — one toast per terminal at a time.
+    pub(super) fn on_localhost_url_detected(
+        &mut self,
+        view: &Entity<TerminalView>,
+        url: String,
+        cx: &mut Context<Self>,
+    ) {
+        let terminal = view.entity_id();
+        let url = SharedString::from(url);
+        if let Some(active) = self
+            .toast
+            .as_ref()
+            .and_then(|toast| toast.localhost.as_ref())
+            && active.terminal == terminal
+        {
+            if active.url != url
+                && crate::terminal::localhost_url_rank(&url)
+                    >= crate::terminal::localhost_url_rank(&active.url)
+            {
+                self.show_localhost_toast(terminal, url);
+            }
+            return;
+        }
+        match self
+            .pending_localhost_toasts
+            .iter_mut()
+            .find(|pending| pending.terminal == terminal)
+        {
+            Some(pending)
+                if pending.url != url
+                    && crate::terminal::localhost_url_rank(&url)
+                        >= crate::terminal::localhost_url_rank(&pending.url) =>
+            {
+                pending.url = url;
+            }
+            Some(_) => {}
+            None => self
+                .pending_localhost_toasts
+                .push_back(PendingLocalhostUrl { terminal, url }),
+        }
+        self.promote_localhost_toast();
+        cx.notify();
+    }
+
+    /// Surface the oldest queued detection once the toast slot is free,
+    /// skipping entries whose terminal has since closed.
+    fn promote_localhost_toast(&mut self) {
+        if self.toast.is_some() {
+            return;
+        }
+        while let Some(pending) = self.pending_localhost_toasts.pop_front() {
+            let alive = self
+                .right_panel_terminals
+                .values()
+                .any(|view| view.entity_id() == pending.terminal);
+            if alive {
+                self.show_localhost_toast(pending.terminal, pending.url);
+                return;
+            }
+        }
+    }
+
+    /// The persistent port toast: no dismiss timer — it stays until the user
+    /// opens the URL or dismisses it.
+    fn show_localhost_toast(&mut self, terminal: EntityId, url: SharedString) {
+        self.set_toast(ToastState {
+            message: tr!("terminal.localhost_detected", url = url.as_ref()),
+            tone: ToastTone::Notice,
+            action: Some(ToastAction {
+                label: tr!("terminal.localhost_open").into(),
+                kind: ToastActionKind::LocalhostUrl,
+            }),
+            detail: None,
+            id: 0,
+            timer_generation: 0,
+            duration_remaining: DEFAULT_TOAST_DURATION,
+            timer_started: None,
+            hovered: false,
+            localhost: Some(LocalhostToast {
+                terminal,
+                url: url.clone(),
+            }),
+        });
+    }
+
+    /// The toast's open affordance and its key bindings land here: the
+    /// displayed localhost toast wins, otherwise the newest queued detection.
+    /// `in_browser_tab` is the shift-modified form.
+    pub(super) fn open_detected_localhost_url(
+        &mut self,
+        in_browser_tab: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (terminal, url) = match self
+            .toast
+            .as_ref()
+            .and_then(|toast| toast.localhost.clone())
+        {
+            Some(localhost) => {
+                self.hide_toast();
+                (localhost.terminal, localhost.url)
+            }
+            None => match self.pending_localhost_toasts.pop_back() {
+                Some(pending) => (pending.terminal, pending.url),
+                None => return,
+            },
+        };
+        self.pending_localhost_toasts
+            .retain(|pending| pending.terminal != terminal);
+        if in_browser_tab {
+            self.settings_page = None;
+            self.open_url_in_browser_tab(url.to_string(), window, cx);
+        } else {
+            cx.open_url(&url);
+        }
+        cx.notify();
+    }
+
+    fn open_localhost_url_action(
+        &mut self,
+        _: &crate::OpenLocalhostUrl,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_detected_localhost_url(false, window, cx);
+    }
+
+    fn open_localhost_url_in_tab_action(
+        &mut self,
+        _: &crate::OpenLocalhostUrlInTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_detected_localhost_url(true, window, cx);
+    }
+
+    fn set_toast(&mut self, mut toast: ToastState) {
+        self.toast_selection.selection.borrow_mut().clear();
+        self.toast_selection.registry.borrow_mut().clear();
+        self.toast_generation = self.toast_generation.wrapping_add(1);
+        toast.id = self.toast_generation;
+        toast.timer_generation = self.toast_generation;
+        self.toast = Some(toast);
     }
 
     /// Arm one wake-up for the moment a time-derived label next changes —
@@ -2243,6 +2431,7 @@ impl Waku {
             // Detached timers are deliberately cheap, but their generation
             // must stop them from dismissing a newer toast.
             self.toast_generation = self.toast_generation.wrapping_add(1);
+            self.promote_localhost_toast();
         }
     }
 
@@ -2250,7 +2439,8 @@ impl Waku {
         let Some(toast) = self.toast.as_mut() else {
             return;
         };
-        if toast.hovered || toast.timer_started.is_some() {
+        // A localhost toast is persistent: it leaves only when acted on.
+        if toast.localhost.is_some() || toast.hovered || toast.timer_started.is_some() {
             return;
         }
         // A pending command run owns its toast until the result lands —
@@ -3496,8 +3686,10 @@ impl Waku {
                     duration_remaining: DEFAULT_TOAST_DURATION,
                     timer_started: None,
                     hovered: false,
+                    localhost: None,
                 }),
                 toast_generation: 0,
+                pending_localhost_toasts: VecDeque::new(),
                 copied_control_feedback: HashMap::new(),
                 copied_control_generation: 0,
                 copied_message_feedback: HashMap::new(),

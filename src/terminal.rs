@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -93,6 +94,27 @@ const TERMINAL_LINK_REGEX: &str = "((ipfs:|ipns:|magnet:|mailto:|gemini://|gophe
                                    [^\u{0000}-\u{001F}\u{007F}-\u{009F}<>\"\\s{-}\\^⟨⟩`\\\\]+";
 const MAX_TERMINAL_LINK_SEARCH_LINES: i32 = 100;
 
+/// Matches a localhost URL in raw terminal output: an explicit
+/// `http(s)://host` where the host is `localhost`, a `*.localhost` subdomain
+/// (Portless's `https://<id>.localhost` form), a loopback address, or a bare
+/// `host:port` with no scheme. The leading boundary keeps `xlocalhost` or a
+/// dotted run like `foo.127.0.0.1` from matching. The URL itself is captured
+/// in `url` so the consumed boundary character stays out of the result.
+static LOCALHOST_URL_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r#"(?i)(?:^|[^A-Za-z0-9_.-])(?P<url>https?://(?:(?:[A-Za-z0-9-]+\.)*localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::[0-9]{1,5})?(?:/[^\s"'<>`\\]*)?|(?:(?:[A-Za-z0-9-]+\.)*localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):[0-9]{1,5}(?:/[^\s"'<>`\\]*)?)"#,
+    )
+    .expect("localhost URL regex compiles")
+});
+/// Lines re-scanned on every output batch so a match landing partially inside
+/// the previous batch is still seen once the rest of it arrives.
+const LOCALHOST_SCAN_OVERLAP: usize = 8;
+/// Upper bound on one scan: a larger burst is trimmed to its newest lines.
+const LOCALHOST_SCAN_MAX_LINES: usize = 512;
+/// Reported URLs remembered per terminal view. The cap only bounds memory;
+/// a terminal this chatty can afford to re-report its oldest URLs.
+const MAX_REPORTED_LOCALHOST_URLS: usize = 64;
+
 /// Icon glyphs (nerd-font private-use codepoints) resolve through CoreText's
 /// cascade rather than run splitting: JetBrains Mono itself keeps the
 /// Powerline range it covers, everything else falls through to the bundled
@@ -131,6 +153,9 @@ pub enum TerminalViewEvent {
     /// themselves, and with `None` when the PTY ended — or never started —
     /// without a status, so a pending run always resolves.
     CommandFinished(Option<i32>),
+    /// A localhost URL appeared in freshly printed output — a dev server
+    /// announcing its port. Carries the normalized, openable URL.
+    LocalhostUrl(String),
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
@@ -241,6 +266,9 @@ struct TerminalSession {
     cell_size: (f32, f32),
     palette: Arc<Mutex<Theme>>,
     url_regex: RegexSearch,
+    /// Grid lines — scrollback plus screen — already scanned for a localhost
+    /// URL, so each output line is considered once.
+    localhost_scan_watermark: usize,
 }
 
 impl TerminalSession {
@@ -340,6 +368,7 @@ impl TerminalSession {
             cell_size: (TERMINAL_CELL_WIDTH, TERMINAL_CELL_HEIGHT),
             palette,
             url_regex,
+            localhost_scan_watermark: 0,
         })
     }
 
@@ -746,6 +775,9 @@ pub struct TerminalView {
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     selecting: bool,
     hovered_link: Option<TerminalLink>,
+    /// Localhost URLs this view has already surfaced, so the overlap between
+    /// one output scan and the next cannot re-report them.
+    reported_localhost_urls: HashSet<String>,
     cursor_blink: gpui::Entity<TerminalCursorBlink>,
     cursor_focus_tracking_started: bool,
     context_menu: ContextMenuHandle,
@@ -823,6 +855,7 @@ impl TerminalView {
             grid_bounds: Rc::new(Cell::new(None)),
             selecting: false,
             hovered_link: None,
+            reported_localhost_urls: HashSet::new(),
             cursor_blink,
             cursor_focus_tracking_started: false,
             context_menu,
@@ -861,10 +894,16 @@ impl TerminalView {
     }
 
     fn poll(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.take_dirty());
+        if changed && let Some(url) = self.detect_localhost_url() {
+            cx.emit(TerminalViewEvent::LocalhostUrl(url));
+        }
         let Some(session) = &self.session else {
-            return false;
+            return changed;
         };
-        let mut changed = session.take_dirty();
         while let Ok(event) = session.ui_events.try_recv() {
             changed = true;
             match event {
@@ -896,6 +935,28 @@ impl TerminalView {
             }
         }
         changed
+    }
+
+    /// Scans the grid lines added since the previous poll for a localhost
+    /// URL — how a dev server announces its port — and returns the best
+    /// candidate not reported before. `https://<id>.localhost` beats other
+    /// loopback forms when both appear.
+    fn detect_localhost_url(&mut self) -> Option<String> {
+        let session = self.session.as_mut()?;
+        let term = session.term.lock();
+        let url = scan_grid_localhost_url(
+            &term,
+            &mut session.localhost_scan_watermark,
+            &self.reported_localhost_urls,
+        );
+        drop(term);
+        if let Some(url) = &url {
+            if self.reported_localhost_urls.len() >= MAX_REPORTED_LOCALHOST_URLS {
+                self.reported_localhost_urls.clear();
+            }
+            self.reported_localhost_urls.insert(url.clone());
+        }
+        url
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1764,6 +1825,94 @@ fn tail_lines<T: EventListener>(term: &Term<T>, count: usize) -> Vec<String> {
     lines
 }
 
+/// Scans the grid lines added since `watermark` was last advanced for a
+/// localhost URL and returns the best candidate not in `reported`.
+/// Alternate-screen apps (editors, TUIs) print file content, not server
+/// announcements; scanning them only invites false positives.
+fn scan_grid_localhost_url<T: EventListener>(
+    term: &Term<T>,
+    watermark: &mut usize,
+    reported: &HashSet<String>,
+) -> Option<String> {
+    if term.mode().contains(TermMode::ALT_SCREEN) {
+        return None;
+    }
+    let grid = term.grid();
+    let total = grid.history_size() + grid.screen_lines();
+    let unseen = total.saturating_sub(*watermark);
+    *watermark = total;
+    // At the scrollback cap `total` stops growing while fresh lines still
+    // rotate through the bottom, so the visible screen is always rescanned.
+    let scan_lines = (unseen + LOCALHOST_SCAN_OVERLAP)
+        .max(grid.screen_lines())
+        .min(total)
+        .min(LOCALHOST_SCAN_MAX_LINES);
+    if scan_lines == 0 {
+        return None;
+    }
+    let bottom = term.bottommost_line();
+    let top = Line(bottom.0 - scan_lines as i32 + 1);
+    let text = term.bounds_to_string(
+        TerminalPoint::new(top, Column(0)),
+        TerminalPoint::new(bottom, term.last_column()),
+    );
+    localhost_urls(&text)
+        .into_iter()
+        .filter(|url| !reported.contains(url))
+        .max_by_key(|url| localhost_url_rank(url))
+}
+
+/// Normalized localhost URLs found in a chunk of terminal output, in the
+/// order they appear and with duplicates removed.
+fn localhost_urls(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    LOCALHOST_URL_REGEX
+        .captures_iter(text)
+        .filter_map(|captures| captures.name("url"))
+        .filter_map(|capture| normalize_localhost_url(capture.as_str()))
+        .filter(|url| seen.insert(url.clone()))
+        .collect()
+}
+
+/// Trims punctuation output tends to append right after a URL, gives
+/// scheme-less `host:port` matches an `http://` scheme, and rewrites the
+/// listen-everywhere `0.0.0.0` to the browsable `localhost`.
+fn normalize_localhost_url(raw: &str) -> Option<String> {
+    let mut raw = raw.trim_end_matches(['.', ',', ';', ':', '!', '?']);
+    for (closer, opener) in [(')', '('), (']', '['), ('}', '{')] {
+        while raw.ends_with(closer) && raw.matches(closer).count() > raw.matches(opener).count() {
+            raw = &raw[..raw.len() - 1];
+        }
+    }
+    // A closer can expose fresh trailing punctuation: "localhost:3000.)".
+    raw = raw.trim_end_matches(['.', ',', ';', ':', '!', '?']);
+    let with_scheme = if raw.contains("://") {
+        raw.to_owned()
+    } else {
+        format!("http://{raw}")
+    };
+    let mut url = url::Url::parse(&with_scheme).ok()?;
+    match url.host_str()? {
+        "localhost" | "127.0.0.1" | "::1" => {}
+        "0.0.0.0" => url.set_host(Some("localhost")).ok()?,
+        host if host.ends_with(".localhost") => {}
+        _ => return None,
+    }
+    Some(url.into())
+}
+
+/// Portless-style `https://<id>.localhost` URLs name the app rather than a
+/// bare port and carry TLS — preferred over any other loopback form.
+pub(crate) fn localhost_url_rank(url: &str) -> u8 {
+    let host = url
+        .strip_prefix("https://")
+        .map(|rest| rest.split(['/', ':']).next().unwrap_or_default());
+    match host {
+        Some(host) if host.ends_with(".localhost") => 2,
+        _ => 1,
+    }
+}
+
 /// ⌘K: drop the scrollback and every row above the cursor, moving the line
 /// being edited to the top of the screen — Terminal.app's "Clear Scrollback"
 /// and Zed's `terminal::Clear` behavior. The alt screen has no scrollback and
@@ -2293,6 +2442,104 @@ mod tests {
                 true
             ),
             Some((TerminalPoint::new(Line(-3), Column(0)), Side::Left))
+        );
+    }
+
+    #[test]
+    fn detects_localhost_urls_in_terminal_output() {
+        assert_eq!(
+            localhost_urls("➜  Local:   http://localhost:5173/\n"),
+            vec!["http://localhost:5173/".to_owned()]
+        );
+        assert_eq!(
+            localhost_urls("listening on localhost:3000"),
+            vec!["http://localhost:3000/".to_owned()]
+        );
+        assert_eq!(
+            localhost_urls("Serving at http://127.0.0.1:8000/api"),
+            vec!["http://127.0.0.1:8000/api".to_owned()]
+        );
+        assert_eq!(
+            localhost_urls("ready on https://my-app.localhost"),
+            vec!["https://my-app.localhost/".to_owned()]
+        );
+        // The listen-everywhere form opens as localhost.
+        assert_eq!(
+            localhost_urls("dev server on 0.0.0.0:8080"),
+            vec!["http://localhost:8080/".to_owned()]
+        );
+    }
+
+    #[test]
+    fn localhost_url_detection_ignores_lookalikes_and_punctuation() {
+        assert!(localhost_urls("host my-localhost:3000").is_empty());
+        assert!(localhost_urls("notlocalhost:3000").is_empty());
+        assert!(localhost_urls("https://example.com:443").is_empty());
+        assert!(localhost_urls("localhost").is_empty());
+        // A bare host:port needs digits; "localhost:" alone is not a server.
+        assert!(localhost_urls("at localhost: soon").is_empty());
+        assert_eq!(
+            localhost_urls("(http://localhost:3000)."),
+            vec!["http://localhost:3000/".to_owned()]
+        );
+        assert_eq!(
+            localhost_urls("open http://localhost:3000, then"),
+            vec!["http://localhost:3000/".to_owned()]
+        );
+    }
+
+    #[test]
+    fn prefers_portless_localhost_subdomains() {
+        assert_eq!(localhost_url_rank("https://my-app.localhost/"), 2);
+        assert_eq!(localhost_url_rank("https://localhost/"), 1);
+        assert_eq!(localhost_url_rank("http://my-app.localhost/"), 1);
+        assert_eq!(localhost_url_rank("http://localhost:3000/"), 1);
+
+        let candidates =
+            localhost_urls("target http://localhost:3000\nvia https://my-app.localhost\n");
+        let best = candidates
+            .into_iter()
+            .max_by_key(|url| localhost_url_rank(url))
+            .unwrap();
+        assert_eq!(best, "https://my-app.localhost/");
+    }
+
+    #[test]
+    fn scans_new_grid_lines_for_localhost_urls() {
+        let mut term = parse_terminal(
+            b"$ python3 -m http.server\nServing HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...\n",
+        );
+        let mut watermark = 0;
+        let mut reported = HashSet::new();
+
+        let url = scan_grid_localhost_url(&term, &mut watermark, &reported).unwrap();
+        assert_eq!(url, "http://localhost:8000/");
+        reported.insert(url);
+
+        // No new output: the overlap rescan only re-finds reported URLs.
+        assert_eq!(scan_grid_localhost_url(&term, &mut watermark, &reported), None);
+
+        // A better URL printed later wins over the already-reported one.
+        let mut processor: Processor = Processor::new();
+        processor.advance(&mut term, b"also via https://my-app.localhost\n");
+        assert_eq!(
+            scan_grid_localhost_url(&term, &mut watermark, &reported),
+            Some("https://my-app.localhost/".to_owned())
+        );
+    }
+
+    #[test]
+    fn detects_a_localhost_url_split_across_output_batches() {
+        let mut term = parse_terminal(b"ready at http://local");
+        let mut watermark = 0;
+        let reported = HashSet::new();
+        assert_eq!(scan_grid_localhost_url(&term, &mut watermark, &reported), None);
+
+        let mut processor: Processor = Processor::new();
+        processor.advance(&mut term, b"host:3000/\n");
+        assert_eq!(
+            scan_grid_localhost_url(&term, &mut watermark, &reported),
+            Some("http://localhost:3000/".to_owned())
         );
     }
 }

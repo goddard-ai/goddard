@@ -289,7 +289,7 @@ impl Render for Waku {
             let commit_dialog = self.render_commit_dialog(cx);
             let archive_dialog = self.render_archive_dialog(cx);
             let goal_dialog = self.render_goal_dialog(window, cx);
-            let toast = self.render_active_toast(cx);
+            let toast = self.render_active_toast(window, cx);
             let content = div()
                 .relative()
                 .size_full()
@@ -310,6 +310,8 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::cancel_project_switch_action))
                 .on_action(cx.listener(Self::select_sidebar_session_action))
                 .on_action(cx.listener(Self::adjust_font_size_action))
+                .on_action(cx.listener(Self::open_localhost_url_action))
+                .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -343,7 +345,7 @@ impl Render for Waku {
         let commit_dialog = self.render_commit_dialog(cx);
         let archive_dialog = self.render_archive_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
-        let toast = self.render_active_toast(cx);
+        let toast = self.render_active_toast(window, cx);
         let content = div()
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -399,6 +401,8 @@ impl Render for Waku {
             .on_action(cx.listener(Self::replace_all_matches_action))
             .on_action(cx.listener(Self::select_sidebar_session_action))
             .on_action(cx.listener(Self::adjust_font_size_action))
+            .on_action(cx.listener(Self::open_localhost_url_action))
+            .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -577,7 +581,11 @@ impl Waku {
     /// is active. Every full-window surface (workspace and settings alike)
     /// must include this, or a toast raised there stays invisible until the
     /// user navigates away.
-    fn render_active_toast(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_active_toast(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         self.start_toast_dismiss_timer(cx);
         let toast = self.toast.as_ref().map(|toast| {
             (
@@ -589,7 +597,7 @@ impl Waku {
             )
         });
         toast.map(|(message, detail, tone, action, generation)| {
-            self.render_toast(message, detail, tone, action, generation, cx)
+            self.render_toast(message, detail, tone, action, generation, window, cx)
                 .into_any_element()
         })
     }
@@ -601,6 +609,7 @@ impl Waku {
         tone: ToastTone,
         action: Option<ToastAction>,
         generation: u64,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
@@ -608,6 +617,7 @@ impl Waku {
             ToastTone::Alert => icon("icons/alert.svg", 14.0, theme.danger).into_any_element(),
             ToastTone::Success => icon("icons/check.svg", 14.0, theme.success).into_any_element(),
             ToastTone::Failure => icon("icons/x.svg", 14.0, theme.danger).into_any_element(),
+            ToastTone::Notice => icon("icons/server.svg", 14.0, theme.accent).into_any_element(),
             ToastTone::Progress => {
                 motion::spin(icon("icons/loader-circle.svg", 14.0, theme.text_tertiary))
             }
@@ -677,7 +687,26 @@ impl Waku {
         });
 
         let action_button = action.map(|action| {
-            let session_id = action.session_id;
+            let kind = action.kind.clone();
+            let mut label = action.label.to_string();
+            let mut tooltip = None;
+            if matches!(kind, ToastActionKind::LocalhostUrl) {
+                if let Some(open) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrl)
+                        .resolve(window)
+                {
+                    label = format!("{label} {open}");
+                }
+                if let Some(in_tab) =
+                    crate::ui::shortcut::ShortcutHint::action(&crate::OpenLocalhostUrlInTab)
+                        .resolve(window)
+                {
+                    tooltip = Some(Tooltip::text(tr!(
+                        "terminal.localhost_open_in_tab",
+                        keys = in_tab
+                    )));
+                }
+            }
             div()
                 .id(SharedString::from(format!("toast-action-{generation}")))
                 .tab_index(0)
@@ -694,14 +723,36 @@ impl Waku {
                 .focus_visible(|style| style.border_1().border_color(theme.accent))
                 .hover(|element| element.bg(theme.overlay))
                 .active(|element| element.bg(theme.overlay_strong))
-                .child(action.label.clone())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_toast_session(session_id, cx);
-                    cx.stop_propagation();
+                .when_some(tooltip, |element, tooltip| element.tooltip(tooltip))
+                .child(label)
+                .on_click(cx.listener({
+                    let kind = kind.clone();
+                    move |this, event: &ClickEvent, window, cx| {
+                        match &kind {
+                            ToastActionKind::Session(session_id) => {
+                                this.open_toast_session(*session_id, cx)
+                            }
+                            ToastActionKind::LocalhostUrl => this.open_detected_localhost_url(
+                                event.modifiers().shift,
+                                window,
+                                cx,
+                            ),
+                        }
+                        cx.stop_propagation();
+                    }
                 }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.open_toast_session(session_id, cx);
+                        match &kind {
+                            ToastActionKind::Session(session_id) => {
+                                this.open_toast_session(*session_id, cx)
+                            }
+                            ToastActionKind::LocalhostUrl => this.open_detected_localhost_url(
+                                event.keystroke.modifiers.shift,
+                                window,
+                                cx,
+                            ),
+                        }
                         cx.stop_propagation();
                     }
                 }))

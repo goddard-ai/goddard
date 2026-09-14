@@ -1845,6 +1845,12 @@ right_panel.terminal_unavailable:
   en: Terminal unavailable
 right_panel.terminal_unavailable_description:
   en: Open the Terminal surface again to start a shell
+terminal.localhost_detected:
+  en: "%{url} is live"
+terminal.localhost_open:
+  en: Open
+terminal.localhost_open_in_tab:
+  en: "%{keys} opens it in a browser tab"
 right_panel.resize:
   en: Resize right panel
 right_panel.tabs:

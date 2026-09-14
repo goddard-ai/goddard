@@ -2355,6 +2355,23 @@ impl Waku {
         browser
     }
 
+    /// Open a URL in a fresh built-in browser tab — the toast's shift-modified
+    /// open path and any future "preview this site" entry point.
+    pub(super) fn open_url_in_browser_tab(
+        &mut self,
+        url: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let surface = RightPanelSurface::new_browser();
+        let Some(browser_id) = surface.browser_id() else {
+            return;
+        };
+        self.open_right_panel_surface(surface, cx);
+        let browser = self.ensure_right_panel_browser(browser_id, window, cx);
+        browser.update(cx, |view, cx| view.navigate_to_url(url, cx));
+    }
+
     /// Drop browser views whose tab no longer exists in any session.
     pub(super) fn retain_right_panel_browsers(&mut self) {
         let retained_browser_ids = self
@@ -2691,27 +2708,30 @@ impl Waku {
             let close_on_exit = command.is_some_and(|command| command.close_on_success);
             let view =
                 cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
-            if command.is_some() {
-                cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
-                    match event {
-                        TerminalViewEvent::Exited => {
-                            // The command's startup line only exits the
-                            // shell when the script succeeded, so the exit
-                            // event is the close signal.
-                            if close_on_exit {
-                                this.close_terminal_view_surface(&view, cx);
-                            }
-                        }
-                        TerminalViewEvent::CommandFinished(code) => {
-                            // A finished command may have changed the
-                            // checkout, so drop the cached snapshot; the
-                            // next read refetches.
-                            this.refresh_selected_branch_snapshot(cx);
-                            this.custom_command_finished(terminal_id, *code, cx);
+            cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
+                match event {
+                    // The command's startup line ends in `&& exit`, so the
+                    // shell only goes away on its own when the script
+                    // succeeded — the exit event is the close signal.
+                    TerminalViewEvent::Exited => {
+                        if close_on_exit {
+                            this.close_terminal_view_surface(&view, cx);
                         }
                     }
-                })
-                .detach();
+                    TerminalViewEvent::CommandFinished(code) => {
+                        // A finished command may have changed the
+                        // checkout, so drop the cached snapshot; the
+                        // next read refetches.
+                        this.refresh_selected_branch_snapshot(cx);
+                        this.custom_command_finished(terminal_id, *code, cx);
+                    }
+                    TerminalViewEvent::LocalhostUrl(url) => {
+                        this.on_localhost_url_detected(&view, url.clone(), cx);
+                    }
+                }
+            })
+            .detach();
+            if command.is_some() {
                 // The view's 24ms poll notifies on every PTY dirty flag;
                 // each one is a chance to refresh the toast's output tail.
                 cx.observe(&view, move |this, _, cx| {

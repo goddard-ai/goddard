@@ -131,7 +131,9 @@ actions!(
         WebviewCopy,
         WebviewCut,
         WebviewPaste,
-        WebviewSelectAll
+        WebviewSelectAll,
+        OpenLocalhostUrl,
+        OpenLocalhostUrlInTab
     ]
 );
 
@@ -529,6 +531,10 @@ pub fn run() {
                 KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
                 KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
                 KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
+                // A terminal's detected localhost URL: opens externally;
+                // adding shift opens it in a built-in browser tab instead.
+                KeyBinding::new("secondary-alt-o", OpenLocalhostUrl, None),
+                KeyBinding::new("secondary-alt-shift-o", OpenLocalhostUrlInTab, None),
             ]);
 
             #[cfg(target_os = "macos")]
