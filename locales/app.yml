@@ -313,6 +313,10 @@ daemon.web_external_description:
   en: Goddard Web connects to a daemon managed outside this browser. Configure its listener, browser origins, and token on that host.
 daemon.web_connection_description:
   en: This browser never starts or stops the daemon.
+daemon.agent_tools_title:
+  en: Agent tools
+daemon.agent_tools_description:
+  en: Let an agent create tasks and send messages to other tasks. Sessions started while this is on get a session-scoped waku-agent command; prompts it sends are marked in the target transcript.
 daemon.not_configured:
   en: Not configured
 daemon.status:
@@ -2064,6 +2068,8 @@ transcript.turn_label:
   en: "Turn %{number}: %{prompt}"
 transcript.edit_message:
   en: Edit message
+transcript.sent_by_agent:
+  en: Sent by agent
 
 duration.second:
   en: "%{count} second"

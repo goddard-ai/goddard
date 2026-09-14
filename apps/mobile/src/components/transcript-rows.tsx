@@ -140,7 +140,8 @@ const UserBubble = memo(
     previous.message.id === next.message.id &&
     previous.message.content === next.message.content &&
     previous.message.display_content === next.message.display_content &&
-    previous.message.attachments === next.message.attachments,
+    previous.message.attachments === next.message.attachments &&
+    previous.message.sent_by_task === next.message.sent_by_task,
 );
 
 function UserBubbleInner({ message }: { message: Message }) {
@@ -154,6 +155,16 @@ function UserBubbleInner({ message }: { message: Message }) {
 
   return (
     <View style={styles.userFrame}>
+      {message.sent_by_task ? (
+        <View style={[styles.agentBadge, { backgroundColor: theme.overlay }]}>
+          <AppSymbol
+            name={{ ios: 'cpu', android: 'smart_toy', web: 'smart_toy' }}
+            size={9}
+            tintColor={theme.textTertiary}
+          />
+          <Text style={[styles.agentBadgeText, { color: theme.textTertiary }]}>Sent by agent</Text>
+        </View>
+      ) : null}
       {message.attachments?.length ? (
         <View style={styles.attachments}>
           {message.attachments.map((attachment, index) => (
@@ -325,6 +336,15 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   userText: { fontSize: 14, lineHeight: 21 },
+  agentBadge: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  agentBadgeText: { fontSize: 10.5, lineHeight: 14 },
   messageFooter: { fontSize: 10.5, marginTop: 10 },
   systemFrame: { alignItems: 'center' },
   systemMessage: {

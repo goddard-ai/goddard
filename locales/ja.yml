@@ -161,6 +161,8 @@ daemon.external_title: 外部デーモン
 daemon.external_description: このデスクトップは Goddard の外部で管理されているデーモンに接続しています。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
 daemon.web_external_description: Goddard Web はブラウザの外部で管理されているデーモンに接続します。リスナー、ブラウザオリジン、トークンは接続先ホストで設定してください。
 daemon.web_connection_description: このブラウザがデーモンを起動または停止することはありません。
+daemon.agent_tools_title: エージェントツール
+daemon.agent_tools_description: エージェントがタスクを作成し、他のタスクにメッセージを送れるようにします。有効な間に開始されたセッションにはセッション限定の waku-agent コマンドが提供され、送信されたプロンプトは対象のトランスクリプトに記録されます。
 daemon.not_configured: 未設定
 daemon.status: 状態
 daemon.disconnect: 接続を解除
@@ -294,6 +296,9 @@ computer_use.no_always_allowed_apps: 常に許可されているアプリはあ�
 computer_use.access_granted: アクセス許可済み
 computer_use.grant_access: アクセスを許可
 computer_use.permission_check_failed: コンピュータ操作の権限を確認できませんでした
+computer_use.desktop_access: デスクトップへのアクセス
+computer_use.windows_access_description: 現在の Windows デスクトップセッションでアプリを操作します。管理者権限で実行中のアプリやセキュアデスクトップへのアクセスは Windows によって制限される場合があります。
+computer_use.linux_access_description: 現在の Linux デスクトップセッションでアプリを操作します。キャプチャと入力のサポートは、コンポジターとアクセシビリティサービスによって異なります。
 
 common.settings: 設定
 common.copy: コピー
@@ -494,6 +499,11 @@ activity.plan_step: プランのステップ
 activity.plan_steps: プランのステップ
 activity.tool_call: ツール呼び出し
 activity.tool_calls: ツール呼び出し
+activity.compacting_context: コンテキストを圧縮中
+activity.compacted_context: コンテキストを圧縮しました
+activity.compaction_failed: コンテキストの圧縮に失敗しました
+activity.provider_retrying: リクエストを再試行中
+activity.background_shell: バックグラウンドシェル
 
 mode.supervised: 監督モード
 mode.auto_accept_edits: 編集を自動承認
@@ -1049,6 +1059,7 @@ transcript.scroll_to_bottom: 一番下へスクロール
 transcript.conversation_turns: 会話ターン
 transcript.turn_label: "ターン %{number}：%{prompt}"
 transcript.edit_message: メッセージを編集
+transcript.sent_by_agent: エージェントから送信
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"

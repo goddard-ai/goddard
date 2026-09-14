@@ -464,14 +464,39 @@ function abbreviateHomePath(path: string) {
 
 function DaemonSettings() {
   const { t } = useI18n()
-  const { config, phase, reconnect, disconnect, forget } = useDaemon()
+  const { client, config, phase, reconnect, disconnect, forget } = useDaemon()
+  const settings = useDaemonSettings()
+  const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+
+  async function setAgentTools(enabled: boolean) {
+    if (!client || !config || !settings.data) return
+    const next = { ...settings.data, agent_tools_enabled: enabled }
+    try {
+      await updateDaemonSettings(client, next)
+      queryClient.setQueryData(daemonKeys.settings(config.address), next)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    }
+  }
+
   return (
     <div>
       <SettingsCard>
         <SettingText
           title={t('daemon.external_title')}
           description={t('daemon.web_external_description')}
+        />
+      </SettingsCard>
+      <SettingsCard row>
+        <SettingText
+          title={t('daemon.agent_tools_title')}
+          description={t('daemon.agent_tools_description')}
+        />
+        <Toggle
+          checked={settings.data?.agent_tools_enabled ?? false}
+          label={t('daemon.agent_tools_title')}
+          onChange={(enabled) => void setAgentTools(enabled)}
         />
       </SettingsCard>
       <SettingsCard>

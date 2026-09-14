@@ -1260,29 +1260,37 @@ impl Waku {
 
     fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let agent_tools_card = self.agent_tools_card(theme, cx);
         if self.daemon.is_remote() {
             return div()
                 .mt(px(15.0))
                 .w_full()
-                .px(px(20.0))
-                .py(px(16.0))
-                .rounded(px(13.0))
-                .bg(theme.raised)
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
                 .child(
                     div()
-                        .text_size(sp(13.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(tr!("daemon.external_title")),
+                        .px(px(20.0))
+                        .py(px(16.0))
+                        .rounded(px(13.0))
+                        .bg(theme.raised)
+                        .child(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("daemon.external_title")),
+                        )
+                        .child(
+                            div()
+                                .mt(px(5.0))
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("daemon.external_description")),
+                        ),
                 )
-                .child(
-                    div()
-                        .mt(px(5.0))
-                        .text_size(sp(12.5))
-                        .line_height(sp(18.0))
-                        .text_color(theme.text_secondary)
-                        .child(tr!("daemon.external_description")),
-                )
+                .child(agent_tools_card)
                 .into_any_element();
         }
 
@@ -1791,7 +1799,62 @@ impl Waku {
                         ),
                 )
             })
+            .child(agent_tools_card)
             .into_any_element()
+    }
+
+    /// The daemon-scoped opt-in for agent-to-agent commands. Toggling it only
+    /// affects sessions started afterwards — running sessions keep the launch
+    /// environment they already have.
+    fn agent_tools_card(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.state.agent_tools_enabled;
+        let toggle = toggle_switch(
+            "agent-tools-toggle",
+            enabled,
+            false,
+            theme,
+            cx,
+            move |this, _, cx| this.set_agent_tools_enabled(!enabled, cx),
+        );
+        div()
+            .min_h(px(66.0))
+            .px(px(20.0))
+            .py(px(13.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("daemon.agent_tools_title")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .min_w_0()
+                            .whitespace_normal()
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("daemon.agent_tools_description")),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
+    }
+
+    fn set_agent_tools_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.state.agent_tools_enabled = enabled;
+        self.save();
+        cx.notify();
     }
 
     fn daemon_exposure_from_fields(

@@ -158,6 +158,8 @@ daemon.external_title: 外部守护进程
 daemon.external_description: 此桌面应用连接到由 Goddard 之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
 daemon.web_external_description: Goddard Web 连接到由浏览器之外管理的守护进程。请在对应主机上配置监听地址、浏览器来源和令牌。
 daemon.web_connection_description: 此浏览器不会启动或停止守护进程。
+daemon.agent_tools_title: 智能体工具
+daemon.agent_tools_description: 允许会话中的智能体创建任务并向其他任务发送消息。开启期间启动的会话将获得按会话隔离的 waku-agent 命令，其发送的提示会在目标转录中标记。
 daemon.not_configured: 未配置
 daemon.status: 状态
 daemon.disconnect: 断开连接
@@ -286,6 +288,9 @@ computer_use.no_always_allowed_apps: 尚未始终允许任何应用。仅限当�
 computer_use.access_granted: 已授权
 computer_use.grant_access: 授予权限
 computer_use.permission_check_failed: 无法检查电脑操作权限
+computer_use.desktop_access: 桌面访问
+computer_use.windows_access_description: 控制当前 Windows 桌面会话中的应用。Windows 可能会限制对提权应用和安全桌面的访问。
+computer_use.linux_access_description: 控制当前 Linux 桌面会话中的应用。截图和输入支持取决于您的合成器与辅助功能服务。
 common.settings: 设置
 common.copy: 复制
 common.remove: 移除
@@ -477,6 +482,11 @@ activity.plan_step: 计划步骤
 activity.plan_steps: 计划步骤
 activity.tool_call: 工具调用
 activity.tool_calls: 工具调用
+activity.compacting_context: 正在压缩上下文
+activity.compacted_context: 已压缩上下文
+activity.compaction_failed: 上下文压缩失败
+activity.provider_retrying: 正在重试请求
+activity.background_shell: 后台 shell
 mode.supervised: 监督
 mode.auto_accept_edits: 自动接受修改
 mode.auto: 自动
@@ -1001,6 +1011,7 @@ transcript.scroll_to_bottom: 滚动到底部
 transcript.conversation_turns: 对话轮次
 transcript.turn_label: "第 %{number} 轮：%{prompt}"
 transcript.edit_message: 编辑消息
+transcript.sent_by_agent: 由智能体发送
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"

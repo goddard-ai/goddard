@@ -1041,6 +1041,12 @@ function MessageRow({
         rewindAction={rewindAction}
       >
         <article className="group/message flex w-full flex-col items-end gap-1">
+          {message.sent_by_task ? (
+            <span className="flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[10.5px] leading-4 text-[var(--text-tertiary)]">
+              <WakuIcon className="size-[10px]" name="bot" />
+              {t('transcript.sent_by_agent')}
+            </span>
+          ) : null}
           {message.attachments?.length ? (
             <div className="flex max-w-[540px] flex-wrap justify-end gap-2">
               {message.attachments.map((attachment) => (

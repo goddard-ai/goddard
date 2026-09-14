@@ -585,6 +585,25 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 .items_end()
                 .gap(px(3.0))
                 .group(group_name.clone());
+            if message.sent_by_task.is_some() {
+                column = column.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .px(px(7.0))
+                        .py(px(2.0))
+                        .rounded_full()
+                        .bg(theme.overlay)
+                        .child(icon("icons/bot.svg", 10.0, theme.text_tertiary))
+                        .child(
+                            div()
+                                .text_size(sp(10.5))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("transcript.sent_by_agent")),
+                        ),
+                );
+            }
             if let Some(attachments) = render_sent_message_attachments(
                 message_id,
                 &message.attachments,
