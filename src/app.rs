@@ -1864,6 +1864,7 @@ mod commit_dialog;
 mod components;
 mod composer;
 mod drafts;
+mod element_inspector;
 mod file_finder;
 mod file_search;
 mod goal_dialog;
@@ -1893,6 +1894,7 @@ use background_work::{
 };
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
+pub use element_inspector::init as init_element_inspector;
 use components::*;
 pub use file_finder::init as init_file_finder;
 pub use goal_dialog::init as init_goal_dialog_keys;

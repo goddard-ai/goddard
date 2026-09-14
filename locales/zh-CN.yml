@@ -66,6 +66,8 @@ command_palette.show_sidebar: 显示侧边栏
 command_palette.hide_sidebar: 隐藏侧边栏
 command_palette.show_right_panel: 显示右侧面板
 command_palette.hide_right_panel: 隐藏右侧面板
+command_palette.inspect_elements: 检查元素
+element_inspector.copied: 已复制元素标签
 command_palette.current: 当前
 command_palette.you: 你
 command_palette.agent: 智能体

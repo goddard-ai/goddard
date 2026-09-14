@@ -172,6 +172,7 @@ enum PaletteAction {
     SelectTask(Uuid),
     RunCustomCommand(Uuid),
     NewCustomCommand,
+    InspectElements,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -922,6 +923,18 @@ impl Waku {
                 next(),
             ),
         ]);
+        // gpui compiles its inspector out of release builds.
+        if cfg!(debug_assertions) {
+            commands.push(CommandPaletteItem::command(
+                PaletteSection::Commands,
+                tr!("command_palette.inspect_elements"),
+                "icons/cursor-spark.svg",
+                None,
+                PaletteAction::InspectElements,
+                "inspect elements ui label source location identify pick hover",
+                next(),
+            ));
+        }
 
         // Same spot the Commands settings page puts its "New command" row:
         // first under the section, above the commands themselves.
@@ -1814,6 +1827,9 @@ impl Waku {
                         }
                     });
                 });
+            }
+            PaletteAction::InspectElements => {
+                element_inspector::start(window, cx);
             }
             PaletteAction::Resume
             | PaletteAction::ChooseResumeProvider

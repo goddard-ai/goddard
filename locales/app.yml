@@ -134,6 +134,10 @@ command_palette.show_right_panel:
   en: Show right panel
 command_palette.hide_right_panel:
   en: Hide right panel
+command_palette.inspect_elements:
+  en: Inspect elements
+element_inspector.copied:
+  en: Element label copied
 command_palette.current:
   en: Current
 command_palette.you:
