@@ -1,9 +1,14 @@
 //! Daemon-owned isolated Git worktrees for tasks.
 //!
 //! A worktree is named and detached: `git worktree add --detach` places it in
-//! `../worktrees/<repository>/<name>` beside the repository, visible to
-//! ordinary Git tooling, with no branch until the user assigns one.
+//! `../worktrees/<repository>/<name>/<repository>` beside the repository,
+//! visible to ordinary Git tooling, with no branch until the user assigns
+//! one. Repeating the repository name as the checkout's leaf — the layout Zed
+//! uses — keeps its basename equal to the primary checkout's, so
+//! basename-derived labels (terminal directories, editor project names) show
+//! the project while the worktree name namespaces it one level up.
 
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -71,7 +76,7 @@ pub fn create(
         &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
     )
     .with_context(|| format!("base ref `{base_ref}` is unavailable"))?;
-    let worktree_root = worktree_root(&repository)?;
+    let (worktree_root, repository_name) = worktree_root(&repository)?;
     fs::create_dir_all(&worktree_root).with_context(|| {
         format!(
             "could not create the worktree directory {}",
@@ -80,12 +85,23 @@ pub fn create(
     })?;
     let registered = registered_worktree_paths(&repository)?;
 
+    // The name directory itself is the claim: a leftover entry must block
+    // reuse whether it still holds a checkout (`<name>/<repository-name>`)
+    // or was registered under the former flat layout (`<name>`).
+    let taken = |name: &str| {
+        let dir = worktree_root.join(name);
+        dir.exists()
+            || registered.contains(&dir)
+            || registered.contains(&dir.join(&repository_name))
+    };
+    let checkout = |name: &str| worktree_root.join(name).join(&repository_name);
+
     match name.and_then(sanitize_name) {
         Some(name) => {
-            let path = worktree_root.join(&name);
-            if path.exists() || registered.contains(&path) {
+            if taken(&name) {
                 bail!("a worktree named `{name}` already exists");
             }
+            let path = checkout(&name);
             add_detached(&repository, &path, &base_ref)?;
             materialized(path, &project_relative, name)
         }
@@ -93,20 +109,20 @@ pub fn create(
             let slug = worktree_slug(prompt.unwrap_or_default());
             for index in 0..MAX_CANDIDATES {
                 let name = candidate_name(&slug, index);
-                let path = worktree_root.join(&name);
-                if path.exists() || registered.contains(&path) {
+                if taken(&name) {
                     continue;
                 }
+                let path = checkout(&name);
                 add_detached(&repository, &path, &base_ref)?;
                 return materialized(path, &project_relative, name);
             }
             // A UUID fallback keeps the last resort independent of
             // human-readable name collisions.
             let name = format!("{slug}-{}", &Uuid::new_v4().simple().to_string()[..8]);
-            let path = worktree_root.join(&name);
-            if path.exists() || registered.contains(&path) {
+            if taken(&name) {
                 bail!("could not allocate a unique Git worktree name");
             }
+            let path = checkout(&name);
             add_detached(&repository, &path, &base_ref)?;
             materialized(path, &project_relative, name)
         }
@@ -138,6 +154,21 @@ pub fn remove(path: &Path) -> anyhow::Result<()> {
         &["worktree", "remove", &worktree_root.to_string_lossy()],
     )
     .with_context(|| format!("could not remove worktree {}", worktree_root.display()))?;
+    // A nested checkout leaves its name directory empty once Git removes it;
+    // drop it so the name frees up, but never remove the repository's
+    // `worktrees/<repository-name>` namespace itself — a former flat-layout
+    // checkout's parent *is* that namespace.
+    if let Some(parent) = worktree_root.parent() {
+        let namespace = repository
+            .parent()
+            .zip(repository.file_name())
+            .map(|(root, name)| root.join("worktrees").join(name));
+        let is_namespace =
+            namespace.is_some_and(|root| fs::canonicalize(&root).unwrap_or(root) == parent);
+        if !is_namespace {
+            let _ = fs::remove_dir(parent);
+        }
+    }
     Ok(())
 }
 
@@ -205,9 +236,7 @@ pub fn ensure(
                 .map(str::trim)
                 .filter(|reference| !reference.is_empty())
             {
-                Some(reference) if ref_is_commit(&repository, reference)? => {
-                    reference.to_owned()
-                }
+                Some(reference) if ref_is_commit(&repository, reference)? => reference.to_owned(),
                 _ => default_base_ref(&repository)?,
             };
             add_detached(&repository, &worktree_path, &base).with_context(|| {
@@ -227,16 +256,18 @@ pub fn ensure(
 
 /// `<repository>/../worktrees/<repository-name>` — beside the checkout so the
 /// worktrees are visible to ordinary Git tooling, namespaced by the
-/// repository's directory name so sibling repositories cannot collide.
-fn worktree_root(repository: &Path) -> anyhow::Result<PathBuf> {
+/// repository's directory name so sibling repositories cannot collide. Also
+/// returns that name: each worktree's checkout repeats it as the leaf.
+fn worktree_root(repository: &Path) -> anyhow::Result<(PathBuf, OsString)> {
     let name = repository
         .file_name()
         .context("could not name worktrees after the repository directory")?;
-    Ok(repository
+    let root = repository
         .parent()
         .context("the Git repository root has no parent directory")?
         .join("worktrees")
-        .join(name))
+        .join(name);
+    Ok((root, name.to_owned()))
 }
 
 /// The worktree paths Git already knows about. A registered entry whose
@@ -516,7 +547,7 @@ mod tests {
             repository
                 .parent()
                 .unwrap()
-                .join("worktrees/repository/My Worktree/packages/app")
+                .join("worktrees/repository/My Worktree/repository/packages/app")
         );
         // Created from the default branch even though `feature` is checked
         // out, and detached: no branch owns the worktree.
@@ -609,8 +640,7 @@ mod tests {
         // A surviving branch is checked out rather than detached.
         run_git(&repository, &["branch", "restore-branch"]);
         fs::remove_dir_all(&worktree_dir).unwrap();
-        let ensured =
-            ensure(&project, &created.path, Some("restore-branch"), None).unwrap();
+        let ensured = ensure(&project, &created.path, Some("restore-branch"), None).unwrap();
         assert_eq!(ensured, Some(Some("restore-branch".to_owned())));
         assert_eq!(
             git_stdout(&created.path, &["branch", "--show-current"]).unwrap(),
@@ -621,8 +651,13 @@ mod tests {
         fs::remove_dir_all(&worktree_dir).unwrap();
         run_git(&repository, &["worktree", "prune"]);
         run_git(&repository, &["branch", "-D", "restore-branch"]);
-        let ensured =
-            ensure(&project, &created.path, Some("restore-branch"), Some("main")).unwrap();
+        let ensured = ensure(
+            &project,
+            &created.path,
+            Some("restore-branch"),
+            Some("main"),
+        )
+        .unwrap();
         assert_eq!(ensured, Some(None));
         assert_eq!(
             fs::read_to_string(created.path.join("README.md")).unwrap(),
