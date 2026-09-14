@@ -213,11 +213,7 @@ pub(super) fn render_message_footer(
     let theme = *theme;
     let message_id = message.id;
     let copy_waku = waku.clone();
-    let footer_color = if theme.is_dark {
-        gpui::hsla(126.93 / 360.0, 0.000_000_1, 0.543_95, 1.0)
-    } else {
-        theme.text_ghost
-    };
+    let footer_color = theme.text_ghost;
     let timestamp = div()
         .h(px(27.0))
         .px(px(4.0))
