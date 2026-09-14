@@ -1408,9 +1408,9 @@ impl Waku {
 
 fn background_work_selection_input(selection: TranscriptSelection) -> impl IntoElement {
     canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            md::render::install_selection_input(bounds, window, &selection)
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+        move |_, region, window, _| {
+            md::render::install_selection_input(region, window, &selection)
         },
     )
     .absolute()

@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font, FontStyle,
-    FontWeight, HitboxBehavior, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
+    FontWeight, HitboxId, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
     StrikethroughStyle, StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font,
     img, point, prelude::*, px, quad, relative, size,
@@ -1107,16 +1107,15 @@ fn registry_point(
 ///
 /// Window-level listeners bypass hitbox dispatch, so the registry's geometric
 /// bounds check alone would let clicks through occluding surfaces — a double
-/// click in the model picker would select the word beneath it. A Normal
-/// hitbox covering `bounds` repaints each frame and gates the handlers via
-/// `is_hovered`, which is false whenever a `BlockMouse` or
-/// `BlockMouseExceptScroll` hitbox covers the point.
+/// click in the model picker would select the word beneath it. The caller
+/// prepaints a Normal hitbox over the region each frame and passes its id as
+/// `region`, which gates the handlers via `is_hovered` — false whenever a
+/// `BlockMouse` or `BlockMouseExceptScroll` hitbox covers the point.
 pub fn install_selection_input(
-    bounds: Bounds<Pixels>,
+    region: HitboxId,
     window: &mut Window,
     state: &TranscriptSelection,
 ) {
-    let region = window.insert_hitbox(bounds, HitboxBehavior::Normal).id;
     window.on_mouse_event({
         let state = state.clone();
         move |event: &MouseDownEvent, phase, window, _| {

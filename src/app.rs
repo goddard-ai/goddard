@@ -10,7 +10,8 @@ use chrono::{DateTime, Local, Utc};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Div,
-    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, Hsla, IntoElement, KeyDownEvent,
+    Entity, ExternalPaths, FocusHandle, Focusable, FontWeight, HitboxBehavior, Hsla, IntoElement,
+    KeyDownEvent,
     ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle,
     SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,

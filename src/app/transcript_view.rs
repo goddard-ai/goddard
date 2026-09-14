@@ -488,9 +488,9 @@ impl Waku {
     fn transcript_selection_input(&self) -> impl IntoElement {
         let selection = self.transcript_selection.clone();
         canvas(
-            |_, _, _| (),
-            move |bounds, _, window, _| {
-                md::render::install_selection_input(bounds, window, &selection)
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, _| {
+                md::render::install_selection_input(region, window, &selection)
             },
         )
         .absolute()
@@ -502,9 +502,9 @@ impl Waku {
     pub(super) fn toast_selection_input(&self) -> impl IntoElement {
         let selection = self.toast_selection.clone();
         canvas(
-            |_, _, _| (),
-            move |bounds, _, window, _| {
-                md::render::install_selection_input(bounds, window, &selection)
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, _| {
+                md::render::install_selection_input(region, window, &selection)
             },
         )
         .absolute()

@@ -16,7 +16,7 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Bounds, DispatchPhase, HitboxBehavior, KeyBinding, MouseButton,
+    AnyElement, App, Bounds, DispatchPhase, HitboxBehavior, HitboxId, KeyBinding, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, canvas, deferred, div, px,
 };
 
@@ -679,17 +679,17 @@ impl Waku {
     /// of the selection's — the click-vs-drag check below reads `spans`, which
     /// a real drag has already populated by mouse-up.
     ///
-    /// Like the selection listeners these bypass hitbox dispatch; a region
-    /// hitbox gates them so a floating surface covering `bounds` doesn't
-    /// trigger hovers or presses on the highlights beneath it.
+    /// Like the selection listeners these bypass hitbox dispatch; the caller
+    /// prepaints a region hitbox whose id gates them so a floating surface
+    /// covering the region doesn't trigger hovers or presses on the
+    /// highlights beneath it.
     fn install_annotation_input(
-        bounds: Bounds<Pixels>,
+        region: HitboxId,
         window: &mut Window,
         _cx: &mut App,
         selection: &TranscriptSelection,
         waku: &WeakEntity<Waku>,
     ) {
-        let region = window.insert_hitbox(bounds, HitboxBehavior::Normal).id;
         window.on_mouse_event({
             let selection = selection.clone();
             let waku = waku.clone();
@@ -798,9 +798,9 @@ impl Waku {
         let selection = self.transcript_selection.clone();
         let waku = cx.entity().downgrade();
         canvas(
-            |_, _, _| (),
-            move |bounds, _, window, cx| {
-                Self::install_annotation_input(bounds, window, cx, &selection, &waku)
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, cx| {
+                Self::install_annotation_input(region, window, cx, &selection, &waku)
             },
         )
         .absolute()

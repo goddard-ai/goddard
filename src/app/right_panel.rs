@@ -3637,9 +3637,11 @@ impl Waku {
         let selection_input = {
             let selection = self.file_preview_selection.clone();
             canvas(
-                |_, _, _| (),
-                move |bounds, _, window, _| {
-                    md::render::install_selection_input(bounds, window, &selection)
+                |bounds, window, _| {
+                    window.insert_hitbox(bounds, HitboxBehavior::Normal).id
+                },
+                move |_, region, window, _| {
+                    md::render::install_selection_input(region, window, &selection)
                 },
             )
             .absolute()
@@ -4423,9 +4425,9 @@ impl Waku {
     fn right_panel_diff_selection_input(&self) -> impl IntoElement {
         let selection = self.right_panel_diff_selection.clone();
         canvas(
-            |_, _, _| (),
-            move |bounds, _, window, _| {
-                md::render::install_selection_input(bounds, window, &selection)
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, _| {
+                md::render::install_selection_input(region, window, &selection)
             },
         )
         .absolute()
