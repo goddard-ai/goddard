@@ -207,8 +207,9 @@ fn add_named(
 /// worktree; the worktree root is what Git removes. `git worktree remove`
 /// refuses to delete a worktree with modifications or untracked files, so
 /// callers can invoke this on abandoned drafts without risking work. `force`
-/// overrides that refusal — only for worktrees whose content is known to be a
-/// discardable copy, never a session's own checkout.
+/// overrides that refusal — only for worktrees whose content is known to be
+/// a discardable copy, or whose state has been captured into a ref as
+/// archived-session cleanup does; never a session's own live checkout.
 pub fn remove(path: &Path, force: bool) -> anyhow::Result<()> {
     let path = fs::canonicalize(path)
         .with_context(|| format!("could not open worktree {}", path.display()))?;
@@ -830,6 +831,51 @@ mod tests {
         assert_eq!(
             fs::read_to_string(created.path.join("README.md")).unwrap(),
             "main\n"
+        );
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn force_removes_a_dirty_worktree() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Dirty"), None, None).unwrap();
+        fs::write(created.path.join("README.md"), "dirty\n").unwrap();
+        fs::write(created.path.join("scratch.txt"), "untracked\n").unwrap();
+
+        remove(&created.path, false).unwrap_err();
+        remove(&created.path, true).unwrap();
+        assert!(!created.path.exists());
+        // The name frees up for reuse.
+        let recreated = create(&project, Some("Dirty"), None, None).unwrap();
+        assert_eq!(recreated.name, "Dirty");
+
+        fs::remove_dir_all(repository.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn a_removed_worktree_restores_from_its_archive_ref() {
+        let repository = repository();
+        let project = repository.join("packages/app");
+        let created = create(&project, Some("Archived"), None, Some("feature")).unwrap();
+        fs::write(created.path.join("README.md"), "dirty\n").unwrap();
+        fs::write(created.path.join("notes.txt"), "untracked\n").unwrap();
+
+        let git_ref = crate::checkpoint::archive_ref(Uuid::new_v4());
+        crate::checkpoint::capture_ref(&created.path, &git_ref).unwrap();
+        remove(&created.path, true).unwrap();
+        assert!(!created.path.exists());
+
+        let ensured = ensure(&project, &created.path, None, Some(&git_ref)).unwrap();
+        assert_eq!(ensured, Some(None));
+        assert_eq!(
+            fs::read_to_string(created.path.join("README.md")).unwrap(),
+            "dirty\n"
+        );
+        assert_eq!(
+            fs::read_to_string(created.path.join("notes.txt")).unwrap(),
+            "untracked\n"
         );
 
         fs::remove_dir_all(repository.parent().unwrap()).ok();

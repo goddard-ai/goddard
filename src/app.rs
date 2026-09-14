@@ -1426,6 +1426,12 @@ pub struct Waku {
     /// being collected; it then reuses the runtime after the event drain has
     /// re-inserted it.
     pending_queue_drains: Vec<Uuid>,
+    /// Archived sessions whose worktrees still need snapshotting and removal.
+    /// Entries wait here while the session could still write into the
+    /// worktree — a settling turn, an in-flight submission preparation, live
+    /// detached work, or a queued turn-checkpoint capture — and drain once it
+    /// goes quiet. Unarchived or removed sessions drop out on the next pass.
+    pending_worktree_cleanups: HashSet<Uuid>,
     stream_state_dirty: bool,
     last_stream_save: Instant,
     /// User expansion overrides keyed by persisted transcript block index.
@@ -3207,6 +3213,7 @@ impl Waku {
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
+                pending_worktree_cleanups: HashSet::new(),
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),

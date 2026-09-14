@@ -330,6 +330,87 @@ impl Waku {
             .detach();
     }
 
+    /// Marks an archived session's worktree for snapshot-and-remove.
+    /// [`Self::drain_pending_worktree_cleanups`] runs it once nothing can
+    /// still write into the worktree.
+    pub(super) fn queue_archived_worktree_cleanup(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_worktree_cleanups.insert(session_id);
+        self.drain_pending_worktree_cleanups(cx);
+    }
+
+    /// Runs queued archived-worktree cleanups whose sessions have gone quiet.
+    ///
+    /// Removal waits for every writer that could still touch the worktree: a
+    /// settling turn, an in-flight submission preparation, live detached
+    /// work, and a queued ending-checkpoint capture — deleting the directory
+    /// first would fail that capture into an error toast. Sessions that left
+    /// the archived set, or were never on a worktree, drop out here.
+    pub(super) fn drain_pending_worktree_cleanups(&mut self, cx: &mut Context<Self>) {
+        let mut deferred = HashSet::new();
+        let mut ready = Vec::new();
+        for session_id in std::mem::take(&mut self.pending_worktree_cleanups) {
+            let Some(session) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+            else {
+                continue;
+            };
+            if session.archived_at.is_none() {
+                continue;
+            }
+            let quiet = !session.is_busy()
+                && !self.submission_preparations.contains(&session_id)
+                && !self.session_has_live_detached_work(session_id)
+                && !self.ending_checkpoint_pending(session_id);
+            if !quiet {
+                deferred.insert(session_id);
+                continue;
+            }
+            if let SessionWorkspace::Worktree { path, .. } = &session.workspace {
+                ready.push((session_id, path.clone()));
+            }
+        }
+        self.pending_worktree_cleanups = deferred;
+        for (session_id, path) in ready {
+            let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+            cx.background_executor()
+                .spawn(async move {
+                    let git_ref = checkpoint::archive_ref(session_id);
+                    let verified = workspace
+                        .request(waku_client::WorkspaceOperation::CaptureRef {
+                            cwd: path.clone(),
+                            git_ref: git_ref.clone(),
+                        })
+                        .and_then(|_| {
+                            workspace.request(waku_client::WorkspaceOperation::HasRef {
+                                cwd: path.clone(),
+                                git_ref,
+                            })
+                        })
+                        .is_ok_and(|result| {
+                            matches!(result, waku_client::WorkspaceResult::Bool { value: true })
+                        });
+                    // The force flag only runs behind a verified snapshot:
+                    // a failed capture leaves the worktree on disk rather
+                    // than destroying unsaved work.
+                    if verified {
+                        let _ =
+                            workspace.request(waku_client::WorkspaceOperation::RemoveWorktree {
+                                path,
+                                force: true,
+                            });
+                    }
+                })
+                .detach();
+        }
+    }
+
     /// Keyboard rows in order: Local, then each create entry.
     pub(super) fn move_worktree_picker_highlight(
         &mut self,

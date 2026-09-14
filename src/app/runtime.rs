@@ -194,27 +194,50 @@ fn prepare_submission(
         }
         SessionWorkspace::Worktree { path, name, branch } => {
             // The directory can vanish between visits — archived tasks
-            // outlive their worktrees once users clean up by hand. The
-            // daemon no-ops while it exists, so this doubles as the
+            // outlive their worktrees once archive cleanup removes them.
+            // The daemon no-ops while it exists, so this doubles as the
             // existence check on the daemon host. Restoration prefers the
-            // worktree's branch, then the latest checkpoint snapshot, so a
-            // continued turn lands on the state the transcript shows.
-            let ensured = match workspace_client.request(
-                waku_client::WorkspaceOperation::EnsureWorktree {
+            // worktree's branch, then the snapshot archive cleanup left,
+            // then the latest checkpoint, so a continued turn lands on the
+            // state the transcript shows.
+            let archive_ref = checkpoint::archive_ref(session_id);
+            let archived = workspace_client
+                .request(waku_client::WorkspaceOperation::HasRef {
+                    cwd: project.path.clone(),
+                    git_ref: archive_ref.clone(),
+                })
+                .is_ok_and(|result| {
+                    matches!(result, waku_client::WorkspaceResult::Bool { value: true })
+                });
+            let base_ref = if archived {
+                Some(archive_ref.clone())
+            } else {
+                Some(checkpoint::checkpoint_ref(
+                    session_id,
+                    turn_count.saturating_sub(1),
+                ))
+            };
+            let ensured =
+                match workspace_client.request(waku_client::WorkspaceOperation::EnsureWorktree {
                     project_path: project.path.clone(),
                     path: path.clone(),
                     branch: branch.clone(),
-                    base_ref: Some(checkpoint::checkpoint_ref(
-                        session_id,
-                        turn_count.saturating_sub(1),
-                    )),
-                },
-            )? {
-                waku_client::WorkspaceResult::WorktreeEnsured { created, branch } => {
-                    (created, branch)
-                }
-                _ => anyhow::bail!("the daemon returned an invalid worktree response"),
-            };
+                    base_ref,
+                })? {
+                    waku_client::WorkspaceResult::WorktreeEnsured { created, branch } => {
+                        (created, branch)
+                    }
+                    _ => anyhow::bail!("the daemon returned an invalid worktree response"),
+                };
+            // The archive snapshot is single-use: once the worktree exists
+            // again the ref is stale, and keeping it would shadow newer
+            // checkpoints the next time the directory disappears.
+            if archived {
+                let _ = workspace_client.request(waku_client::WorkspaceOperation::DeleteRef {
+                    cwd: project.path.clone(),
+                    git_ref: archive_ref,
+                });
+            }
             worktree_restored = ensured.0;
             SessionWorkspace::Worktree {
                 path,
@@ -1750,7 +1773,7 @@ impl Waku {
                 .any(|capture| capture.session_id == session_id && capture.turn_count == turn_count)
     }
 
-    fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
+    pub(super) fn ending_checkpoint_pending(&self, session_id: Uuid) -> bool {
         self.state
             .sessions
             .iter()
@@ -1903,6 +1926,9 @@ impl Waku {
                         waku.pending_queue_drains.retain(|id| *id != session_id);
                         waku.drain_queued_message(session_id, cx);
                     }
+                    // The landed capture may be the ending checkpoint an
+                    // archived worktree cleanup was waiting on.
+                    waku.drain_pending_worktree_cleanups(cx);
                     cx.notify();
                     if attached_turn_id.is_some() {
                         // Let the new transcript row paint before SQLite work.
@@ -2512,6 +2538,7 @@ impl Waku {
         if !self.submission_preparations.remove(&session_id) {
             return;
         }
+        self.drain_pending_worktree_cleanups(cx);
         let selected = self.state.selected_session == Some(session_id);
         let prepared = match result {
             Ok(prepared) => prepared,
@@ -3551,6 +3578,7 @@ impl Waku {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.submission_preparations.remove(&session_id);
+                self.drain_pending_worktree_cleanups(cx);
                 self.track_active_turn_outcome(
                     session_id,
                     crate::analytics::TurnOutcome::PreparationFailed,
@@ -3614,6 +3642,7 @@ impl Waku {
             });
         if !can_start {
             self.submission_preparations.remove(&session_id);
+            self.drain_pending_worktree_cleanups(cx);
             cx.notify();
             return;
         }
@@ -3703,6 +3732,7 @@ impl Waku {
         // cancel or a settled startup failure. The next frame must therefore
         // show Stop (or Send after failure), never the preparation spinner.
         self.submission_preparations.remove(&session_id);
+        self.drain_pending_worktree_cleanups(cx);
         if failed_to_start {
             self.capture_latest_turn_checkpoint_for(session_id);
             self.start_pending_checkpoint_captures(cx);
@@ -3747,6 +3777,9 @@ impl Waku {
         // A finished turn asks for a checkpoint from a handler with no
         // `Context`; this is where that `git` work leaves the UI thread.
         self.start_pending_checkpoint_captures(cx);
+        // Settling turns and drained detached work are also what archived
+        // worktree cleanups wait on; re-check them on the same tick.
+        self.drain_pending_worktree_cleanups(cx);
 
         if self
             .runtimes

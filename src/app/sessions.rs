@@ -504,6 +504,7 @@ impl Waku {
         self.pending_goal_operations.remove(&session_id);
         self.goal_observed_at.remove(&session_id);
         self.unseen_completions.remove(&session_id);
+        self.pending_worktree_cleanups.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
         self.remove_right_panel_session_state(session_id);
@@ -611,8 +612,10 @@ impl Waku {
     /// Hides a task from the sidebar and search without deleting it.
     ///
     /// An active turn is stopped first — a hidden session must not keep
-    /// working. Archiving never touches the task's worktree; the daemon purges
-    /// archives once they outlive the retention window.
+    /// working. A worktree-based task is then snapshotted into its archive
+    /// ref and its worktree removed, so archived chats stop costing a full
+    /// checkout of disk; the daemon purges archives once they outlive the
+    /// retention window.
     pub(super) fn archive_session(
         &mut self,
         session_id: Uuid,
@@ -663,6 +666,7 @@ impl Waku {
             // clobber the flag.
             session.updated_at = now;
         }
+        self.queue_archived_worktree_cleanup(session_id, cx);
         if was_selected {
             self.select_session_fallback(project_id, projectless, window, cx);
         } else {
@@ -698,6 +702,9 @@ impl Waku {
             session.archived_at = None;
             session.updated_at = now;
         }
+        // An unarchived session keeps its worktree: a queued cleanup must
+        // not fire after the task is back.
+        self.pending_worktree_cleanups.remove(&session_id);
         self.save();
         if announce {
             self.show_unarchived_toast(session_id);

@@ -181,10 +181,11 @@ pub enum WorkspaceOperation {
     /// Remove a linked worktree created by `CreateWorktree`. Git refuses to
     /// remove a dirty worktree, making this safe to call on abandonment.
     /// `force` overrides that refusal — only for worktrees whose content is
-    /// known to be a discardable copy.
+    /// a discardable copy or fully captured in a ref.
     RemoveWorktree {
         #[ts(type = "string")]
         path: PathBuf,
+        /// `false` matches older clients that did not send the field.
         #[serde(default)]
         force: bool,
     },
