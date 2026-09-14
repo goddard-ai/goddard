@@ -387,10 +387,25 @@ pub(crate) struct DeepSeekServer {
 
 impl DeepSeekServer {
     pub(crate) fn start(binary: &Path) -> anyhow::Result<Self> {
-        Self::start_with_dsh_home(binary, None)
+        Self::start_with_dsh_home(binary, None, None)
     }
 
-    fn start_with_dsh_home(binary: &Path, dsh_home: Option<&Path>) -> anyhow::Result<Self> {
+    /// Starts a host carrying the session's scoped agent surface. Callers use
+    /// it only for a dedicated (unpooled) host: a pooled host serves many
+    /// sessions and must never bake one session's credential into its
+    /// environment.
+    pub(crate) fn start_with_agent_env(
+        binary: &Path,
+        agent: &crate::agent::AgentLaunchEnv,
+    ) -> anyhow::Result<Self> {
+        Self::start_with_dsh_home(binary, None, Some(agent))
+    }
+
+    fn start_with_dsh_home(
+        binary: &Path,
+        dsh_home: Option<&Path>,
+        agent: Option<&crate::agent::AgentLaunchEnv>,
+    ) -> anyhow::Result<Self> {
         let supports_no_open = web_supports_no_open(binary, dsh_home);
         let catalog_cwd = crate::acp_session::catalog_working_directory()?;
         #[cfg(unix)]
@@ -421,6 +436,9 @@ impl DeepSeekServer {
             .stderr(Stdio::piped());
         if let Some(dsh_home) = dsh_home {
             command.env("DSH_HOME", dsh_home);
+        }
+        if let Some(agent) = agent {
+            crate::command_env::apply_agent_environment(&mut command, agent);
         }
         #[cfg(unix)]
         command.process_group(0);
@@ -1082,7 +1100,7 @@ mod tests {
             TempHarnessHome(std::env::temp_dir().join(format!("waku-dsh-test-{}", Uuid::new_v4())));
         std::fs::create_dir_all(&root.0).unwrap();
         {
-            let server = DeepSeekServer::start_with_dsh_home(&binary, Some(&root.0))
+            let server = DeepSeekServer::start_with_dsh_home(&binary, Some(&root.0), None)
                 .expect("Harness Host should start");
             let session_id = format!("waku-test-{}", Uuid::new_v4());
             let events = server.subscribe(&session_id);

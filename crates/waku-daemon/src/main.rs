@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context as _, anyhow, bail};
 use waku_protocol::{
-    AGENT_TASK_ENV, AGENT_TOKEN_ENV, DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION,
+    AGENT_TASK_ENV, AGENT_TOKEN_ENV, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
+    PROTOCOL_VERSION,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -22,6 +23,7 @@ fn main() -> anyhow::Result<()> {
         std::env::remove_var(DAEMON_TOKEN_ENV);
         std::env::remove_var(AGENT_TOKEN_ENV);
         std::env::remove_var(AGENT_TASK_ENV);
+        std::env::remove_var(DAEMON_ADDRESS_ENV);
     }
     let listener = TcpListener::bind(&arguments.bind)
         .with_context(|| format!("could not bind Goddard daemon to {}", arguments.bind))?;
@@ -58,10 +60,14 @@ fn main() -> anyhow::Result<()> {
     )
     .context("could not load daemon settings")?;
     let task_store = waku_core::persistence::StateStore::daemon(task_path);
+    let backend = waku_core::daemon::WakuBackend::new(settings, task_store)?;
+    // Agent-scoped credentials dial back through this address; it is the
+    // bound socket, not the `--bind` request.
+    backend.set_daemon_address(address.to_string());
     waku_core::serve(
         listener,
         token,
-        Arc::new(waku_core::daemon::WakuBackend::new(settings, task_store)?),
+        Arc::new(backend),
         shutdown,
         waku_core::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),

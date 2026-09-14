@@ -50,6 +50,78 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
+/// Inject the agent surface into a provider launch: the session's scoped
+/// token, its task id, the daemon address, and `PATH` with the `waku-agent`
+/// directory prepended. Callers build `command` through [`command`] first so
+/// the prepend lands on the PATH the provider would already run with.
+pub fn apply_agent_environment(command: &mut Command, agent: &crate::agent::AgentLaunchEnv) {
+    let base_path = command
+        .get_envs()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .and_then(|(_, value)| value.map(OsStr::to_os_string))
+        .or_else(|| std::env::var_os("PATH"));
+    for (name, value) in agent_environment_pairs(agent, base_path) {
+        command.env(name, value);
+    }
+}
+
+/// The same launch environment as name/value pairs, for spawn paths that
+/// pass an explicit environment vector instead of a [`Command`]. Any entry
+/// named `PATH` inside `environment` is replaced rather than duplicated —
+/// libc `getenv` returns the first match, so a second `PATH` would be
+/// silently dropped on some platforms.
+pub fn merge_agent_environment(
+    environment: &mut Vec<(String, String)>,
+    agent: &crate::agent::AgentLaunchEnv,
+) {
+    let base_path = environment
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| OsString::from(value.clone()))
+        .or_else(|| std::env::var_os("PATH"));
+    let pairs = agent_environment_pairs(agent, base_path);
+    for (name, value) in &pairs {
+        if let Some(existing) = environment
+            .iter_mut()
+            .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
+        {
+            existing.1 = value.clone();
+        } else {
+            environment.push((name.clone(), value.clone()));
+        }
+    }
+}
+
+fn agent_environment_pairs(
+    agent: &crate::agent::AgentLaunchEnv,
+    base_path: Option<OsString>,
+) -> Vec<(String, String)> {
+    let cli_directory = agent
+        .cli_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| agent.cli_path.clone());
+    let path = std::env::join_paths(std::iter::once(cli_directory).chain(std::env::split_paths(
+        base_path.as_deref().unwrap_or(OsStr::new("")),
+    )))
+    .unwrap_or_default();
+    vec![
+        (
+            waku_protocol::AGENT_TOKEN_ENV.to_owned(),
+            agent.token.clone(),
+        ),
+        (
+            waku_protocol::AGENT_TASK_ENV.to_owned(),
+            agent.task_id.to_string(),
+        ),
+        (
+            waku_protocol::DAEMON_ADDRESS_ENV.to_owned(),
+            agent.daemon_address.clone(),
+        ),
+        ("PATH".to_owned(), path.to_string_lossy().into_owned()),
+    ]
+}
+
 /// The `PATH` a provider CLI runs with: every directory Goddard itself searched,
 /// plus the one the binary was found in.
 ///
@@ -872,6 +944,94 @@ mod tests {
             .and_then(|(_, value)| value)
             .expect("a provider command sets PATH for its child");
         std::env::split_paths(path).collect()
+    }
+
+    fn agent_launch_env(token: &str) -> crate::agent::AgentLaunchEnv {
+        crate::agent::AgentLaunchEnv {
+            token: token.to_owned(),
+            task_id: uuid::Uuid::new_v4(),
+            daemon_address: "127.0.0.1:7777".to_owned(),
+            cli_path: PathBuf::from(if cfg!(windows) {
+                "C:\\waku\\bin\\waku-agent.exe"
+            } else {
+                "/waku/bin/waku-agent"
+            }),
+            shim_directory: PathBuf::from(if cfg!(windows) {
+                "C:\\waku\\agent\\session"
+            } else {
+                "/waku/agent/session"
+            }),
+        }
+    }
+
+    #[test]
+    fn merge_agent_environment_replaces_path_and_adds_the_credential() {
+        let mut environment = vec![
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+            ("HOME".to_owned(), "/home/test".to_owned()),
+        ];
+        let agent = agent_launch_env("token-1");
+        merge_agent_environment(&mut environment, &agent);
+
+        // libc getenv resolves the first PATH, so a second one would be dead
+        // config: the merge replaces rather than appends.
+        let paths: Vec<&str> = environment
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+            .map(|(_, value)| value.as_str())
+            .collect();
+        assert_eq!(paths.len(), 1);
+        let directories: Vec<PathBuf> = std::env::split_paths(paths[0]).collect();
+        assert_eq!(
+            directories.first().map(PathBuf::as_path),
+            agent.cli_path.parent()
+        );
+        assert!(directories.contains(&PathBuf::from("/usr/bin")));
+
+        for (name, expected) in [
+            ("WAKU_AGENT_TOKEN", "token-1"),
+            ("WAKU_TASK_ID", agent.task_id.to_string().as_str()),
+            ("WAKU_DAEMON_ADDRESS", "127.0.0.1:7777"),
+        ] {
+            assert!(
+                environment
+                    .iter()
+                    .any(|(key, value)| key == name && value == expected),
+                "{name} missing from the merged environment"
+            );
+        }
+        assert!(environment.iter().any(|(key, _)| key == "HOME"));
+    }
+
+    #[test]
+    fn merge_agent_environment_into_an_empty_vector_still_sets_path() {
+        let mut environment = Vec::new();
+        let agent = agent_launch_env("token-2");
+        merge_agent_environment(&mut environment, &agent);
+        assert!(
+            environment
+                .iter()
+                .any(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+        );
+    }
+
+    #[test]
+    fn apply_agent_environment_prepends_the_cli_directory_to_path() {
+        let mut command = command("cat");
+        let agent = agent_launch_env("token-3");
+        apply_agent_environment(&mut command, &agent);
+
+        let directories = command_search_path(&command);
+        assert_eq!(
+            directories.first().map(PathBuf::as_path),
+            agent.cli_path.parent()
+        );
+        let token = command
+            .get_envs()
+            .find(|(key, _)| *key == OsStr::new("WAKU_AGENT_TOKEN"))
+            .and_then(|(_, value)| value)
+            .expect("the scoped token is injected");
+        assert_eq!(token, OsStr::new("token-3"));
     }
 
     /// A CLI resolved from a directory the desktop `PATH` never had must run

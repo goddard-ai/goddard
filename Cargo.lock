@@ -8614,6 +8614,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "waku-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "uuid",
+ "waku-client",
+ "waku-protocol",
+]
+
+[[package]]
 name = "waku-client"
 version = "0.1.0"
 dependencies = [

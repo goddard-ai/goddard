@@ -178,6 +178,7 @@ impl ClaudeDriver {
             context_window,
             agent_preset: _,
             computer_use_enabled: _,
+            agent,
             provider_cursor,
         } = options;
         let (resume_session_id, resume_at) = match provider_cursor {
@@ -202,6 +203,9 @@ impl ClaudeDriver {
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
         configure_stream_command(&mut command, mode);
+        if let Some(agent) = &agent {
+            crate::command_env::apply_agent_environment(&mut command, agent);
+        }
         let launch_model = wire_model(model.as_deref(), context_window.as_deref());
         if let Some(model) = launch_model.as_deref() {
             command.args(["--model", model]);
@@ -1889,6 +1893,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -1957,6 +1962,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,

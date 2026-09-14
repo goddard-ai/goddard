@@ -376,6 +376,7 @@ pub(super) struct OpenCode2Driver {
     commands: Sender<DriverCommand>,
     supports_steer: bool,
     computer_use: Option<Arc<OpenCode2ComputerUse>>,
+    agent_surface: Option<OpenCode2AgentSurface>,
 }
 
 impl OpenCode2Driver {
@@ -396,6 +397,7 @@ impl OpenCode2Driver {
             context_window: _,
             agent_preset,
             computer_use_enabled,
+            agent: agent_env,
             provider_cursor,
         } = options;
 
@@ -510,6 +512,30 @@ impl OpenCode2Driver {
             None
         };
 
+        // The adopted service is one process for every session, so a scoped
+        // token cannot ride its launch environment. The session gets a
+        // credential-carrying launcher plus an instruction pointing at it.
+        let agent_surface = match &agent_env {
+            Some(agent_env) => match OpenCode2AgentSurface::start(&service, &session_id, agent_env)
+            {
+                Ok(surface) => Some(surface),
+                Err(error) => {
+                    if !resuming {
+                        let _ = opencode2_api::delete_session(&endpoint, &session_id);
+                    }
+                    return Err(error);
+                }
+            },
+            None => {
+                let _ = opencode2_api::remove_instruction_entry(
+                    &endpoint,
+                    &session_id,
+                    AGENT_INSTRUCTION_KEY,
+                );
+                None
+            }
+        };
+
         // The session's own token totals are a LIFETIME cumulative counter and
         // cannot gauge how full the window is, so read the latest assistant
         // message's per-request usage instead.
@@ -617,7 +643,58 @@ impl OpenCode2Driver {
             // mid-session.
             supports_steer: true,
             computer_use,
+            agent_surface,
         })
+    }
+}
+
+/// The agent surface for a session on the adopted shared service. The
+/// service is one process for every session, so the scoped credential
+/// cannot ride its environment; instead the daemon writes a per-session
+/// launcher and attaches an instruction pointing the agent at it.
+struct OpenCode2AgentSurface {
+    endpoint: Endpoint,
+    session_id: String,
+    shim_directory: std::path::PathBuf,
+}
+
+const AGENT_INSTRUCTION_KEY: &str = "waku-agent";
+
+impl OpenCode2AgentSurface {
+    fn start(
+        service: &Arc<Opencode2Service>,
+        session_id: &str,
+        agent: &crate::agent::AgentLaunchEnv,
+    ) -> anyhow::Result<Self> {
+        let shim = crate::agent::write_session_shim(agent)?;
+        let endpoint = service.endpoint();
+        if let Err(error) = opencode2_api::put_instruction_entry(
+            &endpoint,
+            session_id,
+            AGENT_INSTRUCTION_KEY,
+            &crate::agent::shared_service_instruction(&shim),
+        ) {
+            let _ = std::fs::remove_dir_all(&agent.shim_directory);
+            return Err(anyhow!(
+                "could not attach OpenCode 2 agent instructions: {error}"
+            ));
+        }
+        Ok(Self {
+            endpoint,
+            session_id: session_id.to_owned(),
+            shim_directory: agent.shim_directory.clone(),
+        })
+    }
+}
+
+impl Drop for OpenCode2AgentSurface {
+    fn drop(&mut self) {
+        let _ = opencode2_api::remove_instruction_entry(
+            &self.endpoint,
+            &self.session_id,
+            AGENT_INSTRUCTION_KEY,
+        );
+        let _ = std::fs::remove_dir_all(&self.shim_directory);
     }
 }
 
@@ -704,6 +781,9 @@ impl Drop for OpenCode2Driver {
         // The worker retains the final lease and cleans up the MCP runtime
         // when it handles Shutdown; the user's service is never terminated.
         drop(self.computer_use.take());
+        // Revoke the session's agent instruction and credential-carrying
+        // launcher while the service is still expected to answer.
+        drop(self.agent_surface.take());
         let _ = self.commands.send(DriverCommand::Shutdown);
     }
 }
@@ -3003,6 +3083,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -3068,6 +3149,7 @@ mod tests {
                     context_window: None,
                     agent_preset: None,
                     computer_use_enabled: true,
+                    agent: None,
                     provider_cursor: None,
                 },
                 events,

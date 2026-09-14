@@ -129,6 +129,7 @@ impl AcpDriver {
             context_window,
             agent_preset: _,
             computer_use_enabled,
+            agent: agent_env,
             provider_cursor,
         } = options;
         let fork_context = match &provider_cursor {
@@ -164,6 +165,7 @@ impl AcpDriver {
             &cwd,
             launch,
             computer_use.as_ref().map(|runtime| &runtime.config),
+            agent_env.as_ref(),
             stderr_lines.clone(),
         )?;
         let (commands, command_rx) = smol::channel::unbounded();
@@ -219,6 +221,7 @@ fn sdk_agent(
     cwd: &Path,
     mut launch: AcpLaunch,
     computer_use: Option<&super::support::HeadlessComputerUseConfig>,
+    agent_env: Option<&crate::agent::AgentLaunchEnv>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
 ) -> anyhow::Result<AcpAgent> {
     let binary = binary
@@ -241,6 +244,9 @@ fn sdk_agent(
         .collect::<Vec<_>>();
     environment.append(&mut launch.env);
     environment.extend(computer_env);
+    if let Some(agent_env) = agent_env {
+        crate::command_env::merge_agent_environment(&mut environment, agent_env);
+    }
 
     // `AcpAgentConfig` deliberately contains only argv and environment. macOS
     // `env -C` supplies the session cwd without a shell, preserving exact
@@ -274,7 +280,14 @@ pub(crate) fn catalog_agent(
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
     let launch = launch_for(provider, None)?;
-    sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
+    sdk_agent(
+        binary,
+        cwd,
+        launch,
+        None,
+        None,
+        Arc::new(Mutex::new(Vec::new())),
+    )
 }
 
 const DEVIN_ACP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -3079,6 +3092,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -3132,6 +3146,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -3190,6 +3205,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,

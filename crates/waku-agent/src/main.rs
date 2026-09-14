@@ -1,0 +1,350 @@
+//! `waku-agent`: the scoped control surface Waku exposes to agents running
+//! inside a provider session.
+//!
+//! The daemon places this binary on the session's `PATH` together with a
+//! per-session credential (`WAKU_AGENT_TOKEN`), this session's task id
+//! (`WAKU_TASK_ID`), and the daemon address (`WAKU_DAEMON_ADDRESS`). The
+//! token grants only the two commands below — nothing else — and dies with
+//! the session.
+//!
+//! Usage contract: invoke `create` or `prompt` only when the human you are
+//! working for has explicitly asked you to create another task or to send a
+//! message to one. There is no per-call approval gate; the daemon marks every
+//! accepted prompt with this task's id so agent-originated turns stay visible
+//! in the target's transcript.
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use anyhow::{Context as _, anyhow, bail};
+use serde::Deserialize;
+use uuid::Uuid;
+
+use waku_client::DaemonClient;
+use waku_protocol::model::ProviderKind;
+use waku_protocol::{
+    AGENT_TASK_ENV, AGENT_TOKEN_ENV, AgentPromptDelivery, AgentWorkspace, Command,
+    DAEMON_ADDRESS_ENV, ResponsePayload,
+};
+
+const USAGE: &str = "\
+waku-agent — reach other Goddard tasks from inside a session
+
+USAGE
+    waku-agent create '<json>'    Create a task and start its first prompt
+    waku-agent prompt '<json>'    Send a prompt to an existing task
+    waku-agent schema             Print the JSON payload schemas
+    waku-agent --help             Show this text
+
+USAGE CONTRACT
+    Only invoke these commands when the human you are working for has
+    explicitly asked you to create another task or to send a message to one.
+    Do not use them for exploration, convenience, or self-orchestration.
+    There is no per-call approval gate; instead the daemon records this
+    task's id on every accepted prompt, so agent-originated turns are
+    visibly attributed in the target's transcript.
+
+ENVIRONMENT
+    WAKU_DAEMON_ADDRESS   Daemon WebSocket address (injected by the daemon)
+    WAKU_AGENT_TOKEN      Per-session scoped credential (injected)
+    WAKU_TASK_ID          This session's task id (injected)
+
+Run `waku-agent schema` for the accepted payloads.";
+
+const SCHEMA: &str = r#"{
+  "usage_contract": "Only invoke these commands when the human you are working for has explicitly asked you to create another task or to send a message to one. There is no per-call approval gate; the daemon records this task's id on every accepted prompt so agent-originated turns stay visible in the target's transcript.",
+  "create": {
+    "description": "Create a fully configured task and immediately start its first prompt. There is no idle-task creation.",
+    "fields": {
+      "provider": {"type": "string", "required": true, "enum": ["amp", "claude", "codex", "cursor", "deepseek", "devin", "fx", "opencode", "opencode2", "grok", "kimi", "ohmypi", "pi"]},
+      "model": {"type": "string", "required": true, "notes": "explicit provider model id, or \"default\" for the provider's own default"},
+      "project": {"type": "string", "required": true, "notes": "absolute path; resolves an existing project or registers a primary Git checkout (linked worktrees are rejected)"},
+      "workspace": {"type": "string", "required": true, "enum": ["local", "worktree"]},
+      "base_branch": {"type": "string", "required_when": "workspace == \"worktree\"", "notes": "ignored for \"local\""},
+      "prompt": {"type": "string", "required": true}
+    },
+    "example": "{\"provider\":\"codex\",\"model\":\"default\",\"project\":\"/abs/path\",\"workspace\":\"worktree\",\"base_branch\":\"main\",\"prompt\":\"Summarize the diff\"}",
+    "returns": {"task_id": "uuid of the created task"}
+  },
+  "prompt": {
+    "description": "Submit a prompt to an existing task, addressed by Waku task id or provider-native thread id.",
+    "fields": {
+      "task_id": {"type": "string", "notes": "Waku task UUID; exactly one of task_id and thread_id is required"},
+      "thread_id": {"type": "string", "notes": "provider-native Agent CLI thread id; exactly one of task_id and thread_id is required"},
+      "provider": {"type": "string", "notes": "disambiguates thread_id when several tasks share it"},
+      "prompt": {"type": "string", "required": true},
+      "delivery": {"type": "string", "enum": ["queue", "steer"], "default": "queue", "notes": "queue waits for the target to go idle and preserves submission order; steer injects into the running turn and fails when no turn is running"}
+    },
+    "example": "{\"task_id\":\"<uuid>\",\"prompt\":\"How is the migration going?\",\"delivery\":\"queue\"}",
+    "returns": {"ok": true}
+  }
+}"#;
+
+#[derive(Deserialize)]
+struct CreatePayload {
+    provider: String,
+    model: String,
+    project: PathBuf,
+    workspace: AgentWorkspaceArg,
+    #[serde(default)]
+    base_branch: Option<String>,
+    prompt: String,
+}
+
+#[derive(Deserialize)]
+struct PromptPayload {
+    #[serde(default)]
+    task_id: Option<Uuid>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    prompt: String,
+    #[serde(default)]
+    delivery: DeliveryArg,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum AgentWorkspaceArg {
+    Local,
+    Worktree,
+}
+
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum DeliveryArg {
+    #[default]
+    Queue,
+    Steer,
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("waku-agent: {error:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> anyhow::Result<()> {
+    let mut arguments = std::env::args().skip(1);
+    let subcommand = arguments.next().unwrap_or_default();
+    match subcommand.as_str() {
+        "--help" | "-h" | "help" => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        "schema" => {
+            println!("{SCHEMA}");
+            Ok(())
+        }
+        "create" | "prompt" => {
+            let payload = arguments
+                .next()
+                .ok_or_else(|| anyhow!("`{subcommand}` takes one JSON object argument; run `waku-agent schema` for its shape"))?;
+            if arguments.next().is_some() {
+                bail!("`{subcommand}` accepts exactly one JSON object argument");
+            }
+            let command = build_command(&subcommand, &payload)?;
+            let response = connect()?.request(request_session_id(), Uuid::nil(), command)?;
+            match response {
+                ResponsePayload::AgentSessionCreated { session_id } => {
+                    println!("{}", serde_json::json!({ "task_id": session_id }));
+                }
+                ResponsePayload::Ack => {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                }
+                other => bail!("daemon returned an unexpected response: {other:?}"),
+            }
+            Ok(())
+        }
+        "" => {
+            eprintln!("{USAGE}");
+            Err(anyhow!("a subcommand is required"))
+        }
+        other => Err(anyhow!(
+            "unknown subcommand `{other}`; run `waku-agent --help`"
+        )),
+    }
+}
+
+fn build_command(subcommand: &str, payload: &str) -> anyhow::Result<Command> {
+    match subcommand {
+        "create" => {
+            let payload: CreatePayload = serde_json::from_str(payload)
+                .context("`create` takes a JSON object; run `waku-agent schema` for its shape")?;
+            Ok(Command::AgentCreateSession {
+                provider: provider_kind(&payload.provider)?,
+                model: payload.model,
+                project: payload.project,
+                workspace: match payload.workspace {
+                    AgentWorkspaceArg::Local => AgentWorkspace::Local,
+                    AgentWorkspaceArg::Worktree => AgentWorkspace::Worktree,
+                },
+                base_branch: payload.base_branch,
+                prompt: payload.prompt,
+            })
+        }
+        "prompt" => {
+            let payload: PromptPayload = serde_json::from_str(payload)
+                .context("`prompt` takes a JSON object; run `waku-agent schema` for its shape")?;
+            let provider = payload.provider.as_deref().map(provider_kind).transpose()?;
+            Ok(Command::AgentPrompt {
+                task_id: payload.task_id,
+                thread_id: payload.thread_id,
+                provider,
+                prompt: payload.prompt,
+                delivery: match payload.delivery {
+                    DeliveryArg::Queue => AgentPromptDelivery::Queue,
+                    DeliveryArg::Steer => AgentPromptDelivery::Steer,
+                },
+            })
+        }
+        _ => unreachable!("checked by run()"),
+    }
+}
+
+fn provider_kind(id: &str) -> anyhow::Result<ProviderKind> {
+    let normalized = id.trim().to_ascii_lowercase();
+    ProviderKind::ALL
+        .iter()
+        .copied()
+        .find(|kind| kind.id() == normalized)
+        .ok_or_else(|| {
+            let known = ProviderKind::ALL
+                .iter()
+                .copied()
+                .map(ProviderKind::id)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow!("unknown provider `{id}`; expected one of: {known}")
+        })
+}
+
+fn connect() -> anyhow::Result<DaemonClient> {
+    let address = std::env::var(DAEMON_ADDRESS_ENV)
+        .context("WAKU_DAEMON_ADDRESS is not set; this session has no agent surface")?;
+    let token = std::env::var(AGENT_TOKEN_ENV)
+        .context("WAKU_AGENT_TOKEN is not set; this session has no agent surface")?;
+    DaemonClient::connect(&address, token).context("could not reach the Goddard daemon")
+}
+
+fn request_session_id() -> Uuid {
+    std::env::var(AGENT_TASK_ENV)
+        .ok()
+        .and_then(|id| id.parse().ok())
+        .unwrap_or_else(Uuid::nil)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_create_payload_becomes_an_agent_create_command() {
+        let command = build_command(
+            "create",
+            r#"{"provider":"codex","model":"default","project":"/tmp/project","workspace":"worktree","base_branch":"main","prompt":"Summarize the diff"}"#,
+        )
+        .expect("a valid create payload parses");
+
+        match command {
+            Command::AgentCreateSession {
+                provider,
+                model,
+                project,
+                workspace,
+                base_branch,
+                prompt,
+            } => {
+                assert_eq!(provider, ProviderKind::Codex);
+                assert_eq!(model, "default");
+                assert_eq!(project, PathBuf::from("/tmp/project"));
+                assert_eq!(workspace, AgentWorkspace::Worktree);
+                assert_eq!(base_branch.as_deref(), Some("main"));
+                assert_eq!(prompt, "Summarize the diff");
+            }
+            other => panic!("expected AgentCreateSession, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_prompt_payload_defaults_to_queue_delivery() {
+        let task_id = Uuid::new_v4();
+        let payload = format!(r#"{{"task_id":"{task_id}","prompt":"status?"}}"#);
+        let command = build_command("prompt", &payload).expect("a task-id prompt parses");
+
+        match command {
+            Command::AgentPrompt {
+                task_id: target,
+                thread_id,
+                prompt,
+                delivery,
+                ..
+            } => {
+                assert_eq!(target, Some(task_id));
+                assert_eq!(thread_id, None);
+                assert_eq!(prompt, "status?");
+                assert_eq!(delivery, AgentPromptDelivery::Queue);
+            }
+            other => panic!("expected AgentPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_prompt_payload_accepts_a_thread_id_with_a_provider_and_steer() {
+        let command = build_command(
+            "prompt",
+            r#"{"thread_id":"thread-9","provider":"claude","prompt":"keep going","delivery":"steer"}"#,
+        )
+        .expect("a thread-id prompt parses");
+
+        match command {
+            Command::AgentPrompt {
+                task_id,
+                thread_id,
+                provider,
+                delivery,
+                ..
+            } => {
+                assert_eq!(task_id, None);
+                assert_eq!(thread_id.as_deref(), Some("thread-9"));
+                assert_eq!(provider, Some(ProviderKind::Claude));
+                assert_eq!(delivery, AgentPromptDelivery::Steer);
+            }
+            other => panic!("expected AgentPrompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_json_and_unknown_providers_are_errors() {
+        assert!(build_command("create", "not json").is_err());
+        assert!(
+            build_command(
+                "create",
+                r#"{"provider":"hal","model":"default","project":"/tmp","workspace":"local","prompt":"x"}"#,
+            )
+            .is_err()
+        );
+        assert!(build_command("prompt", r#"{"delivery":"sideways","prompt":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn help_and_schema_state_the_explicit_request_contract() {
+        for text in [USAGE, SCHEMA] {
+            assert!(
+                text.contains("explicitly asked"),
+                "the agent contract must appear in every surface"
+            );
+            assert!(
+                text.contains("no per-call approval"),
+                "the absence of an approval gate must be documented"
+            );
+        }
+        // The schema stays machine-readable.
+        let _: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+    }
+}

@@ -97,6 +97,7 @@ impl AmpDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled: _,
+            agent,
             provider_cursor,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -126,6 +127,9 @@ impl AmpDriver {
             service_tier.as_deref(),
             thread_id.as_deref(),
         ));
+        if let Some(agent) = &agent {
+            crate::command_env::apply_agent_environment(&mut command, agent);
+        }
         let command = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -576,6 +580,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -634,6 +639,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,

@@ -208,6 +208,7 @@ impl PiDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            agent,
             provider_cursor,
         } = options;
         if mode != RuntimeMode::FullAccess {
@@ -248,6 +249,9 @@ impl PiDriver {
             .transpose()?;
         let mut command = crate::command_env::command(&binary);
         command.args(["--mode", "rpc", flavor.full_access_arg()]);
+        if let Some(agent) = &agent {
+            crate::command_env::apply_agent_environment(&mut command, agent);
+        }
         if flavor.skips_version_check_by_env() {
             command.env("PI_SKIP_VERSION_CHECK", "1");
         }
@@ -1736,6 +1740,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -1983,6 +1988,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,

@@ -108,6 +108,7 @@ impl DeepSeekDriver {
             context_window: _,
             agent_preset,
             computer_use_enabled: _,
+            agent,
             provider_cursor,
         } = options;
         let (requested_session_id, resuming) = match provider_cursor {
@@ -123,7 +124,15 @@ impl DeepSeekDriver {
             _ => (Uuid::new_v4().to_string(), false),
         };
 
-        let server = crate::deepseek_pool::acquire(&binary)?;
+        // A session carrying the agent surface gets a dedicated host: the
+        // scoped token bakes into the host's environment, and the pooled
+        // host would leak it into every other session it serves.
+        let server = match &agent {
+            Some(agent) => PooledDeepSeekServer::dedicated(
+                crate::deepseek_session::DeepSeekServer::start_with_agent_env(&binary, agent)?,
+            ),
+            None => crate::deepseek_pool::acquire(&binary)?,
+        };
         // Subscribe first. A create immediately publishes host and mux state,
         // and buffering that state closes the create/history race.
         let event_rx = server.subscribe(&requested_session_id);

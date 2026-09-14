@@ -68,6 +68,10 @@ pub struct WakuBackend {
     /// Serializes cold-start of a stored task's runtime so two agent prompts
     /// cannot race to spawn it.
     runtime_start_locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    /// The address the daemon bound, published to provider sessions as
+    /// `WAKU_DAEMON_ADDRESS` when agent tools are enabled. Set once by the
+    /// daemon executable after it binds its listener.
+    daemon_address: Mutex<Option<String>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
 }
@@ -106,11 +110,19 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             agent: Arc::new(crate::agent::AgentState::default()),
             runtime_start_locks: Mutex::new(HashMap::new()),
+            daemon_address: Mutex::new(None),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         };
         backend.purge_expired_archived_sessions();
         Ok(backend)
+    }
+
+    /// Record the daemon's bound address for `WAKU_DAEMON_ADDRESS`
+    /// injection. Called once by the daemon executable before it starts
+    /// serving; providers launched while it is unset get no agent surface.
+    pub fn set_daemon_address(&self, address: String) {
+        *self.daemon_address.lock() = Some(address);
     }
 
     #[cfg(all(test, unix))]
@@ -878,6 +890,7 @@ impl Backend for WakuBackend {
                     context_window: options.context_window,
                     agent_preset: options.agent_preset,
                     computer_use_enabled: options.computer_use_enabled,
+                    agent: None,
                     provider_cursor: options
                         .provider_cursor
                         .map(serde_json::from_value)
@@ -1489,6 +1502,9 @@ impl WakuBackend {
                 context_window: source.context_window.clone(),
                 agent_preset: source.agent_preset.clone(),
                 computer_use_enabled: false,
+                // A fork/rollback driver is a one-shot process, not the
+                // task's live runtime; it never receives a scoped token.
+                agent: None,
                 provider_cursor: source.provider_cursor.clone(),
             },
             event_sender,
@@ -1675,6 +1691,7 @@ impl WakuBackend {
                 context_window: source.context_window.clone(),
                 agent_preset: source.agent_preset.clone(),
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: source.provider_cursor.clone(),
             },
             event_sender,
@@ -1730,12 +1747,26 @@ impl WakuBackend {
     ) -> anyhow::Result<DriverHandle> {
         let (wake, _wake_events) = smol::channel::bounded(1);
         let (event_sender, event_receiver) = driver::event_channel(wake);
+        let mut options = options;
         // The credential exists before the process does so it can travel
-        // with the runtime's launch environment.
+        // with the runtime's launch environment. A missing CLI or unset
+        // daemon address disables injection for this launch only.
         if self.settings.get().agent_tools_enabled {
-            self.agent.mint(session_id);
+            match self.agent_launch_env(session_id) {
+                Ok(launch) => options.agent = Some(launch),
+                Err(error) => eprintln!(
+                    "waku-daemon: agent tools unavailable for session {session_id}: {error:#}"
+                ),
+            }
         }
-        let handle = driver::start_local(provider, options, event_sender)?;
+        // A launch that never came up keeps no credential.
+        let handle = match driver::start_local(provider, options, event_sender) {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.agent.revoke_session(session_id);
+                return Err(error);
+            }
+        };
         let forwarder_handle = handle.clone();
         let agent = self.agent.clone();
         let task_state = self.task_state.clone();
@@ -1758,6 +1789,33 @@ impl WakuBackend {
             })
             .context("could not start daemon event forwarding thread")?;
         Ok(handle)
+    }
+
+    /// Mint the runtime's scoped credential and assemble the environment the
+    /// provider launch receives. The shim directory lives beside the daemon
+    /// database so shared-service providers have somewhere private to put a
+    /// per-session launcher.
+    fn agent_launch_env(&self, session_id: Uuid) -> anyhow::Result<crate::agent::AgentLaunchEnv> {
+        let daemon_address = self
+            .daemon_address
+            .lock()
+            .clone()
+            .ok_or_else(|| anyhow!("the daemon's bound address is unknown"))?;
+        let cli_path = crate::agent::agent_cli_path()?;
+        let shim_directory = self
+            .task_store
+            .path()
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("agent")
+            .join(session_id.to_string());
+        Ok(crate::agent::AgentLaunchEnv {
+            token: self.agent.mint(session_id),
+            task_id: session_id,
+            daemon_address,
+            cli_path,
+            shim_directory,
+        })
     }
 
     /// Return the live driver for `session_id`, cold-starting it from the
@@ -1817,6 +1875,7 @@ impl WakuBackend {
                 context_window: session.context_window.clone(),
                 agent_preset: session.agent_preset.clone(),
                 computer_use_enabled: self.settings.get().computer_use_enabled,
+                agent: None,
                 provider_cursor: session.provider_cursor.clone(),
             };
             (provider, options)

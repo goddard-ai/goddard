@@ -221,6 +221,7 @@ impl CodexDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            agent,
             provider_cursor,
         } = options;
         let provider_session_id = match provider_cursor {
@@ -250,6 +251,9 @@ impl CodexDriver {
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
         configure_computer_use_command(&mut command, computer_use.as_ref());
+        if let Some(agent) = &agent {
+            crate::command_env::apply_agent_environment(&mut command, agent);
+        }
         let command = command
             .current_dir(&cwd)
             .stdin(Stdio::piped())
@@ -2511,6 +2515,7 @@ mod tests {
                     context_window: None,
                     agent_preset: None,
                     computer_use_enabled: false,
+                    agent: None,
                     provider_cursor: Some(cursor),
                 },
                 events,
@@ -2596,6 +2601,7 @@ mod tests {
                     context_window: None,
                     agent_preset: None,
                     computer_use_enabled: false,
+                    agent: None,
                     provider_cursor: cursor,
                 },
                 events,

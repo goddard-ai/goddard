@@ -192,6 +192,7 @@ impl OpenCodeDriver {
             context_window: _,
             agent_preset: _,
             computer_use_enabled,
+            agent: agent_env,
             provider_cursor,
         } = options;
         let resume_session_id = match provider_cursor {
@@ -217,16 +218,21 @@ impl OpenCodeDriver {
             .transpose()?;
         // The one-shot path handed Computer Use to OpenCode through the
         // environment; the resident server takes it exactly the same way.
-        let environment = computer_use
+        let mut environment = computer_use
             .as_ref()
             .map(|runtime| super::support::opencode_computer_use_environment(&runtime.config))
             .unwrap_or_default();
+        if let Some(agent_env) = &agent_env {
+            crate::command_env::merge_agent_environment(&mut environment, agent_env);
+        }
         // Computer Use bakes per-session configuration into the server's
-        // environment, so it keeps a dedicated server. Every other session
-        // shares the workspace's one resident server — OpenCode hosts many
-        // sessions per process, and a second `opencode serve` in the same
-        // workspace contends with the live one.
-        let server = if computer_use.is_some() {
+        // environment, so it keeps a dedicated server. A session carrying
+        // the agent surface gets one too — its scoped token must never leak
+        // into a server other sessions share. Every other session shares
+        // the workspace's one resident server — OpenCode hosts many sessions
+        // per process, and a second `opencode serve` in the same workspace
+        // contends with the live one.
+        let server = if computer_use.is_some() || agent_env.is_some() {
             PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
         } else {
             crate::opencode_pool::acquire(&binary, &cwd)?
@@ -1522,6 +1528,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,
@@ -1610,6 +1617,7 @@ mod tests {
                 context_window: None,
                 agent_preset: None,
                 computer_use_enabled: false,
+                agent: None,
                 provider_cursor: None,
             },
             events,

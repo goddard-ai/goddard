@@ -45,6 +45,20 @@ impl Drop for PoolInner {
     }
 }
 
+impl PooledDeepSeekServer {
+    /// Wraps a host a session started for itself. The scoped agent surface
+    /// bakes per-session configuration into the host environment, so those
+    /// sessions cannot share the resident host and keep this path.
+    pub(crate) fn dedicated(server: DeepSeekServer) -> Self {
+        Self {
+            inner: Arc::new(PoolInner {
+                server,
+                slot: Weak::new(),
+            }),
+        }
+    }
+}
+
 impl Deref for PooledDeepSeekServer {
     type Target = DeepSeekServer;
 

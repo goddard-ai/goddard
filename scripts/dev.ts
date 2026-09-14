@@ -318,7 +318,7 @@ async function build(target: BuildTarget): Promise<boolean> {
   }
   const result = isMacOS
     ? await $`${join(root, "scripts/bundle.sh")} debug`.nothrow()
-    : await $`cargo build --package waku --bin waku --bin waku_js_repl --package waku-computer-use --bin waku_computer_use`.nothrow();
+    : await $`cargo build --package waku --bin waku --bin waku_js_repl --package waku-computer-use --bin waku_computer_use --package waku-agent --bin waku-agent`.nothrow();
   if (result.exitCode !== 0) {
     console.error("[waku-dev] Build failed; keeping the current app open.");
     return false;
@@ -341,7 +341,7 @@ async function build(target: BuildTarget): Promise<boolean> {
 async function buildDaemon(): Promise<boolean> {
   console.log("[waku-dev] Building daemon...");
   const result =
-    await $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon`.nothrow();
+    await $`cargo build --package waku-daemon --features dev-binary --bin waku-debug-daemon --package waku-agent --bin waku-agent`.nothrow();
   if (result.exitCode !== 0) {
     console.error(
       "[waku-dev] Daemon build failed; keeping the current daemon running.",
@@ -417,6 +417,7 @@ function targetForChange(
   const relativePath = filename.toString().replaceAll("\\", "/");
   if (
     relativePath.startsWith("waku-daemon/") ||
+    relativePath.startsWith("waku-agent/") ||
     relativePath.startsWith("waku-core/")
   ) {
     return "daemon";

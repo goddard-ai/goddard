@@ -192,6 +192,11 @@ pub struct DriverStartOptions {
     pub context_window: Option<String>,
     pub agent_preset: Option<String>,
     pub computer_use_enabled: bool,
+    /// The scoped agent surface for this launch: the per-session token,
+    /// daemon address, and `waku-agent` CLI location. The daemon fills this
+    /// in when `agent_tools_enabled` is on; it never crosses the wire, so no
+    /// client can mint itself a credential by setting it.
+    pub agent: Option<crate::agent::AgentLaunchEnv>,
     pub provider_cursor: Option<ProviderResumeCursor>,
 }
 
