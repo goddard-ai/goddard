@@ -248,7 +248,7 @@ secrets first:
 
 | Flag / Env | Default | Purpose |
 | --- | --- | --- |
-| `--local` | — | build, notarize, and write the DMG + zip without publishing |
+| `--local` | — | build, notarize, and write the DMG + zip without publishing; still writes the appcast when a usable Sparkle key is found |
 | `--force` | — | re-publish a version that already exists in R2 |
 | `--adhoc`, `--skip-notarize` | — | local test builds (imply `--local`) |
 | `--skip-build` | — | reuse existing release binaries |
@@ -259,6 +259,8 @@ secrets first:
 | `WAKU_HISTORY_COUNT` | `15` | recent archives pulled for delta generation |
 | `WAKU_NO_HISTORY=1` | — | skip pulling old archives (full updates only) |
 | `SPARKLE_BIN` | the `.waku-cache` copy | Sparkle tools directory |
+| `WAKU_ANALYTICS_ENDPOINT`, `WAKU_ANALYTICS_WEBSITE_ID` | — | embedded at build time; required to publish — local builds without them compile analytics out |
+| `SPARKLE_PRIVATE_KEY` | login keychain | EdDSA key for `generate_appcast`; local builds skip the appcast when no usable key is found |
 
 ---
 

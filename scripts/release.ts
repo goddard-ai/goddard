@@ -56,6 +56,8 @@ Environment:
   WAKU_SIGNING_IDENTITY         Developer ID Application identity selector
   WAKU_ANALYTICS_ENDPOINT       analytics endpoint embedded at build time
   WAKU_ANALYTICS_WEBSITE_ID     analytics website ID embedded at build time
+                                (required to publish; unset local builds
+                                compile analytics out)
   WAKU_R2_REMOTE                rclone remote name (default: r2)
   WAKU_R2_BUCKET                R2 bucket name (default: waku-releases)
   WAKU_DOWNLOAD_URL_PREFIX      base URL served by the bucket
@@ -64,7 +66,9 @@ Environment:
   WAKU_NO_HISTORY=1             skip pulling prior archives (no deltas)
   SPARKLE_BIN                   Sparkle tools dir (default: the bundle.sh cache
                                 under .waku-cache/sparkle)
-  SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain)
+  SPARKLE_PRIVATE_KEY           Sparkle EdDSA private key (otherwise keychain);
+                                local builds skip the appcast when no usable
+                                key is found
 
 Before the first production release:
   xcrun notarytool store-credentials NOTARY   # notarization credentials
@@ -180,8 +184,14 @@ if (!Number.isSafeInteger(historyCount) || historyCount < 0) {
   throw new Error("WAKU_HISTORY_COUNT must be a non-negative integer.");
 }
 if (!values["skip-build"] && (!analyticsEndpoint || !analyticsWebsiteId)) {
-  throw new Error(
-    "Set WAKU_ANALYTICS_ENDPOINT and WAKU_ANALYTICS_WEBSITE_ID before building a release.",
+  if (publishing) {
+    throw new Error(
+      "Set WAKU_ANALYTICS_ENDPOINT and WAKU_ANALYTICS_WEBSITE_ID before building a release.",
+    );
+  }
+  console.warn(
+    "WAKU_ANALYTICS_ENDPOINT/WAKU_ANALYTICS_WEBSITE_ID unset — " +
+      "building with analytics disabled.",
   );
 }
 
@@ -651,9 +661,26 @@ try {
       : `No "${version}" section in CHANGELOG.md — attached fallback notes.`,
   );
 
-  logStep("Generating the signed appcast");
-  await generateAppcast(updatesDirectory, downloadUrlPrefix);
-  await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
+  if (publishing) {
+    logStep("Generating the signed appcast");
+    await generateAppcast(updatesDirectory, downloadUrlPrefix);
+    await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
+  } else {
+    // The DMG/zip are handed out directly, so a signed feed is a nicety for
+    // local builds, not a requirement: keep producing it when a usable
+    // Sparkle key is around (CI exports SPARKLE_PRIVATE_KEY and uploads the
+    // result), and warn instead of failing when there isn't one.
+    try {
+      logStep("Generating the signed appcast (optional for local builds)");
+      await generateAppcast(updatesDirectory, downloadUrlPrefix);
+      await $`ditto ${join(updatesDirectory, "appcast.xml")} ${join(projectRoot, "dist", "appcast.xml")}`;
+    } catch (error) {
+      await rm(join(projectRoot, "dist", "appcast.xml"), { force: true });
+      console.warn(
+        `Skipping the update feed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
 
   if (publishing) {
     // Archives and the DMG are immutable once published → cache forever.
