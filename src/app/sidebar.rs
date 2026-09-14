@@ -238,7 +238,7 @@ pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<Str
 /// Recency for sidebar ordering and date groups. A submitted turn promotes the
 /// task immediately, while metadata edits such as a rename do not; a task with
 /// no turns stays anchored to when it was created.
-fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
+pub(super) fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
     session.last_reply_at.unwrap_or(session.created_at)
 }
 

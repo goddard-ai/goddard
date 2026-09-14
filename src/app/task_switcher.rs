@@ -3,7 +3,8 @@
 //! The task order is snapshotted when Control-Tab opens the overlay. Repeated
 //! presses move only the highlight; releasing Control commits once, so a
 //! switch never hydrates intermediate transcripts or reshuffles the list
-//! underneath the pointer. The snapshot is capped at ten visited tasks.
+//! underneath the pointer. The snapshot is capped at ten tasks: recently
+//! visited first, with the most recently active tasks filling open slots.
 
 use super::*;
 
@@ -112,10 +113,21 @@ impl TaskSwitcherUi {
     }
 }
 
-fn ordered_task_ids(current: Option<Uuid>, recent: &[Uuid], started_tasks: &[Uuid]) -> Vec<Uuid> {
-    let valid = started_tasks.iter().copied().collect::<HashSet<_>>();
-    let mut seen = HashSet::with_capacity(started_tasks.len());
-    let mut ordered = Vec::with_capacity(started_tasks.len().min(MAX_TASKS));
+fn ordered_task_ids(
+    current: Option<Uuid>,
+    recent: &[Uuid],
+    sessions: &[AgentSession],
+) -> Vec<Uuid> {
+    let eligible = sessions
+        .iter()
+        .filter(|session| session.has_started() && session.archived_at.is_none())
+        .collect::<Vec<_>>();
+    let valid = eligible
+        .iter()
+        .map(|session| session.id)
+        .collect::<HashSet<_>>();
+    let mut seen = HashSet::with_capacity(eligible.len());
+    let mut ordered = Vec::with_capacity(eligible.len().min(MAX_TASKS));
     let mut push = |id| {
         if ordered.len() < MAX_TASKS && valid.contains(&id) && seen.insert(id) {
             ordered.push(id);
@@ -127,6 +139,15 @@ fn ordered_task_ids(current: Option<Uuid>, recent: &[Uuid], started_tasks: &[Uui
     }
     for recent in recent {
         push(*recent);
+    }
+    // Recently visited tasks keep their rank; when they leave slots open, the
+    // most recently active tasks fill them so the list still shows ten.
+    let mut recently_active = eligible;
+    recently_active.sort_by_key(|session| {
+        std::cmp::Reverse(sidebar::sidebar_session_timestamp(session))
+    });
+    for session in recently_active {
+        push(session.id);
     }
     ordered
 }
@@ -261,17 +282,10 @@ impl Waku {
     }
 
     fn open_task_switcher(&mut self, reverse: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let started_tasks = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started() && session.archived_at.is_none())
-            .map(|session| session.id)
-            .collect::<Vec<_>>();
         let ordered = ordered_task_ids(
             self.state.selected_session,
             &self.task_switcher.recent_session_ids,
-            &started_tasks,
+            &self.state.sessions,
         );
         let Some(highlighted_index) =
             initial_highlight_index(&ordered, self.state.selected_session, reverse)
@@ -609,22 +623,61 @@ impl Waku {
 mod tests {
     use super::*;
 
+    fn started_session(last_reply_at: u64) -> AgentSession {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("task");
+        session.last_reply_at = Some(last_reply_at);
+        session
+    }
+
     #[test]
     fn switcher_order_contains_only_the_ten_most_recently_visited_tasks() {
-        let current = Uuid::new_v4();
-        let recent = (0..12).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
-        let unvisited = Uuid::new_v4();
+        let current = started_session(10);
+        let recent = (0..12).map(|_| started_session(0)).collect::<Vec<_>>();
+        let unvisited = started_session(0);
         let missing = Uuid::new_v4();
-        let mut started_tasks = vec![unvisited, current];
-        started_tasks.extend(recent.iter().copied());
+        let mut sessions = vec![unvisited, current.clone()];
+        sessions.extend(recent.iter().cloned());
         let mut recorded_recency = vec![missing];
-        recorded_recency.extend(recent.iter().copied());
-        let mut expected = vec![current];
-        expected.extend(recent.iter().take(MAX_TASKS - 1).copied());
+        recorded_recency.extend(recent.iter().map(|session| session.id));
+        let mut expected = vec![current.id];
+        expected.extend(recent.iter().take(MAX_TASKS - 1).map(|session| session.id));
 
         assert_eq!(
-            ordered_task_ids(Some(current), &recorded_recency, &started_tasks),
+            ordered_task_ids(Some(current.id), &recorded_recency, &sessions),
             expected
+        );
+    }
+
+    #[test]
+    fn switcher_order_fills_remaining_slots_with_recently_active_tasks() {
+        let current = started_session(10);
+        let recent = [started_session(20), started_session(30)];
+        // Recently active tasks rank below any recently visited one, and an
+        // already-listed task is not repeated.
+        let active_newest = started_session(90);
+        let active_oldest = started_session(5);
+        let sessions = vec![
+            active_oldest.clone(),
+            recent[0].clone(),
+            active_newest.clone(),
+            current.clone(),
+            recent[1].clone(),
+        ];
+        let recorded_recency = recent
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ordered_task_ids(Some(current.id), &recorded_recency, &sessions),
+            vec![
+                current.id,
+                recent[0].id,
+                recent[1].id,
+                active_newest.id,
+                active_oldest.id,
+            ]
         );
     }
 
@@ -656,12 +709,13 @@ mod tests {
 
     #[test]
     fn draft_can_switch_to_the_only_visited_started_task() {
-        let draft = Uuid::new_v4();
-        let started = Uuid::new_v4();
-        let ordered = ordered_task_ids(Some(draft), &[draft, started], &[started]);
-        assert_eq!(ordered, vec![started]);
+        let draft = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let started = started_session(10);
+        let sessions = vec![draft.clone(), started.clone()];
+        let ordered = ordered_task_ids(Some(draft.id), &[draft.id, started.id], &sessions);
+        assert_eq!(ordered, vec![started.id]);
         assert_eq!(
-            initial_highlight_index(&ordered, Some(draft), false),
+            initial_highlight_index(&ordered, Some(draft.id), false),
             Some(0)
         );
     }
