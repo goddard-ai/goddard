@@ -463,6 +463,8 @@ settings.completion_sound_description:
   en: Play a sound when a task you're not viewing finishes its turn
 settings.completion_sound_name:
   en: Sound
+settings.completion_sound_volume:
+  en: Volume
 settings.theme_light:
   en: Light
 settings.theme_dark:

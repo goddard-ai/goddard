@@ -51,6 +51,7 @@ use crate::ui::menu::{
     dropdown_menu, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
+use crate::ui::slider::{self, SliderState};
 use crate::ui::tooltip::Tooltip;
 
 use crate::browser::BrowserView;
@@ -1589,6 +1590,9 @@ pub struct Waku {
     /// slides under it.
     settings_scroll: ScrollHandle,
     settings_scrollbar: Rc<ScrollbarState>,
+    /// The completion-volume slider's in-flight drag, kept on the entity so a
+    /// repaint mid-gesture cannot drop it.
+    completion_volume_slider: Rc<SliderState>,
     header_drag_armed: bool,
     toast: Option<ToastState>,
     toast_generation: u64,
@@ -3233,6 +3237,7 @@ impl Waku {
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
+                completion_volume_slider: SliderState::new(),
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
                     message,

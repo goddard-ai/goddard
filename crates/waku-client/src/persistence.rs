@@ -263,6 +263,10 @@ fn default_provider() -> ProviderKind {
     ProviderKind::Codex
 }
 
+fn default_completion_sound_volume() -> f32 {
+    DEFAULT_COMPLETION_SOUND_VOLUME
+}
+
 fn default_sidebar_width() -> f32 {
     DEFAULT_SIDEBAR_WIDTH
 }
@@ -459,6 +463,9 @@ pub struct AppSettings {
     /// its turn.
     pub completion_sound_enabled: bool,
     pub completion_sound: CompletionSound,
+    /// Volume the completion sound plays at, 0–1. Hand-edited values are
+    /// clamped when applied.
+    pub completion_sound_volume: f32,
     /// User-owned terminal commands surfaced in the command palette.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
@@ -482,6 +489,7 @@ impl Default for AppSettings {
             open_in_app: None,
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
+            completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
         }
     }
@@ -489,6 +497,7 @@ impl Default for AppSettings {
 
 pub const DEFAULT_UI_FONT_SIZE: f32 = 14.0;
 pub const DEFAULT_CODE_FONT_SIZE: f32 = 13.0;
+pub const DEFAULT_COMPLETION_SOUND_VOLUME: f32 = 1.0;
 
 /// Bounds a possibly hand-edited font size to something the layout survives.
 fn sanitized_font_size(size: f32, fallback: f32) -> f32 {
@@ -505,6 +514,15 @@ pub fn sanitized_ui_font_size(size: f32) -> f32 {
 
 pub fn sanitized_code_font_size(size: f32) -> f32 {
     sanitized_font_size(size, DEFAULT_CODE_FONT_SIZE)
+}
+
+/// Bounds a possibly hand-edited volume to the 0–1 range NSSound expects.
+pub fn sanitized_completion_sound_volume(volume: f32) -> f32 {
+    if volume.is_finite() {
+        volume.clamp(0.0, 1.0)
+    } else {
+        DEFAULT_COMPLETION_SOUND_VOLUME
+    }
 }
 
 /// A blank family name is no choice at all — treat it as unset so a
@@ -626,6 +644,8 @@ pub struct PersistedState {
     pub completion_sound_enabled: bool,
     #[serde(default)]
     pub completion_sound: CompletionSound,
+    #[serde(default = "default_completion_sound_volume")]
+    pub completion_sound_volume: f32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_commands: Vec<CustomCommand>,
     #[serde(default = "default_sidebar_visibility")]
@@ -709,6 +729,7 @@ impl PersistedState {
             open_in_app: None,
             completion_sound_enabled: false,
             completion_sound: CompletionSound::default(),
+            completion_sound_volume: DEFAULT_COMPLETION_SOUND_VOLUME,
             custom_commands: Vec::new(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -885,6 +906,7 @@ impl PersistedState {
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
             completion_sound: self.completion_sound,
+            completion_sound_volume: self.completion_sound_volume,
             custom_commands: self.custom_commands.clone(),
         }
     }
@@ -930,6 +952,8 @@ impl PersistedState {
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
         self.completion_sound = settings.completion_sound;
+        self.completion_sound_volume =
+            sanitized_completion_sound_volume(settings.completion_sound_volume);
         self.custom_commands = settings.custom_commands;
     }
 

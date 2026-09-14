@@ -637,6 +637,15 @@ impl Waku {
             .child({
                 let enabled = self.state.completion_sound_enabled;
                 let selected_sound = self.state.completion_sound;
+                let volume = self.state.completion_sound_volume;
+                let volume_shown = self.completion_volume_slider.shown(volume);
+                let volume_slider = slider::slider(
+                    "completion-volume-slider",
+                    &self.completion_volume_slider,
+                    volume,
+                    cx,
+                    |this, volume, cx| this.set_completion_sound_volume(volume, cx),
+                );
                 let weak = cx.entity().downgrade();
                 let sound_handle = self.menu_handle("completion-sound-selector", cx);
                 let sound_selector = dropdown_menu(
@@ -731,6 +740,40 @@ impl Waku {
                                     )
                                     .child(sound_selector),
                             )
+                            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_h(px(52.0))
+                                    .px(px(20.0))
+                                    .py(px(10.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(12.0))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.completion_sound_volume")),
+                                    )
+                                    .child(volume_slider.w(px(140.0)).flex_none())
+                                    .child(
+                                        div()
+                                            .w(px(32.0))
+                                            .flex_none()
+                                            .flex()
+                                            .justify_end()
+                                            .text_size(sp(12.5))
+                                            .text_color(theme.text_secondary)
+                                            .child(format!(
+                                                "{}%",
+                                                (volume_shown * 100.0).round() as i32
+                                            )),
+                                    ),
+                            )
                     })
             })
             .when(updater_available, |column| {
@@ -792,6 +835,9 @@ impl Waku {
         if self.state.completion_sound_enabled == enabled {
             return;
         }
+        if !enabled {
+            self.completion_volume_slider.cancel();
+        }
         self.state.completion_sound_enabled = enabled;
         self.save();
         cx.notify();
@@ -803,7 +849,19 @@ impl Waku {
             self.save();
         }
         // Picking from the menu previews the sound.
-        crate::platform::play_completion_sound(sound);
+        crate::platform::play_completion_sound(sound, self.state.completion_sound_volume);
+        cx.notify();
+    }
+
+    fn set_completion_sound_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        let volume = crate::persistence::sanitized_completion_sound_volume(volume);
+        if self.state.completion_sound_volume == volume {
+            return;
+        }
+        self.state.completion_sound_volume = volume;
+        self.save();
+        // Committing a new level previews the current sound at it.
+        crate::platform::play_completion_sound(self.state.completion_sound, volume);
         cx.notify();
     }
 

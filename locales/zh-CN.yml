@@ -233,6 +233,7 @@ settings.open_at_last_prompt_description: 从最近一条消息开始阅读，�
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音
+settings.completion_sound_volume: 音量
 settings.theme_light: 浅色
 settings.theme_dark: 深色
 input.do_anything: 做什么都可以…

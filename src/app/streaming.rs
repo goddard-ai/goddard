@@ -726,7 +726,10 @@ impl Waku {
                         .find(|session| session.id == session_id)
                         .is_some_and(|session| session.queued_messages.is_empty())
                 {
-                    crate::platform::play_completion_sound(self.state.completion_sound);
+                    crate::platform::play_completion_sound(
+                        self.state.completion_sound,
+                        self.state.completion_sound_volume,
+                    );
                 }
                 if let Some(Some((title, body))) = task_notification {
                     crate::platform::show_task_notification(

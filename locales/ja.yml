@@ -236,6 +236,7 @@ settings.open_at_last_prompt_description: トランスクリプトの末尾で�
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
+settings.completion_sound_volume: 音量
 settings.theme_light: ライト
 settings.theme_dark: ダーク
 

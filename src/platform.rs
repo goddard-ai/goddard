@@ -224,26 +224,38 @@ fn completion_sound_data(sound: waku_client::persistence::CompletionSound) -> &'
     }
 }
 
-/// Play one of the bundled turn-completion sounds. `NSSound` decodes the
-/// embedded MP3 itself and `play` returns immediately; there is no smaller
-/// portable API, so other platforms stay silent for now.
+/// Per-sound loudness compensation, multiplied with the user's volume so the
+/// bundled set lands at a comparable level. Retro's recording runs hot.
 #[cfg(target_os = "macos")]
-pub fn play_completion_sound(sound: waku_client::persistence::CompletionSound) {
+fn completion_sound_gain(sound: waku_client::persistence::CompletionSound) -> f32 {
+    match sound {
+        waku_client::persistence::CompletionSound::Retro => 0.8,
+        _ => 1.0,
+    }
+}
+
+/// Play one of the bundled turn-completion sounds at `volume` (0–1). `NSSound`
+/// decodes the embedded MP3 itself and `play` returns immediately; there is no
+/// smaller portable API, so other platforms stay silent for now.
+#[cfg(target_os = "macos")]
+pub fn play_completion_sound(sound: waku_client::persistence::CompletionSound, volume: f32) {
     use objc2::AnyThread;
     use objc2_app_kit::NSSound;
     use objc2_foundation::NSData;
 
+    let volume = (volume * completion_sound_gain(sound)).clamp(0.0, 1.0);
     let data = NSData::with_bytes(completion_sound_data(sound));
     let Some(sound) = NSSound::initWithData(NSSound::alloc(), &data) else {
         return;
     };
+    sound.setVolume(volume);
     if sound.play() {
         PLAYING_COMPLETION_SOUND.with_borrow_mut(|slot| *slot = Some(sound));
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn play_completion_sound(_: waku_client::persistence::CompletionSound) {}
+pub fn play_completion_sound(_: waku_client::persistence::CompletionSound, _: f32) {}
 
 #[cfg(target_os = "macos")]
 fn app_icon_for_application_path(
