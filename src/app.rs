@@ -14,8 +14,8 @@ use gpui::{
     ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle,
     SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
-    div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point,
-    prelude::*, pulsating_between, px, rgb,
+    deferred, div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list,
+    point, prelude::*, pulsating_between, px, rgb,
 };
 use uuid::Uuid;
 
@@ -46,8 +46,9 @@ use crate::md::render::{
 };
 use crate::md::selection::TranscriptAnnotation;
 use crate::ui::menu::{
-    ConfirmEntry, ContextMenuHandle, DismissMenu, MenuAlign, MenuItem, SelectNextEntry,
-    SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu, dropdown_menu, popover,
+    ConfirmEntry, ContextMenuHandle, DismissMenu, FloatingSurface, MenuAlign, MenuItem,
+    SelectNextEntry, SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu,
+    dropdown_menu, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::tooltip::Tooltip;
@@ -1078,6 +1079,37 @@ struct UserMessageScrollViewport {
     scrollbar: Rc<ScrollbarState>,
 }
 
+/// Hover bookkeeping for one changed-files row and the floating diff card it
+/// can open. Row and card hover are tracked separately so the preview
+/// survives the pointer crossing the overlap between them.
+struct ChangedFilesDiffHover {
+    turn_id: Uuid,
+    path: String,
+    row_hovered: bool,
+    card_hovered: bool,
+    open: bool,
+    scroll_handle: ScrollHandle,
+    scrollbar: Rc<ScrollbarState>,
+}
+
+impl ChangedFilesDiffHover {
+    fn targets(&self, turn_id: Uuid, path: &str) -> bool {
+        self.turn_id == turn_id && self.path == path
+    }
+}
+
+/// One turn diff fetched for the changed-files preview. `file_lines` maps
+/// each `snapshot.files` index to its rendered line positions — the
+/// file-header rows excluded — so a frame only indexes stored rows.
+enum ChangedFilesDiff {
+    Loading,
+    Ready {
+        snapshot: Arc<ReviewDiffSnapshot>,
+        file_lines: Rc<Vec<Vec<usize>>>,
+    },
+    Failed(SharedString),
+}
+
 impl Default for ActivityScrollViewport {
     fn default() -> Self {
         Self {
@@ -1380,6 +1412,19 @@ pub struct Waku {
     /// Per-response file cards the user expanded beyond their three-file
     /// preview. Runtime-only, like the other transcript disclosures.
     expanded_changed_files: HashSet<Uuid>,
+    /// The changed-files row under the pointer — and its floating diff card
+    /// once open — or `None` when neither holds the pointer.
+    changed_files_diff_hover: Option<ChangedFilesDiffHover>,
+    /// Per-turn parsed diffs backing the hover preview. One fetch covers
+    /// every file row in a card and is reused across hovers.
+    changed_files_diffs: HashMap<Uuid, ChangedFilesDiff>,
+    /// Guards the delayed open and the grace-period close: a timer whose
+    /// generation no longer matches must not act.
+    changed_files_diff_generation: u64,
+    /// The preview anchor row's bounds as of the last painted frame, recorded
+    /// by a canvas probe inside it — the deferred card anchors to a row that
+    /// lives inside a virtualized list.
+    changed_files_diff_anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Stable focus identities for controls inside virtualized transcript and
     /// diff rows. Recreating a handle on every row build would drop keyboard
     /// focus whenever GPUI re-renders the list.
@@ -3093,6 +3138,10 @@ impl Waku {
                 expanded_activity_items: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_changed_files: HashSet::new(),
+                changed_files_diff_hover: None,
+                changed_files_diffs: HashMap::new(),
+                changed_files_diff_generation: 0,
+                changed_files_diff_anchor: Rc::new(Cell::new(None)),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,
                 session_rename: None,

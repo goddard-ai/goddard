@@ -5,6 +5,7 @@ use super::composer::{
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::latest_unseen_completion;
 use super::settings::visible_settings_pages;
+use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
@@ -1295,6 +1296,42 @@ fn changed_files_surface_appears_only_for_a_ready_nonempty_checkpoint() {
         !folded_transcript_row_kinds(&session, &HashSet::new()).contains(&ChangedFiles(turn_id))
     );
     assert_eq!(response_footer_message_index(&session, turn_id), Some(1));
+}
+
+#[test]
+fn the_diff_preview_indexes_each_files_rows_without_headers() {
+    use crate::model::ActivityFileChange;
+    use crate::review_diff::{LineKind, from_file_changes};
+
+    let change = |path: &str, diff: &str| ActivityFileChange {
+        path: path.into(),
+        additions: Some(1),
+        deletions: Some(1),
+        status: None,
+        diff: Some(diff.into()),
+    };
+    let snapshot = from_file_changes(&[
+        change("src/one.rs", "@@ -1,2 +1,2 @@\n kept\n-old\n+new\n"),
+        change("src/two.rs", "@@\n+added\n"),
+    ]);
+    let file_lines = changed_files_diff_file_lines(&snapshot);
+
+    assert_eq!(file_lines.len(), 2);
+    for (file_index, indexes) in file_lines.iter().enumerate() {
+        assert!(!indexes.is_empty());
+        for &line_index in indexes {
+            let line = &snapshot.lines[line_index];
+            assert_eq!(line.file_index, file_index);
+            assert_ne!(line.kind, LineKind::FileHeader);
+        }
+    }
+    let indexed: usize = file_lines.iter().map(Vec::len).sum();
+    let expected = snapshot
+        .lines
+        .iter()
+        .filter(|line| line.kind != LineKind::FileHeader)
+        .count();
+    assert_eq!(indexed, expected);
 }
 
 #[test]

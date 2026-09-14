@@ -13,6 +13,23 @@ const ACTIVITY_DIFF_MAX_HEIGHT: f32 = 400.0;
 /// Aligns a hunk separator with the line numbers in the rows below it; see
 /// `DiffRowStyle::ACTIVITY`.
 const ACTIVITY_DIFF_GUTTER_WIDTH: f32 = 52.0;
+/// Hover must hold this long before a changed-file row opens its diff
+/// preview, so dragging the pointer across the card never flashes one.
+const CHANGED_FILES_DIFF_OPEN_DELAY: Duration = Duration::from_millis(350);
+/// The preview survives this long after the pointer leaves both the row and
+/// the card — enough to cross the overlap between them.
+const CHANGED_FILES_DIFF_CLOSE_DELAY: Duration = Duration::from_millis(150);
+/// The preview card stays inside the changed-files card's width with this
+/// much margin on each side.
+const CHANGED_FILES_DIFF_SIDE_INSET: f32 = 30.0;
+/// The card's edge overlaps its anchor row slightly, giving the pointer an
+/// unbroken hover path between them.
+const CHANGED_FILES_DIFF_ROW_OVERLAP: f32 = 2.0;
+/// Past this height the preview's diff scrolls inside the card.
+const CHANGED_FILES_DIFF_MAX_HEIGHT: f32 = 360.0;
+/// A preview is a summary like an activity diff: past this many rows, Review
+/// is where the change should be read.
+const CHANGED_FILES_DIFF_MAX_ROWS: usize = 400;
 
 #[derive(Clone, Debug)]
 struct ConversationNavigationRailSnapshot {
@@ -1505,6 +1522,202 @@ impl Waku {
         cx.notify();
     }
 
+    /// Track the pointer over a changed-files row. A dwell opens the row's
+    /// diff preview; once open, gliding to a sibling row retargets the card
+    /// immediately rather than closing and re-arming the delay.
+    fn changed_files_diff_row_hovered(
+        &mut self,
+        turn_id: Uuid,
+        path: String,
+        hovered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !hovered {
+            let leaving = self
+                .changed_files_diff_hover
+                .as_ref()
+                .is_some_and(|hover| hover.targets(turn_id, &path) && hover.row_hovered);
+            if !leaving {
+                return;
+            }
+            if let Some(hover) = self.changed_files_diff_hover.as_mut() {
+                hover.row_hovered = false;
+            }
+            self.schedule_changed_files_diff_close(cx);
+            return;
+        }
+
+        self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
+        let generation = self.changed_files_diff_generation;
+        let mut retargeted_turn = None;
+        match self.changed_files_diff_hover.as_mut() {
+            Some(hover) if hover.open => {
+                if !hover.targets(turn_id, &path) {
+                    hover.turn_id = turn_id;
+                    hover.path = path;
+                    hover.scroll_handle = ScrollHandle::new();
+                    retargeted_turn = Some(turn_id);
+                }
+                hover.row_hovered = true;
+                hover.card_hovered = false;
+            }
+            _ => {
+                self.changed_files_diff_hover = Some(ChangedFilesDiffHover {
+                    turn_id,
+                    path,
+                    row_hovered: true,
+                    card_hovered: false,
+                    open: false,
+                    scroll_handle: ScrollHandle::new(),
+                    scrollbar: ScrollbarState::new(),
+                });
+            }
+        }
+        if let Some(turn_id) = retargeted_turn {
+            self.ensure_changed_files_diff(turn_id, cx);
+        }
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(CHANGED_FILES_DIFF_OPEN_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.changed_files_diff_generation != generation {
+                    return;
+                }
+                let Some(hover) = this.changed_files_diff_hover.as_mut() else {
+                    return;
+                };
+                if !hover.row_hovered || hover.open {
+                    return;
+                }
+                hover.open = true;
+                let turn_id = hover.turn_id;
+                this.ensure_changed_files_diff(turn_id, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The preview card keeps its row's hover alive while the pointer is on
+    /// the card, and starts the close grace when it leaves.
+    fn changed_files_diff_card_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        let Some(hover) = self.changed_files_diff_hover.as_mut() else {
+            return;
+        };
+        if hover.card_hovered == hovered {
+            return;
+        }
+        hover.card_hovered = hovered;
+        self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
+        if !hovered {
+            self.schedule_changed_files_diff_close(cx);
+        }
+    }
+
+    /// Close the preview unless the pointer re-enters the row or the card
+    /// within the grace period.
+    fn schedule_changed_files_diff_close(&mut self, cx: &mut Context<Self>) {
+        self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
+        let generation = self.changed_files_diff_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(CHANGED_FILES_DIFF_CLOSE_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.changed_files_diff_generation != generation {
+                    return;
+                }
+                let close = this
+                    .changed_files_diff_hover
+                    .as_ref()
+                    .is_some_and(|hover| !hover.row_hovered && !hover.card_hovered);
+                if close {
+                    this.changed_files_diff_hover = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Fetch the hovered turn's diff once; every file row in its card reads
+    /// the same parsed snapshot. Git, patch parsing, and syntax tokenization
+    /// stay off the UI thread, and a superseded fetch cannot land over a
+    /// cleared or restarted entry.
+    fn ensure_changed_files_diff(&mut self, turn_id: Uuid, cx: &mut Context<Self>) {
+        if self.changed_files_diffs.contains_key(&turn_id) {
+            return;
+        }
+        let Some((session_id, turn_count)) = self.selected_session().and_then(|session| {
+            session
+                .turns
+                .iter()
+                .find(|turn| turn.id == turn_id)
+                .map(|turn| (session.id, turn.turn_count))
+        }) else {
+            return;
+        };
+        let Some(project_path) = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+        else {
+            return;
+        };
+
+        self.changed_files_diffs
+            .insert(turn_id, ChangedFilesDiff::Loading);
+        let source = ReviewDiffSource::LastTurn {
+            session_id,
+            turn_id,
+            turn_count,
+        };
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    match workspace.request(waku_client::WorkspaceOperation::CollectReviewDiff {
+                        cwd: project_path,
+                        source: crate::review_diff::wire_source(source),
+                    })? {
+                        waku_client::WorkspaceResult::ReviewDiff { data } => {
+                            let snapshot = crate::review_diff::parse_collected(
+                                source,
+                                &data.numstat,
+                                &data.patch,
+                                data.complete_context,
+                            );
+                            let file_lines = changed_files_diff_file_lines(&snapshot);
+                            Ok((snapshot, file_lines))
+                        }
+                        _ => anyhow::bail!("the daemon returned an invalid diff response"),
+                    }
+                })
+                .await;
+            waku.update(cx, |waku, cx| {
+                if !matches!(
+                    waku.changed_files_diffs.get(&turn_id),
+                    Some(ChangedFilesDiff::Loading)
+                ) {
+                    return;
+                }
+                let state = match result {
+                    Ok((snapshot, file_lines)) => ChangedFilesDiff::Ready {
+                        snapshot: Arc::new(snapshot),
+                        file_lines: Rc::new(file_lines),
+                    },
+                    Err(error) => ChangedFilesDiff::Failed(error.to_string().into()),
+                };
+                waku.changed_files_diffs.insert(turn_id, state);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// The immutable file delta captured when a response settles. Small
     /// summaries stay useful at a glance; larger ones disclose in place and
     /// always offer the complete per-turn list in the right panel.
@@ -1652,43 +1865,86 @@ impl Waku {
             .flex_col()
             .border_t_1()
             .border_color(theme.border);
-        for file in files.iter().take(visible_count) {
-            file_rows = file_rows.child(
-                div()
-                    .h(px(31.0))
-                    .px(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "changed-file-path-{turn_id}-{}",
-                                file.path
-                            )))
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .tooltip(Tooltip::text(file.path.clone()))
-                            .child(file.path.clone()),
+        for (index, file) in files.iter().take(visible_count).enumerate() {
+            let targeted = self
+                .changed_files_diff_hover
+                .as_ref()
+                .is_some_and(|hover| hover.targets(turn_id, &file.path));
+            let preview_open = targeted
+                && self
+                    .changed_files_diff_hover
+                    .as_ref()
+                    .is_some_and(|hover| hover.open);
+            // The last row's hover fill reaches the card's rounded bottom edge
+            // only when no expander row sits beneath it, and `overflow_hidden`
+            // does not clip to a parent's corner radius.
+            let last_row = index + 1 == visible_count && !can_expand;
+            let hovered_path = file.path.clone();
+            let mut row = div()
+                .id(SharedString::from(format!(
+                    "changed-file-row-{turn_id}-{}",
+                    file.path
+                )))
+                .relative()
+                .h(px(31.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .when(last_row, |row| row.rounded_b(px(11.0)))
+                .hover(|style| style.bg(theme.overlay_strong))
+                .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
+                    this.changed_files_diff_row_hovered(
+                        turn_id,
+                        hovered_path.clone(),
+                        *hovering,
+                        cx,
+                    );
+                }))
+                .child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "changed-file-path-{turn_id}-{}",
+                            file.path
+                        )))
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(file.path.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.success)
+                        .child(format!("+{}", file.additions)),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.5))
+                        .text_color(theme.danger)
+                        .child(format!("-{}", file.deletions)),
+                );
+            if targeted {
+                let anchor = self.changed_files_diff_anchor.clone();
+                row = row.child(
+                    canvas(
+                        move |bounds: Bounds<Pixels>, _, _| anchor.set(Some(bounds)),
+                        |_, _, _, _| (),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.5))
-                            .text_color(theme.success)
-                            .child(format!("+{}", file.additions)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.5))
-                            .text_color(theme.danger)
-                            .child(format!("-{}", file.deletions)),
-                    ),
-            );
+                    .absolute()
+                    .inset_0(),
+                );
+                if preview_open && let Some(anchor) = self.changed_files_diff_anchor.get() {
+                    row = row.child(
+                        self.render_changed_files_diff_preview(turn_id, file, anchor, theme, cx),
+                    );
+                }
+            }
+            file_rows = file_rows.child(row);
         }
         card = card.child(file_rows);
 
@@ -1762,6 +2018,222 @@ impl Waku {
         }
 
         Some(card.into_any_element())
+    }
+
+    /// The floating diff card for one hovered changed-files row. It anchors
+    /// to the row — inset to the card's side margins — preferring the space
+    /// above and flipping below when that does not fit. Rendered deferred so
+    /// it escapes the card's `overflow_hidden` and paints above the
+    /// transcript.
+    fn render_changed_files_diff_preview(
+        &self,
+        turn_id: Uuid,
+        file: &crate::model::CheckpointFile,
+        anchor: Bounds<Pixels>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(hover) = self
+            .changed_files_diff_hover
+            .as_ref()
+            .filter(|hover| hover.targets(turn_id, &file.path))
+        else {
+            return div().into_any_element();
+        };
+        let scroll_handle = hover.scroll_handle.clone();
+        let scrollbar_state = hover.scrollbar.clone();
+        let wheel_scroll = scroll_handle.clone();
+        let code_family = crate::fonts::current(cx).code;
+        let row_style = DiffRowStyle::activity(self.state.code_font_size, code_family.clone());
+        let key_prefix = format!("changed-files-diff-{turn_id}");
+
+        let mut trigger = anchor;
+        trigger.origin.x += px(CHANGED_FILES_DIFF_SIDE_INSET);
+        trigger.size.width =
+            (trigger.size.width - px(CHANGED_FILES_DIFF_SIDE_INSET * 2.0)).max(px(0.0));
+
+        let header = div()
+            .h(px(32.0))
+            .flex_none()
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .border_b_1()
+            .border_color(theme.border)
+            .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(file.path.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(theme.success)
+                    .child(format!("+{}", file.additions)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(theme.danger)
+                    .child(format!("-{}", file.deletions)),
+            );
+
+        let body = match self.changed_files_diffs.get(&turn_id) {
+            Some(ChangedFilesDiff::Ready {
+                snapshot,
+                file_lines,
+            }) => {
+                let line_indexes = snapshot
+                    .files
+                    .iter()
+                    .position(|entry| entry.path == file.path)
+                    .and_then(|index| file_lines.get(index));
+                match line_indexes {
+                    Some(indexes) if !indexes.is_empty() => {
+                        use crate::review_diff::LineKind;
+
+                        let mut rows = div().w_full().min_w_0().flex().flex_col();
+                        let hidden = indexes.len().saturating_sub(CHANGED_FILES_DIFF_MAX_ROWS);
+                        for &line_index in indexes.iter().take(CHANGED_FILES_DIFF_MAX_ROWS) {
+                            let line = &snapshot.lines[line_index];
+                            rows = rows.child(match &line.kind {
+                                LineKind::Gap(gap) => activity_diff_break_row(
+                                    Some(tr!("diff.unmodified_lines", count = gap.count())),
+                                    code_family.clone(),
+                                    theme,
+                                ),
+                                LineKind::HunkHeader | LineKind::Meta => activity_diff_break_row(
+                                    (!line.content.is_empty()).then(|| line.content.clone()),
+                                    code_family.clone(),
+                                    theme,
+                                ),
+                                _ => render_diff_code_row(
+                                    line,
+                                    line_index,
+                                    &key_prefix,
+                                    &self.transcript_selection,
+                                    row_style.clone(),
+                                    theme,
+                                ),
+                            });
+                        }
+                        if hidden > 0 {
+                            let note = if hidden == 1 {
+                                tr!("diff.rows_hidden_one")
+                            } else {
+                                tr!("diff.rows_hidden", count = hidden)
+                            };
+                            rows = rows.child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .px(px(12.0))
+                                    .py(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from(note)),
+                            );
+                        }
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .relative()
+                            .max_h(px(CHANGED_FILES_DIFF_MAX_HEIGHT))
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "changed-files-diff-scroll-{turn_id}"
+                                    )))
+                                    .w_full()
+                                    .min_w_0()
+                                    .max_h(px(CHANGED_FILES_DIFF_MAX_HEIGHT))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&scroll_handle)
+                                    .flex()
+                                    .flex_col()
+                                    .on_scroll_wheel(move |_, _, cx| {
+                                        contain_scroll(&wheel_scroll, cx)
+                                    })
+                                    .child(rows),
+                            )
+                            .child(scrollbar::edge_fade(
+                                scroll_handle.clone(),
+                                scrollbar::FadeEdge::Top,
+                                theme.raised,
+                            ))
+                            .child(scrollbar::edge_fade(
+                                scroll_handle.clone(),
+                                scrollbar::FadeEdge::Bottom,
+                                theme.raised,
+                            ))
+                            .child(scrollbar::vertical(&scroll_handle, &scrollbar_state))
+                            .into_any_element()
+                    }
+                    // A binary or mode-only change produces no textual body.
+                    _ => changed_files_diff_message(tr!("diff.no_changes"), theme),
+                }
+            }
+            Some(ChangedFilesDiff::Failed(error)) => {
+                changed_files_diff_message(error.to_string(), theme)
+            }
+            _ => div()
+                .w_full()
+                .h(px(72.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.0))
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_tertiary,
+                )))
+                .child(tr!("diff.loading"))
+                .into_any_element(),
+        };
+
+        let card = div()
+            .id(SharedString::from(format!(
+                "changed-files-diff-card-{turn_id}"
+            )))
+            .occlude()
+            .w(trigger.size.width)
+            .flex()
+            .flex_col()
+            .rounded(px(10.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.raised)
+            .shadow_lg()
+            .overflow_hidden()
+            .child(header)
+            .child(body)
+            .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
+                this.changed_files_diff_card_hovered(*hovering, cx);
+            }))
+            .on_click(|_, _, cx| cx.stop_propagation());
+
+        deferred(FloatingSurface::new(
+            card.into_any_element(),
+            trigger,
+            MenuAlign::AboveLeft,
+            px(-CHANGED_FILES_DIFF_ROW_OVERLAP),
+            px(8.0),
+        ))
+        .with_priority(1)
+        .into_any_element()
     }
 
     /// Settled reasoning, tool activity, and interim assistant commentary are
@@ -2689,6 +3161,37 @@ impl Waku {
             ),
         }
     }
+}
+
+/// Index a snapshot's rendered lines per file, dropping the file-header rows
+/// the preview replaces with its own fixed header. Computed once when the
+/// fetch lands so a frame only reads stored positions.
+pub(super) fn changed_files_diff_file_lines(
+    snapshot: &crate::review_diff::Snapshot,
+) -> Vec<Vec<usize>> {
+    let mut file_lines = vec![Vec::new(); snapshot.files.len()];
+    for (index, line) in snapshot.lines.iter().enumerate() {
+        if line.kind != crate::review_diff::LineKind::FileHeader
+            && let Some(lines) = file_lines.get_mut(line.file_index)
+        {
+            lines.push(index);
+        }
+    }
+    file_lines
+}
+
+/// A centered one-line state inside the changed-files preview card.
+fn changed_files_diff_message(label: String, theme: &Theme) -> AnyElement {
+    div()
+        .w_full()
+        .h(px(72.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(sp(12.5))
+        .text_color(theme.text_tertiary)
+        .child(SharedString::from(label))
+        .into_any_element()
 }
 
 /// The separator between two hunks of the same file.

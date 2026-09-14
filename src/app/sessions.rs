@@ -1267,6 +1267,10 @@ impl Waku {
         self.expanded_activity_items.clear();
         self.expanded_turns.clear();
         self.expanded_changed_files.clear();
+        self.changed_files_diff_hover = None;
+        self.changed_files_diffs.clear();
+        self.changed_files_diff_generation = self.changed_files_diff_generation.wrapping_add(1);
+        self.changed_files_diff_anchor.set(None);
         self.transcript_control_focuses.borrow_mut().clear();
         self.user_message_viewports.borrow_mut().clear();
         self.hovered_response_row = None;
