@@ -27,6 +27,17 @@ const CHANGED_FILES_DIFF_SIDE_INSET: f32 = 30.0;
 const CHANGED_FILES_DIFF_ROW_OVERLAP: f32 = 2.0;
 /// Past this height the preview's diff scrolls inside the card.
 const CHANGED_FILES_DIFF_MAX_HEIGHT: f32 = 360.0;
+/// Height of one file row; the preview cap derives from it so the card can
+/// always fit on one side of its anchor.
+const CHANGED_FILES_ROW_HEIGHT: f32 = 31.0;
+/// The preview card's fixed header row.
+const CHANGED_FILES_DIFF_HEADER_HEIGHT: f32 = 32.0;
+/// The margin passed with the preview's `FloatingSurface` anchor: placement
+/// keeps the card this far off every viewport edge.
+const CHANGED_FILES_DIFF_FLOATING_MARGIN: f32 = 8.0;
+/// Below this body height the preview stops being useful; the fit guarantee
+/// is ceded only in windows too short to matter.
+const CHANGED_FILES_DIFF_MIN_BODY_HEIGHT: f32 = 72.0;
 /// A preview is a summary like an activity diff: past this many rows, Review
 /// is where the change should be read.
 const CHANGED_FILES_DIFF_MAX_ROWS: usize = 400;
@@ -1466,10 +1477,10 @@ impl Waku {
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::TurnFold(turn_id) => self.render_turn_fold_row(turn_id, &theme, cx),
             TranscriptRowKind::ResponseFooter(turn_id, message_index) => {
-                self.render_response_footer_row(turn_id, message_index, &theme, cx)
+                self.render_response_footer_row(turn_id, message_index, &theme, window, cx)
             }
             TranscriptRowKind::ChangedFiles(turn_id) => self
-                .render_changed_files_row(turn_id, &theme, cx)
+                .render_changed_files_row(turn_id, &theme, window, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
         };
@@ -1518,6 +1529,7 @@ impl Waku {
         turn_id: Uuid,
         message_index: usize,
         theme: &Theme,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(message) = self
@@ -1544,7 +1556,7 @@ impl Waku {
             .flex_col()
             .gap(px(3.0))
             .group(group_name.clone());
-        if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, cx) {
+        if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, window, cx) {
             column = column.child(div().w_full().mb(px(3.0)).child(changed_files));
         }
         column
@@ -1783,6 +1795,7 @@ impl Waku {
         &self,
         turn_id: Uuid,
         theme: &Theme,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let Some(checkpoint) = self
@@ -1945,7 +1958,7 @@ impl Waku {
                 .track_focus(&row_focus)
                 .tab_index(0)
                 .relative()
-                .h(px(31.0))
+                .h(px(CHANGED_FILES_ROW_HEIGHT))
                 .px(px(12.0))
                 .flex()
                 .items_center()
@@ -1998,7 +2011,9 @@ impl Waku {
                         .child(format!("-{}", file.deletions)),
                 );
             if preview_open {
-                row = row.child(self.render_changed_files_diff_preview(turn_id, file, theme, cx));
+                row = row.child(self.render_changed_files_diff_preview(
+                    turn_id, file, theme, window, cx,
+                ));
             }
             file_rows = file_rows.child(row);
         }
@@ -2086,6 +2101,7 @@ impl Waku {
         turn_id: Uuid,
         file: &crate::model::CheckpointFile,
         theme: &Theme,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(hover) = self
@@ -2101,9 +2117,10 @@ impl Waku {
         let code_family = crate::fonts::current(cx).code;
         let row_style = DiffRowStyle::activity(self.state.code_font_size, code_family.clone());
         let key_prefix = format!("changed-files-diff-{turn_id}");
+        let body_max_height = changed_files_diff_body_max_height(window);
 
         let header = div()
-            .h(px(32.0))
+            .h(px(CHANGED_FILES_DIFF_HEADER_HEIGHT))
             .flex_none()
             .px(px(12.0))
             .flex()
@@ -2197,7 +2214,7 @@ impl Waku {
                             .w_full()
                             .min_w_0()
                             .relative()
-                            .max_h(px(CHANGED_FILES_DIFF_MAX_HEIGHT))
+                            .max_h(body_max_height)
                             .overflow_hidden()
                             .child(
                                 div()
@@ -2206,7 +2223,7 @@ impl Waku {
                                     )))
                                     .w_full()
                                     .min_w_0()
-                                    .max_h(px(CHANGED_FILES_DIFF_MAX_HEIGHT))
+                                    .max_h(body_max_height)
                                     .overflow_y_scroll()
                                     .track_scroll(&scroll_handle)
                                     .flex()
@@ -2286,7 +2303,7 @@ impl Waku {
                 .into_any_element(),
             MenuAlign::AboveLeft,
             px(-CHANGED_FILES_DIFF_ROW_OVERLAP),
-            px(8.0),
+            px(CHANGED_FILES_DIFF_FLOATING_MARGIN),
         ))
         .with_priority(1)
         .into_any_element()
@@ -3234,6 +3251,24 @@ pub(super) fn changed_files_diff_file_lines(
         }
     }
     file_lines
+}
+
+/// The tallest scroll body that still lets the preview card fit on one side
+/// of its anchor row. `resolve_floating_placement` flips to the roomier side
+/// and then shift-clamps into the viewport; when neither side fits the whole
+/// card, that clamp drags it back across the row it is anchored to. The two
+/// sides share the usable viewport minus the row itself, so capping the card
+/// at half of that — plus the overlap the anchor gap buys back — always
+/// leaves one side with room, and the body scrolls past the cap exactly like
+/// it does past `CHANGED_FILES_DIFF_MAX_HEIGHT`.
+fn changed_files_diff_body_max_height(window: &Window) -> Pixels {
+    let margin =
+        CHANGED_FILES_DIFF_FLOATING_MARGIN + f32::from(window.client_inset().unwrap_or(px(0.0)));
+    let usable = (f32::from(window.viewport_size().height) - margin * 2.0).max(0.0);
+    let card = (usable - CHANGED_FILES_ROW_HEIGHT) / 2.0 + CHANGED_FILES_DIFF_ROW_OVERLAP;
+    // The header and the card's own top and bottom borders don't scroll.
+    px((card - CHANGED_FILES_DIFF_HEADER_HEIGHT - 2.0)
+        .clamp(CHANGED_FILES_DIFF_MIN_BODY_HEIGHT, CHANGED_FILES_DIFF_MAX_HEIGHT))
 }
 
 /// A centered one-line state inside the changed-files preview card.
