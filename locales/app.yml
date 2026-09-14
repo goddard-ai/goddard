@@ -104,6 +104,8 @@ command_palette.current_provider:
   en: Current provider
 command_palette.open_project:
   en: Open project…
+command_palette.open_on_github:
+  en: Open on GitHub
 command_palette.choose_model:
   en: Choose model…
 command_palette.copy_task_id:
@@ -1835,6 +1837,8 @@ files.preview_markdown:
   en: Preview markdown
 files.edit_markdown_source:
   en: Edit source
+files.open_on_github:
+  en: Open on GitHub
 files.enter_fullscreen:
   en: Enter full screen
 files.exit_fullscreen:

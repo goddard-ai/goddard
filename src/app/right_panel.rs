@@ -3063,6 +3063,39 @@ impl Waku {
                 cx,
             )
         };
+        let github_url = self
+            .selected_workspace_path()
+            .map(std::path::Path::to_path_buf)
+            .and_then(|workspace| self.branch_snapshot_for_workspace(&workspace, cx))
+            .and_then(|snapshot| branches::github_file_url(&snapshot, &relative_path));
+        let github_button = github_url.map(|url| {
+            let focus = self.transcript_control_focus("file-open-on-github", cx);
+            let label = tr!("files.open_on_github");
+            let click_url = url.clone();
+            let key_url = url;
+            div()
+                .id("file-open-on-github")
+                .track_focus(&focus)
+                .tab_index(0)
+                .size(px(26.0))
+                .rounded(px(7.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|style| style.bg(theme.overlay))
+                .child(icon("icons/github.svg", 12.0, theme.text_tertiary))
+                .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+                .on_click(move |_, _, cx| cx.open_url(&click_url))
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        cx.open_url(&key_url);
+                        cx.stop_propagation();
+                    }
+                })
+        });
         let preview_toggle = is_markdown.then(|| {
             let focus = self.transcript_control_focus("file-markdown-preview-toggle", cx);
             let (icon_path, label) = if preview {
@@ -3150,6 +3183,7 @@ impl Waku {
                             .text_color(theme.text_secondary)
                             .child(relative_path.clone()),
                     )
+                    .children(github_button)
                     .children(preview_toggle)
                     .children(fullscreen_toggle),
             )

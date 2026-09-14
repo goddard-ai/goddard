@@ -103,6 +103,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         .filter(|branch| branches.iter().any(|entry| entry.name == *branch))
         .map(str::to_owned)
         .or_else(|| current.clone());
+    let origin_url = remote_url(cwd, "origin")?;
     let (additions, deletions) = worktree_line_counts(&repository);
 
     Ok(Some(BranchSnapshot {
@@ -110,10 +111,26 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         current,
         detached_head,
         default_branch,
+        origin_url,
         branches,
         additions,
         deletions,
     }))
+}
+
+/// The fetch URL for `remote`, `None` when the remote is not configured.
+/// `git remote get-url` exits 2 for a missing remote rather than 1, so this
+/// cannot share `optional_stdout`'s exit-code handling.
+fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
+    let output = crate::command_env::plain_command("git")
+        .args(["remote", "get-url", remote])
+        .current_dir(cwd)
+        .output()
+        .context("failed to execute git")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_owned()).filter(|url| !url.is_empty()))
 }
 
 fn worktree_line_counts(cwd: &Path) -> (u64, u64) {
@@ -375,6 +392,26 @@ mod tests {
                 .find(|branch| branch.name == "feature")
                 .unwrap()
                 .checked_out_elsewhere
+        );
+    }
+
+    #[test]
+    fn captures_the_origin_remote_url() {
+        let repository = repository();
+        assert_eq!(inspect(&repository).unwrap().unwrap().origin_url, None);
+        run_git(
+            &repository,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:owner/repo.git",
+            ],
+        );
+        let snapshot = inspect(&repository).unwrap().unwrap();
+        assert_eq!(
+            snapshot.origin_url.as_deref(),
+            Some("git@github.com:owner/repo.git")
         );
     }
 

@@ -161,6 +161,7 @@ enum PaletteAction {
     CopyIdentifier(PaletteIdentifier),
     ChooseModel,
     ToggleWorkspace,
+    OpenOnGitHub,
     ToggleUsage,
     CollapseSidebarGroups,
     GoToLatestUnseenCompletion,
@@ -796,6 +797,22 @@ impl Waku {
                 Some(ShortcutHint::action(&ToggleWorkspace)),
                 PaletteAction::ToggleWorkspace,
                 "toggle switch workspace worktree local checkout draft",
+                next(),
+            ));
+        }
+
+        if self
+            .selected_branch_snapshot()
+            .and_then(branches::github_branch_url)
+            .is_some()
+        {
+            commands.push(CommandPaletteItem::command(
+                display_section(PaletteSection::Suggested),
+                tr!("command_palette.open_on_github"),
+                "icons/github.svg",
+                None,
+                PaletteAction::OpenOnGitHub,
+                "open github remote repository repo branch browser",
                 next(),
             ));
         }
@@ -1710,6 +1727,14 @@ impl Waku {
                 // is visible, then run the same path the keystroke takes.
                 self.settings_page = None;
                 self.toggle_workspace_action(&ToggleWorkspace, window, cx);
+            }
+            PaletteAction::OpenOnGitHub => {
+                if let Some(url) = self
+                    .selected_branch_snapshot()
+                    .and_then(|snapshot| branches::github_branch_url(snapshot))
+                {
+                    cx.open_url(&url);
+                }
             }
             PaletteAction::RunCustomCommand(command_id) => {
                 if let Some(command) = self

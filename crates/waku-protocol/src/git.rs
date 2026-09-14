@@ -18,6 +18,8 @@ pub struct BranchSnapshot {
     pub current: Option<String>,
     pub detached_head: Option<String>,
     pub default_branch: Option<String>,
+    /// The fetch URL of the `origin` remote, if one is configured.
+    pub origin_url: Option<String>,
     pub branches: Vec<BranchEntry>,
     pub additions: u64,
     pub deletions: u64,

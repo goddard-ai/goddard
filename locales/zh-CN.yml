@@ -51,6 +51,7 @@ command_palette.resume: 恢复…
 command_palette.change_provider: 更改服务商
 command_palette.current_provider: 当前服务商
 command_palette.open_project: 打开项目…
+command_palette.open_on_github: 在 GitHub 上打开
 command_palette.choose_model: 选择模型…
 command_palette.copy_task_id: 复制任务 ID
 command_palette.copy_agent_cli_thread_id: 复制智能体 CLI 线程 ID
@@ -901,6 +902,7 @@ files.could_not_save_read_only: "无法保存 %{path}：文件不可编辑"
 files.could_not_save: "无法保存 %{path}：%{error}"
 files.preview_markdown: 预览 Markdown
 files.edit_markdown_source: 编辑源码
+files.open_on_github: 在 GitHub 上打开
 files.enter_fullscreen: 进入全屏
 files.exit_fullscreen: 退出全屏
 files.resize_tree: 调整文件树宽度

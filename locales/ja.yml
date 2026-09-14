@@ -53,6 +53,7 @@ command_palette.resume: 再開…
 command_palette.change_provider: プロバイダーを変更
 command_palette.current_provider: 現在のプロバイダー
 command_palette.open_project: プロジェクトを開く…
+command_palette.open_on_github: GitHub で開く
 command_palette.choose_model: モデルを選択…
 command_palette.copy_task_id: タスク ID をコピー
 command_palette.copy_agent_cli_thread_id: エージェント CLI スレッド ID をコピー
@@ -942,6 +943,7 @@ files.could_not_save_read_only: "%{path} を保存できませんでした：こ
 files.could_not_save: "%{path} を保存できませんでした：%{error}"
 files.preview_markdown: Markdown をプレビュー
 files.edit_markdown_source: ソースを編集
+files.open_on_github: GitHub で開く
 files.enter_fullscreen: フルスクリーンにする
 files.exit_fullscreen: フルスクリーンを終了
 files.resize_tree: ファイルツリーの幅を変更

@@ -5,7 +5,82 @@ enum BranchOperation {
     Create(String),
 }
 
+/// `https://github.com/<owner>/<repo>` for a GitHub remote URL, `None` for any
+/// other host or a value that does not parse. Handles the `scheme://` forms
+/// (https, ssh, git) and the scp-style `git@github.com:owner/repo` shorthand.
+fn github_remote_base(remote_url: &str) -> Option<String> {
+    let remote_url = remote_url.trim();
+    let (host, path) = if let Some((_, rest)) = remote_url.split_once("://") {
+        let (authority, path) = rest.split_once('/')?;
+        let host = authority
+            .rsplit('@')
+            .next()
+            .unwrap_or(authority)
+            .split(':')
+            .next()
+            .unwrap_or_default();
+        (host, path)
+    } else {
+        let (authority, path) = remote_url.split_once(':')?;
+        (authority.rsplit('@').next().unwrap_or(authority), path)
+    };
+    if !host.eq_ignore_ascii_case("github.com") {
+        return None;
+    }
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let owner = segments.next()?;
+    let repo = segments.next()?;
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(format!("https://github.com/{owner}/{repo}"))
+}
+
+/// Escapes the characters that would change a GitHub URL's meaning. Git
+/// refnames already forbid space, `?`, `*`, `:` and friends; file paths keep
+/// their `/` separators and non-ASCII names are fine as UTF-8.
+fn github_url_path_encode(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('#', "%23")
+        .replace('?', "%3F")
+}
+
+/// `…/tree/<branch>` for the snapshot's checked-out branch, or its detached
+/// HEAD commit — GitHub resolves either.
+pub(super) fn github_branch_url(snapshot: &BranchSnapshot) -> Option<String> {
+    let base = github_remote_base(snapshot.origin_url.as_deref()?)?;
+    let reference = snapshot.display_branch()?;
+    Some(format!("{base}/tree/{}", github_url_path_encode(reference)))
+}
+
+/// `…/blob/<branch>/<path>` for a file inside the workspace.
+pub(super) fn github_file_url(snapshot: &BranchSnapshot, relative_path: &str) -> Option<String> {
+    let base = github_remote_base(snapshot.origin_url.as_deref()?)?;
+    let reference = snapshot.display_branch()?;
+    Some(format!(
+        "{base}/blob/{}/{}",
+        github_url_path_encode(reference),
+        github_url_path_encode(relative_path)
+    ))
+}
+
 impl Waku {
+    /// The selected workspace's last-resolved snapshot, `None` until a fetch
+    /// for it has landed. A `&self` read for the command palette; renderers
+    /// wanting to start a fetch use [`branch_snapshot_for_workspace`].
+    ///
+    /// [`branch_snapshot_for_workspace`]: Self::branch_snapshot_for_workspace
+    pub(super) fn selected_branch_snapshot(&self) -> Option<&BranchSnapshot> {
+        let path = self.selected_workspace_path()?;
+        self.visible_branch_snapshot
+            .as_ref()
+            .filter(|(snapshot_path, _)| snapshot_path == path)
+            .map(|(_, snapshot)| snapshot)
+    }
+
     pub(super) fn sync_branch_picker_rows(&self, rows: &[crate::git_branch::BranchEntry]) {
         let mut cached = self.branch_picker_row_cache.borrow_mut();
         if cached.as_slice() == rows {
@@ -382,5 +457,83 @@ impl Waku {
             });
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot(origin_url: Option<&str>, current: Option<&str>) -> BranchSnapshot {
+        BranchSnapshot {
+            repository: PathBuf::from("/repo"),
+            current: current.map(str::to_owned),
+            detached_head: None,
+            default_branch: None,
+            origin_url: origin_url.map(str::to_owned),
+            branches: Vec::new(),
+            additions: 0,
+            deletions: 0,
+        }
+    }
+
+    #[test]
+    fn github_remote_base_parses_common_remote_forms() {
+        for remote in [
+            "git@github.com:owner/repo.git",
+            "git@github.com:owner/repo",
+            "ssh://git@github.com/owner/repo.git",
+            "ssh://git@github.com:22/owner/repo",
+            "https://github.com/owner/repo.git",
+            "https://github.com/owner/repo",
+            "https://github.com/owner/repo/",
+            "http://github.com/owner/repo",
+            "git://github.com/owner/repo.git",
+            "https://user@github.com/owner/repo.git",
+        ] {
+            assert_eq!(
+                github_remote_base(remote).as_deref(),
+                Some("https://github.com/owner/repo"),
+                "{remote}"
+            );
+        }
+    }
+
+    #[test]
+    fn github_remote_base_rejects_other_hosts_and_bad_input() {
+        for remote in [
+            "git@gitlab.com:owner/repo.git",
+            "https://github.example.com/owner/repo",
+            "https://github.com/owner",
+            "",
+            "not a url",
+        ] {
+            assert_eq!(github_remote_base(remote), None, "{remote}");
+        }
+    }
+
+    #[test]
+    fn github_urls_target_the_display_branch() {
+        let github = snapshot(Some("git@github.com:owner/repo.git"), Some("feature/x"));
+        assert_eq!(
+            github_branch_url(&github).as_deref(),
+            Some("https://github.com/owner/repo/tree/feature/x")
+        );
+        assert_eq!(
+            github_file_url(&github, "src/a file.rs").as_deref(),
+            Some("https://github.com/owner/repo/blob/feature/x/src/a%20file.rs")
+        );
+
+        let mut detached = snapshot(Some("git@github.com:owner/repo.git"), None);
+        detached.detached_head = Some("abc1234".into());
+        assert_eq!(
+            github_branch_url(&detached).as_deref(),
+            Some("https://github.com/owner/repo/tree/abc1234")
+        );
+
+        let non_github = snapshot(Some("git@gitlab.com:owner/repo.git"), Some("main"));
+        assert_eq!(github_branch_url(&non_github), None);
+        let no_branch = snapshot(Some("git@github.com:owner/repo.git"), None);
+        assert_eq!(github_branch_url(&no_branch), None);
     }
 }
