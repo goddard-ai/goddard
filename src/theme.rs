@@ -368,14 +368,14 @@ impl Theme {
             danger: 0xFB4934,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xFB4934).into(),   // Statement
-                literal: rgb(0xD3869B).into(),   // Constant
-                string: rgb(0xB8BB26).into(),    // String
-                comment: rgb(0x928374).into(),   // Comment
-                number: rgb(0xD3869B).into(),    // Number
-                ty: rgb(0xFABD2F).into(),        // Type
-                function: rgb(0xB8BB26).into(),  // Function (green, bold upstream)
-                meta: rgb(0x8EC07C).into(),      // PreProc
+                keyword: rgb(0xFB4934).into(),  // Statement
+                literal: rgb(0xD3869B).into(),  // Constant
+                string: rgb(0xB8BB26).into(),   // String
+                comment: rgb(0x928374).into(),  // Comment
+                number: rgb(0xD3869B).into(),   // Number
+                ty: rgb(0xFABD2F).into(),       // Type
+                function: rgb(0xB8BB26).into(), // Function (green, bold upstream)
+                meta: rgb(0x8EC07C).into(),     // PreProc
             },
             ansi: [
                 0x282828, 0xcc241d, 0x98971a, 0xd79921, 0x458588, 0xb16286, 0x689d6a, 0xa89984,
@@ -471,14 +471,14 @@ impl Theme {
             danger: 0xE67E80,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xE67E80).into(),   // red
-                literal: rgb(0x83C092).into(),   // aqua — constants
-                string: rgb(0xA7C080).into(),    // green
-                comment: rgb(0x859289).into(),   // grey1
-                number: rgb(0xD699B6).into(),    // purple
-                ty: rgb(0xDBBC7F).into(),        // yellow
-                function: rgb(0xA7C080).into(),  // green — same as string upstream
-                meta: rgb(0xD699B6).into(),      // purple — preprocessors
+                keyword: rgb(0xE67E80).into(),  // red
+                literal: rgb(0x83C092).into(),  // aqua — constants
+                string: rgb(0xA7C080).into(),   // green
+                comment: rgb(0x859289).into(),  // grey1
+                number: rgb(0xD699B6).into(),   // purple
+                ty: rgb(0xDBBC7F).into(),       // yellow
+                function: rgb(0xA7C080).into(), // green — same as string upstream
+                meta: rgb(0xD699B6).into(),     // purple — preprocessors
             },
             ansi: [
                 0x475258, 0xe67e80, 0xa7c080, 0xdbbc7f, 0x7fbbb3, 0xd699b6, 0x83c092, 0xd3c6aa,
@@ -575,14 +575,14 @@ impl Theme {
             danger: 0xC84053,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x624C83).into(),   // lotusViolet4 — statement/keyword
-                literal: rgb(0xCC6D00).into(),   // lotusOrange — constant
-                string: rgb(0x6F894E).into(),    // lotusGreen
-                comment: rgb(0x8A8980).into(),   // lotusGray3
-                number: rgb(0xB35B79).into(),    // lotusPink
-                ty: rgb(0x597B75).into(),        // lotusAqua
-                function: rgb(0x4D699B).into(),  // lotusBlue4
-                meta: rgb(0xC84053).into(),      // lotusRed — preproc
+                keyword: rgb(0x624C83).into(),  // lotusViolet4 — statement/keyword
+                literal: rgb(0xCC6D00).into(),  // lotusOrange — constant
+                string: rgb(0x6F894E).into(),   // lotusGreen
+                comment: rgb(0x8A8980).into(),  // lotusGray3
+                number: rgb(0xB35B79).into(),   // lotusPink
+                ty: rgb(0x597B75).into(),       // lotusAqua
+                function: rgb(0x4D699B).into(), // lotusBlue4
+                meta: rgb(0xC84053).into(),     // lotusRed — preproc
             },
             ansi: [
                 0x1f1f28, 0xc84053, 0x6f894e, 0x77713f, 0x4d699b, 0xb35b79, 0x597b75, 0x545464,
@@ -628,14 +628,14 @@ impl Theme {
             danger: 0xCC9393,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xF0DFAF).into(),   // zenburn-yellow
-                literal: rgb(0xBFEBBF).into(),   // zenburn-green+4 — constant
-                string: rgb(0xCC9393).into(),    // zenburn-red
-                comment: rgb(0x7F9F7F).into(),   // zenburn-green
-                number: rgb(0xDC8CC3).into(),    // zenburn-magenta — no upstream number face
-                ty: rgb(0x7CB8BB).into(),        // zenburn-blue-1
-                function: rgb(0x93E0E3).into(),  // zenburn-cyan
-                meta: rgb(0x94BFF3).into(),      // zenburn-blue+1 — preprocessor
+                keyword: rgb(0xF0DFAF).into(),  // zenburn-yellow
+                literal: rgb(0xBFEBBF).into(),  // zenburn-green+4 — constant
+                string: rgb(0xCC9393).into(),   // zenburn-red
+                comment: rgb(0x7F9F7F).into(),  // zenburn-green
+                number: rgb(0xDC8CC3).into(),   // zenburn-magenta — no upstream number face
+                ty: rgb(0x7CB8BB).into(),       // zenburn-blue-1
+                function: rgb(0x93E0E3).into(), // zenburn-cyan
+                meta: rgb(0x94BFF3).into(),     // zenburn-blue+1 — preprocessor
             },
             ansi: [
                 0x1e2320, 0xd78787, 0x60b48a, 0xdfaf8f, 0x506070, 0xdc8cc3, 0x8cd0d3, 0xdcdccc,
@@ -688,7 +688,14 @@ pub fn init(cx: &mut App) {
         cx.window_appearance(),
         WindowAppearance::Dark | WindowAppearance::VibrantDark
     );
-    set_active_theme(if system_dark { Theme::dark() } else { Theme::light() }, cx);
+    set_active_theme(
+        if system_dark {
+            Theme::dark()
+        } else {
+            Theme::light()
+        },
+        cx,
+    );
 }
 
 pub fn apply_theme_preference(

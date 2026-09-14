@@ -272,7 +272,10 @@ fn resources_directory(executable: &Path, os: &str) -> anyhow::Result<PathBuf> {
 
 fn packaged_file(path: &Path, name: &str) -> anyhow::Result<PathBuf> {
     if !path.is_file() {
-        bail!("{name} is missing from this Goddard build: {}", path.display());
+        bail!(
+            "{name} is missing from this Goddard build: {}",
+            path.display()
+        );
     }
     Ok(path.to_path_buf())
 }
@@ -390,7 +393,9 @@ fn host_executable_path() -> anyhow::Result<PathBuf> {
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
         .map(Ok)
-        .unwrap_or_else(|| std::env::current_exe().context("Goddard executable path is unavailable"))
+        .unwrap_or_else(|| {
+            std::env::current_exe().context("Goddard executable path is unavailable")
+        })
 }
 
 #[cfg(test)]

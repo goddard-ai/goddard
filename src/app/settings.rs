@@ -1,7 +1,7 @@
 use super::composer::next_picker_highlight;
 use super::*;
-use crate::ui::ActivationExt;
 use crate::theme::{ThemeName, ThemeSettings};
+use crate::ui::ActivationExt;
 use gpui::{KeyBinding, actions};
 
 const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
@@ -3913,12 +3913,7 @@ impl Waku {
             return;
         }
         self.state.theme = settings;
-        crate::theme::apply_theme_preference(
-            settings,
-            self.state.sidebar_transparency,
-            window,
-            cx,
-        );
+        crate::theme::apply_theme_preference(settings, self.state.sidebar_transparency, window, cx);
         self.save();
         cx.notify();
     }

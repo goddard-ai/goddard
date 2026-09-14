@@ -2860,10 +2860,12 @@ impl Render for TextInput {
                 let line_height = sp(22.0);
                 field
                     .min_h(px(24.0))
-                    .max_h(self.max_lines.map_or(
-                        Length::from(AUTO_HEIGHT_MAX),
-                        |lines| (line_height * lines as f32).into(),
-                    ))
+                    .max_h(
+                        self.max_lines
+                            .map_or(Length::from(AUTO_HEIGHT_MAX), |lines| {
+                                (line_height * lines as f32).into()
+                            }),
+                    )
                     .overflow_y_scroll()
                     .track_scroll(&scroll_handle)
                     .px(padding_x)

@@ -2088,11 +2088,7 @@ impl Waku {
         self.open_right_panel_surface(RightPanelSurface::Diff, cx);
     }
 
-    pub(super) fn open_right_panel_file(
-        &mut self,
-        relative_path: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn open_right_panel_file(&mut self, relative_path: String, cx: &mut Context<Self>) {
         self.ensure_initial_right_panel_file_editor_width();
         let Some(active) = self.right_panel_active_surface else {
             self.open_right_panel_surface(RightPanelSurface::File(relative_path), cx);

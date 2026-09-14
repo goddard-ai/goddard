@@ -435,11 +435,9 @@ impl Render for Waku {
                     .when(self.selected_project().is_some(), |element| {
                         element
                             .group(composer::SESSION_DROP_GROUP)
-                            .on_drop(cx.listener(
-                                |this, paths: &ExternalPaths, window, cx| {
-                                    this.stage_dropped_files(paths, window, cx);
-                                },
-                            ))
+                            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                                this.stage_dropped_files(paths, window, cx);
+                            }))
                     })
                     .child(self.render_header(window, cx))
                     .child(if empty {
