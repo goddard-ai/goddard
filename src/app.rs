@@ -2708,6 +2708,11 @@ impl Waku {
                     if this.settings_page == Some(SettingsPage::Skills) {
                         this.ensure_skills_catalog(true, cx);
                     }
+                    // Provider CLIs get installed, upgraded, and removed in a
+                    // terminal; coming back is the moment to re-detect them.
+                    if this.settings_page == Some(SettingsPage::Providers) {
+                        this.refresh_provider_detection(None);
+                    }
                 } else {
                     this.sidebar_shortcuts_window_deactivated(cx);
                 }
