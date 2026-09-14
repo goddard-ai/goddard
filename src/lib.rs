@@ -307,20 +307,13 @@ pub fn run() {
                 KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
                 // The project switcher opens from a New Task draft and
                 // commits when the platform modifier is released, the same
-                // gesture as ctrl-tab above.
-                KeyBinding::new("secondary-e", SwitchProjectForward, Some("Waku")),
-                KeyBinding::new("secondary-shift-e", SwitchProjectBackward, Some("Waku")),
+                // gesture as ctrl-tab above. Registered after New Session at
+                // the same depth, the chord wins the tie and only falls
+                // through to creating a task when no draft can take it.
+                KeyBinding::new("secondary-n", SwitchProjectForward, None),
+                KeyBinding::new("secondary-shift-n", SwitchProjectBackward, None),
                 KeyBinding::new("secondary-escape", CancelProjectSwitch, Some("Waku")),
                 KeyBinding::new("secondary-shift-escape", CancelProjectSwitch, Some("Waku")),
-                // Re-bound on the overlay context so the chord keeps cycling
-                // when the switcher's focus path no longer passes "Waku"
-                // (the settings branch renders the layer as its sibling).
-                KeyBinding::new("secondary-e", SwitchProjectForward, Some("ProjectSwitcher")),
-                KeyBinding::new(
-                    "secondary-shift-e",
-                    SwitchProjectBackward,
-                    Some("ProjectSwitcher"),
-                ),
                 KeyBinding::new("down", SwitchProjectForward, Some("ProjectSwitcher")),
                 KeyBinding::new("right", SwitchProjectForward, Some("ProjectSwitcher")),
                 KeyBinding::new("up", SwitchProjectBackward, Some("ProjectSwitcher")),

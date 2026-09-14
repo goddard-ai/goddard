@@ -1,4 +1,4 @@
-//! Cmd-E switching across recently used projects in a New Task draft.
+//! Cmd-N switching across recently used projects in a New Task draft.
 //!
 //! Mirrors the task switcher: the project order is snapshotted when the
 //! overlay opens, repeated presses move only the highlight, and releasing the
@@ -191,7 +191,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) {
         if !self.project_switcher.open {
-            self.open_project_switcher(reverse, window, cx);
+            // The chord shares ⌘N with New Session; when no draft can take
+            // the switcher, let the keystroke fall through to it.
+            if !self.open_project_switcher(reverse, window, cx) {
+                cx.propagate();
+            }
             return;
         }
 
@@ -221,28 +225,29 @@ impl Waku {
         self.set_project_switcher_highlight(next, cx);
     }
 
-    /// Only a New Task draft can retarget its project; elsewhere the chord is
-    /// inert. The draft's own project pins the head of the list so the first
-    /// press lands on the next most recent one.
+    /// Only a New Task draft can retarget its project; elsewhere the open
+    /// fails and the caller propagates the chord. The draft's own project
+    /// pins the head of the list so the first press lands on the next most
+    /// recent one.
     fn open_project_switcher(
         &mut self,
         reverse: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(current_project) = self
             .selected_session()
             .filter(|session| !session.has_started() && !session.is_busy())
             .map(|session| session.project_id)
         else {
-            return;
+            return false;
         };
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
         let ordered = ordered_project_ids(Some(current_project), &recent, &self.state.projects);
         let Some(highlighted_index) =
             task_switcher::initial_highlight_index(&ordered, Some(current_project), reverse)
         else {
-            return;
+            return false;
         };
 
         if self.task_switcher.is_open() {
@@ -304,6 +309,7 @@ impl Waku {
             });
         });
         cx.notify();
+        true
     }
 
     fn set_project_switcher_highlight(&mut self, index: usize, cx: &mut Context<Self>) {
