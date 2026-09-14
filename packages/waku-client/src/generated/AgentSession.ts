@@ -85,4 +85,16 @@ provider_session_id?: string | null,
  * Not stored in the session JSON — these are rows in the `messages`
  * table, reattached when the session is hydrated.
  */
-messages: Array<Message>, transcript_blocks: Array<TranscriptBlock>, turns: Array<AgentTurn>, queued_messages?: Array<QueuedMessage>, };
+messages: Array<Message>, transcript_blocks: Array<TranscriptBlock>, turns: Array<AgentTurn>, queued_messages?: Array<QueuedMessage>,
+/**
+ * Whether the transcript has been read from the database.
+ *
+ * Startup loads only the columns the session list needs, so a session
+ * begins as a skeleton with empty `messages`, `transcript_blocks` and
+ * `turns`. Those are empty because nothing fetched them, not because the
+ * session is empty — never persist a skeleton, and never conclude from one
+ * that a session has no history. The flag crosses the wire so the daemon
+ * can tell a list projection — whose detail fields are placeholders —
+ * apart from a genuinely empty loaded session.
+ */
+detail_loaded?: boolean, };

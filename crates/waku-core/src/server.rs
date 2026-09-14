@@ -1477,6 +1477,202 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn serve_task_state(
+        root: &std::path::Path,
+        state: crate::persistence::PersistedState,
+    ) -> (std::net::SocketAddr, std::thread::JoinHandle<()>) {
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut state = state;
+        store.save(&mut state).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            store,
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(backend),
+                server_shutdown,
+                ServerOptions {
+                    allow_shutdown: true,
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+        (address, server)
+    }
+
+    #[cfg(unix)]
+    fn hydrate(client: &DaemonClient, session_id: Uuid) -> AgentSession {
+        let ResponsePayload::Session {
+            session: Some(session),
+        } = client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::HydrateSession { session_id },
+            )
+            .unwrap()
+        else {
+            panic!("expected the stored session to hydrate");
+        };
+        session
+    }
+
+    /// The post-restart orphaned-runtime save: a session that was busy when
+    /// the daemon stopped is interrupted and saved while still a skeleton on
+    /// the client. Its column update must land without the projection's
+    /// placeholder workspace or empty transcript erasing stored detail.
+    #[cfg(unix)]
+    #[test]
+    fn a_skeleton_save_updates_columns_without_erasing_detail() {
+        let root = std::env::temp_dir().join(format!("waku-skeleton-save-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut state = crate::persistence::PersistedState::fresh(root.join("repo"));
+        let session_id = state.sessions[0].id;
+        let worktree = crate::model::SessionWorkspace::Worktree {
+            path: root.join("repo-worktrees/task"),
+            name: "task".into(),
+            branch: Some("waku/task".into()),
+        };
+        {
+            let session = &mut state.sessions[0];
+            session.workspace = worktree.clone();
+            session.begin_turn("ship it");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+            session.status = SessionStatus::Working;
+            session.runtime_event_cursor = Some(crate::model::RuntimeEventCursor {
+                runtime_id: Uuid::new_v4(),
+                epoch: Uuid::new_v4(),
+                sequence: 3,
+            });
+        }
+        let (address, server) = serve_task_state(&root, state);
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+
+        // The reattach path hydrates the daemon's copy before the attach
+        // fails, so the merge below runs against a hydrated, busy session.
+        let hydrated = hydrate(&client, session_id);
+        assert_eq!(hydrated.workspace, worktree);
+
+        let mut skeleton = hydrated.list_projection();
+        skeleton.status = SessionStatus::Idle;
+        client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: vec![session_id],
+                    sessions: vec![skeleton],
+                },
+            )
+            .unwrap();
+
+        let after = hydrate(&client, session_id);
+        assert_eq!(after.status, SessionStatus::Idle);
+        assert_eq!(after.workspace, worktree);
+        assert_eq!(after.turns.len(), 1);
+
+        // The stored detail survived too — this is not just in memory.
+        let store = StateStore::daemon(root.join("app.db"));
+        let mut stored = store.load().unwrap().sessions;
+        let stored = stored
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        store.hydrate(stored).unwrap();
+        assert_eq!(stored.workspace, worktree);
+        assert_eq!(stored.turns.len(), 1);
+
+        client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// Pinning or archiving a task that was never opened since launch sends
+    /// its skeleton: the columns must merge while the stored transcript and
+    /// workspace stay untouched, and an unknown skeleton creates nothing.
+    #[cfg(unix)]
+    #[test]
+    fn a_skeleton_save_merges_columns_and_never_creates_a_row() {
+        let root = std::env::temp_dir().join(format!("waku-skeleton-pin-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut state = crate::persistence::PersistedState::fresh(root.join("repo"));
+        let session_id = state.sessions[0].id;
+        let worktree = crate::model::SessionWorkspace::Worktree {
+            path: root.join("repo-worktrees/task"),
+            name: "task".into(),
+            branch: None,
+        };
+        {
+            let session = &mut state.sessions[0];
+            session.workspace = worktree.clone();
+            session.begin_turn("ship it");
+            session.finish_active_turn(crate::model::TurnStatus::Completed);
+        }
+        let (address, server) = serve_task_state(&root, state);
+        let client = DaemonClient::connect(&address.to_string(), "secret".into()).unwrap();
+
+        // The daemon's copy stays a skeleton here — nothing hydrated it.
+        let ResponsePayload::TaskState { sessions, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected daemon task state");
+        };
+        let mut skeleton = sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(!skeleton.detail_loaded);
+        skeleton.pinned_at = Some(1);
+        skeleton.updated_at += 1;
+        let ghost = AgentSession::new(
+            crate::model::Project::from_path(root.join("repo")).id,
+            ProviderKind::Codex,
+        )
+        .list_projection();
+        let ghost_id = ghost.id;
+        client
+            .request(
+                Uuid::nil(),
+                Uuid::nil(),
+                Command::SaveTaskState {
+                    projects: Vec::new(),
+                    live_session_ids: vec![session_id],
+                    sessions: vec![skeleton, ghost],
+                },
+            )
+            .unwrap();
+
+        let after = hydrate(&client, session_id);
+        assert_eq!(after.pinned_at, Some(1));
+        assert_eq!(after.workspace, worktree);
+        assert_eq!(after.turns.len(), 1);
+
+        // The projection of a task the daemon never stored creates no row.
+        let ResponsePayload::TaskState { sessions, .. } = client
+            .request(Uuid::nil(), Uuid::nil(), Command::LoadTaskState)
+            .unwrap()
+        else {
+            panic!("expected daemon task state");
+        };
+        assert!(!sessions.iter().any(|session| session.id == ghost_id));
+
+        client.shutdown();
+        server.join().unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_scoped_agent_token_reaches_only_agent_commands() {
         let root = std::env::temp_dir().join(format!("waku-agent-auth-{}", Uuid::new_v4()));

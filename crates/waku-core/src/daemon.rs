@@ -501,28 +501,48 @@ impl Backend for WakuBackend {
                     .filter(|session| !removed_session_ids.contains(&session.id))
                     .collect::<Vec<_>>();
                 drop(removed_session_ids);
-                let saved_ids = sessions
-                    .iter()
-                    .map(|session| session.id)
-                    .collect::<Vec<_>>();
+                let mut saved_ids = Vec::with_capacity(sessions.len());
                 for mut session in sessions {
-                    if let Some(existing) = state
+                    let session_id = session.id;
+                    let applied = if let Some(existing) = state
                         .sessions
                         .iter_mut()
-                        .find(|existing| existing.id == session.id)
+                        .find(|existing| existing.id == session_id)
                     {
-                        if session_projection_precedes(
+                        if !session.detail_loaded {
+                            merge_session_list_columns(
+                                existing,
+                                session,
+                                active_runtimes.contains_key(&session_id),
+                            )
+                        } else if existing.has_started() && !session.has_started() {
+                            // A session that has started can never become a
+                            // draft again; an "empty" loaded projection is a
+                            // skeleton that lost its marker, not a cleared
+                            // transcript.
+                            false
+                        } else if session_projection_precedes(
                             existing,
                             &session,
-                            active_runtimes.get(&session.id).copied(),
+                            active_runtimes.get(&session_id).copied(),
                         ) {
                             merge_stale_session_metadata(existing, session);
+                            true
                         } else {
                             preserve_daemon_checkpoints(existing, &mut session);
                             *existing = session;
+                            true
                         }
-                    } else {
+                    } else if session.detail_loaded {
                         state.sessions.push(session);
+                        true
+                    } else {
+                        // A skeleton can update a known row but never create
+                        // one — none of its detail is real.
+                        false
+                    };
+                    if applied {
+                        saved_ids.push(session_id);
                     }
                 }
                 let used_project_ids = state
@@ -1033,11 +1053,41 @@ fn session_projection_precedes(
     }
 }
 
+/// Applies the fields a list projection legitimately carries.
+///
+/// A skeleton's workspace, transcript and cursors are placeholders — only its
+/// column values are real, and only while the projection is at least as new
+/// as what is stored. `status` is skipped while the daemon owns a live
+/// runtime for the session: busy state belongs to that runtime, not to a
+/// client's possibly-stale row. Returns whether anything was applied.
+fn merge_session_list_columns(
+    existing: &mut AgentSession,
+    incoming: AgentSession,
+    has_active_runtime: bool,
+) -> bool {
+    if incoming.updated_at < existing.updated_at {
+        return false;
+    }
+    existing.title = incoming.title;
+    existing.auto_title = incoming.auto_title;
+    existing.project_id = incoming.project_id;
+    existing.provider = incoming.provider;
+    existing.model = incoming.model;
+    if !has_active_runtime {
+        existing.status = incoming.status;
+    }
+    existing.created_at = incoming.created_at;
+    existing.updated_at = incoming.updated_at;
+    existing.last_reply_at = existing.last_reply_at.max(incoming.last_reply_at);
+    existing.archived_at = incoming.archived_at;
+    existing.pinned_at = incoming.pinned_at;
+    true
+}
+
 fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSession) {
     if incoming.updated_at >= existing.updated_at {
         existing.title = incoming.title;
         existing.project_id = incoming.project_id;
-        existing.workspace = incoming.workspace;
         existing.provider = incoming.provider;
         existing.model = incoming.model;
         existing.runtime_mode = incoming.runtime_mode;

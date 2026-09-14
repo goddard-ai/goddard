@@ -1067,8 +1067,13 @@ pub struct AgentSession {
     /// begins as a skeleton with empty `messages`, `transcript_blocks` and
     /// `turns`. Those are empty because nothing fetched them, not because the
     /// session is empty — never persist a skeleton, and never conclude from one
-    /// that a session has no history.
-    #[serde(skip, default = "detail_loaded_default")]
+    /// that a session has no history. The flag crosses the wire so the daemon
+    /// can tell a list projection — whose detail fields are placeholders —
+    /// apart from a genuinely empty loaded session.
+    #[serde(
+        default = "detail_loaded_default",
+        skip_serializing_if = "is_true"
+    )]
     pub detail_loaded: bool,
 }
 
@@ -1081,6 +1086,11 @@ fn detail_loaded_default() -> bool {
 /// keeps old payloads legible to older readers.
 pub(crate) fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// The inverse of [`is_false`], for flags that omit themselves when on.
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl AgentSession {

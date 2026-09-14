@@ -76,7 +76,12 @@ export const daemonKeys = {
 }
 
 export async function loadTaskState(client: WakuClient): Promise<TaskState> {
-  return expectResponse(await client.request({ type: 'loadTaskState' }), 'taskState')
+  const state = expectResponse(await client.request({ type: 'loadTaskState' }), 'taskState')
+  // Catalog entries are list projections: their workspace and transcript
+  // fields are placeholders. Flag them so a later save merges only the
+  // columns the projection actually carries.
+  state.sessions = state.sessions.map((session) => ({ ...session, detail_loaded: false }))
+  return state
 }
 
 export async function loadComposerDrafts(client: WakuClient): Promise<ComposerDrafts> {
@@ -103,7 +108,7 @@ export async function hydrateSession(
     await client.request({ type: 'hydrateSession', sessionId }),
     'session',
   )
-  return response.session
+  return response.session && { ...response.session, detail_loaded: true }
 }
 
 export async function attachSession(
@@ -272,7 +277,12 @@ export async function persistSession(
     }),
     'taskStateSaved',
   )
-  return response.sessions.find((item) => item.id === session.id) ?? session
+  // A skeleton save is echoed as a skeleton — never let it replace the
+  // loaded session this client is holding.
+  return (
+    response.sessions.find((item) => item.id === session.id && item.detail_loaded !== false)
+    ?? session
+  )
 }
 
 export async function removeSession(

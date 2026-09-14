@@ -1738,8 +1738,9 @@ mod tests {
         };
 
         assert!(
-            !sessions[0].has_started(),
-            "serde cannot carry the process-local skeleton marker"
+            !sessions[0].detail_loaded && sessions[0].has_started(),
+            "the skeleton marker must survive the wire, or a saved-back \
+             projection looks like an empty loaded session"
         );
         restore_task_state_skeletons(&mut sessions);
         assert!(!sessions[0].detail_loaded);
