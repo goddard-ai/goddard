@@ -289,6 +289,7 @@ impl Waku {
                 turn_id,
                 message_id,
                 sent_by_task,
+                hidden,
             } => {
                 // A prompt reached this runtime: another client's submission,
                 // or the echo of this one. The session decides whether that
@@ -296,7 +297,13 @@ impl Waku {
                 // projection this client persists carries the prompt whose
                 // reply it is about to stream.
                 if let Some(session) = self.state.session_mut(session_id)
-                    && session.adopt_submitted_prompt(&message, turn_id, message_id, sent_by_task)
+                    && session.adopt_submitted_prompt(
+                        &message,
+                        turn_id,
+                        message_id,
+                        sent_by_task,
+                        hidden,
+                    )
                 {
                     self.state.mark_session_dirty(session_id);
                 }

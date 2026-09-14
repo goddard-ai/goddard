@@ -95,6 +95,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             turn_id,
             message_id,
             sent_by_task,
+            hidden,
         } => (
             "promptSubmitted",
             json!({
@@ -102,6 +103,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "turnId": turn_id,
                 "messageId": message_id,
                 "sentByTask": sent_by_task,
+                "hidden": hidden,
             }),
         ),
         DriverEvent::SteerAccepted {
@@ -194,6 +196,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
                 sent_by_task: submitted.sent_by_task,
+                hidden: submitted.hidden,
             }
         }
         "steerAccepted" => {
@@ -240,6 +243,8 @@ struct SubmittedPromptWire {
     message_id: Uuid,
     #[serde(default)]
     sent_by_task: Option<Uuid>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]

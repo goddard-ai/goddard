@@ -677,6 +677,7 @@ composer.attach_daemon_title: 从守护进程主机附加
 composer.stop: 停止
 composer.stop_confirm: 再按一次 Escape 停止
 composer.steer_current: 引导当前回合
+composer.continue: 继续
 composer.starting_agent: 正在启动智能体…
 composer.suggestions: 输入建议
 composer.loading_suggestions: 正在加载建议…

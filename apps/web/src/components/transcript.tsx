@@ -339,12 +339,21 @@ export function Transcript({
 function transcriptNavigationTurns(session: AgentSession): NavigationTurn[] {
   const userIndexes: number[] = []
   session.messages.forEach((message, index) => {
-    if (message.role === 'user') userIndexes.push(index)
+    if (message.role === 'user' && !message.hidden) userIndexes.push(index)
   })
   const turnsById = new Map(session.turns.map((turn) => [turn.id, turn]))
   return userIndexes.map((messageIndex, turnIndex) => {
     const message = session.messages[messageIndex]!
-    const nextUserIndex = userIndexes[turnIndex + 1] ?? session.messages.length
+    // A hidden continue prompt still ends the previous turn's preview — it is
+    // the next user message even though it has no rail entry.
+    const nextVisibleUser = userIndexes[turnIndex + 1] ?? session.messages.length
+    const nextAnyUser = session.messages.findIndex(
+      (candidate, index) => index > messageIndex && candidate.role === 'user',
+    )
+    const nextUserIndex = Math.min(
+      nextVisibleUser,
+      nextAnyUser === -1 ? session.messages.length : nextAnyUser,
+    )
     const visible = message.display_content ?? message.content
     const prompt = visible.trim()
       ? navigationPreviewSnippet(visible, 100)
@@ -895,7 +904,9 @@ function transcriptRows(session: AgentSession): TranscriptItem[] {
       })
     }
     const message = session.messages[index]
-    if (message) {
+    // A hidden prompt stays in `session.messages` so every client's
+    // projection names the same ids — it just renders no row.
+    if (message && !message.hidden) {
       rows.push({
         kind: 'message',
         key: `message-${message.id}`,

@@ -44,9 +44,17 @@ impl DriverHandle {
 
     /// Send a prompt along with the ids this client gave the turn it opened
     /// and that turn's user message, so the daemon can publish the same
-    /// identity to every other client attached to the runtime.
-    pub fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>) {
-        self.inner.prompt(prompt, turn_id, message_id);
+    /// identity to every other client attached to the runtime. `hidden`
+    /// marks the internal "continue" nudge: provider-facing text no client
+    /// renders.
+    pub fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        hidden: bool,
+    ) {
+        self.inner.prompt(prompt, turn_id, message_id, hidden);
     }
 
     pub fn supports_steer(&self) -> bool {
@@ -113,7 +121,13 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
-    fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>);
+    fn prompt(
+        &self,
+        prompt: String,
+        turn_id: Option<Uuid>,
+        message_id: Option<Uuid>,
+        hidden: bool,
+    );
     fn supports_steer(&self) -> bool {
         false
     }

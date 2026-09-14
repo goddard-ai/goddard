@@ -2291,6 +2291,7 @@ impl Waku {
                 human_content: None,
                 attachments: edit.attachments,
                 annotations: Vec::new(),
+                hidden: false,
             },
             cx,
         );
@@ -3081,6 +3082,19 @@ impl Waku {
         handle
     }
 
+    /// Continue an interrupted turn with no typed prompt. The provider still
+    /// gets text — [`CONTINUE_PROMPT`] — but the message is `hidden`, so no
+    /// transcript row, title, or restored draft comes of it.
+    pub(super) fn continue_interrupted_session(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        if !composer::session_awaits_continue(session) || self.model_picker_has_no_providers() {
+            return;
+        }
+        self.submit_composer_submission(ComposerSubmission::hidden_continue(), cx);
+    }
+
     pub(super) fn submit_composer_submission(
         &mut self,
         submission: ComposerSubmission,
@@ -3256,7 +3270,10 @@ impl Waku {
             if !self.session_can_steer(session) {
                 return None;
             }
-            Some((session.id, session.queued_messages.first()?.id))
+            // A hidden queue entry is provider-facing text, not a follow-up
+            // the user can steer — its own drain still delivers it.
+            let message = session.queued_messages.iter().find(|message| !message.hidden)?;
+            Some((session.id, message.id))
         }) else {
             return;
         };
@@ -3336,13 +3353,15 @@ impl Waku {
             return;
         }
         let prompt = submission.prompt.clone();
+        let hidden = submission.hidden;
         let human_prompt = submission.human_prompt();
-        let has_input = !submission
-            .display_content
-            .as_deref()
-            .unwrap_or(&submission.prompt)
-            .trim()
-            .is_empty();
+        let has_input = !hidden
+            && !submission
+                .display_content
+                .as_deref()
+                .unwrap_or(&submission.prompt)
+                .trim()
+                .is_empty();
         let next_turn_count = session.turns.len() + 1;
         let provider = session.provider.id();
         let model = self
@@ -3397,15 +3416,23 @@ impl Waku {
             Vec::new()
         };
         let transcript_anchor = if let Some(session) = self.state.session_mut(session_id) {
-            session.set_title_from_prompt(&human_prompt);
-            let turn_id = session.begin_turn_with_presentation(
-                &prompt,
-                submission.display_content.clone(),
-                submission.attachments.clone(),
-            );
+            // A hidden prompt is not user input: no title, no anchor, and no
+            // transcript row — the turn's work lands on the tail instead.
+            if !hidden {
+                session.set_title_from_prompt(&human_prompt);
+            }
+            let turn_id = if hidden {
+                session.begin_hidden_turn(&prompt)
+            } else {
+                session.begin_turn_with_presentation(
+                    &prompt,
+                    submission.display_content.clone(),
+                    submission.attachments.clone(),
+                )
+            };
             session.status = SessionStatus::Connecting;
             session.updated_at = unix_time();
-            selected.then_some(TranscriptAnchor {
+            (selected && !hidden).then_some(TranscriptAnchor {
                 session_id,
                 turn_id,
             })
@@ -3435,25 +3462,46 @@ impl Waku {
             self.message_edit = None;
             self.hide_toast();
             self.transcript_anchor.set(transcript_anchor);
-            // Provisional reservation: the anchored list has no measured
-            // bounds until its first paint, and a zero end space cannot hold
-            // the sent row at the viewport top — without scroll room past the
-            // tail, the list clamps to its end and the prompt paints a frame
-            // at the bottom before the first measured frame lifts it. Seed a
-            // full viewport of end space instead; the overshoot is invisible
-            // under the top anchor and the first measured frame trues it up.
-            let mut provisional = self.transcript_rows.viewport_bounds().size.height;
-            if provisional <= Pixels::ZERO {
-                provisional = self.anchored_transcript_rows.viewport_bounds().size.height;
+            if hidden {
+                // No sent row to anchor on — a hidden prompt renders nothing.
+                // Hold the tail so the turn's work streams in where the
+                // reader already sits.
+                self.transcript_anchor_end_space.set(Pixels::ZERO);
+                self.transcript_anchor_following.set(false);
+                self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                self.pin_transcript_to_tail();
+            } else {
+                // Provisional reservation: the anchored list has no measured
+                // bounds until its first paint, and a zero end space cannot hold
+                // the sent row at the viewport top — without scroll room past the
+                // tail, the list clamps to its end and the prompt paints a frame
+                // at the bottom before the first measured frame lifts it. Seed a
+                // full viewport of end space instead; the overshoot is invisible
+                // under the top anchor and the first measured frame trues it up.
+                let mut provisional = self.transcript_rows.viewport_bounds().size.height;
+                if provisional <= Pixels::ZERO {
+                    provisional = self.anchored_transcript_rows.viewport_bounds().size.height;
+                }
+                self.transcript_anchor_end_space.set(provisional);
+                self.transcript_anchor_following.set(true);
+                self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+                self.scroll_transcript_to_anchor();
             }
-            self.transcript_anchor_end_space.set(provisional);
-            self.transcript_anchor_following.set(true);
-            self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-            self.scroll_transcript_to_anchor();
         }
         cx.notify();
 
-        let preparation_prompt = human_prompt;
+        // A pending NewWorktree names itself after the prompt. A hidden
+        // continue has none worth keeping, so the session title stands in.
+        let preparation_prompt = if hidden {
+            self.state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| session.display_title().to_owned())
+                .unwrap_or_default()
+        } else {
+            human_prompt
+        };
         let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
             let prepared = cx
@@ -3625,7 +3673,7 @@ impl Waku {
             .unwrap_or((None, None));
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => driver.prompt(driver_prompt, turn_id, message_id),
+            Ok(driver) => driver.prompt(driver_prompt, turn_id, message_id, submission.hidden),
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);

@@ -705,6 +705,7 @@ composer.attach_daemon_title: デーモンホストから添付
 composer.stop: 停止
 composer.stop_confirm: もう一度 Escape を押すと停止します
 composer.steer_current: 現在のターンに指示を追加
+composer.continue: 続行
 composer.starting_agent: エージェントを起動中…
 composer.suggestions: 入力候補
 composer.loading_suggestions: 入力候補を読み込み中…

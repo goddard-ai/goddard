@@ -105,6 +105,11 @@ pub enum Command {
         turn_id: Option<Uuid>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_id: Option<Uuid>,
+        /// The prompt is provider-facing only — the internal nudge a
+        /// "continue" sends to an interrupted session. No client renders a
+        /// transcript row for it.
+        #[serde(default, skip_serializing_if = "crate::model::is_false")]
+        hidden: bool,
     },
     Steer {
         prompt: String,

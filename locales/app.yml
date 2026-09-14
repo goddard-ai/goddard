@@ -1364,6 +1364,8 @@ composer.stop_confirm:
   en: Press Escape again to stop
 composer.steer_current:
   en: Steer current turn
+composer.continue:
+  en: Continue
 composer.starting_agent:
   en: Starting agent…
 composer.suggestions:

@@ -79,6 +79,8 @@ export const messages = sqliteTable(
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
     /** Waku task that submitted the message through an agent credential. */
     sentByTask: text("sent_by_task"),
+    /** Provider-facing text no client renders — the internal "continue" nudge. */
+    hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [index("messages_by_session").on(table.sessionId, table.position)],
 );

@@ -1821,6 +1821,7 @@ mod tests {
                     prompt: "streamed from the first client".into(),
                     turn_id: None,
                     message_id: None,
+                    hidden: false,
                 },
             )
             .unwrap();
@@ -2475,6 +2476,7 @@ mod tests {
                     prompt: "after start".into(),
                     turn_id: None,
                     message_id: None,
+                    hidden: false,
                 },
             },
             second_client_outgoing,

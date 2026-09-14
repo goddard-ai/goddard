@@ -42,16 +42,34 @@ pub(super) enum ComposerSubmitAction {
     Send,
     Preparing,
     Stop,
+    /// The session's last turn ended stopped and the composer is empty —
+    /// the submit affordance continues that work with no prompt required.
+    Continue,
+}
+
+/// Whether an idle session's last turn ended stopped: explicit Stop, an app
+/// quit mid-turn, and orphaned-runtime recovery all settle the turn as
+/// `Interrupted`, so they all qualify. A draft in the composer still wins —
+/// see [`composer_submit_action`].
+pub(super) fn session_awaits_continue(session: &AgentSession) -> bool {
+    !session.status.is_busy()
+        && session
+            .turns
+            .last()
+            .is_some_and(|turn| turn.status == TurnStatus::Interrupted)
 }
 
 pub(super) fn composer_submit_action(
-    status: Option<SessionStatus>,
+    session: Option<&AgentSession>,
     preparing: bool,
+    has_draft: bool,
 ) -> ComposerSubmitAction {
     if preparing {
         ComposerSubmitAction::Preparing
-    } else if status.is_some_and(SessionStatus::is_busy) {
+    } else if session.is_some_and(|session| session.status.is_busy()) {
         ComposerSubmitAction::Stop
+    } else if !has_draft && session.is_some_and(session_awaits_continue) {
+        ComposerSubmitAction::Continue
     } else {
         ComposerSubmitAction::Send
     }
@@ -2254,6 +2272,7 @@ impl Waku {
             human_content,
             attachments,
             annotations,
+            hidden: false,
         })
     }
 
@@ -2385,6 +2404,11 @@ impl Waku {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        if submission.hidden {
+            // The continue nudge was never the user's draft; a failed send
+            // leaves the composer as it was rather than revealing it.
+            return;
+        }
         self.composer_attachments = submission
             .attachments
             .into_iter()
@@ -2592,13 +2616,16 @@ impl Waku {
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
         let session_id = self.state.selected_session?;
         let session = self.selected_session()?;
-        if session.queued_messages.is_empty() {
+        if session.queued_messages.iter().all(|message| message.hidden) {
             return None;
         }
         let theme = Theme::current(cx);
         let steerable = self.session_can_steer(session);
         let mut list = div().flex().flex_col().py(px(4.0));
         for (index, message) in session.queued_messages.iter().enumerate() {
+            if message.hidden {
+                continue;
+            }
             let message_id = message.id;
             let content = if message.visible_content().trim().is_empty() {
                 message
@@ -2816,12 +2843,6 @@ impl Waku {
             self.submission_preparations.contains(&session.id)
                 || self.response_fork_preparations.contains_key(&session.id)
         });
-        let submit_action =
-            composer_submit_action(session.map(|session| session.status), preparing);
-        let escape_stop_armed = session.is_some_and(|session| {
-            self.escape_stop_confirmation
-                .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
-        });
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
             || !self.composer_attachments.is_empty()
             || !self
@@ -2830,11 +2851,21 @@ impl Waku {
                 .borrow()
                 .items
                 .is_empty();
+        // A typed draft always means Send — the continue affordance exists
+        // only while the composer is completely empty.
+        let submit_action = composer_submit_action(session, preparing, has_draft);
+        let escape_stop_armed = session.is_some_and(|session| {
+            self.escape_stop_confirmation
+                .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
+        });
         // With no provider to run it, a draft has nowhere to go. The button
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
         let can_send = has_draft && !no_providers;
+        // Continue needs no draft — an interrupted session is exactly what
+        // makes it available — but it still needs a provider to run.
+        let can_continue = !no_providers;
         let (autocomplete, autocomplete_actionable) =
             match self.render_composer_autocomplete(window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
@@ -3047,6 +3078,42 @@ impl Waku {
                                         this.composer.update(cx, |input, cx| input.clear(cx));
                                         this.submit_composer_submission(submission, cx);
                                     }
+                                })),
+                            ComposerSubmitAction::Continue => div()
+                                .id("send-or-stop")
+                                .w(px(26.0))
+                                .h(px(26.0))
+                                .rounded_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(if can_continue {
+                                    theme.inverse
+                                } else {
+                                    theme.overlay_strong
+                                })
+                                .when(can_continue, |element| {
+                                    element
+                                        .cursor_default()
+                                        .hover(|element| element.opacity(0.9))
+                                        .active(|element| element.opacity(0.8))
+                                })
+                                .child(icon(
+                                    "icons/play.svg",
+                                    13.0,
+                                    if can_continue {
+                                        theme.on_inverse
+                                    } else {
+                                        theme.text_ghost
+                                    },
+                                ))
+                                .tooltip(Tooltip::text(if no_providers {
+                                    tr!("composer.no_providers")
+                                } else {
+                                    tr!("composer.continue")
+                                }))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.continue_interrupted_session(cx);
                                 })),
                         }),
                 ),

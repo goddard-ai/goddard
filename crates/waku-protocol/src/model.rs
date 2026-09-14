@@ -759,6 +759,10 @@ pub struct QueuedMessage {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    /// Provider-facing text that renders no queued chip or transcript row —
+    /// the internal "continue" nudge parked behind a busy session.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     pub created_at: u64,
 }
 
@@ -769,6 +773,7 @@ impl QueuedMessage {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            hidden: false,
             created_at: unix_time(),
         }
     }
@@ -1070,6 +1075,12 @@ pub struct AgentSession {
 /// Anything deserialized from a `data` blob carries its full detail.
 fn detail_loaded_default() -> bool {
     true
+}
+
+/// `skip_serializing_if` predicate for flags that omit themselves when off —
+/// keeps old payloads legible to older readers.
+pub(crate) fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl AgentSession {
@@ -1388,6 +1399,24 @@ impl AgentSession {
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
     ) -> Uuid {
+        self.begin_turn_inner(prompt, display_content, attachments, false)
+    }
+
+    /// Begin a turn whose prompt is provider-facing only — the internal
+    /// nudge a "continue" sends to an interrupted session. The message stays
+    /// in the record so every client's projection names the same rows, but
+    /// no transcript row renders it.
+    pub fn begin_hidden_turn(&mut self, prompt: impl Into<String>) -> Uuid {
+        self.begin_turn_inner(prompt, None, Vec::new(), true)
+    }
+
+    fn begin_turn_inner(
+        &mut self,
+        prompt: impl Into<String>,
+        display_content: Option<String>,
+        attachments: Vec<MessageAttachment>,
+        hidden: bool,
+    ) -> Uuid {
         let id = Uuid::new_v4();
         let now = unix_time();
         self.turns.push(AgentTurn {
@@ -1400,10 +1429,11 @@ impl AgentSession {
             completed_at: None,
             checkpoint: None,
         });
-        self.messages.push(
+        let mut prompt =
             Message::new_for_turn(MessageRole::User, prompt, id)
-                .with_presentation(display_content, attachments),
-        );
+                .with_presentation(display_content, attachments);
+        prompt.hidden = hidden;
+        self.messages.push(prompt);
         self.last_reply_at = Some(now);
         id
     }
@@ -1449,6 +1479,7 @@ impl AgentSession {
         turn_id: Uuid,
         message_id: Uuid,
         sent_by_task: Option<Uuid>,
+        hidden: bool,
     ) -> bool {
         let now = unix_time();
         if let Some(active) = self.active_turn_id() {
@@ -1461,11 +1492,14 @@ impl AgentSession {
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
             prompt.sent_by_task = sent_by_task;
+            prompt.hidden = hidden;
             self.messages.push(prompt);
             self.updated_at = now;
             return true;
         }
-        self.set_title_from_prompt(message);
+        if !hidden {
+            self.set_title_from_prompt(message);
+        }
         self.turns.push(AgentTurn {
             id: turn_id,
             turn_count: self.turns.len() + 1,
@@ -1479,6 +1513,7 @@ impl AgentSession {
         let mut prompt = Message::new_for_turn(MessageRole::User, message, turn_id);
         prompt.id = message_id;
         prompt.sent_by_task = sent_by_task;
+        prompt.hidden = hidden;
         self.messages.push(prompt);
         self.status = SessionStatus::Connecting;
         self.last_reply_at = Some(now);
@@ -1751,6 +1786,11 @@ pub struct Message {
     /// client renders the marker so agent-originated prompts stay visible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sent_by_task: Option<Uuid>,
+    /// Provider-facing text no client renders — the internal nudge a
+    /// "continue" sends to an interrupted session. The message stays in the
+    /// record so every projection carries the same ids.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -1765,6 +1805,7 @@ impl Message {
             display_content: None,
             attachments: Vec::new(),
             sent_by_task: None,
+            hidden: false,
             created_at: unix_time(),
             streaming: false,
         }
@@ -1936,6 +1977,9 @@ pub enum DriverEvent {
         /// The task whose agent submitted the prompt through the daemon's
         /// scoped agent commands, or `None` for a human submission.
         sent_by_task: Option<Uuid>,
+        /// The prompt is provider-facing only — no client renders a
+        /// transcript row for it. Set for the internal "continue" nudge.
+        hidden: bool,
     },
     TurnStarted,
     /// The provider's turn ended while detached work it will wake the
@@ -4830,7 +4874,7 @@ mod tests {
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
 
-        assert!(session.adopt_submitted_prompt("second", turn_id, message_id, None));
+        assert!(session.adopt_submitted_prompt("second", turn_id, message_id, None, false));
 
         assert_eq!(session.status, SessionStatus::Connecting);
         assert_eq!(session.active_turn_id(), Some(turn_id));
@@ -4851,7 +4895,7 @@ mod tests {
         session.status = SessionStatus::Connecting;
         let message_id = session.messages[0].id;
 
-        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id, None));
+        assert!(!session.adopt_submitted_prompt("first", turn_id, message_id, None, false));
 
         assert_eq!(session.turns.len(), 1);
         assert_eq!(session.messages.len(), 1);
@@ -4866,7 +4910,13 @@ mod tests {
         session.status = SessionStatus::Working;
         let message_id = Uuid::new_v4();
 
-        assert!(session.adopt_submitted_prompt("continue", Uuid::new_v4(), message_id, None));
+        assert!(session.adopt_submitted_prompt(
+            "continue",
+            Uuid::new_v4(),
+            message_id,
+            None,
+            false
+        ));
 
         assert_eq!(session.turns.len(), 1);
         let prompt = session.messages.last().unwrap();

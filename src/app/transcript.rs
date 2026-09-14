@@ -534,7 +534,9 @@ pub(super) fn transcript_navigation_turns(
         .messages
         .iter()
         .enumerate()
-        .filter_map(|(index, message)| (message.role == MessageRole::User).then_some(index))
+        .filter_map(|(index, message)| {
+            (message.role == MessageRole::User && !message.hidden).then_some(index)
+        })
         .collect::<Vec<_>>();
 
     // Message rows keep ascending message order through folding, so one cursor
@@ -558,10 +560,19 @@ pub(super) fn transcript_navigation_turns(
         let Some(row_index) = row_index else {
             continue;
         };
+        // A hidden continue prompt still ends the previous turn's preview —
+        // it is the next user message even though it has no rail entry.
         let next_user_index = user_message_indexes
             .get(turn_index + 1)
             .copied()
-            .unwrap_or(session.messages.len());
+            .unwrap_or(session.messages.len())
+            .min(
+                session.messages[message_index + 1..]
+                    .iter()
+                    .position(|candidate| candidate.role == MessageRole::User)
+                    .map(|offset| message_index + 1 + offset)
+                    .unwrap_or(session.messages.len()),
+            );
         let turn_running = message.turn_id.is_some_and(|turn_id| {
             session
                 .turns
@@ -956,6 +967,7 @@ pub(super) fn transcript_rows_fingerprint(
     hash = mix(hash, session.messages.len() as u64);
     for message in &session.messages {
         hash = mix(hash, message.role as u64);
+        hash = mix(hash, message.hidden as u64);
         hash = mix_turn_id(hash, message.turn_id);
         // The fold counts a blank text part as work, so a part crossing that
         // line moves rows. `trim` stops at the first non-space character, so
@@ -1057,6 +1069,16 @@ pub(super) fn folded_transcript_row_kinds(
 
     let mut rows = Vec::with_capacity(raw_rows.len() + fold_anchors.len() + 1);
     for row in raw_rows {
+        // A hidden prompt stays in `session.messages` so every client's
+        // projection names the same ids — it just renders no row.
+        if let TranscriptRowKind::Message(message_index) = row
+            && session
+                .messages
+                .get(message_index)
+                .is_some_and(|message| message.hidden)
+        {
+            continue;
+        }
         if let Some(turn_id) = fold_anchors.get(&row).copied() {
             rows.push(TranscriptRowKind::TurnFold(turn_id));
         }

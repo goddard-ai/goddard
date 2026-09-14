@@ -10,4 +10,9 @@ export type QueuedMessage = { id: string, content: string,
  * The text typed before Goddard appended provider-facing attachment
  * mentions. `None` is the legacy/plain-message representation.
  */
-display_content?: string | null, attachments?: Array<MessageAttachment>, created_at: number, };
+display_content?: string | null, attachments?: Array<MessageAttachment>,
+/**
+ * Provider-facing text that renders no queued chip or transcript row —
+ * the internal "continue" nudge parked behind a busy session.
+ */
+hidden?: boolean, created_at: number, };

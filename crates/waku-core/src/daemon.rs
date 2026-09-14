@@ -974,6 +974,7 @@ impl Backend for WakuBackend {
                     prompt,
                     turn_id,
                     message_id,
+                    hidden,
                 } = &command
                 {
                     // Publish the submission into the runtime's event stream
@@ -988,6 +989,7 @@ impl Backend for WakuBackend {
                         turn_id: turn_id.unwrap_or_else(Uuid::new_v4),
                         message_id: message_id.unwrap_or_else(Uuid::new_v4),
                         sent_by_task: None,
+                        hidden: *hidden,
                     })?)?;
                 }
                 handle_driver_command(&driver, command)
@@ -1978,7 +1980,7 @@ impl WakuBackend {
         let session_id = session.id;
         let turn_id = Uuid::new_v4();
         let message_id = Uuid::new_v4();
-        session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender);
+        session.adopt_submitted_prompt(&prompt, turn_id, message_id, sender, false);
         {
             let mut state = self.task_state.lock();
             state.push_session(session);
@@ -1994,6 +1996,7 @@ impl WakuBackend {
             turn_id,
             message_id,
             sent_by_task: sender,
+            hidden: false,
         })?)?;
         driver.prompt(prompt);
         Ok(ResponsePayload::AgentSessionCreated { session_id })
@@ -2566,6 +2569,7 @@ fn deliver_agent_prompt(
         turn_id,
         message_id,
         sent_by_task: entry.sender,
+        hidden: false,
     })?)?;
     driver.prompt(entry.prompt);
     Ok(())
@@ -2592,7 +2596,7 @@ fn persist_agent_prompt(
         bail!("task {session_id} is unknown to the daemon");
     };
     task_store.hydrate(session)?;
-    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task) {
+    if session.adopt_submitted_prompt(message, turn_id, message_id, sent_by_task, false) {
         state.mark_session_dirty(session_id);
         task_store.save(&mut state)?;
     }
@@ -2744,6 +2748,7 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             turn_id,
             message_id,
             sent_by_task,
+            hidden,
         } => (
             "promptSubmitted",
             json!({
@@ -2751,6 +2756,7 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "turnId": turn_id,
                 "messageId": message_id,
                 "sentByTask": sent_by_task,
+                "hidden": hidden,
             }),
         ),
         DriverEvent::SteerAccepted {
@@ -2843,6 +2849,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 turn_id: submitted.turn_id,
                 message_id: submitted.message_id,
                 sent_by_task: submitted.sent_by_task,
+                hidden: submitted.hidden,
             }
         }
         "steerAccepted" => {
@@ -2889,6 +2896,8 @@ struct SubmittedPromptWire {
     message_id: Uuid,
     #[serde(default)]
     sent_by_task: Option<Uuid>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -3135,6 +3144,7 @@ mod tests {
             turn_id,
             message_id,
             sent_by_task: None,
+            hidden: false,
         })
         .unwrap();
         assert_eq!(wire.kind, "promptSubmitted");
@@ -3156,6 +3166,7 @@ mod tests {
             turn_id: Uuid::new_v4(),
             message_id: Uuid::new_v4(),
             sent_by_task: Some(sender),
+            hidden: false,
         })
         .unwrap();
         assert_eq!(wire.payload["sentByTask"], sender.to_string());

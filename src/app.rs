@@ -356,7 +356,14 @@ struct ComposerSubmission {
     /// Transcript annotations already folded into `prompt`'s header, kept so a
     /// failed submission can restore them alongside the draft text.
     annotations: Vec<TranscriptAnnotation>,
+    /// Provider-facing text no transcript renders — the internal "continue"
+    /// nudge. Never user input: no title, no restored draft, no bubble.
+    hidden: bool,
 }
+
+/// The provider-facing prompt an empty-composer continue sends to an
+/// interrupted turn. `Message::hidden` keeps it out of every transcript.
+const CONTINUE_PROMPT: &str = "Continue the current task if able.";
 
 impl ComposerSubmission {
     fn plain(prompt: String) -> Self {
@@ -366,11 +373,22 @@ impl ComposerSubmission {
             human_content: None,
             attachments: Vec::new(),
             annotations: Vec::new(),
+            hidden: false,
+        }
+    }
+
+    fn hidden_continue() -> Self {
+        Self {
+            hidden: true,
+            ..Self::plain(CONTINUE_PROMPT.to_owned())
         }
     }
 
     fn into_queued_message(self) -> QueuedMessage {
-        QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments)
+        let mut message =
+            QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments);
+        message.hidden = self.hidden;
+        message
     }
 
     fn from_queued_message(message: QueuedMessage) -> Self {
@@ -382,6 +400,7 @@ impl ComposerSubmission {
             // The annotation header already lives inside `content`; queueing
             // counts as sent, so the highlights stay cleared.
             annotations: Vec::new(),
+            hidden: message.hidden,
         }
     }
 
@@ -2625,6 +2644,21 @@ impl Waku {
                                 .then_some(session.id)
                         }) {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
+                        } else if prompt.trim().is_empty()
+                            && this.composer_attachments.is_empty()
+                            && this
+                                .transcript_selection
+                                .annotations
+                                .borrow()
+                                .items
+                                .is_empty()
+                            && this
+                                .selected_session()
+                                .is_some_and(composer::session_awaits_continue)
+                        {
+                            // Enter on an empty composer over a stopped turn
+                            // is the same affordance as the play button.
+                            this.continue_interrupted_session(cx);
                         } else if let Some(submission) =
                             this.submission_with_attachments(prompt, cx)
                         {
@@ -2657,7 +2691,17 @@ impl Waku {
                                 .items
                                 .is_empty()
                         {
-                            this.steer_oldest_queued_message(cx);
+                            if this
+                                .selected_session()
+                                .is_some_and(composer::session_awaits_continue)
+                            {
+                                // Cmd+Enter on an empty composer continues a
+                                // stopped turn too; its queued follow-ups
+                                // still drain once that turn settles.
+                                this.continue_interrupted_session(cx);
+                            } else {
+                                this.steer_oldest_queued_message(cx);
+                            }
                         }
                     }
                     ComposerEvent::Edited => {

@@ -797,6 +797,7 @@ fn search_session_messages(
                   WHERE messages.streaming = 0
                     AND sessions.archived_at IS NULL
                     AND messages.role IN ('user', 'assistant')
+                    AND messages.hidden = 0
                     AND instr(lower(messages.content), lower(?1)) > 0
              )
              SELECT session_id, role, content
@@ -1280,7 +1281,7 @@ impl StateStore {
         let mut statement = connection
             .prepare(
                 "SELECT id, turn_id, role, content, display_content, attachments,
-                        created_at, streaming, sent_by_task
+                        created_at, streaming, sent_by_task, hidden
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
             .map_err(to_io_error)?;
@@ -1296,6 +1297,7 @@ impl StateStore {
                     row.get::<_, i64>(6)?,
                     row.get::<_, i64>(7)?,
                     row.get::<_, Option<String>>(8)?,
+                    row.get::<_, i64>(9)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1593,6 +1595,7 @@ type MessageColumns = (
     i64,
     i64,
     Option<String>,
+    i64,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
@@ -1606,6 +1609,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         created_at,
         streaming,
         sent_by_task,
+        hidden,
     ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
@@ -1620,6 +1624,7 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         sent_by_task: sent_by_task
             .as_deref()
             .and_then(|id| Uuid::parse_str(id).ok()),
+        hidden: hidden != 0,
     })
 }
 
@@ -1637,8 +1642,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming, sent_by_task
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         attachments, created_at, streaming, sent_by_task, hidden
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -1649,7 +1654,8 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          attachments = excluded.attachments,
          created_at = excluded.created_at,
          streaming  = excluded.streaming,
-         sent_by_task = excluded.sent_by_task";
+         sent_by_task = excluded.sent_by_task,
+         hidden     = excluded.hidden";
 
 /// Replaces a session's messages with the given list.
 ///
@@ -1708,6 +1714,7 @@ fn write_messages(
                     message
                         .sent_by_task
                         .map_or(Value::Null, |id| Value::Text(id.to_string())),
+                    Value::Integer(i64::from(message.hidden)),
                 ]),
             )
             .map_err(to_io_error)?;
@@ -1742,6 +1749,7 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
     fold(position as u64);
     fold(message.created_at);
     fold(u64::from(message.streaming));
+    fold(u64::from(message.hidden));
     fold(fingerprint(&tag_of(message.role)));
     let (high, low) = message.id.as_u64_pair();
     fold(high);
@@ -3116,6 +3124,9 @@ mod tests {
         state.sessions[0].push_message(MessageRole::User, "how do I center a div");
         state.sessions[0].push_message(MessageRole::Assistant, "flexbox");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0].begin_hidden_turn("Continue the current task if able.");
+        state.sessions[0].push_message(MessageRole::Assistant, "kept going");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
         let expected = state.sessions[0].messages.clone();
         store.save(&mut state).unwrap();
 
@@ -3147,7 +3158,9 @@ mod tests {
             assert_eq!(restored.turn_id, expected.turn_id);
             assert_eq!(restored.created_at, expected.created_at);
             assert_eq!(restored.streaming, expected.streaming);
+            assert_eq!(restored.hidden, expected.hidden);
         }
+        assert!(messages[3].hidden, "the continue nudge survives the save");
 
         fs::remove_dir_all(directory).ok();
     }
@@ -3171,6 +3184,8 @@ mod tests {
         assistant_match.messages.last_mut().unwrap().streaming = true;
         assistant_match.push_message(MessageRole::Assistant, "Final assistant needle");
         assistant_match.finish_active_turn(crate::model::TurnStatus::Completed);
+        assistant_match.begin_hidden_turn("Hidden continue needle");
+        assistant_match.finish_active_turn(crate::model::TurnStatus::Interrupted);
         state.sessions.push(assistant_match);
         store.save(&mut state).unwrap();
 
@@ -3212,6 +3227,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![user_match_id],
             "SQL wildcard characters are searched literally"
+        );
+        assert!(
+            reopened
+                .session_message_search("Hidden continue".into(), 50)()
+                .unwrap()
+                .is_empty(),
+            "a hidden prompt never surfaces in search"
         );
 
         fs::remove_dir_all(directory).ok();

@@ -13,4 +13,10 @@ display_content?: string | null, attachments?: Array<MessageAttachment>,
  * scoped agent commands. `None` for messages a human typed; every
  * client renders the marker so agent-originated prompts stay visible.
  */
-sent_by_task?: string | null, created_at: number, streaming: boolean, };
+sent_by_task?: string | null,
+/**
+ * Provider-facing text no client renders — the internal nudge a
+ * "continue" sends to an interrupted session. The message stays in the
+ * record so every projection carries the same ids.
+ */
+hidden?: boolean, created_at: number, streaming: boolean, };

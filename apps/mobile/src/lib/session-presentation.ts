@@ -298,7 +298,9 @@ export function buildTranscriptPipeline(
       });
     }
     const message = session.messages[messageIndex];
-    if (message) {
+    // A hidden prompt stays in `session.messages` so every client's
+    // projection names the same ids — it just renders no row.
+    if (message && !message.hidden) {
       tag({
         row: {
           kind: 'message',

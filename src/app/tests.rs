@@ -134,25 +134,82 @@ fn remote_task_catalog_adds_web_tasks_without_replacing_hydrated_detail() {
 
 #[test]
 fn composer_only_offers_stop_after_submission_preparation() {
+    let mut idle = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    idle.status = SessionStatus::Idle;
     assert_eq!(
-        composer_submit_action(Some(SessionStatus::Idle), false),
+        composer_submit_action(Some(&idle), false, false),
         ComposerSubmitAction::Send
     );
+
+    let mut connecting = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    connecting.status = SessionStatus::Connecting;
     assert_eq!(
-        composer_submit_action(Some(SessionStatus::Connecting), true),
+        composer_submit_action(Some(&connecting), true, false),
         ComposerSubmitAction::Preparing
     );
     assert_eq!(
-        composer_submit_action(Some(SessionStatus::Connecting), false),
+        composer_submit_action(Some(&connecting), false, false),
         ComposerSubmitAction::Stop
     );
+
+    let mut working = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    working.status = SessionStatus::Working;
     assert_eq!(
-        composer_submit_action(Some(SessionStatus::Working), false),
+        composer_submit_action(Some(&working), false, false),
         ComposerSubmitAction::Stop
     );
+
+    let mut failed = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    failed.status = SessionStatus::Failed;
     assert_eq!(
-        composer_submit_action(Some(SessionStatus::Failed), false),
+        composer_submit_action(Some(&failed), false, false),
         ComposerSubmitAction::Send
+    );
+}
+
+#[test]
+fn composer_offers_continue_only_for_an_empty_composer_on_a_stopped_turn() {
+    let mut stopped = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    stopped.begin_turn("do the thing");
+    stopped.finish_active_turn(TurnStatus::Interrupted);
+    stopped.status = SessionStatus::Idle;
+
+    // Stopped via Stop, an app quit, or an orphaned runtime — all land on
+    // Idle with the last turn Interrupted, and all offer Continue.
+    assert_eq!(
+        composer_submit_action(Some(&stopped), false, false),
+        ComposerSubmitAction::Continue
+    );
+    // A draft is a send, not a continue.
+    assert_eq!(
+        composer_submit_action(Some(&stopped), false, true),
+        ComposerSubmitAction::Send
+    );
+    // Preparation still wins over everything.
+    assert_eq!(
+        composer_submit_action(Some(&stopped), true, false),
+        ComposerSubmitAction::Preparing
+    );
+
+    // A settled turn does not qualify — only an interrupted one.
+    let mut finished = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    finished.begin_turn("done");
+    finished.finish_active_turn(TurnStatus::Completed);
+    finished.status = SessionStatus::Idle;
+    assert_eq!(
+        composer_submit_action(Some(&finished), false, false),
+        ComposerSubmitAction::Send
+    );
+
+    // A running turn's interrupted predecessor does not qualify either.
+    let mut running = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    running.begin_turn("first");
+    running.finish_active_turn(TurnStatus::Interrupted);
+    running.begin_turn("second");
+    running.status = SessionStatus::Working;
+    assert_eq!(
+        composer_submit_action(Some(&running), false, false),
+        ComposerSubmitAction::Stop
     );
 }
 
@@ -1584,6 +1641,42 @@ fn a_settled_turn_folds_all_of_its_work_above_the_answer() {
             ResponseFooter(turn_id, 2),
         ]
     );
+}
+
+/// A continue's hidden prompt stays in `session.messages` — every client
+/// projects the same ids — but it renders no row, no rail turn, and its turn
+/// folds and footers exactly like a prompted one.
+#[test]
+fn a_hidden_prompt_renders_no_row_but_keeps_its_turn() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    session.begin_turn("Build it");
+    session.push_message(MessageRole::Assistant, "Built it.");
+    session.finish_active_turn(TurnStatus::Interrupted);
+
+    let continued = session.begin_hidden_turn("Continue the current task if able.");
+    session.push_message(MessageRole::Assistant, "Kept going.");
+    session.finish_active_turn(TurnStatus::Completed);
+
+    assert!(session.messages[2].hidden);
+    assert_eq!(
+        folded_transcript_row_kinds(&session, &HashSet::new()),
+        vec![
+            Message(0),
+            Message(1),
+            ResponseFooter(session.turns[0].id, 1),
+            Message(3),
+            ResponseFooter(continued, 3),
+        ],
+        "the hidden prompt at index 2 produces no row"
+    );
+    // The rail offers only the prompts a human typed, and the hidden prompt
+    // still ends the previous turn's preview — "Kept going." must not leak
+    // into "Build it"'s row.
+    let row_kinds = folded_transcript_row_kinds(&session, &HashSet::new());
+    let nav = transcript_navigation_turns(&session, &row_kinds);
+    assert_eq!(nav.len(), 1);
+    assert_eq!(nav[0].message_index, 0);
+    assert_eq!(nav[0].response, "Built it.");
 }
 
 /// Providers split one answer across several text parts. They arrive with no

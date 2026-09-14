@@ -101,6 +101,7 @@ export function reduceRuntimeEvent(
         value.message,
         typeof value.turnId === 'string' ? value.turnId : clock.randomUUID(),
         typeof value.messageId === 'string' ? value.messageId : clock.randomUUID(),
+        value.hidden === true,
         clock,
       )
       break
@@ -338,6 +339,7 @@ function adoptSubmittedPrompt(
   message: string,
   turnId: string,
   messageId: string,
+  hidden: boolean,
   clock: ReducerClock,
 ) {
   const now = clock.nowSeconds()
@@ -352,12 +354,15 @@ function adoptSubmittedPrompt(
       turn_id: active.id,
       role: 'user',
       content: message,
+      hidden,
       created_at: now,
       streaming: false,
     })
     return
   }
-  setTitleFromPrompt(session, message)
+  // A hidden prompt is provider-facing text, not a user draft — the title
+  // keeps the words a human actually typed.
+  if (!hidden) setTitleFromPrompt(session, message)
   session.turns.push({
     id: turnId,
     turn_count: session.turns.length + 1,
@@ -373,6 +378,7 @@ function adoptSubmittedPrompt(
     turn_id: turnId,
     role: 'user',
     content: message,
+    hidden,
     created_at: now,
     streaming: false,
   })
