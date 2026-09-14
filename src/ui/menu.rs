@@ -27,11 +27,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, Display, Element, ElementId, FocusHandle, FontWeight, GlobalElementId,
-    InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton,
-    MouseDownEvent, ParentElement, Pixels, Point, Position, RenderOnce, SharedString, Size,
-    StatefulInteractiveElement, Style, Styled, Window, actions, anchored, canvas, deferred, div,
-    img, prelude::FluentBuilder, px,
+    AnyElement, App, Bounds, Display, Edges, Element, ElementId, FocusHandle, FontWeight,
+    GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId,
+    Length, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Position, RenderOnce,
+    SharedString, Size, StatefulInteractiveElement, Style, Styled, Window, actions, anchored,
+    canvas, deferred, div, img, prelude::FluentBuilder, px,
 };
 
 actions!(
@@ -592,7 +592,11 @@ fn resolve_floating_placement(
 /// a painted glyph rect rather than to an element trigger.
 pub(crate) struct FloatingSurface {
     child: AnyElement,
-    trigger: Bounds<Pixels>,
+    /// `None` anchors to the surface's own containing block: the element is
+    /// laid out stretched over its nearest positioned ancestor and reads that
+    /// rect during prepaint, so the trigger is never a frame behind an anchor
+    /// that moved since the last render.
+    trigger: Option<Bounds<Pixels>>,
     preferred: MenuAlign,
     gap: Pixels,
     margin: Pixels,
@@ -612,7 +616,26 @@ impl FloatingSurface {
     ) -> Self {
         Self {
             child,
-            trigger,
+            trigger: Some(trigger),
+            preferred,
+            gap,
+            margin,
+        }
+    }
+
+    /// A surface anchored to its own containing block rather than a bounds
+    /// snapshot: laid out stretched over the nearest positioned ancestor, it
+    /// resolves the trigger from its own rect at prepaint, tracking an anchor
+    /// that moves between renders without a frame of lag.
+    pub(crate) fn anchored_to_parent(
+        child: AnyElement,
+        preferred: MenuAlign,
+        gap: Pixels,
+        margin: Pixels,
+    ) -> Self {
+        Self {
+            child,
+            trigger: None,
             preferred,
             gap,
             margin,
@@ -644,6 +667,13 @@ impl Element for FloatingSurface {
             Style {
                 position: Position::Absolute,
                 display: Display::Flex,
+                // With no fixed trigger, stretch over the containing block so
+                // `bounds` in `prepaint` is the anchor's rect for this frame.
+                inset: if self.trigger.is_none() {
+                    Edges::<Length>::zero()
+                } else {
+                    Edges::auto()
+                },
                 ..Style::default()
             },
             [child_layout_id],
@@ -665,7 +695,7 @@ impl Element for FloatingSurface {
         let viewport = Bounds::new(Point::default(), window.viewport_size());
         let margin = self.margin + window.client_inset().unwrap_or(px(0.0));
         let placement = resolve_floating_placement(
-            self.trigger,
+            self.trigger.unwrap_or(bounds),
             surface_size,
             viewport,
             self.preferred,

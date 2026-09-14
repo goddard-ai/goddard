@@ -1422,10 +1422,6 @@ pub struct Waku {
     /// Guards the delayed open and the grace-period close: a timer whose
     /// generation no longer matches must not act.
     changed_files_diff_generation: u64,
-    /// The preview anchor row's bounds as of the last painted frame, recorded
-    /// by a canvas probe inside it — the deferred card anchors to a row that
-    /// lives inside a virtualized list.
-    changed_files_diff_anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Stable focus identities for controls inside virtualized transcript and
     /// diff rows. Recreating a handle on every row build would drop keyboard
     /// focus whenever GPUI re-renders the list.
@@ -3142,7 +3138,6 @@ impl Waku {
                 changed_files_diff_hover: None,
                 changed_files_diffs: HashMap::new(),
                 changed_files_diff_generation: 0,
-                changed_files_diff_anchor: Rc::new(Cell::new(None)),
                 transcript_control_focuses: RefCell::new(HashMap::new()),
                 session_navigation,
                 session_rename: None,

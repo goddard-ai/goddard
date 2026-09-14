@@ -1866,15 +1866,10 @@ impl Waku {
             .border_t_1()
             .border_color(theme.border);
         for (index, file) in files.iter().take(visible_count).enumerate() {
-            let targeted = self
+            let preview_open = self
                 .changed_files_diff_hover
                 .as_ref()
-                .is_some_and(|hover| hover.targets(turn_id, &file.path));
-            let preview_open = targeted
-                && self
-                    .changed_files_diff_hover
-                    .as_ref()
-                    .is_some_and(|hover| hover.open);
+                .is_some_and(|hover| hover.open && hover.targets(turn_id, &file.path));
             // The last row's hover fill reaches the card's rounded bottom edge
             // only when no expander row sits beneath it, and `overflow_hidden`
             // does not clip to a parent's corner radius.
@@ -1944,21 +1939,8 @@ impl Waku {
                         .text_color(theme.danger)
                         .child(format!("-{}", file.deletions)),
                 );
-            if targeted {
-                let anchor = self.changed_files_diff_anchor.clone();
-                row = row.child(
-                    canvas(
-                        move |bounds: Bounds<Pixels>, _, _| anchor.set(Some(bounds)),
-                        |_, _, _, _| (),
-                    )
-                    .absolute()
-                    .inset_0(),
-                );
-                if preview_open && let Some(anchor) = self.changed_files_diff_anchor.get() {
-                    row = row.child(
-                        self.render_changed_files_diff_preview(turn_id, file, anchor, theme, cx),
-                    );
-                }
+            if preview_open {
+                row = row.child(self.render_changed_files_diff_preview(turn_id, file, theme, cx));
             }
             file_rows = file_rows.child(row);
         }
@@ -2045,7 +2027,6 @@ impl Waku {
         &self,
         turn_id: Uuid,
         file: &crate::model::CheckpointFile,
-        anchor: Bounds<Pixels>,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -2062,11 +2043,6 @@ impl Waku {
         let code_family = crate::fonts::current(cx).code;
         let row_style = DiffRowStyle::activity(self.state.code_font_size, code_family.clone());
         let key_prefix = format!("changed-files-diff-{turn_id}");
-
-        let mut trigger = anchor;
-        trigger.origin.x += px(CHANGED_FILES_DIFF_SIDE_INSET);
-        trigger.size.width =
-            (trigger.size.width - px(CHANGED_FILES_DIFF_SIDE_INSET * 2.0)).max(px(0.0));
 
         let header = div()
             .h(px(32.0))
@@ -2225,7 +2201,7 @@ impl Waku {
                 "changed-files-diff-card-{turn_id}"
             )))
             .occlude()
-            .w(trigger.size.width)
+            .w_full()
             .flex()
             .flex_col()
             .rounded(px(10.0))
@@ -2241,9 +2217,15 @@ impl Waku {
             }))
             .on_click(|_, _, cx| cx.stop_propagation());
 
-        deferred(FloatingSurface::new(
-            card.into_any_element(),
-            trigger,
+        // The surface stretches over the row and reads that rect at prepaint,
+        // so retargeting to a sibling row never anchors a frame behind; the
+        // side inset lands on the card through padding instead.
+        deferred(FloatingSurface::anchored_to_parent(
+            div()
+                .w_full()
+                .px(px(CHANGED_FILES_DIFF_SIDE_INSET))
+                .child(card)
+                .into_any_element(),
             MenuAlign::AboveLeft,
             px(-CHANGED_FILES_DIFF_ROW_OVERLAP),
             px(8.0),
