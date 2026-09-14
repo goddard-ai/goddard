@@ -46,6 +46,47 @@ pub struct WorkingTreeEntry {
     pub depth: usize,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
+}
+
+/// Where a pull request's reviews stand, as the host summarises them. The
+/// field itself is optional because some hosts report no rollup; absent means
+/// the host did not say, not that a review is outstanding.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+/// One pull request as the sidebar badge reads it. Fields past `is_draft` are
+/// optional because a host read may omit them; absent renders as unknown, not
+/// as a neutral value.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestSummary {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: PullRequestState,
+    pub is_draft: bool,
+    pub base_branch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_decision: Option<PullRequestReviewDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -248,6 +289,14 @@ pub enum WorkspaceOperation {
         cwd: PathBuf,
         source: ReviewDiffSource,
     },
+    /// Pull requests whose head branch is `head_branch`, as the repository's
+    /// host reports them through its CLI. Read-only; the host is never
+    /// written to.
+    ListPullRequests {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        head_branch: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -318,5 +367,12 @@ pub enum WorkspaceResult {
     },
     ReviewDiff {
         data: ReviewDiffData,
+    },
+    /// `None` when the host could not be read — its CLI is missing,
+    /// unauthenticated, or the directory is not a repository it knows — which
+    /// is different from `Some(vec![])`, a host that answered "no pull
+    /// requests".
+    PullRequests {
+        entries: Option<Vec<PullRequestSummary>>,
     },
 }

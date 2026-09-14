@@ -1663,6 +1663,12 @@ pub struct Waku {
     sidebar_checkout_scan_fingerprint: Cell<Option<u64>>,
     sidebar_checkout_scan_generation: Cell<u64>,
     sidebar_checkout_scanned_at: Cell<Option<Instant>>,
+    /// Pull requests resolved per session on a background executor, keyed by
+    /// session id. A session absent from the map means "not known yet" — the
+    /// row renders no badge, same as a session with no pull requests.
+    sidebar_pull_requests: RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
+    sidebar_pull_request_scan_fingerprint: Cell<Option<u64>>,
+    sidebar_pull_request_scan_generation: Cell<u64>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
@@ -3342,6 +3348,9 @@ impl Waku {
                 sidebar_checkout_scan_fingerprint: Cell::new(None),
                 sidebar_checkout_scan_generation: Cell::new(0),
                 sidebar_checkout_scanned_at: Cell::new(None),
+                sidebar_pull_requests: RefCell::new(HashMap::new()),
+                sidebar_pull_request_scan_fingerprint: Cell::new(None),
+                sidebar_pull_request_scan_generation: Cell::new(0),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),

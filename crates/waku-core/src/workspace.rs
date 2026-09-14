@@ -247,6 +247,11 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             )?;
             WorkspaceResult::Ack
         }
+        WorkspaceOperation::ListPullRequests { cwd, head_branch } => {
+            WorkspaceResult::PullRequests {
+                entries: crate::pull_requests::list(&cwd, &head_branch)?,
+            }
+        }
         WorkspaceOperation::CollectReviewDiff { cwd, source } => WorkspaceResult::ReviewDiff {
             data: collect_review_diff(&cwd, source)?,
         },

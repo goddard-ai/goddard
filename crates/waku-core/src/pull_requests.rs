@@ -1,0 +1,136 @@
+//! Pull request reads through the repository host's own CLI.
+//!
+//! GitHub's `gh` is the only host understood today. A missing or
+//! unauthenticated CLI, or a directory the host does not know, reports `None`
+//! — callers render that as "unknown", which is a different answer from an
+//! empty list ("the host checked and found nothing").
+
+use std::path::Path;
+
+use anyhow::Context as _;
+use serde::Deserialize;
+
+use waku_protocol::workspace::{
+    PullRequestReviewDecision, PullRequestState, PullRequestSummary,
+};
+
+/// Keeps a reused branch's history from paging the whole sidebar scan.
+const PULL_REQUEST_LIST_LIMIT: &str = "30";
+
+pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequestSummary>>> {
+    let output = crate::command_env::plain_command("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            head_branch,
+            "--state",
+            "all",
+            "--limit",
+            PULL_REQUEST_LIST_LIMIT,
+            "--json",
+            "number,title,url,state,isDraft,baseRefName,updatedAt,reviewDecision,additions,deletions",
+        ])
+        .current_dir(cwd)
+        .output();
+    let output = match output {
+        Ok(output) if output.status.success() => output,
+        _ => return Ok(None),
+    };
+    let entries: Vec<GhPullRequest> = serde_json::from_slice(&output.stdout)
+        .context("could not parse `gh pr list` output")?;
+    Ok(Some(
+        entries
+            .into_iter()
+            .filter_map(GhPullRequest::into_summary)
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhPullRequest {
+    number: u64,
+    title: String,
+    url: String,
+    state: String,
+    #[serde(default)]
+    is_draft: bool,
+    #[serde(default)]
+    base_ref_name: String,
+    #[serde(default)]
+    updated_at: Option<String>,
+    #[serde(default)]
+    review_decision: Option<String>,
+    #[serde(default)]
+    additions: Option<u64>,
+    #[serde(default)]
+    deletions: Option<u64>,
+}
+
+impl GhPullRequest {
+    /// `None` for a state `gh` has not documented — dropping one row beats
+    /// failing the whole read over a host-side addition.
+    fn into_summary(self) -> Option<PullRequestSummary> {
+        let state = match self.state.as_str() {
+            "OPEN" => PullRequestState::Open,
+            "CLOSED" => PullRequestState::Closed,
+            "MERGED" => PullRequestState::Merged,
+            _ => return None,
+        };
+        let review_decision = match self.review_decision.as_deref() {
+            Some("APPROVED") => Some(PullRequestReviewDecision::Approved),
+            Some("CHANGES_REQUESTED") => Some(PullRequestReviewDecision::ChangesRequested),
+            Some("REVIEW_REQUIRED") => Some(PullRequestReviewDecision::ReviewRequired),
+            _ => None,
+        };
+        Some(PullRequestSummary {
+            number: self.number,
+            title: self.title,
+            url: self.url,
+            state,
+            is_draft: self.is_draft,
+            base_branch: self.base_ref_name,
+            updated_at: self.updated_at,
+            review_decision,
+            additions: self.additions,
+            deletions: self.deletions,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gh_rows_map_to_summaries() {
+        let json = br#"[
+            {"number": 3, "title": "oldest", "url": "https://github.com/o/r/pull/3",
+             "state": "MERGED", "isDraft": false, "baseRefName": "main",
+             "updatedAt": "2026-09-10T00:00:00Z", "reviewDecision": "APPROVED",
+             "additions": 5, "deletions": 2},
+            {"number": 7, "title": "wip", "url": "https://github.com/o/r/pull/7",
+             "state": "OPEN", "isDraft": true, "baseRefName": "main",
+             "updatedAt": null, "reviewDecision": "", "additions": null, "deletions": null},
+            {"number": 9, "title": "surprise", "url": "https://github.com/o/r/pull/9",
+             "state": "QUARANTINED", "isDraft": false}
+        ]"#;
+        let rows: Vec<GhPullRequest> = serde_json::from_slice(json).unwrap();
+        let summaries: Vec<_> = rows
+            .into_iter()
+            .filter_map(GhPullRequest::into_summary)
+            .collect();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].state, PullRequestState::Merged);
+        assert_eq!(
+            summaries[0].review_decision,
+            Some(PullRequestReviewDecision::Approved)
+        );
+        assert_eq!(summaries[0].additions, Some(5));
+        assert_eq!(summaries[1].state, PullRequestState::Open);
+        assert!(summaries[1].is_draft);
+        assert_eq!(summaries[1].review_decision, None);
+        assert_eq!(summaries[1].updated_at, None);
+    }
+}

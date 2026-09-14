@@ -703,6 +703,18 @@ sidebar.status_background:
   en: Waiting for background tasks
 sidebar.status_failed:
   en: Failed
+sidebar.pull_request_open:
+  en: Open
+sidebar.pull_request_draft:
+  en: Draft
+sidebar.pull_request_merged:
+  en: Merged
+sidebar.pull_request_closed:
+  en: Closed
+sidebar.pull_request:
+  en: "PR #%{number} — %{state}: %{title}"
+sidebar.pull_request_more:
+  en: "PR #%{number} — %{state}: %{title} (+%{count} more)"
 
 project.new_project:
   en: New project…

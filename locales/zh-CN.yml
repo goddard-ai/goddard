@@ -349,6 +349,13 @@ sidebar.status_working: 正在工作
 sidebar.status_waiting: 正在等待
 sidebar.status_background: 等待后台任务
 sidebar.status_failed: 失败
+sidebar.pull_request_open: 开放
+sidebar.pull_request_draft: 草稿
+sidebar.pull_request_merged: 已合并
+sidebar.pull_request_closed: 已关闭
+sidebar.pull_request: "PR #%{number} — %{state}: %{title}"
+sidebar.pull_request_more: "PR #%{number} — %{state}: %{title}(+%{count} 个)"
+
 project.new_project: 新建项目…
 project.no_project: 不使用项目
 project.no_project_name: 无项目

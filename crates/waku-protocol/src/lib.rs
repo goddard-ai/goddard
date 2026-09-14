@@ -58,4 +58,7 @@ pub use protocol::{
     WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
 pub use settings::DaemonSettings;
-pub use workspace::{WorkspaceOperation, WorkspaceResult};
+pub use workspace::{
+    PullRequestReviewDecision, PullRequestState, PullRequestSummary, WorkspaceOperation,
+    WorkspaceResult,
+};

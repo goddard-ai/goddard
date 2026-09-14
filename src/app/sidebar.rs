@@ -322,6 +322,144 @@ fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> 
     .filter(|branch| !branch.is_empty())
 }
 
+fn mix_str(hash: u64, value: &str) -> u64 {
+    value.bytes().fold(hash, |hash, byte| mix(hash, byte as u64))
+}
+
+fn sidebar_status_rank(status: SessionStatus) -> u64 {
+    match status {
+        SessionStatus::Idle => 0,
+        SessionStatus::Connecting => 1,
+        SessionStatus::Working => 2,
+        SessionStatus::Background => 3,
+        SessionStatus::Waiting => 4,
+        SessionStatus::Failed => 5,
+    }
+}
+
+/// The state a sidebar pull-request badge reports. `Draft` is its own shape
+/// because the glyph carries the state — color only reinforces it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SidebarPullRequestState {
+    Open,
+    Draft,
+    Merged,
+    Closed,
+}
+
+struct SidebarPullRequestBadge {
+    state: SidebarPullRequestState,
+    number: u64,
+    others: usize,
+    title: String,
+    url: String,
+}
+
+fn pull_request_class(
+    entry: &waku_client::PullRequestSummary,
+) -> SidebarPullRequestState {
+    match (entry.state, entry.is_draft) {
+        (waku_client::PullRequestState::Open, true) => SidebarPullRequestState::Draft,
+        (waku_client::PullRequestState::Open, false) => SidebarPullRequestState::Open,
+        (waku_client::PullRequestState::Merged, _) => SidebarPullRequestState::Merged,
+        (waku_client::PullRequestState::Closed, _) => SidebarPullRequestState::Closed,
+    }
+}
+
+/// Collapses a session's pull requests into the one badge its row shows: a
+/// state glyph for the aggregate — draft only when every one is a draft, open
+/// when any is, merged when all are, closed otherwise — plus the lowest
+/// number in that class, which is usually the pull request the session opened
+/// first. `others` counts the remainder, so `#123 +2` reads as "two more".
+fn sidebar_pull_request_badge(
+    entries: &[waku_client::PullRequestSummary],
+) -> Option<SidebarPullRequestBadge> {
+    if entries.is_empty() {
+        return None;
+    }
+    let all_draft = entries
+        .iter()
+        .all(|entry| entry.state == waku_client::PullRequestState::Open && entry.is_draft);
+    let state = if all_draft {
+        SidebarPullRequestState::Draft
+    } else if entries
+        .iter()
+        .any(|entry| entry.state == waku_client::PullRequestState::Open)
+    {
+        SidebarPullRequestState::Open
+    } else if entries
+        .iter()
+        .all(|entry| entry.state == waku_client::PullRequestState::Merged)
+    {
+        SidebarPullRequestState::Merged
+    } else {
+        SidebarPullRequestState::Closed
+    };
+    let primary = entries
+        .iter()
+        .filter(|entry| {
+            pull_request_class(entry) == state
+                || (state == SidebarPullRequestState::Open
+                    && entry.state == waku_client::PullRequestState::Open)
+        })
+        .min_by_key(|entry| entry.number)
+        .or_else(|| entries.iter().min_by_key(|entry| entry.number))?;
+    Some(SidebarPullRequestBadge {
+        state,
+        number: primary.number,
+        others: entries.len() - 1,
+        title: primary.title.clone(),
+        url: primary.url.clone(),
+    })
+}
+
+fn sidebar_pull_request_icon(state: SidebarPullRequestState) -> &'static str {
+    match state {
+        SidebarPullRequestState::Open => "icons/git-pull-request-arrow.svg",
+        SidebarPullRequestState::Draft => "icons/git-pull-request-draft.svg",
+        SidebarPullRequestState::Merged => "icons/git-merge.svg",
+        SidebarPullRequestState::Closed => "icons/git-pull-request-closed.svg",
+    }
+}
+
+fn sidebar_pull_request_color(theme: &Theme, state: SidebarPullRequestState) -> Hsla {
+    match state {
+        SidebarPullRequestState::Open => theme.success,
+        SidebarPullRequestState::Draft => theme.text_tertiary,
+        SidebarPullRequestState::Merged => theme.info,
+        SidebarPullRequestState::Closed => theme.danger,
+    }
+}
+
+fn sidebar_pull_request_state_label(state: SidebarPullRequestState) -> String {
+    match state {
+        SidebarPullRequestState::Open => tr!("sidebar.pull_request_open"),
+        SidebarPullRequestState::Draft => tr!("sidebar.pull_request_draft"),
+        SidebarPullRequestState::Merged => tr!("sidebar.pull_request_merged"),
+        SidebarPullRequestState::Closed => tr!("sidebar.pull_request_closed"),
+    }
+}
+
+fn sidebar_pull_request_tooltip(badge: &SidebarPullRequestBadge) -> String {
+    let state = sidebar_pull_request_state_label(badge.state);
+    if badge.others == 0 {
+        tr!(
+            "sidebar.pull_request",
+            number = badge.number,
+            state = state,
+            title = badge.title
+        )
+    } else {
+        tr!(
+            "sidebar.pull_request_more",
+            number = badge.number,
+            state = state,
+            title = badge.title,
+            count = badge.others
+        )
+    }
+}
+
 /// Compact "how long ago" for the sidebar: "just now", then one coarse unit —
 /// "5m", "3h", "420d". Days are the largest unit so a glance still reads as a
 /// count rather than a date.
@@ -1240,6 +1378,135 @@ impl Waku {
         .detach();
     }
 
+    /// Resolves each started session's pull requests on a background executor
+    /// through the daemon, so a sidebar frame only ever reads
+    /// `sidebar_pull_requests`. The fingerprint covers the inputs the scan
+    /// uses — the session set, their workspaces and branches, and status
+    /// transitions, since a finishing turn is the moment an agent's `gh pr
+    /// create` lands — plus a slow time bucket that catches host-side changes
+    /// (a review, a merge) no session event can see.
+    fn ensure_sidebar_pull_requests(&self, cx: &mut Context<Self>) {
+        const RESCAN_BUCKET_SECONDS: u64 = 300;
+
+        let mut fingerprint = 0xf1f9_9d5e_c7a3_b21d;
+        let mut targets: Vec<(Uuid, PathBuf, Option<String>)> = Vec::new();
+        for session in &self.state.sessions {
+            if !session.has_started() || session.archived_at.is_some() {
+                continue;
+            }
+            let (cwd, branch) = match &session.workspace {
+                SessionWorkspace::Worktree { path, branch, .. } => {
+                    (path.clone(), branch.clone())
+                }
+                SessionWorkspace::Local => match self
+                    .state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+                {
+                    Some(project) if !project.is_projectless() => (project.path.clone(), None),
+                    _ => continue,
+                },
+                SessionWorkspace::NewWorktree { .. } => continue,
+            };
+            fingerprint = mix_uuid(fingerprint, session.id);
+            fingerprint = mix(fingerprint, sidebar_status_rank(session.status));
+            match &branch {
+                Some(branch) => fingerprint = mix_str(fingerprint, branch),
+                None => fingerprint = mix(fingerprint, u64::MAX),
+            }
+            targets.push((session.id, cwd, branch));
+        }
+        fingerprint = mix(fingerprint, unix_time() / RESCAN_BUCKET_SECONDS);
+        if self.sidebar_pull_request_scan_fingerprint.get() == Some(fingerprint) {
+            return;
+        }
+        if targets.is_empty() {
+            self.sidebar_pull_request_scan_fingerprint
+                .set(Some(fingerprint));
+            self.sidebar_pull_requests.borrow_mut().clear();
+            return;
+        }
+        self.sidebar_pull_request_scan_fingerprint
+            .set(Some(fingerprint));
+        let generation = self
+            .sidebar_pull_request_scan_generation
+            .get()
+            .wrapping_add(1);
+        self.sidebar_pull_request_scan_generation.set(generation);
+
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let resolved = cx
+                .background_executor()
+                .spawn(async move {
+                    // Sessions on a shared local checkout resolve their branch
+                    // once per directory rather than once per session.
+                    let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
+                    for (_, cwd, branch) in &targets {
+                        if branch.is_none() && !branches.contains_key(cwd) {
+                            let resolved_branch = match workspace.request(
+                                waku_client::WorkspaceOperation::InspectBranches {
+                                    cwd: cwd.clone(),
+                                },
+                            ) {
+                                Ok(waku_client::WorkspaceResult::Branches {
+                                    snapshot: Some(snapshot),
+                                }) => snapshot.current,
+                                _ => None,
+                            };
+                            branches.insert(cwd.clone(), resolved_branch);
+                        }
+                    }
+                    // And each (directory, branch) pair asks the host once.
+                    let mut queries: HashMap<
+                        (PathBuf, String),
+                        Option<Vec<waku_client::PullRequestSummary>>,
+                    > = HashMap::new();
+                    let mut resolved = HashMap::new();
+                    for (session_id, cwd, branch) in targets {
+                        let branch = branch
+                            .or_else(|| branches.get(&cwd).cloned().flatten())
+                            .filter(|branch| !branch.is_empty());
+                        let Some(branch) = branch else {
+                            continue;
+                        };
+                        let entries = queries
+                            .entry((cwd.clone(), branch.clone()))
+                            .or_insert_with(|| {
+                                match workspace.request(
+                                    waku_client::WorkspaceOperation::ListPullRequests {
+                                        cwd,
+                                        head_branch: branch,
+                                    },
+                                ) {
+                                    Ok(waku_client::WorkspaceResult::PullRequests {
+                                        entries: Some(entries),
+                                    }) => Some(entries),
+                                    _ => None,
+                                }
+                            });
+                        if let Some(entries) = entries {
+                            resolved.insert(session_id, entries.clone());
+                        }
+                    }
+                    resolved
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.sidebar_pull_request_scan_generation.get() != generation {
+                    return;
+                }
+                *waku.sidebar_pull_requests.borrow_mut() = resolved
+                    .into_iter()
+                    .map(|(session_id, entries)| (session_id, Rc::new(entries)))
+                    .collect();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn render_sidebar(
         &self,
         width: f32,
@@ -1249,6 +1516,7 @@ impl Waku {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
         self.ensure_sidebar_checkout_statuses(cx);
+        self.ensure_sidebar_pull_requests(cx);
         let is_resizing = self
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
@@ -2210,6 +2478,11 @@ impl Waku {
         let menu = self.menu_handle(format!("session-{session_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
         let keyboard_menu = menu.clone();
+        let pull_request_badge = self
+            .sidebar_pull_requests
+            .borrow()
+            .get(&session_id)
+            .and_then(|entries| sidebar_pull_request_badge(entries));
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
             .w_full()
@@ -2340,6 +2613,34 @@ impl Waku {
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
                     .when(session.workspace.is_worktree(), |element| {
                         element.child(icon("icons/fork.svg", 12.5, theme.text_secondary))
+                    })
+                    .when_some(pull_request_badge, |element, badge| {
+                        let color = sidebar_pull_request_color(&theme, badge.state);
+                        let url = badge.url.clone();
+                        element.child(
+                            div()
+                                .id(SharedString::from(format!("session-pr-{session_id}")))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(px(3.0))
+                                .cursor_pointer()
+                                .child(icon(sidebar_pull_request_icon(badge.state), 12.0, color))
+                                .child(
+                                    div().text_size(sp(12.5)).text_color(color).child(
+                                        if badge.others == 0 {
+                                            format!("#{}", badge.number)
+                                        } else {
+                                            format!("#{} +{}", badge.number, badge.others)
+                                        },
+                                    ),
+                                )
+                                .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
+                                .on_click(move |_, _, cx| {
+                                    cx.open_url(&url);
+                                    cx.stop_propagation();
+                                }),
+                        )
                     })
                     .when(pinned, |element| {
                         element.child(icon(
@@ -3166,6 +3467,78 @@ mod tests {
             persisted_sidebar_branch_label(&worktree),
             Some("my-worktree")
         );
+    }
+
+    #[test]
+    fn pull_request_badge_reports_aggregate_state_and_oldest_in_class() {
+        use waku_client::PullRequestState;
+
+        fn entry(number: u64, state: PullRequestState, is_draft: bool) -> waku_client::PullRequestSummary {
+            waku_client::PullRequestSummary {
+                number,
+                title: format!("title {number}"),
+                url: format!("https://github.com/o/r/pull/{number}"),
+                state,
+                is_draft,
+                base_branch: "main".to_owned(),
+                updated_at: None,
+                review_decision: None,
+                additions: None,
+                deletions: None,
+            }
+        }
+
+        assert!(sidebar_pull_request_badge(&[]).is_none());
+
+        let badge = sidebar_pull_request_badge(&[entry(7, PullRequestState::Open, false)]).unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Open);
+        assert_eq!(badge.number, 7);
+        assert_eq!(badge.others, 0);
+
+        // Any open wins the aggregate; the badge number comes from the open
+        // class, not the lowest number overall.
+        let badge = sidebar_pull_request_badge(&[
+            entry(3, PullRequestState::Merged, false),
+            entry(9, PullRequestState::Open, false),
+            entry(5, PullRequestState::Open, false),
+        ])
+        .unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Open);
+        assert_eq!(badge.number, 5);
+        assert_eq!(badge.others, 2);
+
+        // Draft only when every entry is one.
+        let badge = sidebar_pull_request_badge(&[
+            entry(4, PullRequestState::Open, true),
+            entry(6, PullRequestState::Open, true),
+        ])
+        .unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Draft);
+        assert_eq!(badge.number, 4);
+
+        let badge = sidebar_pull_request_badge(&[
+            entry(4, PullRequestState::Open, true),
+            entry(6, PullRequestState::Closed, false),
+        ])
+        .unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Open);
+        assert_eq!(badge.number, 4);
+
+        let badge = sidebar_pull_request_badge(&[
+            entry(8, PullRequestState::Merged, false),
+            entry(2, PullRequestState::Merged, false),
+        ])
+        .unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Merged);
+        assert_eq!(badge.number, 2);
+
+        let badge = sidebar_pull_request_badge(&[
+            entry(8, PullRequestState::Merged, false),
+            entry(2, PullRequestState::Closed, false),
+        ])
+        .unwrap();
+        assert_eq!(badge.state, SidebarPullRequestState::Closed);
+        assert_eq!(badge.number, 2);
     }
 
     #[test]
