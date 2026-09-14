@@ -71,7 +71,8 @@ use crate::ui::{
     toggle_switch,
 };
 use crate::{
-    ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow,
+    AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
+    CloseWindow,
     ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
     ExitFileFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
     GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,

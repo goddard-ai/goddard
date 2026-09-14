@@ -107,6 +107,7 @@ actions!(
         ToggleSessionPin,
         CopySelection,
         CopyWorkingDirectory,
+        AddToChat,
         OpenFind,
         OpenFindReplace,
         CloseFind,
@@ -333,6 +334,12 @@ pub fn run() {
                 KeyBinding::new("enter", ConfirmProjectSwitch, Some("ProjectSwitcher")),
                 KeyBinding::new("escape", CancelProjectSwitch, Some("ProjectSwitcher")),
                 KeyBinding::new("secondary-l", FocusComposer, None),
+                // With the transcript focused — which a text selection
+                // guarantees — ⌘L is the "Add to chat" pill's shortcut. The
+                // action falls back to FocusComposer when no annotatable
+                // selection is on screen, so the chord keeps its global
+                // meaning everywhere else.
+                KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
                 KeyBinding::new("secondary-j", FocusTerminal, None),
                 KeyBinding::new("secondary-/", ToggleModelPicker, None),
                 KeyBinding::new("secondary-shift-t", ToggleWorkspace, None),

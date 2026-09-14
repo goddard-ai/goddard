@@ -205,7 +205,7 @@ impl Waku {
         self.apply_pending_transcript_search_reveal(window, cx);
         self.prune_transcript_annotations(cx);
         let search_bar = self.render_transcript_search_bar(chat_viewport_width, cx);
-        let annotation_offer = self.render_annotation_offer(cx);
+        let annotation_offer = self.render_annotation_offer(window, cx);
         let annotation_editor = self.render_annotation_editor(cx);
         let annotation_tooltip = self.render_annotation_tooltip(cx);
         let transcript_rows = self.active_transcript_rows().clone();

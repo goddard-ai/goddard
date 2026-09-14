@@ -25,6 +25,7 @@ use crate::md::render::{TranscriptSelection, text_range_bounds};
 use crate::md::selection::{Span, TranscriptAnnotation};
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
+use crate::ui::shortcut::ShortcutHint;
 
 use super::*;
 
@@ -206,6 +207,22 @@ impl Waku {
             .iter()
             .find(|annotation| annotation.id == annotation_id)?;
         self.spans_anchor(&annotation.spans)
+    }
+
+    /// ⌘L with the pill's selection on screen is the same as clicking it.
+    /// Without an annotatable selection the chord keeps its global meaning,
+    /// so the transcript's context binding forwards to FocusComposer.
+    pub(super) fn add_to_chat_action(
+        &mut self,
+        _: &AddToChat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.annotatable_selection().is_some() {
+            self.annotate_selection(window, cx);
+        } else {
+            self.focus_composer_action(&FocusComposer, window, cx);
+        }
     }
 
     /// Turn the settled selection into a new annotation and open its comment
@@ -421,10 +438,18 @@ impl Waku {
 
     /// The floating "Add to chat" pill over a settled assistant-message
     /// selection.
-    pub(super) fn render_annotation_offer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_annotation_offer(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let (_, spans) = self.annotatable_selection()?;
         let anchor = self.spans_anchor(&spans)?;
         let theme = Theme::current(cx);
+        // The chord sits on the transcript's key context, so resolve it as if
+        // the transcript were focused — true whenever the pill can show.
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window);
         let focus = self.transcript_control_focus("annotation-add-to-chat", cx);
         let button = div()
             .id("annotation-add-to-chat")
@@ -448,6 +473,9 @@ impl Waku {
             .focus_visible(|element| element.border_color(theme.accent))
             .child(icon("icons/compose.svg", 12.0, theme.text_secondary))
             .child(tr!("annotations.add_to_chat"))
+            .when_some(shortcut_label, |element, label| {
+                element.child(div().flex_none().text_color(theme.text_tertiary).child(label))
+            })
             // A mouse-down here must not reach the transcript's selection
             // listeners, which would clear the very selection being offered.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
