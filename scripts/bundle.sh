@@ -204,6 +204,7 @@ if [ "$codesign_identity" = "-" ]; then
   codesign --force --sign - "$sparkle_framework/Versions/B/Updater.app"
   codesign --force --sign - "$sparkle_framework"
   codesign --force --identifier "$bundle_identifier.js-repl" --sign - "$repl_executable"
+  codesign --force --identifier "$bundle_identifier.agent" --sign - "$agent_executable"
   if [ "$profile" = "release" ]; then
     codesign --force --identifier "$bundle_identifier.daemon" --sign - "$daemon_executable"
   fi
@@ -223,17 +224,20 @@ elif [ "$profile" = "release" ]; then
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
   codesign --force --options runtime --timestamp --identifier "$bundle_identifier.daemon" --sign "$codesign_identity" "$daemon_executable"
+  codesign --force --options runtime --timestamp --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
   codesign --force --options runtime --timestamp --sign "$codesign_identity" "$bundle"
 else
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Autoupdate"
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework/Versions/B/Updater.app"
   codesign --force --options runtime --sign "$codesign_identity" "$sparkle_framework"
   codesign --force --options runtime --identifier "$bundle_identifier.js-repl" --sign "$codesign_identity" "$repl_executable"
+  codesign --force --options runtime --identifier "$bundle_identifier.agent" --sign "$codesign_identity" "$agent_executable"
   codesign --force --options runtime --sign "$codesign_identity" "$bundle"
 fi
 if [ "$profile" = "release" ]; then
   codesign --verify --strict --verbose=2 "$repl_executable"
   codesign --verify --strict --verbose=2 "$daemon_executable"
+  codesign --verify --strict --verbose=2 "$agent_executable"
   codesign --verify --deep --strict --verbose=2 "$bundle"
 fi
 
