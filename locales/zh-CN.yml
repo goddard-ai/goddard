@@ -74,6 +74,9 @@ command_palette.no_resume_sessions_hint: 已在 Goddard 中的会话不会显示
 command_palette.could_not_load_sessions: 无法加载终端会话
 command_palette.loading_selected_session: 正在加载对话…
 command_palette.resume_failed: "无法恢复会话：%{error}"
+command_palette.hint_navigate: 导航
+command_palette.hint_select: 选择
+command_palette.hint_close: 关闭
 
 file_finder.placeholder: 按名称搜索文件…
 file_finder.loading: 正在加载文件…

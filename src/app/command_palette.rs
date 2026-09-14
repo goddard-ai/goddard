@@ -11,6 +11,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
 use super::*;
+use crate::ui::shortcut::ShortcutHint;
 
 actions!(
     waku_command_palette,
@@ -41,6 +42,7 @@ const RESULT_ROW_HEIGHT: f32 = 44.0;
 const CONTENT_RESULT_ROW_HEIGHT: f32 = 60.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 180.0;
 const RESULTS_BOTTOM_PADDING: f32 = 8.0;
+const FOOTER_HEIGHT: f32 = 30.0;
 const MAX_CARD_HEIGHT: f32 = 480.0;
 
 /// Bind list navigation beneath the focused one-line input. This is registered
@@ -183,7 +185,7 @@ pub(super) struct CommandPaletteItem {
     label: String,
     detail: Option<String>,
     icon: PaletteIcon,
-    shortcut: Option<&'static str>,
+    shortcut: Option<ShortcutHint>,
     action: PaletteAction,
     content_match: Option<crate::persistence::SessionMessageMatch>,
     search_text: String,
@@ -196,7 +198,7 @@ impl CommandPaletteItem {
         section: PaletteSection,
         label: String,
         icon: &'static str,
-        shortcut: Option<&'static str>,
+        shortcut: Option<ShortcutHint>,
         action: PaletteAction,
         keywords: &'static str,
         order: usize,
@@ -738,7 +740,7 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.new_task"),
                 "icons/pencil.svg",
-                Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
+                Some(ShortcutHint::action(&NewSession)),
                 PaletteAction::NewTask,
                 "new task session chat conversation start",
                 next(),
@@ -756,7 +758,7 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.open_project"),
                 "icons/folder.svg",
-                Some(crate::platform::primary_shortcut("⌘O", "Ctrl+O")),
+                Some(ShortcutHint::action(&NewProject)),
                 PaletteAction::OpenProject,
                 "open add folder project workspace repository repo",
                 next(),
@@ -771,7 +773,7 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("command_palette.choose_model"),
                 "icons/bot.svg",
-                Some(crate::platform::primary_shortcut("⌘/", "Ctrl+/")),
+                Some(ShortcutHint::action(&ToggleModelPicker)),
                 PaletteAction::ChooseModel,
                 "choose change select model provider agent",
                 next(),
@@ -791,7 +793,7 @@ impl Waku {
                 display_section(PaletteSection::Suggested),
                 tr!("menu.toggle_workspace"),
                 "icons/fork.svg",
-                Some(crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")),
+                Some(ShortcutHint::action(&ToggleWorkspace)),
                 PaletteAction::ToggleWorkspace,
                 "toggle switch workspace worktree local checkout draft",
                 next(),
@@ -802,7 +804,7 @@ impl Waku {
             PaletteSection::Commands,
             tr!("menu.focus_composer"),
             "icons/pencil.svg",
-            Some(crate::platform::primary_shortcut("⌘L", "Ctrl+L")),
+            Some(ShortcutHint::action(&FocusComposer)),
             PaletteAction::FocusComposer,
             "focus composer prompt input message",
             next(),
@@ -825,7 +827,7 @@ impl Waku {
                 PaletteSection::Commands,
                 tr!("menu.toggle_usage_panel"),
                 "icons/command.svg",
-                Some(crate::platform::primary_shortcut("⌘U", "Ctrl+U")),
+                Some(ShortcutHint::action(&ToggleUsagePanel)),
                 PaletteAction::ToggleUsage,
                 "toggle usage limits rate quota panel",
                 next(),
@@ -845,7 +847,7 @@ impl Waku {
                 PaletteSection::Commands,
                 tr!("command_palette.go_to_latest_unseen_completion"),
                 "icons/corner-down-right.svg",
-                Some(crate::platform::primary_shortcut("⌃`", "Ctrl+`")),
+                Some(ShortcutHint::action(&GoToLatestUnseenCompletion)),
                 PaletteAction::GoToLatestUnseenCompletion,
                 "go to latest most recent unseen unread completed finished failed turn task session jump navigate",
                 next(),
@@ -860,7 +862,7 @@ impl Waku {
                     "command_palette.show_sidebar"
                 }),
                 "icons/panel-left.svg",
-                Some(crate::platform::primary_shortcut("⌘B", "Ctrl+B")),
+                Some(ShortcutHint::action(&ToggleSidebar)),
                 PaletteAction::ToggleSidebar,
                 "toggle show hide left sidebar history tasks",
                 next(),
@@ -873,7 +875,7 @@ impl Waku {
                     "command_palette.show_right_panel"
                 }),
                 "icons/panel-right.svg",
-                Some(crate::platform::primary_shortcut("⌥⌘B", "Ctrl+Alt+B")),
+                Some(ShortcutHint::action(&ToggleRightPanel)),
                 PaletteAction::ToggleRightPanel,
                 "toggle show hide right panel files diff terminal browser",
                 next(),
@@ -967,8 +969,7 @@ impl Waku {
                 PaletteSection::Settings,
                 crate::i18n::translate(label_key),
                 icon,
-                (page == SettingsPage::General)
-                    .then_some(crate::platform::primary_shortcut("⌘,", "Ctrl+,")),
+                (page == SettingsPage::General).then_some(ShortcutHint::action(&OpenSettings)),
                 PaletteAction::OpenSettings(page),
                 keywords,
                 next(),
@@ -1796,8 +1797,8 @@ impl Waku {
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
-                .min((card_max_height - SEARCH_ROW_HEIGHT).max(0.0));
-        let card_height = SEARCH_ROW_HEIGHT + results_height;
+                .min((card_max_height - SEARCH_ROW_HEIGHT - FOOTER_HEIGHT).max(0.0));
+        let card_height = SEARCH_ROW_HEIGHT + results_height + FOOTER_HEIGHT;
 
         let mut results = div()
             .id("command-palette-results")
@@ -1980,7 +1981,7 @@ impl Waku {
                     item.detail.clone()
                 };
                 let content_match = item.content_match.clone();
-                let shortcut = item.shortcut;
+                let shortcut = item.shortcut.as_ref().and_then(|hint| hint.resolve(window));
                 results = results.child(
                     div()
                         .id(SharedString::from(format!("command-palette-row-{index}")))
@@ -2164,7 +2165,34 @@ impl Waku {
                                 .child(self.command_palette.search.clone()),
                         ),
                 )
-                .child(results);
+                .child(results)
+                .child(
+                    div()
+                        .h(px(FOOTER_HEIGHT))
+                        .flex_none()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .px(px(19.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(14.0))
+                        .children(
+                            [
+                                ("↑↓", tr!("command_palette.hint_navigate")),
+                                ("↵", tr!("command_palette.hint_select")),
+                                ("esc", tr!("command_palette.hint_close")),
+                            ]
+                            .map(|(keys, label)| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(5.0))
+                                    .text_size(sp(12.0))
+                                    .child(div().text_color(theme.text_tertiary).child(keys))
+                                    .child(div().text_color(theme.text_ghost).child(label))
+                            }),
+                        ),
+                );
 
         let scrim = if theme.is_dark {
             gpui::hsla(0.0, 0.0, 0.0, 0.26)

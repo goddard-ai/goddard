@@ -2916,6 +2916,9 @@ impl Render for TextInput {
                     }
                 };
 
+                // The card owns focus while the menu is open, so the field's
+                // own shortcuts resolve against its focus handle instead.
+                let input_focus = context_menu_input.read(cx).focus();
                 vec![
                     MenuItem::new(
                         tr!("menu.cut"),
@@ -2923,6 +2926,7 @@ impl Render for TextInput {
                             input.cut(&Cut, window, cx)
                         }),
                     )
+                    .shortcut_action_in(&Cut, &input_focus)
                     .disabled(!has_selection),
                     MenuItem::new(
                         tr!("menu.copy"),
@@ -2930,6 +2934,7 @@ impl Render for TextInput {
                             input.copy(&Copy, window, cx)
                         }),
                     )
+                    .shortcut_action_in(&Copy, &input_focus)
                     .disabled(!has_selection),
                     MenuItem::new(
                         tr!("menu.paste"),
@@ -2937,6 +2942,7 @@ impl Render for TextInput {
                             input.paste(&Paste, window, cx)
                         }),
                     )
+                    .shortcut_action_in(&Paste, &input_focus)
                     .disabled(!can_paste),
                     MenuItem::Separator,
                     MenuItem::new(
@@ -2945,6 +2951,7 @@ impl Render for TextInput {
                             input.select_all(&SelectAll, window, cx)
                         }),
                     )
+                    .shortcut_action_in(&SelectAll, &input_focus)
                     .disabled(!has_content || all_selected),
                 ]
             },

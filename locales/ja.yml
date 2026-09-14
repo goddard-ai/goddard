@@ -76,6 +76,9 @@ command_palette.no_resume_sessions_hint: Goddard にすでにあるセッショ�
 command_palette.could_not_load_sessions: ターミナルセッションを読み込めませんでした
 command_palette.loading_selected_session: 会話を読み込み中…
 command_palette.resume_failed: "セッションを再開できませんでした：%{error}"
+command_palette.hint_navigate: 移動
+command_palette.hint_select: 選択
+command_palette.hint_close: 閉じる
 
 file_finder.placeholder: ファイル名で検索…
 file_finder.loading: ファイルを読み込み中…

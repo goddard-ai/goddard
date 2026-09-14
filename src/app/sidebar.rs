@@ -485,6 +485,10 @@ impl Waku {
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_action(
+                tr!("menu.toggle_sidebar"),
+                &ToggleSidebar,
+            ))
             .child(icon("icons/panel-left.svg", 14.0, theme.text_tertiary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
@@ -518,9 +522,10 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
-            .tooltip(Tooltip::text(tr!(
-                "command_palette.go_to_latest_unseen_completion"
-            )))
+            .tooltip(Tooltip::text_with_action(
+                tr!("command_palette.go_to_latest_unseen_completion"),
+                &GoToLatestUnseenCompletion,
+            ))
             .when(!enabled, |element| element.opacity(0.35))
             .when(enabled, |element| {
                 element
@@ -982,7 +987,10 @@ impl Waku {
                     .cursor_default()
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text(tr_cow!("common.settings")))
+                    .tooltip(Tooltip::text_with_action(
+                        tr_cow!("common.settings"),
+                        &OpenSettings,
+                    ))
                     .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_settings_action(&OpenSettings, window, cx);
@@ -1546,7 +1554,7 @@ impl Waku {
                         })
                         .hover(|style| style.bg(theme.overlay))
                         .active(|style| style.bg(theme.overlay_strong))
-                        .tooltip(Tooltip::text(tr!("menu.new_task")))
+                        .tooltip(Tooltip::text_with_action(tr!("menu.new_task"), &NewSession))
                         .child(icon("icons/compose.svg", 14.0, theme.text_secondary))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -2161,6 +2169,7 @@ impl Waku {
                                     .update(cx, |waku, cx| waku.toggle_session_pin(session_id, cx));
                             },
                         )
+                        .shortcut_action(&ToggleSessionPin)
                         .icon(if pinned {
                             "icons/pin-off.svg"
                         } else {
@@ -2171,12 +2180,14 @@ impl Waku {
                                 waku.copy_session_working_directory(session_id, cx);
                             });
                         })
+                        .shortcut_action(&CopyWorkingDirectory)
                         .icon("icons/copy.svg"),
                         MenuItem::new(tr!("session.archive"), move |window, cx| {
                             let _ = archive_waku.update(cx, |waku, cx| {
                                 waku.archive_session(session_id, window, cx)
                             });
                         })
+                        .shortcut_action(&ArchiveSession)
                         .icon("icons/archive.svg"),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.remove"), move |window, cx| {

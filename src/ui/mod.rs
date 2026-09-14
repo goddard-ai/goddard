@@ -8,11 +8,13 @@ use gpui::{
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
+pub mod shortcut;
 pub mod text_field;
 pub mod tooltip;
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
+use crate::ui::shortcut::ShortcutHint;
 
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI
@@ -296,6 +298,8 @@ pub struct MenuChip {
     badge: Option<(&'static str, Hsla)>,
     label: SharedString,
     tooltip: Option<SharedString>,
+    /// A shortcut rendered dim inside the tooltip.
+    shortcut: Option<ShortcutHint>,
     caret: bool,
     outlined: bool,
     selected: bool,
@@ -312,6 +316,7 @@ impl MenuChip {
             badge: None,
             label: SharedString::default(),
             tooltip: None,
+            shortcut: None,
             caret: true,
             outlined: false,
             selected: false,
@@ -381,6 +386,13 @@ impl MenuChip {
         self.tooltip = Some(tooltip.into());
         self
     }
+
+    /// Resolve `action`'s binding and show it inside the tooltip. Does
+    /// nothing without `.tooltip(..)` — a chip with no label shows no hint.
+    pub fn shortcut_action(mut self, action: &dyn gpui::Action) -> Self {
+        self.shortcut = Some(ShortcutHint::action(action));
+        self
+    }
 }
 
 impl Styled for MenuChip {
@@ -405,9 +417,14 @@ impl RenderOnce for MenuChip {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(cx);
         let badge = self.badge;
-        let base = match self.tooltip {
-            Some(label) => self.base.tooltip(tooltip::Tooltip::text(label)),
-            None => self.base,
+        let base = match (self.tooltip, self.shortcut) {
+            (Some(label), Some(hint)) => self.base.tooltip(move |window, cx| {
+                tooltip::Tooltip::new(label.clone())
+                    .shortcut(hint.clone())
+                    .build(window, cx)
+            }),
+            (Some(label), None) => self.base.tooltip(tooltip::Tooltip::text(label)),
+            (None, _) => self.base,
         };
         base.h(self
             .height

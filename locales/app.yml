@@ -150,6 +150,12 @@ command_palette.loading_selected_session:
   en: Loading conversation…
 command_palette.resume_failed:
   en: "Couldn’t resume session: %{error}"
+command_palette.hint_navigate:
+  en: navigate
+command_palette.hint_select:
+  en: select
+command_palette.hint_close:
+  en: close
 
 file_finder.placeholder:
   en: Search files by name…

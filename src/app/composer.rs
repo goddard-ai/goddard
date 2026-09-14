@@ -1032,6 +1032,8 @@ impl Waku {
                     provider_color(&theme, provider).opacity(0.9),
                 )
                 .label(selected_model_name)
+                .tooltip(tr!("command_palette.choose_model"))
+                .shortcut_action(&ToggleModelPicker)
         };
 
         popover(
@@ -2632,7 +2634,10 @@ impl Waku {
                         theme.text_secondary,
                     ))
                     .child(tr!("composer.steer"))
-                    .tooltip(Tooltip::text(tr!("composer.steer_current")))
+                    .tooltip(Tooltip::text_with_action(
+                        tr!("composer.steer_current"),
+                        &crate::input::SubmitSteer,
+                    ))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
                         this.steer_queued_message(session_id, message_id, cx);

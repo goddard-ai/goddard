@@ -80,6 +80,7 @@ pub fn init(cx: &mut App) {
 
 use crate::theme::{Theme, sp};
 use crate::ui::icon;
+use crate::ui::shortcut::ShortcutHint;
 
 /// One row of a menu.
 #[derive(Clone)]
@@ -95,6 +96,8 @@ pub enum MenuItem {
         /// Shown greyed and inert. Preferred over omitting the row when the
         /// action is temporarily unavailable, so the menu keeps a stable shape.
         disabled: bool,
+        /// Right-aligned shortcut hint, resolved at render.
+        shortcut: Option<ShortcutHint>,
         #[allow(clippy::type_complexity)]
         on_click: Rc<dyn Fn(&mut Window, &mut App)>,
     },
@@ -131,6 +134,7 @@ impl MenuItem {
             image: None,
             selected: false,
             disabled: false,
+            shortcut: None,
             on_click: Rc::new(on_click),
         }
     }
@@ -186,6 +190,31 @@ impl MenuItem {
     pub fn image(mut self, value: std::sync::Arc<gpui::Image>) -> Self {
         if let Self::Entry { image, .. } = &mut self {
             *image = Some(value);
+        }
+        self
+    }
+
+    /// An authored shortcut label, for chords the keymap cannot see.
+    pub fn shortcut(mut self, label: impl Into<SharedString>) -> Self {
+        if let Self::Entry { shortcut, .. } = &mut self {
+            *shortcut = Some(ShortcutHint::text(label));
+        }
+        self
+    }
+
+    /// The row's shortcut, resolved from the live keymap at render.
+    pub fn shortcut_action(mut self, action: &dyn gpui::Action) -> Self {
+        if let Self::Entry { shortcut, .. } = &mut self {
+            *shortcut = Some(ShortcutHint::action(action));
+        }
+        self
+    }
+
+    /// Like `shortcut_action`, resolved as if `focus` held focus — for rows
+    /// acting on a field while the open menu card owns it instead.
+    pub fn shortcut_action_in(mut self, action: &dyn gpui::Action, focus: &FocusHandle) -> Self {
+        if let Self::Entry { shortcut, .. } = &mut self {
+            *shortcut = Some(ShortcutHint::action_in(action, focus));
         }
         self
     }
@@ -1144,12 +1173,19 @@ fn render_menu_item(
             image,
             selected,
             disabled,
+            shortcut,
             on_click,
         } => {
             let color = match (disabled, selected) {
                 (true, _) => theme.text_ghost,
                 (false, true) => theme.text,
                 (false, false) => theme.text_secondary,
+            };
+            let shortcut_label = shortcut.and_then(|hint| hint.resolve(window));
+            let shortcut_color = if disabled {
+                theme.text_ghost
+            } else {
+                theme.text_tertiary
             };
             let entry = row(
                 index,
@@ -1167,6 +1203,9 @@ fn render_menu_item(
                 element.child(img(image).size(px(16.0)).flex_none())
             })
             .child(div().flex_1().min_w_0().truncate().child(label))
+            .when_some(shortcut_label, |element, label| {
+                element.child(div().flex_none().text_color(shortcut_color).child(label))
+            })
             .when(selected, |element| {
                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
             });

@@ -2211,7 +2211,11 @@ impl Waku {
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon("icons/panel-right.svg", 14.0, theme.text_tertiary))
-            .tooltip(|window, cx| Tooltip::new(tr!("right_panel.toggle")).build(window, cx))
+            .tooltip(|window, cx| {
+                Tooltip::new(tr!("right_panel.toggle"))
+                    .action(&ToggleRightPanel)
+                    .build(window, cx)
+            })
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })

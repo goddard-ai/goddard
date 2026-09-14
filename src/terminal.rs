@@ -1325,6 +1325,8 @@ impl Render for TerminalView {
                 let copy_terminal = context_terminal.clone();
                 let paste_terminal = context_terminal.clone();
                 let select_all_terminal = context_terminal.clone();
+                // The chords are hand-rolled in `on_key_down` rather than
+                // registered as bindings, so these labels are authored text.
                 vec![
                     MenuItem::new(tr!("menu.copy"), move |_, cx| {
                         let selected_text = { copy_terminal.read(cx).selected_text() };
@@ -1332,6 +1334,7 @@ impl Render for TerminalView {
                             cx.write_to_clipboard(ClipboardItem::new_string(text));
                         }
                     })
+                    .shortcut(crate::platform::primary_shortcut("⌘C", "Ctrl+Shift+C"))
                     .disabled(!has_selection),
                     MenuItem::new(tr!("menu.paste"), move |_, cx| {
                         let Some(text) = cx.read_from_clipboard().and_then(|item| item.text())
@@ -1340,11 +1343,13 @@ impl Render for TerminalView {
                         };
                         paste_terminal.update(cx, |terminal, cx| terminal.paste(text, cx));
                     })
+                    .shortcut(crate::platform::primary_shortcut("⌘V", "Ctrl+Shift+V"))
                     .disabled(!can_paste),
                     MenuItem::Separator,
                     MenuItem::new(tr!("menu.select_all"), move |_, cx| {
                         select_all_terminal.update(cx, |terminal, cx| terminal.select_all(cx));
                     })
+                    .shortcut(crate::platform::primary_shortcut("⌘A", "Ctrl+Shift+A"))
                     .disabled(!has_session),
                 ]
             },
