@@ -722,6 +722,57 @@ impl Waku {
                         },
                     )),
             )
+            .when(cfg!(target_os = "macos"), |element| {
+                // The platform recognizer reads the trackpad's touch stream,
+                // which macOS only hands over when no system gesture claims
+                // three-finger horizontal swipes.
+                let enabled = self.state.three_finger_swipe_navigation;
+                element.child(
+                    div()
+                        .mt(px(15.0))
+                        .w_full()
+                        .min_h(px(60.0))
+                        .px(px(20.0))
+                        .py(px(12.0))
+                        .rounded(px(13.0))
+                        .bg(theme.raised)
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_size(sp(13.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(tr!("settings.three_finger_swipe_navigation")),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!(
+                                            "settings.three_finger_swipe_navigation_description"
+                                        )),
+                                ),
+                        )
+                        .child(toggle_switch(
+                            "three-finger-swipe-toggle",
+                            enabled,
+                            false,
+                            theme,
+                            cx,
+                            move |this, window, cx| {
+                                this.set_three_finger_swipe_navigation(!enabled, window, cx)
+                            },
+                        )),
+                )
+            })
             .child({
                 let enabled = self.state.completion_sound_enabled;
                 let selected_sound = self.state.completion_sound;
@@ -4262,6 +4313,21 @@ impl Waku {
         }
         self.state.sidebar_transparency = transparent;
         crate::theme::apply_theme_preference(self.state.theme, transparent, window, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_three_finger_swipe_navigation(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.three_finger_swipe_navigation == enabled {
+            return;
+        }
+        self.state.three_finger_swipe_navigation = enabled;
+        crate::platform::set_trackpad_navigation_swipe_enabled(window, enabled);
         self.save();
         cx.notify();
     }

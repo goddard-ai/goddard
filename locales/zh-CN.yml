@@ -103,7 +103,7 @@ settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
 settings.commands: 命令
-settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex markdown 预览 文件 渲染 源码 preview 声音 提示音 通知 完成 回合 sound audio notification
+settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex markdown 预览 文件 渲染 源码 preview 声音 提示音 通知 完成 回合 sound audio notification 触控板 轻扫 三指 手势 导航 后退 前进 trackpad swipe gesture
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
@@ -243,6 +243,8 @@ settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提�
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
 settings.sync_with_merge: 同步更改时使用合并
 settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
+settings.three_finger_swipe_navigation: 三指轻扫切换任务
+settings.three_finger_swipe_navigation_description: 在触控板上用三指向左或向右轻扫即可在任务之间切换。需在系统设置 → 触控板中将“在全屏 App 之间轻扫”设为四指。
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音

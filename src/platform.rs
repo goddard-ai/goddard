@@ -682,6 +682,16 @@ pub fn set_sidebar_material_width(window: &Window, width: f32) {
 #[cfg(not(target_os = "macos"))]
 pub fn set_sidebar_material_width(_: &Window, _: f32) {}
 
+/// Opt-in three-finger trackpad swipe for back/forward, recognized from the
+/// window's touch stream by the platform layer.
+#[cfg(target_os = "macos")]
+pub fn set_trackpad_navigation_swipe_enabled(window: &Window, enabled: bool) {
+    window.set_trackpad_navigation_swipe_enabled(enabled);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_trackpad_navigation_swipe_enabled(_: &Window, _: bool) {}
+
 /// Follow macOS when `dark` is `None`, otherwise force the native titlebar,
 /// traffic lights, menus, and vibrancy to the selected appearance.
 #[cfg(target_os = "macos")]

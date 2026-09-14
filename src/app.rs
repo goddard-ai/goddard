@@ -2409,6 +2409,10 @@ impl Waku {
         }
         crate::theme::apply_theme_preference(state.theme, state.sidebar_transparency, window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
+        crate::platform::set_trackpad_navigation_swipe_enabled(
+            window,
+            state.three_finger_swipe_navigation,
+        );
         let project_paths = state
             .projects
             .iter()

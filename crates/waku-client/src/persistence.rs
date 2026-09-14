@@ -458,6 +458,9 @@ pub struct AppSettings {
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
+    /// macOS-only: move back and forward between tasks with a three-finger
+    /// horizontal trackpad swipe.
+    pub three_finger_swipe_navigation: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -490,6 +493,7 @@ impl Default for AppSettings {
             open_at_last_prompt: true,
             sync_with_merge: false,
             sidebar_transparency: true,
+            three_finger_swipe_navigation: false,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -653,6 +657,10 @@ pub struct PersistedState {
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
     pub sidebar_transparency: bool,
+    /// macOS-only, opt-in: move back and forward between tasks with a
+    /// three-finger horizontal trackpad swipe.
+    #[serde(default)]
+    pub three_finger_swipe_navigation: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -744,6 +752,7 @@ impl PersistedState {
             open_at_last_prompt: true,
             sync_with_merge: false,
             sidebar_transparency: true,
+            three_finger_swipe_navigation: false,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             completion_sound_enabled: false,
@@ -922,6 +931,7 @@ impl PersistedState {
             open_at_last_prompt: self.open_at_last_prompt,
             sync_with_merge: self.sync_with_merge,
             sidebar_transparency: self.sidebar_transparency,
+            three_finger_swipe_navigation: self.three_finger_swipe_navigation,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             completion_sound_enabled: self.completion_sound_enabled,
@@ -970,6 +980,7 @@ impl PersistedState {
         self.open_at_last_prompt = settings.open_at_last_prompt;
         self.sync_with_merge = settings.sync_with_merge;
         self.sidebar_transparency = settings.sidebar_transparency;
+        self.three_finger_swipe_navigation = settings.three_finger_swipe_navigation;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.completion_sound_enabled = settings.completion_sound_enabled;
@@ -1569,6 +1580,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(restored.sync_with_merge);
+    }
+
+    #[test]
+    fn three_finger_swipe_navigation_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.three_finger_swipe_navigation);
+        let mut state = PersistedState::empty();
+        assert!(!state.three_finger_swipe_navigation);
+        state.three_finger_swipe_navigation = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["three_finger_swipe_navigation"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("three_finger_swipe_navigation")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.three_finger_swipe_navigation);
     }
 
     #[test]
