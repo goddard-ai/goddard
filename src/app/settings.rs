@@ -669,6 +669,9 @@ impl Waku {
                                     });
                                 })
                                 .selected(sound == selected_sound)
+                                .on_highlight(move |_, _| {
+                                    crate::platform::play_completion_sound(sound, volume);
+                                })
                             })
                             .collect()
                     },
