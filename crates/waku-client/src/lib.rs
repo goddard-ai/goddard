@@ -27,6 +27,7 @@ pub mod git_branch {
 
 pub mod git_commit {
     pub use waku_protocol::git::AgentInvocation;
+    pub use waku_protocol::git::CheckoutStatus;
     pub use waku_protocol::git::CommitSnapshot as Snapshot;
 }
 

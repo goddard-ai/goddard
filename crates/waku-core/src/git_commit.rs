@@ -16,7 +16,7 @@ use anyhow::{Context as _, anyhow, bail};
 use uuid::Uuid;
 
 use crate::model::ProviderKind;
-pub use waku_protocol::git::{AgentInvocation, CommitSnapshot as Snapshot};
+pub use waku_protocol::git::{AgentInvocation, CheckoutStatus, CommitSnapshot as Snapshot};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 const AGENT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -79,6 +79,31 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Snapshot> {
         has_unstaged,
         can_push,
     })
+}
+
+/// Dirty flag plus unpushed-commit count for sidebar badges — two cheap Git
+/// invocations, no diff numstats. `Ok(None)` outside a work tree.
+pub fn checkout_status(cwd: &Path) -> anyhow::Result<Option<CheckoutStatus>> {
+    if !git_optional_stdout(cwd, &["rev-parse", "--is-inside-work-tree"])?
+        .is_some_and(|answer| answer == "true")
+    {
+        return Ok(None);
+    }
+    let status = git_stdout(cwd, &["status", "--porcelain=v1", "--untracked-files=all"])?;
+    // A remote-tracking ref may not exist for this branch, so count commits
+    // unreachable from every remote rather than only `@{upstream}..HEAD`.
+    // Without a remote there is nothing to push to and the count is moot.
+    let unpushed_commits = if git_stdout(cwd, &["remote"])?.is_empty() {
+        0
+    } else {
+        git_stdout(cwd, &["rev-list", "--count", "HEAD", "--not", "--remotes"])?
+            .parse::<u64>()
+            .unwrap_or(0)
+    };
+    Ok(Some(CheckoutStatus {
+        uncommitted_changes: !status.is_empty(),
+        unpushed_commits,
+    }))
 }
 
 pub fn generate_message(
@@ -685,6 +710,36 @@ mod tests {
         run_git(&root, &["add", "."]);
         run_git(&root, &["commit", "-m", "initial"]);
         root
+    }
+
+    #[test]
+    fn checkout_status_reports_dirt_and_unpushed_commits() {
+        let root = repository();
+        let status = checkout_status(&root).unwrap().unwrap();
+        assert!(!status.uncommitted_changes);
+        // No remote configured: nothing can be pushed, so no count.
+        assert_eq!(status.unpushed_commits, 0);
+
+        fs::write(root.join("new.txt"), "untracked\n").unwrap();
+        assert!(checkout_status(&root).unwrap().unwrap().uncommitted_changes);
+
+        run_git(
+            &root,
+            &["remote", "add", "origin", "https://example.com/repo.git"],
+        );
+        run_git(&root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "second"]);
+        let status = checkout_status(&root).unwrap().unwrap();
+        assert!(!status.uncommitted_changes);
+        assert_eq!(status.unpushed_commits, 1);
+    }
+
+    #[test]
+    fn checkout_status_is_none_outside_a_repository() {
+        let root = std::env::temp_dir().join(format!("waku-status-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(checkout_status(&root).unwrap().is_none());
     }
 
     #[test]

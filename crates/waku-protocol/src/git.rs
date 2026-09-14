@@ -31,6 +31,17 @@ impl BranchSnapshot {
     }
 }
 
+/// Sidebar-grade checkout status: whether the working tree is dirty and how
+/// many commits on HEAD are not reachable from any remote-tracking ref.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct CheckoutStatus {
+    /// Staged, unstaged, or untracked changes are present.
+    pub uncommitted_changes: bool,
+    /// Commits on HEAD unreachable from every remote ref; always `0` when the
+    /// repository has no remote configured.
+    pub unpushed_commits: u64,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct CommitSnapshot {
     pub branch: String,

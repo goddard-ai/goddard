@@ -1640,6 +1640,14 @@ pub struct Waku {
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
     sidebar_branch_scan_fingerprint: Cell<Option<u64>>,
     sidebar_branch_scan_generation: Cell<u64>,
+    /// Dirty flag + unpushed commit count per session checkout or worktree
+    /// path, resolved together on a background executor so sidebar rows only
+    /// read memory. Git state drifts without any session-set change, so the
+    /// scan also reruns on a cadence — `sidebar_checkout_scanned_at`.
+    sidebar_checkout_statuses: RefCell<HashMap<PathBuf, crate::git_commit::CheckoutStatus>>,
+    sidebar_checkout_scan_fingerprint: Cell<Option<u64>>,
+    sidebar_checkout_scan_generation: Cell<u64>,
+    sidebar_checkout_scanned_at: Cell<Option<Instant>>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
@@ -3311,6 +3319,10 @@ impl Waku {
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
+                sidebar_checkout_statuses: RefCell::new(HashMap::new()),
+                sidebar_checkout_scan_fingerprint: Cell::new(None),
+                sidebar_checkout_scan_generation: Cell::new(0),
+                sidebar_checkout_scanned_at: Cell::new(None),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),

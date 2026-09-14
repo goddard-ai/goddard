@@ -5,7 +5,9 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::composer::{FileEntry, SlashCommand};
-use crate::git::{AgentInvocation, BranchSnapshot, CommitSnapshot, CreatedWorktree};
+use crate::git::{
+    AgentInvocation, BranchSnapshot, CheckoutStatus, CommitSnapshot, CreatedWorktree,
+};
 use crate::model::{Checkpoint, ProviderKind};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -140,6 +142,12 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    /// Lightweight dirty/unpushed status for sidebar badges; cheaper than
+    /// `InspectCommit`, which also computes diff numstats.
+    InspectCheckoutStatus {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
     GenerateCommitMessage {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -269,6 +277,10 @@ pub enum WorkspaceResult {
     },
     CommitSnapshot {
         snapshot: CommitSnapshot,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    CheckoutStatus {
+        status: Option<CheckoutStatus>,
     },
     CommitMessage {
         message: String,

@@ -141,6 +141,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },
+        WorkspaceOperation::InspectCheckoutStatus { cwd } => WorkspaceResult::CheckoutStatus {
+            status: crate::git_commit::checkout_status(&cwd)?,
+        },
         WorkspaceOperation::GenerateCommitMessage {
             cwd,
             include_unstaged,

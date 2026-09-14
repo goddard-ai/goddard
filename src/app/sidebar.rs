@@ -222,6 +222,9 @@ const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
+/// Git status drifts without any session-set change, so checkout-status scans
+/// rerun on this cadence in addition to path-set fingerprint changes.
+const SIDEBAR_CHECKOUT_STATUS_RESCAN: Duration = Duration::from_secs(10);
 
 /// The session row's trailing time: how long ago the agent last replied,
 /// shown through a live turn too. A session that has never replied shows
@@ -1111,6 +1114,76 @@ impl Waku {
         }
     }
 
+    /// Dirty flag + unpushed commit count for every started session's checkout
+    /// or worktree, resolved in one background pass like the branch labels.
+    /// Rows read only `sidebar_checkout_statuses`.
+    fn ensure_sidebar_checkout_statuses(&self, cx: &mut Context<Self>) {
+        let mut paths = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.has_started())
+            .filter_map(|session| self.workspace_path_for_session(session))
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths.dedup();
+
+        let mut fingerprint = 0xc8ec_07a7_5a7a_5ca1;
+        for path in &paths {
+            for byte in path.as_os_str().as_encoded_bytes() {
+                fingerprint = mix(fingerprint, u64::from(*byte));
+            }
+            fingerprint = mix(fingerprint, 0xff);
+        }
+        let rescan_due = self
+            .sidebar_checkout_scanned_at
+            .get()
+            .is_none_or(|instant| instant.elapsed() >= SIDEBAR_CHECKOUT_STATUS_RESCAN);
+        if self.sidebar_checkout_scan_fingerprint.get() == Some(fingerprint) && !rescan_due {
+            return;
+        }
+        self.sidebar_checkout_scan_fingerprint.set(Some(fingerprint));
+        self.sidebar_checkout_scanned_at.set(Some(Instant::now()));
+        let generation = self.sidebar_checkout_scan_generation.get().wrapping_add(1);
+        self.sidebar_checkout_scan_generation.set(generation);
+
+        if paths.is_empty() {
+            self.sidebar_checkout_statuses.borrow_mut().clear();
+            return;
+        }
+
+        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |waku, cx| {
+            let statuses = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut statuses = HashMap::new();
+                    for path in paths {
+                        if let Ok(waku_client::WorkspaceResult::CheckoutStatus {
+                            status: Some(status),
+                        }) = workspace.request(
+                            waku_client::WorkspaceOperation::InspectCheckoutStatus {
+                                cwd: path.clone(),
+                            },
+                        ) {
+                            statuses.insert(path, status);
+                        }
+                    }
+                    statuses
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.sidebar_checkout_scan_generation.get() != generation {
+                    return;
+                }
+                *waku.sidebar_checkout_statuses.borrow_mut() = statuses;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn render_sidebar(
         &self,
         width: f32,
@@ -1119,6 +1192,7 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
+        self.ensure_sidebar_checkout_statuses(cx);
         let is_resizing = self
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
@@ -1941,6 +2015,13 @@ impl Waku {
             ))
         };
         let has_detail_label = detail_label.is_some();
+        let checkout_status = if session.has_started() {
+            self.workspace_path_for_session(session).and_then(|path| {
+                self.sidebar_checkout_statuses.borrow().get(path).copied()
+            })
+        } else {
+            None
+        };
         let detail_icon = if grouped_by_project {
             "icons/git-branch.svg"
         } else if project.is_some_and(Project::is_projectless) {
@@ -2080,12 +2161,51 @@ impl Waku {
                             .child(icon(detail_icon, 12.5, theme.text_tertiary))
                             .child(
                                 div()
-                                    .flex_1()
                                     .min_w_0()
-                                    .truncate()
+                                    .flex()
+                                    .items_center()
                                     .text_color(theme.text_tertiary)
-                                    .child(label),
+                                    .child(div().min_w_0().truncate().child(label))
+                                    .when(
+                                        checkout_status.is_some_and(|status| {
+                                            status.uncommitted_changes
+                                        }),
+                                        |element| {
+                                            element.child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_color(theme.text_ghost)
+                                                    .child("*"),
+                                            )
+                                        },
+                                    ),
                             )
+                            .when_some(
+                                checkout_status
+                                    .map(|status| status.unpushed_commits)
+                                    .filter(|count| *count > 0),
+                                |element, count| {
+                                    element.child(
+                                        div()
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(2.0))
+                                            .child(icon(
+                                                "icons/arrow-up.svg",
+                                                12.0,
+                                                theme.text_tertiary,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .text_size(sp(12.5))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(SharedString::from(count.to_string())),
+                                            ),
+                                    )
+                                },
+                            )
+                            .child(div().flex_1())
                     })
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
                     .when(session.workspace.is_worktree(), |element| {
