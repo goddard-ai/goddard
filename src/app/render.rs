@@ -589,9 +589,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
-        let (status_icon, status_color) = match tone {
-            ToastTone::Alert => ("icons/alert.svg", theme.danger),
-            ToastTone::Success => ("icons/check.svg", theme.success),
+        let status_icon = match tone {
+            ToastTone::Alert => icon("icons/alert.svg", 14.0, theme.danger).into_any_element(),
+            ToastTone::Success => icon("icons/check.svg", 14.0, theme.success).into_any_element(),
+            ToastTone::Failure => icon("icons/x.svg", 14.0, theme.danger).into_any_element(),
+            ToastTone::Progress => {
+                motion::spin(icon("icons/loader-circle.svg", 14.0, theme.text_tertiary))
+            }
         };
         let palette = MarkdownPalette::from_theme(&theme);
         let text_ctx = MarkdownCtx::new(
@@ -700,7 +704,7 @@ impl Waku {
                     }))
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(md::render::frame_reset(self.toast_selection.clone()))
-                    .child(icon(status_icon, 14.0, status_color))
+                    .child(status_icon)
                     .child(div().flex_1().min_w_0().whitespace_normal().child(message))
                     .children(action_button)
                     .child(dismiss)

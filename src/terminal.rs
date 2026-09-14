@@ -89,13 +89,23 @@ enum TerminalUiEvent {
     ResetTitle,
     ClipboardStore(String),
     ClipboardLoad(Arc<dyn Fn(&str) -> String + Send + Sync>),
-    Exited,
+    /// A custom command's launch line reported the script's exit code
+    /// through its title sentinel.
+    CommandExit(i32),
+    /// The shell process is gone. The code rides along when the OS reported
+    /// one, which doubles as a completion signal for scripts that exit the
+    /// shell themselves instead of reaching the sentinel.
+    Exited(Option<i32>),
 }
 
 /// Emitted on the view when the PTY child exits — the shell itself is gone,
 /// not just the foreground job.
 pub enum TerminalViewEvent {
     Exited,
+    /// A custom-command script finished, carrying its exit code. Raised by
+    /// the launch line's sentinel and, as a fallback for scripts that exit
+    /// the shell themselves, by the child's own exit status.
+    CommandFinished(i32),
 }
 
 /// What a new terminal's PTY runs. `Shell` is the plain interactive shell;
@@ -133,7 +143,13 @@ impl EventListener for TerminalEventProxy {
                 self.dirty.store(true, Ordering::Release);
             }
             Event::Title(title) => {
-                let _ = self.ui_events.send(TerminalUiEvent::Title(title));
+                // A custom command's sentinel reports its exit code as an
+                // OSC 2 title; swallow it so it can never rename the tab.
+                let event = match crate::custom_commands::parse_command_exit(&title) {
+                    Some(code) => TerminalUiEvent::CommandExit(code),
+                    None => TerminalUiEvent::Title(title),
+                };
+                let _ = self.ui_events.send(event);
             }
             Event::ResetTitle => {
                 let _ = self.ui_events.send(TerminalUiEvent::ResetTitle);
@@ -155,8 +171,14 @@ impl EventListener for TerminalEventProxy {
                 self.write_pty(formatter(*self.window_size.lock()).into_bytes());
             }
             Event::Bell => {}
-            Event::Exit | Event::ChildExit(_) => {
-                let _ = self.ui_events.send(TerminalUiEvent::Exited);
+            Event::Exit => {
+                let _ = self.ui_events.send(TerminalUiEvent::Exited(None));
+                self.dirty.store(true, Ordering::Release);
+            }
+            Event::ChildExit(status) => {
+                let _ = self
+                    .ui_events
+                    .send(TerminalUiEvent::Exited(status.code()));
                 self.dirty.store(true, Ordering::Release);
             }
         }
@@ -805,8 +827,17 @@ impl TerminalView {
                         .unwrap_or_default();
                     session.write(formatter(&text).into_bytes());
                 }
-                TerminalUiEvent::Exited => {
+                TerminalUiEvent::CommandExit(code) => {
+                    cx.emit(TerminalViewEvent::CommandFinished(code));
+                }
+                TerminalUiEvent::Exited(code) => {
                     self.exited = true;
+                    // The completion event goes first: a script that exits
+                    // the shell itself still resolves its run before the
+                    // exit event can close the surface out from under it.
+                    if let Some(code) = code {
+                        cx.emit(TerminalViewEvent::CommandFinished(code));
+                    }
                     cx.emit(TerminalViewEvent::Exited);
                 }
             }

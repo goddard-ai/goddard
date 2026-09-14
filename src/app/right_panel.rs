@@ -2031,6 +2031,18 @@ impl Waku {
         surface: RightPanelSurface,
         cx: &mut Context<Self>,
     ) {
+        self.add_right_panel_surface(surface, true, cx);
+    }
+
+    /// `open_right_panel_surface` split on whether the panel should reveal:
+    /// custom commands add their terminal quietly so the run can report
+    /// through a toast instead of a slide-open.
+    fn add_right_panel_surface(
+        &mut self,
+        surface: RightPanelSurface,
+        reveal: bool,
+        cx: &mut Context<Self>,
+    ) {
         let reusable_index = reusable_surface_index(&self.right_panel_surfaces, &surface);
         if matches!(&surface, RightPanelSurface::File(_)) {
             self.ensure_initial_right_panel_file_editor_width();
@@ -2061,9 +2073,11 @@ impl Waku {
         };
         self.right_panel_active_surface = Some(index);
         self.reveal_right_panel_tab(index);
-        self.request_active_terminal_focus();
-        self.request_active_browser_focus();
-        self.set_right_panel_visible(true, cx);
+        if reveal {
+            self.request_active_terminal_focus();
+            self.request_active_browser_focus();
+            self.set_right_panel_visible(true, cx);
+        }
         cx.notify();
     }
 
@@ -2151,6 +2165,7 @@ impl Waku {
         if let Some(terminal_id) = self.right_panel_surfaces[index].terminal_id() {
             self.right_panel_terminals.remove(&terminal_id);
             self.right_panel_terminal_commands.remove(&terminal_id);
+            self.custom_command_runs.remove(&terminal_id);
         }
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
             self.right_panel_browsers.remove(&browser_id);
@@ -2417,6 +2432,13 @@ impl Waku {
     /// sources the command's materialized script. The command rides along in
     /// `right_panel_terminal_commands` so the tab keeps its launch settings
     /// if the PTY is ever respawned for a changed workspace.
+    ///
+    /// The panel stays closed: the run reports through a spinner toast that
+    /// resolves to a check or a red x when the launch line's sentinel hands
+    /// back the script's exit code, and a failure reveals the terminal.
+    /// cmd cannot emit the sentinel, so Windows keeps the reveal-on-run
+    /// behavior; a remote daemon has no PTY at all, so the panel must carry
+    /// whatever the surface shows there too.
     pub(super) fn run_custom_command(&mut self, command: CustomCommand, cx: &mut Context<Self>) {
         if self.selected_workspace_path().is_none() {
             self.show_toast(tr!("commands.no_workspace"));
@@ -2424,11 +2446,71 @@ impl Waku {
             return;
         }
         let surface = RightPanelSurface::new_terminal();
-        if let Some(terminal_id) = surface.terminal_id() {
+        let terminal_id = surface.terminal_id();
+        if let Some(terminal_id) = terminal_id {
             self.right_panel_terminal_commands
-                .insert(terminal_id, command);
+                .insert(terminal_id, command.clone());
         }
-        self.open_right_panel_surface(surface, cx);
+        if cfg!(windows) || self.daemon.is_remote() {
+            self.open_right_panel_surface(surface, cx);
+            return;
+        }
+        if let Some(terminal_id) = terminal_id {
+            let toast_id = self.show_progress_toast(
+                tr!("commands.running", name = command.display_name()),
+                COMMAND_PROGRESS_TOAST_DURATION,
+            );
+            self.custom_command_runs.insert(
+                terminal_id,
+                PendingCommandRun {
+                    name: command.display_name().to_owned(),
+                    toast_id,
+                },
+            );
+        }
+        self.add_right_panel_surface(surface, false, cx);
+    }
+
+    /// A custom command's launch line reported the script's exit code:
+    /// settle the run's toast — in place under its spinner while that is
+    /// still the visible toast, as a fresh toast once it is not — and on
+    /// failure reveal the terminal, which stayed open at the error.
+    fn custom_command_finished(&mut self, terminal_id: Uuid, exit_code: i32, cx: &mut Context<Self>) {
+        let Some(run) = self.custom_command_runs.remove(&terminal_id) else {
+            return;
+        };
+        let (message, tone) = if exit_code == 0 {
+            (
+                tr!("commands.succeeded", name = run.name),
+                ToastTone::Success,
+            )
+        } else {
+            (
+                tr!("commands.failed", name = run.name, code = exit_code),
+                ToastTone::Failure,
+            )
+        };
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|toast| toast.id == run.toast_id)
+        {
+            self.update_toast(message, tone);
+        } else {
+            self.show_toast_with_tone(message, tone, None);
+        }
+        if exit_code != 0
+            && let Some(index) = self
+                .right_panel_surfaces
+                .iter()
+                .position(|surface| surface.terminal_id() == Some(terminal_id))
+        {
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.request_active_terminal_focus();
+            self.set_right_panel_visible(true, cx);
+        }
+        cx.notify();
     }
 
     /// Close the tab a finished terminal belongs to, wherever it sits — the
@@ -2469,6 +2551,7 @@ impl Waku {
         }
         self.right_panel_terminals.remove(&terminal_id);
         self.right_panel_terminal_commands.remove(&terminal_id);
+        self.custom_command_runs.remove(&terminal_id);
         cx.notify();
     }
 
@@ -2500,15 +2583,25 @@ impl Waku {
             let close_on_exit = command.is_some_and(|command| command.close_on_success);
             let view =
                 cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
-            if close_on_exit {
-                // The command's startup line ends in `&& exit`, so the shell
-                // only goes away on its own when the script succeeded — the
-                // exit event is the close signal.
-                cx.subscribe(&view, |this, view, _: &TerminalViewEvent, cx| {
-                    // A finished command may have changed the checkout, so
-                    // drop the cached snapshot; the next read refetches.
-                    this.refresh_selected_branch_snapshot(cx);
-                    this.close_terminal_view_surface(&view, cx);
+            if command.is_some() {
+                cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
+                    match event {
+                        TerminalViewEvent::Exited => {
+                            // The command's startup line only exits the
+                            // shell when the script succeeded, so the exit
+                            // event is the close signal.
+                            if close_on_exit {
+                                this.close_terminal_view_surface(&view, cx);
+                            }
+                        }
+                        TerminalViewEvent::CommandFinished(code) => {
+                            // A finished command may have changed the
+                            // checkout, so drop the cached snapshot; the
+                            // next read refetches.
+                            this.refresh_selected_branch_snapshot(cx);
+                            this.custom_command_finished(terminal_id, *code, cx);
+                        }
+                    }
                 })
                 .detach();
             }
@@ -2535,6 +2628,8 @@ impl Waku {
         self.right_panel_terminals
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         self.right_panel_terminal_commands
+            .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
+        self.custom_command_runs
             .retain(|terminal_id, _| retained_terminal_ids.contains(terminal_id));
         for terminal_id in active_terminal_ids {
             self.ensure_right_panel_terminal(terminal_id, cx);

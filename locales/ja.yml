@@ -145,6 +145,9 @@ commands.cancel: キャンセル
 commands.edit: 編集
 commands.delete: 削除
 commands.no_workspace: 先にタスクを選択してください。コマンドは現在のタスクのディレクトリで実行されます。
+commands.running: "%{name} を実行中…"
+commands.succeeded: "%{name} が完了しました"
+commands.failed: "%{name} が失敗しました（終了コード %{code}）"
 
 daemon.expose_title: 管理対象デーモンを公開
 daemon.expose_description: このマシン以外の Goddard クライアントから接続できるようにします。変更時はデーモンだけが再起動します。

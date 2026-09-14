@@ -143,6 +143,9 @@ const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
+/// How long a custom command's spinner toast waits on a result before
+/// handing off — a run still going past this reports to a fresh toast.
+const COMMAND_PROGRESS_TOAST_DURATION: Duration = Duration::from_millis(2_500);
 const MINIMUM_TOAST_RESUME_DURATION: Duration = Duration::from_millis(800);
 const TOAST_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const TASK_NOTIFICATION_TAG_PREFIX: &str = "waku-task:";
@@ -304,9 +307,26 @@ struct ToastAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ToastTone {
+pub(super) enum ToastTone {
     Alert,
     Success,
+    /// A custom command still running — a spinner riding the shared pulse
+    /// clock.
+    Progress,
+    /// A custom command that reported a nonzero exit — a red x, distinct
+    /// from the warning triangle `Alert` uses.
+    Failure,
+}
+
+/// A custom command launched without revealing the right panel. Its
+/// spinner toast reports the launch; the launch line's exit-code sentinel
+/// resolves it — under the same toast while that is still on screen, as a
+/// fresh toast when the run outlived the spinner's short window.
+struct PendingCommandRun {
+    name: String,
+    /// The toast reporting this run. Stale once it dismisses or a newer
+    /// toast replaces it, which is what hands a late result a fresh toast.
+    toast_id: u64,
 }
 
 fn paused_toast_duration(remaining: Duration, elapsed: Duration) -> Duration {
@@ -1576,6 +1596,10 @@ pub struct Waku {
     /// tells `ensure_right_panel_terminal` how to spawn the PTY and carries
     /// the command's close-on-success choice.
     right_panel_terminal_commands: HashMap<Uuid, CustomCommand>,
+    /// Custom commands launched with the panel kept closed, keyed by the
+    /// surface's terminal id. The entry retires when the command reports
+    /// its exit or the terminal goes away.
+    custom_command_runs: HashMap<Uuid, PendingCommandRun>,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
@@ -2062,6 +2086,27 @@ impl Waku {
         tone: ToastTone,
         action: Option<ToastAction>,
     ) {
+        self.show_toast_for(message, tone, action, DEFAULT_TOAST_DURATION);
+    }
+
+    /// The spinner a custom command launches with. Returns the toast's id
+    /// so the run can tell whether its result still has a toast to land on.
+    pub(super) fn show_progress_toast(
+        &mut self,
+        message: impl Into<String>,
+        duration: Duration,
+    ) -> u64 {
+        self.show_toast_for(message, ToastTone::Progress, None, duration);
+        self.toast_generation
+    }
+
+    fn show_toast_for(
+        &mut self,
+        message: impl Into<String>,
+        tone: ToastTone,
+        action: Option<ToastAction>,
+        duration: Duration,
+    ) {
         self.toast_selection.selection.borrow_mut().clear();
         self.toast_selection.registry.borrow_mut().clear();
         self.toast_generation = self.toast_generation.wrapping_add(1);
@@ -2071,10 +2116,26 @@ impl Waku {
             action,
             id: self.toast_generation,
             timer_generation: self.toast_generation,
-            duration_remaining: DEFAULT_TOAST_DURATION,
+            duration_remaining: duration,
             timer_started: None,
             hovered: false,
         });
+    }
+
+    /// Resolve the visible toast in place — same element, new tone and
+    /// message, fresh dismiss clock. `id` stays put so the spinner's swap
+    /// to a result does not replay the entrance animation; only
+    /// `timer_generation` moves, which retires the in-flight timer.
+    pub(super) fn update_toast(&mut self, message: impl Into<String>, tone: ToastTone) {
+        let Some(toast) = self.toast.as_mut() else {
+            return;
+        };
+        toast.message = message.into();
+        toast.tone = tone;
+        toast.duration_remaining = DEFAULT_TOAST_DURATION;
+        toast.timer_started = None;
+        self.toast_generation = self.toast_generation.wrapping_add(1);
+        toast.timer_generation = self.toast_generation;
     }
 
     /// Arm one wake-up for the moment a time-derived label next changes —
@@ -3301,6 +3362,7 @@ impl Waku {
                 workspace_queries_stale: false,
                 right_panel_terminals: HashMap::new(),
                 right_panel_terminal_commands: HashMap::new(),
+                custom_command_runs: HashMap::new(),
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,

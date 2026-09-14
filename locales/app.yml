@@ -282,6 +282,12 @@ commands.delete:
   en: Delete
 commands.no_workspace:
   en: Select a task first — commands run in the current task’s directory.
+commands.running:
+  en: Running %{name}…
+commands.succeeded:
+  en: "%{name} finished"
+commands.failed:
+  en: "%{name} failed (exit %{code})"
 
 daemon.expose_title:
   en: Expose managed daemon

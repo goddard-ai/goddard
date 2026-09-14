@@ -142,6 +142,9 @@ commands.cancel: 取消
 commands.edit: 编辑
 commands.delete: 删除
 commands.no_workspace: 请先选择一个任务——命令会在当前任务目录中运行。
+commands.running: 正在运行 %{name}…
+commands.succeeded: "%{name} 已完成"
+commands.failed: "%{name} 失败（退出码 %{code}）"
 
 daemon.expose_title: 暴露由 Goddard 管理的守护进程
 daemon.expose_description: 允许本机之外的 Goddard 客户端连接。更改此项只会重启守护进程。

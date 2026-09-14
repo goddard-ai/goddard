@@ -61,6 +61,20 @@ pub fn remove_script_if_unreferenced(script: &str, commands: &[CustomCommand]) {
     let _ = fs::remove_file(script_path(script));
 }
 
+/// Title prefix the launch line's sentinel uses to hand the script's exit
+/// code back to the app: the line ends by writing an OSC 2 sequence whose
+/// title is `{prefix}{code}`, and `TerminalEventProxy` swallows it before
+/// it can rename the tab. This is the only completion signal available —
+/// the shell stays interactive after the script, so nothing exits.
+const COMMAND_EXIT_TITLE_PREFIX: &str = "waku-command-exit:";
+
+/// A sentinel title's reported exit code, if this title is one.
+pub fn parse_command_exit(title: &str) -> Option<i32> {
+    title
+        .strip_prefix(COMMAND_EXIT_TITLE_PREFIX)
+        .and_then(|code| code.trim().parse().ok())
+}
+
 /// `'…'` quoting for the path inside a shell command line.
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
@@ -76,29 +90,49 @@ fn shell_file_name(shell: &Path) -> String {
 
 /// The line fed to the interactive shell: source the materialized script so
 /// it runs with every capability typed input has — aliases, functions, `cd`
-/// that persists — then, when the command is configured to close on success,
-/// exit the shell so the tab can close. A failed script leaves the shell
-/// open with its output visible.
+/// that persists — then report the script's exit code through an invisible
+/// OSC 2 title sentinel and, when the command is configured to close on
+/// success, exit the shell so the tab can close. A failed script leaves the
+/// shell open with its output visible.
 pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> String {
     let quoted = shell_quote(script_path);
     let name = shell_file_name(shell);
     if name == "nu" || name == "nu.exe" {
+        let report = |code: &str| {
+            format!(
+                "print --no-newline $\"(char esc)]2;{COMMAND_EXIT_TITLE_PREFIX}({code})(char esc)\\\\\""
+            )
+        };
         return if close_on_success {
-            format!("source {quoted}; if $env.LAST_EXIT_CODE == 0 {{ exit }}")
+            format!(
+                "source {quoted}; let waku_status = $env.LAST_EXIT_CODE; {}; if $waku_status == 0 {{ exit }}",
+                report("$waku_status")
+            )
         } else {
-            format!("source {quoted}")
+            format!("source {quoted}; {}", report("$env.LAST_EXIT_CODE"))
         };
     }
     if name.starts_with("pwsh") || name.starts_with("powershell") {
         // `$?` — `$LASTEXITCODE` only tracks native commands — reflects the
-        // script's last statement, and `&&` needs PowerShell 7 anyway.
+        // script's last statement, so the sentinel reports 0 or 1 rather
+        // than a real code, and `&&` needs PowerShell 7 anyway.
+        let report = |code: &str| {
+            format!(
+                "[Console]::Write(\"$([char]27)]2;{COMMAND_EXIT_TITLE_PREFIX}$({code})$([char]27)\\\")"
+            )
+        };
         return if close_on_success {
-            format!(". {quoted}; if ($?) {{ exit }}")
+            format!(
+                ". {quoted}; $waku_ok = $?; {}; if ($waku_ok) {{ exit }}",
+                report("[int](-not $waku_ok)")
+            )
         } else {
-            format!(". {quoted}")
+            format!(". {quoted}; {}", report("[int](-not $?)"))
         };
     }
     if name == "cmd" || name == "cmd.exe" {
+        // cmd cannot emit the sentinel; Windows keeps the reveal-on-run
+        // behavior and never waits on a report.
         let quoted = format!("\"{}\"", script_path.to_string_lossy());
         return if close_on_success {
             format!("call {quoted} && exit")
@@ -107,16 +141,29 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
         };
     }
     // `source` is fish's spelling; `.` is the POSIX one. `&&` chains in fish
-    // ≥ 3.0 and every POSIX shell.
-    let source = if name.starts_with("fish") {
-        format!("source {quoted}")
-    } else {
-        format!(". {quoted}")
+    // ≥ 3.0 and every POSIX shell. The printf emits the sentinel as an
+    // ST-terminated OSC 2, which never reaches the screen.
+    let report = |code: &str| {
+        format!("printf '\\033]2;{COMMAND_EXIT_TITLE_PREFIX}%s\\033\\\\' {code}")
     };
+    if name.starts_with("fish") {
+        return if close_on_success {
+            format!(
+                "source {quoted}; set waku_status $status; {}; [ $waku_status -eq 0 ] && exit",
+                report("$waku_status")
+            )
+        } else {
+            format!("source {quoted}; {}", report("$status"))
+        };
+    }
+    let source = format!(". {quoted}");
     if close_on_success {
-        format!("{source} && exit")
+        format!(
+            "{source}; waku_status=$?; {}; [ \"$waku_status\" -eq 0 ] && exit",
+            report("\"$waku_status\"")
+        )
     } else {
-        source
+        format!("{source}; {}", report("\"$?\""))
     }
 }
 
@@ -202,21 +249,26 @@ mod tests {
     #[test]
     fn source_line_matches_the_shell_family() {
         let path = Path::new("/tmp/command-abc");
+        let sentinel = "\\033]2;waku-command-exit:%s\\033\\\\";
         assert_eq!(
             source_line(Path::new("/bin/zsh"), path, false),
-            ". '/tmp/command-abc'"
+            format!(". '/tmp/command-abc'; printf '{sentinel}' \"$?\"")
         );
         assert_eq!(
             source_line(Path::new("/bin/zsh"), path, true),
-            ". '/tmp/command-abc' && exit"
+            format!(
+                ". '/tmp/command-abc'; waku_status=$?; printf '{sentinel}' \"$waku_status\"; [ \"$waku_status\" -eq 0 ] && exit"
+            )
         );
         assert_eq!(
             source_line(Path::new("/opt/homebrew/bin/fish"), path, false),
-            "source '/tmp/command-abc'"
+            format!("source '/tmp/command-abc'; printf '{sentinel}' $status")
         );
         assert_eq!(
             source_line(Path::new("/usr/local/bin/nu"), path, true),
-            "source '/tmp/command-abc'; if $env.LAST_EXIT_CODE == 0 { exit }"
+            "source '/tmp/command-abc'; let waku_status = $env.LAST_EXIT_CODE; \
+             print --no-newline $\"(char esc)]2;waku-command-exit:($waku_status)(char esc)\\\\\"; \
+             if $waku_status == 0 { exit }"
         );
         assert_eq!(
             source_line(
@@ -224,12 +276,22 @@ mod tests {
                 path,
                 true
             ),
-            ". '/tmp/command-abc'; if ($?) { exit }"
+            ". '/tmp/command-abc'; $waku_ok = $?; [Console]::Write(\"$([char]27)]2;waku-command-exit:$([int](-not $waku_ok))$([char]27)\\\"); if ($waku_ok) { exit }"
         );
         assert_eq!(
             source_line(Path::new("C:/Windows/System32/cmd.exe"), path, true),
             "call \"/tmp/command-abc\" && exit"
         );
+    }
+
+    #[test]
+    fn parse_command_exit_reads_only_sentinel_titles() {
+        assert_eq!(parse_command_exit("waku-command-exit:0"), Some(0));
+        assert_eq!(parse_command_exit("waku-command-exit:127"), Some(127));
+        assert_eq!(parse_command_exit("waku-command-exit:1"), Some(1));
+        assert_eq!(parse_command_exit("waku-command-exit:"), None);
+        assert_eq!(parse_command_exit("waku-command-exit:abc"), None);
+        assert_eq!(parse_command_exit("vim — ~/project"), None);
     }
 
     #[test]
@@ -251,7 +313,7 @@ mod tests {
         let path = Path::new("/tmp/it's/command");
         assert_eq!(
             source_line(Path::new("/bin/sh"), path, false),
-            r". '/tmp/it'\''s/command'"
+            r#". '/tmp/it'\''s/command'; printf '\033]2;waku-command-exit:%s\033\\' "$?""#
         );
     }
 }
