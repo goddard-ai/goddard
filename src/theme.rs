@@ -698,6 +698,110 @@ impl Theme {
             ],
         })
     }
+
+    /// GitHub Light Default — primer/github-vscode-theme. Paper-white canvas
+    /// on `#f6f8fa` chrome; syntax is Pretty Lights: keywords red, strings
+    /// deep blue, constants and numbers blue, functions purple, types
+    /// orange. ANSI is the theme's own terminal table.
+    pub fn github_light() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: false,
+            canvas: 0xFFFFFF,
+            sidebar_solid: 0xF6F8FA,
+            surface: 0xFFFFFF,
+            raised: 0xF6F8FA,
+            composer: 0xF6F8FA,
+            inset: 0xF6F8FA,
+            terminal: 0xFFFFFF,
+            sidebar_border: rgb(0xD0D7DE).into(),
+
+            neutral: rgb(0x8C959F).into(),
+
+            text: 0x1F2328,
+            text_secondary: 0x656D76,
+            text_tertiary: 0x6E7781,
+            text_ghost: 0xAFB8C1,
+
+            accent: 0x0969DA,
+            selection: wash(0x0366D6, 0.20),
+            code_text: 0x0550AE,
+
+            inverse: 0x1F2328,
+            on_inverse: 0xFFFFFF,
+
+            info: 0x0969DA,
+            warning: 0x9A6700,
+            success: 0x1A7F37,
+            favorite: 0xBF8700,
+            danger: 0xCF222E,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0xCF222E).into(),   // red — keyword/storage
+                literal: rgb(0x0550AE).into(),   // blue — constant
+                string: rgb(0x0A3069).into(),    // deep blue
+                comment: rgb(0x6E7781).into(),   // gray
+                number: rgb(0x0550AE).into(),    // constant.numeric → blue
+                ty: rgb(0x953800).into(),        // orange — entity.name
+                function: rgb(0x8250DF).into(),  // purple — entity.name.function
+                meta: rgb(0x8250DF).into(),      // purple — meta.diff.range
+            },
+            ansi: [
+                0x24292f, 0xcf222e, 0x116329, 0x4d2d00, 0x0969da, 0x8250df, 0x1b7c83, 0x6e7781,
+                0x57606a, 0xa40e26, 0x1a7f37, 0x633c01, 0x218bff, 0xa475f9, 0x3192aa, 0x8c959f,
+            ],
+        })
+    }
+
+    /// GitHub Dark Default — primer/github-vscode-theme. `#0d1117` canvas on
+    /// `#010409` chrome; the same Pretty Lights hue roles as the light side.
+    pub fn github_dark() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x0D1117,
+            sidebar_solid: 0x010409,
+            surface: 0x0D1117,
+            raised: 0x161B22,
+            composer: 0x161B22,
+            inset: 0x010409,
+            terminal: 0x0D1117,
+            sidebar_border: rgb(0x30363D).into(),
+
+            neutral: rgb(0x8B949E).into(),
+
+            text: 0xE6EDF3,
+            text_secondary: 0x7D8590,
+            text_tertiary: 0x6E7681,
+            text_ghost: 0x484F58,
+
+            accent: 0x2F81F7,
+            selection: wash(0x3392FF, 0.27),
+            code_text: 0x79C0FF,
+
+            inverse: 0xE6EDF3,
+            on_inverse: 0x0D1117,
+
+            info: 0x2F81F7,
+            warning: 0xD29922,
+            success: 0x3FB950,
+            favorite: 0xE3B341,
+            danger: 0xF85149,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0xFF7B72).into(),   // red — keyword/storage
+                literal: rgb(0x79C0FF).into(),   // blue — constant
+                string: rgb(0xA5D6FF).into(),    // light blue
+                comment: rgb(0x8B949E).into(),   // gray
+                number: rgb(0x79C0FF).into(),    // constant.numeric → blue
+                ty: rgb(0xFFA657).into(),        // orange — entity.name
+                function: rgb(0xD2A8FF).into(),  // purple — entity.name.function
+                meta: rgb(0xD2A8FF).into(),      // purple — meta.diff.range
+            },
+            ansi: [
+                0x484f58, 0xff7b72, 0x3fb950, 0xd29922, 0x58a6ff, 0xbc8cff, 0x39c5cf, 0xb1bac4,
+                0x6e7681, 0xffa198, 0x56d364, 0xe3b341, 0x79c0ff, 0xd2a8ff, 0x56d4dd, 0xffffff,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -722,6 +826,8 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::KanagawaLight => Theme::kanagawa_light(),
         ThemeName::ZenburnDark => Theme::zenburn(),
         ThemeName::PoimandresDark => Theme::poimandres(),
+        ThemeName::GithubLight => Theme::github_light(),
+        ThemeName::GithubDark => Theme::github_dark(),
     }
 }
 
