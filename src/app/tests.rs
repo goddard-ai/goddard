@@ -17,15 +17,14 @@ use super::{
     maintain_transcript_anchor, message_opens_turn, message_starts_followup_turn,
     navigation_preview_snippet, navigation_rail_fade_visibility, navigation_rail_height,
     navigation_rail_scale, next_navigation_turn_index, paused_toast_duration, pop_stream_batch,
-    previous_navigation_turn_index, push_transcript_activity,
+    previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
     response_footer_message_index, response_row_turn_id, session_accepts_turn_output,
     session_is_reapable, session_opens_at_last_prompt, settle_stream_segment,
-    should_refresh_branch_after_activity,
-    should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
-    task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
-    transcript_rests_at_tail, transcript_row_kinds, transcript_row_splice,
-    transcript_rows_fingerprint, widened_panel_width_for_file_editor,
-    widened_panel_width_for_review,
+    should_refresh_branch_after_activity, should_show_navigation_rail,
+    should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
+    transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
+    transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
+    widened_panel_width_for_file_editor, widened_panel_width_for_review,
 };
 use crate::git_branch::BranchEntry;
 use crate::model::{
@@ -1005,7 +1004,7 @@ fn stream_batches_commit_full_adjacent_text_and_preserve_event_order() {
     ]);
 
     assert!(matches!(
-        pop_stream_batch(&mut events, StreamDeltaKind::Text),
+        pop_stream_batch(&mut events, StreamDeltaKind::Text, &mut 0),
         Some(DriverEvent::TextDelta(text)) if text == "first line\nsecond line"
     ));
     assert!(matches!(
@@ -1094,6 +1093,59 @@ fn reasoning_and_tools_share_one_ordered_activity_block() {
         2,
         "assistant text keeps later work at its own transcript position"
     );
+}
+
+#[test]
+fn line_delimited_reasoning_deltas_join_as_prose() {
+    let fold = |deltas: &[&str]| {
+        let mut content = String::new();
+        let mut pending = 0;
+        for delta in deltas {
+            push_reasoning_delta(&mut content, &mut pending, delta);
+        }
+        content
+    };
+
+    // GLM via OpenRouter alternates a text chunk with a newline-only chunk;
+    // spacing lives inside the text chunks, so the newlines drop out — even a
+    // mid-word split ("upstream" + "/main") rejoins cleanly.
+    assert_eq!(
+        fold(&[
+            "The",
+            "\n",
+            " tracking",
+            "\n",
+            " got",
+            "\n",
+            " set",
+            "\n",
+            " to",
+            "\n",
+            " upstream",
+            "\n",
+            "/main",
+            "\n",
+        ]),
+        "The tracking got set to upstream/main"
+    );
+
+    // A run of newline-only chunks collapses to one paragraph break instead
+    // of accumulating blank lines, and a trailing run goes away entirely.
+    assert_eq!(
+        fold(&["first", "\n", "\n", "\n", "second", "\n", "\n"]),
+        "first\n\nsecond"
+    );
+
+    // Newlines inside a real chunk are kept, and a whitespace delta is still
+    // real spacing rather than a collapsible break.
+    assert_eq!(
+        fold(&["one\ntwo", "\n", " three", " ", "four"]),
+        "one\ntwo three four"
+    );
+
+    // A run at the head of a batch folds to a leading paragraph break;
+    // `append_reasoning_delta` trims it when it would open a fresh block.
+    assert_eq!(fold(&["\n", "\n", "text"]), "\n\ntext");
 }
 
 #[test]

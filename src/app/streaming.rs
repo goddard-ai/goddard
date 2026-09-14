@@ -47,13 +47,14 @@ impl Waku {
     ) {
         let previous_phase = runtime.stream_phase;
         let continuing = previous_phase == Some(StreamPhase::Reasoning);
-        if !continuing && delta.trim().is_empty() {
-            return;
-        }
-        let now = unix_time_millis();
         if !continuing {
+            runtime.pending_reasoning_newlines = 0;
+            if delta.trim().is_empty() {
+                return;
+            }
             self.finish_streaming_assistant(session_id);
         }
+        let now = unix_time_millis();
         if let Some(session) = self.state.session_mut(session_id) {
             if continuing
                 && let Some(reasoning) = session
@@ -69,7 +70,11 @@ impl Waku {
                     session,
                     ActivityItem::from_reasoning(
                         ReasoningBlock {
-                            content: delta,
+                            // A folded batch can open with a collapsed
+                            // paragraph break left over from a previous
+                            // block's trailing newline run; a fresh block
+                            // never starts on a break.
+                            content: delta.trim_start_matches(['\n', '\r']).to_owned(),
                             started_at_ms: now,
                             finished_at_ms: now,
                         },
@@ -1025,6 +1030,7 @@ pub(super) fn compact_driver_error(error: &str) -> String {
 pub(super) fn pop_stream_batch(
     events: &mut VecDeque<DriverEvent>,
     kind: StreamDeltaKind,
+    pending_reasoning_newlines: &mut usize,
 ) -> Option<DriverEvent> {
     let mut chunk = String::new();
     let mut latest_cursor = None;
@@ -1036,9 +1042,11 @@ pub(super) fn pop_stream_batch(
             Some(event) if stream_delta_text(event, kind).is_some() => {
                 let event = events.pop_front()?;
                 match (kind, event) {
-                    (StreamDeltaKind::Text, DriverEvent::TextDelta(text))
-                    | (StreamDeltaKind::Reasoning, DriverEvent::ReasoningDelta(text)) => {
+                    (StreamDeltaKind::Text, DriverEvent::TextDelta(text)) => {
                         chunk.push_str(&text);
+                    }
+                    (StreamDeltaKind::Reasoning, DriverEvent::ReasoningDelta(text)) => {
+                        push_reasoning_delta(&mut chunk, pending_reasoning_newlines, &text);
                     }
                     _ => unreachable!("the stream kind was checked before removing the event"),
                 }
@@ -1053,6 +1061,37 @@ pub(super) fn pop_stream_batch(
         StreamDeltaKind::Text => Some(DriverEvent::TextDelta(chunk)),
         StreamDeltaKind::Reasoning => Some(DriverEvent::ReasoningDelta(chunk)),
     }
+}
+
+/// Newline count when a reasoning delta is nothing but line breaks, e.g. the
+/// `"\n"` chunks GLM via OpenRouter interleaves between every text chunk.
+/// Mixed deltas keep their interior newlines untouched.
+fn reasoning_delta_newlines(delta: &str) -> Option<usize> {
+    delta
+        .bytes()
+        .all(|byte| matches!(byte, b'\n' | b'\r'))
+        .then(|| delta.bytes().filter(|byte| *byte == b'\n').count())
+}
+
+/// Fold one reasoning delta into a batch's chunk. Newline-only deltas are
+/// buffered rather than appended — a lone one is dropped and a run collapses
+/// to a single paragraph break once real text resumes — so providers that
+/// emit line-delimited reasoning don't render one token per line. A run left
+/// pending when the batch ends carries into the next one.
+pub(super) fn push_reasoning_delta(
+    content: &mut String,
+    pending_newlines: &mut usize,
+    delta: &str,
+) {
+    if let Some(newlines) = reasoning_delta_newlines(delta) {
+        *pending_newlines += newlines;
+        return;
+    }
+    if *pending_newlines >= 2 {
+        content.push_str("\n\n");
+    }
+    *pending_newlines = 0;
+    content.push_str(delta);
 }
 
 pub(super) fn append_text_delta_to_session(

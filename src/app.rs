@@ -942,6 +942,11 @@ struct SessionRuntime {
     /// accepted/rejected acknowledgement, in transport order.
     pending_steers: VecDeque<ComposerSubmission>,
     stream_phase: Option<StreamPhase>,
+    /// Newline-only reasoning deltas buffered while a reasoning block streams.
+    /// Some providers (e.g. GLM via OpenRouter) emit every text chunk followed
+    /// by a newline-only chunk; joined verbatim that renders one token per
+    /// line, so the run is collapsed instead — see `push_reasoning_delta`.
+    pending_reasoning_newlines: usize,
     /// The parked-turn notification has fired for the turn in flight, so a
     /// wake that parks again does not repeat it. Cleared when the turn ends.
     park_announced: bool,

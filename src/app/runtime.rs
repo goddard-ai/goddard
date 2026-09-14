@@ -3145,6 +3145,7 @@ impl Waku {
                 pending_events: VecDeque::new(),
                 pending_steers: VecDeque::new(),
                 stream_phase: None,
+                pending_reasoning_newlines: 0,
                 park_announced: false,
                 stream_remeasure_pending: false,
                 pending_permission: None,
@@ -3910,7 +3911,11 @@ impl Waku {
             while let Some(event) = runtime.pending_events.front() {
                 let kind = stream_delta_kind(event);
                 let event = if let Some(kind) = kind {
-                    pop_stream_batch(&mut runtime.pending_events, kind)
+                    pop_stream_batch(
+                        &mut runtime.pending_events,
+                        kind,
+                        &mut runtime.pending_reasoning_newlines,
+                    )
                 } else {
                     runtime.pending_events.pop_front()
                 };
