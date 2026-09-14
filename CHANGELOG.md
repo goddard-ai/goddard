@@ -16,6 +16,7 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+- Fix right-panel surface chooser cards clipping their descriptions when the UI font size is increased
 - Hide the app with Cmd+H on macOS
 
 ## [0.1.19]
