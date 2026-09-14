@@ -1080,6 +1080,38 @@ impl Waku {
         self.request_session_activation(target, SessionActivationTransition::Visit, cx);
     }
 
+    /// Context-menu "Mark as unread": the task rejoins the unseen-completion
+    /// set — sidebar dot, GoToLatestUnseenCompletion candidate — on demand,
+    /// where `mark_unseen_turn_settled` only stamps off-screen finishes.
+    /// Stamping now orders it newest.
+    pub(super) fn mark_session_unread(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if !self
+            .state
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.has_started())
+        {
+            return;
+        }
+        self.unseen_completions.insert(session_id, unix_time());
+        cx.notify();
+    }
+
+    /// ⌘⇧D: mark the viewed task unread — it stays a GoToLatestUnseenCompletion
+    /// candidate for a later ⌘D — then run the same jump, which lands on the
+    /// next unread task since the selected one is filtered out.
+    pub(super) fn mark_unread_and_go_to_next_unseen_action(
+        &mut self,
+        _: &MarkUnreadAndGoToNextUnseen,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(session_id) = self.state.selected_session {
+            self.mark_session_unread(session_id, cx);
+        }
+        self.go_to_latest_unseen_completion_action(&GoToLatestUnseenCompletion, window, cx);
+    }
+
     pub(super) fn navigation_mouse_down(
         &mut self,
         event: &MouseDownEvent,

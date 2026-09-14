@@ -74,14 +74,14 @@ use crate::{
     ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow,
     ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
     ExitFileFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
-    GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, NavigateBack, NavigateForward,
-    NewProject, NewSession, OpenFind, OpenFindReplace, OpenResumePicker, OpenSettings,
-    ReplaceAllMatches, SaveFile, SelectFirstProject, SelectFirstTask,
-    SelectLastProject, SelectLastTask, SwitchProjectBackward, SwitchProjectForward,
-    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFileFinder,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleModelPicker, ToggleRightPanel, ToggleSessionPin, ToggleSidebar, ToggleUsagePanel,
-    ToggleWorkspace,
+    GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,
+    NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
+    OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject,
+    SelectFirstTask, SelectLastProject, SelectLastTask, SwitchProjectBackward,
+    SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
+    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
+    ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleSessionPin, ToggleSidebar,
+    ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]

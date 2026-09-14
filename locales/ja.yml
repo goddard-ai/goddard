@@ -322,6 +322,7 @@ session.copy_working_directory: 作業ディレクトリをコピー
 session.archive: アーカイブ
 session.pin: ピン留め
 session.unpin: ピン留めを解除
+session.mark_unread: 未読にする
 
 sidebar.today: 今日
 sidebar.search: 検索

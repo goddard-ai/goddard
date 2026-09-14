@@ -2136,6 +2136,7 @@ impl Waku {
                 move |_| {
                     let rename_waku = waku.clone();
                     let pin_waku = waku.clone();
+                    let unread_waku = waku.clone();
                     let copy_waku = waku.clone();
                     let archive_waku = waku.clone();
                     let remove_waku = waku.clone();
@@ -2163,6 +2164,12 @@ impl Waku {
                         } else {
                             "icons/pin.svg"
                         }),
+                        MenuItem::new(tr!("session.mark_unread"), move |_, cx| {
+                            let _ = unread_waku.update(cx, |waku, cx| {
+                                waku.mark_session_unread(session_id, cx);
+                            });
+                        })
+                        .icon("icons/eye-off.svg"),
                         MenuItem::new(tr!("session.copy_working_directory"), move |_, cx| {
                             let _ = copy_waku.update(cx, |waku, cx| {
                                 waku.copy_session_working_directory(session_id, cx);

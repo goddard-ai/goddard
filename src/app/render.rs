@@ -349,6 +349,7 @@ impl Render for Waku {
             .on_action(cx.listener(Self::navigate_back_action))
             .on_action(cx.listener(Self::navigate_forward_action))
             .on_action(cx.listener(Self::go_to_latest_unseen_completion_action))
+            .on_action(cx.listener(Self::mark_unread_and_go_to_next_unseen_action))
             .on_action(cx.listener(Self::go_to_previous_turn_action))
             .on_action(cx.listener(Self::go_to_next_turn_action))
             .on_action(cx.listener(Self::switch_task_forward_action))

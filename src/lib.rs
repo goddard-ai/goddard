@@ -81,6 +81,7 @@ actions!(
         NavigateBack,
         NavigateForward,
         GoToLatestUnseenCompletion,
+        MarkUnreadAndGoToNextUnseen,
         GoToPreviousTurn,
         GoToNextTurn,
         SwitchTaskForward,
@@ -295,6 +296,13 @@ pub fn run() {
                 // ⌘D reads as "done" and is the left-hand-only alternative.
                 KeyBinding::new("ctrl-`", GoToLatestUnseenCompletion, Some("Waku")),
                 KeyBinding::new("secondary-d", GoToLatestUnseenCompletion, Some("Waku")),
+                // ⌘⇧D keeps the viewed task unread for a later ⌘D, then
+                // jumps to the next one waiting.
+                KeyBinding::new(
+                    "secondary-shift-d",
+                    MarkUnreadAndGoToNextUnseen,
+                    Some("Waku"),
+                ),
                 KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Waku")),
                 KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Waku")),
                 KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Waku")),

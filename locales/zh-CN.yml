@@ -312,6 +312,7 @@ session.copy_working_directory: 复制工作目录
 session.archive: 归档
 session.pin: 置顶
 session.unpin: 取消置顶
+session.mark_unread: 标记为未读
 sidebar.today: 今天
 sidebar.search: 搜索
 sidebar.options: 侧边栏选项

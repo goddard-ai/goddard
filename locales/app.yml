@@ -628,6 +628,8 @@ session.pin:
   en: Pin
 session.unpin:
   en: Unpin
+session.mark_unread:
+  en: Mark as Unread
 
 sidebar.today:
   en: Today
