@@ -1,3 +1,4 @@
+mod escape;
 pub mod highlight;
 mod math;
 pub mod mend;

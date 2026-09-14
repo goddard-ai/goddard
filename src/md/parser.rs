@@ -153,10 +153,23 @@ pub fn parse(source: &str) -> BlockTree {
     let events = Parser::new_ext(source, options())
         .into_offset_iter()
         .collect::<Vec<_>>();
-    let mut cursor = Cursor {
-        events: &events,
-        index: 0,
+    let Some((repaired, repairs)) = super::escape::repair_code_spans(source, &events) else {
+        return tree_from_events(&events);
     };
+    // Reparse the repaired source, then map every event range back into the
+    // original coordinates the caller slices.
+    let mut events = Parser::new_ext(&repaired, options())
+        .into_offset_iter()
+        .collect::<Vec<_>>();
+    for (_, range) in &mut events {
+        range.start = super::escape::original_offset(&repairs, range.start);
+        range.end = super::escape::original_offset(&repairs, range.end);
+    }
+    tree_from_events(&events)
+}
+
+fn tree_from_events(events: &[(Event<'_>, Range<usize>)]) -> BlockTree {
+    let mut cursor = Cursor { events, index: 0 };
     let mut blocks = Vec::new();
     while let Some((event, range)) = cursor.peek() {
         let range = range.clone();
@@ -1058,6 +1071,75 @@ mod tests {
 
         // Adjacent identically styled runs are coalesced.
         assert_eq!(runs[0].text, "plain ");
+    }
+
+    /// Models emit `` `a\`b` `` as if a code span were a string literal.
+    /// CommonMark closes the span at the escaped backtick, corrupting both
+    /// the code text and everything the stray delimiter reaches. When the
+    /// escape is glued to more text the span is repaired instead.
+    #[test]
+    fn escaped_backticks_inside_code_spans_render_literally() {
+        let tree = parse("use `a\\`b` here");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph")
+        };
+        assert!(runs.iter().any(|run| run.style.code && run.text == "a`b"));
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "use a`b here");
+    }
+
+    #[test]
+    fn escaped_backticks_do_not_swallow_prose_between_spans() {
+        let tree = parse("use `a\\`b` and `c\\`d` end");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph")
+        };
+        let code = runs
+            .iter()
+            .filter(|run| run.style.code)
+            .map(|run| run.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(code, ["a`b", "c`d"]);
+        // Without the repair the middle prose parses as a code span.
+        assert!(
+            runs.iter()
+                .any(|run| run.text == " and " && !run.style.code)
+        );
+    }
+
+    #[test]
+    fn a_closing_backslash_code_span_is_not_an_escape() {
+        // `` `path\` `` legitimately ends in a backslash; only a `\`` glued
+        // to more span text proves the escape convention.
+        let tree = parse("`C:\\path\\` is a dir");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph")
+        };
+        assert!(
+            runs.iter()
+                .any(|run| run.style.code && run.text == "C:\\path\\")
+        );
+    }
+
+    #[test]
+    fn escaped_backticks_leave_code_blocks_literal() {
+        let tree = parse("```\n`a\\`b`\n```");
+        assert!(
+            matches!(&tree.blocks[0].block, Block::CodeBlock { code, .. } if code == "`a\\`b`")
+        );
+    }
+
+    #[test]
+    fn escaped_backticks_repair_while_streaming() {
+        let mut parser = IncrementalParser::new();
+        let source = "call `a\\`b` now";
+        for ch in source.chars() {
+            parser.append(&ch.to_string());
+            assert_eq!(parser.tree(), &parse(parser.text()), "{}", parser.text());
+        }
+        let Block::Paragraph { runs } = &parser.display_tree().blocks[0].block else {
+            panic!("expected a paragraph")
+        };
+        assert!(runs.iter().any(|run| run.style.code && run.text == "a`b"));
     }
 
     #[test]
