@@ -366,14 +366,42 @@ fn pull_request_class(
     }
 }
 
+/// The span in which a pull request can be this session's own work: from the
+/// first turn's start to the newest turn's end. `None` on the upper bound
+/// means the window is still open — a turn is in flight or none has settled
+/// — so a pull request created right now is still attributable. A session can
+/// only produce pull requests while it is working; anything created before
+/// its first turn or after its last one ended belongs to somebody else.
+fn session_pull_request_window(session: &AgentSession) -> (u64, Option<u64>) {
+    let since = session
+        .turns
+        .first()
+        .map(|turn| turn.started_at)
+        .unwrap_or(session.created_at);
+    let until = session.turns.last().and_then(|turn| turn.completed_at);
+    (since, until)
+}
+
 /// Collapses a session's pull requests into the one badge its row shows: a
 /// state glyph for the aggregate — draft only when every one is a draft, open
 /// when any is, merged when all are, closed otherwise — plus the lowest
 /// number in that class, which is usually the pull request the session opened
 /// first. `others` counts the remainder, so `#123 +2` reads as "two more".
+/// `window` bounds attribution by when the pull request was created; a host
+/// that reports no creation time keeps its row rather than losing it.
 fn sidebar_pull_request_badge(
     entries: &[waku_client::PullRequestSummary],
+    window: (u64, Option<u64>),
 ) -> Option<SidebarPullRequestBadge> {
+    let (since, until) = window;
+    let entries: Vec<&waku_client::PullRequestSummary> = entries
+        .iter()
+        .filter(|entry| {
+            entry.created_at.map_or(true, |created| {
+                created >= since && until.map_or(true, |until| created <= until)
+            })
+        })
+        .collect();
     if entries.is_empty() {
         return None;
     }
@@ -2482,7 +2510,9 @@ impl Waku {
             .sidebar_pull_requests
             .borrow()
             .get(&session_id)
-            .and_then(|entries| sidebar_pull_request_badge(entries));
+            .and_then(|entries| {
+                sidebar_pull_request_badge(entries, session_pull_request_window(session))
+            });
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
             .w_full()
@@ -3473,7 +3503,12 @@ mod tests {
     fn pull_request_badge_reports_aggregate_state_and_oldest_in_class() {
         use waku_client::PullRequestState;
 
-        fn entry(number: u64, state: PullRequestState, is_draft: bool) -> waku_client::PullRequestSummary {
+        fn entry(
+            number: u64,
+            state: PullRequestState,
+            is_draft: bool,
+            created_at: Option<u64>,
+        ) -> waku_client::PullRequestSummary {
             waku_client::PullRequestSummary {
                 number,
                 title: format!("title {number}"),
@@ -3481,6 +3516,7 @@ mod tests {
                 state,
                 is_draft,
                 base_branch: "main".to_owned(),
+                created_at,
                 updated_at: None,
                 review_decision: None,
                 additions: None,
@@ -3488,57 +3524,122 @@ mod tests {
             }
         }
 
-        assert!(sidebar_pull_request_badge(&[]).is_none());
+        let window = (100, Some(200));
+        let open = |number| entry(number, PullRequestState::Open, false, Some(150));
 
-        let badge = sidebar_pull_request_badge(&[entry(7, PullRequestState::Open, false)]).unwrap();
+        assert!(sidebar_pull_request_badge(&[], window).is_none());
+
+        let badge = sidebar_pull_request_badge(&[open(7)], window).unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Open);
         assert_eq!(badge.number, 7);
         assert_eq!(badge.others, 0);
 
         // Any open wins the aggregate; the badge number comes from the open
         // class, not the lowest number overall.
-        let badge = sidebar_pull_request_badge(&[
-            entry(3, PullRequestState::Merged, false),
-            entry(9, PullRequestState::Open, false),
-            entry(5, PullRequestState::Open, false),
-        ])
+        let badge = sidebar_pull_request_badge(
+            &[
+                entry(3, PullRequestState::Merged, false, Some(150)),
+                open(9),
+                open(5),
+            ],
+            window,
+        )
         .unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Open);
         assert_eq!(badge.number, 5);
         assert_eq!(badge.others, 2);
 
         // Draft only when every entry is one.
-        let badge = sidebar_pull_request_badge(&[
-            entry(4, PullRequestState::Open, true),
-            entry(6, PullRequestState::Open, true),
-        ])
+        let badge = sidebar_pull_request_badge(
+            &[
+                entry(4, PullRequestState::Open, true, Some(150)),
+                entry(6, PullRequestState::Open, true, Some(150)),
+            ],
+            window,
+        )
         .unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Draft);
         assert_eq!(badge.number, 4);
 
-        let badge = sidebar_pull_request_badge(&[
-            entry(4, PullRequestState::Open, true),
-            entry(6, PullRequestState::Closed, false),
-        ])
+        let badge = sidebar_pull_request_badge(
+            &[
+                entry(4, PullRequestState::Open, true, Some(150)),
+                entry(6, PullRequestState::Closed, false, Some(150)),
+            ],
+            window,
+        )
         .unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Open);
         assert_eq!(badge.number, 4);
 
-        let badge = sidebar_pull_request_badge(&[
-            entry(8, PullRequestState::Merged, false),
-            entry(2, PullRequestState::Merged, false),
-        ])
+        let badge = sidebar_pull_request_badge(
+            &[
+                entry(8, PullRequestState::Merged, false, Some(150)),
+                entry(2, PullRequestState::Merged, false, Some(150)),
+            ],
+            window,
+        )
         .unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Merged);
         assert_eq!(badge.number, 2);
 
-        let badge = sidebar_pull_request_badge(&[
-            entry(8, PullRequestState::Merged, false),
-            entry(2, PullRequestState::Closed, false),
-        ])
+        let badge = sidebar_pull_request_badge(
+            &[
+                entry(8, PullRequestState::Merged, false, Some(150)),
+                entry(2, PullRequestState::Closed, false, Some(150)),
+            ],
+            window,
+        )
         .unwrap();
         assert_eq!(badge.state, SidebarPullRequestState::Closed);
         assert_eq!(badge.number, 2);
+    }
+
+    #[test]
+    fn pull_request_badge_only_counts_pull_requests_inside_the_session_window() {
+        use waku_client::PullRequestState;
+
+        fn entry(number: u64, created_at: Option<u64>) -> waku_client::PullRequestSummary {
+            waku_client::PullRequestSummary {
+                number,
+                title: format!("title {number}"),
+                url: format!("https://github.com/o/r/pull/{number}"),
+                state: PullRequestState::Open,
+                is_draft: false,
+                base_branch: "main".to_owned(),
+                created_at,
+                updated_at: None,
+                review_decision: None,
+                additions: None,
+                deletions: None,
+            }
+        }
+
+        // Before the first turn and after the last turn ended are somebody
+        // else's pull requests even though they share the branch.
+        let badge = sidebar_pull_request_badge(
+            &[entry(3, Some(50)), entry(9, Some(500))],
+            (100, Some(200)),
+        );
+        assert!(badge.is_none());
+
+        let badge = sidebar_pull_request_badge(
+            &[entry(3, Some(50)), entry(9, Some(150)), entry(4, Some(500))],
+            (100, Some(200)),
+        )
+        .unwrap();
+        assert_eq!(badge.number, 9);
+        assert_eq!(badge.others, 0);
+
+        // An in-flight turn leaves the window open, and a host that reports
+        // no creation time is kept rather than dropped.
+        let badge = sidebar_pull_request_badge(
+            &[entry(9, Some(500)), entry(4, None)],
+            (100, None),
+        )
+        .unwrap();
+        assert_eq!(badge.number, 4);
+        assert_eq!(badge.others, 1);
     }
 
     #[test]

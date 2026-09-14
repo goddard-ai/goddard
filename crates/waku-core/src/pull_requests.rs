@@ -29,7 +29,7 @@ pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequ
             "--limit",
             PULL_REQUEST_LIST_LIMIT,
             "--json",
-            "number,title,url,state,isDraft,baseRefName,updatedAt,reviewDecision,additions,deletions",
+            "number,title,url,state,isDraft,baseRefName,createdAt,updatedAt,reviewDecision,additions,deletions",
         ])
         .current_dir(cwd)
         .output();
@@ -47,6 +47,14 @@ pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequ
     ))
 }
 
+/// `gh` timestamps arrive RFC 3339; the wire and everything reading it speaks
+/// unix seconds.
+fn gh_time(value: Option<String>) -> Option<u64> {
+    value
+        .and_then(|text| chrono::DateTime::parse_from_rfc3339(&text).ok())
+        .and_then(|time| u64::try_from(time.timestamp()).ok())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GhPullRequest {
@@ -58,6 +66,8 @@ struct GhPullRequest {
     is_draft: bool,
     #[serde(default)]
     base_ref_name: String,
+    #[serde(default)]
+    created_at: Option<String>,
     #[serde(default)]
     updated_at: Option<String>,
     #[serde(default)]
@@ -91,7 +101,8 @@ impl GhPullRequest {
             state,
             is_draft: self.is_draft,
             base_branch: self.base_ref_name,
-            updated_at: self.updated_at,
+            created_at: gh_time(self.created_at),
+            updated_at: gh_time(self.updated_at),
             review_decision,
             additions: self.additions,
             deletions: self.deletions,
@@ -108,11 +119,12 @@ mod tests {
         let json = br#"[
             {"number": 3, "title": "oldest", "url": "https://github.com/o/r/pull/3",
              "state": "MERGED", "isDraft": false, "baseRefName": "main",
-             "updatedAt": "2026-09-10T00:00:00Z", "reviewDecision": "APPROVED",
-             "additions": 5, "deletions": 2},
+             "createdAt": "2026-09-08T00:00:00Z", "updatedAt": "2026-09-10T00:00:00Z",
+             "reviewDecision": "APPROVED", "additions": 5, "deletions": 2},
             {"number": 7, "title": "wip", "url": "https://github.com/o/r/pull/7",
              "state": "OPEN", "isDraft": true, "baseRefName": "main",
-             "updatedAt": null, "reviewDecision": "", "additions": null, "deletions": null},
+             "createdAt": null, "updatedAt": null, "reviewDecision": "",
+             "additions": null, "deletions": null},
             {"number": 9, "title": "surprise", "url": "https://github.com/o/r/pull/9",
              "state": "QUARANTINED", "isDraft": false}
         ]"#;
@@ -128,9 +140,11 @@ mod tests {
             Some(PullRequestReviewDecision::Approved)
         );
         assert_eq!(summaries[0].additions, Some(5));
+        assert!(summaries[0].created_at < summaries[0].updated_at);
         assert_eq!(summaries[1].state, PullRequestState::Open);
         assert!(summaries[1].is_draft);
         assert_eq!(summaries[1].review_decision, None);
+        assert_eq!(summaries[1].created_at, None);
         assert_eq!(summaries[1].updated_at, None);
     }
 }

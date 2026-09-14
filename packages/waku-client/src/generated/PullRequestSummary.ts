@@ -5,6 +5,7 @@ import type { PullRequestState } from "./PullRequestState";
 /**
  * One pull request as the sidebar badge reads it. Fields past `is_draft` are
  * optional because a host read may omit them; absent renders as unknown, not
- * as a neutral value.
+ * as a neutral value. Timestamps are unix seconds, matching session and turn
+ * times.
  */
-export type PullRequestSummary = { number: number, title: string, url: string, state: PullRequestState, isDraft: boolean, baseBranch: string, updatedAt?: string | null, reviewDecision?: PullRequestReviewDecision | null, additions?: number | null, deletions?: number | null, };
+export type PullRequestSummary = { number: number, title: string, url: string, state: PullRequestState, isDraft: boolean, baseBranch: string, createdAt?: number | null, updatedAt?: number | null, reviewDecision?: PullRequestReviewDecision | null, additions?: number | null, deletions?: number | null, };

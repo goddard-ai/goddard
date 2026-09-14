@@ -67,7 +67,8 @@ pub enum PullRequestReviewDecision {
 
 /// One pull request as the sidebar badge reads it. Fields past `is_draft` are
 /// optional because a host read may omit them; absent renders as unknown, not
-/// as a neutral value.
+/// as a neutral value. Timestamps are unix seconds, matching session and turn
+/// times.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSummary {
@@ -78,7 +79,9 @@ pub struct PullRequestSummary {
     pub is_draft: bool,
     pub base_branch: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<String>,
+    pub created_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_decision: Option<PullRequestReviewDecision>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
