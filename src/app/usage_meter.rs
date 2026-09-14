@@ -387,7 +387,7 @@ fn usage_panel(
         .track_focus(handle.focus_handle())
         .w(px(320.0))
         .p(px(14.0))
-        .rounded(px(10.0))
+        .rounded(px(12.0))
         .border_1()
         .border_color(theme.border_strong)
         .bg(theme.raised)

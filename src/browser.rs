@@ -1988,7 +1988,7 @@ impl BrowserView {
         let base = div()
             .id(id)
             .size(px(26.0))
-            .rounded(px(6.0))
+            .rounded(px(8.0))
             .flex_none()
             .flex()
             .items_center()

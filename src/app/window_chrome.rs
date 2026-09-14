@@ -15,7 +15,7 @@ use crate::theme::Theme;
 use crate::ui::{icon, tooltip::Tooltip};
 
 const CLIENT_FRAME_INSET: f32 = 10.0;
-const CLIENT_FRAME_ROUNDING: f32 = 10.0;
+const CLIENT_FRAME_ROUNDING: f32 = 12.0;
 
 #[derive(Clone, Copy)]
 pub(super) enum WindowControlSide {

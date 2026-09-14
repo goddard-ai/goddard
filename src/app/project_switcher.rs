@@ -11,13 +11,13 @@
 use super::*;
 
 const MODAL_WIDTH: f32 = 400.0;
-const MODAL_RADIUS: f32 = 14.0;
+const MODAL_RADIUS: f32 = 17.0;
 const MODAL_INSET: f32 = 6.0;
 const TITLE_HEIGHT: f32 = 30.0;
 const TITLE_INSET_X: f32 = 10.0;
 const ROW_HEIGHT: f32 = 34.0;
 const ROW_INSET_X: f32 = 10.0;
-const ROW_RADIUS: f32 = 8.0;
+const ROW_RADIUS: f32 = 10.0;
 const PATH_MAX_WIDTH: f32 = 180.0;
 const MAX_PROJECTS: usize = 10;
 const WINDOW_MARGIN: f32 = 44.0;

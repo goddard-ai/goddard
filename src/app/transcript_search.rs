@@ -484,7 +484,7 @@ impl Waku {
                 .right(px(12.0))
                 .w(px(bar_width))
                 .max_w_full()
-                .rounded(px(8.0))
+                .rounded(px(10.0))
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.raised)

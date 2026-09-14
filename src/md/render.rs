@@ -1625,7 +1625,7 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
             image
                 .max_w(relative(1.0))
                 .max_h(px(MAX_HEIGHT))
-                .rounded(px(6.0))
+                .rounded(px(8.0))
                 .object_fit(gpui::ObjectFit::ScaleDown),
         )
         .when(!alt.trim().is_empty(), |element| {
@@ -1774,7 +1774,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .tab_stop(false)
         .w_full()
         .min_w_0()
-        .rounded(px(8.0))
+        .rounded(px(10.0))
         .border_1()
         .border_color(ctx.palette.border)
         .bg(ctx.palette.inset)
@@ -1891,7 +1891,7 @@ fn render_table(
     let mut table = div()
         .w_full()
         .min_w_0()
-        .rounded(px(8.0))
+        .rounded(px(10.0))
         .border_1()
         .border_color(ctx.palette.border)
         .overflow_hidden()

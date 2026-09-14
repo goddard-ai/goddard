@@ -54,7 +54,7 @@ pub fn icon_button(id: impl Into<ElementId>, path: &'static str, theme: Theme) -
     div()
         .id(id)
         .size(px(22.0))
-        .rounded(px(6.0))
+        .rounded(px(8.0))
         .flex()
         .items_center()
         .justify_center()
@@ -431,7 +431,7 @@ impl RenderOnce for MenuChip {
             .height
             .unwrap_or(if self.outlined { px(30.0) } else { px(26.0) }))
             .px(if self.outlined { px(10.0) } else { px(7.0) })
-            .rounded(if self.outlined { px(7.0) } else { px(6.0) })
+            .rounded(if self.outlined { px(9.0) } else { px(8.0) })
             .flex()
             .items_center()
             .gap(px(6.0))

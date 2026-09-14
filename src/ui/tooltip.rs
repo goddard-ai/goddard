@@ -80,7 +80,7 @@ impl Render for Tooltip {
             div()
                 .px(px(7.0))
                 .py(px(4.0))
-                .rounded(px(6.0))
+                .rounded(px(8.0))
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.raised)

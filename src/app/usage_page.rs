@@ -271,7 +271,7 @@ impl Waku {
         let monthly = self.usage_view == UsageViewMode::Monthly;
 
         let mut view_options = div()
-            .rounded(px(7.0))
+            .rounded(px(9.0))
             .border_1()
             .border_color(theme.border_strong)
             .flex()
@@ -363,7 +363,7 @@ impl Waku {
             .focus_visible(|style| style.border_color(theme.accent))
             .h(px(28.0))
             .px(px(8.0))
-            .rounded(px(7.0))
+            .rounded(px(9.0))
             .border_1()
             .border_color(theme.border_strong)
             .flex()
@@ -569,7 +569,7 @@ impl Waku {
     ) -> Div {
         let metric = self.usage_metric;
         let mut toggle = div()
-            .rounded(px(7.0))
+            .rounded(px(9.0))
             .border_1()
             .border_color(theme.border_strong)
             .flex()
@@ -974,7 +974,7 @@ impl Waku {
     ) -> Div {
         let breakdown = self.usage_breakdown;
         let mut toggle = div()
-            .rounded(px(7.0))
+            .rounded(px(9.0))
             .border_1()
             .border_color(theme.border_strong)
             .flex()
@@ -1153,7 +1153,7 @@ impl Waku {
             .flex_1()
             .min_h_0()
             .pb(px(8.0))
-            .rounded(px(13.0))
+            .rounded(px(16.0))
             .bg(theme.raised)
             .flex()
             .flex_col()
@@ -1462,7 +1462,7 @@ fn usage_notices(history: &UsageHistory, theme: &Theme) -> Div {
         .mt(px(14.0))
         .px(px(12.0))
         .py(px(8.0))
-        .rounded(px(8.0))
+        .rounded(px(10.0))
         .border_1()
         .border_color(theme.border)
         .flex()
@@ -1515,7 +1515,7 @@ fn usage_chart_readout(
         .min_w(px(150.0))
         .px(px(9.0))
         .py(px(7.0))
-        .rounded(px(8.0))
+        .rounded(px(10.0))
         .border_1()
         .border_color(theme.border_strong)
         .bg(theme.raised)
@@ -1986,7 +1986,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                             div()
                                 .h(px(CHART_HEIGHT))
                                 .w_full()
-                                .rounded(px(8.0))
+                                .rounded(px(10.0))
                                 .bg(theme.overlay),
                         )
                         .child(
@@ -2021,7 +2021,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
             let mut card = div()
                 .mt(px(20.0))
                 .px(px(20.0))
-                .rounded(px(13.0))
+                .rounded(px(16.0))
                 .bg(theme.raised)
                 .flex()
                 .flex_col()
@@ -2046,7 +2046,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
                                     .h(px(26.0))
                                     .w(px(240.0))
                                     .flex_none()
-                                    .rounded(px(7.0))
+                                    .rounded(px(9.0))
                                     .bg(theme.overlay_strong),
                             )
                         }),
@@ -2478,7 +2478,7 @@ fn usage_month_list(
         .flex_1()
         .min_h_0()
         .pb(px(8.0))
-        .rounded(px(13.0))
+        .rounded(px(16.0))
         .bg(theme.raised)
         .flex()
         .flex_col()

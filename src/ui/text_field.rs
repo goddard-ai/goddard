@@ -65,7 +65,7 @@ impl RenderOnce for TextField {
         self.base
             .h(px(28.0))
             .px(px(8.0))
-            .rounded(px(6.0))
+            .rounded(px(8.0))
             .border_1()
             .border_color(if focused {
                 theme.accent

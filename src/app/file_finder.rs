@@ -419,7 +419,7 @@ impl Waku {
             .max_w(px(640.0))
             .h(px(card_height))
             .overflow_hidden()
-            .rounded(px(15.0))
+            .rounded(px(18.0))
             .bg(theme.raised)
             .shadow_xl()
             .relative()
@@ -492,7 +492,7 @@ impl Waku {
             .id(SharedString::from(format!("file-finder-row-{index}")))
             .h(px(RESULT_ROW_HEIGHT))
             .px(px(11.0))
-            .rounded(px(9.0))
+            .rounded(px(11.0))
             .border_1()
             .border_color(if highlighted {
                 theme.border_strong
