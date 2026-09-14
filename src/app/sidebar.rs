@@ -2073,15 +2073,7 @@ impl Waku {
                     })
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
                     .when(session.workspace.is_worktree(), |element| {
-                        element.child(icon(
-                            "icons/fork.svg",
-                            12.5,
-                            if session.is_busy() {
-                                theme.text_tertiary
-                            } else {
-                                theme.text_ghost
-                            },
-                        ))
+                        element.child(icon("icons/fork.svg", 12.5, theme.text_secondary))
                     })
                     .when(pinned, |element| {
                         element.child(icon(
@@ -2101,11 +2093,7 @@ impl Waku {
                                 div()
                                     .flex_none()
                                     .text_size(sp(12.5))
-                                    .text_color(if session.is_busy() {
-                                        theme.text_tertiary
-                                    } else {
-                                        theme.text_ghost
-                                    })
+                                    .text_color(theme.text_secondary)
                                     .child(SharedString::from(label)),
                             )
                         },
