@@ -40,19 +40,22 @@ pub enum ThemeName {
     GithubLight,
     GithubDark,
     DraculaDark,
+    RosePineDawn,
+    RosePineMoon,
 }
 
 impl ThemeName {
     /// Light-slot choices, in picker order.
-    pub const LIGHT: [Self; 5] = [
+    pub const LIGHT: [Self; 6] = [
         Self::DefaultLight,
         Self::GruvboxLightHard,
         Self::EverforestLight,
         Self::KanagawaLight,
         Self::GithubLight,
+        Self::RosePineDawn,
     ];
     /// Dark-slot choices, in picker order.
-    pub const DARK: [Self; 7] = [
+    pub const DARK: [Self; 8] = [
         Self::DefaultDark,
         Self::GruvboxDark,
         Self::EverforestDark,
@@ -60,6 +63,7 @@ impl ThemeName {
         Self::PoimandresDark,
         Self::GithubDark,
         Self::DraculaDark,
+        Self::RosePineMoon,
     ];
 
     pub fn is_dark(self) -> bool {
@@ -81,6 +85,8 @@ impl ThemeName {
             Self::GithubLight => "GitHub Light".to_owned(),
             Self::GithubDark => "GitHub Dark".to_owned(),
             Self::DraculaDark => "Dracula".to_owned(),
+            Self::RosePineDawn => "Rosé Pine Dawn".to_owned(),
+            Self::RosePineMoon => "Rosé Pine Moon".to_owned(),
         }
     }
 }

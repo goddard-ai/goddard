@@ -856,6 +856,110 @@ impl Theme {
             ],
         })
     }
+
+    /// Rosé Pine Dawn — rose-pine/neovim `palette.lua` + highlight groups.
+    /// Warm paper canvas; keywords are pine, strings gold, functions rose,
+    /// types foam, attributes iris. The ANSI table is the official alacritty
+    /// port (pine fills the green slot, rose the cyan slot).
+    pub fn rose_pine_dawn() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: false,
+            canvas: 0xFAF4ED,
+            sidebar_solid: 0xF8F0E7,
+            surface: 0xFAF4ED,
+            raised: 0xFFFAF3,
+            composer: 0xFFFAF3,
+            inset: 0xF2E9E1,
+            terminal: 0xFFFAF3,
+            sidebar_border: rgb(0xDFDAD9).into(),
+
+            neutral: rgb(0x9893A5).into(),
+
+            text: 0x464261,
+            text_secondary: 0x797593,
+            text_tertiary: 0x9893A5,
+            text_ghost: 0xCECACD,
+
+            accent: 0x907AA9,
+            selection: wash(0x907AA9, 0.20),
+            code_text: 0x56949F,
+
+            inverse: 0x464261,
+            on_inverse: 0xFAF4ED,
+
+            info: 0x56949F,
+            warning: 0xEA9D34,
+            success: 0x286983,
+            favorite: 0xEA9D34,
+            danger: 0xB4637A,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x286983).into(),   // pine
+                literal: rgb(0xD7827E).into(),   // rose — booleans
+                string: rgb(0xEA9D34).into(),    // gold
+                comment: rgb(0x797593).into(),   // subtle
+                number: rgb(0xEA9D34).into(),    // gold
+                ty: rgb(0x56949F).into(),        // foam
+                function: rgb(0xD7827E).into(),  // rose
+                meta: rgb(0x907AA9).into(),      // iris — preproc/attributes
+            },
+            ansi: [
+                0xf2e9e1, 0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279,
+                0x9893a5, 0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279,
+            ],
+        })
+    }
+
+    /// Rosé Pine Moon — the dark side of the same palette. `#232136` base
+    /// under `#1f1d30` chrome, same hue roles as Dawn.
+    pub fn rose_pine_moon() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x232136,
+            sidebar_solid: 0x1F1D30,
+            surface: 0x232136,
+            raised: 0x393552,
+            composer: 0x2A273F,
+            inset: 0x1F1D30,
+            terminal: 0x232136,
+            sidebar_border: rgb(0x44415A).into(),
+
+            neutral: rgb(0x6E6A86).into(),
+
+            text: 0xE0DEF4,
+            text_secondary: 0x908CAA,
+            text_tertiary: 0x6E6A86,
+            text_ghost: 0x56526E,
+
+            accent: 0xC4A7E7,
+            selection: wash(0xC4A7E7, 0.20),
+            code_text: 0x9CCFD8,
+
+            inverse: 0xE0DEF4,
+            on_inverse: 0x232136,
+
+            info: 0x9CCFD8,
+            warning: 0xF6C177,
+            success: 0x3E8FB0,
+            favorite: 0xF6C177,
+            danger: 0xEB6F92,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0x3E8FB0).into(),   // pine
+                literal: rgb(0xEA9A97).into(),   // rose — booleans
+                string: rgb(0xF6C177).into(),    // gold
+                comment: rgb(0x908CAA).into(),   // subtle
+                number: rgb(0xF6C177).into(),    // gold
+                ty: rgb(0x9CCFD8).into(),        // foam
+                function: rgb(0xEA9A97).into(),  // rose
+                meta: rgb(0xC4A7E7).into(),      // iris — preproc/attributes
+            },
+            ansi: [
+                0x393552, 0xeb6f92, 0x3e8fb0, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xea9a97, 0xe0def4,
+                0x6e6a86, 0xeb6f92, 0x3e8fb0, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xea9a97, 0xe0def4,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -883,6 +987,8 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::GithubLight => Theme::github_light(),
         ThemeName::GithubDark => Theme::github_dark(),
         ThemeName::DraculaDark => Theme::dracula(),
+        ThemeName::RosePineDawn => Theme::rose_pine_dawn(),
+        ThemeName::RosePineMoon => Theme::rose_pine_moon(),
     }
 }
 
