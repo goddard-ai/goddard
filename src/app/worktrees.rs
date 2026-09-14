@@ -1,7 +1,7 @@
 use super::*;
 
 /// Keyboard-navigable rows in the composer worktree picker.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum WorktreePickerAction {
     /// The draft's existing worktree. It leads the list so a bare `enter`
     /// keeps the current choice, matching the branch picker's pinning.
@@ -11,6 +11,36 @@ pub(super) enum WorktreePickerAction {
     /// Create a detached worktree at the given base ref — `None` resolves
     /// the repository's default branch on the daemon.
     Create { base_ref: Option<String> },
+}
+
+/// The "New worktree" rows: fork from the checkout's current ref, then the
+/// repository's default branch, then the base the draft remembered — each
+/// only while it names a ref no earlier row already offered. A checkout
+/// sitting on the default branch would otherwise show "From main" twice.
+pub(super) fn worktree_picker_create_actions(
+    workspace: &SessionWorkspace,
+    current_ref: &str,
+    default_ref: Option<&str>,
+) -> Vec<WorktreePickerAction> {
+    let mut actions = vec![WorktreePickerAction::Create {
+        base_ref: Some(current_ref.to_owned()),
+    }];
+    if default_ref != Some(current_ref) {
+        actions.push(WorktreePickerAction::Create {
+            base_ref: default_ref.map(str::to_owned),
+        });
+    }
+    if let SessionWorkspace::NewWorktree {
+        base_branch: Some(base),
+    } = workspace
+        && Some(base.as_str()) != default_ref
+        && base != current_ref
+    {
+        actions.push(WorktreePickerAction::Create {
+            base_ref: Some(base.clone()),
+        });
+    }
+    actions
 }
 
 impl Waku {
@@ -176,5 +206,87 @@ impl Waku {
             }
             None => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_rows_skip_the_default_when_the_checkout_sits_on_it() {
+        let actions =
+            worktree_picker_create_actions(&SessionWorkspace::Local, "main", Some("main"));
+
+        assert_eq!(
+            actions,
+            vec![WorktreePickerAction::Create {
+                base_ref: Some("main".to_owned())
+            }]
+        );
+    }
+
+    #[test]
+    fn create_rows_offer_the_default_alongside_a_different_checkout() {
+        let actions =
+            worktree_picker_create_actions(&SessionWorkspace::Local, "feature", Some("main"));
+
+        assert_eq!(
+            actions,
+            vec![
+                WorktreePickerAction::Create {
+                    base_ref: Some("feature".to_owned())
+                },
+                WorktreePickerAction::Create {
+                    base_ref: Some("main".to_owned())
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn remembered_base_joins_only_when_it_names_a_new_ref() {
+        let distinct = SessionWorkspace::NewWorktree {
+            base_branch: Some("develop".to_owned()),
+        };
+        let actions = worktree_picker_create_actions(&distinct, "feature", Some("main"));
+        assert_eq!(actions.len(), 3);
+        assert_eq!(
+            actions[2],
+            WorktreePickerAction::Create {
+                base_ref: Some("develop".to_owned())
+            }
+        );
+
+        // Matching the default branch or the checked-out ref adds no row.
+        let on_default = SessionWorkspace::NewWorktree {
+            base_branch: Some("main".to_owned()),
+        };
+        assert_eq!(
+            worktree_picker_create_actions(&on_default, "feature", Some("main")).len(),
+            2
+        );
+        let on_current = SessionWorkspace::NewWorktree {
+            base_branch: Some("feature".to_owned()),
+        };
+        assert_eq!(
+            worktree_picker_create_actions(&on_current, "feature", Some("main")).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn unknown_default_still_offers_the_daemon_resolved_row() {
+        let actions = worktree_picker_create_actions(&SessionWorkspace::Local, "main", None);
+
+        assert_eq!(
+            actions,
+            vec![
+                WorktreePickerAction::Create {
+                    base_ref: Some("main".to_owned())
+                },
+                WorktreePickerAction::Create { base_ref: None }
+            ]
+        );
     }
 }

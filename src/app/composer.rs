@@ -3727,23 +3727,11 @@ impl Waku {
                 let default_ref = project_snapshot
                     .as_ref()
                     .and_then(|snapshot| snapshot.default_branch.clone());
-                actions.push(worktrees::WorktreePickerAction::Create {
-                    base_ref: Some(current_ref),
-                });
-                actions.push(worktrees::WorktreePickerAction::Create {
-                    base_ref: default_ref.clone(),
-                });
-                // A base branch the draft remembered joins the create rows
-                // when it differs from both defaults.
-                if let SessionWorkspace::NewWorktree {
-                    base_branch: Some(base),
-                } = &workspace
-                    && Some(base) != default_ref.as_ref()
-                {
-                    actions.push(worktrees::WorktreePickerAction::Create {
-                        base_ref: Some(base.clone()),
-                    });
-                }
+                actions.extend(worktrees::worktree_picker_create_actions(
+                    &workspace,
+                    &current_ref,
+                    default_ref.as_deref(),
+                ));
             }
             let actions = Rc::new(actions);
             let highlight = self
