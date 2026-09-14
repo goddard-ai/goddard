@@ -802,6 +802,60 @@ impl Theme {
             ],
         })
     }
+
+    /// Dracula — spec.draculatheme.com. The `#282a36` canvas and the classic
+    /// candy set: keywords pink, functions green, strings yellow, types cyan,
+    /// constants and numbers purple. Secondary text ramps are interpolated
+    /// between the spec's foreground and comment — the palette has no grays.
+    /// ANSI is the official terminal spec.
+    pub fn dracula() -> Self {
+        Self::from_spec(ThemeSpec {
+            is_dark: true,
+            canvas: 0x282A36,
+            sidebar_solid: 0x21222C,
+            surface: 0x282A36,
+            raised: 0x44475A,
+            composer: 0x343746,
+            inset: 0x21222C,
+            terminal: 0x282A36,
+            sidebar_border: rgb(0x44475A).into(),
+
+            neutral: rgb(0x6272A4).into(),
+
+            text: 0xF8F8F2,
+            text_secondary: 0xADB5CB,
+            text_tertiary: 0x8893B7,
+            text_ghost: 0x6272A4,
+
+            accent: 0xBD93F9,
+            selection: wash(0x44475A, 0.80),
+            code_text: 0x8BE9FD,
+
+            inverse: 0xF8F8F2,
+            on_inverse: 0x282A36,
+
+            info: 0x8BE9FD,
+            warning: 0xFFB86C,
+            success: 0x50FA7B,
+            favorite: 0xF1FA8C,
+            danger: 0xFF5555,
+
+            syntax: SyntaxColors {
+                keyword: rgb(0xFF79C6).into(),   // pink
+                literal: rgb(0xBD93F9).into(),   // purple — constant.language
+                string: rgb(0xF1FA8C).into(),    // yellow
+                comment: rgb(0x6272A4).into(),
+                number: rgb(0xBD93F9).into(),    // purple — constant.numeric
+                ty: rgb(0x8BE9FD).into(),        // cyan
+                function: rgb(0x50FA7B).into(),  // green
+                meta: rgb(0xFFB86C).into(),      // orange — parameters/attributes
+            },
+            ansi: [
+                0x21222c, 0xff5555, 0x50fa7b, 0xf1fa8c, 0xbd93f9, 0xff79c6, 0x8be9fd, 0xf8f8f2,
+                0x6272a4, 0xff6e6e, 0x69ff94, 0xffffa5, 0xd6acff, 0xff92df, 0xa4ffff, 0xffffff,
+            ],
+        })
+    }
 }
 
 /// Resolve settings to a palette. `System` picks the slot matching the OS
@@ -828,6 +882,7 @@ fn theme_named(name: ThemeName) -> Theme {
         ThemeName::PoimandresDark => Theme::poimandres(),
         ThemeName::GithubLight => Theme::github_light(),
         ThemeName::GithubDark => Theme::github_dark(),
+        ThemeName::DraculaDark => Theme::dracula(),
     }
 }
 
