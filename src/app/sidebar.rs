@@ -772,7 +772,7 @@ impl Waku {
             .rounded(px(7.0))
             .flex()
             .items_center()
-            .gap(px(10.0))
+            .gap(px(6.0))
             .cursor_default()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|element| element.bg(theme.sidebar_item_background))
