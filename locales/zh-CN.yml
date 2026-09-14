@@ -101,7 +101,7 @@ settings.usage: 用量
 settings.daemon: 守护进程
 settings.computer_use: 电脑操作
 settings.commands: 命令
-settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex 声音 提示音 通知 完成 回合 sound audio notification
+settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本 数学 公式 表达式 math latex markdown 预览 文件 渲染 源码 preview 声音 提示音 通知 完成 回合 sound audio notification
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 等宽 大小 编辑器 侧边栏 透明
 settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi kimi fx deepseek ohmypi omp devin
 settings.skills: 技能
@@ -235,6 +235,8 @@ settings.code_font_size: 代码字号
 settings.code_font_size_description: 文件编辑器、差分视图、代码块与工具输出的文字大小
 settings.render_math: 渲染数学公式
 settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
+settings.markdown_preview: 预览 Markdown 文件
+settings.markdown_preview_description: 以渲染后的预览而非源码形式打开 Markdown 文件
 settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提问
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
 settings.sync_with_merge: 同步更改时使用合并

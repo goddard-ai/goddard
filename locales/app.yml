@@ -202,7 +202,7 @@ settings.computer_use:
 settings.commands:
   en: Commands
 settings.general_keywords:
-  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open
+  en: general local projects conversations privacy analytics telemetry anonymous sharing updates automatic sparkle version math latex formula expression markdown preview file rendered source sound audio notification alert chime bleep bubble gentle completed turn scroll prompt transcript open
 settings.appearance_keywords:
   en: appearance theme system light dark language english chinese simplified font family typeface monospace size text editor sidebar transparency vibrancy blur opaque solid
 settings.providers_keywords:
@@ -467,6 +467,10 @@ settings.render_math:
   en: Render math expressions
 settings.render_math_description:
   en: Show formatted math in Markdown. Turn off to show LaTeX source.
+settings.markdown_preview:
+  en: Preview Markdown files
+settings.markdown_preview_description:
+  en: Open Markdown files as a rendered preview instead of source
 settings.open_at_last_prompt:
   en: Open finished tasks at the last prompt
 settings.open_at_last_prompt_description:

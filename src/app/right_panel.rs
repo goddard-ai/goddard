@@ -3655,9 +3655,7 @@ impl Waku {
     /// Flips the global markdown source/preview mode and persists it, so the
     /// choice follows the user across files and sessions.
     fn toggle_markdown_preview(&mut self, cx: &mut Context<Self>) {
-        self.state.markdown_preview = !self.state.markdown_preview;
-        self.save();
-        cx.notify();
+        self.set_markdown_preview(!self.state.markdown_preview, cx);
     }
 
     /// The fullscreen file layer is on screen this frame — the mode is

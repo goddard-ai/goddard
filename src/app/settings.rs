@@ -611,6 +611,50 @@ impl Waku {
                                     .text_size(sp(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
+                                    .child(tr!("settings.markdown_preview")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.markdown_preview_description")),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "markdown-preview-toggle",
+                        self.state.markdown_preview,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.markdown_preview;
+                            move |this, _, cx| this.set_markdown_preview(!enabled, cx)
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
                                     .child(tr!("settings.open_at_last_prompt")),
                             )
                             .child(
@@ -3224,6 +3268,15 @@ impl Waku {
         }
         self.state.render_math = enabled;
         self.remeasure_font_sized_surfaces();
+        self.save();
+        cx.notify();
+    }
+
+    pub(super) fn set_markdown_preview(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.markdown_preview == enabled {
+            return;
+        }
+        self.state.markdown_preview = enabled;
         self.save();
         cx.notify();
     }
