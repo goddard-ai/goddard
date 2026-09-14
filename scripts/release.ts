@@ -5,6 +5,7 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readlink,
   rm,
 } from "node:fs/promises";
@@ -380,6 +381,30 @@ async function verifyJavaScriptRepl(executable: string): Promise<void> {
   }
 }
 
+/** Detaches interstitial images left attached by failed create-dmg runs
+ *  (their image paths are named rw.<pid>.<name>.dmg). */
+async function detachStaleDmgImages(): Promise<void> {
+  const info = await $`hdiutil info`.quiet().text();
+  for (const block of info.split(/^=+$/m)) {
+    if (!/image-path\s+:.*\/rw\.[^/\s]+\.dmg/.test(block)) {
+      continue;
+    }
+    const device = block.match(/^\/dev\/disk\d+\s/m)?.[0].trim();
+    if (device) {
+      await $`hdiutil detach ${device} -force`.quiet().nothrow();
+    }
+  }
+}
+
+/** Removes create-dmg's rw.*.dmg interstitial files next to the output DMG. */
+async function removeStaleDmgTempFiles(): Promise<void> {
+  for (const entry of await readdir(dirname(outputPath))) {
+    if (/^rw\..*\.dmg$/.test(entry)) {
+      await rm(join(dirname(outputPath), entry), { force: true });
+    }
+  }
+}
+
 if (extname(outputPath).toLowerCase() !== ".dmg") {
   throw new Error(`Output path must end in .dmg: ${outputPath}`);
 }
@@ -468,7 +493,29 @@ try {
   await rm(outputPath, { force: true });
 
   logStep(`Creating the styled DMG at ${outputPath}`);
-  await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 660 400 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 180 178 --hide-extension ${`${appName}.app`} --app-drop-link 480 178 --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`;
+  // APFS mounting races create-dmg: hdiutil attach can return before the
+  // synthesized volume device exists, so create-dmg picks the APFS container
+  // partition, finds no mount point for it, and fails with "interstitial
+  // disk image was not found" while leaving the image attached. Detach the
+  // leaked image, drop its rw.*.dmg temp file, and retry.
+  for (let attempt = 1; ; attempt++) {
+    const result =
+      await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 660 400 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 180 178 --hide-extension ${`${appName}.app`} --app-drop-link 480 178 --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`
+        .quiet()
+        .nothrow();
+    if (result.exitCode === 0) {
+      process.stdout.write(result.stdout);
+      break;
+    }
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+    if (attempt === 3) {
+      throw new Error(`create-dmg failed after ${attempt} attempts.`);
+    }
+    console.warn(`create-dmg failed; cleaning up and retrying (${attempt}/3).`);
+    await detachStaleDmgImages();
+    await removeStaleDmgTempFiles();
+  }
 
   logStep(adhoc ? "Ad-hoc signing the DMG" : "Signing the DMG");
   if (adhoc) {
