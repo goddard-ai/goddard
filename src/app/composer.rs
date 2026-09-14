@@ -3538,6 +3538,114 @@ impl Waku {
         ))
     }
 
+    /// The new-task sync strip: how far the workspace's checkout trails (and
+    /// leads) its upstream, plus the button that runs `git pull` in a
+    /// terminal tab. Counts come from the local tracking ref, so they reflect
+    /// the last fetch. Only drafts show it — a started task's checkout state
+    /// is its agent's concern — and only local daemons, whose checkout a
+    /// desktop terminal can actually reach.
+    fn render_sync_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.daemon.is_remote() {
+            return None;
+        }
+        let session = self.selected_session()?;
+        if session.has_started() || session.is_busy() {
+            return None;
+        }
+        self.selected_project()
+            .filter(|project| !project.is_projectless())?;
+        let workspace_path = self.workspace_path_for_session(session)?.to_path_buf();
+        let upstream = self
+            .branch_snapshot_for_workspace(&workspace_path, cx)?
+            .upstream
+            .filter(|upstream| upstream.behind > 0)?;
+        let theme = Theme::current(cx);
+        let script = if self.state.sync_with_merge {
+            "git pull --no-rebase"
+        } else {
+            "git pull --rebase"
+        };
+        let mut summary = if upstream.behind == 1 {
+            tr!("sync.behind_one", upstream = upstream.name)
+        } else {
+            tr!(
+                "sync.behind_many",
+                count = upstream.behind,
+                upstream = upstream.name
+            )
+        };
+        if upstream.ahead > 0 {
+            let ahead = if upstream.ahead == 1 {
+                tr!("sync.ahead_one")
+            } else {
+                tr!("sync.ahead_many", count = upstream.ahead)
+            };
+            summary = format!("{summary} · {ahead}");
+        }
+        let focus = self.transcript_control_focus("workspace-sync", cx);
+        Some(
+            div()
+                .h(px(26.0))
+                .pl(px(10.0))
+                .pr(px(10.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(icon("icons/download.svg", 12.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_color(theme.text_tertiary)
+                        .child(summary),
+                )
+                .child(
+                    div()
+                        .id("sync-changes")
+                        .h(px(20.0))
+                        .px(px(8.0))
+                        .rounded(px(5.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .cursor_default()
+                        .track_focus(&focus)
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .bg(theme.overlay)
+                        .hover(|element| element.bg(theme.overlay_strong))
+                        .active(|element| element.opacity(0.8))
+                        .child(icon("icons/rotate-cw.svg", 11.0, theme.text_secondary))
+                        .child(tr!("sync.action"))
+                        .tooltip(Tooltip::text(tr!("sync.command_hint", command = script)))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.sync_workspace(script, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.sync_workspace(script, cx);
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Run the checkout's sync command in a fresh terminal tab — the rebase
+    /// pull by default, the merge form when the setting says so. The tab
+    /// closes itself on success; a conflict or other failure stays open with
+    /// its output visible.
+    fn sync_workspace(&mut self, script: &'static str, cx: &mut Context<Self>) {
+        let mut command = CustomCommand::new(script.to_owned());
+        command.name = Some(tr!("sync.action"));
+        command.icon = CustomCommandIcon::Refresh;
+        command.close_on_success = true;
+        self.run_custom_command(command, cx);
+    }
+
     pub(super) fn render_workspace_footer(&mut self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let selected_project_id = self.state.selected_project;
@@ -3998,6 +4106,7 @@ impl Waku {
         };
 
         let branch_selector = self.render_branch_selector(cx);
+        let sync_notice = self.render_sync_notice(cx);
 
         let usage_meter = self.render_usage_meter(cx);
         div()
@@ -4010,24 +4119,28 @@ impl Waku {
                     .w_full()
                     .max_w(px(CONTENT_MAX_WIDTH))
                     .mx_auto()
-                    .h(px(28.0))
-                    // The chip contributes 7px, lining its icon up with the
-                    // composer's 10px padding plus the controls' 7px inset.
-                    .pl(px(10.0))
-                    .pr(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .tab_index(0)
-                    .tab_group()
-                    .tab_stop(false)
                     .text_size(sp(12.5))
                     .line_height(sp(14.0))
-                    .child(project_selector)
-                    .child(worktree_selector)
-                    .children(branch_selector)
-                    .child(div().flex_1())
-                    .children(usage_meter),
+                    .children(sync_notice)
+                    .child(
+                        div()
+                            .h(px(28.0))
+                            // The chip contributes 7px, lining its icon up with the
+                            // composer's 10px padding plus the controls' 7px inset.
+                            .pl(px(10.0))
+                            .pr(px(10.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .tab_index(0)
+                            .tab_group()
+                            .tab_stop(false)
+                            .child(project_selector)
+                            .child(worktree_selector)
+                            .children(branch_selector)
+                            .child(div().flex_1())
+                            .children(usage_meter),
+                    ),
             )
     }
 }

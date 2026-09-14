@@ -235,6 +235,8 @@ settings.render_math: 数式を描画
 settings.render_math_description: Markdown の数式を整形して表示します。オフにすると LaTeX ソースを表示します。
 settings.open_at_last_prompt: 終了したタスクを最後のプロンプトから開く
 settings.open_at_last_prompt_description: トランスクリプトの末尾ではなく、最後のメッセージから読み始めます
+settings.sync_with_merge: 変更の同期にマージを使用
+settings.sync_with_merge_description: 新規タスク画面からチェックアウトを同期するときに、git pull --rebase の代わりに git マージを使います
 settings.completion_sound: ターン完了時にサウンドを再生
 settings.completion_sound_description: 表示していないタスクがターンを完了したときにサウンドを再生します
 settings.completion_sound_name: サウンド
@@ -736,6 +738,13 @@ workspace.from_default: デフォルトブランチから
 workspace.workspace: ワークスペース
 workspace.worktree: ワークツリー
 workspace.toggle_hint: 作業場所を切り替え (%{shortcut})
+
+sync.behind_one: "%{upstream} より 1 コミット遅れています"
+sync.behind_many: "%{upstream} より %{count} コミット遅れています"
+sync.ahead_one: 1 コミット進んでいます
+sync.ahead_many: "%{count} コミット進んでいます"
+sync.action: 変更を同期
+sync.command_hint: "ターミナルで %{command} を実行します"
 
 terminal.starting: ターミナルを起動中…
 

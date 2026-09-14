@@ -232,6 +232,8 @@ settings.render_math: 渲染数学公式
 settings.render_math_description: 在 Markdown 中显示排版后的公式。关闭后显示 LaTeX 源码。
 settings.open_at_last_prompt: 打开已结束的任务时定位到最后的提问
 settings.open_at_last_prompt_description: 从最近一条消息开始阅读，而不是对话末尾
+settings.sync_with_merge: 同步更改时使用合并
+settings.sync_with_merge_description: 在新任务区域同步检出时，使用 git merge 代替 git pull --rebase
 settings.completion_sound: 回合完成时播放提示音
 settings.completion_sound_description: 当你未查看的任务完成回合时播放提示音
 settings.completion_sound_name: 提示音
@@ -706,6 +708,14 @@ workspace.from_default: 从默认分支
 workspace.workspace: 工作区
 workspace.worktree: 工作树
 workspace.toggle_hint: 切换工作位置 (%{shortcut})
+
+sync.behind_one: "落后 %{upstream} 1 个提交"
+sync.behind_many: "落后 %{upstream} %{count} 个提交"
+sync.ahead_one: 领先 1 个提交
+sync.ahead_many: "领先 %{count} 个提交"
+sync.action: 同步更改
+sync.command_hint: "在终端中运行 %{command}"
+
 terminal.starting: 正在启动终端…
 project.add_project: 添加项目
 errors.remote_project_picker: 添加守护进程主机上的项目需要远程路径选择器，但该功能尚不可用

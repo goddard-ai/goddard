@@ -461,6 +461,10 @@ settings.open_at_last_prompt:
   en: Open finished tasks at the last prompt
 settings.open_at_last_prompt_description:
   en: Start reading at your latest message instead of the end of the transcript
+settings.sync_with_merge:
+  en: Merge when syncing changes
+settings.sync_with_merge_description:
+  en: Use git merge instead of git pull --rebase when syncing a checkout from the new task area
 settings.completion_sound:
   en: Play sound on completed turn
 settings.completion_sound_description:
@@ -1434,6 +1438,19 @@ workspace.worktree:
   en: Worktree
 workspace.toggle_hint:
   en: Toggle workspace (%{shortcut})
+
+sync.behind_one:
+  en: 1 commit behind %{upstream}
+sync.behind_many:
+  en: "%{count} commits behind %{upstream}"
+sync.ahead_one:
+  en: 1 commit ahead
+sync.ahead_many:
+  en: "%{count} commits ahead"
+sync.action:
+  en: Sync changes
+sync.command_hint:
+  en: "Runs %{command} in a terminal"
 
 terminal.starting:
   en: Starting terminal…

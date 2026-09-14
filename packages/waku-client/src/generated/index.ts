@@ -88,6 +88,7 @@ export type { ThreadGoalStatus } from "./ThreadGoalStatus";
 export type { TokenTotals } from "./TokenTotals";
 export type { TranscriptBlock } from "./TranscriptBlock";
 export type { TurnStatus } from "./TurnStatus";
+export type { UpstreamStatus } from "./UpstreamStatus";
 export type { UsageHistory } from "./UsageHistory";
 export type { UsageProvider } from "./UsageProvider";
 export type { UsageWindow } from "./UsageWindow";

@@ -451,6 +451,10 @@ pub struct AppSettings {
     /// Open a task that is not mid-turn scrolled to its last prompt instead
     /// of the end of the transcript.
     pub open_at_last_prompt: bool,
+    /// Integrate upstream changes with `git pull --no-rebase` (a merge)
+    /// instead of `git pull --rebase` when a checkout is synced from the new
+    /// task area.
+    pub sync_with_merge: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     pub sidebar_transparency: bool,
@@ -484,6 +488,7 @@ impl Default for AppSettings {
             code_font_family: None,
             render_math: true,
             open_at_last_prompt: true,
+            sync_with_merge: false,
             sidebar_transparency: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
@@ -632,6 +637,11 @@ pub struct PersistedState {
     pub render_math: bool,
     #[serde(default = "default_open_at_last_prompt")]
     pub open_at_last_prompt: bool,
+    /// Integrate upstream changes with `git pull --no-rebase` (a merge)
+    /// instead of `git pull --rebase` when a checkout is synced from the new
+    /// task area.
+    #[serde(default)]
+    pub sync_with_merge: bool,
     /// macOS-only: blend the desktop behind the sidebar through vibrancy
     /// instead of painting a solid fill.
     #[serde(default = "default_sidebar_transparency")]
@@ -724,6 +734,7 @@ impl PersistedState {
             code_font_family: None,
             render_math: true,
             open_at_last_prompt: true,
+            sync_with_merge: false,
             sidebar_transparency: true,
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
@@ -901,6 +912,7 @@ impl PersistedState {
             code_font_family: self.code_font_family.clone(),
             render_math: self.render_math,
             open_at_last_prompt: self.open_at_last_prompt,
+            sync_with_merge: self.sync_with_merge,
             sidebar_transparency: self.sidebar_transparency,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
@@ -947,6 +959,7 @@ impl PersistedState {
         self.code_font_family = sanitized_font_family(settings.code_font_family);
         self.render_math = settings.render_math;
         self.open_at_last_prompt = settings.open_at_last_prompt;
+        self.sync_with_merge = settings.sync_with_merge;
         self.sidebar_transparency = settings.sidebar_transparency;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
@@ -1521,6 +1534,26 @@ mod tests {
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(serde_json::from_value(settings).unwrap());
         assert!(!restored.render_math);
+    }
+
+    #[test]
+    fn merge_sync_defaults_off_and_persists_as_an_app_preference() {
+        let defaults: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!defaults.sync_with_merge);
+        let mut state = PersistedState::empty();
+        assert!(!state.sync_with_merge);
+        state.sync_with_merge = true;
+        let settings = serde_json::to_value(state.app_settings()).unwrap();
+        assert_eq!(settings["sync_with_merge"], true);
+        assert!(
+            serde_json::to_value(state.app_state())
+                .unwrap()
+                .get("sync_with_merge")
+                .is_none()
+        );
+        let mut restored = PersistedState::empty();
+        restored.apply_app_settings(serde_json::from_value(settings).unwrap());
+        assert!(restored.sync_with_merge);
     }
 
     #[test]

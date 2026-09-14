@@ -634,6 +634,50 @@ impl Waku {
                         },
                     )),
             )
+            .child(
+                div()
+                    .mt(px(15.0))
+                    .w_full()
+                    .min_h(px(60.0))
+                    .px(px(20.0))
+                    .py(px(12.0))
+                    .rounded(px(13.0))
+                    .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("settings.sync_with_merge")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.sync_with_merge_description")),
+                            ),
+                    )
+                    .child(toggle_switch(
+                        "sync-with-merge-toggle",
+                        self.state.sync_with_merge,
+                        false,
+                        theme,
+                        cx,
+                        {
+                            let enabled = self.state.sync_with_merge;
+                            move |this, _, cx| this.set_sync_with_merge(!enabled, cx)
+                        },
+                    )),
+            )
             .child({
                 let enabled = self.state.completion_sound_enabled;
                 let selected_sound = self.state.completion_sound;
@@ -3189,6 +3233,15 @@ impl Waku {
             return;
         }
         self.state.open_at_last_prompt = enabled;
+        self.save();
+        cx.notify();
+    }
+
+    fn set_sync_with_merge(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.state.sync_with_merge == enabled {
+            return;
+        }
+        self.state.sync_with_merge = enabled;
         self.save();
         cx.notify();
     }

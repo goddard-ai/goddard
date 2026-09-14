@@ -11,6 +11,20 @@ pub struct BranchEntry {
     pub checked_out_elsewhere: bool,
 }
 
+/// The checked-out branch's relationship to its configured upstream —
+/// `origin/<branch>` in a typical checkout. Counts come from the local
+/// remote-tracking ref, so they describe the last fetch, not the remote's
+/// current state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct UpstreamStatus {
+    /// The tracking ref's short name, e.g. `origin/main`.
+    pub name: String,
+    /// Commits on HEAD the upstream does not have.
+    pub ahead: u64,
+    /// Commits on the upstream HEAD does not have.
+    pub behind: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct BranchSnapshot {
     #[ts(type = "string")]
@@ -20,6 +34,8 @@ pub struct BranchSnapshot {
     pub default_branch: Option<String>,
     /// The fetch URL of the `origin` remote, if one is configured.
     pub origin_url: Option<String>,
+    /// `None` for a detached HEAD or a branch with no upstream configured.
+    pub upstream: Option<UpstreamStatus>,
     pub branches: Vec<BranchEntry>,
     pub additions: u64,
     pub deletions: u64,

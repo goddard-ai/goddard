@@ -471,6 +471,7 @@ mod tests {
             detached_head: None,
             default_branch: None,
             origin_url: origin_url.map(str::to_owned),
+            upstream: None,
             branches: Vec::new(),
             additions: 0,
             deletions: 0,

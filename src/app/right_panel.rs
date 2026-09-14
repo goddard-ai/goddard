@@ -2505,6 +2505,9 @@ impl Waku {
                 // only goes away on its own when the script succeeded — the
                 // exit event is the close signal.
                 cx.subscribe(&view, |this, view, _: &TerminalViewEvent, cx| {
+                    // A finished command may have changed the checkout, so
+                    // drop the cached snapshot; the next read refetches.
+                    this.refresh_selected_branch_snapshot(cx);
                     this.close_terminal_view_surface(&view, cx);
                 })
                 .detach();

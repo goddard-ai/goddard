@@ -14,13 +14,13 @@ use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt as _;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{anyhow, bail, Context as _};
 const MAX_UNTRACKED_FILES: usize = 2_048;
 const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 32 * 1_024 * 1_024;
 const BINARY_PROBE_BYTES: usize = 8_000;
 
-pub use waku_protocol::git::{BranchEntry, BranchSnapshot};
+pub use waku_protocol::git::{BranchEntry, BranchSnapshot, UpstreamStatus};
 
 /// Inspect local branches and which worktree, if any, currently owns each.
 /// `Ok(None)` means `cwd` is not inside a Git repository.
@@ -104,6 +104,7 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         .map(str::to_owned)
         .or_else(|| current.clone());
     let origin_url = remote_url(cwd, "origin")?;
+    let upstream = upstream_status(cwd);
     let (additions, deletions) = worktree_line_counts(&repository);
 
     Ok(Some(BranchSnapshot {
@@ -112,10 +113,47 @@ pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
         detached_head,
         default_branch,
         origin_url,
+        upstream,
         branches,
         additions,
         deletions,
     }))
+}
+
+/// The checked-out branch's upstream and its divergence from it. `None` for
+/// a detached HEAD or a branch with no upstream configured; a probe failure
+/// also degrades to `None` rather than failing the whole inspect.
+fn upstream_status(cwd: &Path) -> Option<UpstreamStatus> {
+    let name = crate::command_env::plain_command("git")
+        .args([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|name| !name.is_empty())?;
+    // `--left-right --count @{upstream}...HEAD` reports the upstream-only
+    // count first — how far the checkout trails — then the HEAD-only count.
+    let counts = crate::command_env::plain_command("git")
+        .args(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+        .current_dir(cwd)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let counts = String::from_utf8_lossy(&counts.stdout);
+    let mut parts = counts.split_whitespace();
+    let behind = parts.next().and_then(|part| part.parse::<u64>().ok())?;
+    let ahead = parts.next().and_then(|part| part.parse::<u64>().ok())?;
+    Some(UpstreamStatus {
+        name,
+        ahead,
+        behind,
+    })
 }
 
 /// The fetch URL for `remote`, `None` when the remote is not configured.
@@ -130,7 +168,10 @@ fn remote_url(cwd: &Path, remote: &str) -> anyhow::Result<Option<String>> {
     if !output.status.success() {
         return Ok(None);
     }
-    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_owned()).filter(|url| !url.is_empty()))
+    Ok(
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|url| !url.is_empty()),
+    )
 }
 
 fn worktree_line_counts(cwd: &Path) -> (u64, u64) {
@@ -401,12 +442,7 @@ mod tests {
         assert_eq!(inspect(&repository).unwrap().unwrap().origin_url, None);
         run_git(
             &repository,
-            &[
-                "remote",
-                "add",
-                "origin",
-                "git@github.com:owner/repo.git",
-            ],
+            &["remote", "add", "origin", "git@github.com:owner/repo.git"],
         );
         let snapshot = inspect(&repository).unwrap().unwrap();
         assert_eq!(
@@ -423,12 +459,75 @@ mod tests {
 
         let created = create_and_checkout(&repository, "topic/new-picker").unwrap();
         assert_eq!(created.current.as_deref(), Some("topic/new-picker"));
-        assert!(
-            created
-                .branches
-                .iter()
-                .any(|branch| branch.name == "topic/new-picker")
+        assert!(created
+            .branches
+            .iter()
+            .any(|branch| branch.name == "topic/new-picker"));
+    }
+
+    #[test]
+    fn reports_divergence_from_the_configured_upstream() {
+        let repository = repository();
+        assert_eq!(inspect(&repository).unwrap().unwrap().upstream, None);
+
+        // A same-directory "remote" keeps the fixture offline; the clone's
+        // main tracks origin/main through the ordinary clone setup.
+        let remote = repository.with_extension("remote");
+        run_git(
+            &repository,
+            &["clone", "--bare", ".", remote.to_str().unwrap()],
         );
+        let checkout = repository.with_extension("checkout");
+        run_git(
+            &repository,
+            &[
+                "clone",
+                remote.to_str().unwrap(),
+                checkout.to_str().unwrap(),
+            ],
+        );
+
+        let snapshot = inspect(&checkout).unwrap().unwrap();
+        let upstream = snapshot.upstream.unwrap();
+        assert_eq!(upstream.name, "origin/main");
+        assert_eq!((upstream.ahead, upstream.behind), (0, 0));
+
+        // One commit on each side diverges the tracking ref from HEAD. The
+        // bare remote has no work tree, so the upstream commit is made in the
+        // original repository and pushed.
+        fs::write(repository.join("UPSTREAM.md"), "upstream\n").unwrap();
+        run_git(&repository, &["add", "UPSTREAM.md"]);
+        run_git(
+            &repository,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "upstream",
+            ],
+        );
+        run_git(&repository, &["push", remote.to_str().unwrap(), "main"]);
+        run_git(&checkout, &["fetch", "origin"]);
+        fs::write(checkout.join("LOCAL.md"), "local\n").unwrap();
+        run_git(&checkout, &["add", "LOCAL.md"]);
+        run_git(
+            &checkout,
+            &[
+                "-c",
+                "user.name=Goddard Tests",
+                "-c",
+                "user.email=waku@example.com",
+                "commit",
+                "-m",
+                "local",
+            ],
+        );
+
+        let upstream = inspect(&checkout).unwrap().unwrap().upstream.unwrap();
+        assert_eq!((upstream.ahead, upstream.behind), (1, 1));
     }
 
     #[test]
