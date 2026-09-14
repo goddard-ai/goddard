@@ -222,6 +222,34 @@ struct ScoredPaletteItem {
     item: CommandPaletteItem,
 }
 
+/// Groups results by section, ordering the sections by each one's best score
+/// so a strong match lifts its section above weak matches elsewhere — a
+/// keyword-stuffed command must not outrank a literal custom-command hit just
+/// because of a fixed section order. Ties fall back to browsing order, and the
+/// stable sort preserves each section's internal score order.
+fn order_sections_by_best_score(scored_results: &mut [ScoredPaletteItem]) {
+    let mut best: Vec<(PaletteSection, u32)> = Vec::new();
+    for scored in scored_results.iter() {
+        match best
+            .iter_mut()
+            .find(|(section, _)| *section == scored.item.section)
+        {
+            Some((_, score)) => *score = (*score).max(scored.score),
+            None => best.push((scored.item.section, scored.score)),
+        }
+    }
+    best.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(a.0.query_rank().cmp(&b.0.query_rank()))
+            .then(a.0.cmp(&b.0))
+    });
+    scored_results.sort_by_key(|scored| {
+        best.iter()
+            .position(|(section, _)| *section == scored.item.section)
+            .unwrap_or(usize::MAX)
+    });
+}
+
 pub(super) fn next_selection_index(selected: usize, len: usize, delta: isize) -> Option<usize> {
     if len == 0 {
         return None;
@@ -400,7 +428,9 @@ impl CommandPaletteUi {
             provider_session_generation: 0,
             selected: 0,
             scroll: ScrollHandle::new(),
-            matcher: crate::composer_complete::matcher(),
+            // Plain config: `match_paths` biases toward path basenames, which
+            // is right for file pickers but skews label/keyword scoring here.
+            matcher: Matcher::new(nucleo_matcher::Config::DEFAULT),
         }
     }
 
@@ -1297,14 +1327,7 @@ impl Waku {
                     .map(|score| ScoredPaletteItem { score, item })
             })
             .collect::<Vec<_>>();
-        commands.sort_by(|a, b| {
-            a.item
-                .section
-                .query_rank()
-                .cmp(&b.item.section.query_rank())
-                .then(b.score.cmp(&a.score))
-                .then(a.item.order.cmp(&b.item.order))
-        });
+        commands.sort_by(|a, b| b.score.cmp(&a.score).then(a.item.order.cmp(&b.item.order)));
 
         let selected_action = preserve_selection.then(|| {
             self.command_palette
@@ -1314,8 +1337,7 @@ impl Waku {
         });
         let mut scored_results = tasks;
         scored_results.extend(commands);
-        // Stable sorting keeps each section's existing score/recency order.
-        scored_results.sort_by_key(|scored| scored.item.section.query_rank());
+        order_sections_by_best_score(&mut scored_results);
         let next_results = scored_results
             .into_iter()
             .map(|scored| scored.item)
@@ -2267,9 +2289,59 @@ mod tests {
     }
 
     #[test]
-    fn searched_commands_rank_before_tasks() {
-        assert!(PaletteSection::Commands.query_rank() < PaletteSection::Tasks.query_rank());
-        assert!(PaletteSection::Tasks.query_rank() < PaletteSection::Settings.query_rank());
+    fn sections_follow_their_best_score_when_searching() {
+        let item = |section: PaletteSection, order: usize| {
+            CommandPaletteItem::command(
+                section,
+                format!("Item {order}"),
+                "icons/search.svg",
+                None,
+                PaletteAction::NewTask,
+                "",
+                order,
+            )
+        };
+        // Typing "merge": the literal "Merge into dev" custom command must
+        // outrank built-in commands that only matched scattered letters in
+        // stuffed keywords, despite Commands' better browsing rank.
+        let mut scored = vec![
+            ScoredPaletteItem {
+                score: 10,
+                item: item(PaletteSection::Commands, 0),
+            },
+            ScoredPaletteItem {
+                score: 5,
+                item: item(PaletteSection::Commands, 1),
+            },
+            ScoredPaletteItem {
+                score: 500,
+                item: item(PaletteSection::CustomCommands, 2),
+            },
+            ScoredPaletteItem {
+                score: 40,
+                item: item(PaletteSection::Tasks, 3),
+            },
+            ScoredPaletteItem {
+                score: 40,
+                item: item(PaletteSection::Settings, 4),
+            },
+        ];
+        order_sections_by_best_score(&mut scored);
+        let sections = scored
+            .iter()
+            .map(|scored| scored.item.section)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sections,
+            [
+                PaletteSection::CustomCommands,
+                // Equal scores fall back to browsing rank: Tasks before Settings.
+                PaletteSection::Tasks,
+                PaletteSection::Settings,
+                PaletteSection::Commands,
+                PaletteSection::Commands,
+            ]
+        );
     }
 
     #[test]
