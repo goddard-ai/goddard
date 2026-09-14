@@ -1743,13 +1743,15 @@ impl Waku {
             .map(|session| session.runtime_mode)
             .unwrap_or_default();
         let weak = cx.entity().downgrade();
-        let handle = self.menu_handle("runtime-mode", cx);
+        let handle = self.menu_handle(RUNTIME_MODE_MENU_ID, cx);
         dropdown_menu(
             MenuChip::new("runtime-mode")
                 .icon(selected_mode.icon(), theme.text_tertiary)
                 .label(selected_mode.label())
                 .caret(false)
-                .selected(handle.is_open()),
+                .selected(handle.is_open())
+                .tooltip(tr!("mode.choose"))
+                .shortcut_action(&ToggleRuntimeModePicker),
             "runtime-mode-menu",
             &handle,
             MenuAlign::AboveLeft,
@@ -3197,7 +3199,11 @@ impl Waku {
             .caret(false)
             .disabled(!branch_enabled)
             .selected(branch_enabled && handle.is_open())
-            .max_w(px(210.0));
+            .max_w(px(210.0))
+            .when(branch_enabled, |chip| {
+                chip.tooltip(tr!("branches.choose"))
+                    .shortcut_action(&ToggleBranchPicker)
+            });
         if !branch_enabled {
             return Some(trigger.into_any_element());
         }
@@ -3680,7 +3686,11 @@ impl Waku {
             .caret(false)
             .disabled(!can_configure_workspace)
             .selected(can_configure_workspace && project_handle.is_open())
-            .max_w(px(190.0));
+            .max_w(px(190.0))
+            .when(can_configure_workspace, |chip| {
+                chip.tooltip(tr!("project.choose"))
+                    .shortcut_action(&SwitchProjectForward)
+            });
         let project_selector = if can_configure_workspace {
             let project_options = self
                 .state
@@ -3727,7 +3737,8 @@ impl Waku {
                         MenuItem::new(tr!("project.new_project"), move |_, cx| {
                             let _ = add_project.update(cx, |this, cx| this.add_project(cx));
                         })
-                        .icon("icons/folder-new.svg"),
+                        .icon("icons/folder-new.svg")
+                        .shortcut_action(&NewProject),
                     );
                     let projectless = weak.clone();
                     items.push(

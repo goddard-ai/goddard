@@ -48,6 +48,10 @@ menu.focus_terminal:
   en: Focus Terminal
 menu.toggle_model_picker:
   en: Toggle Model Picker
+menu.toggle_branch_picker:
+  en: Toggle Branch Picker
+menu.toggle_runtime_mode_picker:
+  en: Toggle Mode Picker
 menu.toggle_workspace:
   en: Toggle Workspace
 menu.toggle_usage_panel:
@@ -710,6 +714,8 @@ project.chat:
   en: Chat
 project.choose_project:
   en: choose a project
+project.choose:
+  en: Choose a project
 project.default_folder:
   en: Default folder
 project.project_lower:
@@ -1032,6 +1038,8 @@ mode.auto_description:
   en: An AI reviewer approves routine actions; risky ones still ask
 mode.full_access_description:
   en: Allow commands and edits without prompts
+mode.choose:
+  en: Choose a mode
 agent_preset.standard:
   en: Standard mode
 agent_preset.code:
@@ -1961,6 +1969,11 @@ file_picker.file:
   en: File
 file_picker.typed_file:
   en: "%{type} file"
+
+navigation.back:
+  en: Back
+navigation.forward:
+  en: Forward
 
 diff.no_changes:
   en: No changes

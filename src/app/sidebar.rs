@@ -2,6 +2,7 @@ use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions};
 
 use super::*;
+use crate::ui::shortcut::ShortcutHint;
 
 actions!(waku_sidebar, [CancelSessionRename]);
 
@@ -609,6 +610,11 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let (label, action): (String, &dyn gpui::Action) = if navigate_back {
+            (tr!("navigation.back"), &NavigateBack)
+        } else {
+            (tr!("navigation.forward"), &NavigateForward)
+        };
         div()
             .id(id)
             .w(px(26.0))
@@ -619,6 +625,7 @@ impl Waku {
             .items_center()
             .justify_center()
             .cursor_default()
+            .tooltip(Tooltip::text_with_action(label, action))
             .when(!enabled, |element| element.opacity(0.35))
             .when(enabled, |element| {
                 element
@@ -780,7 +787,10 @@ impl Waku {
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text(tr!("project.new_project")))
+            .tooltip(Tooltip::text_with_action(
+                tr!("project.new_project"),
+                &NewProject,
+            ))
             .child(icon("icons/folder-new.svg", 14.0, theme.text_secondary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| {
@@ -807,11 +817,16 @@ impl Waku {
         id: &'static str,
         icon_path: &'static str,
         label: String,
+        shortcut_action: &dyn gpui::Action,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let group_name = SharedString::from(format!("{id}-shortcut"));
+        let shortcut = ShortcutHint::action(shortcut_action).resolve(window);
         div()
             .id(id)
+            .group(group_name.clone())
             .tab_index(0)
             .w_full()
             .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
@@ -837,18 +852,33 @@ impl Waku {
             .child(
                 div()
                     .min_w_0()
+                    .flex_1()
                     .truncate()
                     .text_size(sp(13.0))
                     .text_color(theme.text_secondary)
                     .child(label),
             )
+            .when_some(shortcut, |element, shortcut| {
+                element.child(
+                    div()
+                        .flex_none()
+                        .invisible()
+                        .group_hover(group_name.clone(), |element| element.visible())
+                        .pr(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(shortcut),
+                )
+            })
     }
 
-    fn render_sidebar_new_session(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_sidebar_new_session(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-new-session",
             "icons/compose.svg",
             tr!("menu.new_task"),
+            &NewSession,
+            window,
             cx,
         )
         .on_click(cx.listener(|this, _, window, cx| {
@@ -862,12 +892,14 @@ impl Waku {
         }))
     }
 
-    fn render_sidebar_search(&self, cx: &mut Context<Self>) -> Div {
+    fn render_sidebar_search(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let search = self
             .render_sidebar_action_row(
                 "sidebar-search",
                 "icons/search.svg",
                 tr!("sidebar.search"),
+                &ToggleCommandPalette,
+                window,
                 cx,
             )
             .on_click(cx.listener(|this, _, window, cx| {
@@ -1265,7 +1297,7 @@ impl Waku {
                 div()
                     .flex_none()
                     .px(px(10.0))
-                    .child(self.render_sidebar_new_session(cx)),
+                    .child(self.render_sidebar_new_session(window, cx)),
             )
             .child(
                 div()
@@ -1275,19 +1307,16 @@ impl Waku {
                     .relative()
                     .child(
                         div().px(px(10.0)).size_full().child(
-                            list(
-                                self.sidebar_list_state.clone(),
-                                move |index, _window, cx| {
-                                    entity
-                                        .upgrade()
-                                        .map(|entity| {
-                                            entity.update(cx, |this, cx| {
-                                                this.sidebar_row(index, &rows, cx)
-                                            })
+                            list(self.sidebar_list_state.clone(), move |index, window, cx| {
+                                entity
+                                    .upgrade()
+                                    .map(|entity| {
+                                        entity.update(cx, |this, cx| {
+                                            this.sidebar_row(index, &rows, window, cx)
                                         })
-                                        .unwrap_or_else(|| div().into_any_element())
-                                },
-                            )
+                                    })
+                                    .unwrap_or_else(|| div().into_any_element())
+                            })
                             .size_full(),
                         ),
                     )
@@ -1612,12 +1641,18 @@ impl Waku {
         }
     }
 
-    fn sidebar_row(&self, index: usize, rows: &[SidebarRow], cx: &mut Context<Self>) -> AnyElement {
+    fn sidebar_row(
+        &self,
+        index: usize,
+        rows: &[SidebarRow],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
         match *row {
-            SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
+            SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
                     matches!(row, SidebarRow::Session(_) | SidebarRow::ShowMore(_))
@@ -2808,7 +2843,8 @@ impl Waku {
                     MenuItem::new(tr!("project.new_project"), move |_, cx| {
                         let _ = add_project_weak.update(cx, |this, cx| this.add_project(cx));
                     })
-                    .icon("icons/folder-new.svg"),
+                    .icon("icons/folder-new.svg")
+                    .shortcut_action(&NewProject),
                 );
                 let projectless_weak = weak.clone();
                 items.push(

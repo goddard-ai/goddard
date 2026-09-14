@@ -1503,25 +1503,102 @@ impl Waku {
         {
             return;
         }
-        let menus = self.menus.borrow();
-        let Some(handle) = menus.get(MODEL_PICKER_MENU_ID).cloned() else {
+        self.defer_menu_toggle(
+            MODEL_PICKER_MENU_ID,
+            crate::ui::menu::toggle_popover,
+            window,
+            cx,
+        );
+    }
+
+    /// Primary modifier + Shift + B: toggle the branch picker as if its chip
+    /// were clicked — a worktree draft's base branch, or a checkout's current
+    /// branch. The guards mirror the selector's disabled states.
+    pub(super) fn toggle_branch_picker_action(
+        &mut self,
+        _: &ToggleBranchPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        let Some(session) = self.selected_session() else {
             return;
         };
-        // A keyboard toggle produces no mouse-down for another open menu's
-        // dismiss-on-down-out to see, so close the rest here.
+        if session.is_busy() || self.branch_operation_pending {
+            return;
+        }
+        if self
+            .selected_project()
+            .filter(|project| !project.is_projectless())
+            .is_none()
+        {
+            return;
+        }
+        let Some(workspace_path) = self.workspace_path_for_session(session) else {
+            return;
+        };
+        let workspace_path = workspace_path.to_path_buf();
+        if self
+            .branch_snapshot_for_workspace(&workspace_path, cx)
+            .is_none()
+        {
+            return;
+        }
+        self.defer_menu_toggle(
+            BRANCH_PICKER_MENU_ID,
+            crate::ui::menu::toggle_popover,
+            window,
+            cx,
+        );
+    }
+
+    /// Primary modifier + .: toggle the composer's runtime-mode menu as if
+    /// its chip were clicked.
+    pub(super) fn toggle_runtime_mode_picker_action(
+        &mut self,
+        _: &ToggleRuntimeModePicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings_page.is_some() {
+            return;
+        }
+        self.defer_menu_toggle(
+            RUNTIME_MODE_MENU_ID,
+            crate::ui::menu::toggle_dropdown,
+            window,
+            cx,
+        );
+    }
+
+    /// A keyboard toggle produces no mouse-down for another open menu's
+    /// dismiss-on-down-out to see, so close the rest here. The pickers' toggle
+    /// observers update this entity, so the toggle itself has to run after
+    /// this listener releases it.
+    fn defer_menu_toggle(
+        &self,
+        menu_id: &'static str,
+        toggle: fn(&ContextMenuHandle, MenuAlign, &mut Window, &mut App),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let menus = self.menus.borrow();
+        let Some(handle) = menus.get(menu_id).cloned() else {
+            return;
+        };
         let other_open: Vec<_> = menus
             .iter()
-            .filter(|(id, other)| id.as_ref() != MODEL_PICKER_MENU_ID && other.is_open())
+            .filter(|(id, other)| id.as_ref() != menu_id && other.is_open())
             .map(|(_, other)| other.clone())
             .collect();
         drop(menus);
-        // The picker's toggle observers update this entity, so the toggle has
-        // to run after this listener releases it.
         window.defer(cx, move |window, cx| {
             for menu in other_open {
                 menu.close(window, cx);
             }
-            crate::ui::menu::toggle_popover(&handle, MenuAlign::AboveLeft, window, cx);
+            toggle(&handle, MenuAlign::AboveLeft, window, cx);
         });
     }
 

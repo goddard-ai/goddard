@@ -79,10 +79,10 @@ use crate::{
     NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
     OpenResumePicker, OpenSettings, ReplaceAllMatches, SaveFile, SelectFirstProject,
     SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
-    SwitchProjectBackward,
-    SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
-    ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
-    ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleSessionPin, ToggleSidebar,
+    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
+    ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker,
+    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar,
     ToggleUsagePanel, ToggleWorkspace,
 };
 
@@ -95,6 +95,7 @@ const CONTENT_MAX_WIDTH: f32 = 720.0;
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
 const BRANCH_PICKER_MENU_ID: &str = "workspace-branch-picker";
+const RUNTIME_MODE_MENU_ID: &str = "runtime-mode";
 const BRANCH_PICKER_ROW_HEIGHT: f32 = 26.0;
 const SIDEBAR_MIN_WIDTH: f32 = 180.0;
 const SIDEBAR_MAX_WIDTH: f32 = 420.0;

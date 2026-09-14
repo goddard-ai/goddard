@@ -369,6 +369,8 @@ impl Render for Waku {
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::focus_terminal_action))
             .on_action(cx.listener(Self::toggle_model_picker_action))
+            .on_action(cx.listener(Self::toggle_branch_picker_action))
+            .on_action(cx.listener(Self::toggle_runtime_mode_picker_action))
             .on_action(cx.listener(Self::toggle_workspace_action))
             .on_action(cx.listener(Self::toggle_usage_panel_action))
             .on_action(cx.listener(Self::save_right_panel_file_action))

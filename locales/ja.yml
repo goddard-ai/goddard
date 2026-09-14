@@ -24,6 +24,8 @@ menu.toggle_right_panel: 右パネルの表示を切り替える
 menu.focus_composer: 入力欄にフォーカスを移動
 menu.focus_terminal: ターミナルにフォーカスを移動
 menu.toggle_model_picker: モデル選択の表示を切り替える
+menu.toggle_branch_picker: ブランチ選択の表示を切り替える
+menu.toggle_runtime_mode_picker: モード選択の表示を切り替える
 menu.toggle_workspace: 作業場所を切り替える
 menu.toggle_usage_panel: 使用状況パネルの表示を切り替える
 menu.window: ウインドウ
@@ -364,6 +366,7 @@ project.no_project: プロジェクトを使用しない
 project.no_project_name: プロジェクトなし
 project.chat: チャット
 project.choose_project: プロジェクトを選択
+project.choose: プロジェクトを選択
 project.default_folder: デフォルトフォルダ
 project.project_lower: プロジェクト
 project.without_a_project: プロジェクトなし
@@ -528,6 +531,7 @@ mode.supervised_description: コマンドの実行とファイル変更の前に
 mode.auto_accept_edits_description: 編集は自動承認し、その他の操作は事前に確認します
 mode.auto_description: 通常の操作は AI レビュアーが承認し、リスクのある操作は事前に確認します
 mode.full_access_description: 確認なしでコマンドの実行と編集を許可します
+mode.choose: モードを選択
 
 agent_preset.standard: 標準モード
 agent_preset.code: コードモード
@@ -1005,6 +1009,9 @@ file_picker.open: 開く
 file_picker.folder: フォルダ
 file_picker.file: ファイル
 file_picker.typed_file: "%{type} ファイル"
+
+navigation.back: 戻る
+navigation.forward: 進む
 
 diff.no_changes: 変更はありません
 diff.no_changes_description: このソースにはレビューするファイル変更がありません

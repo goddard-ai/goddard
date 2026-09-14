@@ -24,6 +24,8 @@ menu.toggle_right_panel: 显示或隐藏右侧面板
 menu.focus_composer: 将焦点移到输入框
 menu.focus_terminal: 将焦点移到终端
 menu.toggle_model_picker: 打开或关闭模型选择器
+menu.toggle_branch_picker: 打开或关闭分支选择器
+menu.toggle_runtime_mode_picker: 打开或关闭模式选择器
 menu.toggle_workspace: 切换工作位置
 menu.toggle_usage_panel: 打开或关闭用量面板
 menu.window: 窗口
@@ -352,6 +354,7 @@ project.no_project: 不使用项目
 project.no_project_name: 无项目
 project.chat: 聊天
 project.choose_project: 选择项目
+project.choose: 选择项目
 project.default_folder: 默认文件夹
 project.project_lower: 项目
 project.without_a_project: 不使用项目
@@ -510,6 +513,7 @@ mode.supervised_description: 执行命令或修改文件前先征求许可
 mode.auto_accept_edits_description: 自动批准文件修改，执行其他操作前先询问
 mode.auto_description: 由 AI 审核并批准常规操作；高风险操作仍会询问
 mode.full_access_description: 无需确认即可执行命令和修改文件
+mode.choose: 选择模式
 agent_preset.standard: 标准模式
 agent_preset.code: 代码模式
 agent_preset.minimal: 极简模式
@@ -965,6 +969,9 @@ file_picker.open: 打开
 file_picker.folder: 文件夹
 file_picker.file: 文件
 file_picker.typed_file: "%{type} 文件"
+
+navigation.back: 后退
+navigation.forward: 前进
 diff.no_changes: 没有更改
 diff.no_changes_description: 此来源没有可审阅的文件更改
 diff.filter_files: 筛选文件…
