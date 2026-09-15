@@ -200,14 +200,138 @@ impl Waku {
             - self.right_panel_rendered_width
     }
 
+    /// The peek overlay mounts only while the docked slot has fully released
+    /// the pane — a sidebar that is open or still sliding keeps it.
+    fn sidebar_peek_allowed(&self) -> bool {
+        !self.sidebar_visible && self.sidebar_slide.is_none()
+    }
+
+    /// The peek overlay's width: the configured sidebar width a touch wider,
+    /// still fitted to leave the main panel on screen.
+    fn sidebar_peek_width(&self, window: &Window) -> f32 {
+        let viewport_width = f32::from(window.viewport_size().width);
+        (sanitize_panel_width(
+            self.sidebar_width,
+            DEFAULT_SIDEBAR_WIDTH,
+            SIDEBAR_MIN_WIDTH,
+            SIDEBAR_MAX_WIDTH,
+        ) * SIDEBAR_PEEK_WIDTH_FACTOR)
+            .min((viewport_width - MAIN_PANEL_MIN_WIDTH).max(SIDEBAR_PEEK_STRIP))
+    }
+
+    /// Entering the edge strip reveals the overlay at once; the nudge plays
+    /// out from there. The vibrancy tint that backs translucent sidebar
+    /// pixels is sized to the docked width, so it extends under the wider
+    /// overlay while the peek is up.
+    fn sidebar_peek_strip_hover(
+        &mut self,
+        hovered: &bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !*hovered
+            || !self.sidebar_peek_allowed()
+            || matches!(self.sidebar_peek, SidebarPeek::Shown { .. })
+        {
+            return;
+        }
+        self.sidebar_peek = SidebarPeek::Shown {
+            entered: Instant::now(),
+        };
+        crate::platform::set_sidebar_material_width(window, self.sidebar_peek_width(window));
+        cx.notify();
+    }
+
+    /// The overlay is the hover surface once it is up — it covers the strip —
+    /// so leaving it (or the window) starts the nudge-out, and returning to
+    /// it mid-exit settles it back.
+    fn sidebar_peek_overlay_hover(
+        &mut self,
+        hovered: &bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if *hovered {
+            if matches!(self.sidebar_peek, SidebarPeek::Exiting { .. }) {
+                self.sidebar_peek = SidebarPeek::Shown {
+                    entered: Instant::now(),
+                };
+                cx.notify();
+            }
+            return;
+        }
+        if matches!(self.sidebar_peek, SidebarPeek::Shown { .. }) {
+            if cx.reduce_motion() {
+                self.sidebar_peek = SidebarPeek::Hidden;
+                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+            } else {
+                self.sidebar_peek = SidebarPeek::Exiting {
+                    started: Instant::now(),
+                };
+            }
+            cx.notify();
+        }
+    }
+
+    /// Advance the peek nudge and retire the overlay when it ends. Returns
+    /// the `left` inset for the frame while the overlay stays mounted.
+    fn settle_sidebar_peek(&mut self, window: &Window, cx: &App) -> Option<f32> {
+        // A sidebar that opens or starts sliding takes the pane back, and
+        // settings covers the workspace outright — either way the overlay
+        // retires without its nudge-out.
+        if self.settings_page.is_some() || !self.sidebar_peek_allowed() {
+            if !matches!(self.sidebar_peek, SidebarPeek::Hidden) {
+                self.sidebar_peek = SidebarPeek::Hidden;
+                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+            }
+            return None;
+        }
+        if cx.reduce_motion() {
+            if matches!(self.sidebar_peek, SidebarPeek::Exiting { .. }) {
+                self.sidebar_peek = SidebarPeek::Hidden;
+                crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+            }
+            return (!matches!(self.sidebar_peek, SidebarPeek::Hidden)).then_some(0.0);
+        }
+        match self.sidebar_peek {
+            SidebarPeek::Hidden => None,
+            SidebarPeek::Shown { entered } => {
+                let progress =
+                    (entered.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32()).min(1.0);
+                if progress < 1.0 {
+                    window.request_animation_frame();
+                }
+                Some(-SIDEBAR_PEEK_NUDGE * (1.0 - ease_out_quint()(progress)))
+            }
+            SidebarPeek::Exiting { started } => {
+                let progress = started.elapsed().as_secs_f32() / SIDEBAR_PEEK_SLIDE.as_secs_f32();
+                if progress >= 1.0 {
+                    self.sidebar_peek = SidebarPeek::Hidden;
+                    crate::platform::set_sidebar_material_width(window, self.sidebar_width);
+                    return None;
+                }
+                window.request_animation_frame();
+                Some(-SIDEBAR_PEEK_NUDGE * ease_out_quint()(progress.max(0.0)))
+            }
+        }
+    }
+
     /// [`WakuPane`] delegate for the sidebar island.
     pub(super) fn sidebar_pane_content(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (sidebar_width, _) = self.effective_panel_widths(window);
-        self.render_sidebar(sidebar_width, window, cx)
+        // Mounted in the peek overlay, the pane lays out at the overlay's
+        // width; docked, at the fitted sidebar width.
+        let width = if self.sidebar_peek_allowed()
+            && !matches!(self.sidebar_peek, SidebarPeek::Hidden)
+        {
+            self.sidebar_peek_width(window)
+        } else {
+            self.effective_panel_widths(window).0
+        };
+        self.render_sidebar(width, window, cx)
             .into_any_element()
     }
 
@@ -273,6 +397,7 @@ impl Render for Waku {
             // `with_animation` would do, minus its element-id keying.
             window.request_animation_frame();
         }
+        let sidebar_peek_offset = self.settle_sidebar_peek(window, cx);
         // Before anything can early-return (the settings page below), settle
         // whether each native browser webview belongs on screen this frame —
         // it floats above everything GPUI paints.
@@ -614,6 +739,47 @@ impl Render for Waku {
                         .on_action(cx.listener(Self::exit_panel_fullscreen_action))
                         .child(
                             self.right_panel_pane
+                                .clone()
+                                .cached(StyleRefinement::default().size_full()),
+                        ),
+                )
+            })
+            // The closed sidebar's hover zone: a transparent strip along the
+            // left edge. Its hitbox is Normal, so the header and transcript
+            // beneath keep their clicks and hover — it only reports whether
+            // the pointer is on the edge.
+            .when(self.sidebar_peek_allowed(), |root| {
+                root.child(
+                    div()
+                        .id("sidebar-peek-strip")
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left_0()
+                        .w(px(SIDEBAR_PEEK_STRIP))
+                        .cursor_default()
+                        .on_hover(cx.listener(Self::sidebar_peek_strip_hover)),
+                )
+            })
+            // The peek overlay: the real sidebar pane — scroll position and
+            // all — mounted over the content rather than in the layout. Once
+            // up it covers the strip and is itself the hover surface, so only
+            // leaving the panel dismisses it.
+            .when_some(sidebar_peek_offset, |root, offset| {
+                root.child(
+                    div()
+                        .id("sidebar-peek")
+                        .occlude()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(offset))
+                        .w(px(self.sidebar_peek_width(window)))
+                        .border_r(hairline())
+                        .border_color(theme.sidebar_border)
+                        .on_hover(cx.listener(Self::sidebar_peek_overlay_hover))
+                        .child(
+                            self.sidebar_pane
                                 .clone()
                                 .cached(StyleRefinement::default().size_full()),
                         ),
