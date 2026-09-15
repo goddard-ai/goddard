@@ -12,9 +12,32 @@ pub(super) struct TerminalRecord {
     pub working_directory: Option<PathBuf>,
 }
 
-/// A terminal row is a single line: icon, title, directory.
+/// A terminal row is a single line: title, location.
 pub(super) const SIDEBAR_TERMINAL_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_TERMINAL_ROW_GAP: f32 = 1.0;
+
+/// The nearest enclosing repository's root — `.git` may be a file in a
+/// linked worktree, so existence rather than `is_dir` is the test.
+fn nearest_repo_root(directory: &Path) -> Option<PathBuf> {
+    directory
+        .ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+/// `~/…` for paths under the home directory, the absolute path otherwise.
+fn home_abbreviated_path(path: &Path) -> String {
+    let Some(home) = dirs::home_dir() else {
+        return path.display().to_string();
+    };
+    if path == home {
+        "~".to_owned()
+    } else if let Ok(rest) = path.strip_prefix(&home) {
+        format!("~/{}", rest.display())
+    } else {
+        path.display().to_string()
+    }
+}
 
 impl Waku {
     /// Terminal ids in creation order — the group's flat listing.
@@ -23,6 +46,67 @@ impl Waku {
             .iter()
             .copied()
             .filter(|id| self.terminal_records.contains_key(id))
+    }
+
+    /// The directory a row reports — the live PTY cwd once the view is up,
+    /// the recorded spawn directory otherwise.
+    fn terminal_cwd(&self, terminal_id: Uuid, cx: &App) -> Option<PathBuf> {
+        self.right_panel_terminals
+            .get(&terminal_id)
+            .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
+            .or_else(|| {
+                self.terminal_records
+                    .get(&terminal_id)
+                    .and_then(|record| record.working_directory.clone())
+            })
+    }
+
+    /// Resolve every terminal's nearest repository root in one background
+    /// pass. Rows read only the store — the ancestor walk is a filesystem
+    /// probe, and a miss just means "not known yet".
+    pub(super) fn ensure_sidebar_terminal_repo_roots(&self, cx: &mut Context<Self>) {
+        let mut fingerprint = 0x7e0e_5a1d_1e0c_a710;
+        let mut directories = HashSet::new();
+        for terminal_id in self.sidebar_terminal_ids() {
+            fingerprint = mix_uuid(fingerprint, terminal_id);
+            if let Some(cwd) = self.terminal_cwd(terminal_id, cx) {
+                fingerprint = mix_str(fingerprint, &cwd.to_string_lossy());
+                directories.insert(cwd);
+            }
+        }
+        if self.sidebar_terminal_repo_scan_fingerprint.get() == Some(fingerprint) {
+            return;
+        }
+        self.sidebar_terminal_repo_scan_fingerprint.set(Some(fingerprint));
+        let generation = self
+            .sidebar_terminal_repo_scan_generation
+            .get()
+            .wrapping_add(1);
+        self.sidebar_terminal_repo_scan_generation.set(generation);
+
+        if directories.is_empty() {
+            self.sidebar_terminal_repo_roots.borrow_mut().clear();
+            return;
+        }
+        cx.spawn(async move |waku, cx| {
+            let roots = cx
+                .background_executor()
+                .spawn(async move {
+                    directories
+                        .into_iter()
+                        .map(|cwd| (cwd.clone(), nearest_repo_root(&cwd)))
+                        .collect::<HashMap<_, _>>()
+                })
+                .await;
+            let _ = waku.update(cx, |waku, cx| {
+                if waku.sidebar_terminal_repo_scan_generation.get() != generation {
+                    return;
+                }
+                *waku.sidebar_terminal_repo_roots.borrow_mut() = roots;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Register a terminal surface with the group. Called wherever a
@@ -355,26 +439,57 @@ impl Waku {
             return div().into_any_element();
         };
         let pinned = record.pinned;
-        let record_directory = record.working_directory.clone();
         let terminal = self.right_panel_terminals.get(&terminal_id);
         let title = terminal
             .map(|terminal| single_line_label(terminal.read(cx).title()))
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| tr!("right_panel.terminal"));
-        let directory = terminal
-            .map(|terminal| terminal.read(cx).working_directory().to_path_buf())
-            .or(record_directory)
-            .map(|path| {
-                if dirs::home_dir().as_deref() == Some(path.as_path()) {
-                    "~".to_owned()
-                } else {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| path.display().to_string())
-                }
-            })
-            .unwrap_or_else(|| tr!("workspace.workspace"));
+        let cwd = self.terminal_cwd(terminal_id, cx);
+        let shell_name = terminal
+            .map(|terminal| terminal.read(cx).shell_name().to_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| {
+                crate::command_env::default_terminal_shell()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_owned()
+            });
+        // The trailing label is the terminal's location, named by its
+        // nearest repository the way a session row names its project —
+        // "waku" at the root, "waku/src/app" deeper in. Outside any
+        // repository the shell's name stands in under a shell glyph
+        // rather than a folder, with the cwd trailing it.
+        let repo = cwd.as_deref().and_then(|cwd| {
+            self.sidebar_terminal_repo_roots
+                .borrow()
+                .get(cwd)
+                .cloned()
+                .flatten()
+                .map(|root| (cwd, root))
+        });
+        let (detail_icon, detail) = match repo {
+            Some((cwd, root)) => {
+                let name = root
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                let label = cwd
+                    .strip_prefix(&root)
+                    .ok()
+                    .filter(|rel| !rel.as_os_str().is_empty())
+                    .map(|rel| format!("{name}/{}", rel.display()))
+                    .unwrap_or(name);
+                ("icons/folder.svg", label)
+            }
+            None => (
+                "icons/terminal-square.svg",
+                cwd.as_deref()
+                    .map(|cwd| format!("{shell_name} {}", home_abbreviated_path(cwd)))
+                    .unwrap_or_else(|| shell_name.clone()),
+            ),
+        };
         let selected = self.selected_terminal == Some(terminal_id);
         let menu = self.menu_handle(format!("terminal-{terminal_id}"), cx);
         let row_focus = menu.trigger_focus_handle().clone();
@@ -413,9 +528,13 @@ impl Waku {
             .child(
                 div()
                     .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
                     .text_size(sp(12.5))
                     .text_color(theme.text_tertiary)
-                    .child(SharedString::from(directory)),
+                    .child(icon(detail_icon, 12.5, theme.text_tertiary))
+                    .child(SharedString::from(detail)),
             )
             .when(pinned, |element| {
                 element.child(icon("icons/pin-filled.svg", 12.0, theme.text_ghost))

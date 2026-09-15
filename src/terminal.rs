@@ -757,6 +757,9 @@ pub struct TerminalView {
     error: Option<String>,
     focus_handle: FocusHandle,
     working_directory: PathBuf,
+    /// Basename of the PTY's shell — "zsh", "bash" — what a sidebar row
+    /// reports when the terminal sits outside any repository.
+    shell_name: String,
     title: String,
     /// What `ResetTitle` restores — the localized "Terminal" for a plain
     /// shell, the command's display name for a custom command.
@@ -796,6 +799,17 @@ impl TerminalView {
             TerminalLaunch::Shell => tr!("right_panel.terminal"),
             TerminalLaunch::CustomCommand(command) => command.display_name().to_owned(),
         };
+        let shell = match &launch {
+            TerminalLaunch::Shell => crate::command_env::default_terminal_shell(),
+            TerminalLaunch::CustomCommand(command) => {
+                crate::custom_commands::command_shell(command)
+            }
+        };
+        let shell_name = shell
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
         let terminal_cwd = working_directory.clone();
         cx.spawn(async move |this, cx| {
             let started = cx
@@ -849,6 +863,7 @@ impl TerminalView {
             title: default_title.clone(),
             default_title,
             working_directory,
+            shell_name,
             exited: false,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
@@ -881,6 +896,12 @@ impl TerminalView {
 
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
+    }
+
+    /// Basename of the shell the PTY runs — the row label for a terminal
+    /// outside any repository.
+    pub fn shell_name(&self) -> &str {
+        &self.shell_name
     }
 
     /// The last `count` non-blank lines on the terminal's screen — empty

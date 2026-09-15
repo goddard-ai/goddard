@@ -1794,6 +1794,12 @@ pub struct Waku {
     sidebar_branch_labels: RefCell<HashMap<PathBuf, SharedString>>,
     sidebar_branch_scan_fingerprint: Cell<Option<u64>>,
     sidebar_branch_scan_generation: Cell<u64>,
+    /// Nearest repository root per terminal working directory — `None` for
+    /// a directory outside any checkout — resolved together on a
+    /// background executor so sidebar rows only read memory.
+    sidebar_terminal_repo_roots: RefCell<HashMap<PathBuf, Option<PathBuf>>>,
+    sidebar_terminal_repo_scan_fingerprint: Cell<Option<u64>>,
+    sidebar_terminal_repo_scan_generation: Cell<u64>,
     /// Dirty flag + unpushed commit count per session checkout or worktree
     /// path, resolved together on a background executor so sidebar rows only
     /// read memory. Git state drifts without any session-set change, so the
@@ -2033,7 +2039,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use settings::init as init_settings_keys;
 pub use sidebar::init as init_sidebar_keys;
-use sidebar::{SidebarGroup, SidebarRow};
+use sidebar::{SidebarGroup, SidebarRow, mix_str};
 pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use terminals::TerminalRecord;
@@ -3802,6 +3808,9 @@ impl Waku {
                 sidebar_branch_labels: RefCell::new(HashMap::new()),
                 sidebar_branch_scan_fingerprint: Cell::new(None),
                 sidebar_branch_scan_generation: Cell::new(0),
+                sidebar_terminal_repo_roots: RefCell::new(HashMap::new()),
+                sidebar_terminal_repo_scan_fingerprint: Cell::new(None),
+                sidebar_terminal_repo_scan_generation: Cell::new(0),
                 sidebar_checkout_statuses: RefCell::new(HashMap::new()),
                 sidebar_checkout_scan_fingerprint: Cell::new(None),
                 sidebar_checkout_scan_generation: Cell::new(0),

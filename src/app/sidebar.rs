@@ -337,7 +337,7 @@ fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> 
     .filter(|branch| !branch.is_empty())
 }
 
-fn mix_str(hash: u64, value: &str) -> u64 {
+pub(super) fn mix_str(hash: u64, value: &str) -> u64 {
     value
         .bytes()
         .fold(hash, |hash, byte| mix(hash, byte as u64))
@@ -1799,6 +1799,7 @@ impl Waku {
         self.ensure_sidebar_github_repos(cx);
         self.ensure_sidebar_checkout_statuses(cx);
         self.ensure_sidebar_pull_requests(cx);
+        self.ensure_sidebar_terminal_repo_roots(cx);
         let is_resizing = self
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
