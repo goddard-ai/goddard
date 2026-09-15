@@ -33,6 +33,22 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // While gpui's inspector is picking it shrinks the root's layout width
+        // by a 30rem strip on the right edge for inspector UI
+        // (`Window::draw_roots`). Goddard's inspector label floats over the app
+        // instead, so pin the root to the full viewport width — an explicit
+        // width isn't auto, so `stretch_auto_size_to_fill` leaves it alone and
+        // the strip vanishes.
+        let content = if window.is_inspector_picking(cx) {
+            div()
+                .w(window.viewport_size().width)
+                .h_full()
+                .child(content)
+                .into_any_element()
+        } else {
+            content
+        };
+
         let Decorations::Client { tiling } = window.window_decorations() else {
             window.set_client_inset(px(0.0));
             return content;
