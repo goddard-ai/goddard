@@ -1321,7 +1321,7 @@ impl Waku {
                 .items_center()
                 .gap(px(5.0))
                 .cursor_default()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .when(selector_open, |element| element.bg(theme.overlay_strong))
                 .hover(|style| style.bg(theme.overlay))
                 .child(
@@ -1372,7 +1372,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(12.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .child(selector)
             .child(
@@ -1414,7 +1414,7 @@ impl Waku {
             .when(enabled, |element| {
                 let element = element
                     .cursor_default()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent));
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent));
                 if selected {
                     element.bg(theme.surface).text_color(theme.text)
                 } else {
@@ -1462,7 +1462,7 @@ impl Waku {
                 .cursor_default()
                 .hover(|style| style.bg(theme.overlay))
                 .active(|style| style.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                 .tooltip(Tooltip::text(tr!("github.back_to_list")))
                 .child(icon("icons/arrow-left.svg", 13.0, theme.text_secondary))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1500,7 +1500,7 @@ impl Waku {
                     .items_center()
                     .gap(px(4.0))
                     .cursor_default()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .when(menu_open, |element| element.bg(theme.overlay_strong))
                     .hover(|style| style.bg(theme.overlay))
                     .child(
@@ -1543,7 +1543,7 @@ impl Waku {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .children(back)
             .child(
@@ -1566,7 +1566,7 @@ impl Waku {
                     .cursor_default()
                     .hover(|style| style.bg(theme.overlay))
                     .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                     .tooltip(Tooltip::text(tr!("github.refresh")))
                     .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1766,7 +1766,7 @@ impl Waku {
             .items_center()
             .gap(px(6.0))
             .cursor_default()
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .bg(theme.inset)
             .hover(|style| style.bg(theme.overlay))
@@ -1866,7 +1866,7 @@ impl Waku {
             .items_center()
             .gap(px(8.0))
             .cursor_default()
-            .border_b_1()
+            .border_b(hairline())
             .border_color(theme.border)
             .when(selected, |element| element.bg(theme.overlay_strong))
             .hover(|style| style.bg(theme.overlay))
@@ -2452,7 +2452,7 @@ impl Waku {
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .border_t_1()
+                .border_t(hairline())
                 .border_color(theme.border)
                 .bg(theme.raised)
                 .child(
@@ -2475,7 +2475,7 @@ impl Waku {
                         .text_size(sp(11.5))
                         .text_color(theme.text_secondary)
                         .hover(|style| style.bg(theme.overlay).text_color(theme.text))
-                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                         .child(tr!("projects.clear_selection"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(state) = this.projects_page_states.get_mut(&project_id) {
@@ -2501,7 +2501,7 @@ impl Waku {
                                 .cursor_default()
                                 .text_color(theme.danger)
                                 .hover(|style| style.bg(theme.danger_soft))
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let keys: Vec<ProjectsRowKey> = this
                                         .projects_page_states
@@ -2658,7 +2658,7 @@ impl Waku {
         div()
             .flex_none()
             .w_full()
-            .border_t_1()
+            .border_t(hairline())
             .border_color(theme.border)
             .bg(theme.composer)
             .pt(px(8.0))
@@ -2693,7 +2693,7 @@ impl Waku {
                                     theme.overlay
                                 })
                             })
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
                             .tooltip(Tooltip::text(tr!("projects.send")))
                             .child(icon(
                                 "icons/arrow-up.svg",

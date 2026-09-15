@@ -1653,7 +1653,7 @@ impl TerminalView {
                 .px(px(10.0))
                 .py(px(7.0))
                 .rounded(px(10.0))
-                .border_1()
+                .border(hairline())
                 .border_color(theme.border_strong)
                 .bg(theme.composer)
                 .shadow_lg()

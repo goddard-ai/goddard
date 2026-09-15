@@ -1762,7 +1762,7 @@ impl Waku {
             } else {
                 theme.text_ghost
             })
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
             .child(if landing {
                 motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
             } else {
