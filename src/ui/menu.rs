@@ -28,11 +28,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Bounds, Display, Edges, Element, ElementId, FocusHandle, FontWeight,
-    GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId,
-    Length, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Position, RenderOnce,
-    SharedString, Size, StatefulInteractiveElement, Style, Styled, Window, actions, anchored,
-    canvas, deferred, div, img, prelude::FluentBuilder, px,
+    AlignItems, AnyElement, App, Bounds, Display, Edges, Element, ElementId, FocusHandle,
+    FontWeight, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent,
+    LayoutId, Length, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, Position,
+    RenderOnce, SharedString, Size, StatefulInteractiveElement, Style, Styled, Window, actions,
+    anchored, canvas, deferred, div, img, prelude::FluentBuilder, px,
 };
 
 actions!(
@@ -730,6 +730,12 @@ impl Element for FloatingSurface {
             Style {
                 position: Position::Absolute,
                 display: Display::Flex,
+                // The surface exists to measure and move its child, never to
+                // resize it: without this, a surface stretched over its
+                // containing block would cross-stretch the child to the
+                // anchor's height, and `prepaint` would resolve placement
+                // from the anchor's size instead of the card's.
+                align_items: Some(AlignItems::FlexStart),
                 // With no fixed trigger, stretch over the containing block so
                 // `bounds` in `prepaint` is the anchor's rect for this frame.
                 inset: if self.trigger.is_none() {
@@ -1761,6 +1767,65 @@ mod tests {
         );
 
         assert_eq!(placement.bounds.origin.x, px(8.0));
+    }
+
+    /// Mirrors the changed-files row the diff preview anchors to: a thin
+    /// positioned row whose floating child is far taller than the row itself.
+    /// The wrapper keeps an auto height so layout exercises the same
+    /// cross-stretch path the real preview relies on.
+    struct AnchoredSurfaceHarness {
+        row_top: f32,
+    }
+
+    impl Render for AnchoredSurfaceHarness {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let row_top = self.row_top;
+            div().size_full().pt(px(row_top)).child(
+                div().relative().w(px(400.0)).h(px(31.0)).child(deferred(
+                    FloatingSurface::anchored_to_parent(
+                        div()
+                            .w_full()
+                            .child(
+                                div()
+                                    .debug_selector(|| "anchored-surface-card".into())
+                                    .w_full()
+                                    .h(px(300.0)),
+                            )
+                            .into_any_element(),
+                        MenuAlign::AboveLeft,
+                        px(-2.0),
+                        px(8.0),
+                    ),
+                )),
+            )
+        }
+    }
+
+    fn anchored_card_bounds(row_top: f32, cx: &mut TestAppContext) -> Bounds<Pixels> {
+        let window = cx.open_window(size(px(800.0), px(600.0)), |_, _| AnchoredSurfaceHarness {
+            row_top,
+        });
+        cx.run_until_parked();
+        gpui::VisualTestContext::from_window(window.into(), cx)
+            .debug_bounds("anchored-surface-card")
+            .expect("the anchored surface should paint")
+    }
+
+    #[gpui::test]
+    fn anchored_surface_bottom_edge_overlaps_the_row_top_when_it_fits(cx: &mut TestAppContext) {
+        let card = anchored_card_bounds(400.0, cx);
+        // The surface must measure the card, not the 31px row it anchors to:
+        // a stretched child reads 31px here and the placement resolves from
+        // the wrong height.
+        assert_eq!(card.size.height, px(300.0));
+        assert_eq!(card.bottom(), px(402.0));
+    }
+
+    #[gpui::test]
+    fn anchored_surface_flips_below_to_overlap_the_row_bottom_edge(cx: &mut TestAppContext) {
+        let card = anchored_card_bounds(100.0, cx);
+        assert_eq!(card.size.height, px(300.0));
+        assert_eq!(card.top(), px(129.0));
     }
 
     impl Render for Harness {
