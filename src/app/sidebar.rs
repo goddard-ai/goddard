@@ -225,6 +225,9 @@ const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
+/// The session column's top bar. The empty-state hero drops by this much so
+/// it sits clear of the header instead of optically centering under it.
+const HEADER_HEIGHT: f32 = 48.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 /// A GitHub entry row plus the same trailing gap session rows carry.
@@ -3534,7 +3537,7 @@ impl Waku {
             .flatten();
         div()
             .id("window-header")
-            .h(px(48.0))
+            .h(px(HEADER_HEIGHT))
             .flex_none()
             .flex()
             .items_center()
@@ -3833,6 +3836,9 @@ impl Waku {
             .items_center()
             .justify_center()
             .px_8()
+            // Centering splits added space, so twice the header height drops
+            // the hero by the bar's full height.
+            .pt(px(HEADER_HEIGHT * 2.0))
             .pb(px(52.0))
             .child(goddard_logo(&theme))
             .child(
