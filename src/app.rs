@@ -1662,6 +1662,10 @@ pub struct Waku {
     /// surface's terminal id. The entry retires when the command reports
     /// its exit or the terminal goes away.
     custom_command_runs: HashMap<Uuid, PendingCommandRun>,
+    /// Install/sign-in terminals running inside the Providers settings page,
+    /// keyed by the provider they set up. They live outside the right panel
+    /// surfaces because Settings covers the workspace while they run.
+    provider_setup_terminals: HashMap<ProviderKind, Entity<TerminalView>>,
     right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
@@ -3651,6 +3655,7 @@ impl Waku {
                 right_panel_terminals: HashMap::new(),
                 right_panel_terminal_commands: HashMap::new(),
                 custom_command_runs: HashMap::new(),
+                provider_setup_terminals: HashMap::new(),
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,

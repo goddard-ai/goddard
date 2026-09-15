@@ -611,6 +611,22 @@ providers.checked_minutes_ago:
   en: Checked %{count}m ago
 providers.checked_hours_ago:
   en: Checked %{count}h ago
+providers.set_up:
+  en: Set up
+providers.setup:
+  en: Setup
+providers.install_label:
+  en: Install
+providers.sign_in_label:
+  en: Sign in
+providers.run_in_terminal:
+  en: Run in terminal
+providers.docs:
+  en: Docs
+providers.api_key_hint:
+  en: or set %{var}
+providers.setup_terminal_title:
+  en: Set up %{provider}
 
 computer_use.allow_apps:
   en: Let Goddard use apps

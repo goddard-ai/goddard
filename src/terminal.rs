@@ -766,6 +766,10 @@ pub struct TerminalView {
     exited: bool,
     scroll_accumulator: f32,
     panel_width: f32,
+    /// Terminals rendered inside another surface — the provider setup block
+    /// in Settings — size their grid to the painted bounds instead of the
+    /// right panel's viewport math.
+    embedded: bool,
     /// Advance width of one grid cell, measured from the terminal font on
     /// first render so grid math matches what `StyledText` actually lays out.
     /// Keyed by family and size so a font change re-measures instead of
@@ -850,6 +854,7 @@ impl TerminalView {
             exited: false,
             scroll_accumulator: 0.0,
             panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            embedded: false,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -861,6 +866,19 @@ impl TerminalView {
             context_menu,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// A terminal embedded in another surface rather than filling the right
+    /// panel: the grid derives its columns and rows from the painted bounds,
+    /// so the parent can give it any fixed height.
+    pub fn embedded(
+        working_directory: PathBuf,
+        launch: TerminalLaunch,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::with_launch(working_directory, launch, cx);
+        view.embedded = true;
+        view
     }
 
     pub fn working_directory(&self) -> &Path {
@@ -1313,12 +1331,33 @@ impl Render for TerminalView {
                 width
             }
         };
-        let columns = ((panel_width - TERMINAL_PADDING_X * 2.0) / cell_width)
-            .floor()
-            .max(TERMINAL_MIN_COLUMNS as f32) as usize;
-        let rows = ((body_height - TERMINAL_PADDING_Y * 2.0) / cell_height)
-            .floor()
-            .max(TERMINAL_MIN_ROWS as f32) as usize;
+        // The painted bounds already sit inside the grid's padding, so the
+        // embedded math doesn't subtract it again. Before the first prepaint
+        // an embedded terminal falls through to the panel defaults; the PTY
+        // resize lands a frame later.
+        let embedded_bounds = if self.embedded {
+            self.grid_bounds.get()
+        } else {
+            None
+        };
+        let (columns, rows) = match embedded_bounds {
+            Some(bounds) => (
+                (f32::from(bounds.size.width) / cell_width)
+                    .floor()
+                    .max(TERMINAL_MIN_COLUMNS as f32) as usize,
+                (f32::from(bounds.size.height) / cell_height)
+                    .floor()
+                    .max(TERMINAL_MIN_ROWS as f32) as usize,
+            ),
+            None => (
+                ((panel_width - TERMINAL_PADDING_X * 2.0) / cell_width)
+                    .floor()
+                    .max(TERMINAL_MIN_COLUMNS as f32) as usize,
+                ((body_height - TERMINAL_PADDING_Y * 2.0) / cell_height)
+                    .floor()
+                    .max(TERMINAL_MIN_ROWS as f32) as usize,
+            ),
+        };
 
         let terminal_focused = window.is_window_active() && self.focus_handle.is_focused(window);
         let cursor_style =

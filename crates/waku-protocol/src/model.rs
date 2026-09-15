@@ -117,6 +117,98 @@ impl ProviderKind {
         }
     }
 
+    /// Vendor-documented setup for the provider's CLI: the canonical one-line
+    /// install command, the interactive sign-in command, and the docs page.
+    /// The Settings page shows these verbatim and can run them in a terminal.
+    pub fn setup(self) -> ProviderSetup {
+        match self {
+            Self::Amp => ProviderSetup {
+                install: "curl -fsSL https://ampcode.com/install.sh | bash",
+                sign_in: Some("amp login"),
+                api_key_env: Some("AMP_API_KEY"),
+                docs_url: "https://ampcode.com/manual",
+            },
+            Self::Claude => ProviderSetup {
+                install: "curl -fsSL https://claude.ai/install.sh | bash",
+                sign_in: Some("claude auth login"),
+                api_key_env: Some("ANTHROPIC_API_KEY"),
+                docs_url: "https://code.claude.com/docs/en/install",
+            },
+            // Codex reads an API key via `codex login --with-api-key`, not
+            // silently from the environment.
+            Self::Codex => ProviderSetup {
+                install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+                sign_in: Some("codex login"),
+                api_key_env: None,
+                docs_url: "https://developers.openai.com/codex/cli",
+            },
+            Self::Cursor => ProviderSetup {
+                install: "curl -fsSL https://cursor.com/install | bash",
+                sign_in: Some("cursor-agent login"),
+                api_key_env: Some("CURSOR_API_KEY"),
+                docs_url: "https://cursor.com/docs/cli/installation",
+            },
+            // DeepSeek Harness authenticates with an API key only; there is
+            // no login subcommand.
+            Self::DeepSeek => ProviderSetup {
+                install: "npm install -g @deepseek-ai/dsh",
+                sign_in: None,
+                api_key_env: Some("DEEPSEEK_API_KEY"),
+                docs_url: "https://github.com/deepseek-ai/deepseek-harness",
+            },
+            Self::Devin => ProviderSetup {
+                install: "curl -fsSL https://cli.devin.ai/install.sh | bash",
+                sign_in: Some("devin auth login"),
+                api_key_env: None,
+                docs_url: "https://docs.devin.ai/cli",
+            },
+            Self::Fx => ProviderSetup {
+                install: "curl -fsSL https://fx.sh/setup.sh | bash",
+                sign_in: Some("fx login"),
+                api_key_env: Some("AI_GATEWAY_API_KEY"),
+                docs_url: "https://fx.sh/docs/getting-started/installation",
+            },
+            Self::OpenCode => ProviderSetup {
+                install: "curl -fsSL https://opencode.ai/install | bash",
+                sign_in: Some("opencode auth login"),
+                api_key_env: None,
+                docs_url: "https://opencode.ai/docs",
+            },
+            Self::OpenCode2 => ProviderSetup {
+                install: "curl -fsSL https://opencode.ai/v2/install | bash",
+                sign_in: Some("opencode2 auth login"),
+                api_key_env: None,
+                docs_url: "https://opencode.ai/v2/docs",
+            },
+            Self::Grok => ProviderSetup {
+                install: "curl -fsSL https://x.ai/cli/install.sh | bash",
+                sign_in: Some("grok login"),
+                api_key_env: Some("XAI_API_KEY"),
+                docs_url: "https://docs.x.ai/build/overview",
+            },
+            Self::Kimi => ProviderSetup {
+                install: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+                sign_in: Some("kimi login"),
+                api_key_env: None,
+                docs_url: "https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html",
+            },
+            Self::OhMyPi => ProviderSetup {
+                install: "curl -fsSL https://omp.sh/install | sh",
+                sign_in: Some("omp auth-broker login"),
+                api_key_env: None,
+                docs_url: "https://github.com/can1357/oh-my-pi",
+            },
+            // Pi has no login subcommand; signing in is `/login` inside its
+            // TUI, so the sign-in step simply launches `pi`.
+            Self::Pi => ProviderSetup {
+                install: "curl -fsSL https://pi.dev/install.sh | sh",
+                sign_in: Some("pi"),
+                api_key_env: None,
+                docs_url: "https://pi.dev/docs/latest",
+            },
+        }
+    }
+
     /// Kimi Code, Fx, and Devin are deliberately absent from this list and from
     /// [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork` copies a
     /// whole session and takes no turn count, while Fx and Devin expose no
@@ -171,6 +263,22 @@ impl ProviderKind {
                 | Self::Pi
         )
     }
+}
+
+/// Vendor-documented setup for a provider's CLI — see
+/// [`ProviderKind::setup`].
+#[derive(Clone, Copy, Debug)]
+pub struct ProviderSetup {
+    /// The provider's canonical one-line install command.
+    pub install: &'static str,
+    /// Interactive sign-in command, `None` when the provider authenticates
+    /// with an API key rather than a login flow.
+    pub sign_in: Option<&'static str>,
+    /// Environment variable that carries credentials directly, when the
+    /// provider documents one.
+    pub api_key_env: Option<&'static str>,
+    /// Install/authentication documentation.
+    pub docs_url: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -4279,6 +4387,22 @@ mod tests {
         assert_eq!(ProviderKind::OpenCode2.command(), "opencode2");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
+    }
+
+    #[test]
+    fn provider_setup_is_complete() {
+        for provider in ProviderKind::ALL {
+            let setup = provider.setup();
+            assert!(!setup.install.is_empty(), "{provider:?} has no install");
+            assert!(
+                setup.docs_url.starts_with("https://"),
+                "{provider:?} docs link"
+            );
+            assert!(
+                setup.sign_in.is_some() || setup.api_key_env.is_some(),
+                "{provider:?} offers no way to authenticate"
+            );
+        }
     }
 
     #[test]

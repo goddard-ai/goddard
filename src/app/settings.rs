@@ -3701,6 +3701,37 @@ impl Waku {
                 this.toggle_provider_expanded(kind, window, cx);
             }));
 
+            let setup_button = (!installed).then(|| {
+                div()
+                    .id(SharedString::from(format!("provider-setup-{}", kind.id())))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .h(px(28.0))
+                    .px(px(11.0))
+                    .rounded(px(9.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(6.0))
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(icon("icons/download.svg", 11.0, theme.text_tertiary))
+                    .child(tr!("providers.set_up"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.provider_setup_clicked(kind, window, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.provider_setup_clicked(kind, window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            });
+
             let header = div()
                 .flex()
                 .items_center()
@@ -3773,6 +3804,7 @@ impl Waku {
                                 .child(detail),
                         ),
                 )
+                .when_some(setup_button, |element, button| element.child(button))
                 .child(expand_button)
                 .when(installed, |element| element.child(toggle));
 
@@ -3899,8 +3931,10 @@ impl Waku {
             .flex()
             .flex_col()
             .gap(px(5.0))
+            .child(self.render_provider_setup_section(kind, theme, cx))
             .child(
                 div()
+                    .mt(px(6.0))
                     .text_size(sp(12.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
@@ -3938,6 +3972,334 @@ impl Waku {
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
             )
+    }
+
+    /// The expanded row's setup block: the provider's documented install and
+    /// sign-in commands verbatim, each with a copy button, plus a Docs link
+    /// and a Run button that executes them in a terminal embedded in the row.
+    /// A remote daemon can't use a local PTY, so there Run stays hidden.
+    fn render_provider_setup_section(
+        &self,
+        kind: ProviderKind,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let setup = kind.setup();
+        let installed = self
+            .provider_probe(kind)
+            .is_some_and(|probe| probe.installed);
+        let terminal = self.provider_setup_terminals.get(&kind).cloned();
+
+        let mut steps = div().mt(px(2.0)).flex().flex_col().gap(px(6.0));
+        if !installed {
+            steps = steps.child(self.provider_setup_step_row(
+                kind,
+                "install",
+                tr!("providers.install_label"),
+                setup.install,
+                theme,
+                cx,
+            ));
+        }
+        if let Some(sign_in) = setup.sign_in {
+            steps = steps.child(self.provider_setup_step_row(
+                kind,
+                "sign-in",
+                tr!("providers.sign_in_label"),
+                sign_in,
+                theme,
+                cx,
+            ));
+        }
+
+        let mut actions = div().mt(px(4.0)).flex().items_center().gap(px(8.0));
+        if !self.daemon.is_remote()
+            && let Some(script) = self.provider_setup_script(kind)
+        {
+            let run = div()
+                .id(SharedString::from(format!(
+                    "provider-run-setup-{}",
+                    kind.id()
+                )))
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .h(px(29.0))
+                .px(px(10.0))
+                .rounded(px(9.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon("icons/terminal.svg", 11.0, theme.text_tertiary))
+                .child(tr!("providers.run_in_terminal"))
+                .tooltip(Tooltip::text(script))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.run_provider_setup(kind, window, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.run_provider_setup(kind, window, cx);
+                        cx.stop_propagation();
+                    }
+                }));
+            actions = actions.child(run);
+        }
+        let docs_url = setup.docs_url;
+        let docs = div()
+            .id(SharedString::from(format!("provider-docs-{}", kind.id())))
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .h(px(29.0))
+            .px(px(10.0))
+            .rounded(px(9.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .child(icon("icons/external-link.svg", 11.0, theme.text_tertiary))
+            .child(tr!("providers.docs"))
+            .on_click(move |_, _, cx| cx.open_url(docs_url))
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.open_url(docs_url);
+                    cx.stop_propagation();
+                }
+            });
+        actions = actions.child(docs);
+        if let Some(env) = setup.api_key_env {
+            actions = actions.child(
+                div()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_ghost)
+                    .child(SharedString::from(tr!("providers.api_key_hint", var = env))),
+            );
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("providers.setup")),
+            )
+            .child(steps)
+            .child(actions)
+            .when_some(terminal, |element, view| {
+                element.child(
+                    div()
+                        .mt(px(4.0))
+                        .h(px(280.0))
+                        .border_1()
+                        .border_color(theme.border)
+                        .relative()
+                        .child(view)
+                        .child(
+                            div().absolute().top(px(4.0)).right(px(6.0)).child(
+                                icon_button(
+                                    SharedString::from(format!(
+                                        "provider-setup-close-{}",
+                                        kind.id()
+                                    )),
+                                    "icons/x.svg",
+                                    theme,
+                                )
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.dismiss_provider_setup_terminal(kind, cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            this.dismiss_provider_setup_terminal(kind, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                )),
+                            ),
+                        ),
+                )
+            })
+    }
+
+    /// One setup step: its label, the exact command in code, and a copy
+    /// button.
+    fn provider_setup_step_row(
+        &self,
+        kind: ProviderKind,
+        step: &'static str,
+        label: String,
+        command: &'static str,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let copy_id = format!("provider-setup-copy-{}-{}", kind.id(), step);
+        let copied = self.control_was_copied(&copy_id);
+        let click_id = copy_id.clone();
+        let key_id = copy_id.clone();
+        let copy = div()
+            .id(SharedString::from(copy_id))
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .size(px(22.0))
+            .rounded(px(7.0))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|element| element.bg(theme.overlay))
+            .child(icon(
+                if copied {
+                    "icons/check.svg"
+                } else {
+                    "icons/copy.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(command.to_owned()));
+                this.show_control_copied(click_id.clone(), cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.write_to_clipboard(ClipboardItem::new_string(command.to_owned()));
+                    this.show_control_copied(key_id.clone(), cx);
+                    cx.stop_propagation();
+                }
+            }));
+        div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .w(px(56.0))
+                    .flex_none()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(label)),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "provider-setup-command-{}-{}",
+                        kind.id(),
+                        step
+                    )))
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(crate::fonts::current(cx).code)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .tooltip(Tooltip::text(command))
+                    .child(SharedString::from(command)),
+            )
+            .child(copy)
+    }
+
+    /// The script a provider's Run button executes: install when the CLI is
+    /// undetected — chained into sign-in when the provider has one — or
+    /// sign-in alone for an installed CLI. `None` when nothing is runnable.
+    fn provider_setup_script(&self, provider: ProviderKind) -> Option<String> {
+        let setup = provider.setup();
+        let installed = self
+            .provider_probe(provider)
+            .is_some_and(|probe| probe.installed);
+        match (installed, setup.sign_in) {
+            (false, Some(sign_in)) => Some(format!("{} && {}", setup.install, sign_in)),
+            (false, None) => Some(setup.install.to_owned()),
+            (true, Some(sign_in)) => Some(sign_in.to_owned()),
+            (true, None) => None,
+        }
+    }
+
+    /// The row's Set up button: expand the provider's settings and start the
+    /// setup script. A remote daemon gets the expanded copy/docs row only —
+    /// a desktop PTY would install the binary on the wrong host.
+    fn provider_setup_clicked(
+        &mut self,
+        provider: ProviderKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.expanded_provider_settings != Some(provider) {
+            self.toggle_provider_expanded(provider, window, cx);
+        }
+        if self.daemon.is_remote() || self.provider_setup_terminals.contains_key(&provider) {
+            return;
+        }
+        self.run_provider_setup(provider, window, cx);
+    }
+
+    /// Run the setup script in a terminal embedded in the expanded row. The
+    /// command closes its own shell on success; the exit event drops the
+    /// embed and re-detects the provider.
+    fn run_provider_setup(
+        &mut self,
+        provider: ProviderKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.daemon.is_remote() {
+            return;
+        }
+        let Some(script) = self.provider_setup_script(provider) else {
+            return;
+        };
+        let mut command = CustomCommand::new(script);
+        command.name = Some(tr!(
+            "providers.setup_terminal_title",
+            provider = provider.display_name()
+        ));
+        command.icon = CustomCommandIcon::Download;
+        command.close_on_success = true;
+        let cwd = self
+            .home_directory
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("/"));
+        let view =
+            cx.new(|cx| TerminalView::embedded(cwd, TerminalLaunch::CustomCommand(command), cx));
+        cx.subscribe(&view, move |this, _, _: &TerminalViewEvent, cx| {
+            this.provider_setup_terminal_exited(provider, cx);
+        })
+        .detach();
+        self.provider_setup_terminals.insert(provider, view.clone());
+        let focus = view.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// The setup terminal's shell exited — drop the embed and re-detect so
+    /// the row reflects whatever the script changed.
+    fn provider_setup_terminal_exited(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
+        self.provider_setup_terminals.remove(&provider);
+        self.refresh_provider_detection(Some(provider));
+        cx.notify();
+    }
+
+    fn dismiss_provider_setup_terminal(&mut self, provider: ProviderKind, cx: &mut Context<Self>) {
+        self.provider_setup_terminals.remove(&provider);
+        cx.notify();
     }
 
     fn toggle_provider_expanded(
