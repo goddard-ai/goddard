@@ -14,8 +14,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, BorderStyle, Bounds, Hsla, IntoElement, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, Styled, Window, canvas, fill,
+    App, BorderStyle, Bounds, Corners, Hsla, IntoElement, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, Styled, Window, canvas,
     linear_color_stop, linear_gradient, point, prelude::*, px, quad, size,
 };
 
@@ -234,6 +234,18 @@ pub fn edge_fade(
     side: FadeEdge,
     surface: Hsla,
 ) -> impl IntoElement {
+    edge_fade_rounded(scroll, side, surface, Pixels::ZERO)
+}
+
+/// An [`edge_fade`] whose quad rounds the two corners on its edge by `radius`,
+/// so it can sit flush against a rounded parent — `overflow_hidden` clips to a
+/// rectangle, not the parent's corner curve.
+pub fn edge_fade_rounded(
+    scroll: impl Scrollable + 'static,
+    side: FadeEdge,
+    surface: Hsla,
+    radius: Pixels,
+) -> impl IntoElement {
     canvas(
         move |bounds, _, _| {
             let scrolled = scroll.scrolled();
@@ -256,7 +268,26 @@ pub fn edge_fade(
                         linear_color_stop(surface, 1.0),
                     ),
                 };
-                fill(bounds, background)
+                let corner_radii = match side {
+                    FadeEdge::Top => Corners {
+                        top_left: radius,
+                        top_right: radius,
+                        ..Corners::default()
+                    },
+                    FadeEdge::Bottom => Corners {
+                        bottom_right: radius,
+                        bottom_left: radius,
+                        ..Corners::default()
+                    },
+                };
+                quad(
+                    bounds,
+                    corner_radii,
+                    background,
+                    px(0.0),
+                    gpui::transparent_black(),
+                    BorderStyle::default(),
+                )
             })
         },
         |_, fade, window, _| {

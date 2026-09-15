@@ -32,6 +32,9 @@ const CHANGED_FILES_DIFF_MAX_HEIGHT: f32 = 360.0;
 const CHANGED_FILES_ROW_HEIGHT: f32 = 31.0;
 /// The preview card's fixed header row.
 const CHANGED_FILES_DIFF_HEADER_HEIGHT: f32 = 32.0;
+/// The preview card's corner radius. The bottom edge fade rounds one pixel
+/// less to follow the inside of the card's border.
+const CHANGED_FILES_DIFF_CARD_RADIUS: f32 = 12.0;
 /// The margin passed with the preview's `FloatingSurface` anchor: placement
 /// keeps the card this far off every viewport edge.
 const CHANGED_FILES_DIFF_FLOATING_MARGIN: f32 = 8.0;
@@ -2270,10 +2273,11 @@ impl Waku {
                                 scrollbar::FadeEdge::Top,
                                 theme.raised,
                             ))
-                            .child(scrollbar::edge_fade(
+                            .child(scrollbar::edge_fade_rounded(
                                 scroll_handle.clone(),
                                 scrollbar::FadeEdge::Bottom,
                                 theme.raised,
+                                px(CHANGED_FILES_DIFF_CARD_RADIUS - 1.0),
                             ))
                             .child(scrollbar::vertical(&scroll_handle, &scrollbar_state))
                             .into_any_element()
@@ -2311,7 +2315,7 @@ impl Waku {
             .w_full()
             .flex()
             .flex_col()
-            .rounded(px(12.0))
+            .rounded(px(CHANGED_FILES_DIFF_CARD_RADIUS))
             .border(hairline())
             .border_color(theme.border_strong)
             .bg(theme.raised)
