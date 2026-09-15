@@ -3580,10 +3580,7 @@ impl Waku {
     /// tracking ref, so they reflect the last fetch. Only drafts show it — a
     /// started task's checkout state is its agent's concern — and only local
     /// daemons, whose checkout a desktop terminal can actually reach.
-    pub(super) fn render_sync_notice(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_sync_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.daemon.is_remote() {
             return None;
         }

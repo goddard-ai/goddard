@@ -20,8 +20,7 @@ use super::{
     previous_navigation_turn_index, push_reasoning_delta, push_transcript_activity,
     response_footer_message_index, response_row_turn_id, row_starts_followup_turn,
     session_accepts_turn_output, session_is_reapable, session_opens_at_last_prompt,
-    settle_stream_segment,
-    should_refresh_branch_after_activity, should_show_navigation_rail,
+    settle_stream_segment, should_refresh_branch_after_activity, should_show_navigation_rail,
     should_show_scroll_to_bottom, task_id_from_notification_tag, task_notification_tag,
     transcript_anchor_end_space, transcript_navigation_turns, transcript_rests_at_tail,
     transcript_row_kinds, transcript_row_splice, transcript_rows_fingerprint,
@@ -521,12 +520,7 @@ fn next_unread_session_prefers_blocked_tasks_then_the_newest_finish() {
     // A pending activation supersedes the selection as the on-screen task, so
     // the departing blocked session is a valid target again.
     assert_eq!(
-        next_unread_session(
-            &sessions,
-            &unseen,
-            Some(blocked_id),
-            Some(blocked_later_id)
-        ),
+        next_unread_session(&sessions, &unseen, Some(blocked_id), Some(blocked_later_id)),
         Some(blocked_id)
     );
 }
@@ -611,12 +605,18 @@ fn conversation_navigation_turn_stepping_walks_boundaries() {
     // whether the scroll top sits mid-turn or a few pixels into the row
     // that opens it.
     assert_eq!(previous_navigation_turn_index(&turn_rows, 7, true), Some(1));
-    assert_eq!(previous_navigation_turn_index(&turn_rows, 5, false), Some(1));
+    assert_eq!(
+        previous_navigation_turn_index(&turn_rows, 5, false),
+        Some(1)
+    );
     // Above the first prompt or on it, previous clamps to the first turn.
     assert_eq!(previous_navigation_turn_index(&turn_rows, 0, true), Some(0));
     assert_eq!(previous_navigation_turn_index(&turn_rows, 2, true), Some(0));
     // From the tail, previous lands on the last prompt.
-    assert_eq!(previous_navigation_turn_index(&turn_rows, 12, true), Some(2));
+    assert_eq!(
+        previous_navigation_turn_index(&turn_rows, 12, true),
+        Some(2)
+    );
     assert_eq!(previous_navigation_turn_index(&[], 0, true), None);
 
     // Next always moves strictly forward, even parked on a boundary.

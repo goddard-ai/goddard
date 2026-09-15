@@ -121,13 +121,7 @@ impl DriverHandle {
 }
 
 pub trait DriverControl: Send + Sync {
-    fn prompt(
-        &self,
-        prompt: String,
-        turn_id: Option<Uuid>,
-        message_id: Option<Uuid>,
-        hidden: bool,
-    );
+    fn prompt(&self, prompt: String, turn_id: Option<Uuid>, message_id: Option<Uuid>, hidden: bool);
     fn supports_steer(&self) -> bool {
         false
     }

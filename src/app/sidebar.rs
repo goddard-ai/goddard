@@ -339,7 +339,9 @@ fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> 
 }
 
 fn mix_str(hash: u64, value: &str) -> u64 {
-    value.bytes().fold(hash, |hash, byte| mix(hash, byte as u64))
+    value
+        .bytes()
+        .fold(hash, |hash, byte| mix(hash, byte as u64))
 }
 
 fn sidebar_status_rank(status: SessionStatus) -> u64 {
@@ -819,9 +821,10 @@ impl Waku {
         // A blocked task outranks plain completions, so the target being one
         // is what the badge warns about.
         let blocked = target.is_some_and(|session_id| {
-            self.state.sessions.iter().any(|session| {
-                session.id == session_id && session.status == SessionStatus::Waiting
-            })
+            self.state
+                .sessions
+                .iter()
+                .any(|session| session.id == session_id && session.status == SessionStatus::Waiting)
         });
         div()
             .id("unseen-completion-bell")
@@ -858,11 +861,11 @@ impl Waku {
             .child(icon("icons/bell.svg", 14.0, theme.text_tertiary))
             .when(enabled, |element| {
                 element.child(if blocked {
-                    div()
-                        .absolute()
-                        .top(px(2.0))
-                        .right(px(2.0))
-                        .child(icon("icons/x.svg", 8.0, theme.danger))
+                    div().absolute().top(px(2.0)).right(px(2.0)).child(icon(
+                        "icons/x.svg",
+                        8.0,
+                        theme.danger,
+                    ))
                 } else {
                     div()
                         .absolute()
@@ -1485,7 +1488,8 @@ impl Waku {
         if self.sidebar_checkout_scan_fingerprint.get() == Some(fingerprint) && !rescan_due {
             return;
         }
-        self.sidebar_checkout_scan_fingerprint.set(Some(fingerprint));
+        self.sidebar_checkout_scan_fingerprint
+            .set(Some(fingerprint));
         self.sidebar_checkout_scanned_at.set(Some(Instant::now()));
         let generation = self.sidebar_checkout_scan_generation.get().wrapping_add(1);
         self.sidebar_checkout_scan_generation.set(generation);
@@ -1543,9 +1547,7 @@ impl Waku {
                 continue;
             }
             let (cwd, branch) = match &session.workspace {
-                SessionWorkspace::Worktree { path, branch, .. } => {
-                    (path.clone(), branch.clone())
-                }
+                SessionWorkspace::Worktree { path, branch, .. } => (path.clone(), branch.clone()),
                 SessionWorkspace::Local => match self
                     .state
                     .projects
@@ -1585,62 +1587,62 @@ impl Waku {
 
         let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |waku, cx| {
-            let resolved = cx
-                .background_executor()
-                .spawn(async move {
-                    // Sessions on a shared local checkout resolve their branch
-                    // once per directory rather than once per session.
-                    let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
-                    for (_, cwd, branch) in &targets {
-                        if branch.is_none() && !branches.contains_key(cwd) {
-                            let resolved_branch = match workspace.request(
-                                waku_client::WorkspaceOperation::InspectBranches {
-                                    cwd: cwd.clone(),
-                                },
-                            ) {
-                                Ok(waku_client::WorkspaceResult::Branches {
-                                    snapshot: Some(snapshot),
-                                }) => snapshot.current,
-                                _ => None,
-                            };
-                            branches.insert(cwd.clone(), resolved_branch);
-                        }
-                    }
-                    // And each (directory, branch) pair asks the host once.
-                    let mut queries: HashMap<
-                        (PathBuf, String),
-                        Option<Vec<waku_client::PullRequestSummary>>,
-                    > = HashMap::new();
-                    let mut resolved = HashMap::new();
-                    for (session_id, cwd, branch) in targets {
-                        let branch = branch
-                            .or_else(|| branches.get(&cwd).cloned().flatten())
-                            .filter(|branch| !branch.is_empty());
-                        let Some(branch) = branch else {
-                            continue;
-                        };
-                        let entries = queries
-                            .entry((cwd.clone(), branch.clone()))
-                            .or_insert_with(|| {
-                                match workspace.request(
-                                    waku_client::WorkspaceOperation::ListPullRequests {
-                                        cwd,
-                                        head_branch: branch,
+            let resolved =
+                cx.background_executor()
+                    .spawn(async move {
+                        // Sessions on a shared local checkout resolve their branch
+                        // once per directory rather than once per session.
+                        let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
+                        for (_, cwd, branch) in &targets {
+                            if branch.is_none() && !branches.contains_key(cwd) {
+                                let resolved_branch = match workspace.request(
+                                    waku_client::WorkspaceOperation::InspectBranches {
+                                        cwd: cwd.clone(),
                                     },
                                 ) {
-                                    Ok(waku_client::WorkspaceResult::PullRequests {
-                                        entries: Some(entries),
-                                    }) => Some(entries),
+                                    Ok(waku_client::WorkspaceResult::Branches {
+                                        snapshot: Some(snapshot),
+                                    }) => snapshot.current,
                                     _ => None,
-                                }
-                            });
-                        if let Some(entries) = entries {
-                            resolved.insert(session_id, entries.clone());
+                                };
+                                branches.insert(cwd.clone(), resolved_branch);
+                            }
                         }
-                    }
-                    resolved
-                })
-                .await;
+                        // And each (directory, branch) pair asks the host once.
+                        let mut queries: HashMap<
+                            (PathBuf, String),
+                            Option<Vec<waku_client::PullRequestSummary>>,
+                        > = HashMap::new();
+                        let mut resolved = HashMap::new();
+                        for (session_id, cwd, branch) in targets {
+                            let branch = branch
+                                .or_else(|| branches.get(&cwd).cloned().flatten())
+                                .filter(|branch| !branch.is_empty());
+                            let Some(branch) = branch else {
+                                continue;
+                            };
+                            let entries = queries
+                                .entry((cwd.clone(), branch.clone()))
+                                .or_insert_with(|| {
+                                    match workspace.request(
+                                        waku_client::WorkspaceOperation::ListPullRequests {
+                                            cwd,
+                                            head_branch: branch,
+                                        },
+                                    ) {
+                                        Ok(waku_client::WorkspaceResult::PullRequests {
+                                            entries: Some(entries),
+                                        }) => Some(entries),
+                                        _ => None,
+                                    }
+                                });
+                            if let Some(entries) = entries {
+                                resolved.insert(session_id, entries.clone());
+                            }
+                        }
+                        resolved
+                    })
+                    .await;
             let _ = waku.update(cx, |waku, cx| {
                 if waku.sidebar_pull_request_scan_generation.get() != generation {
                     return;
@@ -2219,9 +2221,9 @@ impl Waku {
                 }
             }
         }
-        let has_session_header = rows.iter().any(|row| {
-            matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Terminals)
-        });
+        let has_session_header = rows.iter().any(
+            |row| matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Terminals),
+        );
         if !has_session_header {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
@@ -2386,16 +2388,14 @@ impl Waku {
             group,
             SidebarGroup::Date(_) | SidebarGroup::Pinned | SidebarGroup::Terminals
         )
-            .then(|| {
-                icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
-                    .when(collapsed, |icon| {
-                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
-                            0.75,
-                        )))
-                    })
-                    .invisible()
-                    .group_hover(group_name.clone(), |icon| icon.visible())
-            });
+        .then(|| {
+            icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
+                .when(collapsed, |icon| {
+                    icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(0.75)))
+                })
+                .invisible()
+                .group_hover(group_name.clone(), |icon| icon.visible())
+        });
         let compose = show_group_icon.then(|| {
             let compose_focus = self
                 .sidebar_group_compose_focuses
@@ -2641,9 +2641,7 @@ impl Waku {
     ) {
         // Opening the Terminals group is a selection, not just disclosure:
         // the last-shown terminal takes the main area.
-        if group == SidebarGroup::Terminals
-            && self.sidebar_collapsed_groups.contains(&group)
-        {
+        if group == SidebarGroup::Terminals && self.sidebar_collapsed_groups.contains(&group) {
             self.expand_terminals_group(window, cx);
             return;
         }
@@ -2852,9 +2850,8 @@ impl Waku {
         };
         let has_detail_label = detail_label.is_some();
         let checkout_status = if session.has_started() {
-            self.workspace_path_for_session(session).and_then(|path| {
-                self.sidebar_checkout_statuses.borrow().get(path).copied()
-            })
+            self.workspace_path_for_session(session)
+                .and_then(|path| self.sidebar_checkout_statuses.borrow().get(path).copied())
         } else {
             None
         };
@@ -3020,9 +3017,8 @@ impl Waku {
                                     .text_color(theme.text_tertiary)
                                     .child(div().min_w_0().truncate().child(label))
                                     .when(
-                                        checkout_status.is_some_and(|status| {
-                                            status.uncommitted_changes
-                                        }),
+                                        checkout_status
+                                            .is_some_and(|status| status.uncommitted_changes),
                                         |element| {
                                             element.child(icon(
                                                 "icons/asterisk.svg",
@@ -3062,52 +3058,55 @@ impl Waku {
                     .when(!has_detail_label, |element| element.child(div().flex_1()))
                     .when(
                         session.workspace.is_worktree() && !shortcut_hint,
-                        |element| {
-                            element.child(icon("icons/fork.svg", 12.5, theme.text_secondary))
-                        },
+                        |element| element.child(icon("icons/fork.svg", 12.5, theme.text_secondary)),
                     )
-                    .when_some(pull_request_badge.filter(|_| !shortcut_hint), |element, badge| {
-                        let color = sidebar_pull_request_color(&theme, badge.state);
-                        let url = badge.url.clone();
-                        element.child(
-                            div()
-                                .id(SharedString::from(format!("session-pr-{session_id}")))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .gap(px(3.0))
-                                .cursor_pointer()
-                                .child(icon(sidebar_pull_request_icon(badge.state), 12.0, color))
-                                .child(
-                                    div().text_size(sp(12.5)).text_color(color).child(
+                    .when_some(
+                        pull_request_badge.filter(|_| !shortcut_hint),
+                        |element, badge| {
+                            let color = sidebar_pull_request_color(&theme, badge.state);
+                            let url = badge.url.clone();
+                            element.child(
+                                div()
+                                    .id(SharedString::from(format!("session-pr-{session_id}")))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.0))
+                                    .cursor_pointer()
+                                    .child(icon(
+                                        sidebar_pull_request_icon(badge.state),
+                                        12.0,
+                                        color,
+                                    ))
+                                    .child(div().text_size(sp(12.5)).text_color(color).child(
                                         if badge.others == 0 {
                                             format!("#{}", badge.number)
                                         } else {
                                             format!("#{} +{}", badge.number, badge.others)
                                         },
-                                    ),
-                                )
-                                .when_some(badge.check_status, |element, status| {
-                                    element.child(icon(
-                                        sidebar_check_status_icon(status),
-                                        11.5,
-                                        sidebar_check_status_color(&theme, status),
                                     ))
-                                })
-                                .when_some(badge.review_decision, |element, decision| {
-                                    element.child(icon(
-                                        sidebar_review_decision_icon(decision),
-                                        11.5,
-                                        sidebar_review_decision_color(&theme, decision),
-                                    ))
-                                })
-                                .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
-                                .on_click(move |_, _, cx| {
-                                    cx.open_url(&url);
-                                    cx.stop_propagation();
-                                }),
-                        )
-                    })
+                                    .when_some(badge.check_status, |element, status| {
+                                        element.child(icon(
+                                            sidebar_check_status_icon(status),
+                                            11.5,
+                                            sidebar_check_status_color(&theme, status),
+                                        ))
+                                    })
+                                    .when_some(badge.review_decision, |element, decision| {
+                                        element.child(icon(
+                                            sidebar_review_decision_icon(decision),
+                                            11.5,
+                                            sidebar_review_decision_color(&theme, decision),
+                                        ))
+                                    })
+                                    .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
+                                    .on_click(move |_, _, cx| {
+                                        cx.open_url(&url);
+                                        cx.stop_propagation();
+                                    }),
+                            )
+                        },
+                    )
                     .when(pinned && !shortcut_hint, |element| {
                         element.child(icon(
                             "icons/pin-filled.svg",
@@ -3120,8 +3119,7 @@ impl Waku {
                         ))
                     })
                     .when_some(
-                        session_time_label(session, unix_time())
-                            .filter(|_| !shortcut_hint),
+                        session_time_label(session, unix_time()).filter(|_| !shortcut_hint),
                         |element, label| {
                             element.child(
                                 div()
@@ -3291,16 +3289,13 @@ impl Waku {
                         .bottom(px(SIDEBAR_SESSION_ROW_GAP))
                         .right_0()
                         .flex()
-                        .child(
-                            div()
-                                .h_full()
-                                .w(px(SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH))
-                                .bg(linear_gradient(
-                                    90.0,
-                                    linear_color_stop(fade.opacity(0.0), 0.0),
-                                    linear_color_stop(fade, 1.0),
-                                )),
-                        )
+                        .child(div().h_full().w(px(SIDEBAR_SHORTCUT_CHIP_FADE_WIDTH)).bg(
+                            linear_gradient(
+                                90.0,
+                                linear_color_stop(fade.opacity(0.0), 0.0),
+                                linear_color_stop(fade, 1.0),
+                            ),
+                        ))
                         .child(
                             div()
                                 .h_full()
@@ -4162,11 +4157,8 @@ mod tests {
 
         // An in-flight turn leaves the window open, and a host that reports
         // no creation time is kept rather than dropped.
-        let badge = sidebar_pull_request_badge(
-            &[entry(9, Some(500)), entry(4, None)],
-            (100, None),
-        )
-        .unwrap();
+        let badge = sidebar_pull_request_badge(&[entry(9, Some(500)), entry(4, None)], (100, None))
+            .unwrap();
         assert_eq!(badge.number, 4);
         assert_eq!(badge.others, 1);
     }

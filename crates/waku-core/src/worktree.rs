@@ -402,13 +402,10 @@ pub fn ensure(
             // `rev-list --parents` prints "<commit> <parent>..."; a root
             // commit lists itself alone, which `--verify <commit>^1` would
             // report as a hard error instead.
-            let parent = git_stdout(
-                &repository,
-                &["rev-list", "--parents", "-n", "1", &commit],
-            )?
-            .split_whitespace()
-            .nth(1)
-            .map(str::to_owned);
+            let parent = git_stdout(&repository, &["rev-list", "--parents", "-n", "1", &commit])?
+                .split_whitespace()
+                .nth(1)
+                .map(str::to_owned);
             Some((commit, parent))
         }
         _ => None,
@@ -1020,8 +1017,13 @@ mod tests {
         crate::checkpoint::capture_ref(&created.path, &git_ref).unwrap();
         remove(&created.path, true).unwrap();
 
-        let ensured =
-            ensure(&project, &created.path, Some("session-branch"), Some(&git_ref)).unwrap();
+        let ensured = ensure(
+            &project,
+            &created.path,
+            Some("session-branch"),
+            Some(&git_ref),
+        )
+        .unwrap();
         assert_eq!(ensured, Some(Some("session-branch".to_owned())));
         let worktree_root = created
             .path

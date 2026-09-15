@@ -358,20 +358,15 @@ impl Waku {
                             git_ref: archive_ref.clone(),
                         })
                         .is_ok_and(|result| {
-                            matches!(
-                                result,
-                                waku_client::WorkspaceResult::Bool { value: true }
-                            )
+                            matches!(result, waku_client::WorkspaceResult::Bool { value: true })
                         });
                     let base_ref = if archived {
                         Some(archive_ref.clone())
                     } else {
-                        match workspace.request(
-                            waku_client::WorkspaceOperation::SessionTurnRefs {
-                                cwd: project_path.clone(),
-                                session_id,
-                            },
-                        ) {
+                        match workspace.request(waku_client::WorkspaceOperation::SessionTurnRefs {
+                            cwd: project_path.clone(),
+                            session_id,
+                        }) {
                             Ok(waku_client::WorkspaceResult::TurnRefs { turn_counts }) => {
                                 turn_counts.into_iter().max().map(|turn_count| {
                                     checkpoint::checkpoint_ref(session_id, turn_count)
@@ -380,19 +375,19 @@ impl Waku {
                             _ => None,
                         }
                     };
-                    let ensured = match workspace.request(
-                        waku_client::WorkspaceOperation::EnsureWorktree {
+                    let ensured =
+                        match workspace.request(waku_client::WorkspaceOperation::EnsureWorktree {
                             project_path: project_path.clone(),
                             path,
                             branch,
                             base_ref,
-                        },
-                    ) {
-                        Ok(waku_client::WorkspaceResult::WorktreeEnsured { created, branch }) => {
-                            Some((created, branch))
-                        }
-                        _ => None,
-                    };
+                        }) {
+                            Ok(waku_client::WorkspaceResult::WorktreeEnsured {
+                                created,
+                                branch,
+                            }) => Some((created, branch)),
+                            _ => None,
+                        };
                     // The archive snapshot is single-use, same as the
                     // submission path treats it.
                     if archived && ensured.is_some() {
@@ -412,9 +407,8 @@ impl Waku {
                     return;
                 }
                 if let Some(session) = waku.state.session_mut(session_id)
-                    && let SessionWorkspace::Worktree {
-                        branch: stored, ..
-                    } = &mut session.workspace
+                    && let SessionWorkspace::Worktree { branch: stored, .. } =
+                        &mut session.workspace
                 {
                     *stored = branch;
                 }

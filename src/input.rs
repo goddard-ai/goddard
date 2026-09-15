@@ -1763,8 +1763,7 @@ impl TextInput {
                             let next_line = &self.content[pos..next_end];
                             match highlight::list_item(next_line) {
                                 Some(next)
-                                    if next.number.is_some()
-                                        && next.indent == item.indent =>
+                                    if next.number.is_some() && next.indent == item.indent =>
                                 {
                                     lines.push(format!(
                                         "{}{}{}",
@@ -2312,19 +2311,14 @@ impl EntityInputHandler for TextInput {
         let end = if start_idx == end_idx {
             start
         } else {
-            layout
-                .position_for_index(end_idx)
-                .unwrap_or(start)
+            layout.position_for_index(end_idx).unwrap_or(start)
         };
 
         let res = if start.y == end.y {
             let width = (end.x - start.x).max(px(2.0));
             Bounds::new(start, size(width, line_height))
         } else {
-            Bounds::from_corners(
-                start,
-                point(bounds.right(), start.y + line_height),
-            )
+            Bounds::from_corners(start, point(bounds.right(), start.y + line_height))
         };
 
         Some(res)
@@ -3464,10 +3458,7 @@ mod tests {
         cx.simulate_keystrokes("shift-enter");
 
         cx.read_entity(&composer, |composer, cx| {
-            assert_eq!(
-                composer.content(cx),
-                "1. one\n2. \n   - nested\n3. two"
-            );
+            assert_eq!(composer.content(cx), "1. one\n2. \n   - nested\n3. two");
         });
     }
 

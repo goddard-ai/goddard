@@ -1178,10 +1178,7 @@ pub struct AgentSession {
     /// that a session has no history. The flag crosses the wire so the daemon
     /// can tell a list projection — whose detail fields are placeholders —
     /// apart from a genuinely empty loaded session.
-    #[serde(
-        default = "detail_loaded_default",
-        skip_serializing_if = "is_true"
-    )]
+    #[serde(default = "detail_loaded_default", skip_serializing_if = "is_true")]
     pub detail_loaded: bool,
 }
 
@@ -1547,9 +1544,8 @@ impl AgentSession {
             completed_at: None,
             checkpoint: None,
         });
-        let mut prompt =
-            Message::new_for_turn(MessageRole::User, prompt, id)
-                .with_presentation(display_content, attachments);
+        let mut prompt = Message::new_for_turn(MessageRole::User, prompt, id)
+            .with_presentation(display_content, attachments);
         prompt.hidden = hidden;
         self.messages.push(prompt);
         self.last_reply_at = Some(now);

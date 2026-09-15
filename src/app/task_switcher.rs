@@ -143,9 +143,8 @@ fn ordered_task_ids(
     // Recently visited tasks keep their rank; when they leave slots open, the
     // most recently active tasks fill them so the list still shows ten.
     let mut recently_active = eligible;
-    recently_active.sort_by_key(|session| {
-        std::cmp::Reverse(sidebar::sidebar_session_timestamp(session))
-    });
+    recently_active
+        .sort_by_key(|session| std::cmp::Reverse(sidebar::sidebar_session_timestamp(session)));
     for session in recently_active {
         push(session.id);
     }
@@ -524,11 +523,7 @@ impl Waku {
                             div()
                                 .size(px(if unread { 7.0 } else { 4.0 }))
                                 .rounded_full()
-                                .bg(if unread {
-                                    theme.info
-                                } else {
-                                    theme.text_ghost
-                                }),
+                                .bg(if unread { theme.info } else { theme.text_ghost }),
                         ),
                 )
             })
@@ -670,10 +665,7 @@ mod tests {
             current.clone(),
             recent[1].clone(),
         ];
-        let recorded_recency = recent
-            .iter()
-            .map(|session| session.id)
-            .collect::<Vec<_>>();
+        let recorded_recency = recent.iter().map(|session| session.id).collect::<Vec<_>>();
 
         assert_eq!(
             ordered_task_ids(Some(current.id), &recorded_recency, &sessions),

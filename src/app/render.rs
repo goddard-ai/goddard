@@ -463,35 +463,35 @@ impl Render for Waku {
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
-                                .on_drop(cx.listener(
-                                    |this, paths: &ExternalPaths, window, cx| {
-                                        this.stage_dropped_files(paths, window, cx);
-                                    },
-                                ))
+                                .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                                    this.stage_dropped_files(paths, window, cx);
+                                }))
                         },
                     )
                     .child(self.render_header(window, cx))
                     // A selected terminal takes the column in place of the
                     // transcript, the GitHub browser, or the new-task prompt.
-                    .child(if let Some(terminal_id) = self
-                        .selected_terminal
-                        .filter(|id| self.right_panel_terminals.contains_key(id))
-                    {
-                        self.render_main_terminal(
-                            terminal_id,
-                            self.chat_viewport_width(window),
-                            cx,
-                        )
-                    } else if let Some(project_id) = github_project {
-                        self.render_github_browser(project_id, window, cx)
-                    } else if empty {
-                        self.render_empty_state(cx).into_any_element()
-                    } else {
-                        self.transcript_pane
-                            .clone()
-                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
-                            .into_any_element()
-                    })
+                    .child(
+                        if let Some(terminal_id) = self
+                            .selected_terminal
+                            .filter(|id| self.right_panel_terminals.contains_key(id))
+                        {
+                            self.render_main_terminal(
+                                terminal_id,
+                                self.chat_viewport_width(window),
+                                cx,
+                            )
+                        } else if let Some(project_id) = github_project {
+                            self.render_github_browser(project_id, window, cx)
+                        } else if empty {
+                            self.render_empty_state(cx).into_any_element()
+                        } else {
+                            self.transcript_pane
+                                .clone()
+                                .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                                .into_any_element()
+                        },
+                    )
                     .children(permission)
                     .when(
                         self.selected_project().is_some() && self.selected_terminal.is_none(),
@@ -530,14 +530,16 @@ impl Render for Waku {
                         // layout underneath never disturbs, and the pane is
                         // never mounted in two places at once.
                         .when(!panels.panel_fullscreen, |element| {
-                            element.child(self.right_panel_pane.clone().cached(
-                                StyleRefinement::default()
-                                    .absolute()
-                                    .top_0()
-                                    .right_0()
-                                    .w(px(panels.right_panel_content))
-                                    .h_full(),
-                            ))
+                            element.child(
+                                self.right_panel_pane.clone().cached(
+                                    StyleRefinement::default()
+                                        .absolute()
+                                        .top_0()
+                                        .right_0()
+                                        .w(px(panels.right_panel_content))
+                                        .h_full(),
+                                ),
+                            )
                         }),
                 )
             })

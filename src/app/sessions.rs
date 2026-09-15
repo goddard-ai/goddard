@@ -667,9 +667,7 @@ impl Waku {
             self.finish_archive_session(session_id, window, cx);
             return;
         };
-        if self.archive_dialog.is_some()
-            || !self.archive_preview_pending.insert(session_id)
-        {
+        if self.archive_dialog.is_some() || !self.archive_preview_pending.insert(session_id) {
             return;
         }
         let window_handle = window.window_handle();
@@ -679,9 +677,7 @@ impl Waku {
                 .background_executor()
                 .spawn(async move {
                     match workspace_client.request(
-                        waku_client::WorkspaceOperation::InspectArchivePreview {
-                            cwd: workspace,
-                        },
+                        waku_client::WorkspaceOperation::InspectArchivePreview { cwd: workspace },
                     ) {
                         Ok(waku_client::WorkspaceResult::ArchivePreview { preview }) => preview,
                         _ => None,
@@ -696,8 +692,7 @@ impl Waku {
                             if !preview.files.is_empty()
                                 || !preview.unpushed_commits.is_empty() =>
                         {
-                            let focus =
-                                waku.open_archive_dialog(session_id, preview, cx);
+                            let focus = waku.open_archive_dialog(session_id, preview, cx);
                             Some(focus)
                         }
                         _ => None,
@@ -710,9 +705,7 @@ impl Waku {
                         // Like the other deferred surfaces, focus lands two
                         // frames after the modal joins the dispatch tree.
                         window.on_next_frame(move |window, _| {
-                            window.on_next_frame(move |window, cx| {
-                                window.focus(&focus, cx)
-                            });
+                            window.on_next_frame(move |window, cx| window.focus(&focus, cx));
                         });
                     }
                     None => {
@@ -883,9 +876,7 @@ impl Waku {
             .filter(|terminal_id| {
                 self.right_panel_terminals
                     .get(terminal_id)
-                    .is_some_and(|terminal| {
-                        terminal.read(cx).focus_handle(cx).is_focused(window)
-                    })
+                    .is_some_and(|terminal| terminal.read(cx).focus_handle(cx).is_focused(window))
             });
         if let Some(terminal_id) = focused_terminal {
             self.toggle_terminal_pin(terminal_id, cx);

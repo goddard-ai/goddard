@@ -683,14 +683,14 @@ impl Theme {
             danger: 0xD0679D,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x5DE4C7).into(),   // brightMint — control flow
-                literal: rgb(0x5DE4C7).into(),   // constant.language — same mint
-                string: rgb(0x5DE4C7).into(),    // strings are mint upstream
-                comment: rgb(0x767C9D).into(),   // darkerGray
-                number: rgb(0x5DE4C7).into(),    // constant.numeric — same mint
-                ty: rgb(0xADD7FF).into(),        // lightBlue — types and classes
-                function: rgb(0xADD7FF).into(),  // lightBlue — function decls
-                meta: rgb(0x91B4D5).into(),      // desaturatedBlue — attributes
+                keyword: rgb(0x5DE4C7).into(),  // brightMint — control flow
+                literal: rgb(0x5DE4C7).into(),  // constant.language — same mint
+                string: rgb(0x5DE4C7).into(),   // strings are mint upstream
+                comment: rgb(0x767C9D).into(),  // darkerGray
+                number: rgb(0x5DE4C7).into(),   // constant.numeric — same mint
+                ty: rgb(0xADD7FF).into(),       // lightBlue — types and classes
+                function: rgb(0xADD7FF).into(), // lightBlue — function decls
+                meta: rgb(0x91B4D5).into(),     // desaturatedBlue — attributes
             },
             ansi: [
                 0x1B1E28, 0xD0679D, 0x5DE4C7, 0xFFFAC2, 0x89DDFF, 0xF087BD, 0x89DDFF, 0xFFFFFF,
@@ -736,14 +736,14 @@ impl Theme {
             danger: 0xCF222E,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xCF222E).into(),   // red — keyword/storage
-                literal: rgb(0x0550AE).into(),   // blue — constant
-                string: rgb(0x0A3069).into(),    // deep blue
-                comment: rgb(0x6E7781).into(),   // gray
-                number: rgb(0x0550AE).into(),    // constant.numeric → blue
-                ty: rgb(0x953800).into(),        // orange — entity.name
-                function: rgb(0x8250DF).into(),  // purple — entity.name.function
-                meta: rgb(0x8250DF).into(),      // purple — meta.diff.range
+                keyword: rgb(0xCF222E).into(),  // red — keyword/storage
+                literal: rgb(0x0550AE).into(),  // blue — constant
+                string: rgb(0x0A3069).into(),   // deep blue
+                comment: rgb(0x6E7781).into(),  // gray
+                number: rgb(0x0550AE).into(),   // constant.numeric → blue
+                ty: rgb(0x953800).into(),       // orange — entity.name
+                function: rgb(0x8250DF).into(), // purple — entity.name.function
+                meta: rgb(0x8250DF).into(),     // purple — meta.diff.range
             },
             ansi: [
                 0x24292f, 0xcf222e, 0x116329, 0x4d2d00, 0x0969da, 0x8250df, 0x1b7c83, 0x6e7781,
@@ -787,14 +787,14 @@ impl Theme {
             danger: 0xF85149,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xFF7B72).into(),   // red — keyword/storage
-                literal: rgb(0x79C0FF).into(),   // blue — constant
-                string: rgb(0xA5D6FF).into(),    // light blue
-                comment: rgb(0x8B949E).into(),   // gray
-                number: rgb(0x79C0FF).into(),    // constant.numeric → blue
-                ty: rgb(0xFFA657).into(),        // orange — entity.name
-                function: rgb(0xD2A8FF).into(),  // purple — entity.name.function
-                meta: rgb(0xD2A8FF).into(),      // purple — meta.diff.range
+                keyword: rgb(0xFF7B72).into(),  // red — keyword/storage
+                literal: rgb(0x79C0FF).into(),  // blue — constant
+                string: rgb(0xA5D6FF).into(),   // light blue
+                comment: rgb(0x8B949E).into(),  // gray
+                number: rgb(0x79C0FF).into(),   // constant.numeric → blue
+                ty: rgb(0xFFA657).into(),       // orange — entity.name
+                function: rgb(0xD2A8FF).into(), // purple — entity.name.function
+                meta: rgb(0xD2A8FF).into(),     // purple — meta.diff.range
             },
             ansi: [
                 0x484f58, 0xff7b72, 0x3fb950, 0xd29922, 0x58a6ff, 0xbc8cff, 0x39c5cf, 0xb1bac4,
@@ -841,14 +841,14 @@ impl Theme {
             danger: 0xFF5555,
 
             syntax: SyntaxColors {
-                keyword: rgb(0xFF79C6).into(),   // pink
-                literal: rgb(0xBD93F9).into(),   // purple — constant.language
-                string: rgb(0xF1FA8C).into(),    // yellow
+                keyword: rgb(0xFF79C6).into(), // pink
+                literal: rgb(0xBD93F9).into(), // purple — constant.language
+                string: rgb(0xF1FA8C).into(),  // yellow
                 comment: rgb(0x6272A4).into(),
-                number: rgb(0xBD93F9).into(),    // purple — constant.numeric
-                ty: rgb(0x8BE9FD).into(),        // cyan
-                function: rgb(0x50FA7B).into(),  // green
-                meta: rgb(0xFFB86C).into(),      // orange — parameters/attributes
+                number: rgb(0xBD93F9).into(), // purple — constant.numeric
+                ty: rgb(0x8BE9FD).into(),     // cyan
+                function: rgb(0x50FA7B).into(), // green
+                meta: rgb(0xFFB86C).into(),   // orange — parameters/attributes
             },
             ansi: [
                 0x21222c, 0xff5555, 0x50fa7b, 0xf1fa8c, 0xbd93f9, 0xff79c6, 0x8be9fd, 0xf8f8f2,
@@ -894,14 +894,14 @@ impl Theme {
             danger: 0xB4637A,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x286983).into(),   // pine
-                literal: rgb(0xD7827E).into(),   // rose — booleans
-                string: rgb(0xEA9D34).into(),    // gold
-                comment: rgb(0x797593).into(),   // subtle
-                number: rgb(0xEA9D34).into(),    // gold
-                ty: rgb(0x56949F).into(),        // foam
-                function: rgb(0xD7827E).into(),  // rose
-                meta: rgb(0x907AA9).into(),      // iris — preproc/attributes
+                keyword: rgb(0x286983).into(),  // pine
+                literal: rgb(0xD7827E).into(),  // rose — booleans
+                string: rgb(0xEA9D34).into(),   // gold
+                comment: rgb(0x797593).into(),  // subtle
+                number: rgb(0xEA9D34).into(),   // gold
+                ty: rgb(0x56949F).into(),       // foam
+                function: rgb(0xD7827E).into(), // rose
+                meta: rgb(0x907AA9).into(),     // iris — preproc/attributes
             },
             ansi: [
                 0xf2e9e1, 0xb4637a, 0x286983, 0xea9d34, 0x56949f, 0x907aa9, 0xd7827e, 0x575279,
@@ -945,14 +945,14 @@ impl Theme {
             danger: 0xEB6F92,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x3E8FB0).into(),   // pine
-                literal: rgb(0xEA9A97).into(),   // rose — booleans
-                string: rgb(0xF6C177).into(),    // gold
-                comment: rgb(0x908CAA).into(),   // subtle
-                number: rgb(0xF6C177).into(),    // gold
-                ty: rgb(0x9CCFD8).into(),        // foam
-                function: rgb(0xEA9A97).into(),  // rose
-                meta: rgb(0xC4A7E7).into(),      // iris — preproc/attributes
+                keyword: rgb(0x3E8FB0).into(),  // pine
+                literal: rgb(0xEA9A97).into(),  // rose — booleans
+                string: rgb(0xF6C177).into(),   // gold
+                comment: rgb(0x908CAA).into(),  // subtle
+                number: rgb(0xF6C177).into(),   // gold
+                ty: rgb(0x9CCFD8).into(),       // foam
+                function: rgb(0xEA9A97).into(), // rose
+                meta: rgb(0xC4A7E7).into(),     // iris — preproc/attributes
             },
             ansi: [
                 0x393552, 0xeb6f92, 0x3e8fb0, 0xf6c177, 0x9ccfd8, 0xc4a7e7, 0xea9a97, 0xe0def4,
@@ -999,14 +999,14 @@ impl Theme {
             danger: 0xC34043,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x8992A7).into(),   // violet2 — keyword/statement
-                literal: rgb(0xB6927B).into(),   // orange — constant
-                string: rgb(0x8A9A7B).into(),    // green3
-                comment: rgb(0x75797F).into(),   // gray4
-                number: rgb(0xA292A3).into(),    // pink
-                ty: rgb(0x8EA4A2).into(),        // aqua
-                function: rgb(0x8BA4B0).into(),  // blue3
-                meta: rgb(0x909398).into(),      // gray3 — preproc/parameters
+                keyword: rgb(0x8992A7).into(),  // violet2 — keyword/statement
+                literal: rgb(0xB6927B).into(),  // orange — constant
+                string: rgb(0x8A9A7B).into(),   // green3
+                comment: rgb(0x75797F).into(),  // gray4
+                number: rgb(0xA292A3).into(),   // pink
+                ty: rgb(0x8EA4A2).into(),       // aqua
+                function: rgb(0x8BA4B0).into(), // blue3
+                meta: rgb(0x909398).into(),     // gray3 — preproc/parameters
             },
             ansi: [
                 0x090e13, 0xc4746e, 0x8a9a7b, 0xc4b28a, 0x8ba4b0, 0xa292a3, 0xc5c9c7, 0xa4a7a4,
@@ -1052,14 +1052,14 @@ impl Theme {
             danger: 0xD7474B,
 
             syntax: SyntaxColors {
-                keyword: rgb(0x624C83).into(),   // pearlViolet4 — keyword/statement
-                literal: rgb(0xCC6D00).into(),   // pearlOrange — constant
-                string: rgb(0x6F894E).into(),    // pearlGreen
-                comment: rgb(0x6D6D69).into(),   // pearlGray3
-                number: rgb(0xB35B79).into(),    // pearlPink
-                ty: rgb(0x597B75).into(),        // pearlAqua
-                function: rgb(0x4D699B).into(),  // pearlBlue4
-                meta: rgb(0x5C6068).into(),      // pearlGray2 — preproc
+                keyword: rgb(0x624C83).into(),  // pearlViolet4 — keyword/statement
+                literal: rgb(0xCC6D00).into(),  // pearlOrange — constant
+                string: rgb(0x6F894E).into(),   // pearlGreen
+                comment: rgb(0x6D6D69).into(),  // pearlGray3
+                number: rgb(0xB35B79).into(),   // pearlPink
+                ty: rgb(0x597B75).into(),       // pearlAqua
+                function: rgb(0x4D699B).into(), // pearlBlue4
+                meta: rgb(0x5C6068).into(),     // pearlGray2 — preproc
             },
             ansi: [
                 0x22262d, 0xc84053, 0x6f894e, 0x77713f, 0x4d699b, 0xb35b79, 0x597b75, 0x22262d,

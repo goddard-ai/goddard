@@ -16,17 +16,14 @@ use waku_protocol::workspace::{
     PullRequestReviewDecision, PullRequestState, PullRequestSummary, WorkItemQueryState,
 };
 
-use crate::github::{
-    GhComment, GhUser, gh_output, gh_query_state, gh_time, parse_gh_stdout,
-};
+use crate::github::{GhComment, GhUser, gh_output, gh_query_state, gh_time, parse_gh_stdout};
 
 /// Keeps a reused branch's history from paging the whole sidebar scan.
 const PULL_REQUEST_LIST_LIMIT: &str = "30";
 /// The repo-wide browser pages deeper than the badge scan.
 const PULL_REQUEST_REPO_LIST_LIMIT: &str = "100";
 
-const PULL_REQUEST_LIST_FIELDS: &str =
-    "number,title,url,state,isDraft,author,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,statusCheckRollup,additions,deletions";
+const PULL_REQUEST_LIST_FIELDS: &str = "number,title,url,state,isDraft,author,headRefName,baseRefName,createdAt,updatedAt,reviewDecision,statusCheckRollup,additions,deletions";
 
 pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequestSummary>>> {
     let output = crate::command_env::plain_command("gh")
@@ -48,8 +45,8 @@ pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequ
         Ok(output) if output.status.success() => output,
         _ => return Ok(None),
     };
-    let entries: Vec<GhPullRequest> = serde_json::from_slice(&output.stdout)
-        .context("could not parse `gh pr list` output")?;
+    let entries: Vec<GhPullRequest> =
+        serde_json::from_slice(&output.stdout).context("could not parse `gh pr list` output")?;
     Ok(Some(
         entries
             .into_iter()
@@ -261,7 +258,11 @@ impl GhCheckRollupEntry {
     /// This entry alone, for the detail view's per-run rows. `None` when the
     /// entry carries neither a check-run verdict nor a status state.
     fn as_check(&self) -> Option<PullRequestCheck> {
-        let status = match (self.status.as_deref(), self.conclusion.as_deref(), self.state.as_deref()) {
+        let status = match (
+            self.status.as_deref(),
+            self.conclusion.as_deref(),
+            self.state.as_deref(),
+        ) {
             (Some(status), _, _) if status != "COMPLETED" => PullRequestCheckStatus::Pending,
             (Some(_), Some(conclusion), _) => match conclusion {
                 "FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "CANCELLED" => {
@@ -283,7 +284,10 @@ impl GhCheckRollupEntry {
             status,
             run_id: url.as_deref().and_then(actions_run_id),
             url,
-            duration_seconds: match (gh_time(self.started_at.clone()), gh_time(self.completed_at.clone())) {
+            duration_seconds: match (
+                gh_time(self.started_at.clone()),
+                gh_time(self.completed_at.clone()),
+            ) {
                 (Some(started), Some(completed)) => completed.checked_sub(started),
                 _ => None,
             },
@@ -296,7 +300,10 @@ impl GhCheckRollupEntry {
 fn actions_run_id(url: &str) -> Option<u64> {
     let marker = "/actions/runs/";
     let start = url.find(marker)? + marker.len();
-    let digits: String = url[start..].chars().take_while(char::is_ascii_digit).collect();
+    let digits: String = url[start..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
     digits.parse().ok()
 }
 

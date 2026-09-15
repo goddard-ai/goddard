@@ -156,7 +156,11 @@ impl Waku {
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(icon("icons/git-commit-horizontal.svg", 12.0, theme.text_ghost))
+                            .child(icon(
+                                "icons/git-commit-horizontal.svg",
+                                12.0,
+                                theme.text_ghost,
+                            ))
                             .child(
                                 div()
                                     .min_w_0()

@@ -786,8 +786,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         body.child(
                                             canvas(
                                                 move |_, _, cx| {
-                                                    let clipped =
-                                                        scroll.max_offset().y > px(0.5);
+                                                    let clipped = scroll.max_offset().y > px(0.5);
                                                     if overflowing.replace(clipped) != clipped {
                                                         cx.notify(owner);
                                                     }
@@ -844,9 +843,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         .text_size(sp(12.5))
                                         .text_color(theme.text_tertiary)
                                         .hover(|style| style.text_color(theme.text))
-                                        .focus_visible(|style| {
-                                            style.text_color(theme.text)
-                                        })
+                                        .focus_visible(|style| style.text_color(theme.text))
                                         .child(if user_message_expanded {
                                             tr!("transcript.show_less")
                                         } else {
@@ -854,28 +851,24 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                                         })
                                         .on_click(move |_, _, cx| {
                                             let _ = click_waku.update(cx, |this, cx| {
-                                                this.toggle_user_message_expanded(
-                                                    message_id, cx,
-                                                );
+                                                this.toggle_user_message_expanded(message_id, cx);
                                             });
                                         })
-                                        .on_key_down(
-                                            move |event: &KeyDownEvent, _, cx| {
-                                                if !event.keystroke.modifiers.modified()
-                                                    && matches!(
-                                                        event.keystroke.key.as_str(),
-                                                        "enter" | "space"
-                                                    )
-                                                {
-                                                    let _ = key_waku.update(cx, |this, cx| {
-                                                        this.toggle_user_message_expanded(
-                                                            message_id, cx,
-                                                        );
-                                                    });
-                                                    cx.stop_propagation();
-                                                }
-                                            },
-                                        ),
+                                        .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                                            if !event.keystroke.modifiers.modified()
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                let _ = key_waku.update(cx, |this, cx| {
+                                                    this.toggle_user_message_expanded(
+                                                        message_id, cx,
+                                                    );
+                                                });
+                                                cx.stop_propagation();
+                                            }
+                                        }),
                                 )
                             })
                             .when_some(user_message_viewport, |bubble, viewport| {

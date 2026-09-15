@@ -143,9 +143,8 @@ pub fn source_line(shell: &Path, script_path: &Path, close_on_success: bool) -> 
     // `source` is fish's spelling; `.` is the POSIX one. `&&` chains in fish
     // ≥ 3.0 and every POSIX shell. The printf emits the sentinel as an
     // ST-terminated OSC 2, which never reaches the screen.
-    let report = |code: &str| {
-        format!("printf '\\033]2;{COMMAND_EXIT_TITLE_PREFIX}%s\\033\\\\' {code}")
-    };
+    let report =
+        |code: &str| format!("printf '\\033]2;{COMMAND_EXIT_TITLE_PREFIX}%s\\033\\\\' {code}");
     if name.starts_with("fish") {
         return if close_on_success {
             format!(

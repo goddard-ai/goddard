@@ -80,8 +80,7 @@ impl Waku {
             .map(TerminalLaunch::CustomCommand)
             .unwrap_or(TerminalLaunch::Shell);
         let close_on_exit = command.is_some_and(|command| command.close_on_success);
-        let view =
-            cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
+        let view = cx.new(|cx| TerminalView::with_launch(working_directory.clone(), launch, cx));
         cx.subscribe(&view, move |this, view, event: &TerminalViewEvent, cx| {
             match event {
                 // The command's startup line ends in `&& exit`, so the
@@ -213,11 +212,7 @@ impl Waku {
     /// Fold the group open and land on the last terminal that was on
     /// screen — the newest one if none has been shown yet, or a fresh
     /// global terminal in ~ when the group is empty.
-    pub(super) fn expand_terminals_group(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn expand_terminals_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_sidebar_group_collapsed(SidebarGroup::Terminals, false, cx);
         let target = self
             .last_visible_terminal
@@ -263,8 +258,7 @@ impl Waku {
                 .get(&terminal_id)
                 .and_then(|record| record.session);
             if let Some(working_directory) = working_directory
-                && let Some(new_terminal) =
-                    self.create_terminal(working_directory, session, cx)
+                && let Some(new_terminal) = self.create_terminal(working_directory, session, cx)
             {
                 self.select_terminal(new_terminal, window, cx);
             }
@@ -378,7 +372,9 @@ impl Waku {
         let keyboard_menu = menu.clone();
         let waku = cx.entity().downgrade();
         let row = div()
-            .id(SharedString::from(format!("sidebar-terminal-{terminal_id}")))
+            .id(SharedString::from(format!(
+                "sidebar-terminal-{terminal_id}"
+            )))
             .w_full()
             .h(px(SIDEBAR_TERMINAL_ROW_HEIGHT - SIDEBAR_TERMINAL_ROW_GAP))
             .pl(px(8.0))

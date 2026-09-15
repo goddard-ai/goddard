@@ -106,18 +106,13 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             name,
             base_ref,
         } => WorkspaceResult::WorktreeCreated {
-            worktree: crate::worktree::create(
-                &project_path,
-                name.as_deref(),
-                base_ref.as_deref(),
-            )?,
+            worktree: crate::worktree::create(&project_path, name.as_deref(), base_ref.as_deref())?,
         },
-        WorkspaceOperation::CreateWorktreeFromCheckout {
-            project_path,
-            name,
-        } => WorkspaceResult::WorktreeCreated {
-            worktree: crate::worktree::create_from_checkout(&project_path, name.as_deref())?,
-        },
+        WorkspaceOperation::CreateWorktreeFromCheckout { project_path, name } => {
+            WorkspaceResult::WorktreeCreated {
+                worktree: crate::worktree::create_from_checkout(&project_path, name.as_deref())?,
+            }
+        }
         WorkspaceOperation::RemoveWorktree { path, force } => {
             crate::worktree::remove(&path, force)?;
             WorkspaceResult::Ack

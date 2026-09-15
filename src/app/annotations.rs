@@ -474,7 +474,12 @@ impl Waku {
             .child(icon("icons/compose.svg", 12.0, theme.text_secondary))
             .child(tr!("annotations.add_to_chat"))
             .when_some(shortcut_label, |element, label| {
-                element.child(div().flex_none().text_color(theme.text_tertiary).child(label))
+                element.child(
+                    div()
+                        .flex_none()
+                        .text_color(theme.text_tertiary)
+                        .child(label),
+                )
             })
             // A mouse-down here must not reach the transcript's selection
             // listeners, which would clear the very selection being offered.
@@ -715,9 +720,7 @@ impl Waku {
             let selection = selection.clone();
             let waku = waku.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
-                if phase != DispatchPhase::Bubble
-                    || event.dragging()
-                    || !region.is_hovered(window)
+                if phase != DispatchPhase::Bubble || event.dragging() || !region.is_hovered(window)
                 {
                     return;
                 }

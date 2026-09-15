@@ -8,17 +8,14 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use waku_protocol::workspace::{
-    IssueDetail, IssueState, IssueSummary, WorkItemQueryState,
-};
+use waku_protocol::workspace::{IssueDetail, IssueState, IssueSummary, WorkItemQueryState};
 
 use crate::github::{
     GhComment, GhLabel, GhUser, gh_output, gh_query_state, gh_time, parse_gh_stdout,
 };
 
 const ISSUE_LIST_LIMIT: &str = "100";
-const ISSUE_FIELDS: &str =
-    "number,title,url,state,author,labels,assignees,createdAt,updatedAt";
+const ISSUE_FIELDS: &str = "number,title,url,state,author,labels,assignees,createdAt,updatedAt";
 
 /// Repo-wide issue list for the GitHub browser. `query` forwards to
 /// `gh issue list --search`.
@@ -41,13 +38,18 @@ pub fn list(
         args.push(OsString::from("--search"));
         args.push(OsString::from(query));
     }
-    let Some(output) = gh_output(cwd, &args.iter().map(OsString::as_os_str).collect::<Vec<_>>())
-    else {
+    let Some(output) = gh_output(
+        cwd,
+        &args.iter().map(OsString::as_os_str).collect::<Vec<_>>(),
+    ) else {
         return Ok(None);
     };
     let entries: Vec<GhIssue> = parse_gh_stdout(&output, "gh issue list")?;
     Ok(Some(
-        entries.into_iter().filter_map(GhIssue::into_summary).collect(),
+        entries
+            .into_iter()
+            .filter_map(GhIssue::into_summary)
+            .collect(),
     ))
 }
 
@@ -60,8 +62,10 @@ pub fn view(cwd: &Path, number: u64) -> anyhow::Result<Option<IssueDetail>> {
         OsString::from("--json"),
         OsString::from(format!("{ISSUE_FIELDS},body,comments")),
     ];
-    let Some(output) = gh_output(cwd, &args.iter().map(OsString::as_os_str).collect::<Vec<_>>())
-    else {
+    let Some(output) = gh_output(
+        cwd,
+        &args.iter().map(OsString::as_os_str).collect::<Vec<_>>(),
+    ) else {
         return Ok(None);
     };
     let entry: GhIssue = parse_gh_stdout(&output, "gh issue view")?;

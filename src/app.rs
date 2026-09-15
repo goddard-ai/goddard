@@ -1994,8 +1994,8 @@ use background_work::{
 };
 pub use command_palette::init as init_command_palette;
 pub use commit_dialog::init as init_commit_dialog_keys;
-pub use element_inspector::init as init_element_inspector;
 use components::*;
+pub use element_inspector::init as init_element_inspector;
 pub use file_finder::init as init_file_finder;
 pub use goal_dialog::init as init_goal_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;

@@ -226,9 +226,7 @@ impl EventListener for TerminalEventProxy {
                 self.dirty.store(true, Ordering::Release);
             }
             Event::ChildExit(status) => {
-                let _ = self
-                    .ui_events
-                    .send(TerminalUiEvent::Exited(status.code()));
+                let _ = self.ui_events.send(TerminalUiEvent::Exited(status.code()));
                 self.dirty.store(true, Ordering::Release);
             }
         }
@@ -2566,7 +2564,10 @@ mod tests {
         reported.insert(url);
 
         // No new output: the overlap rescan only re-finds reported URLs.
-        assert_eq!(scan_grid_localhost_url(&term, &mut watermark, &reported), None);
+        assert_eq!(
+            scan_grid_localhost_url(&term, &mut watermark, &reported),
+            None
+        );
 
         // A better URL printed later wins over the already-reported one.
         let mut processor: Processor = Processor::new();
@@ -2582,7 +2583,10 @@ mod tests {
         let mut term = parse_terminal(b"ready at http://local");
         let mut watermark = 0;
         let reported = HashSet::new();
-        assert_eq!(scan_grid_localhost_url(&term, &mut watermark, &reported), None);
+        assert_eq!(
+            scan_grid_localhost_url(&term, &mut watermark, &reported),
+            None
+        );
 
         let mut processor: Processor = Processor::new();
         processor.advance(&mut term, b"host:3000/\n");

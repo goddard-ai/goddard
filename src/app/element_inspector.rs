@@ -13,8 +13,8 @@ use gpui::{App, Window};
 #[cfg(debug_assertions)]
 mod implementation {
     use gpui::{
-        AnyElement, App, ClipboardItem, Context, Empty, Inspector, InspectorElementId,
-        IntoElement, Pixels, Window, div, prelude::*, px, rems,
+        AnyElement, App, ClipboardItem, Context, Empty, Inspector, InspectorElementId, IntoElement,
+        Pixels, Window, div, prelude::*, px, rems,
     };
 
     use crate::fonts;

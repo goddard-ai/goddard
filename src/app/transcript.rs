@@ -287,11 +287,7 @@ impl Waku {
 
     /// Re-apply the landing activation chose after a late runtime attach or
     /// interrupt resets the rows a second time.
-    pub(super) fn reapply_transcript_landing(
-        &mut self,
-        session_id: Uuid,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn reapply_transcript_landing(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         let Some((landing_session, landing)) = self.transcript_landing.take() else {
             return;
         };
@@ -300,11 +296,7 @@ impl Waku {
         }
     }
 
-    fn scroll_to_transcript_landing(
-        &mut self,
-        landing: TranscriptLanding,
-        cx: &mut Context<Self>,
-    ) {
+    fn scroll_to_transcript_landing(&mut self, landing: TranscriptLanding, cx: &mut Context<Self>) {
         match landing {
             TranscriptLanding::Position(offset) => {
                 self.transcript_anchor_following.set(false);
@@ -312,10 +304,7 @@ impl Waku {
                 self.transcript_is_scrolled.set(true);
             }
             TranscriptLanding::LastTurn => {
-                if let Some(message_id) = self
-                    .navigation_turns()
-                    .last()
-                    .map(|turn| turn.message_id)
+                if let Some(message_id) = self.navigation_turns().last().map(|turn| turn.message_id)
                 {
                     self.scroll_to_navigation_turn(message_id, cx);
                 }

@@ -185,7 +185,9 @@ mod tests {
             "url": "https://github.com/acme/widget",
             "defaultBranchRef": {"name": "main"}
         }"#;
-        let repo = serde_json::from_slice::<GhRepoView>(json).unwrap().into_ref();
+        let repo = serde_json::from_slice::<GhRepoView>(json)
+            .unwrap()
+            .into_ref();
         assert_eq!(repo.owner, "acme");
         assert_eq!(repo.name, "widget");
         assert_eq!(repo.host, None);
@@ -199,7 +201,9 @@ mod tests {
             "url": "https://ghe.acme.example/acme/widget",
             "defaultBranchRef": null
         }"#;
-        let repo = serde_json::from_slice::<GhRepoView>(json).unwrap().into_ref();
+        let repo = serde_json::from_slice::<GhRepoView>(json)
+            .unwrap()
+            .into_ref();
         assert_eq!(repo.host.as_deref(), Some("ghe.acme.example"));
     }
 
@@ -209,6 +213,8 @@ mod tests {
             "To get started with GitHub CLI, please run: gh auth login"
         ));
         assert!(gh_error_is_auth("You are not logged into any GitHub hosts"));
-        assert!(!gh_error_is_auth("none of the git remotes correspond to GitHub"));
+        assert!(!gh_error_is_auth(
+            "none of the git remotes correspond to GitHub"
+        ));
     }
 }

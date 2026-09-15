@@ -120,10 +120,11 @@ impl Selection {
         if self.is_empty() {
             return false;
         }
-        let anchor = self
-            .anchor
-            .as_ref()
-            .and_then(|key| registry.position(key).map(|index| (index, self.anchor_offset)));
+        let anchor = self.anchor.as_ref().and_then(|key| {
+            registry
+                .position(key)
+                .map(|index| (index, self.anchor_offset))
+        });
         let edges = self
             .spans
             .first()

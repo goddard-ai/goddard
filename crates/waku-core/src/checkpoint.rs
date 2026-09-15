@@ -153,12 +153,8 @@ pub fn capture_ref(cwd: &Path, git_ref: &str) -> anyhow::Result<()> {
 
     let head = resolve_ref(cwd, "HEAD");
     let parents = head.iter().cloned().collect::<Vec<_>>();
-    let commit = capture_worktree_commit_from(
-        cwd,
-        head.as_deref(),
-        "Goddard worktree snapshot",
-        &parents,
-    )?;
+    let commit =
+        capture_worktree_commit_from(cwd, head.as_deref(), "Goddard worktree snapshot", &parents)?;
     git_output(cwd, ["update-ref", git_ref, &commit])?;
     Ok(())
 }

@@ -14,7 +14,7 @@ use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt as _;
 
-use anyhow::{anyhow, bail, Context as _};
+use anyhow::{Context as _, anyhow, bail};
 const MAX_UNTRACKED_FILES: usize = 2_048;
 const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 32 * 1_024 * 1_024;
@@ -459,10 +459,12 @@ mod tests {
 
         let created = create_and_checkout(&repository, "topic/new-picker").unwrap();
         assert_eq!(created.current.as_deref(), Some("topic/new-picker"));
-        assert!(created
-            .branches
-            .iter()
-            .any(|branch| branch.name == "topic/new-picker"));
+        assert!(
+            created
+                .branches
+                .iter()
+                .any(|branch| branch.name == "topic/new-picker")
+        );
     }
 
     #[test]

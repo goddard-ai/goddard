@@ -80,8 +80,10 @@ mod tests {
             Some("first line\n{\"actual\":\"command json\"}")
         );
         assert_eq!(
-            format_output(&serde_json::json!({"type": "content", "content": {"type": "text", "text": "hi"}}))
-                .as_deref(),
+            format_output(
+                &serde_json::json!({"type": "content", "content": {"type": "text", "text": "hi"}})
+            )
+            .as_deref(),
             Some("hi")
         );
         assert_eq!(

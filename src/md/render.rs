@@ -1111,11 +1111,7 @@ fn registry_point(
 /// prepaints a Normal hitbox over the region each frame and passes its id as
 /// `region`, which gates the handlers via `is_hovered` — false whenever a
 /// `BlockMouse` or `BlockMouseExceptScroll` hitbox covers the point.
-pub fn install_selection_input(
-    region: HitboxId,
-    window: &mut Window,
-    state: &TranscriptSelection,
-) {
+pub fn install_selection_input(region: HitboxId, window: &mut Window, state: &TranscriptSelection) {
     window.on_mouse_event({
         let state = state.clone();
         move |event: &MouseDownEvent, phase, window, _| {

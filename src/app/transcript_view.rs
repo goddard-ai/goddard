@@ -900,10 +900,7 @@ impl Waku {
         }
         self.sync_transcript_rows();
         let turns = self.navigation_turns();
-        let turn_rows = turns
-            .iter()
-            .map(|turn| turn.row_index)
-            .collect::<Vec<_>>();
+        let turn_rows = turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>();
         let scroll_top = self.active_transcript_rows().logical_scroll_top();
         let Some(target) = previous_navigation_turn_index(
             &turn_rows,
@@ -931,10 +928,7 @@ impl Waku {
         let turns = self.navigation_turns();
         let scroll_top_row = self.active_transcript_rows().logical_scroll_top().item_ix;
         let target = next_navigation_turn_index(
-            &turns
-                .iter()
-                .map(|turn| turn.row_index)
-                .collect::<Vec<_>>(),
+            &turns.iter().map(|turn| turn.row_index).collect::<Vec<_>>(),
             scroll_top_row,
         );
         match target {
@@ -2023,9 +2017,9 @@ impl Waku {
                         .child(format!("-{}", file.deletions)),
                 );
             if preview_open {
-                row = row.child(self.render_changed_files_diff_preview(
-                    turn_id, file, theme, window, cx,
-                ));
+                row = row.child(
+                    self.render_changed_files_diff_preview(turn_id, file, theme, window, cx),
+                );
             }
             file_rows = file_rows.child(row);
         }
@@ -3279,8 +3273,10 @@ fn changed_files_diff_body_max_height(window: &Window) -> Pixels {
     let usable = (f32::from(window.viewport_size().height) - margin * 2.0).max(0.0);
     let card = (usable - CHANGED_FILES_ROW_HEIGHT) / 2.0 + CHANGED_FILES_DIFF_ROW_OVERLAP;
     // The header and the card's own top and bottom borders don't scroll.
-    px((card - CHANGED_FILES_DIFF_HEADER_HEIGHT - 2.0)
-        .clamp(CHANGED_FILES_DIFF_MIN_BODY_HEIGHT, CHANGED_FILES_DIFF_MAX_HEIGHT))
+    px((card - CHANGED_FILES_DIFF_HEADER_HEIGHT - 2.0).clamp(
+        CHANGED_FILES_DIFF_MIN_BODY_HEIGHT,
+        CHANGED_FILES_DIFF_MAX_HEIGHT,
+    ))
 }
 
 /// A centered one-line state inside the changed-files preview card.

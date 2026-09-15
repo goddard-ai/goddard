@@ -1542,7 +1542,8 @@ mod tests {
         // `None`, so it keeps following later code-size changes.
         let mut restored = PersistedState::empty();
         restored.apply_app_settings(
-            serde_json::from_str(r#"{"code_font_size": 15.0, "terminal_font_size": 15.0}"#).unwrap(),
+            serde_json::from_str(r#"{"code_font_size": 15.0, "terminal_font_size": 15.0}"#)
+                .unwrap(),
         );
         assert_eq!(restored.terminal_font_size, None);
         restored.code_font_size = 18.0;
