@@ -357,6 +357,8 @@ struct SidebarPullRequestBadge {
     others: usize,
     title: String,
     url: String,
+    check_status: Option<waku_client::PullRequestCheckStatus>,
+    review_decision: Option<waku_client::PullRequestReviewDecision>,
 }
 
 fn pull_request_class(
@@ -442,6 +444,8 @@ fn sidebar_pull_request_badge(
         others: entries.len() - 1,
         title: primary.title.clone(),
         url: primary.url.clone(),
+        check_status: primary.check_status,
+        review_decision: primary.review_decision,
     })
 }
 
@@ -472,9 +476,75 @@ fn sidebar_pull_request_state_label(state: SidebarPullRequestState) -> String {
     }
 }
 
+/// The checks glyph sits after the PR number; the hourglass stays static —
+/// the badge already refreshes on a scan cadence, so spinning adds motion
+/// without adding information.
+fn sidebar_check_status_icon(status: waku_client::PullRequestCheckStatus) -> &'static str {
+    match status {
+        waku_client::PullRequestCheckStatus::Passing => "icons/check.svg",
+        waku_client::PullRequestCheckStatus::Pending => "icons/hourglass.svg",
+        waku_client::PullRequestCheckStatus::Failing => "icons/x.svg",
+    }
+}
+
+fn sidebar_check_status_color(theme: &Theme, status: waku_client::PullRequestCheckStatus) -> Hsla {
+    match status {
+        waku_client::PullRequestCheckStatus::Passing => theme.success,
+        waku_client::PullRequestCheckStatus::Pending => theme.warning,
+        waku_client::PullRequestCheckStatus::Failing => theme.danger,
+    }
+}
+
+fn sidebar_check_status_label(status: waku_client::PullRequestCheckStatus) -> String {
+    match status {
+        waku_client::PullRequestCheckStatus::Passing => {
+            tr!("sidebar.pull_request_checks_passing")
+        }
+        waku_client::PullRequestCheckStatus::Pending => {
+            tr!("sidebar.pull_request_checks_pending")
+        }
+        waku_client::PullRequestCheckStatus::Failing => {
+            tr!("sidebar.pull_request_checks_failing")
+        }
+    }
+}
+
+fn sidebar_review_decision_icon(decision: waku_client::PullRequestReviewDecision) -> &'static str {
+    match decision {
+        waku_client::PullRequestReviewDecision::Approved => "icons/check.svg",
+        waku_client::PullRequestReviewDecision::ChangesRequested => "icons/alert.svg",
+        waku_client::PullRequestReviewDecision::ReviewRequired => "icons/eye.svg",
+    }
+}
+
+fn sidebar_review_decision_color(
+    theme: &Theme,
+    decision: waku_client::PullRequestReviewDecision,
+) -> Hsla {
+    match decision {
+        waku_client::PullRequestReviewDecision::Approved => theme.success,
+        waku_client::PullRequestReviewDecision::ChangesRequested => theme.warning,
+        waku_client::PullRequestReviewDecision::ReviewRequired => theme.text_secondary,
+    }
+}
+
+fn sidebar_review_decision_label(decision: waku_client::PullRequestReviewDecision) -> String {
+    match decision {
+        waku_client::PullRequestReviewDecision::Approved => {
+            tr!("sidebar.pull_request_review_approved")
+        }
+        waku_client::PullRequestReviewDecision::ChangesRequested => {
+            tr!("sidebar.pull_request_review_changes")
+        }
+        waku_client::PullRequestReviewDecision::ReviewRequired => {
+            tr!("sidebar.pull_request_review_required")
+        }
+    }
+}
+
 fn sidebar_pull_request_tooltip(badge: &SidebarPullRequestBadge) -> String {
     let state = sidebar_pull_request_state_label(badge.state);
-    if badge.others == 0 {
+    let mut tooltip = if badge.others == 0 {
         tr!(
             "sidebar.pull_request",
             number = badge.number,
@@ -489,7 +559,16 @@ fn sidebar_pull_request_tooltip(badge: &SidebarPullRequestBadge) -> String {
             title = badge.title,
             count = badge.others
         )
+    };
+    if let Some(status) = badge.check_status {
+        tooltip.push_str(" · ");
+        tooltip.push_str(&sidebar_check_status_label(status));
     }
+    if let Some(decision) = badge.review_decision {
+        tooltip.push_str(" · ");
+        tooltip.push_str(&sidebar_review_decision_label(decision));
+    }
+    tooltip
 }
 
 /// Compact "how long ago" for the sidebar: "just now", then one coarse unit —
@@ -2740,6 +2819,20 @@ impl Waku {
                                         },
                                     ),
                                 )
+                                .when_some(badge.check_status, |element, status| {
+                                    element.child(icon(
+                                        sidebar_check_status_icon(status),
+                                        11.5,
+                                        sidebar_check_status_color(&theme, status),
+                                    ))
+                                })
+                                .when_some(badge.review_decision, |element, decision| {
+                                    element.child(icon(
+                                        sidebar_review_decision_icon(decision),
+                                        11.5,
+                                        sidebar_review_decision_color(&theme, decision),
+                                    ))
+                                })
                                 .tooltip(Tooltip::text(sidebar_pull_request_tooltip(&badge)))
                                 .on_click(move |_, _, cx| {
                                     cx.open_url(&url);
@@ -3626,6 +3719,7 @@ mod tests {
                 created_at,
                 updated_at: None,
                 review_decision: None,
+                check_status: None,
                 additions: None,
                 deletions: None,
             }
@@ -3717,6 +3811,7 @@ mod tests {
                 created_at,
                 updated_at: None,
                 review_decision: None,
+                check_status: None,
                 additions: None,
                 deletions: None,
             }

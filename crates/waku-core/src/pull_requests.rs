@@ -11,7 +11,7 @@ use anyhow::Context as _;
 use serde::Deserialize;
 
 use waku_protocol::workspace::{
-    PullRequestReviewDecision, PullRequestState, PullRequestSummary,
+    PullRequestCheckStatus, PullRequestReviewDecision, PullRequestState, PullRequestSummary,
 };
 
 /// Keeps a reused branch's history from paging the whole sidebar scan.
@@ -29,7 +29,7 @@ pub fn list(cwd: &Path, head_branch: &str) -> anyhow::Result<Option<Vec<PullRequ
             "--limit",
             PULL_REQUEST_LIST_LIMIT,
             "--json",
-            "number,title,url,state,isDraft,baseRefName,createdAt,updatedAt,reviewDecision,additions,deletions",
+            "number,title,url,state,isDraft,baseRefName,createdAt,updatedAt,reviewDecision,statusCheckRollup,additions,deletions",
         ])
         .current_dir(cwd)
         .output();
@@ -73,6 +73,8 @@ struct GhPullRequest {
     #[serde(default)]
     review_decision: Option<String>,
     #[serde(default)]
+    status_check_rollup: Vec<GhCheckRollupEntry>,
+    #[serde(default)]
     additions: Option<u64>,
     #[serde(default)]
     deletions: Option<u64>,
@@ -94,6 +96,7 @@ impl GhPullRequest {
             Some("REVIEW_REQUIRED") => Some(PullRequestReviewDecision::ReviewRequired),
             _ => None,
         };
+        let check_status = gh_check_status(&self.status_check_rollup);
         Some(PullRequestSummary {
             number: self.number,
             title: self.title,
@@ -104,10 +107,57 @@ impl GhPullRequest {
             created_at: gh_time(self.created_at),
             updated_at: gh_time(self.updated_at),
             review_decision,
+            check_status,
             additions: self.additions,
             deletions: self.deletions,
         })
     }
+}
+
+/// One `statusCheckRollup` entry. `gh` mixes two shapes in the same list:
+/// check runs report `status` + `conclusion`, legacy commit statuses report
+/// `state`. Both are optional so an unfamiliar entry shape is skipped rather
+/// than failing the read.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCheckRollupEntry {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    conclusion: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+/// Rolls the host's check entries into one badge signal: any failure wins,
+/// then anything still running. `None` when there is nothing to report.
+fn gh_check_status(rollup: &[GhCheckRollupEntry]) -> Option<PullRequestCheckStatus> {
+    if rollup.is_empty() {
+        return None;
+    }
+    let mut pending = false;
+    for entry in rollup {
+        if let Some(status) = entry.status.as_deref() {
+            if status != "COMPLETED" {
+                pending = true;
+            } else if matches!(
+                entry.conclusion.as_deref(),
+                Some("FAILURE" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "CANCELLED")
+            ) {
+                return Some(PullRequestCheckStatus::Failing);
+            }
+        }
+        match entry.state.as_deref() {
+            Some("FAILURE" | "ERROR") => return Some(PullRequestCheckStatus::Failing),
+            Some("PENDING" | "EXPECTED") => pending = true,
+            _ => {}
+        }
+    }
+    Some(if pending {
+        PullRequestCheckStatus::Pending
+    } else {
+        PullRequestCheckStatus::Passing
+    })
 }
 
 #[cfg(test)]
@@ -146,5 +196,60 @@ mod tests {
         assert_eq!(summaries[1].review_decision, None);
         assert_eq!(summaries[1].created_at, None);
         assert_eq!(summaries[1].updated_at, None);
+    }
+
+    #[test]
+    fn check_rollup_reports_failure_then_pending_then_passing() {
+        fn entry(
+            status: Option<&str>,
+            conclusion: Option<&str>,
+            state: Option<&str>,
+        ) -> GhCheckRollupEntry {
+            GhCheckRollupEntry {
+                status: status.map(str::to_owned),
+                conclusion: conclusion.map(str::to_owned),
+                state: state.map(str::to_owned),
+            }
+        }
+
+        assert_eq!(gh_check_status(&[]), None);
+        assert_eq!(
+            gh_check_status(&[
+                entry(Some("COMPLETED"), Some("SUCCESS"), None),
+                entry(None, None, Some("SUCCESS")),
+            ]),
+            Some(PullRequestCheckStatus::Passing)
+        );
+        // A skipped or neutral conclusion does not count as a failure.
+        assert_eq!(
+            gh_check_status(&[
+                entry(Some("COMPLETED"), Some("SUCCESS"), None),
+                entry(Some("COMPLETED"), Some("SKIPPED"), None),
+            ]),
+            Some(PullRequestCheckStatus::Passing)
+        );
+        assert_eq!(
+            gh_check_status(&[
+                entry(Some("COMPLETED"), Some("SUCCESS"), None),
+                entry(Some("IN_PROGRESS"), None, None),
+            ]),
+            Some(PullRequestCheckStatus::Pending)
+        );
+        assert_eq!(
+            gh_check_status(&[entry(None, None, Some("PENDING"))]),
+            Some(PullRequestCheckStatus::Pending)
+        );
+        // Failure beats pending no matter the order.
+        assert_eq!(
+            gh_check_status(&[
+                entry(Some("IN_PROGRESS"), None, None),
+                entry(Some("COMPLETED"), Some("FAILURE"), None),
+            ]),
+            Some(PullRequestCheckStatus::Failing)
+        );
+        assert_eq!(
+            gh_check_status(&[entry(None, None, Some("ERROR"))]),
+            Some(PullRequestCheckStatus::Failing)
+        );
     }
 }

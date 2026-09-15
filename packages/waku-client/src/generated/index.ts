@@ -61,6 +61,7 @@ export type { ProviderSessionForkRequest } from "./ProviderSessionForkRequest";
 export type { ProviderSessionHistory } from "./ProviderSessionHistory";
 export type { ProviderSessionSummary } from "./ProviderSessionSummary";
 export type { ProviderSlice } from "./ProviderSlice";
+export type { PullRequestCheckStatus } from "./PullRequestCheckStatus";
 export type { PullRequestReviewDecision } from "./PullRequestReviewDecision";
 export type { PullRequestState } from "./PullRequestState";
 export type { PullRequestSummary } from "./PullRequestSummary";

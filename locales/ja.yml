@@ -388,6 +388,12 @@ sidebar.pull_request_merged: マージ済み
 sidebar.pull_request_closed: クローズ
 sidebar.pull_request: "PR #%{number} — %{state}: %{title}"
 sidebar.pull_request_more: "PR #%{number} — %{state}: %{title}(+%{count} 件)"
+sidebar.pull_request_checks_passing: チェック成功
+sidebar.pull_request_checks_pending: チェック実行中
+sidebar.pull_request_checks_failing: チェック失敗
+sidebar.pull_request_review_approved: 承認済み
+sidebar.pull_request_review_changes: 変更リクエストあり
+sidebar.pull_request_review_required: レビュー待ち
 
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない

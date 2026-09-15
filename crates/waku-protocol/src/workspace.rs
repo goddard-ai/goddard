@@ -66,6 +66,18 @@ pub enum PullRequestReviewDecision {
     ReviewRequired,
 }
 
+/// A pull request's checks rolled up to one signal: any failure reports
+/// `Failing`, otherwise any unfinished check reports `Pending`. Absent means
+/// the host reported no checks at all, which renders as nothing rather than
+/// as passing.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum PullRequestCheckStatus {
+    Passing,
+    Pending,
+    Failing,
+}
+
 /// One pull request as the sidebar badge reads it. Fields past `is_draft` are
 /// optional because a host read may omit them; absent renders as unknown, not
 /// as a neutral value. Timestamps are unix seconds, matching session and turn
@@ -85,6 +97,8 @@ pub struct PullRequestSummary {
     pub updated_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_decision: Option<PullRequestReviewDecision>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_status: Option<PullRequestCheckStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub additions: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

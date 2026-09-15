@@ -376,6 +376,12 @@ sidebar.pull_request_merged: 已合并
 sidebar.pull_request_closed: 已关闭
 sidebar.pull_request: "PR #%{number} — %{state}: %{title}"
 sidebar.pull_request_more: "PR #%{number} — %{state}: %{title}(+%{count} 个)"
+sidebar.pull_request_checks_passing: 检查通过
+sidebar.pull_request_checks_pending: 检查进行中
+sidebar.pull_request_checks_failing: 检查失败
+sidebar.pull_request_review_approved: 已批准
+sidebar.pull_request_review_changes: 请求更改
+sidebar.pull_request_review_required: 待审查
 
 project.new_project: 新建项目…
 project.no_project: 不使用项目

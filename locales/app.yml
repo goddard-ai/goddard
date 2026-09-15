@@ -758,6 +758,18 @@ sidebar.pull_request:
   en: "PR #%{number} — %{state}: %{title}"
 sidebar.pull_request_more:
   en: "PR #%{number} — %{state}: %{title} (+%{count} more)"
+sidebar.pull_request_checks_passing:
+  en: checks passing
+sidebar.pull_request_checks_pending:
+  en: checks pending
+sidebar.pull_request_checks_failing:
+  en: checks failing
+sidebar.pull_request_review_approved:
+  en: approved
+sidebar.pull_request_review_changes:
+  en: changes requested
+sidebar.pull_request_review_required:
+  en: review required
 
 project.new_project:
   en: New project…

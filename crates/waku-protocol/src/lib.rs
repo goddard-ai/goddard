@@ -60,6 +60,6 @@ pub use protocol::{
 };
 pub use settings::DaemonSettings;
 pub use workspace::{
-    PullRequestReviewDecision, PullRequestState, PullRequestSummary, WorkspaceOperation,
-    WorkspaceResult,
+    PullRequestCheckStatus, PullRequestReviewDecision, PullRequestState, PullRequestSummary,
+    WorkspaceOperation, WorkspaceResult,
 };
