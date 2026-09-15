@@ -107,7 +107,6 @@ actions!(
         ToggleUsagePanel,
         ToggleWorkspace,
         SaveFile,
-        CancelTurn,
         ArchiveSession,
         ToggleSessionPin,
         ToggleTerminals,
@@ -141,6 +140,16 @@ actions!(
         OpenLocalhostUrlInTab
     ]
 );
+
+/// Stop the selected session's running turn. Bare Escape binds it with the
+/// second-press confirmation, and never inside a focused terminal where
+/// Escape is real pty input; there ⌥Escape carries `immediate` so a single
+/// press still stops the turn.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct CancelTurn {
+    pub immediate: bool,
+}
 
 /// Jump to the nth task currently listed in the sidebar (⌘1–⌘9). Carries the
 /// target index so nine bindings share one action.
@@ -515,7 +524,17 @@ pub fn run() {
                     },
                     Some("!Browser"),
                 ),
-                KeyBinding::new("escape", CancelTurn, Some("Waku")),
+                // Escape is real input for a focused terminal — vim, fzf, and
+                // agent TUIs all need it — so bare Escape is excluded from
+                // CancelTurn there. ⌥Escape remains the one-press stop and
+                // works with the terminal focused, skipping the confirmation
+                // a bare Escape requires.
+                KeyBinding::new(
+                    "escape",
+                    CancelTurn { immediate: false },
+                    Some("Waku && !Terminal"),
+                ),
+                KeyBinding::new("alt-escape", CancelTurn { immediate: true }, Some("Waku")),
                 KeyBinding::new("secondary-shift-a", ArchiveSession, Some("Waku")),
                 KeyBinding::new("secondary-alt-p", ToggleSessionPin, Some("Waku")),
                 KeyBinding::new("secondary-c", CopySelection, Some("Waku")),
@@ -539,8 +558,13 @@ pub fn run() {
                 KeyBinding::new("escape", CloseFind, Some("FindBar")),
                 // Between FileEditorPane and Waku: escape in a maximized
                 // panel tab exits the mode once no find bar claims it,
-                // instead of reaching CancelTurn.
-                KeyBinding::new("escape", ExitPanelFullscreen, Some("PanelFullscreen")),
+                // instead of reaching CancelTurn. A terminal tab keeps the
+                // keystroke for the pty even while maximized.
+                KeyBinding::new(
+                    "escape",
+                    ExitPanelFullscreen,
+                    Some("PanelFullscreen && !Terminal"),
+                ),
                 KeyBinding::new(
                     "secondary-alt-c",
                     ToggleFindCaseSensitive,

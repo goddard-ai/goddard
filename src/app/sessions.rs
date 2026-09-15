@@ -1410,7 +1410,7 @@ impl Waku {
 
     pub(super) fn cancel_turn_action(
         &mut self,
-        _: &CancelTurn,
+        action: &CancelTurn,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1433,6 +1433,12 @@ impl Waku {
         }
         if self.message_edit.is_some() {
             self.cancel_message_edit(window, cx);
+            return;
+        }
+        // ⌥Escape is a deliberate chord, so it stops on a single press
+        // instead of arming the second-press confirmation bare Escape needs.
+        if action.immediate {
+            self.cancel_turn(cx);
             return;
         }
         let Some(target) = self.selected_escape_stop_target() else {

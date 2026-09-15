@@ -3806,7 +3806,8 @@ impl Waku {
     /// Escape inside the maximized layer. The binding's PanelFullscreen
     /// context sits deeper than Waku's CancelTurn and shallower than
     /// FileEditorPane's close-find, so it only fires once no find bar has
-    /// claimed the keystroke.
+    /// claimed the keystroke — and it excludes Terminal, leaving Escape to
+    /// a focused pty even while maximized.
     pub(super) fn exit_panel_fullscreen_action(
         &mut self,
         _: &ExitPanelFullscreen,

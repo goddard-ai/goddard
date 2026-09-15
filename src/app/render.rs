@@ -568,7 +568,8 @@ impl Render for Waku {
             // Escape is bound on the PanelFullscreen context, which sits
             // between FileEditorPane (close-find) and Waku (cancel-turn), so
             // an open find bar still eats the first escape and a turn is
-            // never cancelled from here.
+            // never cancelled from here. The binding excludes Terminal, so a
+            // focused terminal inside the layer keeps Escape for the pty.
             .when(panels.panel_fullscreen, |root| {
                 root.child(
                     div()
