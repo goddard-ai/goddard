@@ -1598,9 +1598,87 @@ impl TextInput {
             return;
         }
         if self.selected_range.is_empty() {
+            if self.list_continuation && self.delete_empty_list_item(window, cx) {
+                return;
+            }
             self.select_to(self.previous_boundary(self.cursor_offset()), cx);
         }
         self.replace_text_in_range(None, "", window, cx);
+    }
+
+    /// With [`list_continuation`](Self::list_continuation), backspace on a
+    /// line that is only its Markdown list marker deletes the item outright
+    /// — the line and a break beside it — and leaves the caret at the end
+    /// of the previous line, undoing the continuation
+    /// [`insert_newline`](Self::insert_newline) opened. The rest of an
+    /// ordered run shifts down a number, the mirror of the newline path's
+    /// shift up. Returns whether the keystroke was consumed.
+    fn delete_empty_list_item(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let line_start = self.hard_line_start();
+        let line_end = self.hard_line_end();
+        let line = &self.content[line_start..line_end];
+        let Some(item) = highlight::list_item(line) else {
+            return false;
+        };
+        if !line[item.body_start..].trim().is_empty() {
+            return false;
+        }
+        // Take the break before the line so the caret lands at the previous
+        // line's end; the first line has none, so it takes the one after.
+        let caret = line_start.saturating_sub(1);
+        let mut start = caret;
+        let mut end = if line_start > 0 {
+            line_end
+        } else {
+            (line_end + 1).min(self.content.len())
+        };
+        let mut text = String::new();
+        if let Some(number) = item.number {
+            // The rest of the ordered run shifts down a number. A deeper
+            // indent belongs to a nested list and passes through; anything
+            // else ends the run.
+            let mut expected = number;
+            let mut lines = Vec::new();
+            let mut run_end = line_end;
+            let mut pos = line_end + 1;
+            while pos <= self.content.len() {
+                let next_end = self.content[pos..]
+                    .find('\n')
+                    .map_or(self.content.len(), |i| pos + i);
+                let next_line = &self.content[pos..next_end];
+                match highlight::list_item(next_line) {
+                    Some(next) if next.number.is_some() && next.indent == item.indent => {
+                        lines.push(format!(
+                            "{}{}{}",
+                            &next_line[..next.indent],
+                            expected,
+                            &next_line[next.marker_end - 1..]
+                        ));
+                        expected += 1;
+                    }
+                    Some(next) if next.indent > item.indent => {
+                        lines.push(next_line.to_owned());
+                    }
+                    _ => break,
+                }
+                run_end = next_end;
+                pos = next_end + 1;
+            }
+            if !lines.is_empty() {
+                // Rewriting the run keeps the break ahead of the line: the
+                // splice starts at the line and the joined lines take the
+                // place of the old run.
+                start = line_start;
+                end = run_end;
+                text = lines.join("\n");
+            }
+        }
+        self.select_range(start..end, cx);
+        self.replace_text_in_range(None, &text, window, cx);
+        // The splice leaves the caret behind the rewritten run; it belongs
+        // at the previous line's end.
+        self.select_range(caret..caret, cx);
+        true
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
@@ -3541,6 +3619,126 @@ mod tests {
 
         cx.read_entity(&input, |input, _| {
             assert_eq!(input.content(), "- one\n");
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_an_empty_item_deletes_the_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- one\n- ", cx));
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one");
+            assert_eq!(composer.cursor(cx), "- one".len());
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_an_empty_item_between_siblings_keeps_the_break(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("- one\n- \n- three", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(8..8, cx));
+        });
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one\n- three");
+            assert_eq!(composer.cursor(cx), "- one".len());
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_an_empty_task_item_deletes_the_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- one\n- [ ] ", cx));
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one");
+            assert_eq!(composer.cursor(cx), "- one".len());
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_an_empty_first_item_drops_the_line(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("- \ntext", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(2..2, cx));
+        });
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "text");
+            assert_eq!(composer.cursor(cx), 0);
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_an_empty_item_renumbers_the_ordered_run(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("1. one\n2. \n3. three", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(10..10, cx));
+        });
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "1. one\n2. three");
+            assert_eq!(composer.cursor(cx), "1. one".len());
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_renumbers_past_a_nested_item(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| {
+            composer.set_content("1. one\n2. \n   - nested\n3. three", cx);
+            composer
+                .input
+                .update(cx, |input, cx| input.select_range(10..10, cx));
+        });
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "1. one\n   - nested\n2. three");
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_inside_a_filled_item_deletes_a_grapheme(cx: &mut TestAppContext) {
+        let (composer, cx) = setup_composer(cx);
+        composer.update(cx, |composer, cx| composer.set_content("- one\n- two", cx));
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&composer, |composer, cx| {
+            assert_eq!(composer.content(cx), "- one\n- tw");
+        });
+    }
+
+    #[gpui::test]
+    fn backspace_on_a_marker_only_line_without_list_continuation(cx: &mut TestAppContext) {
+        let (input, cx) = setup_input(cx, "- one\n- ", px(300.));
+
+        cx.simulate_keystrokes("backspace");
+
+        cx.read_entity(&input, |input, _| {
+            assert_eq!(input.content(), "- one\n-");
         });
     }
 
