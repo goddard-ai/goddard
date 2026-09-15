@@ -385,6 +385,41 @@ fn branch_picker_pins_selection_and_filters_by_name() {
 }
 
 #[test]
+fn branch_picker_prefers_exact_matches() {
+    let branches = vec![
+        BranchEntry {
+            name: "mainline".into(),
+            checked_out_elsewhere: false,
+        },
+        BranchEntry {
+            name: "topic/main".into(),
+            checked_out_elsewhere: false,
+        },
+        BranchEntry {
+            name: "main".into(),
+            checked_out_elsewhere: false,
+        },
+    ];
+    // The exact match leads even when another branch is selected, and the
+    // query's case does not matter.
+    assert_eq!(
+        visible_branch_entries(&branches, "topic/main", "MAIN")
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["main", "topic/main", "mainline"]
+    );
+    // A partial query keeps the selection pinned and sorts by name.
+    assert_eq!(
+        visible_branch_entries(&branches, "topic/main", "mai")
+            .iter()
+            .map(|branch| branch.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["topic/main", "main", "mainline"]
+    );
+}
+
+#[test]
 fn driver_errors_are_bounded_before_rendering() {
     let error = (0..20)
         .map(|line| format!("provider diagnostic line {line}"))

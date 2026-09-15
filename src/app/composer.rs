@@ -4186,9 +4186,10 @@ impl Waku {
     }
 }
 
-/// Branches matching the search, with the selected branch pinned first and
-/// every other row sorted by name. Disabled worktree-owned rows stay in the
-/// result; the UI needs to explain why Git cannot switch to them.
+/// Branches matching the search, with an exact match first, then the
+/// selected branch pinned, and every other row sorted by name. Disabled
+/// worktree-owned rows stay in the result; the UI needs to explain why Git
+/// cannot switch to them.
 pub(super) fn visible_branch_entries(
     branches: &[crate::git_branch::BranchEntry],
     selected_branch: &str,
@@ -4205,10 +4206,13 @@ pub(super) fn visible_branch_entries(
         .cloned()
         .collect::<Vec<_>>();
     visible.sort_by(|left, right| {
+        let left_exact = left.name.eq_ignore_ascii_case(&normalized_query);
+        let right_exact = right.name.eq_ignore_ascii_case(&normalized_query);
         let left_selected = left.name == selected_branch;
         let right_selected = right.name == selected_branch;
-        right_selected
-            .cmp(&left_selected)
+        right_exact
+            .cmp(&left_exact)
+            .then_with(|| right_selected.cmp(&left_selected))
             .then_with(|| left.name.cmp(&right.name))
     });
     visible

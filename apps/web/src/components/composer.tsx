@@ -1682,6 +1682,9 @@ function BranchPicker({
   const visible = [...snapshot.branches]
     .filter((branch) => normalized.split(/\s+/).filter(Boolean).every((part) => branch.name.toLowerCase().includes(part)))
     .sort((left, right) => {
+      const leftExact = left.name.toLowerCase() === normalized
+      const rightExact = right.name.toLowerCase() === normalized
+      if (leftExact !== rightExact) return leftExact ? -1 : 1
       if (left.name === selected) return -1
       if (right.name === selected) return 1
       return left.name.localeCompare(right.name)
