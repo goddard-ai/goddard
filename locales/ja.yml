@@ -145,6 +145,9 @@ settings.archived: アーカイブ済みチャット
 settings.archived_keywords: アーカイブ チャット 会話 非表示 履歴 復元 削除
 settings.archived_description: アーカイブされたチャットはサイドバーと検索から非表示になります。アーカイブから30日以上経過したチャットは完全に削除されます。
 settings.archived_empty: アーカイブ済みのチャットはありません。
+settings.archived_search: アーカイブ済みチャットを検索
+settings.archived_all_projects: すべてのプロジェクト
+settings.archived_no_match: 現在の条件に一致するアーカイブ済みチャットはありません。
 settings.back: 戻る
 settings.search: 設定を検索
 

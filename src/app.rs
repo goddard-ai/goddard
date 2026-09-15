@@ -1764,6 +1764,17 @@ pub struct Waku {
     /// slides under it.
     settings_scroll: ScrollHandle,
     settings_scrollbar: Rc<ScrollbarState>,
+    /// Filter query over the Archived Chats page's rows.
+    archived_search: Entity<TextInput>,
+    /// Project the archived list is narrowed to; `None` shows every project.
+    archived_project_filter: Option<Uuid>,
+    /// Virtualized list over the filtered archived rows, so only visible
+    /// rows build elements no matter how long the archive grows.
+    archived_sessions_list: ListState,
+    archived_sessions_scrollbar: Rc<ScrollbarState>,
+    /// Session ids the search and project filters leave visible, newest
+    /// archived first — the row builder reads only this.
+    archived_session_rows: RefCell<Vec<Uuid>>,
     /// The completion-volume slider's in-flight drag, kept on the entity so a
     /// repaint mid-gesture cannot drop it.
     completion_volume_slider: Rc<SliderState>,
@@ -2681,6 +2692,11 @@ impl Waku {
                 .clear_on_escape()
                 .placeholder(tr!("settings.search"))
         });
+        let archived_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.archived_search"))
+        });
         let ui_font_selector = settings::FontSelector::new(window, cx);
         let code_font_selector = settings::FontSelector::new(window, cx);
         let daemon_port = state.daemon_exposure.port.to_string();
@@ -3335,6 +3351,15 @@ impl Waku {
                 },
             )
             .detach();
+            cx.subscribe(
+                &archived_search,
+                |_: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
             for (target, search) in [
                 (settings::FontTarget::Ui, ui_font_selector.search.clone()),
                 (
@@ -3793,6 +3818,11 @@ impl Waku {
                 skills_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
+                archived_search,
+                archived_project_filter: None,
+                archived_sessions_list: ListState::new(0, ListAlignment::Top, px(256.0)),
+                archived_sessions_scrollbar: ScrollbarState::new(),
+                archived_session_rows: RefCell::new(Vec::new()),
                 completion_volume_slider: SliderState::new(),
                 theme_preview_active: false,
                 header_drag_armed: false,

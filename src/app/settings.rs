@@ -10,6 +10,10 @@ const SETTINGS_CONTENT_MAX_WIDTH: f32 = 760.0;
 /// two-column layout and needs the extra room for the chart.
 const SETTINGS_USAGE_MAX_WIDTH: f32 = 1024.0;
 
+/// Uniform height hint for the virtualized archived-chat rows, so the
+/// scrollbar knows the total extent before rows are measured.
+const ARCHIVED_SESSION_ROW_HEIGHT: f32 = 45.0;
+
 /// Key context the settings sidebar declares around its search field.
 const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
 
@@ -130,6 +134,32 @@ pub(super) fn visible_settings_pages(
             let keywords = crate::i18n::translate(keywords_key).to_lowercase();
             (query.is_empty() || keywords.contains(query)).then_some((page, label, icon))
         })
+}
+
+/// The archived rows the search query and project filter leave visible,
+/// preserving the input order (callers sort newest-archived first). `query`
+/// must already be trimmed and lowercased, and `project_names` must hold
+/// each project id's lowercased display name — title and project both match.
+pub(super) fn filter_archived_sessions(
+    sessions: &[&AgentSession],
+    query: &str,
+    project_filter: Option<Uuid>,
+    project_names: &HashMap<Uuid, String>,
+) -> Vec<Uuid> {
+    sessions
+        .iter()
+        .filter(|session| {
+            if project_filter.is_some_and(|id| session.project_id != id) {
+                return false;
+            }
+            query.is_empty()
+                || session.display_title().to_lowercase().contains(query)
+                || project_names
+                    .get(&session.project_id)
+                    .is_some_and(|name| name.contains(query))
+        })
+        .map(|session| session.id)
+        .collect()
 }
 
 impl Waku {
@@ -372,12 +402,13 @@ impl Waku {
         }
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
-        // container.
-        let fills_viewport = page == SettingsPage::Usage
-            && matches!(
-                self.usage_view,
-                UsageViewMode::Monthly | UsageViewMode::Projects
-            );
+        // container; the Archived page's virtualized list needs the same.
+        let fills_viewport = page == SettingsPage::Archived
+            || (page == SettingsPage::Usage
+                && matches!(
+                    self.usage_view,
+                    UsageViewMode::Monthly | UsageViewMode::Projects
+                ));
         // The titlebar strip is transparent; once content slides under it, a
         // hairline marks the boundary so the clip edge reads as a header
         // rather than a glitch.
@@ -2348,167 +2379,358 @@ impl Waku {
 
     fn render_archived_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let now = unix_time();
+        let query = self
+            .archived_search
+            .read(cx)
+            .content()
+            .trim()
+            .to_lowercase();
+
         let mut archived = self
             .state
             .sessions
             .iter()
             .filter(|session| session.archived_at.is_some())
             .collect::<Vec<_>>();
-        archived.sort_by(|a, b| b.archived_at.cmp(&a.archived_at));
+        archived.sort_by_key(|session| std::cmp::Reverse(session.archived_at));
+        let any_archived = !archived.is_empty();
 
-        let mut rows = div().mt(px(8.0)).flex().flex_col();
-        for session in archived {
-            let session_id = session.id;
-            let group = SharedString::from(format!("archived-chat-{session_id}"));
-            let project_name = self
-                .state
-                .projects
+        // The selector offers the projects the archive actually spans, in
+        // name order, and earns its slot once a choice would narrow
+        // anything — or while a set filter needs clearing.
+        let mut project_options: Vec<(Uuid, String)> = Vec::new();
+        for session in &archived {
+            if project_options
                 .iter()
-                .find(|project| project.id == session.project_id)
-                .map(Project::display_name)
-                .unwrap_or_else(|| tr!("project.no_project_name"));
-            let updated = super::sidebar::format_time_ago(now.saturating_sub(session.updated_at));
-            let detail = format!("{project_name} · {updated}");
-
-            let unarchive_button = div()
-                .id(SharedString::from(format!(
-                    "archived-chat-unarchive-{session_id}"
-                )))
-                .tab_index(0)
-                .h(px(27.0))
-                .px(px(9.0))
-                .rounded(px(8.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .text_size(sp(12.5))
-                .text_color(theme.text_secondary)
-                // Hover reveals the actions; keyboard focus has to reach the
-                // same buttons, so focus makes them visible too.
-                .opacity(0.0)
-                .group_hover(group.clone(), |element| element.opacity(1.0))
-                .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
-                .hover(|element| element.bg(theme.overlay))
-                .active(|element| element.bg(theme.overlay_strong))
-                .child(tr!("common.unarchive"))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.unarchive_session(session_id, true, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                    if !event.keystroke.modifiers.modified()
-                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                    {
-                        this.unarchive_session(session_id, true, cx);
-                        cx.stop_propagation();
-                    }
-                }));
-
-            let remove_button = div()
-                .id(SharedString::from(format!(
-                    "archived-chat-remove-{session_id}"
-                )))
-                .tab_index(0)
-                .h(px(27.0))
-                .px(px(9.0))
-                .rounded(px(8.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .text_size(sp(12.5))
-                .text_color(theme.danger)
-                .opacity(0.0)
-                .group_hover(group.clone(), |element| element.opacity(1.0))
-                .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
-                .hover(|element| element.bg(theme.danger.opacity(0.12)))
-                .active(|element| element.bg(theme.danger.opacity(0.18)))
-                .child(tr!("common.remove"))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.remove_session(session_id, window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if !event.keystroke.modifiers.modified()
-                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                    {
-                        this.remove_session(session_id, window, cx);
-                        cx.stop_propagation();
-                    }
-                }));
-
-            rows = rows.child(
-                div()
-                    .group(group)
-                    .w_full()
-                    .px(px(12.0))
-                    .py(px(7.0))
-                    .rounded(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .hover(|element| element.bg(theme.sidebar_item_background))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .text_size(sp(13.0))
-                                    .text_color(theme.text)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(session.display_title().to_owned()),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(1.0))
-                                    .text_size(sp(11.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child(detail),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(unarchive_button)
-                            .child(remove_button),
-                    ),
-            );
+                .any(|(id, _)| *id == session.project_id)
+            {
+                continue;
+            }
+            project_options.push((
+                session.project_id,
+                self.project_display_name(session.project_id),
+            ));
         }
+        project_options.sort_by_cached_key(|(_, name)| name.to_lowercase());
+        let project_names: HashMap<Uuid, String> = project_options
+            .iter()
+            .map(|(id, name)| (*id, name.to_lowercase()))
+            .collect();
+        // A filter whose project left the archive matches nothing; treat it
+        // as cleared so it cannot silently hide every row.
+        let project_filter = self
+            .archived_project_filter
+            .filter(|id| project_names.contains_key(id));
+
+        let visible = filter_archived_sessions(&archived, &query, project_filter, &project_names);
+        self.sync_archived_session_rows(&visible);
 
         let mut page = div()
             .mt(px(15.0))
             .w_full()
+            .flex_1()
+            .min_h_0()
+            .pb(px(32.0))
+            .flex()
+            .flex_col()
             .child(
                 div()
+                    .flex_none()
                     .text_size(sp(12.5))
                     .line_height(sp(18.0))
                     .text_color(theme.text_secondary)
                     .child(tr!("settings.archived_description")),
-            )
-            .child(rows);
-        if self
-            .state
-            .sessions
-            .iter()
-            .all(|session| session.archived_at.is_none())
-        {
+            );
+        if !any_archived {
+            return page
+                .child(
+                    div()
+                        .mt(px(12.0))
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_tertiary)
+                        .child(tr!("settings.archived_empty")),
+                )
+                .into_any_element();
+        }
+
+        let mut toolbar = div()
+            .mt(px(14.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .child(
+                TextField::new("archived-search-field", self.archived_search.clone())
+                    .icon("icons/search.svg", 13.0)
+                    .flex_1()
+                    .min_w_0(),
+            );
+        if project_options.len() > 1 || project_filter.is_some() {
+            let weak = cx.entity().downgrade();
+            let selected_label = project_filter
+                .and_then(|filter| {
+                    project_options
+                        .iter()
+                        .find(|(id, _)| *id == filter)
+                        .map(|(_, name)| name.clone())
+                })
+                .unwrap_or_else(|| tr!("settings.archived_all_projects"));
+            let menu_handle = self.menu_handle("archived-project-selector", cx);
+            toolbar = toolbar.child(dropdown_menu(
+                MenuChip::new("archived-project-selector")
+                    .icon("icons/folder.svg", theme.text_tertiary)
+                    .label(selected_label)
+                    .outlined()
+                    .selected(menu_handle.is_open())
+                    .w(px(180.0))
+                    .flex_none()
+                    .justify_between(),
+                "archived-project-selector-menu",
+                &menu_handle,
+                MenuAlign::BelowRight,
+                move |_| {
+                    let mut items = Vec::with_capacity(project_options.len() + 1);
+                    items.push(
+                        MenuItem::new(tr!("settings.archived_all_projects"), {
+                            let weak = weak.clone();
+                            move |_, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.archived_project_filter = None;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .selected(project_filter.is_none()),
+                    );
+                    items.extend(project_options.iter().map(|(project_id, name)| {
+                        let project_id = *project_id;
+                        let weak = weak.clone();
+                        MenuItem::new(name.clone(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.archived_project_filter = Some(project_id);
+                                cx.notify();
+                            });
+                        })
+                        .selected(project_filter == Some(project_id))
+                    }));
+                    items
+                },
+            ));
+        }
+        page = page.child(toolbar);
+
+        if visible.is_empty() {
             page = page.child(
                 div()
                     .mt(px(12.0))
                     .text_size(sp(13.0))
                     .text_color(theme.text_tertiary)
-                    .child(tr!("settings.archived_empty")),
+                    .child(tr!("settings.archived_no_match")),
+            );
+        } else {
+            let entity = cx.entity().downgrade();
+            page = page.child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(
+                        list(
+                            self.archived_sessions_list.clone(),
+                            move |index, _window, cx| {
+                                entity
+                                    .upgrade()
+                                    .map(|entity| {
+                                        entity.update(cx, |this, cx| {
+                                            this.archived_session_row(index, cx)
+                                        })
+                                    })
+                                    .unwrap_or_else(|| div().into_any_element())
+                            },
+                        )
+                        .size_full(),
+                    )
+                    .child(scrollbar::vertical(
+                        &self.archived_sessions_list,
+                        &self.archived_sessions_scrollbar,
+                    )),
             );
         }
         page.into_any_element()
+    }
+
+    /// A project's display name, falling back to the "No project" label when
+    /// the archived session's project is gone.
+    fn project_display_name(&self, project_id: Uuid) -> String {
+        self.state
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(Project::display_name)
+            .unwrap_or_else(|| tr!("project.no_project_name"))
+    }
+
+    /// Keep the virtualized archived list in sync with the filtered session
+    /// ids. Filtering preserves order, so an unchanged prefix splices only
+    /// the tail and the scroll position survives typing in the filter.
+    fn sync_archived_session_rows(&self, sessions: &[Uuid]) {
+        let mut cached = self.archived_session_rows.borrow_mut();
+        if cached.as_slice() == sessions {
+            return;
+        }
+        let prefix = cached
+            .iter()
+            .zip(sessions.iter())
+            .take_while(|(cached, fresh)| cached == fresh)
+            .count();
+        let old_count = cached.len();
+        *cached = sessions.to_vec();
+        if old_count == 0 {
+            self.archived_sessions_list
+                .reset_with_uniform_height(sessions.len(), px(ARCHIVED_SESSION_ROW_HEIGHT));
+        } else {
+            self.archived_sessions_list
+                .splice(prefix..old_count, sessions.len() - prefix);
+            // Newly inserted rows have no measured height yet; the uniform
+            // hint keeps the scrollbar's total height honest.
+            self.archived_sessions_list
+                .clone()
+                .with_uniform_item_height(px(ARCHIVED_SESSION_ROW_HEIGHT));
+        }
+    }
+
+    /// One archived-chat row, built only while visible. Reads the per-frame
+    /// id cache; a stale index from a frame racing a state change renders as
+    /// an empty row for that frame rather than panicking.
+    fn archived_session_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let rows = self.archived_session_rows.borrow();
+        let Some(session_id) = rows.get(row).copied() else {
+            return div().into_any_element();
+        };
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return div().into_any_element();
+        };
+        let group = SharedString::from(format!("archived-chat-{session_id}"));
+        let project_name = self.project_display_name(session.project_id);
+        let updated =
+            super::sidebar::format_time_ago(unix_time().saturating_sub(session.updated_at));
+        let detail = format!("{project_name} · {updated}");
+
+        let unarchive_button = div()
+            .id(SharedString::from(format!(
+                "archived-chat-unarchive-{session_id}"
+            )))
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            // Hover reveals the actions; keyboard focus has to reach the
+            // same buttons, so focus makes them visible too.
+            .opacity(0.0)
+            .group_hover(group.clone(), |element| element.opacity(1.0))
+            .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(tr!("common.unarchive"))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.unarchive_session(session_id, true, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.unarchive_session(session_id, true, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        let remove_button = div()
+            .id(SharedString::from(format!(
+                "archived-chat-remove-{session_id}"
+            )))
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(8.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.danger)
+            .opacity(0.0)
+            .group_hover(group.clone(), |element| element.opacity(1.0))
+            .focus_visible(|element| element.opacity(1.0).border_1().border_color(theme.accent))
+            .hover(|element| element.bg(theme.danger.opacity(0.12)))
+            .active(|element| element.bg(theme.danger.opacity(0.18)))
+            .child(tr!("common.remove"))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.remove_session(session_id, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.remove_session(session_id, window, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        div()
+            .group(group)
+            .w_full()
+            .px(px(12.0))
+            .py(px(7.0))
+            .rounded(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .hover(|element| element.bg(theme.sidebar_item_background))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(session.display_title().to_owned()),
+                    )
+                    .child(
+                        div()
+                            .mt(px(1.0))
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(detail),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(unarchive_button)
+                    .child(remove_button),
+            )
+            .into_any_element()
     }
 
     fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -4946,6 +5168,9 @@ impl Waku {
         });
         self.settings_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("settings.search"), cx)
+        });
+        self.archived_search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("settings.archived_search"), cx)
         });
         for selector in [&self.ui_font_selector, &self.code_font_selector] {
             selector.search.update(cx, |input, cx| {

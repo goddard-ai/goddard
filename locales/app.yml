@@ -284,6 +284,12 @@ settings.archived_description:
   en: Archived chats are hidden from the sidebar and search. Chats archived more than 30 days ago are permanently removed.
 settings.archived_empty:
   en: No archived chats.
+settings.archived_search:
+  en: Search archived chats
+settings.archived_all_projects:
+  en: All projects
+settings.archived_no_match:
+  en: No archived chats match the current filters.
 settings.back:
   en: Back
 settings.search:

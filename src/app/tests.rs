@@ -4,7 +4,7 @@ use super::composer::{
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::sessions::next_unread_session;
-use super::settings::visible_settings_pages;
+use super::settings::{filter_archived_sessions, visible_settings_pages};
 use super::transcript_view::changed_files_diff_file_lines;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
@@ -2373,6 +2373,48 @@ fn settings_search_filters_pages_for_arrow_cycling() {
     assert_eq!(pages("codex"), codex_pages);
 
     assert_eq!(pages("no such setting"), vec![]);
+}
+
+#[test]
+fn archived_filter_matches_titles_and_projects() {
+    let project_a = Uuid::new_v4();
+    let project_b = Uuid::new_v4();
+    let names: HashMap<Uuid, String> = [
+        (project_a, "goddard".to_string()),
+        (project_b, "waku".to_string()),
+    ]
+    .into_iter()
+    .collect();
+
+    let mut alpha = AgentSession::new(project_a, ProviderKind::Codex);
+    alpha.title = "fix the sidebar".into();
+    let mut beta = AgentSession::new(project_b, ProviderKind::Claude);
+    beta.title = "usage chart".into();
+    let sessions = vec![&alpha, &beta];
+
+    // No query and no project filter keeps every row in the given order.
+    assert_eq!(
+        filter_archived_sessions(&sessions, "", None, &names),
+        vec![alpha.id, beta.id]
+    );
+    // Titles match a normalized query; the project name matches too.
+    assert_eq!(
+        filter_archived_sessions(&sessions, "sidebar", None, &names),
+        vec![alpha.id]
+    );
+    assert_eq!(
+        filter_archived_sessions(&sessions, "waku", None, &names),
+        vec![beta.id]
+    );
+    // The project filter narrows before the query runs.
+    assert_eq!(
+        filter_archived_sessions(&sessions, "", Some(project_a), &names),
+        vec![alpha.id]
+    );
+    assert_eq!(
+        filter_archived_sessions(&sessions, "sidebar", Some(project_b), &names),
+        Vec::<Uuid>::new()
+    );
 }
 
 #[test]

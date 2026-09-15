@@ -142,6 +142,9 @@ settings.archived: 已归档的聊天
 settings.archived_keywords: 已归档 聊天 对话 隐藏 历史 恢复 移除
 settings.archived_description: 已归档的聊天会从侧边栏和搜索中隐藏。归档超过 30 天的聊天将被永久移除。
 settings.archived_empty: 没有已归档的聊天。
+settings.archived_search: 搜索已归档的聊天
+settings.archived_all_projects: 所有项目
+settings.archived_no_match: 没有符合当前条件的已归档聊天。
 settings.back: 返回
 settings.search: 搜索设置
 
