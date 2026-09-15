@@ -2182,6 +2182,15 @@ impl Waku {
             .border_color(theme.border)
             .text_size(sp(11.0))
             .text_color(theme.text_tertiary)
+            .when_some(commit_author_avatar(&entry.author_email), |meta, source| {
+                meta.child(
+                    img(source)
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .flex_none()
+                        .rounded(px(4.0)),
+                )
+            })
             .child(div().min_w_0().flex_1().truncate().child(byline));
         if entry.additions + entry.deletions > 0 {
             meta = meta
@@ -2753,6 +2762,27 @@ impl Waku {
             ),
         }
     }
+}
+
+/// The author's avatar image: their GitHub picture when the commit used
+/// GitHub's `noreply` alias (`<id>+<user>@users.noreply.github.com` or the
+/// bare `<user>@` form), the Gravatar for the address otherwise. `None` for
+/// a missing email — the byline then reads as before.
+fn commit_author_avatar(email: &str) -> Option<SharedString> {
+    let email = email.trim();
+    if email.is_empty() {
+        return None;
+    }
+    let lower = email.to_ascii_lowercase();
+    if let Some(local) = lower.strip_suffix("@users.noreply.github.com") {
+        // The id-prefixed form carries the login after the `+`.
+        let username = local.rsplit('+').next().unwrap_or_default();
+        if !username.is_empty() {
+            return Some(format!("https://github.com/{username}.png?size=64").into());
+        }
+    }
+    let digest = format!("{:x}", <md5::Md5 as md5::Digest>::digest(lower));
+    Some(format!("https://www.gravatar.com/avatar/{digest}?s=64&d=identicon").into())
 }
 
 /// A commit body reads like Markdown source: single newlines are soft breaks
