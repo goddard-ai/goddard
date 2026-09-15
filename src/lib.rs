@@ -78,6 +78,10 @@ actions!(
         ToggleGitPanel,
         ToggleCommandPalette,
         ToggleFileFinder,
+        ToggleProjectsPage,
+        SelectAllProjectsRows,
+        FocusProjectsFilter,
+        DismissProjectsLayer,
         ToggleBigPicture,
         OpenResumePicker,
         ToggleFpsCounter,
@@ -156,6 +160,14 @@ pub struct CancelTurn {
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = waku, no_json)]
 pub struct SelectSidebarSession {
+    pub index: usize,
+}
+
+/// Switch the Projects page to its nth tab (⌘⌥1–⌘⌥4), or deep-link to that
+/// tab from anywhere when the page is closed.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = waku, no_json)]
+pub struct SelectProjectsTab {
     pub index: usize,
 }
 
@@ -461,6 +473,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
         // ⌘0 zooms out to Big Picture mode: the sessions most worth a
         // glance, side by side, with the composer docked underneath.
         KeyBinding::new("secondary-0", ToggleBigPicture, None),
+        // ⌘⇧P opens the Projects page; pressed while open, it starts
+        // the recent-project cycle the modifier release commits.
+        KeyBinding::new("secondary-shift-p", ToggleProjectsPage, None),
+        // ⌘⌥1–4 name the page's tabs; with the page closed the same
+        // chords open it straight onto that tab.
+        KeyBinding::new("secondary-alt-1", SelectProjectsTab { index: 0 }, None),
+        KeyBinding::new("secondary-alt-2", SelectProjectsTab { index: 1 }, None),
+        KeyBinding::new("secondary-alt-3", SelectProjectsTab { index: 2 }, None),
+        KeyBinding::new("secondary-alt-4", SelectProjectsTab { index: 3 }, None),
+        // Page-scoped list conventions — active only while focus is
+        // inside the page, so a focused filter field keeps its own
+        // ⌘A and first Escape.
+        KeyBinding::new("secondary-a", SelectAllProjectsRows, Some("ProjectsPage")),
+        KeyBinding::new("secondary-f", FocusProjectsFilter, Some("ProjectsPage")),
+        KeyBinding::new("escape", DismissProjectsLayer, Some("ProjectsPage")),
         // Step between turn prompts — the navigation rail's
         // landmarks. ⌘⌥ arrows are unclaimed by text fields, so the
         // pair works with the composer focused; in the terminal the

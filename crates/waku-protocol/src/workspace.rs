@@ -242,6 +242,69 @@ pub struct PullRequestDetail {
     pub files: Vec<PullRequestFile>,
 }
 
+/// One linked worktree or the repository's ordinary checkout, enriched with
+/// status for the Projects page's worktree table. `None` fields mean the
+/// read could not answer rather than a neutral value.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoWorktree {
+    /// Absolute worktree path.
+    #[ts(type = "string")]
+    pub path: PathBuf,
+    /// HEAD commit sha.
+    pub head: String,
+    /// Checked-out branch short name; `None` for detached HEAD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// The repository's main (ordinary) working tree, never a linked one.
+    pub is_main: bool,
+    /// Tracked + untracked change count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dirty_files: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u64>,
+    /// Unix seconds of HEAD's commit time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_commit_at: Option<u64>,
+}
+
+/// One local branch or remote-tracking ref for the Projects page's branch
+/// table. Remote entries carry `remote` ("origin") and `name` without the
+/// remote prefix; local entries have `remote: None`.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoBranch {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+    pub sha: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u64>,
+    /// Unix seconds of the tip commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_commit_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_commit_subject: Option<String>,
+    /// Worktree path currently holding this branch checked out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "string")]
+    pub checked_out_in: Option<PathBuf>,
+}
+
+/// One branch `DeleteBranches` could not remove, with Git's own wording.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchDeleteFailure {
+    pub name: String,
+    pub error: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WorkspaceOperation {
@@ -349,6 +412,45 @@ pub enum WorkspaceOperation {
         branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         base_ref: Option<String>,
+    },
+    /// The repository's worktrees — the ordinary checkout and each linked
+    /// one — with per-checkout status for the Projects page's worktree
+    /// table. Returns `RepoWorktrees`; `None` outside a Git repository.
+    ListWorktrees {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// Local branches and remote-tracking refs for the Projects page's
+    /// branch table. Returns `RepoBranches`; `None` outside a Git
+    /// repository.
+    ListRepoBranches {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
+    /// `git fetch --prune <remote>`: refresh one remote's tracking refs and
+    /// drop the ones it deleted.
+    FetchRemote {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        remote: String,
+    },
+    /// Delete local branches — `git branch -d` each, `-D` when `force`.
+    /// A branch Git refuses, such as one checked out in a worktree or one
+    /// unmerged without `force`, comes back in `BranchDeletions.failures`
+    /// rather than failing the batch.
+    DeleteBranches {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+        names: Vec<String>,
+        /// `false` matches older clients that did not send the field.
+        #[serde(default)]
+        force: bool,
+    },
+    /// `git worktree prune`: drop worktree registrations whose directories
+    /// were deleted outside the app.
+    PruneWorktrees {
+        #[ts(type = "string")]
+        cwd: PathBuf,
     },
     InspectCommit {
         #[ts(type = "string")]
@@ -651,5 +753,18 @@ pub enum WorkspaceResult {
     },
     PullRequest {
         detail: Option<PullRequestDetail>,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    RepoWorktrees {
+        entries: Option<Vec<RepoWorktree>>,
+    },
+    /// `None` when `cwd` is not inside a Git repository.
+    RepoBranches {
+        entries: Option<Vec<RepoBranch>>,
+    },
+    /// One entry per branch Git refused to delete; an empty list means every
+    /// requested branch is gone.
+    BranchDeletions {
+        failures: Vec<BranchDeleteFailure>,
     },
 }

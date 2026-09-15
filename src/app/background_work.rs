@@ -956,7 +956,12 @@ impl Waku {
     /// Open the workspace folder in the catalog app `app_id` and remember it
     /// as the preferred target. Launch Services delivers the open
     /// asynchronously, so this one-shot action never blocks a frame.
-    fn open_workspace_in_app(&mut self, path: &Path, app_id: &str, cx: &mut Context<Self>) {
+    pub(super) fn open_workspace_in_app(
+        &mut self,
+        path: &Path,
+        app_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(bundle_id) = self
             .open_in_apps
             .iter()

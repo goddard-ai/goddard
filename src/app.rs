@@ -73,16 +73,17 @@ use crate::ui::{
 use crate::{
     AddToChat, ArchiveSession, CancelProjectSwitch, CancelTaskSwitch, CancelTurn, CloseFind,
     CloseWindow, ConfirmProjectSwitch, ConfirmTaskSwitch, CopySelection, CopyWorkingDirectory,
-    ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer, FocusTerminal,
-    GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn, MarkUnreadAndGoToNextUnseen,
-    NavigateBack, NavigateForward, NewProject, NewSession, OpenFind, OpenFindReplace,
-    OpenResumePicker, OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile,
-    SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask, SelectSidebarSession,
-    SwitchProjectBackward, SwitchProjectForward, SwitchTaskBackward, SwitchTaskForward,
-    ToggleBigPicture, ToggleBranchPicker, ToggleCommandPalette, ToggleFileFinder,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleGitPanel, ToggleModelPicker, ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin,
-    ToggleSidebar, ToggleTerminals, ToggleUsagePanel, ToggleWorkspace,
+    DismissProjectsLayer, ExitPanelFullscreen, FindNext, FindPrevious, FocusComposer,
+    FocusProjectsFilter, FocusTerminal, GoToLatestUnseenCompletion, GoToNextTurn, GoToPreviousTurn,
+    MarkUnreadAndGoToNextUnseen, NavigateBack, NavigateForward, NewProject, NewSession, OpenFind,
+    OpenFindReplace, OpenResumePicker, OpenSettings, ReplaceAllMatches, RunProjectScript, SaveFile,
+    SelectAllProjectsRows, SelectFirstProject, SelectFirstTask, SelectLastProject, SelectLastTask,
+    SelectProjectsTab, SelectSidebarSession, SwitchProjectBackward, SwitchProjectForward,
+    SwitchTaskBackward, SwitchTaskForward, ToggleBigPicture, ToggleBranchPicker,
+    ToggleCommandPalette, ToggleFileFinder, ToggleFindCaseSensitive, ToggleFindRegex,
+    ToggleFindWholeWord, ToggleFpsCounter, ToggleGitPanel, ToggleModelPicker, ToggleProjectsPage,
+    ToggleRightPanel, ToggleRuntimeModePicker, ToggleSessionPin, ToggleSidebar, ToggleTerminals,
+    ToggleUsagePanel, ToggleWorkspace,
 };
 
 #[cfg(target_os = "macos")]
@@ -1835,15 +1836,15 @@ pub struct Waku {
         RefCell<HashMap<Uuid, Rc<Vec<waku_protocol::workspace::PullRequestSummary>>>>,
     sidebar_pull_request_scan_fingerprint: Cell<Option<u64>>,
     sidebar_pull_request_scan_generation: Cell<u64>,
-    /// Whether each project's GitHub sidebar entry shows — resolved in the
-    /// background; absent means "not known yet" and the row stays hidden.
-    sidebar_github_repos: RefCell<HashMap<Uuid, bool>>,
-    sidebar_github_scan_fingerprint: Cell<Option<u64>>,
-    sidebar_github_scan_generation: Cell<u64>,
-    sidebar_github_row_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
-    /// Open GitHub browsers keyed by project id — state survives the view
+    /// GitHub list/detail state keyed by project id, backing the Projects
+    /// page's Issues and Pull Requests tabs — state survives the view
     /// toggling back to the transcript.
     github_browsers: HashMap<Uuid, github::GitHubBrowser>,
+    /// The Projects page's own project selection — `Some` while the page
+    /// claims the main column — independent of `state.selected_project`.
+    projects_page: Option<Uuid>,
+    /// Per-project page state kept across page toggles.
+    projects_page_states: HashMap<Uuid, projects::ProjectsPageState>,
     transcript_row_kinds: RefCell<Vec<TranscriptRowKind>>,
     /// Fingerprint of the transcript inputs `transcript_row_kinds` was folded
     /// from, so an unchanged transcript costs nothing on a frame. `None` until
@@ -2041,6 +2042,7 @@ mod github;
 mod goal_dialog;
 mod image_preview;
 mod project_switcher;
+mod projects;
 mod render;
 mod right_panel;
 mod run_script;
@@ -3887,11 +3889,9 @@ impl Waku {
                 sidebar_pull_requests: RefCell::new(HashMap::new()),
                 sidebar_pull_request_scan_fingerprint: Cell::new(None),
                 sidebar_pull_request_scan_generation: Cell::new(0),
-                sidebar_github_repos: RefCell::new(HashMap::new()),
-                sidebar_github_scan_fingerprint: Cell::new(None),
-                sidebar_github_scan_generation: Cell::new(0),
-                sidebar_github_row_focuses: RefCell::new(HashMap::new()),
                 github_browsers: HashMap::new(),
+                projects_page: None,
+                projects_page_states: HashMap::new(),
                 transcript_row_kinds: RefCell::new(Vec::new()),
                 transcript_row_kinds_fingerprint: Cell::new(None),
                 transcript_navigation_turns: RefCell::new(Rc::new(Vec::new())),

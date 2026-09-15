@@ -259,16 +259,8 @@ impl Waku {
         self.state.unseen_completions.remove(&session_id);
         self.task_switcher.record_access(session_id);
         // Picking a task hands the main area back to the transcript; the
-        // project's GitHub browser keeps its state for the next visit.
-        if let Some(project_id) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .map(|session| session.project_id)
-        {
-            self.deactivate_github_browser(project_id);
-        }
+        // Projects page keeps its per-project state for the next visit.
+        self.projects_page = None;
         if let Some((
             project_id,
             provider,
@@ -1358,11 +1350,13 @@ impl Waku {
             return;
         };
         // The composer only exists once a project is on screen; settings
-        // replaces the workspace root wholesale, and a selected terminal —
-        // not the composer — owns the main area's keystrokes.
+        // replaces the workspace root wholesale, a selected terminal owns the
+        // main area's keystrokes, and the Projects page's own filter and
+        // composer own theirs.
         if self.selected_project().is_none()
             || self.settings_page.is_some()
             || self.selected_terminal.is_some()
+            || self.projects_page.is_some()
         {
             return;
         }

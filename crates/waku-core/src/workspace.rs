@@ -137,6 +137,25 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
                 branch: None,
             },
         },
+        WorkspaceOperation::ListWorktrees { cwd } => WorkspaceResult::RepoWorktrees {
+            entries: crate::repo::list_worktrees(&cwd)?,
+        },
+        WorkspaceOperation::ListRepoBranches { cwd } => WorkspaceResult::RepoBranches {
+            entries: crate::repo::list_repo_branches(&cwd)?,
+        },
+        WorkspaceOperation::FetchRemote { cwd, remote } => {
+            crate::repo::fetch_remote(&cwd, &remote)?;
+            WorkspaceResult::Ack
+        }
+        WorkspaceOperation::DeleteBranches { cwd, names, force } => {
+            WorkspaceResult::BranchDeletions {
+                failures: crate::repo::delete_branches(&cwd, &names, force)?,
+            }
+        }
+        WorkspaceOperation::PruneWorktrees { cwd } => {
+            crate::repo::prune_worktrees(&cwd)?;
+            WorkspaceResult::Ack
+        }
         WorkspaceOperation::InspectCommit { cwd } => WorkspaceResult::CommitSnapshot {
             snapshot: crate::git_commit::inspect(&cwd)?,
         },

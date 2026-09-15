@@ -57,6 +57,7 @@ pub mod persistence;
 pub mod pi_session;
 pub mod projectless;
 pub mod pull_requests;
+pub mod repo;
 pub mod settings;
 pub mod skills;
 mod slash_command_catalog;

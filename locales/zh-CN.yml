@@ -359,6 +359,7 @@ computer_use.windows_access_description: 控制当前 Windows 桌面会话中的
 computer_use.linux_access_description: 控制当前 Linux 桌面会话中的应用。截图和输入支持取决于您的合成器与辅助功能服务。
 common.settings: 设置
 common.copy: 复制
+common.delete: 删除
 common.remove: 移除
 common.unarchive: 取消归档
 common.rename: 重命名
@@ -376,6 +377,7 @@ archive.uncommitted: "%{count} 个未提交的文件"
 archive.unpushed: "%{count} 个未推送的提交"
 sidebar.today: 今天
 sidebar.search: 搜索
+sidebar.projects: 项目
 sidebar.options: 侧边栏选项
 sidebar.grouping: 分组
 sidebar.grouping_project: 项目
@@ -418,7 +420,6 @@ sidebar.pull_request_checks_failing: 检查失败
 sidebar.pull_request_review_approved: 已批准
 sidebar.pull_request_review_changes: 请求更改
 sidebar.pull_request_review_required: 待审查
-sidebar.github_entry: GitHub
 
 github.tab_pull_requests: 拉取请求
 github.tab_issues: 问题
@@ -430,6 +431,7 @@ github.refresh: 刷新
 github.back_to_list: 返回列表
 github.open_repo: 在 GitHub 上打开仓库
 github.open_external: 在 GitHub 上打开
+github.copy_url: 复制 URL
 github.start_task: 开始任务
 github.fix_checks: 修复失败的检查
 github.resolving_repo: 正在解析仓库…
@@ -460,6 +462,48 @@ project.default_folder: 默认文件夹
 project.project_lower: 项目
 project.without_a_project: 不使用项目
 project.your_project: 你的项目
+
+projects.title: 项目
+projects.tab_worktrees: 工作树
+projects.tab_branches: 分支
+projects.filter_worktrees: 筛选工作树
+projects.filter_branches: 筛选分支
+projects.filter_issues: 筛选 Issue
+projects.filter_pull_requests: 筛选拉取请求
+projects.no_worktrees: 没有工作树
+projects.no_branches: 没有分支
+projects.main_checkout: 主检出
+projects.checked_out_in: "已在 %{path} 检出"
+projects.new_worktree_from: "从 %{name} 新建工作树"
+projects.new_task_in_worktree: 在此工作树中新建任务
+projects.new_task_on: "在 %{name} 上新建任务"
+projects.open_in: 打开方式…
+projects.reveal_in_finder: 在访达中显示
+projects.copy_path: 复制路径
+projects.copy_paths: 复制路径
+projects.copy_branch_name: 复制分支名
+projects.remove_worktree: 移除工作树
+projects.remove_worktrees: "移除 %{count} 个工作树"
+projects.delete_branch: 删除分支
+projects.delete_branches: "删除 %{count} 个分支"
+projects.prune_stale: 清理过期工作树
+projects.clear_selection: 清除选择
+projects.selected_count: "已选择 %{count} 项"
+projects.confirm_remove_one: "移除 %{name}？"
+projects.confirm_remove_many: "移除 %{count} 个工作树？"
+projects.confirm_remove_detail: 该文件夹及其中未提交的更改将被删除。
+projects.confirm_delete_one: "删除 %{name}？"
+projects.confirm_delete_many: "删除 %{count} 个分支？"
+projects.confirm_delete_detail: 分支上未合并的工作将丢失。
+projects.open_pull_request: 打开拉取请求
+projects.view_pull_request: "查看 PR %{number}"
+projects.not_a_repo: 此项目不是 Git 仓库
+projects.not_a_github_repo: 此项目不是 GitHub 仓库
+projects.chip_filter: "筛选：%{filter}"
+projects.chip_selected: "已选择 %{count} 项"
+projects.composer_placeholder: 描述任务…
+projects.send: 发送
+
 onboarding.open_project_to_begin: 打开一个项目即可开始
 onboarding.description: Goddard 会在你选择的文件夹中运行编程智能体。代码、任务和历史记录都保留在这台电脑上
 onboarding.web_description: 请选择守护进程主机上的路径，或在不使用项目的情况下开始。

@@ -368,6 +368,7 @@ computer_use.linux_access_description: 現在の Linux デスクトップセッ�
 
 common.settings: 設定
 common.copy: コピー
+common.delete: 削除
 common.remove: 削除
 common.unarchive: アーカイブ解除
 common.rename: 名前を変更
@@ -388,6 +389,7 @@ archive.unpushed: "未プッシュのコミット %{count} 件"
 
 sidebar.today: 今日
 sidebar.search: 検索
+sidebar.projects: プロジェクト
 sidebar.options: サイドバーオプション
 sidebar.grouping: グループ化
 sidebar.grouping_project: プロジェクト
@@ -430,7 +432,6 @@ sidebar.pull_request_checks_failing: チェック失敗
 sidebar.pull_request_review_approved: 承認済み
 sidebar.pull_request_review_changes: 変更リクエストあり
 sidebar.pull_request_review_required: レビュー待ち
-sidebar.github_entry: GitHub
 
 github.tab_pull_requests: プルリクエスト
 github.tab_issues: Issue
@@ -442,6 +443,7 @@ github.refresh: 更新
 github.back_to_list: 一覧に戻る
 github.open_repo: GitHub でリポジトリを開く
 github.open_external: GitHub で開く
+github.copy_url: URL をコピー
 github.start_task: タスクを開始
 github.fix_checks: 失敗したチェックを修正
 github.resolving_repo: リポジトリを解決中…
@@ -472,6 +474,47 @@ project.default_folder: デフォルトフォルダ
 project.project_lower: プロジェクト
 project.without_a_project: プロジェクトなし
 project.your_project: あなたのプロジェクト
+
+projects.title: プロジェクト
+projects.tab_worktrees: ワークツリー
+projects.tab_branches: ブランチ
+projects.filter_worktrees: ワークツリーを絞り込み
+projects.filter_branches: ブランチを絞り込み
+projects.filter_issues: Issue を絞り込み
+projects.filter_pull_requests: プルリクエストを絞り込み
+projects.no_worktrees: ワークツリーがありません
+projects.no_branches: ブランチがありません
+projects.main_checkout: メインのチェックアウト
+projects.checked_out_in: "%{path} でチェックアウト中"
+projects.new_worktree_from: "%{name} から新しいワークツリー"
+projects.new_task_in_worktree: このワークツリーで新しいタスク
+projects.new_task_on: "%{name} で新しいタスク"
+projects.open_in: 次で開く…
+projects.reveal_in_finder: Finder に表示
+projects.copy_path: パスをコピー
+projects.copy_paths: パスをコピー
+projects.copy_branch_name: ブランチ名をコピー
+projects.remove_worktree: ワークツリーを削除
+projects.remove_worktrees: "%{count} 個のワークツリーを削除"
+projects.delete_branch: ブランチを削除
+projects.delete_branches: "%{count} 個のブランチを削除"
+projects.prune_stale: 古いワークツリーを整理
+projects.clear_selection: 選択を解除
+projects.selected_count: "%{count} 件選択中"
+projects.confirm_remove_one: "%{name} を削除しますか？"
+projects.confirm_remove_many: "%{count} 個のワークツリーを削除しますか？"
+projects.confirm_remove_detail: フォルダと未コミットの変更がすべて削除されます。
+projects.confirm_delete_one: "%{name} を削除しますか？"
+projects.confirm_delete_many: "%{count} 個のブランチを削除しますか？"
+projects.confirm_delete_detail: ブランチ上の未マージの作業は失われます。
+projects.open_pull_request: プルリクエストを開く
+projects.view_pull_request: "PR %{number} を表示"
+projects.not_a_repo: このプロジェクトは Git リポジトリではありません
+projects.not_a_github_repo: このプロジェクトは GitHub リポジトリではありません
+projects.chip_filter: "フィルター：%{filter}"
+projects.chip_selected: "%{count} 件選択中"
+projects.composer_placeholder: タスクを入力…
+projects.send: 送信
 
 onboarding.open_project_to_begin: プロジェクトを開いて始めましょう
 onboarding.description: Goddard は選択したフォルダでコーディングエージェントを実行します。コード、タスク、履歴はこのコンピュータに保存されます

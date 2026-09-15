@@ -24,6 +24,14 @@ const WINDOW_MARGIN: f32 = 44.0;
 const VERTICAL_BIAS: f32 = 0.08;
 const VERTICAL_BIAS_MAX: f32 = 96.0;
 
+/// What a commit retargets: the draft the ⌘N gesture was opened on, or the
+/// open Projects page's own project — the ⌘⇧P gesture's.
+#[derive(Clone, Copy, PartialEq)]
+enum ProjectSwitcherTarget {
+    Draft,
+    ProjectsPage,
+}
+
 /// Runtime-only switcher state, like its task counterpart: recency lives in
 /// the task switcher's session history, so restoration seeds nothing here.
 pub(super) struct ProjectSwitcherUi {
@@ -31,6 +39,7 @@ pub(super) struct ProjectSwitcherUi {
     ordered_project_ids: Vec<Uuid>,
     highlighted_project_id: Option<Uuid>,
     original_session_id: Option<Uuid>,
+    target: ProjectSwitcherTarget,
     focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
     scroll: ScrollHandle,
@@ -44,6 +53,7 @@ impl ProjectSwitcherUi {
             ordered_project_ids: Vec::new(),
             highlighted_project_id: None,
             original_session_id: None,
+            target: ProjectSwitcherTarget::Draft,
             focus,
             previous_focus: None,
             scroll: ScrollHandle::new(),
@@ -57,6 +67,8 @@ impl ProjectSwitcherUi {
 
     /// The draft the switcher was opened on went away; without a window the
     /// previous focus cannot be restored, so just drop the overlay state.
+    /// Only the draft target holds a session — the page target's `None`
+    /// never matches here.
     pub(super) fn session_removed(&mut self, session_id: Uuid) {
         if self.original_session_id == Some(session_id) {
             self.dismiss();
@@ -79,6 +91,7 @@ impl ProjectSwitcherUi {
         self.ordered_project_ids.clear();
         self.highlighted_project_id = None;
         self.original_session_id = None;
+        self.target = ProjectSwitcherTarget::Draft;
         self.generation = self.generation.wrapping_add(1);
         self.previous_focus.take()
     }
@@ -208,7 +221,32 @@ impl Waku {
             }
             return;
         }
+        self.advance_project_switcher(reverse, window, cx);
+    }
 
+    /// The ⌘⇧P gesture's second press onward: same overlay and ordering as
+    /// ⌘N, but a commit retargets the open Projects page instead of a draft.
+    pub(super) fn cycle_page_project_switcher(
+        &mut self,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.project_switcher.open {
+            if !self.open_page_project_switcher(reverse, window, cx) {
+                cx.propagate();
+            }
+            return;
+        }
+        self.advance_project_switcher(reverse, window, cx);
+    }
+
+    fn advance_project_switcher(
+        &mut self,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(current_index) =
             self.project_switcher
                 .highlighted_project_id
@@ -252,8 +290,59 @@ impl Waku {
         else {
             return false;
         };
+        self.open_switcher(
+            current_project,
+            self.state.selected_session,
+            ProjectSwitcherTarget::Draft,
+            false,
+            reverse,
+            window,
+            cx,
+        )
+    }
+
+    /// ⌘⇧P's switcher: only while the Projects page is open, headed by the
+    /// page's own project selection.
+    fn open_page_project_switcher(
+        &mut self,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(current_project) = self.projects_page else {
+            return false;
+        };
+        self.open_switcher(
+            current_project,
+            None,
+            ProjectSwitcherTarget::ProjectsPage,
+            true,
+            reverse,
+            window,
+            cx,
+        )
+    }
+
+    fn open_switcher(
+        &mut self,
+        current_project: Uuid,
+        original_session_id: Option<Uuid>,
+        target: ProjectSwitcherTarget,
+        // The page has no projectless scope; its cycling list excludes them.
+        exclude_projectless: bool,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let recent = self.task_switcher.recent_project_ids(&self.state.sessions);
-        let ordered = ordered_project_ids(Some(current_project), &recent, &self.state.projects);
+        let projects: Vec<Project> = self
+            .state
+            .projects
+            .iter()
+            .filter(|project| !exclude_projectless || !project.is_projectless())
+            .cloned()
+            .collect();
+        let ordered = ordered_project_ids(Some(current_project), &recent, &projects);
         let Some(highlighted_index) =
             task_switcher::initial_highlight_index(&ordered, Some(current_project), reverse)
         else {
@@ -288,7 +377,8 @@ impl Waku {
             .ordered_project_ids
             .get(highlighted_index)
             .copied();
-        self.project_switcher.original_session_id = self.state.selected_session;
+        self.project_switcher.original_session_id = original_session_id;
+        self.project_switcher.target = target;
         self.project_switcher.reveal_highlight();
         self.project_switcher.generation = self.project_switcher.generation.wrapping_add(1);
         let generation = self.project_switcher.generation;
@@ -350,7 +440,28 @@ impl Waku {
         }
         let selected = self.project_switcher.highlighted_project_id;
         let original = self.project_switcher.original_session_id;
+        let target = self.project_switcher.target;
         let previous_focus = self.project_switcher.dismiss();
+        // Page commits have no draft to guard — the highlighted project just
+        // becomes the page's scope, and its tables refresh.
+        if target == ProjectSwitcherTarget::ProjectsPage {
+            if let Some(project_id) = selected
+                && self
+                    .state
+                    .projects
+                    .iter()
+                    .any(|project| project.id == project_id)
+            {
+                self.projects_page = Some(project_id);
+                self.projects_ensure_state(project_id, window, cx);
+                self.projects_refresh(project_id, cx);
+            }
+            if let Some(previous_focus) = previous_focus {
+                window.focus(&previous_focus, cx);
+            }
+            cx.notify();
+            return;
+        }
         let may_commit = pointer_selection || self.state.selected_session == original;
         let mut focus_after = previous_focus;
         if may_commit

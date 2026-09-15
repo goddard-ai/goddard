@@ -167,7 +167,6 @@ fn append_sidebar_group_rows(
     sessions: &[Uuid],
     collapsed: bool,
     show_more: bool,
-    github_entry: Option<Uuid>,
 ) {
     if sessions.is_empty() && !show_more {
         return;
@@ -175,9 +174,6 @@ fn append_sidebar_group_rows(
 
     rows.push(SidebarRow::Header(group));
     if !collapsed {
-        if let Some(project_id) = github_entry {
-            rows.push(SidebarRow::GitHub(project_id));
-        }
         rows.extend(sessions.iter().copied().map(SidebarRow::Session));
         if show_more {
             rows.push(SidebarRow::ShowMore(group));
@@ -230,8 +226,7 @@ const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const HEADER_HEIGHT: f32 = 48.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
-/// A GitHub entry row plus the same trailing gap session rows carry.
-const SIDEBAR_GITHUB_ROW_HEIGHT: f32 = SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
+/// The spacer a project group carries between its rows and the next group.
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_GROUP_GUIDE_X: f32 = 15.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
@@ -611,12 +606,12 @@ pub(super) fn format_time_ago(seconds: u64) -> String {
 pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
+    /// Opens the Projects page and scrolls with history.
+    Projects,
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
     Session(Uuid),
-    /// A project's GitHub browser entry, under its expanded group header.
-    GitHub(Uuid),
     /// A terminal in the Terminals group.
     Terminal(Uuid),
     /// Reveals the next batch of older sessions in a project section.
@@ -671,13 +666,12 @@ fn sidebar_shortcut_chip_label(index: usize) -> String {
 
 fn sidebar_row_height(row: SidebarRow) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Search | SidebarRow::Projects => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Header(SidebarGroup::Terminals) => {
             SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP
         }
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
-        SidebarRow::GitHub(_) => SIDEBAR_GITHUB_ROW_HEIGHT,
         SidebarRow::Terminal(_) => terminals::SIDEBAR_TERMINAL_ROW_HEIGHT,
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
@@ -1232,6 +1226,45 @@ impl Waku {
             .child(search)
     }
 
+    /// The "Projects" action row under Search — opens the page that replaces
+    /// the old per-project GitHub entry.
+    fn render_sidebar_projects(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let theme = Theme::current(cx);
+        let open = self.projects_page.is_some();
+        let row = self
+            .render_sidebar_action_row(
+                "sidebar-projects",
+                "icons/package.svg",
+                tr!("sidebar.projects"),
+                &ToggleProjectsPage,
+                window,
+                cx,
+            )
+            .when(open, |element| element.bg(theme.sidebar_item_background))
+            .on_click(cx.listener(|this, _, window, cx| {
+                if this.projects_page.is_some() {
+                    this.close_projects_page(cx);
+                } else {
+                    this.open_projects_page(None, window, cx);
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    if this.projects_page.is_some() {
+                        this.close_projects_page(cx);
+                    } else {
+                        this.open_projects_page(None, window, cx);
+                    }
+                    cx.stop_propagation();
+                }
+            }));
+        div()
+            .w_full()
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
+            .flex_none()
+            .child(row)
+    }
+
     fn start_available_update(&mut self, cx: &mut Context<Self>) {
         if self.updater_status != crate::updater::UpdateStatus::Available {
             return;
@@ -1719,135 +1752,6 @@ impl Waku {
         .detach();
     }
 
-    /// Resolve each project's GitHub repo once per project set, on the
-    /// background executor — the GitHub sidebar entry only appears for
-    /// projects `gh` can read (or would read once authenticated).
-    fn ensure_sidebar_github_repos(&self, cx: &mut Context<Self>) {
-        const RESCAN_BUCKET_SECONDS: u64 = 300;
-
-        let mut fingerprint = 0x9d3f_21a7_c05b_e611;
-        let mut targets: Vec<(Uuid, PathBuf)> = Vec::new();
-        for project in &self.state.projects {
-            if project.is_projectless() {
-                continue;
-            }
-            fingerprint = mix_uuid(fingerprint, project.id);
-            targets.push((project.id, project.path.clone()));
-        }
-        fingerprint = mix(fingerprint, unix_time() / RESCAN_BUCKET_SECONDS);
-        if self.sidebar_github_scan_fingerprint.get() == Some(fingerprint) {
-            return;
-        }
-        self.sidebar_github_scan_fingerprint.set(Some(fingerprint));
-        let generation = self.sidebar_github_scan_generation.get().wrapping_add(1);
-        self.sidebar_github_scan_generation.set(generation);
-        if targets.is_empty() {
-            self.sidebar_github_repos.borrow_mut().clear();
-            return;
-        }
-
-        let workspace = waku_client::WorkspaceClient::new(self.daemon.client());
-        cx.spawn(async move |waku, cx| {
-            let resolved = cx
-                .background_executor()
-                .spawn(async move {
-                    targets
-                        .into_iter()
-                        .map(|(project_id, cwd)| {
-                            // The row shows when the repo resolves — and also
-                            // when gh cannot tell (missing auth), so the
-                            // browser's hint state stays reachable.
-                            let show = matches!(
-                                workspace.request(
-                                    waku_client::WorkspaceOperation::ResolveGitHubRepo { cwd },
-                                ),
-                                Ok(waku_client::WorkspaceResult::GitHubRepo { repo: Some(_), .. })
-                                    | Ok(waku_client::WorkspaceResult::GitHubRepo {
-                                        repo: None,
-                                        availability: waku_client::GitHubAvailability::MissingCli
-                                            | waku_client::GitHubAvailability::Unauthenticated,
-                                    })
-                            );
-                            (project_id, show)
-                        })
-                        .collect::<HashMap<_, _>>()
-                })
-                .await;
-            let _ = waku.update(cx, |waku, cx| {
-                if waku.sidebar_github_scan_generation.get() != generation {
-                    return;
-                }
-                *waku.sidebar_github_repos.borrow_mut() = resolved;
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    /// The "GitHub" entry under a project group header — opens the browser in
-    /// the main area, keyboard-reachable like every other sidebar row.
-    fn render_sidebar_github_row(&self, project_id: Uuid, cx: &mut Context<Self>) -> Div {
-        let theme = Theme::current(cx);
-        let active = self
-            .github_browsers
-            .get(&project_id)
-            .is_some_and(|browser| browser.active);
-        let focus = self
-            .sidebar_github_row_focuses
-            .borrow_mut()
-            .entry(project_id)
-            .or_insert_with(|| cx.focus_handle())
-            .clone();
-        div().h(px(SIDEBAR_GITHUB_ROW_HEIGHT)).child(
-            div()
-                .id(SharedString::from(format!("sidebar-github-{project_id}")))
-                .track_focus(&focus)
-                .tab_index(0)
-                .tab_stop(true)
-                .w_full()
-                .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
-                .pl(px(SIDEBAR_GROUP_CHILD_PADDING))
-                .pr(px(8.0))
-                .rounded(px(8.0))
-                .flex()
-                .items_center()
-                .gap(px(7.0))
-                .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-                .hover(|style| style.bg(theme.sidebar_item_background))
-                .active(|style| style.bg(theme.overlay_strong))
-                .when(active, |element| element.bg(theme.sidebar_item_background))
-                .child(icon(
-                    "icons/github.svg",
-                    13.0,
-                    if active {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    },
-                ))
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .text_color(if active {
-                            theme.text
-                        } else {
-                            theme.text_secondary
-                        })
-                        .child(tr!("sidebar.github_entry")),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.open_github_browser(project_id, window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.open_github_browser(project_id, window, cx);
-                        cx.stop_propagation();
-                    }
-                })),
-        )
-    }
-
     pub(super) fn render_sidebar(
         &self,
         width: f32,
@@ -1856,7 +1760,6 @@ impl Waku {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
-        self.ensure_sidebar_github_repos(cx);
         self.ensure_sidebar_checkout_statuses(cx);
         self.ensure_sidebar_pull_requests(cx);
         self.ensure_sidebar_terminal_repo_roots(cx);
@@ -2172,7 +2075,7 @@ impl Waku {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
-        let mut rows = vec![SidebarRow::Search];
+        let mut rows = vec![SidebarRow::Search, SidebarRow::Projects];
 
         // The Terminals group sits between the search field and the session
         // history. Its header renders even with no terminals — expanding an
@@ -2211,7 +2114,6 @@ impl Waku {
             self.sidebar_collapsed_groups
                 .contains(&SidebarGroup::Pinned),
             false,
-            None,
         );
         sorted_sessions.retain(|session| session.pinned_at.is_none());
 
@@ -2234,7 +2136,6 @@ impl Waku {
                         &grouped_sessions[date_group.index()],
                         self.sidebar_collapsed_groups.contains(&group),
                         false,
-                        None,
                     );
                 }
             }
@@ -2273,26 +2174,12 @@ impl Waku {
                         recent_cutoff,
                         revealed_older_sessions,
                     );
-                    let github_entry = match group {
-                        SidebarGroup::Project(project_id)
-                            if self
-                                .sidebar_github_repos
-                                .borrow()
-                                .get(&project_id)
-                                .copied()
-                                .unwrap_or(false) =>
-                        {
-                            Some(project_id)
-                        }
-                        _ => None,
-                    };
                     append_sidebar_group_rows(
                         &mut rows,
                         group,
                         &visible_sessions,
                         self.sidebar_collapsed_groups.contains(&group),
                         show_more,
-                        github_entry,
                     );
                 }
             }
@@ -2402,14 +2289,12 @@ impl Waku {
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(window, cx).into_any_element(),
+            SidebarRow::Projects => self.render_sidebar_projects(window, cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let has_expanded_children = rows.get(index + 1).is_some_and(|row| {
                     matches!(
                         row,
-                        SidebarRow::Session(_)
-                            | SidebarRow::GitHub(_)
-                            | SidebarRow::Terminal(_)
-                            | SidebarRow::ShowMore(_)
+                        SidebarRow::Session(_) | SidebarRow::Terminal(_) | SidebarRow::ShowMore(_)
                     )
                 });
                 // The header actions belong to the session history — the
@@ -2433,9 +2318,6 @@ impl Waku {
                 self.render_sidebar_session_item(session_id, shortcut_index, cx)
                     .into_any_element()
             }
-            SidebarRow::GitHub(project_id) => self
-                .render_sidebar_github_row(project_id, cx)
-                .into_any_element(),
             SidebarRow::Terminal(terminal_id) => self
                 .render_sidebar_terminal_item(terminal_id, cx)
                 .into_any_element(),
@@ -3509,6 +3391,8 @@ impl Waku {
                 .map(|terminal| single_line_label(terminal.read(cx).title()))
                 .filter(|title| !title.is_empty())
                 .unwrap_or_else(|| tr!("right_panel.terminal"))
+        } else if self.projects_page.is_some() {
+            tr!("projects.title")
         } else {
             session
                 .map(localized_session_title)
@@ -3919,7 +3803,7 @@ mod tests {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let group = SidebarGroup::Date(SessionDateGroup::Today);
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &sessions, false, false, None);
+        append_sidebar_group_rows(&mut expanded, group, &sessions, false, false);
         assert_eq!(
             expanded,
             vec![
@@ -3931,89 +3815,7 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, false, None);
-        assert_eq!(
-            collapsed,
-            vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
-        );
-    }
-
-    #[test]
-    fn next_sidebar_session_scans_down_from_the_departed_row_and_wraps() {
-        let group = SidebarGroup::Date(SessionDateGroup::Today);
-        let sessions = [
-            Uuid::from_u128(1),
-            Uuid::from_u128(2),
-            Uuid::from_u128(3),
-            Uuid::from_u128(4),
-        ];
-        // Row 2 is the departed session's slot: the scan starts on the row
-        // that slid up into it.
-        let rows = vec![
-            SidebarRow::Header(group),
-            SidebarRow::Session(sessions[0]),
-            SidebarRow::Session(sessions[1]),
-            SidebarRow::Session(sessions[2]),
-            SidebarRow::Session(sessions[3]),
-            SidebarRow::GroupSpacer,
-        ];
-        let idle = |_| true;
-        assert_eq!(
-            next_sidebar_session_in_rows(&rows, 2, idle),
-            Some(sessions[1])
-        );
-
-        // A busy session is skipped for the next available one below it.
-        assert_eq!(
-            next_sidebar_session_in_rows(&rows, 2, |id| id != sessions[1]),
-            Some(sessions[2])
-        );
-
-        // Past the last row the scan wraps to the top of the list.
-        assert_eq!(
-            next_sidebar_session_in_rows(&rows, 4, |id| id == sessions[0]),
-            Some(sessions[0])
-        );
-
-        // Non-session rows are skipped; nothing available means no selection.
-        assert_eq!(next_sidebar_session_in_rows(&rows, 0, |_| false), None);
-        assert_eq!(next_sidebar_session_in_rows(&[], 0, idle), None);
-    }
-
-    #[test]
-    fn github_entry_sits_under_the_project_header_only_when_expanded() {
-        let project_id = Uuid::from_u128(7);
-        let group = SidebarGroup::Project(project_id);
-        let sessions = [Uuid::from_u128(1)];
-
-        let mut expanded = Vec::new();
-        append_sidebar_group_rows(
-            &mut expanded,
-            group,
-            &sessions,
-            false,
-            false,
-            Some(project_id),
-        );
-        assert_eq!(
-            expanded,
-            vec![
-                SidebarRow::Header(group),
-                SidebarRow::GitHub(project_id),
-                SidebarRow::Session(sessions[0]),
-                SidebarRow::GroupSpacer,
-            ]
-        );
-
-        let mut collapsed = Vec::new();
-        append_sidebar_group_rows(
-            &mut collapsed,
-            group,
-            &sessions,
-            true,
-            false,
-            Some(project_id),
-        );
+        append_sidebar_group_rows(&mut collapsed, group, &sessions, true, false);
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
@@ -4040,14 +3842,7 @@ mod tests {
     fn collapsed_groups_contribute_no_shortcut_targets() {
         let sessions = [Uuid::from_u128(1), Uuid::from_u128(2)];
         let mut rows = Vec::new();
-        append_sidebar_group_rows(
-            &mut rows,
-            SidebarGroup::Pinned,
-            &sessions,
-            true,
-            false,
-            None,
-        );
+        append_sidebar_group_rows(&mut rows, SidebarGroup::Pinned, &sessions, true, false);
         assert_eq!(sidebar_shortcut_target_ids(&rows).count(), 0);
     }
 
@@ -4055,7 +3850,7 @@ mod tests {
     fn hidden_project_sessions_keep_a_keyboard_reveal_row() {
         let group = SidebarGroup::Project(Uuid::from_u128(1));
         let mut expanded = Vec::new();
-        append_sidebar_group_rows(&mut expanded, group, &[], false, true, None);
+        append_sidebar_group_rows(&mut expanded, group, &[], false, true);
         assert_eq!(
             expanded,
             vec![
@@ -4066,7 +3861,7 @@ mod tests {
         );
 
         let mut collapsed = Vec::new();
-        append_sidebar_group_rows(&mut collapsed, group, &[], true, true, None);
+        append_sidebar_group_rows(&mut collapsed, group, &[], true, true);
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer]

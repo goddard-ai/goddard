@@ -356,11 +356,9 @@ impl Waku {
             self.state.selected_session = None;
         }
         self.pending_session_activation = None;
-        // A terminal claims the main area too: an open GitHub browser for
-        // the selected project folds, keeping its state for the next visit.
-        if let Some(project_id) = self.state.selected_project {
-            self.deactivate_github_browser(project_id);
-        }
+        // A terminal claims the main area too: an open Projects page folds,
+        // keeping its state for the next visit.
+        self.projects_page = None;
         self.selected_terminal = Some(terminal_id);
         self.last_visible_terminal = Some(terminal_id);
         if let Some(terminal) = self.right_panel_terminals.get(&terminal_id) {

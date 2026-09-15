@@ -738,6 +738,8 @@ common.settings:
   en: Settings
 common.copy:
   en: Copy
+common.delete:
+  en: Delete
 common.remove:
   en: Remove
 common.unarchive:
@@ -775,6 +777,8 @@ sidebar.today:
   en: Today
 sidebar.search:
   en: Search
+sidebar.projects:
+  en: Projects
 sidebar.options:
   en: Sidebar options
 sidebar.grouping:
@@ -859,8 +863,6 @@ sidebar.pull_request_review_changes:
   en: changes requested
 sidebar.pull_request_review_required:
   en: review required
-sidebar.github_entry:
-  en: GitHub
 
 github.tab_pull_requests:
   en: Pull requests
@@ -882,6 +884,8 @@ github.open_repo:
   en: Open repository on GitHub
 github.open_external:
   en: Open on GitHub
+github.copy_url:
+  en: Copy URL
 github.start_task:
   en: Start a task
 github.fix_checks:
@@ -941,6 +945,87 @@ project.without_a_project:
   en: without a project
 project.your_project:
   en: your project
+
+projects.title:
+  en: Projects
+projects.tab_worktrees:
+  en: Worktrees
+projects.tab_branches:
+  en: Branches
+projects.filter_worktrees:
+  en: Filter worktrees
+projects.filter_branches:
+  en: Filter branches
+projects.filter_issues:
+  en: Filter issues
+projects.filter_pull_requests:
+  en: Filter pull requests
+projects.no_worktrees:
+  en: No worktrees
+projects.no_branches:
+  en: No branches
+projects.main_checkout:
+  en: Main checkout
+projects.checked_out_in:
+  en: "Checked out in %{path}"
+projects.new_worktree_from:
+  en: "New worktree from %{name}"
+projects.new_task_in_worktree:
+  en: New task in this worktree
+projects.new_task_on:
+  en: "New task on %{name}"
+projects.open_in:
+  en: Open in…
+projects.reveal_in_finder:
+  en: Reveal in Finder
+projects.copy_path:
+  en: Copy path
+projects.copy_paths:
+  en: Copy paths
+projects.copy_branch_name:
+  en: Copy branch name
+projects.remove_worktree:
+  en: Remove worktree
+projects.remove_worktrees:
+  en: "Remove %{count} worktrees"
+projects.delete_branch:
+  en: Delete branch
+projects.delete_branches:
+  en: "Delete %{count} branches"
+projects.prune_stale:
+  en: Prune stale worktrees
+projects.clear_selection:
+  en: Clear selection
+projects.selected_count:
+  en: "%{count} selected"
+projects.confirm_remove_one:
+  en: "Remove %{name}?"
+projects.confirm_remove_many:
+  en: "Remove %{count} worktrees?"
+projects.confirm_remove_detail:
+  en: The folder and any uncommitted changes inside it will be deleted.
+projects.confirm_delete_one:
+  en: "Delete %{name}?"
+projects.confirm_delete_many:
+  en: "Delete %{count} branches?"
+projects.confirm_delete_detail:
+  en: Unmerged work on the branch will be lost.
+projects.open_pull_request:
+  en: Open pull request
+projects.view_pull_request:
+  en: "View PR %{number}"
+projects.not_a_repo:
+  en: This project is not a git repository
+projects.not_a_github_repo:
+  en: This project is not a GitHub repository
+projects.chip_filter:
+  en: "Filter: %{filter}"
+projects.chip_selected:
+  en: "%{count} selected"
+projects.composer_placeholder:
+  en: Describe a task…
+projects.send:
+  en: Send
 
 onboarding.open_project_to_begin:
   en: Open a project to begin

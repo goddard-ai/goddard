@@ -1,12 +1,12 @@
-//! The project GitHub browser: a repo's pull requests and issues rendered in
-//! place of the transcript.
+//! A project's GitHub lists and details — the machinery behind the Projects
+//! page's Issues and Pull Requests tabs.
 //!
 //! Every read goes through the daemon's `gh` operations on a background
 //! executor — the render path only paints what has already landed, and
 //! `GitHubFetch::Loaded(None)` ("the host could not answer") renders
-//! differently from an empty `Some`. The browser is keyed by project, keeps
-//! its tab/filter/scroll state when the user switches away, and stays bound
-//! to that project: it only draws while its project is selected.
+//! differently from an empty `Some`. State is keyed by project in
+//! `Waku::github_browsers`; the page owns tab and filter state and hands
+//! them in.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -57,7 +57,7 @@ pub(super) enum GitHubFetch<T> {
 /// One row in the filtered list: an `Rc` bump per frame instead of cloning a
 /// summary's strings.
 #[derive(Clone)]
-enum GitHubListRow {
+pub(super) enum GitHubListRow {
     PullRequest {
         entries: Rc<Vec<PullRequestSummary>>,
         index: usize,
@@ -78,14 +78,11 @@ impl GitHubListRow {
     }
 }
 
-/// One project's browser: its tab, filter, fetched pages, and open detail.
-/// Kept in `Waku::github_browsers` by project id so switching projects does
-/// not lose position.
+/// One project's GitHub state: the resolved repo, fetched lists, and open
+/// detail — what the Projects page's Issues/Pull Requests tabs paint. Kept
+/// in `Waku::github_browsers` by project id so switching projects or leaving
+/// the page does not lose position.
 pub(super) struct GitHubBrowser {
-    /// Whether this project renders the browser in place of the transcript.
-    /// Selecting a session deactivates; reopening the sidebar entry restores.
-    pub active: bool,
-    pub tab: GitHubTab,
     /// Open/closed/all — applied server-side by `gh list`.
     pub query_state: WorkItemQueryState,
     /// `None` until the resolve lands; `Some((None, availability))` says why a
@@ -99,12 +96,13 @@ pub(super) struct GitHubBrowser {
     /// Row focus handles keyed by item so a virtualized row can take tab
     /// focus and open on Enter.
     pub row_focuses: RefCell<HashMap<GitHubDetailRef, FocusHandle>>,
+    /// Row context-menu handles keyed the same way.
+    pub row_menus: RefCell<HashMap<GitHubDetailRef, ContextMenuHandle>>,
     pub detail_focus: FocusHandle,
     pub list_state: ListState,
     pub detail_scroll: ScrollHandle,
     pub list_scrollbar: Rc<ScrollbarState>,
     pub detail_scrollbar: Rc<ScrollbarState>,
-    pub filter: Entity<TextInput>,
     /// Incremented whenever a fresh fetch set starts; replies from older
     /// generations drop instead of overwriting newer state.
     pub generation: u64,
@@ -116,10 +114,8 @@ pub(super) struct GitHubBrowser {
 const GITHUB_LIST_ROW_HEIGHT: f32 = 30.0;
 
 impl GitHubBrowser {
-    fn new(window: &mut Window, cx: &mut Context<Waku>) -> Self {
+    pub(super) fn new(cx: &mut Context<Waku>) -> Self {
         Self {
-            active: true,
-            tab: GitHubTab::PullRequests,
             query_state: WorkItemQueryState::Open,
             repo: None,
             pull_requests: GitHubFetch::Loading,
@@ -127,13 +123,12 @@ impl GitHubBrowser {
             detail: None,
             details: HashMap::new(),
             row_focuses: RefCell::new(HashMap::new()),
+            row_menus: RefCell::new(HashMap::new()),
             detail_focus: cx.focus_handle(),
             list_state: ListState::new(0, ListAlignment::Top, px(64.0)),
             detail_scroll: ScrollHandle::new(),
             list_scrollbar: ScrollbarState::new(),
             detail_scrollbar: ScrollbarState::new(),
-            filter: cx
-                .new(|cx| TextInput::new(window, cx).placeholder(tr!("github.filter_placeholder"))),
             generation: 0,
             markdown: RefCell::new(HashMap::new()),
             markdown_selection: TranscriptSelection::default(),
@@ -142,52 +137,6 @@ impl GitHubBrowser {
 }
 
 impl Waku {
-    /// The browser drawn for the selected project, when that project's
-    /// browser is active.
-    pub(super) fn active_github_browser(&self) -> Option<(&Uuid, &GitHubBrowser)> {
-        let project_id = self.state.selected_project.as_ref()?;
-        self.github_browsers
-            .get_key_value(project_id)
-            .filter(|(_, browser)| browser.active)
-    }
-
-    /// Sidebar entry: select the project and swap its main area to the
-    /// browser. Unlike `select_project` this does not create a draft session.
-    pub(super) fn open_github_browser(
-        &mut self,
-        project_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.settings_page = None;
-        // The browser claims the main area — a selected terminal gives way
-        // and the Terminals group folds, same as picking a chat does.
-        self.selected_terminal = None;
-        if self
-            .sidebar_collapsed_groups
-            .insert(SidebarGroup::Terminals)
-        {
-            self.sidebar_rows_fingerprint.set(None);
-        }
-        self.state.selected_project = Some(project_id);
-        let browser = self
-            .github_browsers
-            .entry(project_id)
-            .or_insert_with(|| GitHubBrowser::new(window, cx));
-        browser.active = true;
-        self.github_refresh(project_id, cx);
-        cx.notify();
-    }
-
-    /// Deactivate the browser when the user picks a session row — the
-    /// transcript reclaims the main area, and the browser keeps its state for
-    /// the next visit.
-    pub(super) fn deactivate_github_browser(&mut self, project_id: Uuid) {
-        if let Some(browser) = self.github_browsers.get_mut(&project_id) {
-            browser.active = false;
-        }
-    }
-
     /// Refetch the repo identity (when unknown) and both lists for the
     /// browser's current state filter. Explicit refresh reuses this path.
     pub(super) fn github_refresh(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
@@ -383,8 +332,8 @@ impl Waku {
         window.focus(&focus, cx);
     }
 
-    /// Move the open detail to the previous/next row in the current filtered
-    /// list, wrapping past the ends.
+    /// Move the open detail to the previous/next row in the Projects page's
+    /// current filtered list, wrapping past the ends.
     pub(super) fn github_detail_navigate(
         &mut self,
         project_id: Uuid,
@@ -392,7 +341,28 @@ impl Waku {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.github_filtered_rows(project_id, cx);
+        let (tab, filter) = self
+            .github_browsers
+            .get(&project_id)
+            .and_then(|browser| browser.detail)
+            .map(|detail| {
+                let tab = match detail.kind {
+                    GitHubItemKind::PullRequest => GitHubTab::PullRequests,
+                    GitHubItemKind::Issue => GitHubTab::Issues,
+                };
+                let projects_tab = match detail.kind {
+                    GitHubItemKind::PullRequest => projects::ProjectsTab::PullRequests,
+                    GitHubItemKind::Issue => projects::ProjectsTab::Issues,
+                };
+                let filter = self
+                    .projects_page_states
+                    .get(&project_id)
+                    .map(|state| state.filter_text(projects_tab, cx))
+                    .unwrap_or_default();
+                (tab, filter)
+            })
+            .unwrap_or((GitHubTab::PullRequests, String::new()));
+        let rows = self.github_filtered_rows(project_id, tab, &filter, cx);
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return;
         };
@@ -407,20 +377,26 @@ impl Waku {
         self.github_open_detail(project_id, next_detail, window, cx);
     }
 
-    /// The current tab's rows after the filter field's text is applied —
-    /// matched against title, `#number`, author, and labels/head branch.
-    fn github_filtered_rows(&self, project_id: Uuid, cx: &App) -> Vec<GitHubListRow> {
+    /// A tab's rows after `filter` text is applied — matched against title,
+    /// `#number`, author, and labels/head branch.
+    pub(super) fn github_filtered_rows(
+        &self,
+        project_id: Uuid,
+        tab: GitHubTab,
+        filter: &str,
+        _cx: &App,
+    ) -> Vec<GitHubListRow> {
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return Vec::new();
         };
-        let filter = browser.filter.read(cx).content().trim().to_lowercase();
+        let filter = filter.trim().to_lowercase();
         let matches = |haystacks: &[&str]| {
             filter.is_empty()
                 || haystacks
                     .iter()
                     .any(|text| text.to_lowercase().contains(&filter))
         };
-        match browser.tab {
+        match tab {
             GitHubTab::PullRequests => match &browser.pull_requests {
                 GitHubFetch::Loaded(Some(entries)) => entries
                     .iter()
@@ -468,229 +444,7 @@ impl Waku {
         }
     }
 
-    pub(super) fn render_github_browser(
-        &mut self,
-        project_id: Uuid,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = Theme::current(cx);
-        let Some(browser) = self.github_browsers.get(&project_id) else {
-            return div().into_any_element();
-        };
-        let Some((repo, availability)) = browser.repo.clone() else {
-            return github_centered(
-                icon("icons/loader-circle.svg", 16.0, theme.text_tertiary).into_any_element(),
-                tr!("github.resolving_repo"),
-                &theme,
-            );
-        };
-        let Some(repo) = repo else {
-            let message = match availability {
-                GitHubAvailability::MissingCli => tr!("github.install_gh"),
-                GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
-                GitHubAvailability::Ready => tr!("github.not_a_repo"),
-            };
-            return github_centered(
-                icon("icons/github.svg", 16.0, theme.text_tertiary).into_any_element(),
-                message,
-                &theme,
-            );
-        };
-
-        let header = self.render_github_header(project_id, &repo, window, cx);
-        let body = if self
-            .github_browsers
-            .get(&project_id)
-            .is_some_and(|browser| browser.detail.is_some())
-        {
-            self.render_github_detail(project_id, window, cx)
-        } else {
-            self.render_github_list(project_id, window, cx)
-        };
-        div()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(header)
-            .child(body)
-            .into_any_element()
-    }
-
-    fn render_github_header(
-        &mut self,
-        project_id: Uuid,
-        repo: &GitHubRepoRef,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = Theme::current(cx);
-        let Some(browser) = self.github_browsers.get(&project_id) else {
-            return div().into_any_element();
-        };
-        let tab = browser.tab;
-        let query_state = browser.query_state;
-        let detail_open = browser.detail.is_some();
-        let filter = browser.filter.clone();
-        let repo_name = SharedString::from(format!("{}/{}", repo.owner, repo.name));
-        let repo_url = repo.web_url.clone();
-        let state_label = match query_state {
-            WorkItemQueryState::Open => tr!("github.state_open"),
-            WorkItemQueryState::Closed => tr!("github.state_closed"),
-            WorkItemQueryState::All => tr!("github.state_all"),
-        };
-
-        let weak = cx.entity().downgrade();
-        let state_menu = self.menu_handle("github-state", cx);
-        let state_menu_open = state_menu.is_open();
-        let state_picker = dropdown_menu(
-            div()
-                .id("github-state-picker")
-                .h(px(24.0))
-                .px(px(8.0))
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .cursor_default()
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-                .when(state_menu_open, |element| element.bg(theme.overlay_strong))
-                .hover(|style| style.bg(theme.overlay))
-                .child(
-                    div()
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_secondary)
-                        .child(state_label),
-                )
-                .child(icon("icons/chevron-down.svg", 11.0, theme.text_tertiary)),
-            "github-state-menu",
-            &state_menu,
-            MenuAlign::BelowLeft,
-            move |_| {
-                [
-                    (WorkItemQueryState::Open, tr!("github.state_open")),
-                    (WorkItemQueryState::Closed, tr!("github.state_closed")),
-                    (WorkItemQueryState::All, tr!("github.state_all")),
-                ]
-                .into_iter()
-                .map(|(state, label)| {
-                    let weak = weak.clone();
-                    MenuItem::new(label, move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.github_set_query_state(project_id, state, cx);
-                        });
-                    })
-                    .selected(state == query_state)
-                })
-                .collect()
-            },
-        );
-
-        let back = detail_open.then(|| {
-            div()
-                .id("github-back")
-                .w(px(24.0))
-                .h(px(24.0))
-                .rounded(px(6.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_default()
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-                .tooltip(Tooltip::text(tr!("github.back_to_list")))
-                .child(icon("icons/arrow-left.svg", 13.0, theme.text_secondary))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.github_close_detail(project_id, cx);
-                }))
-                .into_any_element()
-        });
-
-        div()
-            .flex_none()
-            .h(px(40.0))
-            .w_full()
-            .px(px(12.0))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .border_b(hairline())
-            .border_color(theme.border)
-            .child(icon("icons/github.svg", 15.0, theme.text_secondary))
-            .child(
-                div()
-                    .id("github-repo-link")
-                    .cursor_pointer()
-                    .text_size(sp(13.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme.text)
-                    .hover(|style| style.text_color(theme.accent))
-                    .tooltip(Tooltip::text(tr!("github.open_repo")))
-                    .child(repo_name)
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.open_url(&repo_url);
-                    })),
-            )
-            .when_some(back, |element, back| element.child(back))
-            .child(div().flex_1())
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.0))
-                    .p(px(2.0))
-                    .bg(theme.inset)
-                    .child(github_tab_button(
-                        project_id,
-                        GitHubTab::PullRequests,
-                        tab,
-                        tr!("github.tab_pull_requests"),
-                        &theme,
-                        cx,
-                    ))
-                    .child(github_tab_button(
-                        project_id,
-                        GitHubTab::Issues,
-                        tab,
-                        tr!("github.tab_issues"),
-                        &theme,
-                        cx,
-                    )),
-            )
-            .child(state_picker)
-            .child(
-                TextField::new("github-filter", filter)
-                    .icon("icons/search.svg", 12.0)
-                    .w(px(180.0))
-                    .flex_none(),
-            )
-            .child(
-                div()
-                    .id("github-refresh")
-                    .w(px(24.0))
-                    .h(px(24.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|style| style.bg(theme.overlay))
-                    .active(|style| style.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-                    .tooltip(Tooltip::text(tr!("github.refresh")))
-                    .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.github_refresh(project_id, cx);
-                    })),
-            )
-            .into_any_element()
-    }
-
-    fn github_set_query_state(
+    pub(super) fn github_set_query_state(
         &mut self,
         project_id: Uuid,
         state: WorkItemQueryState,
@@ -706,20 +460,44 @@ impl Waku {
         self.github_refresh(project_id, cx);
     }
 
-    fn render_github_list(
+    /// The list half of a GitHub tab — rows filtered by the page's filter
+    /// field for that tab. The page owns the chrome around it.
+    pub(super) fn render_github_list(
         &mut self,
         project_id: Uuid,
+        tab: GitHubTab,
+        filter: &str,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let rows = self.github_filtered_rows(project_id, cx);
+        // Repo resolution gates the lists: unresolved → resolving, a non-GitHub
+        // repo or `gh` problem → its hint, resolved → rows.
+        if let Some((repo, availability)) = self
+            .github_browsers
+            .get(&project_id)
+            .and_then(|browser| browser.repo.clone())
+        {
+            if repo.is_none() {
+                let message = match availability {
+                    GitHubAvailability::MissingCli => tr!("github.install_gh"),
+                    GitHubAvailability::Unauthenticated => tr!("github.auth_gh"),
+                    GitHubAvailability::Ready => tr!("github.not_a_repo"),
+                };
+                return github_centered(
+                    icon("icons/github.svg", 16.0, theme.text_tertiary).into_any_element(),
+                    message,
+                    &theme,
+                );
+            }
+        }
+        let rows = self.github_filtered_rows(project_id, tab, filter, cx);
         let Some(browser) = self.github_browsers.get(&project_id) else {
             return div().into_any_element();
         };
         let list_state = browser.list_state.clone();
         let scrollbar = browser.list_scrollbar.clone();
-        let fetch = match browser.tab {
+        let fetch = match tab {
             GitHubTab::PullRequests => match &browser.pull_requests {
                 GitHubFetch::Loading => None,
                 GitHubFetch::Loaded(entries) => Some(entries.is_some()),
@@ -729,7 +507,7 @@ impl Waku {
                 GitHubFetch::Loaded(entries) => Some(entries.is_some()),
             },
         };
-        let filter_active = !browser.filter.read(cx).content().trim().is_empty();
+        let filter_active = !filter.trim().is_empty();
 
         match fetch {
             None => {
@@ -752,7 +530,7 @@ impl Waku {
                     if filter_active {
                         tr!("github.no_matches")
                     } else {
-                        match browser.tab {
+                        match tab {
                             GitHubTab::PullRequests => tr!("github.no_pull_requests"),
                             GitHubTab::Issues => tr!("github.no_issues"),
                         }
@@ -811,16 +589,39 @@ impl Waku {
             })
             .unwrap_or_else(|| cx.focus_handle());
 
-        let row_div = match &row {
+        let (row_div, title, url) = match &row {
             GitHubListRow::PullRequest { entries, index, .. } => {
-                github_pull_request_row(&entries[*index], &theme)
+                let entry = &entries[*index];
+                (
+                    github_pull_request_row(entry, &theme),
+                    entry.title.clone(),
+                    entry.url.clone(),
+                )
             }
             GitHubListRow::Issue { entries, index, .. } => {
-                github_issue_row(&entries[*index], &theme)
+                let entry = &entries[*index];
+                (
+                    github_issue_row(entry, &theme),
+                    entry.title.clone(),
+                    entry.url.clone(),
+                )
             }
         };
+        let menu = self
+            .github_browsers
+            .get(&project_id)
+            .map(|browser| {
+                browser
+                    .row_menus
+                    .borrow_mut()
+                    .entry(detail)
+                    .or_insert_with(|| ContextMenuHandle::new(cx))
+                    .clone()
+            })
+            .unwrap_or_else(|| ContextMenuHandle::new(cx));
+        let weak = cx.entity().downgrade();
 
-        row_div
+        let framed = row_div
             .id(SharedString::from(format!(
                 "github-row-{}-{}",
                 match detail.kind {
@@ -852,11 +653,51 @@ impl Waku {
                     this.github_open_detail(project_id, detail, window, cx);
                     cx.stop_propagation();
                 }
-            }))
-            .into_any_element()
+            }));
+
+        context_menu(
+            framed,
+            format!(
+                "github-row-menu-{}-{}",
+                detail.number,
+                match detail.kind {
+                    GitHubItemKind::PullRequest => "pr",
+                    GitHubItemKind::Issue => "issue",
+                }
+            ),
+            &menu,
+            move |_cx| {
+                let mut items = Vec::new();
+                let start_weak = weak.clone();
+                let prompt = github_task_prompt(detail, &title, &url, false);
+                items.push(
+                    MenuItem::new(tr!("github.start_task"), move |window, cx| {
+                        let _ = start_weak.update(cx, |this, cx| {
+                            this.github_start_task(project_id, prompt.clone(), window, cx);
+                        });
+                    })
+                    .icon("icons/plus.svg"),
+                );
+                let open_url = url.clone();
+                items.push(
+                    MenuItem::new(tr!("github.open_external"), move |_, cx| {
+                        cx.open_url(&open_url);
+                    })
+                    .icon("icons/external-link.svg"),
+                );
+                let copy_url = url.clone();
+                items.push(
+                    MenuItem::new(tr!("github.copy_url"), move |_, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy_url.clone()));
+                    })
+                    .icon("icons/copy.svg"),
+                );
+                items
+            },
+        )
     }
 
-    fn render_github_detail(
+    pub(super) fn render_github_detail(
         &mut self,
         project_id: Uuid,
         _window: &mut Window,
@@ -1403,53 +1244,6 @@ fn github_issue_row(issue: &IssueSummary, theme: &Theme) -> Div {
         )
 }
 
-fn github_tab_button(
-    project_id: Uuid,
-    tab: GitHubTab,
-    current: GitHubTab,
-    label: String,
-    theme: &Theme,
-    cx: &mut Context<Waku>,
-) -> Stateful<Div> {
-    let selected = tab == current;
-    div()
-        .id(SharedString::from(format!(
-            "github-tab-{}",
-            match tab {
-                GitHubTab::PullRequests => "pull-requests",
-                GitHubTab::Issues => "issues",
-            }
-        )))
-        .h(px(20.0))
-        .px(px(10.0))
-        .rounded(px(5.0))
-        .flex()
-        .items_center()
-        .cursor_default()
-        .when(selected, |element| {
-            element.bg(theme.surface).text_color(theme.text)
-        })
-        .when(!selected, |element| {
-            element
-                .text_color(theme.text_secondary)
-                .hover(|style| style.text_color(theme.text))
-        })
-        .focus_visible(|style| style.border(hairline()).border_color(theme.accent))
-        .text_size(sp(12.0))
-        .child(label)
-        .on_click(cx.listener(move |this, _, _, cx| {
-            if let Some(browser) = this.github_browsers.get_mut(&project_id)
-                && browser.tab != tab
-            {
-                browser.tab = tab;
-                browser
-                    .list_state
-                    .reset_with_uniform_height(0, px(GITHUB_LIST_ROW_HEIGHT));
-                cx.notify();
-            }
-        }))
-}
-
 fn github_pr_meta(pr: &PullRequestSummary) -> Vec<String> {
     let mut meta = Vec::new();
     if let Some(head) = &pr.head_branch {
@@ -1521,8 +1315,12 @@ fn github_task_prompt(detail: GitHubDetailRef, title: &str, url: &str, fix_check
     }
 }
 
-/// A centered icon + message for the browser's non-list states.
-fn github_centered(icon_element: AnyElement, message: String, theme: &Theme) -> AnyElement {
+/// A centered icon + message for a list surface's non-list states.
+pub(super) fn github_centered(
+    icon_element: AnyElement,
+    message: String,
+    theme: &Theme,
+) -> AnyElement {
     div()
         .flex_1()
         .min_h_0()

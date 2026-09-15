@@ -317,6 +317,8 @@ impl Render for Waku {
                 .on_action(cx.listener(Self::open_localhost_url_action))
                 .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
                 .on_action(cx.listener(Self::toggle_terminals_action))
+                .on_action(cx.listener(Self::toggle_projects_page_action))
+                .on_action(cx.listener(Self::select_projects_tab_action))
                 .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
                 .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -342,9 +344,7 @@ impl Render for Waku {
 
         let theme = Theme::current(cx);
         let empty = should_render_empty_state(self.selected_session());
-        let github_project = self
-            .active_github_browser()
-            .map(|(project_id, _)| *project_id);
+        let projects_page = self.projects_page;
         let permission = self.render_permission(cx);
         let computer_use = self.render_computer_use_overlay(window, cx);
         let command_palette = self.render_command_palette(window, cx);
@@ -416,6 +416,8 @@ impl Render for Waku {
             .on_action(cx.listener(Self::open_localhost_url_action))
             .on_action(cx.listener(Self::open_localhost_url_in_tab_action))
             .on_action(cx.listener(Self::toggle_terminals_action))
+            .on_action(cx.listener(Self::toggle_projects_page_action))
+            .on_action(cx.listener(Self::select_projects_tab_action))
             .on_modifiers_changed(cx.listener(Self::task_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::project_switcher_modifiers_changed))
             .on_modifiers_changed(cx.listener(Self::sidebar_shortcuts_modifiers_changed))
@@ -470,7 +472,9 @@ impl Render for Waku {
                     // hitbox so the composer card can light itself up as the
                     // landing zone wherever the drag is held.
                     .when(
-                        self.selected_project().is_some() && self.selected_terminal.is_none(),
+                        self.selected_project().is_some()
+                            && self.selected_terminal.is_none()
+                            && self.projects_page.is_none(),
                         |element| {
                             element
                                 .group(composer::SESSION_DROP_GROUP)
@@ -481,7 +485,7 @@ impl Render for Waku {
                     )
                     .child(self.render_header(window, cx))
                     // A selected terminal takes the column in place of the
-                    // transcript, the GitHub browser, or the new-task prompt.
+                    // transcript, the Projects page, or the new-task prompt.
                     .child(
                         if let Some(terminal_id) = self
                             .selected_terminal
@@ -492,8 +496,8 @@ impl Render for Waku {
                                 self.chat_viewport_width(window),
                                 cx,
                             )
-                        } else if let Some(project_id) = github_project {
-                            self.render_github_browser(project_id, window, cx)
+                        } else if projects_page.is_some() {
+                            self.render_projects_page(window, cx)
                         } else if empty {
                             self.render_empty_state(cx).into_any_element()
                         } else {
@@ -505,10 +509,12 @@ impl Render for Waku {
                     )
                     .children(permission)
                     // Big Picture remounts the one composer entity inside its
-                    // own layer; mounting it here too would collide.
+                    // own layer; mounting it here too would collide. The
+                    // Projects page docks its own composer instead.
                     .when(
                         self.selected_project().is_some()
                             && self.selected_terminal.is_none()
+                            && self.projects_page.is_none()
                             && !self.big_picture.is_open(),
                         |element| {
                             element
