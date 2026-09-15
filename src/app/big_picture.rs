@@ -17,14 +17,18 @@ use gpui::{KeyBinding, actions};
 use super::*;
 
 pub const MAX_CARDS: usize = 4;
-const CARD_WIDTH: f32 = 360.0;
-const CARD_MIN_WIDTH: f32 = 260.0;
 const CARD_GAP: f32 = 16.0;
 const CARD_RADIUS: f32 = 14.0;
-const CARD_HEIGHT_RATIO: f32 = 0.56;
-const CARD_HEIGHT_MIN: f32 = 300.0;
-const CARD_HEIGHT_MAX: f32 = 540.0;
-const ROW_MARGIN_X: f32 = 48.0;
+/// Distance from the window's side edges to the card row and composer.
+const EDGE_MARGIN: f32 = 32.0;
+/// Clears the 48px titlebar — and the traffic lights inside it — plus a
+/// comfortable gap before the first card.
+const TOP_MARGIN: f32 = 64.0;
+/// Air between the card row's bottom edge and the docked composer.
+const CARD_COMPOSER_GAP: f32 = 20.0;
+/// Narrowest a card can get before the layout would rather clip than crush
+/// the header row — only reached on very small windows.
+const CARD_MIN_WIDTH: f32 = 140.0;
 const COMPOSER_WIDTH: f32 = 560.0;
 const COMPOSER_BOTTOM_MARGIN: f32 = 28.0;
 const HINT_BOTTOM_MARGIN: f32 = 10.0;
@@ -59,12 +63,16 @@ pub fn init(cx: &mut App) {
 #[derive(Clone)]
 struct BigPictureSlot {
     session_id: Uuid,
-    /// Column the card rests at; only an index change re-runs the slide, so a
-    /// window resize moves cards without replaying a transition per frame.
+    /// Column the card rests at; only an index or count change re-runs the
+    /// slide, so a window resize moves cards without replaying a transition
+    /// per frame.
     index: usize,
     left: f32,
     /// Where the in-flight transition started, for FLIP slides on re-sort.
     from_left: f32,
+    /// Fill width this frame; resized live, so a viewport drag never replays.
+    width: f32,
+    from_width: f32,
     leaving: bool,
     /// Fresh mounts fade up; reordered or surviving cards only slide.
     entering: bool,
@@ -90,6 +98,10 @@ pub(super) struct BigPictureUi {
     /// Sessions whose transcript hydration this open already requested, so a
     /// persistently failing load cannot re-spawn (and re-toast) every frame.
     hydrate_requested: HashSet<Uuid>,
+    /// Card count from the last reconcile; a change means a card entered or
+    /// left — which animates width — while an unchanged count means any
+    /// geometry delta is a viewport resize and stays instant.
+    last_row_count: usize,
 }
 
 impl BigPictureUi {
@@ -105,6 +117,7 @@ impl BigPictureUi {
             anim_seq: 0,
             pending_submission: None,
             hydrate_requested: HashSet::new(),
+            last_row_count: 0,
         }
     }
 
@@ -387,9 +400,13 @@ impl Waku {
     /// Reconcile mounted slots against this frame's ranking. Runs from
     /// `render` — the work is a sort of a sessions-length vec plus, at most,
     /// one spawn per card entering or leaving; steady state touches nothing.
-    fn reconcile_big_picture_slots(&mut self, card_width: f32, cx: &mut Context<Self>) {
-        let desired = big_picture_order(&self.state.sessions, &self.state.unseen_completions);
-        for session_id in &desired {
+    fn reconcile_big_picture_slots(
+        &mut self,
+        desired: &[Uuid],
+        card_width: f32,
+        cx: &mut Context<Self>,
+    ) {
+        for session_id in desired {
             if self.big_picture.hydrate_requested.insert(*session_id) {
                 self.ensure_session_loaded(*session_id, cx);
             }
@@ -438,6 +455,10 @@ impl Waku {
             })
             .detach();
         }
+        // A card arriving or leaving changes every card's width, so those
+        // slides animate. A viewport resize does not — same count, new width,
+        // no replayed transition chasing the drag.
+        let count_changed = self.big_picture.last_row_count != desired.len();
         for (index, session_id) in desired.iter().enumerate() {
             let left = index as f32 * step;
             match self
@@ -447,14 +468,16 @@ impl Waku {
                 .find(|slot| slot.session_id == *session_id)
             {
                 Some(slot) if !slot.leaving => {
-                    if slot.index != index {
+                    if slot.index != index || (count_changed && slot.width != card_width) {
                         slot.from_left = slot.left;
+                        slot.from_width = slot.width;
                         slot.index = index;
                         slot.entering = false;
                         seq += 1;
                         slot.anim_seq = seq;
                     }
                     slot.left = left;
+                    slot.width = card_width;
                 }
                 Some(_) => {}
                 None => {
@@ -464,6 +487,8 @@ impl Waku {
                         index,
                         left,
                         from_left: left,
+                        width: card_width,
+                        from_width: card_width,
                         leaving: false,
                         entering: true,
                         anim_seq: seq,
@@ -472,6 +497,7 @@ impl Waku {
             }
         }
         self.big_picture.anim_seq = seq;
+        self.big_picture.last_row_count = desired.len();
         // A targeted or highlighted session can leave the grid — or the task
         // list — under the overlay; the highlight only tracks visible cards.
         if self
@@ -583,8 +609,6 @@ impl Waku {
         &self,
         session: &AgentSession,
         slot: &BigPictureSlot,
-        card_width: f32,
-        card_height: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
@@ -596,6 +620,8 @@ impl Waku {
         let entering = slot.entering;
         let left = slot.left;
         let from_left = slot.from_left;
+        let width = slot.width;
+        let from_width = slot.from_width;
         let anim_id =
             SharedString::from(format!("big-picture-card-{session_id}-{}", slot.anim_seq));
         let preview = if session.detail_loaded {
@@ -751,9 +777,9 @@ impl Waku {
         div()
             .absolute()
             .top_0()
+            .h_full()
             .left(px(left))
-            .w(px(card_width))
-            .h(px(card_height))
+            .w(px(width))
             .child(card)
             .with_animation(
                 anim_id,
@@ -761,6 +787,7 @@ impl Waku {
                 move |element, delta| {
                     let element = element
                         .left(px(from_left + (left - from_left) * delta))
+                        .w(px(from_width + (width - from_width) * delta))
                         .opacity(if leaving {
                             1.0 - delta
                         } else if entering {
@@ -943,24 +970,14 @@ impl Waku {
         }
         let theme = Theme::current(cx);
         let viewport = window.viewport_size();
-        let viewport_width = f32::from(viewport.width);
-        let viewport_height = f32::from(viewport.height);
-        let card_width = ((viewport_width - ROW_MARGIN_X * 2.0 - CARD_GAP * 3.0) / 4.0)
-            .clamp(CARD_MIN_WIDTH, CARD_WIDTH);
-        let card_height =
-            (viewport_height * CARD_HEIGHT_RATIO).clamp(CARD_HEIGHT_MIN, CARD_HEIGHT_MAX);
-        self.reconcile_big_picture_slots(card_width, cx);
-        let count = self
-            .big_picture
-            .slots
-            .iter()
-            .filter(|slot| !slot.leaving)
-            .count();
-        let row_width = if count == 0 {
-            0.0
-        } else {
-            count as f32 * card_width + (count - 1) as f32 * CARD_GAP
-        };
+        let desired = big_picture_order(&self.state.sessions, &self.state.unseen_completions);
+        // Cards stretch to fill the row: N sessions split the width between
+        // the screen-edge margins and the inter-card gaps.
+        let count = desired.len().max(1) as f32;
+        let row_width = (f32::from(viewport.width) - EDGE_MARGIN * 2.0).max(0.0);
+        let card_width =
+            ((row_width - CARD_GAP * (count - 1.0)) / count).max(CARD_MIN_WIDTH);
+        self.reconcile_big_picture_slots(&desired, card_width, cx);
         let slots = self.big_picture.slots.clone();
         let cards = slots
             .iter()
@@ -971,9 +988,7 @@ impl Waku {
                     .find(|session| session.id == slot.session_id)
                     .map(|session| (session, slot))
             })
-            .map(|(session, slot)| {
-                self.render_big_picture_card(session, slot, card_width, card_height, cx)
-            })
+            .map(|(session, slot)| self.render_big_picture_card(session, slot, cx))
             .collect::<Vec<_>>();
         let focus = self.big_picture.focus.clone();
         let scrim = if theme.is_dark {
@@ -1004,22 +1019,16 @@ impl Waku {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .relative()
-                            .w(px(row_width.max(card_width)))
-                            .h(px(card_height))
-                            .children(cards),
-                    ),
+                    .pt(px(TOP_MARGIN))
+                    .px(px(EDGE_MARGIN))
+                    .pb(px(CARD_COMPOSER_GAP))
+                    .child(div().relative().size_full().children(cards)),
             )
             .child(
                 div()
                     .flex_none()
                     .pb(px(COMPOSER_BOTTOM_MARGIN))
-                    .px(px(24.0))
+                    .px(px(EDGE_MARGIN))
                     .flex()
                     .justify_center()
                     .child(self.render_big_picture_composer(cx)),
