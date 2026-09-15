@@ -896,58 +896,6 @@ impl Waku {
                         },
                     )),
             )
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.sidebar_shortcut_tags")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!(
-                                        "settings.sidebar_shortcut_tags_description",
-                                        keys = crate::platform::primary_shortcut(
-                                            "⌘1–⌘9",
-                                            "Ctrl+1–Ctrl+9"
-                                        ),
-                                        modifier =
-                                            crate::platform::primary_shortcut("⌘", "Ctrl")
-                                    )),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "sidebar-shortcut-tags-toggle",
-                        self.state.sidebar_shortcut_tags,
-                        false,
-                        theme,
-                        cx,
-                        {
-                            let enabled = self.state.sidebar_shortcut_tags;
-                            move |this, _, cx| this.set_sidebar_shortcut_tags(!enabled, cx)
-                        },
-                    )),
-            )
             .when(cfg!(target_os = "macos"), |element| {
                 // The platform recognizer reads the trackpad's touch stream,
                 // which macOS only hands over when no system gesture claims
@@ -3974,21 +3922,6 @@ impl Waku {
             return;
         }
         self.state.new_worktree_default_branch = enabled;
-        self.save();
-        cx.notify();
-    }
-
-    fn set_sidebar_shortcut_tags(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if self.state.sidebar_shortcut_tags == enabled {
-            return;
-        }
-        self.state.sidebar_shortcut_tags = enabled;
-        if !enabled {
-            // Take down chips already up and cancel a pending reveal.
-            self.sidebar_shortcut_hint_generation =
-                self.sidebar_shortcut_hint_generation.wrapping_add(1);
-            self.sidebar_shortcut_hints = false;
-        }
         self.save();
         cx.notify();
     }
