@@ -39,7 +39,7 @@ use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
 use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
 use super::selection::{
-    RegisteredText, SelectionRegistry, SelectionState, TextKey, line_range, word_range,
+    RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::fonts::Fonts;
@@ -1237,20 +1237,23 @@ fn registry_point(
 /// `region`, which gates the handlers via `is_hovered` — false whenever a
 /// `BlockMouse` or `BlockMouseExceptScroll` hitbox covers the point.
 ///
-/// `alt_click` is the action ⌥-click dispatches once the clicked line is
-/// selected and settled — the transcript passes ⌘L's `AddToChat`, making the
-/// gesture "select this chunk and annotate it" without the action handler
-/// seeing anything but an ordinary settled selection. Surfaces that pass
-/// `None` keep plain click behavior under ⌥.
+/// `alt_click` is the action an ⌥-press dispatches on mouse-up. The press
+/// starts an ordinary drag but arms the pressed line as its release fallback,
+/// so a click selects the line and a drag keeps its own spans — the transcript
+/// passes ⌘L's `AddToChat`, making the gesture "select this and annotate it"
+/// without the action handler seeing anything but an ordinary settled
+/// selection. Surfaces that pass `None` keep plain click behavior under ⌥.
 pub fn install_selection_input(
     region: HitboxId,
     window: &mut Window,
     state: &TranscriptSelection,
     alt_click: Option<Box<dyn Action>>,
 ) {
+    let alt_click = Rc::new(alt_click);
     window.on_mouse_event({
         let state = state.clone();
-        move |event: &MouseDownEvent, phase, window, cx| {
+        let alt_click = alt_click.clone();
+        move |event: &MouseDownEvent, phase, window, _cx| {
             if phase != DispatchPhase::Bubble
                 || event.button != MouseButton::Left
                 || !region.is_hovered(window)
@@ -1267,21 +1270,23 @@ pub fn install_selection_input(
                     let offset = match entry.geometry.index_for_position(event.position) {
                         Ok(offset) | Err(offset) => offset,
                     };
-                    // ⌥-click selects the whole line like a triple-click and
-                    // settles the drag at once, then the caller's action runs
-                    // against the settled selection.
-                    if event.modifiers.alt
-                        && let Some(action) = alt_click.as_ref()
-                    {
-                        selection.begin_with_span(
+                    // ⌥-press starts an ordinary drag and arms the pressed
+                    // line as its release fallback: mouse-up selects the line
+                    // when nothing was dragged, then runs the caller's action
+                    // against whatever the release settled.
+                    if event.modifiers.alt && alt_click.is_some() {
+                        selection.begin_with_fallback(
                             entry.key.clone(),
-                            entry.text.clone(),
-                            line_range(&entry.text, offset),
+                            offset,
+                            Span {
+                                key: entry.key.clone(),
+                                range: line_range(&entry.text, offset),
+                                text: entry.text.clone(),
+                                block_break: false,
+                            },
                         );
-                        selection.end_drag(&entry.key);
                         drop(selection);
                         drop(registry);
-                        window.dispatch_action(action.boxed_clone(), cx);
                         window.refresh();
                         return;
                     }
@@ -1363,13 +1368,16 @@ pub fn install_selection_input(
 
     window.on_mouse_event({
         let state = state.clone();
-        move |_: &MouseUpEvent, phase, _, _| {
+        let alt_click = alt_click.clone();
+        move |_: &MouseUpEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
-            let key = state.selection.borrow().anchor().cloned();
-            if let Some(key) = key {
-                state.selection.borrow_mut().end_drag(&key);
+            if state.selection.borrow_mut().release()
+                && let Some(action) = alt_click.as_ref()
+            {
+                window.dispatch_action(action.boxed_clone(), cx);
+                window.refresh();
             }
         }
     });

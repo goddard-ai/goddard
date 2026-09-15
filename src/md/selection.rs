@@ -60,6 +60,9 @@ pub struct Selection {
     dragging: bool,
     /// Resolved spans in document order. Empty until a drag moves.
     spans: Vec<Span>,
+    /// Span a press falls back to when its release resolves empty — ⌥-click
+    /// defers its line selection to mouse-up so a drag can win.
+    release_fallback: Option<Span>,
 }
 
 impl Selection {
@@ -73,6 +76,7 @@ impl Selection {
         self.anchor_offset = offset;
         self.dragging = true;
         self.spans.clear();
+        self.release_fallback = None;
     }
 
     /// Begin with an immediate span: double- or triple-click in one element.
@@ -86,6 +90,33 @@ impl Selection {
             text,
             block_break: false,
         }];
+        self.release_fallback = None;
+    }
+
+    /// Begin a drag that falls back to `fallback` when its release resolves
+    /// empty — ⌥-click waits for mouse-up so a drag can win the selection.
+    pub fn begin_with_fallback(&mut self, key: TextKey, offset: usize, fallback: Span) {
+        self.begin(key, offset);
+        self.release_fallback = Some(fallback);
+    }
+
+    /// Mouse-up: end the live drag, then apply a fallback armed by
+    /// [`Self::begin_with_fallback`] when the drag left nothing selected.
+    /// True when one was armed, so the caller can fire its deferred action.
+    pub fn release(&mut self) -> bool {
+        let fallback = self.release_fallback.take();
+        if let Some(key) = self.anchor.clone() {
+            self.end_drag(&key);
+        }
+        let Some(fallback) = fallback else {
+            return false;
+        };
+        if self.is_empty() {
+            self.anchor = Some(fallback.key.clone());
+            self.anchor_offset = fallback.range.start;
+            self.spans = vec![fallback];
+        }
+        true
     }
 
     /// The live drag's anchor offset, if `key` owns the drag.
@@ -147,6 +178,7 @@ impl Selection {
         self.anchor = Some(registry.entries()[fixed.0].key.clone());
         self.anchor_offset = fixed.1;
         self.dragging = true;
+        self.release_fallback = None;
         true
     }
 
@@ -178,6 +210,7 @@ impl Selection {
         self.anchor_offset = 0;
         self.dragging = false;
         self.spans.clear();
+        self.release_fallback = None;
     }
 
     /// The wash range for `key` this frame. `None` means nothing to paint.
@@ -658,6 +691,73 @@ mod tests {
         assert_eq!(selection.end_drag(&key), None);
         assert!(selection.is_empty());
         assert_eq!(selection.anchor(), None);
+    }
+
+    #[test]
+    fn a_fallback_press_selects_its_span_when_the_drag_stays_empty() {
+        let mut selection = Selection::default();
+        let key = TextKey::new("r1", 0);
+        let text: Rc<str> = Rc::from("first paragraph");
+        selection.begin_with_fallback(
+            key.clone(),
+            6,
+            Span {
+                key: key.clone(),
+                range: 0..15,
+                text,
+                block_break: false,
+            },
+        );
+
+        // The fallback is armed but nothing is selected while the press lasts.
+        assert!(selection.is_empty());
+        assert!(selection.is_dragging());
+
+        assert!(selection.release());
+        assert_eq!(selection.wash_range(&key), Some(0..15));
+        assert!(!selection.is_dragging());
+    }
+
+    #[test]
+    fn a_fallback_press_keeps_what_the_drag_resolved() {
+        let registry = sample();
+        let mut selection = Selection::default();
+        let anchor = TextKey::new("r1", 0);
+        let text: Rc<str> = Rc::from("first paragraph");
+        selection.begin_with_fallback(
+            anchor.clone(),
+            6,
+            Span {
+                key: anchor.clone(),
+                range: 0..15,
+                text,
+                block_break: false,
+            },
+        );
+        selection.set_spans(registry.resolve((0, 6), (1, 6)));
+
+        assert!(selection.release());
+        assert_eq!(
+            selected(&registry, selection.spans()),
+            vec!["paragraph", "second"]
+        );
+    }
+
+    #[test]
+    fn release_without_a_fallback_just_ends_the_drag() {
+        let registry = sample();
+        let mut selection = Selection::default();
+        let anchor = TextKey::new("r1", 0);
+        selection.begin(anchor.clone(), 6);
+        selection.set_spans(registry.resolve((0, 6), (0, 15)));
+
+        assert!(!selection.release());
+        assert_eq!(selection.wash_range(&anchor), Some(6..15));
+
+        // A plain click clears the same way `end_drag` did.
+        selection.begin(anchor.clone(), 3);
+        assert!(!selection.release());
+        assert!(selection.is_empty());
     }
 
     #[test]
