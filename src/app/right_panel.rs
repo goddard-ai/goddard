@@ -2884,6 +2884,52 @@ impl Waku {
                     }),
             );
         }
+        // The add button trails the rightmost tab so it reads as part of the
+        // strip; it scrolls with the tabs and opens its menu on a short hover.
+        if !self.right_panel_surfaces.is_empty() {
+            let weak = cx.entity().downgrade();
+            let existing_surfaces = self.right_panel_surfaces.clone();
+            let options = [
+                RightPanelSurface::new_browser(),
+                RightPanelSurface::new_terminal(),
+                RightPanelSurface::Files,
+                RightPanelSurface::Diff,
+            ];
+            let handle = self.menu_handle("add-right-panel-surface", cx);
+            tabs = tabs.child(
+                div()
+                    .flex_none()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(dropdown_menu_on_hover(
+                        icon_button("add-right-panel-surface", "icons/plus.svg", theme),
+                        "add-right-panel-surface-menu",
+                        &handle,
+                        MenuAlign::BelowLeft,
+                        move |_| {
+                            options
+                                .clone()
+                                .into_iter()
+                                .map(|surface| {
+                                    let weak = weak.clone();
+                                    let open_surface = surface.clone();
+                                    let already_open =
+                                        reusable_surface_index(&existing_surfaces, &surface)
+                                            .is_some();
+                                    MenuItem::new(surface.label(), move |_, cx| {
+                                        let _ = weak.update(cx, |this, cx| {
+                                            this.open_right_panel_surface(open_surface.clone(), cx);
+                                        });
+                                    })
+                                    .icon(surface.icon_path())
+                                    .selected(already_open)
+                                })
+                                .collect()
+                        },
+                    )),
+            );
+        }
         tabs = tabs.child(div().w(px(TAB_SCROLL_FADE_WIDTH)).h(px(1.0)).flex_none());
 
         let fullscreen = self.panel_fullscreen_active();
@@ -2939,51 +2985,6 @@ impl Waku {
                         theme.surface,
                     )),
             );
-
-        if !self.right_panel_surfaces.is_empty() {
-            let weak = cx.entity().downgrade();
-            let existing_surfaces = self.right_panel_surfaces.clone();
-            let options = [
-                RightPanelSurface::new_browser(),
-                RightPanelSurface::new_terminal(),
-                RightPanelSurface::Files,
-                RightPanelSurface::Diff,
-            ];
-            let handle = self.menu_handle("add-right-panel-surface", cx);
-            header = header.child(
-                div()
-                    .flex_none()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(dropdown_menu(
-                        icon_button("add-right-panel-surface", "icons/plus.svg", theme),
-                        "add-right-panel-surface-menu",
-                        &handle,
-                        MenuAlign::BelowRight,
-                        move |_| {
-                            options
-                                .clone()
-                                .into_iter()
-                                .map(|surface| {
-                                    let weak = weak.clone();
-                                    let open_surface = surface.clone();
-                                    let already_open =
-                                        reusable_surface_index(&existing_surfaces, &surface)
-                                            .is_some();
-                                    MenuItem::new(surface.label(), move |_, cx| {
-                                        let _ = weak.update(cx, |this, cx| {
-                                            this.open_right_panel_surface(open_surface.clone(), cx);
-                                        });
-                                    })
-                                    .icon(surface.icon_path())
-                                    .selected(already_open)
-                                })
-                                .collect()
-                        },
-                    )),
-            );
-        }
 
         if self.active_right_panel_surface().is_some() {
             let maximized = self.fullscreen_surface.is_some();

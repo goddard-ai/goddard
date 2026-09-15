@@ -48,7 +48,7 @@ use crate::md::selection::TranscriptAnnotation;
 use crate::ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, FloatingSurface, MenuAlign, MenuItem,
     SelectNextEntry, SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu,
-    dropdown_menu, popover,
+    dropdown_menu, dropdown_menu_on_hover, popover,
 };
 use crate::ui::scrollbar::{self, ScrollbarState};
 use crate::ui::slider::{self, SliderState};

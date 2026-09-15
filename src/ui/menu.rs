@@ -25,6 +25,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
     AnyElement, App, Bounds, Display, Edges, Element, ElementId, FocusHandle, FontWeight,
@@ -51,6 +52,10 @@ const MENU_CONTEXT: &str = "WakuMenu";
 
 /// Vertical gap between a trigger and its anchored card.
 const TRIGGER_GAP: f32 = 4.0;
+
+/// Dwell before a hover-open trigger's menu appears: long enough that a
+/// cursor crossing the strip never flashes it, short enough to feel instant.
+const HOVER_OPEN_DELAY: Duration = Duration::from_millis(150);
 
 /// A text field inside an open panel, such as a picker's filter box.
 ///
@@ -286,6 +291,10 @@ struct MenuState {
     /// outside-click capture must leave that click alone so the later trigger
     /// handler can close it; a context-menu row has no such handler.
     trigger_click_toggles: bool,
+    /// Whether the pointer currently rests on a hover-open trigger. Lives on
+    /// the handle, not the element: the element is rebuilt every frame, so a
+    /// captured `Cell` would forget the hover a pending timer needs to see.
+    trigger_hovered: bool,
 }
 
 /// Cross-frame state for one context menu. The owner keeps one per menu site.
@@ -808,6 +817,57 @@ where
         }
         .into_any_element()
     })
+}
+
+/// A [`dropdown_menu`] whose trigger also opens after the pointer rests on it
+/// for [`HOVER_OPEN_DELAY`] — for controls like a tab strip's add button,
+/// whose whole job is presenting the menu. Click and keyboard still toggle,
+/// and a deliberate close while still hovered is respected: reopening takes a
+/// fresh pointer entry.
+pub fn dropdown_menu_on_hover<E>(
+    trigger: E,
+    id: impl Into<ElementId>,
+    handle: &ContextMenuHandle,
+    align: MenuAlign,
+    items: impl Fn(&mut App) -> Vec<MenuItem> + 'static,
+) -> AnyElement
+where
+    E: ParentElement + Styled + StatefulInteractiveElement + IntoElement + 'static,
+{
+    let hover_handle = handle.clone();
+    let trigger = trigger.on_hover(move |hovered, window, cx| {
+        let entered = {
+            let mut state = hover_handle.state.borrow_mut();
+            let entered = *hovered && !state.trigger_hovered;
+            state.trigger_hovered = *hovered;
+            entered
+        };
+        if !entered || hover_handle.is_open() {
+            return;
+        }
+        let window_handle = window.window_handle();
+        let handle = hover_handle.clone();
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(HOVER_OPEN_DELAY).await;
+            let _ = window_handle.update(cx, |_, window, cx| {
+                let opens = {
+                    let state = handle.state.borrow();
+                    state.trigger_hovered && state.open.is_none()
+                };
+                if !opens {
+                    return;
+                }
+                let anchor = handle
+                    .trigger_bounds
+                    .get()
+                    .map(|bounds| align.anchor_point(bounds, px(TRIGGER_GAP)))
+                    .unwrap_or_else(|| window.mouse_position());
+                open_menu(&handle, anchor, SurfaceFocus::Card, true, window, cx);
+            });
+        })
+        .detach();
+    });
+    dropdown_menu(trigger, id, handle, align, items)
 }
 
 /// A dropdown-anchored panel holding arbitrary content.
