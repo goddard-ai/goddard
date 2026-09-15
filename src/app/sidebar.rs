@@ -3123,7 +3123,7 @@ impl Waku {
 
     // ── Empty states ───────────────────────────────────────────────────────
 
-    pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_empty_state(&mut self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         if self.selected_project().is_none() {
             return div()
@@ -3250,6 +3250,7 @@ impl Waku {
             .collect::<Vec<_>>();
         let weak = cx.entity().downgrade();
         let handle = self.menu_handle("empty-state-project", cx);
+        let sync_notice = self.render_sync_notice(cx);
         let project_selector = dropdown_menu(
             ProjectNameSelector::new("empty-state-project", project_name)
                 .selected(handle.is_open()),
@@ -3324,6 +3325,7 @@ impl Waku {
                             .child(tr_cow!("onboarding.question_mark"))
                     }),
             )
+            .children(sync_notice)
     }
 }
 

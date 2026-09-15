@@ -3574,13 +3574,16 @@ impl Waku {
         ))
     }
 
-    /// The new-task sync strip: how far the workspace's checkout trails (and
-    /// leads) its upstream, plus the button that runs `git pull` in a
-    /// terminal tab. Counts come from the local tracking ref, so they reflect
-    /// the last fetch. Only drafts show it — a started task's checkout state
-    /// is its agent's concern — and only local daemons, whose checkout a
-    /// desktop terminal can actually reach.
-    fn render_sync_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The new-task sync strip under the centered greeting: how far the
+    /// workspace's checkout trails (and leads) its upstream, plus the button
+    /// that runs `git pull` in a terminal tab. Counts come from the local
+    /// tracking ref, so they reflect the last fetch. Only drafts show it — a
+    /// started task's checkout state is its agent's concern — and only local
+    /// daemons, whose checkout a desktop terminal can actually reach.
+    pub(super) fn render_sync_notice(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         if self.daemon.is_remote() {
             return None;
         }
@@ -3622,6 +3625,8 @@ impl Waku {
         Some(
             div()
                 .h(px(26.0))
+                .mt(px(12.0))
+                .max_w_full()
                 .pl(px(10.0))
                 .pr(px(10.0))
                 .flex()
@@ -4147,7 +4152,6 @@ impl Waku {
         };
 
         let branch_selector = self.render_branch_selector(cx);
-        let sync_notice = self.render_sync_notice(cx);
 
         let usage_meter = self.render_usage_meter(cx);
         div()
@@ -4162,7 +4166,6 @@ impl Waku {
                     .mx_auto()
                     .text_size(sp(12.5))
                     .line_height(sp(14.0))
-                    .children(sync_notice)
                     .child(
                         div()
                             .h(px(28.0))
