@@ -1872,6 +1872,14 @@ impl Waku {
     }
 
     fn take_active_right_panel_state(&mut self) -> RightPanelSessionState {
+        // Parked file annotations keep their items — the pinned highlights
+        // belong to the session — but the transient hover/editing flags must
+        // not resurface pointing at an editor that closed during the swap.
+        for editor in self.right_panel_file_editors.values() {
+            let mut annotations = editor.annotations.borrow_mut();
+            annotations.hovered = None;
+            annotations.editing = None;
+        }
         RightPanelSessionState {
             visible: self.right_panel_visible,
             surfaces: std::mem::take(&mut self.right_panel_surfaces),
@@ -3665,6 +3673,7 @@ impl Waku {
                 dirty: false,
                 reading: false,
                 read_epoch: 0,
+                annotations: Default::default(),
             },
         );
 
@@ -3897,6 +3906,14 @@ impl Waku {
         .w(px(gutter_width - GUTTER_PAD_RIGHT))
         .h(content_height);
 
+        // Pinned annotation washes live inside the field's own paint — push
+        // the live set in before building the body so this frame already
+        // shows any change.
+        self.sync_file_annotation_washes(relative_path, cx);
+        let annotation_offer = self.render_file_annotation_offer(relative_path, window, cx);
+        let annotation_editor = self.render_file_annotation_editor(relative_path, cx);
+        let annotation_tooltip = self.render_file_annotation_tooltip(relative_path, cx);
+
         // The find bar sits in normal flow above the scroll region — Zed's
         // buffer-search arrangement — so an open bar pushes the content and
         // its line-number gutter down instead of covering the first lines.
@@ -3943,7 +3960,13 @@ impl Waku {
                     .child(scrollbar::vertical(
                         &self.right_panel_editor_scroll_handle,
                         &self.right_panel_editor_scrollbar,
-                    )),
+                    ))
+                    // The annotation listeners' region covers the text area;
+                    // their hit-tests stay glyph-precise inside it.
+                    .child(self.file_annotation_input(relative_path, cx))
+                    .children(annotation_offer)
+                    .children(annotation_editor)
+                    .children(annotation_tooltip),
             )
     }
 

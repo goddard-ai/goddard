@@ -221,7 +221,11 @@ fn shortcut_rows() -> Vec<(&'static str, Vec<ShortcutRow>)> {
                     CancelTurn { immediate: true },
                     Some("Waku"),
                 ),
-                bound(tr!("shortcuts.add_to_chat"), AddToChat, Some("Transcript")),
+                bound(
+                    tr!("shortcuts.add_to_chat"),
+                    AddToChat,
+                    Some("Transcript || FileEditorPane"),
+                ),
                 bound(tr!("shortcuts.archive_task"), ArchiveSession, Some("Waku")),
                 bound(tr!("shortcuts.pin_task"), ToggleSessionPin, Some("Waku")),
                 bound(tr!("shortcuts.copy_selection"), CopySelection, Some("Waku")),

@@ -344,19 +344,39 @@ fn clamp_boundary(text: &str, offset: usize) -> usize {
     offset
 }
 
+/// Where a file annotation's passage was selected: the right-panel editor
+/// for `path` (workspace-relative). `range` is the selected byte range inside
+/// the file's current text — where the pinned highlight paints — and
+/// `start_line`/`end_line` are the 1-based lines covering it at selection
+/// time, carried for the `[Selected lines N-M]` prompt marker.
+#[derive(Clone, Debug)]
+pub struct FileAnnotation {
+    pub path: String,
+    pub range: Range<usize>,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
 /// A highlighted passage of transcript text carrying a user comment.
 ///
 /// Annotations are created from a finished selection confined to one agent
 /// message. `spans` snapshots the selected text the way copy does, so the
 /// quoted passage stays intact even if the message is later edited.
+///
+/// A file annotation — `file` set — is the same object pinned on a
+/// right-panel file editor's selection instead: `spans` holds one span over
+/// the selected text alone, `message_id` is nil, and the passage formats as
+/// `@path` plus a fenced block rather than a plain quote.
 #[derive(Clone, Debug)]
 pub struct TranscriptAnnotation {
     pub id: u64,
     /// The message the spans were taken from; they all share one
-    /// `message-{id}` row key.
+    /// `message-{id}` row key. Nil when `file` is set.
     pub message_id: uuid::Uuid,
     pub spans: Vec<Span>,
     pub comment: String,
+    /// Right-panel file provenance; `None` for transcript annotations.
+    pub file: Option<FileAnnotation>,
 }
 
 impl TranscriptAnnotation {

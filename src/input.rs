@@ -670,6 +670,11 @@ pub struct TextInput {
     /// Index into `search_matches` of the match navigation is on, painted
     /// stronger than its siblings.
     active_search_match: Option<usize>,
+    /// Pinned file-annotation ranges painted as washes under the text, paired
+    /// with an emphasis flag for the hovered or being-edited one. Owned by the
+    /// annotation layer like `search_matches` is by the find bar — the field
+    /// only paints them.
+    annotation_ranges: Vec<(Range<usize>, bool)>,
     content: SharedString,
     placeholder: SharedString,
     accessibility_label: Option<SharedString>,
@@ -758,6 +763,7 @@ impl TextInput {
             highlight: Vec::new(),
             search_matches: Vec::new(),
             active_search_match: None,
+            annotation_ranges: Vec::new(),
             content: "".into(),
             placeholder: "".into(),
             accessibility_label: None,
@@ -1060,8 +1066,42 @@ impl TextInput {
         cx.notify();
     }
 
+    /// Replace the painted annotation washes — `(byte range, emphasised)`
+    /// pairs. Purely visual like [`Self::set_search_matches`]: the content is
+    /// untouched, so no [`InputEvent::Edited`] is emitted.
+    pub fn set_annotation_ranges(
+        &mut self,
+        ranges: Vec<(Range<usize>, bool)>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.annotation_ranges == ranges {
+            return;
+        }
+        self.annotation_ranges = ranges;
+        cx.notify();
+    }
+
     pub fn selected_range(&self) -> Range<usize> {
         self.selected_range.clone()
+    }
+
+    /// A mouse drag is currently extending the selection. Callers offering a
+    /// selection affordance gate on this so it only shows once the drag
+    /// settles.
+    pub fn is_selecting(&self) -> bool {
+        self.is_selecting
+    }
+
+    /// Collapse the selection to a caret at its end, keeping the text —
+    /// accepting a selection offer pins the range elsewhere and drops the
+    /// wash.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        let offset = self.selected_range.end;
+        self.selected_range = offset..offset;
+        self.selection_reversed = false;
+        self.vertical_navigation = None;
+        self.pause_blink_cursor(cx);
+        cx.notify();
     }
 
     /// Move the selection to `range`, as find-next does when it lands on a
@@ -1099,6 +1139,27 @@ impl TextInput {
         let layout = self.last_layout.as_ref()?;
         let position = layout.position_for_index(offset.min(self.content.len()))?;
         Some((position, layout.line_height()))
+    }
+
+    /// The byte offset under `position` in window coordinates — `None` when
+    /// the point lands outside the text proper: past a line's end, in the
+    /// margins, or before the field has painted once. Hit-testing painted
+    /// highlights uses this so clicks off a glyph never reach them.
+    pub fn offset_for_position(&self, position: Point<Pixels>) -> Option<usize> {
+        let layout = self.last_layout.as_ref()?;
+        layout.index_for_position(position).ok()
+    }
+
+    /// Painted glyph boxes for a byte range of the current content, in window
+    /// coordinates — one box per visual row the range covers. Floating
+    /// surfaces anchored to the text (a selection's "Add to chat" pill, an
+    /// annotation's comment card) read this. Empty until the field has
+    /// painted once.
+    pub fn range_bounds(&self, range: &Range<usize>) -> Vec<Bounds<Pixels>> {
+        let Some(layout) = self.last_layout.as_ref() else {
+            return Vec::new();
+        };
+        crate::md::render::range_rects(layout, range, 0.0, 0.0)
     }
 
     /// Height of each logical line as laid out, so a gutter can put one number
@@ -2684,6 +2745,27 @@ impl SearchPaint<'static> {
     }
 }
 
+/// Pinned file-annotation washes layered into [`input_text_runs`], the same
+/// layering the transcript paints: below the selection, so selecting across
+/// an annotation still looks like a selection, and below find matches, which
+/// are the more transient signal. The bool marks the emphasised (hovered or
+/// being-edited) range, painted stronger.
+struct AnnotationPaint<'a> {
+    ranges: &'a [(Range<usize>, bool)],
+    color: Hsla,
+    emphasized_color: Hsla,
+}
+
+impl AnnotationPaint<'static> {
+    fn none() -> Self {
+        Self {
+            ranges: &[],
+            color: gpui::transparent_black(),
+            emphasized_color: gpui::transparent_black(),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn input_text_runs(
     display_len: usize,
@@ -2694,6 +2776,7 @@ fn input_text_runs(
     highlight: &[(Range<usize>, TokenClass)],
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
+    annotations: AnnotationPaint,
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -2705,6 +2788,10 @@ fn input_text_runs(
         boundaries.push(range.end.min(display_len));
     }
     for range in search.matches {
+        boundaries.push(range.start.min(display_len));
+        boundaries.push(range.end.min(display_len));
+    }
+    for (range, _) in annotations.ranges {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
     }
@@ -2721,6 +2808,14 @@ fn input_text_runs(
             .matches
             .get(index)
             .is_some_and(|range| range.start <= start && range.end >= end)
+    };
+    // Annotation ranges are few and may overlap, so a linear probe is right.
+    let covering_annotation = |start: usize, end: usize| -> Option<bool> {
+        annotations
+            .ranges
+            .iter()
+            .find(|(range, _)| range.start <= start && range.end >= end)
+            .map(|(_, emphasized)| *emphasized)
     };
 
     boundaries
@@ -2743,7 +2838,13 @@ fn input_text_runs(
             } else if covering_match(start, end) {
                 Some(search.match_color)
             } else {
-                None
+                covering_annotation(start, end).map(|emphasized| {
+                    if emphasized {
+                        annotations.emphasized_color
+                    } else {
+                        annotations.color
+                    }
+                })
             };
             (start < end).then(|| TextRun {
                 len: end - start,
@@ -2825,6 +2926,16 @@ impl Element for InputElement {
                 active_color: theme.warning.opacity(0.5),
             }
         };
+        let annotation_wash = palette.annotation;
+        let annotations = if content_is_empty {
+            AnnotationPaint::none()
+        } else {
+            AnnotationPaint {
+                ranges: &input.annotation_ranges,
+                color: annotation_wash,
+                emphasized_color: annotation_wash.opacity((annotation_wash.a * 1.75).min(1.0)),
+            }
+        };
         let runs = input_text_runs(
             display_text.len(),
             base_run,
@@ -2838,6 +2949,7 @@ impl Element for InputElement {
             },
             |class| palette.token(class),
             search,
+            annotations,
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -3407,11 +3519,11 @@ mod tests {
 
     use super::TokenClass;
     use super::{
-        ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart, DeleteToParagraphEnd,
-        EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL, UNDO_HISTORY_CAP,
-        cursor_should_be_visible, input_text_runs, media_paste_entries, next_word_boundary,
-        pasted_text_for_mode, previous_word_boundary, single_line_scroll, trimmed_splice,
-        visual_row_count, word_range_at,
+        AnnotationPaint, ComposerEvent, ComposerInput, DeleteToLineEnd, DeleteToLineStart,
+        DeleteToParagraphEnd, EditHistory, FieldMode, SearchPaint, TextInput, UNDO_GROUP_INTERVAL,
+        UNDO_HISTORY_CAP, cursor_should_be_visible, input_text_runs, media_paste_entries,
+        next_word_boundary, pasted_text_for_mode, previous_word_boundary, single_line_scroll,
+        trimmed_splice, visual_row_count, word_range_at,
     };
 
     struct InputHarness {
@@ -4542,6 +4654,7 @@ mod tests {
                 _ => plain,
             },
             SearchPaint::none(),
+            AnnotationPaint::none(),
         );
 
         assert_eq!(
@@ -4582,6 +4695,7 @@ mod tests {
             &[],
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
+            AnnotationPaint::none(),
         );
 
         assert_eq!(
@@ -4637,6 +4751,7 @@ mod tests {
                 match_color,
                 active_color,
             },
+            AnnotationPaint::none(),
         );
 
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 20);

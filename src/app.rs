@@ -44,7 +44,7 @@ use crate::md::render::{
     Ctx as MarkdownCtx, MarkdownView, Metrics as MarkdownMetrics, Palette as MarkdownPalette,
     TranscriptSelection,
 };
-use crate::md::selection::TranscriptAnnotation;
+use crate::md::selection::{Annotations, TranscriptAnnotation};
 use crate::ui::menu::{
     ConfirmEntry, ContextMenuHandle, DismissMenu, FloatingSurface, MenuAlign, MenuItem,
     SelectNextEntry, SelectNextTab, SelectPreviousEntry, SelectPreviousTab, context_menu,
@@ -881,6 +881,11 @@ struct RightPanelFileEditor {
     /// started earlier cannot apply over a newer truth — a save in particular,
     /// which makes any read already in flight describe the pre-save file.
     read_epoch: u64,
+    /// Pinned selection highlights with comments — this editor's share of the
+    /// session's annotation set. Painted inside the field, counted in the
+    /// composer chip, drained into the next submission alongside the
+    /// transcript's; `RefCell` matches the transcript store's access shape.
+    annotations: Rc<RefCell<Annotations>>,
 }
 
 struct RightPanelSessionState {
@@ -3223,12 +3228,7 @@ impl Waku {
                             this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
                         } else if prompt.trim().is_empty()
                             && this.composer_attachments.is_empty()
-                            && this
-                                .transcript_selection
-                                .annotations
-                                .borrow()
-                                .items
-                                .is_empty()
+                            && !this.has_annotations()
                             && this
                                 .selected_session()
                                 .is_some_and(composer::session_awaits_continue)
@@ -3265,18 +3265,11 @@ impl Waku {
                         }
                     }
                     ComposerEvent::SteerQueued => {
-                        // Staged attachments and transcript annotations make
-                        // this a real draft even when the text field is
-                        // empty. Preserve the shortcut's previous no-op
-                        // behavior until that draft is sent or cleared.
-                        if this.composer_attachments.is_empty()
-                            && this
-                                .transcript_selection
-                                .annotations
-                                .borrow()
-                                .items
-                                .is_empty()
-                        {
+                        // Staged attachments and annotations make this a
+                        // real draft even when the text field is empty.
+                        // Preserve the shortcut's previous no-op behavior
+                        // until that draft is sent or cleared.
+                        if this.composer_attachments.is_empty() && !this.has_annotations() {
                             if this
                                 .selected_session()
                                 .is_some_and(composer::session_awaits_continue)

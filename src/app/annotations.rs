@@ -1,17 +1,22 @@
-//! Transcript annotations: commented highlights over agent messages.
+//! Transcript annotations: commented highlights over agent messages and
+//! right-panel file editors.
 //!
-//! Selecting text inside a single assistant message offers an "Add to chat"
-//! pill; accepting it pins a highlight on the passage and opens a floating
-//! comment editor. Confirmed annotations stay highlighted — hover previews the
-//! comment, a click reopens the editor — and the composer shows an
-//! "N annotations" chip until the next submission, which carries the comments
-//! to the provider as a quoted header above the typed prompt and echoes the
-//! quoted passages in the sent bubble.
+//! Selecting text inside a single assistant message — or inside a file
+//! editor — offers an "Add to chat" pill; accepting it pins a highlight on
+//! the passage and opens a floating comment editor. Confirmed annotations
+//! stay highlighted — hover previews the comment, a click reopens the editor
+//! — and the composer shows an "N annotations" chip until the next
+//! submission, which carries the comments to the provider as a quoted header
+//! above the typed prompt and echoes the quoted passages in the sent bubble.
+//! A file annotation quotes as `@path` plus a `[Selected lines N-M]` marker
+//! and a fenced block instead of a plain passage.
 //!
-//! Annotations live in memory only, one set per session. The painted set sits
-//! on [`TranscriptSelection`] so the renderer can reach it from paint
-//! closures; session switches park and restore it (see
-//! `reset_visible_state`), and sending drains it into the prompt.
+//! Annotations live in memory only, one set per session. The transcript's
+//! painted set sits on [`TranscriptSelection`] so the renderer can reach it
+//! from paint closures; each file editor carries its own list on
+//! [`RightPanelFileEditor`], painted inside the field and parked with the
+//! session's panel state. Session switches park and restore both (see
+//! `reset_visible_state`), and sending drains them into the prompt.
 //!
 //! A submission's drained set also parks under its user message
 //! (`sent_annotations`): the prompt header teaches the agent to cite it as
@@ -19,6 +24,7 @@
 //! tooltip shows the quoted passage and comment — see
 //! [`Waku::annotation_ref_set`].
 
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -30,7 +36,7 @@ use gpui::{
 
 use crate::input::Clear;
 use crate::md::render::{TranscriptSelection, text_range_bounds};
-use crate::md::selection::{Span, TextKey, TranscriptAnnotation};
+use crate::md::selection::{Annotations, FileAnnotation, Span, TextKey, TranscriptAnnotation};
 use crate::ui::ActivationExt;
 use crate::ui::menu::{DismissMenu, FloatingSurface, MenuAlign};
 use crate::ui::shortcut::ShortcutHint;
@@ -56,6 +62,15 @@ pub fn init(cx: &mut App) {
 /// settle a native tooltip gives before it shows.
 const ANNOTATION_HOVER_DELAY: Duration = Duration::from_millis(400);
 
+/// Which live set an annotation belongs to — the transcript's painted store
+/// or a right-panel file editor's own list, keyed by its workspace-relative
+/// path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum AnnotationTarget {
+    Transcript,
+    File(String),
+}
+
 /// The open comment editor. `is_new` marks an annotation Enter/Escape has not
 /// yet confirmed; discarding it removes the highlight too.
 #[derive(Clone, Debug)]
@@ -64,21 +79,25 @@ pub(super) struct AnnotationEditor {
     pub is_new: bool,
     /// Focus to hand back when the editor closes — almost always the composer.
     pub previous_focus: Option<FocusHandle>,
+    /// The set the edited annotation lives in.
+    pub target: AnnotationTarget,
 }
 
 /// Mouse-down on a highlight, held until mouse-up proves it was a click
 /// (selection stayed empty) rather than the start of a drag.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct AnnotationPress {
     pub id: u64,
     pub position: Point<Pixels>,
+    pub target: AnnotationTarget,
 }
 
 /// The annotation under the pointer. `visible` flips on after
 /// [`ANNOTATION_HOVER_DELAY`] so a passing cursor does not flash the card.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct AnnotationHover {
     pub id: u64,
+    pub target: AnnotationTarget,
     pub visible: bool,
 }
 
@@ -101,6 +120,26 @@ pub(super) struct AnnotationRefHover {
     pub visible: bool,
 }
 
+/// The quoted passage as the prompt and the sent bubble carry it: a file
+/// annotation leads with `@path` and its line-span marker above a fenced
+/// block of the selected code; a transcript annotation is just its text.
+fn annotation_prompt_passage(annotation: &TranscriptAnnotation) -> String {
+    let Some(file) = &annotation.file else {
+        return annotation.quoted_text();
+    };
+    let marker = if file.start_line == file.end_line {
+        format!("[Selected line {}]", file.start_line)
+    } else {
+        format!("[Selected lines {}-{}]", file.start_line, file.end_line)
+    };
+    format!(
+        "@{}\n{}\n```\n{}\n```",
+        file.path,
+        marker,
+        annotation.quoted_text().trim_end()
+    )
+}
+
 /// The prompt block prepended to a submission carrying annotations.
 ///
 /// Each passage is quoted and labelled so the agent can cite the comment's
@@ -112,7 +151,7 @@ pub(super) fn annotation_prompt_prefix(annotations: &[TranscriptAnnotation]) -> 
     let mut out = String::new();
     for (index, annotation) in annotations.iter().enumerate() {
         out.push_str(&format!("Annotation {}:\n", index + 1));
-        for line in annotation.quoted_text().lines() {
+        for line in annotation_prompt_passage(annotation).lines() {
             out.push_str("> ");
             out.push_str(line);
             out.push('\n');
@@ -142,7 +181,14 @@ pub(super) fn annotation_display_content(annotations: &[TranscriptAnnotation]) -
     }
     annotations
         .iter()
-        .map(TranscriptAnnotation::quoted_text)
+        .map(|annotation| {
+            // The selected code makes a poor title; its file is the summary.
+            annotation
+                .file
+                .as_ref()
+                .map(|file| format!("@{}", file.path))
+                .unwrap_or_else(|| annotation.quoted_text())
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -156,7 +202,7 @@ pub(super) fn annotation_bubble_content(
 ) -> String {
     let mut out = String::new();
     for annotation in annotations {
-        for line in annotation.quoted_text().lines() {
+        for line in annotation_prompt_passage(annotation).lines() {
             out.push_str("> ");
             out.push_str(line);
             out.push('\n');
@@ -200,6 +246,31 @@ impl Waku {
         (message.role == MessageRole::Assistant).then(|| (message_id, spans.to_vec()))
     }
 
+    /// The file editor's settled selection when it can be annotated:
+    /// non-empty and not mid-drag. File selections are always one contiguous
+    /// range, so those are the only conditions.
+    fn annotatable_file_selection(&self, relative_path: &str, cx: &App) -> Option<Range<usize>> {
+        let editor = self.right_panel_file_editors.get(relative_path)?;
+        let field = editor.state.read(cx);
+        let range = field.selected_range();
+        if field.is_selecting() || range.is_empty() {
+            return None;
+        }
+        Some(range)
+    }
+
+    /// The live annotation set for `target` — the transcript's painted store
+    /// or one file editor's own list. `None` once the file's editor is gone.
+    fn annotation_store(&self, target: &AnnotationTarget) -> Option<Rc<RefCell<Annotations>>> {
+        match target {
+            AnnotationTarget::Transcript => Some(self.transcript_selection.annotations.clone()),
+            AnnotationTarget::File(path) => self
+                .right_panel_file_editors
+                .get(path)
+                .map(|editor| editor.annotations.clone()),
+        }
+    }
+
     /// First on-screen glyph rect for `spans`, in window coordinates, for a
     /// floating surface to anchor to. `None` when the annotated row is
     /// virtualized away or the text no longer matches its snapshot.
@@ -236,20 +307,91 @@ impl Waku {
         self.spans_anchor(&annotation.spans)
     }
 
+    /// First on-screen glyph rect of a file annotation's range — the anchor
+    /// for its comment editor and hover tooltip. `None` when the range
+    /// scrolled out of the editor viewport or the file's text moved under it.
+    fn file_annotation_anchor(
+        &self,
+        relative_path: &str,
+        annotation_id: u64,
+        cx: &App,
+    ) -> Option<Bounds<Pixels>> {
+        let editor = self.right_panel_file_editors.get(relative_path)?;
+        let annotations = editor.annotations.borrow();
+        let annotation = annotations
+            .items
+            .iter()
+            .find(|annotation| annotation.id == annotation_id)?;
+        let file = annotation.file.as_ref()?;
+        let input = editor.state.read(cx);
+        if !file_annotation_live(annotation, input.content()) {
+            return None;
+        }
+        let viewport = self.right_panel_editor_scroll_handle.bounds();
+        input
+            .range_bounds(&file.range)
+            .into_iter()
+            .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())
+    }
+
+    /// The file annotation whose highlight contains `position`, hit-tested by
+    /// the glyph under the pointer — `TextInput::offset_for_position` already
+    /// rejects clicks past a line's end or in the margins.
+    fn file_annotation_hit_at(
+        &self,
+        relative_path: &str,
+        position: Point<Pixels>,
+        cx: &App,
+    ) -> Option<u64> {
+        let editor = self.right_panel_file_editors.get(relative_path)?;
+        let annotations = editor.annotations.borrow();
+        if annotations.items.is_empty() {
+            return None;
+        }
+        let input = editor.state.read(cx);
+        let offset = input.offset_for_position(position)?;
+        annotations.items.iter().find_map(|annotation| {
+            let file = annotation.file.as_ref()?;
+            (file.range.contains(&offset) && file_annotation_live(annotation, input.content()))
+                .then_some(annotation.id)
+        })
+    }
+
     /// ⌘L with the pill's selection on screen is the same as clicking it.
     /// Without an annotatable selection the chord keeps its global meaning,
-    /// so the transcript's context binding forwards to FocusComposer.
+    /// so the context bindings forward to FocusComposer. A focused file
+    /// editor's selection wins — its FileEditorPane binding only fires there.
     pub(super) fn add_to_chat_action(
         &mut self,
         _: &AddToChat,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.annotatable_selection().is_some() {
+        if let Some(path) = self
+            .visible_right_panel_file_path()
+            .filter(|path| self.file_editor_selection_focused(path, window, cx))
+        {
+            self.annotate_file_selection(&path, window, cx);
+        } else if self.annotatable_selection().is_some() {
             self.annotate_selection(window, cx);
         } else {
             self.focus_composer_action(&FocusComposer, window, cx);
         }
+    }
+
+    /// The visible file editor is focused and holding a selection — the case
+    /// the FileEditorPane `secondary-l` binding dispatches for.
+    fn file_editor_selection_focused(
+        &self,
+        relative_path: &str,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        let Some(editor) = self.right_panel_file_editors.get(relative_path) else {
+            return false;
+        };
+        let field = editor.state.read(cx);
+        field.focus().is_focused(window) && !field.selected_range().is_empty()
     }
 
     /// Turn the settled selection into a new annotation and open its comment
@@ -267,17 +409,94 @@ impl Waku {
                 message_id,
                 spans,
                 comment: String::new(),
+                file: None,
             });
             annotations.hovered = None;
         }
         self.transcript_selection.selection.borrow_mut().clear();
         self.annotation_hover = None;
-        self.open_annotation_editor(id, true, window, cx);
+        self.open_annotation_editor(id, true, AnnotationTarget::Transcript, window, cx);
         // Focus is on the just-clicked "Add to chat" button, which is gone by
         // the time the editor closes — return to the composer instead.
         let composer_focus = self.composer_focus(cx);
         if let Some(editor) = self.annotation_editor.as_mut() {
             editor.previous_focus = Some(composer_focus);
+        }
+    }
+
+    /// The file-editor counterpart of [`Self::annotate_selection`]: the
+    /// selection becomes a pinned highlight on the field — keyed by byte
+    /// range, kept while its snapshot still matches there — the live
+    /// selection collapses, and the comment editor opens over it.
+    fn annotate_file_selection(
+        &mut self,
+        relative_path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((range, text, start_line, end_line, state, field_focus)) = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .and_then(|editor| {
+                let field = editor.state.read(cx);
+                let range = field.selected_range();
+                if field.is_selecting() || range.is_empty() {
+                    return None;
+                }
+                let text = field.content().get(range.clone())?.to_owned();
+                let start_line = 1 + field.content().get(..range.start)?.matches('\n').count();
+                let end_line = start_line + text.matches('\n').count();
+                Some((
+                    range,
+                    text,
+                    start_line,
+                    end_line,
+                    editor.state.clone(),
+                    field.focus(),
+                ))
+            })
+        else {
+            return;
+        };
+        let id = self.annotation_next_id;
+        self.annotation_next_id = self.annotation_next_id.wrapping_add(1);
+        if let Some(editor) = self.right_panel_file_editors.get(relative_path) {
+            let mut annotations = editor.annotations.borrow_mut();
+            annotations.items.push(TranscriptAnnotation {
+                id,
+                message_id: Uuid::nil(),
+                // One span over the selected text alone — enough for
+                // `quoted_text`, which is all a file annotation reads spans
+                // for. The `file` range is what paints and hit-tests.
+                spans: vec![Span {
+                    key: TextKey::new(format!("file:{relative_path}"), 0),
+                    range: 0..text.len(),
+                    text: Rc::from(text.as_str()),
+                    block_break: false,
+                }],
+                comment: String::new(),
+                file: Some(FileAnnotation {
+                    path: relative_path.to_owned(),
+                    range,
+                    start_line,
+                    end_line,
+                }),
+            });
+            annotations.hovered = None;
+        }
+        state.update(cx, |input, cx| input.clear_selection(cx));
+        self.annotation_hover = None;
+        self.open_annotation_editor(
+            id,
+            true,
+            AnnotationTarget::File(relative_path.to_owned()),
+            window,
+            cx,
+        );
+        // As on the transcript, the just-clicked pill is gone when the editor
+        // closes — hand focus back to the field the selection came from.
+        if let Some(editor) = self.annotation_editor.as_mut() {
+            editor.previous_focus = Some(field_focus);
         }
     }
 
@@ -289,26 +508,37 @@ impl Waku {
         &mut self,
         id: u64,
         is_new: bool,
+        target: AnnotationTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let comment = {
-            let annotations = self.transcript_selection.annotations.borrow();
-            annotations
+        let comment = self.annotation_store(&target).and_then(|store| {
+            store
+                .borrow()
                 .items
                 .iter()
                 .find(|annotation| annotation.id == id)
                 .map(|annotation| annotation.comment.clone())
-        };
+        });
         let Some(comment) = comment else {
             return;
         };
+        // One editor at a time: an already-open one's editing emphasis in
+        // its own store would otherwise stay stuck on.
+        if let Some(previous) = self.annotation_editor.as_ref()
+            && let Some(store) = self.annotation_store(&previous.target)
+        {
+            store.borrow_mut().editing = None;
+        }
         self.annotation_editor = Some(AnnotationEditor {
             annotation_id: id,
             is_new,
             previous_focus: window.focused(cx),
+            target: target.clone(),
         });
-        self.transcript_selection.annotations.borrow_mut().editing = Some(id);
+        if let Some(store) = self.annotation_store(&target) {
+            store.borrow_mut().editing = Some(id);
+        }
         self.annotation_comment_input
             .update(cx, |input, cx| input.set_content(comment, cx));
         // The card is a deferred element; its focus handle joins the dispatch
@@ -326,8 +556,8 @@ impl Waku {
             return;
         };
         let comment = self.annotation_comment_input.read(cx).content().to_owned();
-        {
-            let mut annotations = self.transcript_selection.annotations.borrow_mut();
+        if let Some(store) = self.annotation_store(&editor.target) {
+            let mut annotations = store.borrow_mut();
             if let Some(annotation) = annotations
                 .items
                 .iter_mut()
@@ -347,8 +577,8 @@ impl Waku {
         let Some(editor) = self.annotation_editor.take() else {
             return;
         };
-        {
-            let mut annotations = self.transcript_selection.annotations.borrow_mut();
+        if let Some(store) = self.annotation_store(&editor.target) {
+            let mut annotations = store.borrow_mut();
             if editor.is_new {
                 annotations
                     .items
@@ -367,17 +597,26 @@ impl Waku {
 
     /// The trash button: delete the annotation and its highlight, closing the
     /// editor when it was the one being edited.
-    fn remove_annotation(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        self.transcript_selection
-            .annotations
-            .borrow_mut()
-            .items
-            .retain(|annotation| annotation.id != id);
+    fn remove_annotation(
+        &mut self,
+        id: u64,
+        target: AnnotationTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(store) = self.annotation_store(&target) {
+            store
+                .borrow_mut()
+                .items
+                .retain(|annotation| annotation.id != id);
+        }
         if let Some(editor) = self
             .annotation_editor
             .take_if(|editor| editor.annotation_id == id)
         {
-            self.transcript_selection.annotations.borrow_mut().editing = None;
+            if let Some(store) = self.annotation_store(&editor.target) {
+                store.borrow_mut().editing = None;
+            }
             self.annotation_comment_input
                 .update(cx, |input, cx| input.set_content("", cx));
             let focus = editor
@@ -388,7 +627,8 @@ impl Waku {
         cx.notify();
     }
 
-    /// The composer chip's X: drop every annotation and close an open editor.
+    /// The composer chip's X: drop every annotation — transcript and file —
+    /// and close an open editor.
     fn clear_annotations(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(editor) = self.annotation_editor.take() {
             let focus = editor
@@ -404,6 +644,12 @@ impl Waku {
             annotations.hovered = None;
             annotations.editing = None;
         }
+        for editor in self.right_panel_file_editors.values() {
+            let mut annotations = editor.annotations.borrow_mut();
+            annotations.items.clear();
+            annotations.hovered = None;
+            annotations.editing = None;
+        }
         cx.notify();
     }
 
@@ -415,16 +661,52 @@ impl Waku {
         let _ = window_handle.update(cx, |_, window, cx| window.focus(&focus, cx));
     }
 
-    /// Drain the live set for a submission. Parked sets for other sessions are
-    /// untouched — only what was on screen ships.
-    pub(super) fn drain_transcript_annotations(&mut self) -> Vec<TranscriptAnnotation> {
+    /// The composer chip count and the "is there anything to send" check:
+    /// transcript annotations plus every file editor's.
+    pub(super) fn annotation_count(&self) -> usize {
+        self.transcript_selection.annotations.borrow().items.len()
+            + self
+                .right_panel_file_editors
+                .values()
+                .map(|editor| editor.annotations.borrow().items.len())
+                .sum::<usize>()
+    }
+
+    pub(super) fn has_annotations(&self) -> bool {
+        !self
+            .transcript_selection
+            .annotations
+            .borrow()
+            .items
+            .is_empty()
+            || self
+                .right_panel_file_editors
+                .values()
+                .any(|editor| !editor.annotations.borrow().items.is_empty())
+    }
+
+    /// Drain the live sets for a submission — transcript annotations plus
+    /// every file editor's, merged in creation order so the "Annotation N"
+    /// labels match the order the user made them. Parked sets for other
+    /// sessions are untouched — only what was on screen ships.
+    pub(super) fn drain_annotations(&mut self) -> Vec<TranscriptAnnotation> {
         self.annotation_editor = None;
         self.annotation_hover = None;
         self.annotation_press = None;
-        let mut annotations = self.transcript_selection.annotations.borrow_mut();
-        annotations.editing = None;
-        annotations.hovered = None;
-        std::mem::take(&mut annotations.items)
+        let mut items = {
+            let mut annotations = self.transcript_selection.annotations.borrow_mut();
+            annotations.editing = None;
+            annotations.hovered = None;
+            std::mem::take(&mut annotations.items)
+        };
+        for editor in self.right_panel_file_editors.values() {
+            let mut annotations = editor.annotations.borrow_mut();
+            annotations.editing = None;
+            annotations.hovered = None;
+            items.extend(annotations.items.drain(..));
+        }
+        items.sort_by_key(|annotation| annotation.id);
+        items
     }
 
     /// Park a submission's drained annotations under the user message that
@@ -515,39 +797,44 @@ impl Waku {
             });
         }
         let editor_gone = self.annotation_editor.as_ref().is_some_and(|editor| {
-            !self
-                .transcript_selection
-                .annotations
-                .borrow()
-                .items
-                .iter()
-                .any(|annotation| annotation.id == editor.annotation_id)
+            self.annotation_store(&editor.target).is_none_or(|store| {
+                !store
+                    .borrow()
+                    .items
+                    .iter()
+                    .any(|annotation| annotation.id == editor.annotation_id)
+            })
         });
         if editor_gone {
-            self.transcript_selection.annotations.borrow_mut().editing = None;
+            if let Some(store) = self
+                .annotation_editor
+                .as_ref()
+                .and_then(|editor| self.annotation_store(&editor.target))
+            {
+                store.borrow_mut().editing = None;
+            }
             self.annotation_editor = None;
             self.annotation_comment_input
                 .update(cx, |input, cx| input.set_content("", cx));
         }
     }
 
-    /// The floating "Add to chat" pill over a settled assistant-message
-    /// selection.
-    pub(super) fn render_annotation_offer(
+    /// The "Add to chat" pill shared by the transcript's and the file
+    /// editor's offers: focusable, focus-ringed, activating on Enter or
+    /// Space, and swallowing its mouse-down so it can't clear the selection
+    /// being offered.
+    fn add_to_chat_button(
         &self,
-        window: &Window,
+        element_id: &'static str,
+        focus_key: &'static str,
+        shortcut_label: Option<String>,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let (_, spans) = self.annotatable_selection()?;
-        let anchor = self.spans_anchor(&spans)?;
+        on_accept: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        // The chord sits on the transcript's key context, so resolve it as if
-        // the transcript were focused — true whenever the pill can show.
-        let shortcut_label =
-            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window);
-        let focus = self.transcript_control_focus("annotation-add-to-chat", cx);
-        let button = div()
-            .id("annotation-add-to-chat")
+        let focus = self.transcript_control_focus(focus_key, cx);
+        div()
+            .id(element_id)
             .occlude()
             .track_focus(&focus)
             .tab_index(0)
@@ -576,12 +863,30 @@ impl Waku {
                         .child(label),
                 )
             })
-            // A mouse-down here must not reach the transcript's selection
-            // listeners, which would clear the very selection being offered.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_activation(cx, |this, window, cx| {
-                this.annotate_selection(window, cx);
-            });
+            .on_activation(cx, move |this, window, cx| on_accept(this, window, cx))
+    }
+
+    /// The floating "Add to chat" pill over a settled assistant-message
+    /// selection.
+    pub(super) fn render_annotation_offer(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (_, spans) = self.annotatable_selection()?;
+        let anchor = self.spans_anchor(&spans)?;
+        // The chord sits on the transcript's key context, so resolve it as if
+        // the transcript were focused — true whenever the pill can show.
+        let shortcut_label =
+            ShortcutHint::action_in(&AddToChat, &self.transcript_focus).resolve(window);
+        let button = self.add_to_chat_button(
+            "annotation-add-to-chat",
+            "annotation-add-to-chat",
+            shortcut_label,
+            cx,
+            |this, window, cx| this.annotate_selection(window, cx),
+        );
         Some(
             deferred(FloatingSurface::new(
                 motion::surface_enter(
@@ -600,11 +905,59 @@ impl Waku {
         )
     }
 
-    /// The floating comment editor, anchored below the annotation's first
-    /// visible line.
-    pub(super) fn render_annotation_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let editor = self.annotation_editor.as_ref()?;
-        let anchor = self.annotation_anchor(editor.annotation_id)?;
+    /// The floating "Add to chat" pill over a settled file-editor selection —
+    /// the same control, anchored to the field's own painted selection.
+    pub(super) fn render_file_annotation_offer(
+        &self,
+        relative_path: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let range = self.annotatable_file_selection(relative_path, cx)?;
+        let editor = self.right_panel_file_editors.get(relative_path)?;
+        let field = editor.state.read(cx);
+        let viewport = self.right_panel_editor_scroll_handle.bounds();
+        let anchor = field
+            .range_bounds(&range)
+            .into_iter()
+            .find(|rect| rect.bottom() > viewport.top() && rect.top() < viewport.bottom())?;
+        // Resolve the chord as if the field were focused — the FileEditorPane
+        // binding, not the transcript's.
+        let shortcut_label = ShortcutHint::action_in(&AddToChat, &field.focus()).resolve(window);
+        let path = relative_path.to_owned();
+        let button = self.add_to_chat_button(
+            "file-annotation-add-to-chat",
+            "file-annotation-add-to-chat",
+            shortcut_label,
+            cx,
+            move |this, window, cx| this.annotate_file_selection(&path, window, cx),
+        );
+        Some(
+            deferred(FloatingSurface::new(
+                motion::surface_enter(
+                    "annotate-file-selection-enter",
+                    button,
+                    MenuAlign::AboveLeft.anchor_point(anchor, px(6.0)),
+                )
+                .into_any_element(),
+                anchor,
+                MenuAlign::AboveLeft,
+                px(6.0),
+                px(8.0),
+            ))
+            .with_priority(2)
+            .into_any_element(),
+        )
+    }
+
+    /// The shared comment-editor card. The caller anchors it below the
+    /// annotation's first visible line — transcript span or file range.
+    fn annotation_editor_card(
+        &self,
+        element_id: &'static str,
+        anchor: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let trash_focus = self.transcript_control_focus("annotation-remove", cx);
         let card = div()
@@ -624,7 +977,7 @@ impl Waku {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
-                    .id("annotation-editor-card")
+                    .id(element_id)
                     .w(px(280.0))
                     .p(px(6.0))
                     .rounded(px(11.0))
@@ -648,34 +1001,100 @@ impl Waku {
                             .tooltip(Tooltip::text(tr!("annotations.remove")))
                             .on_activation(cx, |this, window, cx| {
                                 if let Some(editor) = this.annotation_editor.clone() {
-                                    this.remove_annotation(editor.annotation_id, window, cx);
+                                    this.remove_annotation(
+                                        editor.annotation_id,
+                                        editor.target.clone(),
+                                        window,
+                                        cx,
+                                    );
                                 }
                             }),
                     ),
             );
-        Some(
-            deferred(FloatingSurface::new(
-                motion::surface_enter(
-                    "annotation-editor-enter",
-                    card,
-                    MenuAlign::BelowLeft.anchor_point(anchor, px(6.0)),
-                )
-                .into_any_element(),
-                anchor,
-                MenuAlign::BelowLeft,
-                px(6.0),
-                px(8.0),
-            ))
-            .with_priority(3)
+        deferred(FloatingSurface::new(
+            motion::surface_enter(
+                "annotation-editor-enter",
+                card,
+                MenuAlign::BelowLeft.anchor_point(anchor, px(6.0)),
+            )
             .into_any_element(),
-        )
+            anchor,
+            MenuAlign::BelowLeft,
+            px(6.0),
+            px(8.0),
+        ))
+        .with_priority(3)
+        .into_any_element()
+    }
+
+    /// The floating comment editor, anchored below the annotation's first
+    /// visible line.
+    pub(super) fn render_annotation_editor(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let editor = self.annotation_editor.as_ref()?;
+        if editor.target != AnnotationTarget::Transcript {
+            return None;
+        }
+        let anchor = self.annotation_anchor(editor.annotation_id)?;
+        Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
+    }
+
+    /// The same floating comment editor over a file annotation, anchored
+    /// below its first visible line in the editor.
+    pub(super) fn render_file_annotation_editor(
+        &self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let editor = self.annotation_editor.as_ref()?;
+        if editor.target != AnnotationTarget::File(relative_path.to_owned()) {
+            return None;
+        }
+        let anchor = self.file_annotation_anchor(relative_path, editor.annotation_id, cx)?;
+        Some(self.annotation_editor_card("annotation-editor-card", anchor, cx))
+    }
+
+    /// The shared comment tooltip card: the annotation's comment, anchored
+    /// above the highlight. Pointer-transparent by construction — no hit
+    /// targets.
+    fn annotation_tooltip_card(
+        &self,
+        anchor: Bounds<Pixels>,
+        comment: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let card = div()
+            .max_w(px(320.0))
+            .px(px(7.0))
+            .py(px(4.0))
+            .rounded(px(8.0))
+            .border(hairline())
+            .border_color(theme.border_strong)
+            .bg(theme.raised)
+            .shadow_md()
+            .text_size(sp(12.5))
+            .line_height(sp(15.0))
+            .text_color(theme.text_secondary)
+            .child(comment);
+        deferred(FloatingSurface::new(
+            card.into_any_element(),
+            anchor,
+            MenuAlign::AboveLeft,
+            px(6.0),
+            px(8.0),
+        ))
+        .with_priority(2)
+        .into_any_element()
     }
 
     /// The comment tooltip, surfaced after the hover delay over a confirmed
     /// annotation. Pointer-transparent by construction: it anchors above the
     /// highlight with a gap and carries no hit targets.
     pub(super) fn render_annotation_tooltip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let hover = self.annotation_hover.filter(|hover| hover.visible)?;
+        let hover = self
+            .annotation_hover
+            .as_ref()
+            .filter(|hover| hover.visible && hover.target == AnnotationTarget::Transcript)?;
         // The editor for this annotation already shows the comment.
         if self
             .annotation_editor
@@ -696,31 +1115,42 @@ impl Waku {
             return None;
         }
         let anchor = self.annotation_anchor(hover.id)?;
-        let theme = Theme::current(cx);
-        let card = div()
-            .max_w(px(320.0))
-            .px(px(7.0))
-            .py(px(4.0))
-            .rounded(px(8.0))
-            .border(hairline())
-            .border_color(theme.border_strong)
-            .bg(theme.raised)
-            .shadow_md()
-            .text_size(sp(12.5))
-            .line_height(sp(15.0))
-            .text_color(theme.text_secondary)
-            .child(comment);
-        Some(
-            deferred(FloatingSurface::new(
-                card.into_any_element(),
-                anchor,
-                MenuAlign::AboveLeft,
-                px(6.0),
-                px(8.0),
-            ))
-            .with_priority(2)
-            .into_any_element(),
-        )
+        Some(self.annotation_tooltip_card(anchor, comment, cx))
+    }
+
+    /// The same comment tooltip over a file annotation's highlight.
+    pub(super) fn render_file_annotation_tooltip(
+        &self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let hover = self.annotation_hover.as_ref().filter(|hover| {
+            hover.visible && hover.target == AnnotationTarget::File(relative_path.to_owned())
+        })?;
+        if self
+            .annotation_editor
+            .as_ref()
+            .is_some_and(|editor| editor.annotation_id == hover.id)
+        {
+            return None;
+        }
+        let comment = self
+            .right_panel_file_editors
+            .get(relative_path)
+            .and_then(|editor| {
+                editor
+                    .annotations
+                    .borrow()
+                    .items
+                    .iter()
+                    .find(|annotation| annotation.id == hover.id)
+                    .map(|annotation| annotation.comment.clone())
+            })?;
+        if comment.trim().is_empty() {
+            return None;
+        }
+        let anchor = self.file_annotation_anchor(relative_path, hover.id, cx)?;
+        Some(self.annotation_tooltip_card(anchor, comment, cx))
     }
 
     /// The citation tooltip, surfaced after the hover delay over an
@@ -774,10 +1204,11 @@ impl Waku {
         )
     }
 
-    /// The composer's "N annotations" chip, with an always-visible clear-all
-    /// control: tabbable, focus-ringed, activating on Enter or Space.
+    /// The composer's "N annotations" chip — transcript and file annotations
+    /// counted together — with an always-visible clear-all control: tabbable,
+    /// focus-ringed, activating on Enter or Space.
     pub(super) fn render_annotation_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let count = self.transcript_selection.annotations.borrow().items.len();
+        let count = self.annotation_count();
         if count == 0 {
             return None;
         }
@@ -866,6 +1297,7 @@ impl Waku {
                         this.annotation_press = Some(AnnotationPress {
                             id,
                             position: event.position,
+                            target: AnnotationTarget::Transcript,
                         });
                     });
                 }
@@ -903,7 +1335,10 @@ impl Waku {
                 };
                 if changed {
                     let _ = waku.update(cx, |this, cx| {
-                        this.annotation_hover_changed(hit, cx);
+                        this.annotation_hover_changed(
+                            hit.map(|id| (id, AnnotationTarget::Transcript)),
+                            cx,
+                        );
                         this.annotation_ref_hover_changed(ref_hit, cx);
                     });
                     window.refresh();
@@ -919,7 +1354,10 @@ impl Waku {
                     return;
                 }
                 let press = waku
-                    .update(cx, |this, _| this.annotation_press.take())
+                    .update(cx, |this, _| {
+                        this.annotation_press
+                            .take_if(|press| press.target == AnnotationTarget::Transcript)
+                    })
                     .ok()
                     .flatten();
                 let Some(press) = press else {
@@ -938,23 +1376,169 @@ impl Waku {
                     return;
                 }
                 let _ = waku.update(cx, |this, cx| {
-                    this.open_annotation_editor(press.id, false, window, cx)
+                    this.open_annotation_editor(
+                        press.id,
+                        false,
+                        AnnotationTarget::Transcript,
+                        window,
+                        cx,
+                    )
                 });
             }
         });
     }
 
-    fn annotation_hover_changed(&mut self, hit: Option<u64>, cx: &mut Context<Self>) {
-        self.annotation_hover = hit.map(|id| AnnotationHover { id, visible: false });
-        if let Some(id) = hit {
+    /// The file editor's annotation mouse listeners — the same
+    /// press/hover/click pattern as [`Self::install_annotation_input`],
+    /// hit-testing the field's painted highlight ranges. Presses are armed
+    /// and consumed under a `File` target so the two listener sets, both
+    /// window-level, never steal each other's.
+    fn install_file_annotation_input(
+        region: HitboxId,
+        window: &mut Window,
+        _cx: &mut App,
+        relative_path: &str,
+        waku: &WeakEntity<Waku>,
+    ) {
+        window.on_mouse_event({
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseDownEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble
+                    || event.button != MouseButton::Left
+                    || !region.is_hovered(window)
+                {
+                    return;
+                }
+                let hit = waku
+                    .read_with(cx, |this, cx| {
+                        this.file_annotation_hit_at(&path, event.position, cx)
+                    })
+                    .ok()
+                    .flatten();
+                if let Some(id) = hit {
+                    let _ = waku.update(cx, |this, _| {
+                        this.annotation_press = Some(AnnotationPress {
+                            id,
+                            position: event.position,
+                            target: AnnotationTarget::File(path.clone()),
+                        });
+                    });
+                }
+            }
+        });
+
+        window.on_mouse_event({
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || event.dragging() || !region.is_hovered(window)
+                {
+                    return;
+                }
+                let changed = waku
+                    .update(cx, |this, cx| {
+                        let hit = this.file_annotation_hit_at(&path, event.position, cx);
+                        let Some(editor) = this.right_panel_file_editors.get(&path) else {
+                            return false;
+                        };
+                        if editor.annotations.borrow().hovered == hit {
+                            return false;
+                        }
+                        editor.annotations.borrow_mut().hovered = hit;
+                        this.annotation_hover_changed(
+                            hit.map(|id| (id, AnnotationTarget::File(path.clone()))),
+                            cx,
+                        );
+                        true
+                    })
+                    .unwrap_or(false);
+                if changed {
+                    window.refresh();
+                }
+            }
+        });
+
+        window.on_mouse_event({
+            let path = relative_path.to_owned();
+            let waku = waku.clone();
+            move |event: &MouseUpEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                    return;
+                }
+                let press = waku
+                    .update(cx, |this, _| {
+                        this.annotation_press
+                            .take_if(|press| press.target == AnnotationTarget::File(path.clone()))
+                    })
+                    .ok()
+                    .flatten();
+                let Some(press) = press else {
+                    return;
+                };
+                // A drag that started on a highlight ends with a selection,
+                // not a press — only a clean click reopens the editor.
+                let selected = waku
+                    .read_with(cx, |this, cx| {
+                        this.right_panel_file_editors
+                            .get(&path)
+                            .is_some_and(|editor| {
+                                !editor.state.read(cx).selected_range().is_empty()
+                            })
+                    })
+                    .unwrap_or(true);
+                if selected {
+                    return;
+                }
+                let moved = event.position - press.position;
+                if moved.x.abs() > px(4.0) || moved.y.abs() > px(4.0) {
+                    return;
+                }
+                let still_hit = waku
+                    .read_with(cx, |this, cx| {
+                        this.file_annotation_hit_at(&path, event.position, cx) == Some(press.id)
+                    })
+                    .unwrap_or(false);
+                if !still_hit {
+                    return;
+                }
+                let _ = waku.update(cx, |this, cx| {
+                    this.open_annotation_editor(
+                        press.id,
+                        false,
+                        AnnotationTarget::File(path.clone()),
+                        window,
+                        cx,
+                    )
+                });
+            }
+        });
+    }
+
+    fn annotation_hover_changed(
+        &mut self,
+        hit: Option<(u64, AnnotationTarget)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.annotation_hover = hit.clone().map(|(id, target)| AnnotationHover {
+            id,
+            target,
+            visible: false,
+        });
+        if let Some((id, target)) = hit {
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(ANNOTATION_HOVER_DELAY).await;
                 let _ = this.update(cx, |this, cx| {
                     if this
                         .annotation_hover
+                        .as_ref()
                         .is_some_and(|hover| hover.id == id && !hover.visible)
                     {
-                        this.annotation_hover = Some(AnnotationHover { id, visible: true });
+                        this.annotation_hover = Some(AnnotationHover {
+                            id,
+                            target,
+                            visible: true,
+                        });
                         cx.notify();
                     }
                 });
@@ -1012,6 +1596,63 @@ impl Waku {
         .left_0()
         .size_full()
     }
+
+    /// The file editor's listener canvas — see
+    /// [`Self::install_file_annotation_input`]. Rendered inside the editor's
+    /// scroll container so the region only ever covers its text area.
+    pub(super) fn file_annotation_input(
+        &self,
+        relative_path: &str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let path = relative_path.to_owned();
+        let waku = cx.entity().downgrade();
+        canvas(
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal).id,
+            move |_, region, window, cx| {
+                Self::install_file_annotation_input(region, window, cx, &path, &waku)
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// Push the file editor's live annotation ranges into the field's paint
+    /// set. Runs from render — the field's `last_layout` and the annotation
+    /// ranges are both in-memory — and costs a few short string compares per
+    /// frame, all short-circuited by the field's own unchanged-check.
+    pub(super) fn sync_file_annotation_washes(&self, relative_path: &str, cx: &mut Context<Self>) {
+        let Some(editor) = self.right_panel_file_editors.get(relative_path) else {
+            return;
+        };
+        let ranges = {
+            let annotations = editor.annotations.borrow();
+            if annotations.items.is_empty() {
+                Vec::new()
+            } else {
+                let content = editor.state.read(cx).content();
+                annotations
+                    .items
+                    .iter()
+                    .filter_map(|annotation| {
+                        let file = annotation.file.as_ref()?;
+                        file_annotation_live(annotation, content).then(|| {
+                            (
+                                file.range.clone(),
+                                annotations.hovered == Some(annotation.id)
+                                    || annotations.editing == Some(annotation.id),
+                            )
+                        })
+                    })
+                    .collect()
+            }
+        };
+        editor
+            .state
+            .update(cx, |input, cx| input.set_annotation_ranges(ranges, cx));
+    }
 }
 
 /// The annotation span still describes the element's painted text: the
@@ -1023,6 +1664,23 @@ fn annotation_span_live(span: &Span, text: &str) -> bool {
     span.range.start < end
         && end <= span.text.len()
         && span.text.as_bytes()[..end] == text.as_bytes()[..end]
+}
+
+/// The file annotation's range still covers its snapshot in the editor's
+/// current content — the same drop-rather-than-mismatch rule as
+/// [`annotation_span_live`], checked where the passage actually lives.
+/// `get` bounds- and boundary-checks the range, so an edited file can only
+/// drop the highlight, never panic or mark different words.
+fn file_annotation_live(annotation: &TranscriptAnnotation, content: &str) -> bool {
+    let Some(file) = &annotation.file else {
+        return false;
+    };
+    let Some(span) = annotation.spans.first() else {
+        return false;
+    };
+    content
+        .get(file.range.clone())
+        .is_some_and(|slice| slice == &*span.text)
 }
 
 /// The annotation whose highlight contains `position`, consulting the frame's
@@ -1086,16 +1744,29 @@ fn annotation_ref_hit_at(
 }
 
 /// The quoted passage as the citation tooltip shows it — trimmed and capped
-/// so a long selection cannot blow the card up.
+/// so a long selection cannot blow the card up. A file annotation's quote
+/// leads with its `@path` and line marker, so the citation reads "Annotation
+/// N → that spot in that file".
 fn annotation_quote_preview(annotation: &TranscriptAnnotation) -> String {
     const MAX_CHARS: usize = 240;
     let quote = annotation.quoted_text();
     let quote = quote.trim();
-    if quote.chars().count() <= MAX_CHARS {
-        return quote.to_owned();
+    let body = if quote.chars().count() <= MAX_CHARS {
+        quote.to_owned()
+    } else {
+        let preview: String = quote.chars().take(MAX_CHARS).collect();
+        format!("{}…", preview.trim_end())
+    };
+    match &annotation.file {
+        Some(file) if file.start_line == file.end_line => {
+            format!("@{} · line {}\n{}", file.path, file.start_line, body)
+        }
+        Some(file) => format!(
+            "@{} · lines {}-{}\n{}",
+            file.path, file.start_line, file.end_line, body
+        ),
+        None => body,
     }
-    let preview: String = quote.chars().take(MAX_CHARS).collect();
-    format!("{}…", preview.trim_end())
 }
 
 #[cfg(test)]
@@ -1116,6 +1787,37 @@ mod tests {
                 block_break: false,
             }],
             comment: comment.to_owned(),
+            file: None,
+        }
+    }
+
+    /// A file annotation as `annotate_file_selection` builds it: one span
+    /// over the selected text and the file provenance alongside.
+    fn file_annotation(
+        id: u64,
+        path: &str,
+        text: &str,
+        range: Range<usize>,
+        start_line: usize,
+        end_line: usize,
+        comment: &str,
+    ) -> TranscriptAnnotation {
+        TranscriptAnnotation {
+            id,
+            message_id: Uuid::nil(),
+            spans: vec![Span {
+                key: TextKey::new(format!("file:{path}"), 0),
+                range: 0..text.len(),
+                text: Rc::from(text),
+                block_break: false,
+            }],
+            comment: comment.to_owned(),
+            file: Some(FileAnnotation {
+                path: path.to_owned(),
+                range,
+                start_line,
+                end_line,
+            }),
         }
     }
 
@@ -1189,5 +1891,115 @@ mod tests {
             ),
             "> first passage\n\nnote\n\n> second\n> passage\n\nfix this"
         );
+    }
+
+    #[test]
+    fn prompt_prefix_quotes_a_file_annotation_with_path_marker_and_fence() {
+        let annotations = [file_annotation(
+            1,
+            "src/main.rs",
+            "fn main() {\n    run();\n}",
+            40..59,
+            3,
+            5,
+            "why twice?",
+        )];
+        assert_eq!(
+            annotation_prompt_prefix(&annotations),
+            concat!(
+                "Annotation 1:\n",
+                "> @src/main.rs\n",
+                "> [Selected lines 3-5]\n",
+                "> ```\n",
+                "> fn main() {\n",
+                ">     run();\n",
+                "> }\n",
+                "> ```\n",
+                "\nComment: why twice?\n\n",
+                "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+            )
+        );
+    }
+
+    #[test]
+    fn prompt_prefix_marks_a_single_line_file_selection() {
+        let annotations = [file_annotation(
+            1,
+            "src/lib.rs",
+            "let x = 1;",
+            10..20,
+            7,
+            7,
+            "",
+        )];
+        assert_eq!(
+            annotation_prompt_prefix(&annotations),
+            concat!(
+                "Annotation 1:\n",
+                "> @src/lib.rs\n",
+                "> [Selected line 7]\n",
+                "> ```\n",
+                "> let x = 1;\n",
+                "> ```\n",
+                "\nComment: \n\n",
+                "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+            )
+        );
+    }
+
+    #[test]
+    fn mixed_annotations_number_in_the_drained_order() {
+        let annotations = [
+            annotation(1, "quoted agent text", "transcript note"),
+            file_annotation(2, "src/main.rs", "run();", 5..11, 9, 9, "file note"),
+        ];
+        assert_eq!(
+            annotation_prompt_prefix(&annotations),
+            concat!(
+                "Annotation 1:\n> quoted agent text\n\nComment: transcript note\n\n",
+                "Annotation 2:\n> @src/main.rs\n> [Selected line 9]\n> ```\n> run();\n> ```\n\nComment: file note\n\n",
+                "When responding, refer to the annotations above by their label (e.g. \"Annotation 1\") when appropriate.\n\n",
+            )
+        );
+    }
+
+    #[test]
+    fn display_content_summarises_a_file_annotation_by_its_path() {
+        let annotations = [file_annotation(1, "src/main.rs", "code", 0..4, 1, 1, "")];
+        assert_eq!(annotation_display_content(&annotations), "@src/main.rs");
+    }
+
+    #[test]
+    fn bubble_content_quotes_a_file_annotation_the_same_way() {
+        let annotations = [file_annotation(
+            1,
+            "src/main.rs",
+            "run();",
+            5..11,
+            9,
+            9,
+            "note",
+        )];
+        assert_eq!(
+            annotation_bubble_content(&annotations, "fix this"),
+            "> @src/main.rs\n> [Selected line 9]\n> ```\n> run();\n> ```\n\nnote\n\nfix this"
+        );
+    }
+
+    #[test]
+    fn file_annotation_stays_live_while_its_range_matches_the_snapshot() {
+        let content = "let a = 1;\nlet b = 2;\nlet c = 3;\n";
+        let pinned = file_annotation(1, "src/x.rs", "let b = 2;", 11..21, 2, 2, "");
+        assert!(file_annotation_live(&pinned, content));
+        // An edit ahead of the range shifts the bytes; the highlight drops.
+        assert!(!file_annotation_live(
+            &pinned,
+            "x\nlet a = 1;\nlet b = 2;\nlet c = 3;\n"
+        ));
+        // A shorter file just stops matching — no panic.
+        assert!(!file_annotation_live(&pinned, "let a = 1;\n"));
+        // A transcript annotation is never file-live.
+        let transcript = annotation(2, "text", "");
+        assert!(!file_annotation_live(&transcript, content));
     }
 }

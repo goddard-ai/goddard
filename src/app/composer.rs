@@ -2251,7 +2251,7 @@ impl Waku {
             .iter()
             .map(|attachment| attachment.mention.clone())
             .collect::<Vec<_>>();
-        let annotations = self.drain_transcript_annotations();
+        let annotations = self.drain_annotations();
         let submission = match merged_submission(prompt, &mentions) {
             Some(body) => {
                 // Resolve command syntax while the body's leading `/` is
@@ -2457,12 +2457,25 @@ impl Waku {
             .collect();
         if !submission.annotations.is_empty() {
             // The drain consumed the highlights; hand them back so the
-            // restored draft still carries its comments.
+            // restored draft still carries its comments — file annotations
+            // return to their editors, the rest to the transcript store. A
+            // file whose editor is gone simply drops its annotation.
+            let (file_annotations, transcript_annotations): (Vec<_>, Vec<_>) = submission
+                .annotations
+                .into_iter()
+                .partition(|annotation| annotation.file.is_some());
             self.transcript_selection
                 .annotations
                 .borrow_mut()
                 .items
-                .extend(submission.annotations);
+                .extend(transcript_annotations);
+            for annotation in file_annotations {
+                if let Some(file) = &annotation.file
+                    && let Some(editor) = self.right_panel_file_editors.get_mut(&file.path)
+                {
+                    editor.annotations.borrow_mut().items.push(annotation);
+                }
+            }
         }
         let content = submission
             .human_content

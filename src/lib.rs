@@ -569,12 +569,16 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("enter", ConfirmProjectSwitch, Some("ProjectSwitcher")),
         KeyBinding::new("escape", CancelProjectSwitch, Some("ProjectSwitcher")),
         KeyBinding::new("secondary-l", FocusComposer, None),
-        // With the transcript focused — which a text selection
-        // guarantees — ⌘L is the "Add to chat" pill's shortcut. The
-        // action falls back to FocusComposer when no annotatable
-        // selection is on screen, so the chord keeps its global
-        // meaning everywhere else.
-        KeyBinding::new("secondary-l", AddToChat, Some("Transcript")),
+        // With the transcript or a file editor focused — which a text
+        // selection guarantees — ⌘L is the "Add to chat" pill's
+        // shortcut. The action falls back to FocusComposer when no
+        // annotatable selection is on screen, so the chord keeps its
+        // global meaning everywhere else.
+        KeyBinding::new(
+            "secondary-l",
+            AddToChat,
+            Some("Transcript || FileEditorPane"),
+        ),
         KeyBinding::new("secondary-j", FocusTerminal, None),
         // ⌘R opens the run-a-script picker everywhere except the
         // browser surface, whose deeper context keeps it as reload.

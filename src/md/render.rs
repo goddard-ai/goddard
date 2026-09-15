@@ -1108,7 +1108,7 @@ pub fn frame_reset(selection: TranscriptSelection) -> impl IntoElement {
 /// window coordinates, from the laid-out text's own geometry. `pad_x` overhangs
 /// horizontally (inline code) and `inset_y` shrinks vertically; a selection
 /// wash passes zero for both so its boxes tile seamlessly across wrapped rows.
-fn range_rects(
+pub(crate) fn range_rects(
     layout: &TextLayout,
     range: &Range<usize>,
     pad_x: f32,
