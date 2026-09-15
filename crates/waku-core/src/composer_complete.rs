@@ -326,9 +326,9 @@ fn assemble_slash_commands(
             }
         }
         // Harness commands are session-scoped and reported live by the Host,
-        // and Kimi Code likewise publishes its whole command set over ACP
-        // rather than from files Goddard could scan.
-        ProviderKind::DeepSeek | ProviderKind::Grok | ProviderKind::Kimi => {}
+        // and Kimi Code and Droid likewise publish their whole command set
+        // over ACP rather than from files Goddard could scan.
+        ProviderKind::DeepSeek | ProviderKind::Droid | ProviderKind::Grok | ProviderKind::Kimi => {}
     }
     // The cross-tool skill standard, read by Amp and OpenCode among others;
     // Goddard lists it for every provider.

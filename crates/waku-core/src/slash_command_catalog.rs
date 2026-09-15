@@ -44,6 +44,7 @@ pub(crate) fn discover(
         ProviderKind::Cursor
         | ProviderKind::DeepSeek
         | ProviderKind::Devin
+        | ProviderKind::Droid
         | ProviderKind::Fx
         | ProviderKind::Grok
         | ProviderKind::Kimi => None,
